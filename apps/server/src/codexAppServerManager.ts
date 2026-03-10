@@ -1342,6 +1342,22 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     });
   }
 
+  private emitNotificationEvent(
+    context: CodexSessionContext,
+    method: string,
+    message: string,
+  ): void {
+    this.emitEvent({
+      id: EventId.makeUnsafe(randomUUID()),
+      kind: "notification",
+      provider: "codex",
+      threadId: context.session.threadId,
+      createdAt: new Date().toISOString(),
+      method,
+      message,
+    });
+  }
+
   private emitErrorEvent(context: CodexSessionContext, method: string, message: string): void {
     this.emitEvent({
       id: EventId.makeUnsafe(randomUUID()),
