@@ -511,6 +511,7 @@ describe("WebSocket Server", () => {
     expect(message.data).toEqual({
       cwd: "/test/project",
       projectName: "project",
+      serverVersion: expect.any(String),
     });
   });
 

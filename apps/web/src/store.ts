@@ -308,10 +308,9 @@ function mapThreadsFromReadModel(
     .map((thread, incomingIndex) => {
       const previousIndex = previousOrderById.get(thread.id);
       const persistedIndex = usePersistedOrder ? persistedOrderById.get(thread.id) : undefined;
-      const orderIndex =
-        previousIndex ??
-        persistedIndex ??
-        (usePersistedOrder ? persistedThreadOrderIds.length : previous.length) + incomingIndex;
+      const createdAtMs = Date.parse(thread.createdAt);
+      const createdAtRank = Number.isFinite(createdAtMs) ? -createdAtMs : -Date.now();
+      const orderIndex = previousIndex ?? persistedIndex ?? createdAtRank;
       return { thread, incomingIndex, orderIndex };
     })
     .toSorted((a, b) => {

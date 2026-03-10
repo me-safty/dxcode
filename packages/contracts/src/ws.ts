@@ -176,6 +176,7 @@ export type WsResponse = typeof WsResponse.Type;
 export const WsWelcomePayload = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   projectName: TrimmedNonEmptyString,
+  serverVersion: TrimmedNonEmptyString,
   bootstrapProjectId: Schema.optional(ProjectId),
   bootstrapThreadId: Schema.optional(ThreadId),
 });

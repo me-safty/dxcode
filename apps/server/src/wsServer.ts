@@ -7,6 +7,9 @@
  * @module Server
  */
 import http from "node:http";
+import { spawn } from "node:child_process";
+import nodePath from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Duplex } from "node:stream";
 
 import Mime from "@effect/platform-node/Mime";
@@ -63,6 +66,7 @@ import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuer
 import { clamp } from "effect/Number";
 import { Open, resolveAvailableEditors } from "./open";
 import { ServerConfig } from "./config";
+import { getServerVersion } from "./version";
 import { GitCore } from "./git/Services/GitCore.ts";
 import { tryHandleProjectFaviconRequest } from "./projectFaviconRoute";
 import {
@@ -719,6 +723,54 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           return;
         }
 
+        if (url.pathname === "/api/dev-restart") {
+          const corsHeaders = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+          };
+          if (req.method === "OPTIONS") {
+            respond(204, corsHeaders);
+            return;
+          }
+          if (req.method !== "POST") {
+            respond(405, { ...corsHeaders, "Content-Type": "text/plain" }, "Method Not Allowed");
+            return;
+          }
+          if (!devUrl) {
+            respond(403, { ...corsHeaders, "Content-Type": "text/plain" }, "Dev restart unavailable");
+            return;
+          }
+
+          respond(
+            202,
+            { ...corsHeaders, "Content-Type": "application/json" },
+            JSON.stringify({ ok: true }),
+          );
+
+          setTimeout(() => {
+            try {
+              const serverRoot = nodePath.resolve(
+                nodePath.dirname(fileURLToPath(import.meta.url)),
+                "..",
+              );
+              const child = spawn("bun", ["run", "dev"], {
+                cwd: serverRoot,
+                env: process.env,
+                detached: true,
+                stdio: "ignore",
+              });
+              child.unref();
+            } catch {
+              // Swallow spawn errors so we still exit.
+            }
+            setTimeout(() => {
+              process.exit(0);
+            }, 150);
+          }, 50);
+          return;
+        }
+
         // In dev mode, redirect to Vite dev server
         if (devUrl) {
           respond(302, { Location: devUrl.href });
@@ -1289,6 +1341,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
     const segments = cwd.split(/[/\\]/).filter(Boolean);
     const projectName = segments[segments.length - 1] ?? "project";
+    const serverVersion = getServerVersion();
 
     const welcome: WsPush = {
       type: "push",
@@ -1296,6 +1349,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       data: {
         cwd,
         projectName,
+        serverVersion,
         ...(welcomeBootstrapProjectId ? { bootstrapProjectId: welcomeBootstrapProjectId } : {}),
         ...(welcomeBootstrapThreadId ? { bootstrapThreadId: welcomeBootstrapThreadId } : {}),
       },

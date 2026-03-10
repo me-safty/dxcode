@@ -10,7 +10,7 @@ import {
   TerminalIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   DndContext,
   type DragCancelEvent,
@@ -86,6 +86,7 @@ import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import { resolveThreadStatusPill } from "./Sidebar.logic";
 import { buildSidebarProjectTree } from "../sidebarTree";
+import { readBranchedThreadRecords, subscribeBranchedThreadRecords } from "../branchedThreads";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_PREVIEW_LIMIT = 6;
@@ -361,6 +362,19 @@ function DroppableTreeContainer({
 export default function Sidebar() {
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
+  const branchedThreadRecords = useSyncExternalStore(
+    subscribeBranchedThreadRecords,
+    readBranchedThreadRecords,
+    () => [],
+  );
+  const branchedThreadIdSet = useMemo(
+    () => new Set(branchedThreadRecords.map((record) => record.threadId)),
+    [branchedThreadRecords],
+  );
+  const visibleThreads = useMemo(
+    () => threads.filter((thread) => !branchedThreadIdSet.has(thread.id)),
+    [branchedThreadIdSet, threads],
+  );
   const markThreadUnread = useStore((store) => store.markThreadUnread);
   const toggleProject = useStore((store) => store.toggleProject);
   const moveProject = useStore((store) => store.moveProject);
@@ -474,7 +488,10 @@ export default function Sidebar() {
     }
     return map;
   }, [threadGitStatusCwds, threadGitStatusQueries, threadGitTargets]);
-  const projectTree = useMemo(() => buildSidebarProjectTree(projects, threads), [projects, threads]);
+  const projectTree = useMemo(
+    () => buildSidebarProjectTree(projects, visibleThreads),
+    [projects, visibleThreads],
+  );
   const childProjectCountByParentId = useMemo(() => {
     const counts = new Map<ProjectId | null, number>();
     for (const project of projects) {
@@ -581,7 +598,7 @@ export default function Sidebar() {
 
   const focusMostRecentThreadForProject = useCallback(
     (projectId: ProjectId) => {
-      const latestThread = threads
+      const latestThread = visibleThreads
         .filter((thread) => thread.projectId === projectId)
         .toSorted((a, b) => {
           const byDate = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
@@ -595,7 +612,7 @@ export default function Sidebar() {
         params: { threadId: latestThread.id },
       });
     },
-    [navigate, threads],
+    [navigate, visibleThreads],
   );
 
   const addProjectFromPath = useCallback(

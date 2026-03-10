@@ -97,7 +97,7 @@ describe("wsNativeApi", () => {
     const listener = vi.fn();
     onServerWelcome(listener);
 
-    const payload = { cwd: "/tmp/workspace", projectName: "t3-code" };
+    const payload = { cwd: "/tmp/workspace", projectName: "t3-code", serverVersion: "0.0.0" };
     emitPush(WS_CHANNELS.serverWelcome, payload);
 
     expect(listener).toHaveBeenCalledTimes(1);
@@ -121,6 +121,7 @@ describe("wsNativeApi", () => {
     emitPush(WS_CHANNELS.serverWelcome, {
       cwd: "/tmp/workspace",
       projectName: "t3-code",
+      serverVersion: "0.0.0",
       bootstrapProjectId: "project-1",
       bootstrapThreadId: "thread-1",
     });
@@ -145,7 +146,11 @@ describe("wsNativeApi", () => {
     onServerWelcome(listener);
 
     emitPush(WS_CHANNELS.serverWelcome, { cwd: 42, projectName: "t3-code" });
-    emitPush(WS_CHANNELS.serverWelcome, { cwd: "/tmp/workspace", projectName: "t3-code" });
+    emitPush(WS_CHANNELS.serverWelcome, {
+      cwd: "/tmp/workspace",
+      projectName: "t3-code",
+      serverVersion: "0.0.0",
+    });
 
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener).toHaveBeenCalledWith(

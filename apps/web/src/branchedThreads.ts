@@ -19,6 +19,10 @@ export interface BranchedThreadTreeNode {
   parentThreadId: ThreadId | null;
   kind: BranchedThreadKind | "root";
   createdAt: string;
+  sourceThreadId?: ThreadId;
+  sourceMessageId?: MessageId;
+  variantGroupId?: string;
+  anchorThreadId?: ThreadId;
   children: BranchedThreadTreeNode[];
 }
 
@@ -29,6 +33,9 @@ export interface BranchedThreadLineageSelection {
 }
 
 const STORAGE_KEY = "t3code:branched-threads:v1";
+const VARIANT_SELECTION_KEY = "t3code:branched-thread-variant-selection:v1";
+const subscribers = new Set<() => void>();
+let cachedRecords: BranchedThreadRecord[] | null = null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -71,6 +78,16 @@ function normalizeRecord(value: unknown): BranchedThreadRecord | null {
   };
 }
 
+function notifySubscribers(): void {
+  for (const subscriber of subscribers) {
+    try {
+      subscriber();
+    } catch {
+      // Ignore subscriber errors to keep updates flowing.
+    }
+  }
+}
+
 function writeRecords(records: ReadonlyArray<BranchedThreadRecord>): void {
   if (typeof window === "undefined") return;
   try {
@@ -78,13 +95,53 @@ function writeRecords(records: ReadonlyArray<BranchedThreadRecord>): void {
   } catch {
     // Ignore localStorage failures so chat flows keep working.
   }
+  cachedRecords = [...records];
+  notifySubscribers();
 }
 
 export function buildVariantGroupId(kind: BranchedThreadKind, messageId: MessageId): string {
   return `${kind}:${messageId}`;
 }
 
-export function readBranchedThreadRecords(): BranchedThreadRecord[] {
+export function buildVariantSelectionKey(
+  variantGroupId: string,
+  anchorThreadId: ThreadId,
+): string {
+  return `${variantGroupId}\u0000${anchorThreadId}`;
+}
+
+function readVariantSelectionRaw(): Record<string, ThreadId> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(VARIANT_SELECTION_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!isRecord(parsed)) return {};
+    const next: Record<string, ThreadId> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (!isNonEmptyString(key) || !isNonEmptyString(value)) continue;
+      next[key] = value as ThreadId;
+    }
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+export function readVariantSelections(): Record<string, ThreadId> {
+  return readVariantSelectionRaw();
+}
+
+export function writeVariantSelections(selections: Record<string, ThreadId>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(VARIANT_SELECTION_KEY, JSON.stringify(selections));
+  } catch {
+    // Ignore localStorage failures so chat flows keep working.
+  }
+}
+
+function loadRecordsFromStorage(): BranchedThreadRecord[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -105,6 +162,21 @@ export function readBranchedThreadRecords(): BranchedThreadRecord[] {
   } catch {
     return [];
   }
+}
+
+export function readBranchedThreadRecords(): BranchedThreadRecord[] {
+  if (cachedRecords) {
+    return cachedRecords;
+  }
+  cachedRecords = loadRecordsFromStorage();
+  return cachedRecords;
+}
+
+export function subscribeBranchedThreadRecords(listener: () => void): () => void {
+  subscribers.add(listener);
+  return () => {
+    subscribers.delete(listener);
+  };
 }
 
 export function upsertBranchedThreadRecord(record: BranchedThreadRecord): BranchedThreadRecord[] {
@@ -184,13 +256,16 @@ export function buildBranchedThreadTree(
     kind: BranchedThreadKind | "root",
     createdAt: string,
     parentThreadId: ThreadId | null,
+    record?: BranchedThreadRecord,
   ): BranchedThreadTreeNode => {
     const children = (recordsByParent.get(threadId) ?? [])
       .toSorted(
         (left, right) =>
           left.createdAt.localeCompare(right.createdAt) || left.threadId.localeCompare(right.threadId),
       )
-      .map((record) => buildNode(record.threadId, record.kind, record.createdAt, record.parentThreadId));
+      .map((record) =>
+        buildNode(record.threadId, record.kind, record.createdAt, record.parentThreadId, record),
+      );
 
     return {
       threadId,
@@ -198,6 +273,14 @@ export function buildBranchedThreadTree(
       kind,
       createdAt,
       children,
+      ...(record
+        ? {
+            sourceThreadId: record.sourceThreadId,
+            sourceMessageId: record.sourceMessageId,
+            variantGroupId: record.variantGroupId,
+            anchorThreadId: record.anchorThreadId,
+          }
+        : {}),
     };
   };
 

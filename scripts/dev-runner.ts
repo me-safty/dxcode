@@ -180,7 +180,7 @@ export function createDevRunnerEnv({
   host,
   port,
   devUrl,
-}: CreateDevRunnerEnvInput): Effect.Effect<NodeJS.ProcessEnv, never, Path.Path> {
+}: CreateDevRunnerEnvInput): Effect.Effect<NodeJS.ProcessEnv, unknown, Path.Path> {
   return Effect.gen(function* () {
     const path = yield* Path.Path;
     const repoRoot = yield* REPO_ROOT;
@@ -493,15 +493,13 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       try: () =>
         new Promise<number>((resolve, reject) => {
           const child = spawn(turboCommand, [...MODE_ARGS[input.mode], ...input.turboArgs], {
-            stdin: "inherit",
-            stdout: "inherit",
-            stderr: "inherit",
+            stdio: "inherit",
             env,
             shell: process.platform === "win32",
             detached: false,
           });
 
-          child.once("error", (cause) => {
+          child.once("error", (cause: Error) => {
             reject(
               new DevRunnerError({
                 message: `Failed to start turbo from ${turboCommand}`,
@@ -510,7 +508,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
             );
           });
 
-          child.once("exit", (code, signal) => {
+          child.once("exit", (code: number | null, signal: NodeJS.Signals | null) => {
             if (signal) {
               reject(
                 new DevRunnerError({
