@@ -98,6 +98,11 @@ export function resolveThreadRowClassName(input: {
   return cn(baseClassName, "text-muted-foreground hover:bg-accent hover:text-foreground");
 }
 
+export function isContextMenuPointerDown(input: { button: number; ctrlKey: boolean }): boolean {
+  if (input.button === 2) return true;
+  return input.button === 0 && input.ctrlKey;
+}
+
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
   hasPendingApprovals: boolean;

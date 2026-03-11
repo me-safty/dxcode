@@ -4,6 +4,7 @@ import {
   getVisibleThreadsForProject,
   getProjectSortTimestamp,
   hasUnseenCompletion,
+  isContextMenuPointerDown,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
@@ -92,6 +93,35 @@ describe("resolveSidebarNewThreadEnvMode", () => {
         defaultEnvMode: "worktree",
       }),
     ).toBe("local");
+  });
+});
+
+describe("isContextMenuPointerDown", () => {
+  it("treats secondary-button pointerdown as a context-menu gesture", () => {
+    expect(
+      isContextMenuPointerDown({
+        button: 2,
+        ctrlKey: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("treats ctrl-primary-click as a context-menu gesture", () => {
+    expect(
+      isContextMenuPointerDown({
+        button: 0,
+        ctrlKey: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not treat primary-button pointerdown as a context-menu gesture", () => {
+    expect(
+      isContextMenuPointerDown({
+        button: 0,
+        ctrlKey: false,
+      }),
+    ).toBe(false);
   });
 });
 
