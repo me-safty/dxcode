@@ -8,6 +8,7 @@ import {
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  sortThreadsForSidebar,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   sortThreadsForSidebar,
@@ -219,6 +220,34 @@ describe("resolveThreadStatusPill", () => {
   });
 });
 
+describe("sortThreadsForSidebar", () => {
+  it("prioritizes pinned threads before recency", () => {
+    const threads = sortThreadsForSidebar([
+      {
+        id: "thread-1" as never,
+        pinned: false,
+        createdAt: "2026-03-09T10:10:00.000Z",
+      },
+      {
+        id: "thread-2" as never,
+        pinned: true,
+        createdAt: "2026-03-09T10:00:00.000Z",
+      },
+      {
+        id: "thread-3" as never,
+        pinned: true,
+        createdAt: "2026-03-09T10:20:00.000Z",
+      },
+    ]);
+
+    expect(threads.map((thread) => thread.id)).toEqual([
+      "thread-3" as never,
+      "thread-2" as never,
+      "thread-1" as never,
+    ]);
+  });
+});
+
 describe("resolveThreadRowClassName", () => {
   it("uses the darker selected palette when a thread is both selected and active", () => {
     const className = resolveThreadRowClassName({ isActive: true, isSelected: true });
@@ -362,6 +391,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     codexThreadId: null,
     projectId: ProjectId.makeUnsafe("project-1"),
     title: "Thread",
+    pinned: false,
     model: "gpt-5.4",
     runtimeMode: DEFAULT_RUNTIME_MODE,
     interactionMode: DEFAULT_INTERACTION_MODE,

@@ -17,6 +17,8 @@ type SidebarProject = {
 };
 type SidebarThreadSortInput = Pick<Thread, "createdAt" | "updatedAt" | "messages">;
 
+type SidebarThreadSortInput = Pick<Thread, "createdAt" | "id" | "pinned">;
+
 export interface ThreadStatusPill {
   label:
     | "Working"
@@ -58,6 +60,19 @@ export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
 export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null): boolean {
   if (target === null) return true;
   return !target.closest(THREAD_SELECTION_SAFE_SELECTOR);
+}
+
+export function sortThreadsForSidebar<T extends SidebarThreadSortInput>(
+  threads: ReadonlyArray<T>,
+): T[] {
+  return threads.toSorted((left, right) => {
+    if (left.pinned !== right.pinned) {
+      return Number(right.pinned) - Number(left.pinned);
+    }
+    const byDate = Date.parse(right.createdAt) - Date.parse(left.createdAt);
+    if (byDate !== 0) return byDate;
+    return right.id.localeCompare(left.id);
+  });
 }
 
 export function resolveSidebarNewThreadEnvMode(input: {
