@@ -1,9 +1,11 @@
-import { TurnId } from "@t3tools/contracts";
+import { MessageId, ThreadId, TurnId } from "@t3tools/contracts";
 
 export interface DiffRouteSearch {
-  diff?: "1" | undefined;
-  diffTurnId?: TurnId | undefined;
-  diffFilePath?: string | undefined;
+  diff?: "1";
+  diffTurnId?: TurnId;
+  diffFilePath?: string;
+  branchThreadId?: ThreadId;
+  messageId?: MessageId;
 }
 
 function isDiffOpenValue(value: unknown): boolean {
@@ -25,15 +27,35 @@ export function stripDiffSearchParams<T extends Record<string, unknown>>(
   return rest as Omit<T, "diff" | "diffTurnId" | "diffFilePath">;
 }
 
+export function stripBranchSearchParams<T extends Record<string, unknown>>(
+  params: T,
+): Omit<T, "branchThreadId"> {
+  const { branchThreadId: _branchThreadId, ...rest } = params;
+  return rest as Omit<T, "branchThreadId">;
+}
+
+export function stripMessageSearchParams<T extends Record<string, unknown>>(
+  params: T,
+): Omit<T, "messageId"> {
+  const { messageId: _messageId, ...rest } = params;
+  return rest as Omit<T, "messageId">;
+}
+
 export function parseDiffRouteSearch(search: Record<string, unknown>): DiffRouteSearch {
   const diff = isDiffOpenValue(search.diff) ? "1" : undefined;
   const diffTurnIdRaw = diff ? normalizeSearchString(search.diffTurnId) : undefined;
   const diffTurnId = diffTurnIdRaw ? TurnId.makeUnsafe(diffTurnIdRaw) : undefined;
   const diffFilePath = diff && diffTurnId ? normalizeSearchString(search.diffFilePath) : undefined;
+  const branchThreadIdRaw = normalizeSearchString(search.branchThreadId);
+  const branchThreadId = branchThreadIdRaw ? ThreadId.makeUnsafe(branchThreadIdRaw) : undefined;
+  const messageIdRaw = normalizeSearchString(search.messageId);
+  const messageId = messageIdRaw ? MessageId.makeUnsafe(messageIdRaw) : undefined;
 
   return {
     ...(diff ? { diff } : {}),
     ...(diffTurnId ? { diffTurnId } : {}),
     ...(diffFilePath ? { diffFilePath } : {}),
+    ...(branchThreadId ? { branchThreadId } : {}),
+    ...(messageId ? { messageId } : {}),
   };
 }

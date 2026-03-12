@@ -62,6 +62,7 @@ describe("makeServerPushBus", () => {
           {
             cwd: "/tmp/project",
             projectName: "project",
+            serverVersion: "0.0.0",
           },
         );
         expect(delivered).toBe(true);
@@ -87,6 +88,7 @@ describe("makeServerPushBus", () => {
           data: {
             cwd: "/tmp/project",
             projectName: "project",
+            serverVersion: "0.0.0",
           },
         });
         expect(messages[1]).toEqual({

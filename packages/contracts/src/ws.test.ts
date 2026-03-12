@@ -82,6 +82,7 @@ it.effect("accepts typed websocket push envelopes with sequence", () =>
       data: {
         cwd: "/tmp/workspace",
         projectName: "workspace",
+        serverVersion: "0.0.0",
       },
     });
 

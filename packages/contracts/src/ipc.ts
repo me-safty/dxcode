@@ -19,6 +19,8 @@ import type {
   GitStatusResult,
 } from "./git";
 import type {
+  ProjectCreateWorkspaceInput,
+  ProjectCreateWorkspaceResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
   ProjectWriteFileInput,
@@ -38,8 +40,12 @@ import type {
 import type { ServerUpsertKeybindingInput, ServerUpsertKeybindingResult } from "./server";
 import type {
   ClientOrchestrationCommand,
+  OrchestrationCreateBranchedThreadInput,
+  OrchestrationCreateBranchedThreadResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationSetMessageFeedbackInput,
+  OrchestrationSetMessageFeedbackResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
@@ -126,6 +132,7 @@ export interface NativeApi {
     onEvent: (callback: (event: TerminalEvent) => void) => () => void;
   };
   projects: {
+    createWorkspace: (input: ProjectCreateWorkspaceInput) => Promise<ProjectCreateWorkspaceResult>;
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
   };
@@ -163,6 +170,12 @@ export interface NativeApi {
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
+    createBranchedThread: (
+      input: OrchestrationCreateBranchedThreadInput,
+    ) => Promise<OrchestrationCreateBranchedThreadResult>;
+    setMessageFeedback: (
+      input: OrchestrationSetMessageFeedbackInput,
+    ) => Promise<OrchestrationSetMessageFeedbackResult>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,

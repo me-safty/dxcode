@@ -112,6 +112,7 @@ export function createWsNativeApi(): NativeApi {
         transport.subscribe(WS_CHANNELS.terminalEvent, (message) => callback(message.data)),
     },
     projects: {
+      createWorkspace: (input) => transport.request(WS_METHODS.projectsCreateWorkspace, input),
       searchEntries: (input) => transport.request(WS_METHODS.projectsSearchEntries, input),
       writeFile: (input) => transport.request(WS_METHODS.projectsWriteFile, input),
     },
@@ -165,6 +166,10 @@ export function createWsNativeApi(): NativeApi {
       getSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot),
       dispatchCommand: (command) =>
         transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, { command }),
+      createBranchedThread: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.createBranchedThread, input),
+      setMessageFeedback: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.setMessageFeedback, input),
       getTurnDiff: (input) => transport.request(ORCHESTRATION_WS_METHODS.getTurnDiff, input),
       getFullThreadDiff: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.getFullThreadDiff, input),

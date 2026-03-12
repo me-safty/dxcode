@@ -4,8 +4,10 @@ import {
   MessageId,
   NonNegativeInt,
   OrchestrationCheckpointFile,
+  OrchestrationMessageFeedbackRating,
   OrchestrationReadModel,
   ProjectScript,
+  TrimmedNonEmptyString,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -50,6 +52,10 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   Struct.assign({
     isStreaming: Schema.Number,
     attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
+    feedbackRating: Schema.NullOr(OrchestrationMessageFeedbackRating),
+    feedbackNote: Schema.NullOr(TrimmedNonEmptyString),
+    feedbackCreatedAt: Schema.NullOr(IsoDateTime),
+    feedbackUpdatedAt: Schema.NullOr(IsoDateTime),
   }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
@@ -176,17 +182,26 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
-          message_id AS "messageId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          role,
-          text,
-          attachments_json AS "attachments",
-          is_streaming AS "isStreaming",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
+          projection_thread_messages.message_id AS "messageId",
+          projection_thread_messages.thread_id AS "threadId",
+          projection_thread_messages.turn_id AS "turnId",
+          projection_thread_messages.role AS "role",
+          projection_thread_messages.text AS "text",
+          projection_thread_messages.attachments_json AS "attachments",
+          projection_thread_messages.is_streaming AS "isStreaming",
+          projection_thread_messages.created_at AS "createdAt",
+          projection_thread_messages.updated_at AS "updatedAt",
+          feedback.rating AS "feedbackRating",
+          feedback.note AS "feedbackNote",
+          feedback.created_at AS "feedbackCreatedAt",
+          feedback.updated_at AS "feedbackUpdatedAt"
         FROM projection_thread_messages
-        ORDER BY thread_id ASC, created_at ASC, message_id ASC
+        LEFT JOIN rlhf_message_feedback AS feedback
+          ON feedback.message_id = projection_thread_messages.message_id
+        ORDER BY
+          projection_thread_messages.thread_id ASC,
+          projection_thread_messages.created_at ASC,
+          projection_thread_messages.message_id ASC
       `,
   });
 
@@ -422,6 +437,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ...(row.attachments !== null ? { attachments: row.attachments } : {}),
               turnId: row.turnId,
               streaming: row.isStreaming === 1,
+              ...(row.feedbackRating !== null || row.feedbackNote !== null
+                ? {
+                    feedback: {
+                      rating: row.feedbackRating,
+                      ...(row.feedbackNote !== null ? { note: row.feedbackNote } : {}),
+                      createdAt: row.feedbackCreatedAt ?? row.updatedAt,
+                      updatedAt: row.feedbackUpdatedAt ?? row.updatedAt,
+                    },
+                  }
+                : {}),
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,
             });

@@ -2,6 +2,8 @@ import { Fragment, type ReactNode, createElement, useEffect } from "react";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   type ProviderKind,
+  MessageId,
+  ProjectId,
   ThreadId,
   type OrchestrationReadModel,
   type OrchestrationSessionStatus,
@@ -15,6 +17,9 @@ import {
 import { create } from "zustand";
 import { type ChatMessage, type Project, type Thread } from "./types";
 import { Debouncer } from "@tanstack/react-pacer";
+import { isProjectDescendant, sanitizeProjectParents } from "./sidebarTree";
+
+import { resolveServerHttpOrigin } from "./serverConnection";
 
 // ── State ────────────────────────────────────────────────────────────
 
@@ -24,8 +29,9 @@ export interface AppState {
   threadsHydrated: boolean;
 }
 
-const PERSISTED_STATE_KEY = "t3code:renderer-state:v8";
+const PERSISTED_STATE_KEY = "t3code:renderer-state:v9";
 const LEGACY_PERSISTED_STATE_KEYS = [
+  "t3code:renderer-state:v8",
   "t3code:renderer-state:v7",
   "t3code:renderer-state:v6",
   "t3code:renderer-state:v5",
@@ -44,6 +50,8 @@ const initialState: AppState = {
 };
 const persistedExpandedProjectCwds = new Set<string>();
 const persistedProjectOrderCwds: string[] = [];
+const persistedThreadOrderIds: string[] = [];
+const persistedProjectParentCwdByCwd = new Map<string, string>();
 
 // ── Persist helpers ──────────────────────────────────────────────────
 
@@ -55,9 +63,13 @@ function readPersistedState(): AppState {
     const parsed = JSON.parse(raw) as {
       expandedProjectCwds?: string[];
       projectOrderCwds?: string[];
+      threadOrderIds?: string[];
+      projectParentCwdByCwd?: Record<string, string>;
     };
     persistedExpandedProjectCwds.clear();
     persistedProjectOrderCwds.length = 0;
+    persistedThreadOrderIds.length = 0;
+    persistedProjectParentCwdByCwd.clear();
     for (const cwd of parsed.expandedProjectCwds ?? []) {
       if (typeof cwd === "string" && cwd.length > 0) {
         persistedExpandedProjectCwds.add(cwd);
@@ -66,6 +78,26 @@ function readPersistedState(): AppState {
     for (const cwd of parsed.projectOrderCwds ?? []) {
       if (typeof cwd === "string" && cwd.length > 0 && !persistedProjectOrderCwds.includes(cwd)) {
         persistedProjectOrderCwds.push(cwd);
+      }
+    }
+    for (const threadId of parsed.threadOrderIds ?? []) {
+      if (
+        typeof threadId === "string" &&
+        threadId.length > 0 &&
+        !persistedThreadOrderIds.includes(threadId)
+      ) {
+        persistedThreadOrderIds.push(threadId);
+      }
+    }
+    for (const [cwd, parentCwd] of Object.entries(parsed.projectParentCwdByCwd ?? {})) {
+      if (
+        typeof cwd === "string" &&
+        cwd.length > 0 &&
+        typeof parentCwd === "string" &&
+        parentCwd.length > 0 &&
+        parentCwd !== cwd
+      ) {
+        persistedProjectParentCwdByCwd.set(cwd, parentCwd);
       }
     }
     return { ...initialState };
@@ -86,6 +118,18 @@ function persistState(state: AppState): void {
           .filter((project) => project.expanded)
           .map((project) => project.cwd),
         projectOrderCwds: state.projects.map((project) => project.cwd),
+        threadOrderIds: state.threads.map((thread) => thread.id),
+        projectParentCwdByCwd: Object.fromEntries(
+          state.projects.flatMap((project) => {
+            const parentProject = state.projects.find(
+              (candidate) => candidate.id === project.parentProjectId,
+            );
+            if (!parentProject) {
+              return [];
+            }
+            return [[project.cwd, parentProject.cwd] as const];
+          }),
+        ),
       }),
     );
     if (!legacyKeysCleanedUp) {
@@ -146,12 +190,21 @@ function mapProjectsFromReadModel(
         (persistedExpandedProjectCwds.size > 0
           ? persistedExpandedProjectCwds.has(project.workspaceRoot)
           : true),
+      parentProjectId: existing?.parentProjectId ?? null,
       scripts: project.scripts.map((script) => ({ ...script })),
-    } satisfies Project;
+      persistedParentCwd:
+        existing === undefined
+          ? (persistedProjectParentCwdByCwd.get(project.workspaceRoot) ?? null)
+          : null,
+    };
   });
 
-  return mappedProjects
-    .map((project, incomingIndex) => {
+  const projectIdByCwd = new Map(
+    mappedProjects.map((project) => [project.cwd, project.id] as const),
+  );
+
+  const orderedProjects = mappedProjects
+    .map(({ persistedParentCwd, ...project }, incomingIndex) => {
       const previousIndex =
         previousOrderById.get(project.id) ?? previousOrderByCwd.get(project.cwd);
       const persistedIndex = usePersistedOrder ? persistedOrderByCwd.get(project.cwd) : undefined;
@@ -159,7 +212,10 @@ function mapProjectsFromReadModel(
         previousIndex ??
         persistedIndex ??
         (usePersistedOrder ? persistedProjectOrderCwds.length : previous.length) + incomingIndex;
-      return { project, incomingIndex, orderIndex };
+      const parentProjectId =
+        project.parentProjectId ??
+        (persistedParentCwd ? (projectIdByCwd.get(persistedParentCwd) ?? null) : null);
+      return { project: { ...project, parentProjectId }, incomingIndex, orderIndex };
     })
     .toSorted((a, b) => {
       const byOrder = a.orderIndex - b.orderIndex;
@@ -167,6 +223,119 @@ function mapProjectsFromReadModel(
       return a.incomingIndex - b.incomingIndex;
     })
     .map((entry) => entry.project);
+
+  return sanitizeProjectParents(orderedProjects);
+}
+
+function mapThreadsFromReadModel(
+  incoming: OrchestrationReadModel["threads"],
+  previous: Thread[],
+): Thread[] {
+  const existingThreadById = new Map(previous.map((thread) => [thread.id, thread] as const));
+  const previousOrderById = new Map(previous.map((thread, index) => [thread.id, index] as const));
+  const persistedOrderById = new Map(
+    persistedThreadOrderIds.map((threadId, index) => [threadId, index] as const),
+  );
+  const usePersistedOrder = previous.length === 0;
+
+  return incoming
+    .map((thread) => {
+      const existing = existingThreadById.get(thread.id);
+      return {
+        id: thread.id,
+        codexThreadId: null,
+        projectId: thread.projectId,
+        title: thread.title,
+        model: resolveModelSlugForProvider(
+          inferProviderForThreadModel({
+            model: thread.model,
+            sessionProviderName: thread.session?.providerName ?? null,
+          }),
+          thread.model,
+        ),
+        runtimeMode: thread.runtimeMode,
+        interactionMode: thread.interactionMode,
+        session: thread.session
+          ? {
+              provider: toLegacyProvider(thread.session.providerName),
+              status: toLegacySessionStatus(thread.session.status),
+              orchestrationStatus: thread.session.status,
+              activeTurnId: thread.session.activeTurnId ?? undefined,
+              createdAt: thread.session.updatedAt,
+              updatedAt: thread.session.updatedAt,
+              ...(thread.session.lastError ? { lastError: thread.session.lastError } : {}),
+            }
+          : null,
+        messages: thread.messages.map((message) => {
+          const attachments = message.attachments?.map((attachment) => ({
+            type: "image" as const,
+            id: attachment.id,
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            sizeBytes: attachment.sizeBytes,
+            previewUrl: toAttachmentPreviewUrl(attachmentPreviewRoutePath(attachment.id)),
+          }));
+          const normalizedMessage: ChatMessage = {
+            id: message.id,
+            role: message.role,
+            text: message.text,
+            turnId: message.turnId,
+            createdAt: message.createdAt,
+            streaming: message.streaming,
+            ...(message.streaming ? {} : { completedAt: message.updatedAt }),
+            ...(message.feedback
+              ? {
+                  feedback: {
+                    rating: message.feedback.rating,
+                    ...(message.feedback.note ? { note: message.feedback.note } : {}),
+                    createdAt: message.feedback.createdAt,
+                    updatedAt: message.feedback.updatedAt,
+                  },
+                }
+              : {}),
+            ...(attachments && attachments.length > 0 ? { attachments } : {}),
+          };
+          return normalizedMessage;
+        }),
+        proposedPlans: thread.proposedPlans.map((proposedPlan) => ({
+          id: proposedPlan.id,
+          turnId: proposedPlan.turnId,
+          planMarkdown: proposedPlan.planMarkdown,
+          createdAt: proposedPlan.createdAt,
+          updatedAt: proposedPlan.updatedAt,
+        })),
+        error: thread.session?.lastError ?? null,
+        createdAt: thread.createdAt,
+        latestTurn: thread.latestTurn,
+        lastVisitedAt: existing?.lastVisitedAt ?? thread.updatedAt,
+        branch: thread.branch,
+        worktreePath: thread.worktreePath,
+        turnDiffSummaries: thread.checkpoints.map((checkpoint) => ({
+          turnId: checkpoint.turnId,
+          completedAt: checkpoint.completedAt,
+          status: checkpoint.status,
+          assistantMessageId: checkpoint.assistantMessageId ?? undefined,
+          checkpointTurnCount: checkpoint.checkpointTurnCount,
+          checkpointRef: checkpoint.checkpointRef,
+          files: checkpoint.files.map((file) => ({ ...file })),
+        })),
+        activities: thread.activities.map((activity) => ({ ...activity })),
+      };
+    })
+    .map((thread, incomingIndex) => {
+      const previousIndex = previousOrderById.get(thread.id);
+      const persistedIndex = usePersistedOrder ? persistedOrderById.get(thread.id) : undefined;
+      const createdAtMs = Date.parse(thread.createdAt);
+      const createdAtRank = Number.isFinite(createdAtMs) ? -createdAtMs : -Date.now();
+      const orderIndex = previousIndex ?? persistedIndex ?? createdAtRank;
+      return { thread, incomingIndex, orderIndex };
+    })
+    .toSorted((a, b) => {
+      const byOrder = a.orderIndex - b.orderIndex;
+      if (byOrder !== 0) return byOrder;
+      return a.incomingIndex - b.incomingIndex;
+    })
+    .map((entry) => entry.thread);
 }
 
 function toLegacySessionStatus(
@@ -211,30 +380,9 @@ function inferProviderForThreadModel(input: {
   return "codex";
 }
 
-function resolveWsHttpOrigin(): string {
-  if (typeof window === "undefined") return "";
-  const bridgeWsUrl = window.desktopBridge?.getWsUrl?.();
-  const envWsUrl = import.meta.env.VITE_WS_URL as string | undefined;
-  const wsCandidate =
-    typeof bridgeWsUrl === "string" && bridgeWsUrl.length > 0
-      ? bridgeWsUrl
-      : typeof envWsUrl === "string" && envWsUrl.length > 0
-        ? envWsUrl
-        : null;
-  if (!wsCandidate) return window.location.origin;
-  try {
-    const wsUrl = new URL(wsCandidate);
-    const protocol =
-      wsUrl.protocol === "wss:" ? "https:" : wsUrl.protocol === "ws:" ? "http:" : wsUrl.protocol;
-    return `${protocol}//${wsUrl.host}`;
-  } catch {
-    return window.location.origin;
-  }
-}
-
 function toAttachmentPreviewUrl(rawUrl: string): string {
   if (rawUrl.startsWith("/")) {
-    return `${resolveWsHttpOrigin()}${rawUrl}`;
+    return `${resolveServerHttpOrigin()}${rawUrl}`;
   }
   return rawUrl;
 }
@@ -250,81 +398,10 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
     readModel.projects.filter((project) => project.deletedAt === null),
     state.projects,
   );
-  const existingThreadById = new Map(state.threads.map((thread) => [thread.id, thread] as const));
-  const threads = readModel.threads
-    .filter((thread) => thread.deletedAt === null)
-    .map((thread) => {
-      const existing = existingThreadById.get(thread.id);
-      return {
-        id: thread.id,
-        codexThreadId: null,
-        projectId: thread.projectId,
-        title: thread.title,
-        model: resolveModelSlugForProvider(
-          inferProviderForThreadModel({
-            model: thread.model,
-            sessionProviderName: thread.session?.providerName ?? null,
-          }),
-          thread.model,
-        ),
-        runtimeMode: thread.runtimeMode,
-        interactionMode: thread.interactionMode,
-        session: thread.session
-          ? {
-              provider: toLegacyProvider(thread.session.providerName),
-              status: toLegacySessionStatus(thread.session.status),
-              orchestrationStatus: thread.session.status,
-              activeTurnId: thread.session.activeTurnId ?? undefined,
-              createdAt: thread.session.updatedAt,
-              updatedAt: thread.session.updatedAt,
-              ...(thread.session.lastError ? { lastError: thread.session.lastError } : {}),
-            }
-          : null,
-        messages: thread.messages.map((message) => {
-          const attachments = message.attachments?.map((attachment) => ({
-            type: "image" as const,
-            id: attachment.id,
-            name: attachment.name,
-            mimeType: attachment.mimeType,
-            sizeBytes: attachment.sizeBytes,
-            previewUrl: toAttachmentPreviewUrl(attachmentPreviewRoutePath(attachment.id)),
-          }));
-          const normalizedMessage: ChatMessage = {
-            id: message.id,
-            role: message.role,
-            text: message.text,
-            createdAt: message.createdAt,
-            streaming: message.streaming,
-            ...(message.streaming ? {} : { completedAt: message.updatedAt }),
-            ...(attachments && attachments.length > 0 ? { attachments } : {}),
-          };
-          return normalizedMessage;
-        }),
-        proposedPlans: thread.proposedPlans.map((proposedPlan) => ({
-          id: proposedPlan.id,
-          turnId: proposedPlan.turnId,
-          planMarkdown: proposedPlan.planMarkdown,
-          createdAt: proposedPlan.createdAt,
-          updatedAt: proposedPlan.updatedAt,
-        })),
-        error: thread.session?.lastError ?? null,
-        createdAt: thread.createdAt,
-        latestTurn: thread.latestTurn,
-        lastVisitedAt: existing?.lastVisitedAt ?? thread.updatedAt,
-        branch: thread.branch,
-        worktreePath: thread.worktreePath,
-        turnDiffSummaries: thread.checkpoints.map((checkpoint) => ({
-          turnId: checkpoint.turnId,
-          completedAt: checkpoint.completedAt,
-          status: checkpoint.status,
-          assistantMessageId: checkpoint.assistantMessageId ?? undefined,
-          checkpointTurnCount: checkpoint.checkpointTurnCount,
-          checkpointRef: checkpoint.checkpointRef,
-          files: checkpoint.files.map((file) => ({ ...file })),
-        })),
-        activities: thread.activities.map((activity) => ({ ...activity })),
-      };
-    });
+  const threads = mapThreadsFromReadModel(
+    readModel.threads.filter((thread) => thread.deletedAt === null),
+    state.threads,
+  );
   return {
     ...state,
     projects,
@@ -392,15 +469,96 @@ export function reorderProjects(
   draggedProjectId: Project["id"],
   targetProjectId: Project["id"],
 ): AppState {
-  if (draggedProjectId === targetProjectId) return state;
-  const draggedIndex = state.projects.findIndex((project) => project.id === draggedProjectId);
-  const targetIndex = state.projects.findIndex((project) => project.id === targetProjectId);
-  if (draggedIndex < 0 || targetIndex < 0) return state;
-  const projects = [...state.projects];
-  const [draggedProject] = projects.splice(draggedIndex, 1);
+  const targetProject = state.projects.find((project) => project.id === targetProjectId);
+  if (!targetProject) return state;
+  const siblingProjects = state.projects.filter(
+    (project) => project.parentProjectId === targetProject.parentProjectId,
+  );
+  const targetIndex = siblingProjects.findIndex((project) => project.id === targetProjectId);
+  return moveProject(state, draggedProjectId, targetProject.parentProjectId, targetIndex);
+}
+
+export function moveProject(
+  state: AppState,
+  draggedProjectId: Project["id"],
+  targetParentProjectId: ProjectId | null,
+  targetIndex: number,
+): AppState {
+  const draggedProject = state.projects.find((project) => project.id === draggedProjectId);
   if (!draggedProject) return state;
-  projects.splice(targetIndex, 0, draggedProject);
-  return { ...state, projects };
+  if (targetParentProjectId === draggedProjectId) return state;
+  if (
+    targetParentProjectId !== null &&
+    isProjectDescendant(state.projects, targetParentProjectId, draggedProjectId)
+  ) {
+    return state;
+  }
+
+  const remainingProjects = state.projects.filter((project) => project.id !== draggedProjectId);
+  const siblingProjects = remainingProjects.filter(
+    (project) => project.parentProjectId === targetParentProjectId,
+  );
+  const clampedTargetIndex = Math.max(0, Math.min(targetIndex, siblingProjects.length));
+
+  let insertionIndex = remainingProjects.length;
+  if (clampedTargetIndex < siblingProjects.length) {
+    insertionIndex = remainingProjects.findIndex(
+      (project) => project.id === siblingProjects[clampedTargetIndex]?.id,
+    );
+  } else if (siblingProjects.length > 0) {
+    insertionIndex =
+      remainingProjects.findIndex(
+        (project) => project.id === siblingProjects[siblingProjects.length - 1]?.id,
+      ) + 1;
+  }
+
+  const nextDraggedProject =
+    draggedProject.parentProjectId === targetParentProjectId
+      ? draggedProject
+      : { ...draggedProject, parentProjectId: targetParentProjectId };
+  const projects = [
+    ...remainingProjects.slice(0, insertionIndex),
+    nextDraggedProject,
+    ...remainingProjects.slice(insertionIndex),
+  ];
+  return { ...state, projects: sanitizeProjectParents(projects) };
+}
+
+export function moveThread(
+  state: AppState,
+  draggedThreadId: Thread["id"],
+  targetProjectId: ProjectId,
+  targetIndex: number,
+): AppState {
+  const draggedThread = state.threads.find((thread) => thread.id === draggedThreadId);
+  if (!draggedThread) return state;
+
+  const remainingThreads = state.threads.filter((thread) => thread.id !== draggedThreadId);
+  const siblingThreads = remainingThreads.filter((thread) => thread.projectId === targetProjectId);
+  const clampedTargetIndex = Math.max(0, Math.min(targetIndex, siblingThreads.length));
+
+  let insertionIndex = remainingThreads.length;
+  if (clampedTargetIndex < siblingThreads.length) {
+    insertionIndex = remainingThreads.findIndex(
+      (thread) => thread.id === siblingThreads[clampedTargetIndex]?.id,
+    );
+  } else if (siblingThreads.length > 0) {
+    insertionIndex =
+      remainingThreads.findIndex(
+        (thread) => thread.id === siblingThreads[siblingThreads.length - 1]?.id,
+      ) + 1;
+  }
+
+  const nextDraggedThread =
+    draggedThread.projectId === targetProjectId
+      ? draggedThread
+      : { ...draggedThread, projectId: targetProjectId };
+  const threads = [
+    ...remainingThreads.slice(0, insertionIndex),
+    nextDraggedThread,
+    ...remainingThreads.slice(insertionIndex),
+  ];
+  return { ...state, threads };
 }
 
 export function setError(state: AppState, threadId: ThreadId, error: string | null): AppState {
@@ -430,6 +588,34 @@ export function setThreadBranch(
   return threads === state.threads ? state : { ...state, threads };
 }
 
+export function setMessageFeedback(
+  state: AppState,
+  messageId: MessageId,
+  feedback: ChatMessage["feedback"] | null,
+): AppState {
+  let threadsChanged = false;
+  const threads = state.threads.map((thread) => {
+    let messagesChanged = false;
+    const messages = thread.messages.map((message) => {
+      if (message.id !== messageId) return message;
+      const nextFeedback = feedback ?? undefined;
+      const existing = message.feedback;
+      const isSame =
+        existing?.rating === nextFeedback?.rating &&
+        existing?.note === nextFeedback?.note &&
+        existing?.createdAt === nextFeedback?.createdAt &&
+        existing?.updatedAt === nextFeedback?.updatedAt;
+      if (isSame) return message;
+      messagesChanged = true;
+      return { ...message, feedback: nextFeedback };
+    });
+    if (!messagesChanged) return thread;
+    threadsChanged = true;
+    return { ...thread, messages };
+  });
+  return threadsChanged ? { ...state, threads } : state;
+}
+
 // ── Zustand store ────────────────────────────────────────────────────
 
 interface AppStore extends AppState {
@@ -439,8 +625,19 @@ interface AppStore extends AppState {
   toggleProject: (projectId: Project["id"]) => void;
   setProjectExpanded: (projectId: Project["id"], expanded: boolean) => void;
   reorderProjects: (draggedProjectId: Project["id"], targetProjectId: Project["id"]) => void;
+  moveProject: (
+    draggedProjectId: Project["id"],
+    targetParentProjectId: ProjectId | null,
+    targetIndex: number,
+  ) => void;
+  moveThread: (
+    draggedThreadId: Thread["id"],
+    targetProjectId: ProjectId,
+    targetIndex: number,
+  ) => void;
   setError: (threadId: ThreadId, error: string | null) => void;
   setThreadBranch: (threadId: ThreadId, branch: string | null, worktreePath: string | null) => void;
+  setMessageFeedback: (messageId: MessageId, feedback: ChatMessage["feedback"] | null) => void;
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -454,9 +651,15 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => setProjectExpanded(state, projectId, expanded)),
   reorderProjects: (draggedProjectId, targetProjectId) =>
     set((state) => reorderProjects(state, draggedProjectId, targetProjectId)),
+  moveProject: (draggedProjectId, targetParentProjectId, targetIndex) =>
+    set((state) => moveProject(state, draggedProjectId, targetParentProjectId, targetIndex)),
+  moveThread: (draggedThreadId, targetProjectId, targetIndex) =>
+    set((state) => moveThread(state, draggedThreadId, targetProjectId, targetIndex)),
   setError: (threadId, error) => set((state) => setError(state, threadId, error)),
   setThreadBranch: (threadId, branch, worktreePath) =>
     set((state) => setThreadBranch(state, threadId, branch, worktreePath)),
+  setMessageFeedback: (messageId, feedback) =>
+    set((state) => setMessageFeedback(state, messageId, feedback)),
 }));
 
 // Persist state changes with debouncing to avoid localStorage thrashing

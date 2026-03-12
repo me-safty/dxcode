@@ -1,0 +1,6 @@
+- rlhf
+- facelift - make it look better, more like the real codex, sidebar needs to look the same as codex
+- add images
+- add color marking/highlighting for both user and ai
+- connect with ollama and actually working with branched messages and rlhf
+- connect with openclaw by copying aionai
