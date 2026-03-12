@@ -67,6 +67,22 @@ export function resolveSidebarNewThreadEnvMode(input: {
   return input.requestedEnvMode ?? input.defaultEnvMode;
 }
 
+export function isMacOS(): boolean {
+  const nav = window.navigator as Navigator & {
+    userAgentData?: { platform: string };
+  };
+  return nav.userAgentData ? nav.userAgentData.platform === "macOS" : /Mac/i.test(nav.userAgent);
+}
+
+export function isContextMenuPointerDown(input: {
+  button: number;
+  ctrlKey: boolean;
+  isMac: boolean;
+}): boolean {
+  if (input.button === 2) return true;
+  return input.isMac && input.button === 0 && input.ctrlKey;
+}
+
 export function resolveThreadRowClassName(input: {
   isActive: boolean;
   isSelected: boolean;

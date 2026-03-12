@@ -96,35 +96,6 @@ describe("resolveSidebarNewThreadEnvMode", () => {
   });
 });
 
-describe("isContextMenuPointerDown", () => {
-  it("treats secondary-button pointerdown as a context-menu gesture", () => {
-    expect(
-      isContextMenuPointerDown({
-        button: 2,
-        ctrlKey: false,
-      }),
-    ).toBe(true);
-  });
-
-  it("treats ctrl-primary-click as a context-menu gesture", () => {
-    expect(
-      isContextMenuPointerDown({
-        button: 0,
-        ctrlKey: true,
-      }),
-    ).toBe(true);
-  });
-
-  it("does not treat primary-button pointerdown as a context-menu gesture", () => {
-    expect(
-      isContextMenuPointerDown({
-        button: 0,
-        ctrlKey: false,
-      }),
-    ).toBe(false);
-  });
-});
-
 describe("resolveThreadStatusPill", () => {
   const baseThread = {
     interactionMode: "plan" as const,

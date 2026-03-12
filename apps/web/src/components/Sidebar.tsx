@@ -101,6 +101,7 @@ import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
   getVisibleThreadsForProject,
   isContextMenuPointerDown,
+  isMacOS,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
@@ -1101,6 +1102,7 @@ export default function Sidebar() {
         isContextMenuPointerDown({
           button: event.button,
           ctrlKey: event.ctrlKey,
+          isMac: isMacOS(),
         })
       ) {
         // Keep context-menu gestures from arming the sortable drag sensor.
