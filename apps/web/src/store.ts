@@ -2,6 +2,7 @@ import { Fragment, type ReactNode, createElement, useEffect } from "react";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   type ProviderKind,
+  MessageId,
   ProjectId,
   ThreadId,
   type OrchestrationReadModel,
@@ -273,9 +274,20 @@ function mapThreadsFromReadModel(
             id: message.id,
             role: message.role,
             text: message.text,
+            turnId: message.turnId,
             createdAt: message.createdAt,
             streaming: message.streaming,
             ...(message.streaming ? {} : { completedAt: message.updatedAt }),
+            ...(message.feedback
+              ? {
+                  feedback: {
+                    rating: message.feedback.rating,
+                    ...(message.feedback.note ? { note: message.feedback.note } : {}),
+                    createdAt: message.feedback.createdAt,
+                    updatedAt: message.feedback.updatedAt,
+                  },
+                }
+              : {}),
             ...(attachments && attachments.length > 0 ? { attachments } : {}),
           };
           return normalizedMessage;
@@ -571,6 +583,34 @@ export function setThreadBranch(
   return threads === state.threads ? state : { ...state, threads };
 }
 
+export function setMessageFeedback(
+  state: AppState,
+  messageId: MessageId,
+  feedback: ChatMessage["feedback"] | null,
+): AppState {
+  let threadsChanged = false;
+  const threads = state.threads.map((thread) => {
+    let messagesChanged = false;
+    const messages = thread.messages.map((message) => {
+      if (message.id !== messageId) return message;
+      const nextFeedback = feedback ?? undefined;
+      const existing = message.feedback;
+      const isSame =
+        existing?.rating === nextFeedback?.rating &&
+        existing?.note === nextFeedback?.note &&
+        existing?.createdAt === nextFeedback?.createdAt &&
+        existing?.updatedAt === nextFeedback?.updatedAt;
+      if (isSame) return message;
+      messagesChanged = true;
+      return { ...message, feedback: nextFeedback };
+    });
+    if (!messagesChanged) return thread;
+    threadsChanged = true;
+    return { ...thread, messages };
+  });
+  return threadsChanged ? { ...state, threads } : state;
+}
+
 // ── Zustand store ────────────────────────────────────────────────────
 
 interface AppStore extends AppState {
@@ -588,6 +628,7 @@ interface AppStore extends AppState {
   moveThread: (draggedThreadId: Thread["id"], targetProjectId: ProjectId, targetIndex: number) => void;
   setError: (threadId: ThreadId, error: string | null) => void;
   setThreadBranch: (threadId: ThreadId, branch: string | null, worktreePath: string | null) => void;
+  setMessageFeedback: (messageId: MessageId, feedback: ChatMessage["feedback"] | null) => void;
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -608,6 +649,8 @@ export const useStore = create<AppStore>((set) => ({
   setError: (threadId, error) => set((state) => setError(state, threadId, error)),
   setThreadBranch: (threadId, branch, worktreePath) =>
     set((state) => setThreadBranch(state, threadId, branch, worktreePath)),
+  setMessageFeedback: (messageId, feedback) =>
+    set((state) => setMessageFeedback(state, messageId, feedback)),
 }));
 
 // Persist state changes with debouncing to avoid localStorage thrashing

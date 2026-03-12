@@ -2,6 +2,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { defineConfig } from "vite";
+import { version } from "./package.json" with { type: "json" };
 import { spawn } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
@@ -118,6 +119,7 @@ export default defineConfig({
   define: {
     // In dev mode, tell the web app where the WebSocket server lives
     "import.meta.env.VITE_WS_URL": JSON.stringify(process.env.VITE_WS_URL ?? ""),
+    "import.meta.env.APP_VERSION": JSON.stringify(version),
   },
   resolve: {
     tsconfigPaths: true,

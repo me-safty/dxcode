@@ -3,11 +3,14 @@ import {
   ChevronRightIcon,
   FolderIcon,
   GitPullRequestIcon,
+  ListIcon,
   PlusIcon,
   RocketIcon,
   SettingsIcon,
   SquarePenIcon,
   TerminalIcon,
+  ThumbsDownIcon,
+  ThumbsUpIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -31,6 +34,7 @@ import {
   DEFAULT_RUNTIME_MODE,
   DEFAULT_MODEL_BY_PROVIDER,
   type DesktopUpdateState,
+  MessageId,
   ProjectId,
   ThreadId,
   type GitStatusResult,
@@ -44,13 +48,19 @@ import { APP_STAGE_LABEL } from "../branding";
 import { newCommandId, newProjectId, newThreadId } from "../lib/utils";
 import { useStore } from "../store";
 import { isChatNewLocalShortcut, isChatNewShortcut, shortcutLabelForCommand } from "../keybindings";
-import { derivePendingApprovals, derivePendingUserInputs } from "../session-logic";
+import { derivePendingApprovals, derivePendingUserInputs, formatTimestamp } from "../session-logic";
 import { gitRemoveWorktreeMutationOptions, gitStatusQueryOptions } from "../lib/gitReactQuery";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { resolveServerHttpOrigin } from "../serverConnection";
 import { type DraftThreadEnvMode, useComposerDraftStore } from "../composerDraftStore";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import {
+  stripBranchSearchParams,
+  stripDiffSearchParams,
+  stripMessageSearchParams,
+} from "../diffRouteSearch";
+import { truncateTitle } from "../truncateTitle";
 import { toastManager } from "./ui/toast";
 import {
   getArm64IntelBuildWarningDescription,
@@ -66,6 +76,14 @@ import {
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Collapsible, CollapsibleContent } from "./ui/collapsible";
+import {
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "./ui/dialog";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   SidebarContent,
@@ -359,6 +377,20 @@ function DroppableTreeContainer({
   );
 }
 
+function normalizeFeedbackPreview(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function buildFeedbackMessagePreview(message: { text: string; attachments?: Array<unknown> }): string {
+  const trimmed = normalizeFeedbackPreview(message.text);
+  if (trimmed.length > 0) return trimmed;
+  const attachmentCount = message.attachments?.length ?? 0;
+  if (attachmentCount > 0) {
+    return attachmentCount === 1 ? "1 attachment" : `${attachmentCount} attachments`;
+  }
+  return "(empty message)";
+}
+
 export default function Sidebar() {
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
@@ -421,8 +453,40 @@ export default function Sidebar() {
   const dragInProgressRef = useRef(false);
   const suppressProjectClickAfterDragRef = useRef(false);
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
+  const [feedbackLogOpen, setFeedbackLogOpen] = useState(false);
   const defaultProjectsPath = serverConfig?.defaultProjectsPath ?? null;
   const shouldShowProjectPathEntry = addingProject;
+  const feedbackEntries = useMemo(() => {
+    const entries: Array<{
+      messageId: MessageId;
+      threadId: ThreadId;
+      threadTitle: string;
+      messagePreview: string;
+      messageCreatedAt: string;
+      rating: "up" | "down" | "mixed" | null;
+      note: string | null;
+      updatedAt: string;
+    }> = [];
+
+    for (const thread of threads) {
+      for (const message of thread.messages) {
+        if (message.role !== "assistant") continue;
+        if (!message.feedback) continue;
+        entries.push({
+          messageId: message.id,
+          threadId: thread.id,
+          threadTitle: thread.title.trim() || "Untitled thread",
+          messagePreview: truncateTitle(buildFeedbackMessagePreview(message), 120),
+          messageCreatedAt: message.createdAt,
+          rating: message.feedback.rating,
+          note: message.feedback.note ?? null,
+          updatedAt: message.feedback.updatedAt,
+        });
+      }
+    }
+
+    return entries.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }, [threads]);
   const pendingApprovalByThreadId = useMemo(() => {
     const map = new Map<ThreadId, boolean>();
     for (const thread of threads) {
@@ -1859,6 +1923,16 @@ export default function Sidebar() {
       <SidebarFooter className="p-2">
         <SidebarMenu>
           <SidebarMenuItem>
+            <SidebarMenuButton
+              size="sm"
+              className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+              onClick={() => setFeedbackLogOpen(true)}
+            >
+              <ListIcon className="size-3.5" />
+              <span className="text-xs">RLHF log</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
             {isOnSettings ? (
               <SidebarMenuButton
                 size="sm"
@@ -1881,6 +1955,81 @@ export default function Sidebar() {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
+
+      <Dialog open={feedbackLogOpen} onOpenChange={setFeedbackLogOpen}>
+        <DialogPopup className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>RLHF feedback log</DialogTitle>
+            <DialogDescription>Recent feedback across all threads.</DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-2">
+            {feedbackEntries.length === 0 ? (
+              <p className="text-sm text-muted-foreground/70">No feedback yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {feedbackEntries.map((entry) => (
+                  <button
+                    key={`${entry.threadId}:${entry.messageId}`}
+                    type="button"
+                    onDoubleClick={() => {
+                      setFeedbackLogOpen(false);
+                      void navigate({
+                        to: "/$threadId",
+                        params: { threadId: entry.threadId },
+                        search: (previous) => ({
+                          ...stripDiffSearchParams(
+                            stripBranchSearchParams(stripMessageSearchParams(previous)),
+                          ),
+                          messageId: entry.messageId,
+                        }),
+                      });
+                    }}
+                    className="group flex w-full items-start gap-3 rounded-lg border border-border/70 bg-card/40 px-3 py-2 text-left transition-colors hover:border-border hover:bg-accent/25"
+                  >
+                    <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background/60">
+                      {entry.rating === null ? (
+                        <span className="text-[9px] font-semibold uppercase text-muted-foreground/80">
+                          Note
+                        </span>
+                      ) : entry.rating === "mixed" ? (
+                        <div className="flex items-center gap-1">
+                          <ThumbsUpIcon className="size-3 text-foreground" />
+                          <ThumbsDownIcon className="size-3 text-foreground" />
+                        </div>
+                      ) : entry.rating === "up" ? (
+                        <ThumbsUpIcon className="size-3.5 text-foreground" />
+                      ) : (
+                        <ThumbsDownIcon className="size-3.5 text-foreground" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-medium text-foreground/90">
+                          {entry.threadTitle}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground/70">
+                          {formatTimestamp(entry.updatedAt)}
+                        </p>
+                      </div>
+                      <p className="text-sm text-foreground/90">{entry.messagePreview}</p>
+                      {entry.note ? (
+                        <p className="text-xs text-muted-foreground/80">
+                          Note: {truncateTitle(normalizeFeedbackPreview(entry.note), 160)}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground/50">No note.</p>
+                      )}
+                      <p className="text-[11px] text-muted-foreground/50">
+                        Double-click to open message
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </DialogPanel>
+        </DialogPopup>
+      </Dialog>
     </>
   );
 }

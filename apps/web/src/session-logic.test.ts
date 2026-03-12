@@ -489,6 +489,7 @@ describe("deriveTimelineEntries", () => {
           id: MessageId.makeUnsafe("message-1"),
           role: "assistant",
           text: "hello",
+          turnId: null,
           createdAt: "2026-02-23T00:00:01.000Z",
           streaming: false,
         },

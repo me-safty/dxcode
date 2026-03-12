@@ -19,6 +19,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
   dispatchCommand: "orchestration.dispatchCommand",
   createBranchedThread: "orchestration.createBranchedThread",
+  setMessageFeedback: "orchestration.setMessageFeedback",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   replayEvents: "orchestration.replayEvents",
@@ -145,6 +146,17 @@ export type OrchestrationProject = typeof OrchestrationProject.Type;
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
+export const OrchestrationMessageFeedbackRating = Schema.Literals(["up", "down", "mixed"]);
+export type OrchestrationMessageFeedbackRating = typeof OrchestrationMessageFeedbackRating.Type;
+
+export const OrchestrationMessageFeedback = Schema.Struct({
+  rating: Schema.NullOr(OrchestrationMessageFeedbackRating),
+  note: Schema.optional(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationMessageFeedback = typeof OrchestrationMessageFeedback.Type;
+
 export const OrchestrationMessage = Schema.Struct({
   id: MessageId,
   role: OrchestrationMessageRole,
@@ -152,6 +164,7 @@ export const OrchestrationMessage = Schema.Struct({
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
+  feedback: Schema.optional(OrchestrationMessageFeedback),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -267,9 +280,7 @@ export const OrchestrationThread = Schema.Struct({
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
-  proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
-    Schema.withDecodingDefault(() => []),
-  ),
+  proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(Schema.withDecodingDefault(() => [])),
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
@@ -997,6 +1008,21 @@ export const OrchestrationCreateBranchedThreadResult = Schema.Struct({
 export type OrchestrationCreateBranchedThreadResult =
   typeof OrchestrationCreateBranchedThreadResult.Type;
 
+export const OrchestrationSetMessageFeedbackInput = Schema.Struct({
+  messageId: MessageId,
+  rating: Schema.NullOr(OrchestrationMessageFeedbackRating),
+  note: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type OrchestrationSetMessageFeedbackInput =
+  typeof OrchestrationSetMessageFeedbackInput.Type;
+
+export const OrchestrationSetMessageFeedbackResult = Schema.Struct({
+  messageId: MessageId,
+  feedback: Schema.NullOr(OrchestrationMessageFeedback),
+});
+export type OrchestrationSetMessageFeedbackResult =
+  typeof OrchestrationSetMessageFeedbackResult.Type;
+
 export const OrchestrationRpcSchemas = {
   getSnapshot: {
     input: OrchestrationGetSnapshotInput,
@@ -1009,6 +1035,10 @@ export const OrchestrationRpcSchemas = {
   createBranchedThread: {
     input: OrchestrationCreateBranchedThreadInput,
     output: OrchestrationCreateBranchedThreadResult,
+  },
+  setMessageFeedback: {
+    input: OrchestrationSetMessageFeedbackInput,
+    output: OrchestrationSetMessageFeedbackResult,
   },
   getTurnDiff: {
     input: OrchestrationGetTurnDiffInput,

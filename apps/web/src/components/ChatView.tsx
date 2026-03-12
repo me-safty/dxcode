@@ -56,6 +56,7 @@ import {
   parseDiffRouteSearch,
   stripBranchSearchParams,
   stripDiffSearchParams,
+  stripMessageSearchParams,
 } from "../diffRouteSearch";
 import {
   type ComposerSlashCommand,
@@ -147,6 +148,11 @@ import {
   ListTodoIcon,
   LockIcon,
   LockOpenIcon,
+  MessageSquareIcon,
+  PencilIcon,
+  RefreshCcwIcon,
+  ThumbsDownIcon,
+  ThumbsUpIcon,
   Undo2Icon,
   XIcon,
   CopyIcon,
@@ -1031,6 +1037,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     return ids;
   }, [routeRootThreadId, selectedBranchLineage.lineage]);
+  const clearScrollTarget = useCallback(() => {
+    if (!rawSearch.messageId) return;
+    void navigate({
+      to: "/$threadId",
+      params: { threadId },
+      search: (previous) => stripMessageSearchParams(previous),
+    });
+  }, [navigate, rawSearch.messageId, threadId]);
   useEffect(() => {
     if (selectedBranchLineage.lineage.length === 0) {
       return;
@@ -1645,8 +1659,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
       }
     }
-    const latestUserEntry = [...timelineEntries]
-      .reverse()
+    const latestUserEntry = timelineEntries
+      .toReversed()
       .find((entry) => entry.kind === "message" && entry.message.role === "user");
     if (latestUserEntry && latestUserEntry.kind === "message") {
       editableIds.add(latestUserEntry.message.id);
@@ -3088,6 +3102,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         role: "user",
         text: trimmed,
         ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+        turnId: null,
         createdAt: messageCreatedAt,
         streaming: false,
       },
@@ -3469,15 +3484,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
       beginSendPhase("sending-turn");
       setThreadError(threadIdForSend, null);
       setOptimisticUserMessages((existing) => [
-        ...existing,
-        {
-          id: messageIdForSend,
-          role: "user",
-          text: trimmed,
-          createdAt: messageCreatedAt,
-          streaming: false,
-        },
-      ]);
+      ...existing,
+      {
+        id: messageIdForSend,
+        role: "user",
+        text: trimmed,
+        turnId: null,
+        createdAt: messageCreatedAt,
+        streaming: false,
+      },
+    ]);
       shouldAutoScrollRef.current = true;
       forceStickToBottom();
 
@@ -4094,8 +4110,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       interactionMode,
       isCreatingBranch,
       isServerThread,
-      isWorking,
-      navigateToVisibleThread,
       navigateToNewBranchInRoot,
       providerOptionsForDispatch,
       routeRootThreadId,
@@ -4345,6 +4359,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
               markdownCwd={gitCwd ?? undefined}
               resolvedTheme={resolvedTheme}
               workspaceRoot={activeProject?.cwd ?? undefined}
+              scrollToMessageId={rawSearch.messageId ?? null}
+              onScrollToMessageHandled={clearScrollTarget}
             />
           </div>
 
@@ -4357,7 +4373,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
               data-chat-composer-form="true"
             >
               <div
-                className={`group rounded-[20px] border bg-card transition-colors duration-200 focus-within:border-ring/45 ${
+                className={`group rounded-[20px] border-[1.5px] bg-card transition-colors duration-200 focus-within:border-ring/45 ${
                   isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border"
                 }`}
                 onDragEnter={onComposerDragEnter}
@@ -6129,12 +6145,15 @@ interface MessagesTimelineProps {
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   workspaceRoot: string | undefined;
+  scrollToMessageId: MessageId | null;
+  onScrollToMessageHandled: () => void;
 }
 
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineProposedPlan = Extract<TimelineEntry, { kind: "proposed-plan" }>["proposedPlan"];
 type TimelineWorkEntry = Extract<TimelineEntry, { kind: "work" }>["entry"];
+type FeedbackRating = NonNullable<ChatMessage["feedback"]>["rating"];
 type TimelineRow =
   | {
       kind: "work";
@@ -6190,9 +6209,145 @@ const MessagesTimeline = memo(function MessagesTimeline({
   markdownCwd,
   resolvedTheme,
   workspaceRoot,
+  scrollToMessageId,
+  onScrollToMessageHandled,
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
+  const setMessageFeedback = useStore((state) => state.setMessageFeedback);
+  const [pendingFeedbackIds, setPendingFeedbackIds] = useState<Set<MessageId>>(() => new Set());
+  const [pendingFeedbackOverrides, setPendingFeedbackOverrides] = useState<
+    Record<MessageId, { rating: FeedbackRating | null; note: string | null }>
+  >({});
+  const [feedbackDialog, setFeedbackDialog] = useState<{
+    messageId: MessageId;
+    rating: FeedbackRating | null;
+  } | null>(null);
+  const [feedbackNoteDraft, setFeedbackNoteDraft] = useState("");
+
+  const resolveFeedbackFlags = useCallback((rating: FeedbackRating | null) => {
+    return {
+      up: rating === "up" || rating === "mixed",
+      down: rating === "down" || rating === "mixed",
+    };
+  }, []);
+  const resolveFeedbackRating = useCallback((flags: { up: boolean; down: boolean }) => {
+    if (flags.up && flags.down) return "mixed";
+    if (flags.up) return "up";
+    if (flags.down) return "down";
+    return null;
+  }, []);
+
+  const updatePendingFeedback = useCallback((messageId: MessageId, pending: boolean) => {
+    setPendingFeedbackIds((current) => {
+      const next = new Set(current);
+      if (pending) {
+        next.add(messageId);
+      } else {
+        next.delete(messageId);
+      }
+      return next;
+    });
+  }, []);
+
+  const updatePendingFeedbackOverride = useCallback(
+    (
+      messageId: MessageId,
+      override: { rating: FeedbackRating | null; note: string | null } | null,
+    ) => {
+      setPendingFeedbackOverrides((current) => {
+        const existing = current[messageId];
+        if (override) {
+          if (existing && existing.rating === override.rating && existing.note === override.note) {
+            return current;
+          }
+          return { ...current, [messageId]: override };
+        }
+        if (!existing) return current;
+        const next = { ...current };
+        delete next[messageId];
+        return next;
+      });
+    },
+    [],
+  );
+
+  const resolveFeedbackSnapshot = useCallback(
+    (message: TimelineMessage) => {
+      const override = pendingFeedbackOverrides[message.id];
+      if (override) {
+        return {
+          rating: override.rating,
+          note: override.note ?? "",
+        };
+      }
+      return {
+        rating: message.feedback?.rating ?? null,
+        note: message.feedback?.note ?? "",
+      };
+    },
+    [pendingFeedbackOverrides],
+  );
+
+  const submitMessageFeedback = useCallback(
+    async (messageId: MessageId, rating: FeedbackRating | null, note: string | null) => {
+      const api = readNativeApi();
+      if (!api) {
+        toastManager.add({
+          type: "error",
+          title: "No server connection",
+          description: "Unable to save feedback without a server connection.",
+        });
+        return;
+      }
+      updatePendingFeedbackOverride(messageId, { rating, note });
+      updatePendingFeedback(messageId, true);
+      try {
+        const result = await api.orchestration.setMessageFeedback({
+          messageId,
+          rating,
+          note,
+        });
+        setMessageFeedback(messageId, result.feedback);
+        updatePendingFeedbackOverride(messageId, null);
+      } catch (error) {
+        updatePendingFeedbackOverride(messageId, null);
+        toastManager.add({
+          type: "error",
+          title: "Could not save feedback",
+          description:
+            error instanceof Error ? error.message : "An error occurred while saving feedback.",
+        });
+      } finally {
+        updatePendingFeedback(messageId, false);
+      }
+    },
+    [setMessageFeedback, updatePendingFeedback, updatePendingFeedbackOverride],
+  );
+
+  const openFeedbackNote = useCallback((message: TimelineMessage) => {
+    if (message.role !== "assistant") return;
+    const snapshot = resolveFeedbackSnapshot(message);
+    setFeedbackNoteDraft(snapshot.note);
+    setFeedbackDialog({ messageId: message.id, rating: snapshot.rating });
+  }, [resolveFeedbackSnapshot]);
+
+  const toggleFeedbackRating = useCallback(
+    (message: TimelineMessage, rating: "up" | "down") => {
+      if (message.role !== "assistant") return;
+      const snapshot = resolveFeedbackSnapshot(message);
+      const currentRating = snapshot.rating;
+      const currentFlags = resolveFeedbackFlags(currentRating);
+      const nextFlags = {
+        ...currentFlags,
+        [rating]: !currentFlags[rating],
+      } as const;
+      const nextRating = resolveFeedbackRating(nextFlags);
+      const note = snapshot.note.trim();
+      void submitMessageFeedback(message.id, nextRating, note.length > 0 ? note : null);
+    },
+    [resolveFeedbackFlags, resolveFeedbackRating, resolveFeedbackSnapshot, submitMessageFeedback],
+  );
 
   useLayoutEffect(() => {
     const timelineRoot = timelineRootRef.current;
@@ -6340,6 +6495,28 @@ const MessagesTimeline = memo(function MessagesTimeline({
     overscan: 8,
   });
   useEffect(() => {
+    if (!scrollToMessageId) return;
+    const targetIndex = rows.findIndex(
+      (row) => row.kind === "message" && row.message.id === scrollToMessageId,
+    );
+    if (targetIndex < 0) return;
+    if (targetIndex < virtualizedRowCount) {
+      rowVirtualizer.scrollToIndex(targetIndex, { align: "center" });
+    } else {
+      const target = timelineRootRef.current?.querySelector<HTMLElement>(
+        `[data-message-id="${scrollToMessageId}"]`,
+      );
+      target?.scrollIntoView({ block: "center", behavior: "auto" });
+    }
+    onScrollToMessageHandled();
+  }, [
+    onScrollToMessageHandled,
+    rowVirtualizer,
+    rows,
+    scrollToMessageId,
+    virtualizedRowCount,
+  ]);
+  useEffect(() => {
     if (timelineWidthPx === null) return;
     rowVirtualizer.measure();
   }, [rowVirtualizer, timelineWidthPx]);
@@ -6373,6 +6550,8 @@ const MessagesTimeline = memo(function MessagesTimeline({
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const nonVirtualizedRows = rows.slice(virtualizedRowCount);
+  const feedbackDialogPending =
+    feedbackDialog !== null && pendingFeedbackIds.has(feedbackDialog.messageId);
   const [allDirectoriesExpandedByTurnId, setAllDirectoriesExpandedByTurnId] = useState<
     Record<string, boolean>
   >({});
@@ -6483,7 +6662,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
           const variantState = messageVariantStateByMessageId.get(row.message.id) ?? null;
           return (
             <div className="flex justify-end">
-              <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+              <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border-0 border-border bg-secondary px-4 py-3">
                 {userImages.length > 0 && (
                   <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                     {userImages.map(
@@ -6536,8 +6715,10 @@ const MessagesTimeline = memo(function MessagesTimeline({
                           variant="outline"
                           disabled={isCreatingBranch}
                           onClick={() => onEditUserMessage(row.message.id)}
+                          aria-label="Edit Message"
+                          title="Edit Message"
                         >
-                          Edit
+                          <PencilIcon className="size-3" />
                         </Button>
                       )}
                       {row.message.text && <MessageCopyButton text={row.message.text} />}
@@ -6576,6 +6757,15 @@ const MessagesTimeline = memo(function MessagesTimeline({
             retryableAssistantMessageIds.has(row.message.id) ||
             row.message.streaming ||
             row.message.turnId !== null;
+          const feedbackSnapshot = resolveFeedbackSnapshot(row.message);
+          const feedbackRating = feedbackSnapshot.rating;
+          const feedbackFlags = resolveFeedbackFlags(feedbackRating);
+          const feedbackNote = feedbackSnapshot.note;
+          const feedbackPending = pendingFeedbackIds.has(row.message.id);
+          const feedbackDisabled = row.message.streaming || feedbackPending;
+          const feedbackNoteLabel = feedbackNote
+            ? `Edit Feedback: ${truncateTitle(feedbackNote.replace(/\s+/g, " "), 48)}`
+            : "Add Feedback";
           const variantState = messageVariantStateByMessageId.get(row.message.id) ?? null;
           return (
             <>
@@ -6588,7 +6778,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
                   <span className="h-px flex-1 bg-border" />
                 </div>
               )}
-              <div className="min-w-0 px-1 py-0.5">
+              <div className="group min-w-0 px-1 py-0.5">
                 <ChatMarkdown
                   text={messageText}
                   cwd={markdownCwd}
@@ -6660,10 +6850,60 @@ const MessagesTimeline = memo(function MessagesTimeline({
                         variant="outline"
                         disabled={isWorking || isCreatingBranch}
                         onClick={() => onRetryAssistantMessage(row.message.id)}
+                        aria-label="Try again"
+                        title="Try again"
                       >
-                        Try again
+                        <RefreshCcwIcon className="size-3" />
                       </Button>
                     )}
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="outline"
+                        disabled={feedbackDisabled}
+                        aria-label="Thumbs up"
+                        aria-pressed={feedbackFlags.up}
+                        onClick={() => toggleFeedbackRating(row.message, "up")}
+                        className={cn(
+                          feedbackFlags.up &&
+                            "border-transparent bg-black text-white hover:!bg-black dark:bg-white dark:text-black dark:hover:!bg-white",
+                        )}
+                      >
+                        <ThumbsUpIcon className={cn("size-3.5", feedbackFlags.up && "opacity-100")} />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="outline"
+                        disabled={feedbackDisabled}
+                        aria-label="Thumbs down"
+                        aria-pressed={feedbackFlags.down}
+                        onClick={() => toggleFeedbackRating(row.message, "down")}
+                        className={cn(
+                          feedbackFlags.down &&
+                            "border-transparent bg-black text-white hover:!bg-black dark:bg-white dark:text-black dark:hover:!bg-white",
+                        )}
+                      >
+                        <ThumbsDownIcon className={cn("size-3.5", feedbackFlags.down && "opacity-100")} />
+                      </Button>
+                    </div>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant={feedbackNote ? "secondary" : "outline"}
+                      onClick={() => openFeedbackNote(row.message)}
+                      title={feedbackNote ? feedbackNote : "Add Feedback"}
+                      className={cn(
+                        "transition-opacity duration-150",
+                        feedbackNote
+                          ? "opacity-100 pointer-events-auto"
+                          : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto",
+                      )}
+                    >
+                      <MessageSquareIcon className="size-3.5" />
+                      {feedbackNoteLabel}
+                    </Button>
                     <MessageVariantControls
                       variantState={variantState}
                       onNavigate={(direction) => onNavigateMessageVariant(row.message.id, direction)}
@@ -6752,6 +6992,64 @@ const MessagesTimeline = memo(function MessagesTimeline({
       {nonVirtualizedRows.map((row) => (
         <div key={`non-virtual-row:${row.id}`}>{renderRowContent(row)}</div>
       ))}
+
+      <Dialog
+        open={feedbackDialog !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setFeedbackDialog(null);
+            setFeedbackNoteDraft("");
+          }
+        }}
+      >
+        <DialogPopup className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Feedback note</DialogTitle>
+            <DialogDescription>
+              Add optional context to help refine future responses.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-3">
+            <Textarea
+              value={feedbackNoteDraft}
+              onChange={(event) => setFeedbackNoteDraft(event.target.value)}
+              placeholder="What worked well or what should be improved?"
+              rows={4}
+              disabled={feedbackDialogPending}
+            />
+          </DialogPanel>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={feedbackDialogPending}
+              onClick={() => {
+                setFeedbackDialog(null);
+                setFeedbackNoteDraft("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={feedbackDialogPending || feedbackDialog === null}
+              onClick={() => {
+                if (!feedbackDialog) return;
+                const note = feedbackNoteDraft.trim();
+                void submitMessageFeedback(
+                  feedbackDialog.messageId,
+                  feedbackDialog.rating,
+                  note.length > 0 ? note : null,
+                );
+                setFeedbackDialog(null);
+                setFeedbackNoteDraft("");
+              }}
+            >
+              {feedbackDialogPending ? "Saving..." : "Save note"}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
     </div>
   );
 });

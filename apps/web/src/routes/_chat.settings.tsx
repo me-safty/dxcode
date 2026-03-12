@@ -3,19 +3,19 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { type ProviderKind } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
-
 import { MAX_CUSTOM_MODEL_LENGTH, useAppSettings } from "../appSettings";
+import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { ensureNativeApi } from "../nativeApi";
-import { preferredTerminalEditor } from "../terminal-links";
+import { useDevServerRestart } from "../devServerRestart";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Switch } from "../components/ui/switch";
+import { APP_VERSION } from "../branding";
 import { SidebarInset } from "~/components/ui/sidebar";
-import { useDevServerRestart } from "../devServerRestart";
 
 const THEME_OPTIONS = [
   {
@@ -50,7 +50,6 @@ const MODEL_PROVIDER_SETTINGS: Array<{
     example: "gpt-6.7-codex-ultra-preview",
   },
 ] as const;
-
 
 function getCustomModelsForProvider(
   settings: ReturnType<typeof useAppSettings>["settings"],
@@ -101,22 +100,29 @@ function SettingsRouteView() {
   const codexBinaryPath = settings.codexBinaryPath;
   const codexHomePath = settings.codexHomePath;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
+  const availableEditors = serverConfigQuery.data?.availableEditors;
   const restartLabel =
     devServerStatus === "restarting"
       ? "Restarting..."
       : devServerStatus === "starting"
         ? "Starting..."
         : devServerStatus === "connected"
-        ? "Connected"
-        : null;
+          ? "Connected"
+          : null;
 
   const openKeybindingsFile = useCallback(() => {
     if (!keybindingsConfigPath) return;
     setOpenKeybindingsError(null);
     setIsOpeningKeybindings(true);
     const api = ensureNativeApi();
+    const editor = resolveAndPersistPreferredEditor(availableEditors ?? []);
+    if (!editor) {
+      setOpenKeybindingsError("No available editors found.");
+      setIsOpeningKeybindings(false);
+      return;
+    }
     void api.shell
-      .openInEditor(keybindingsConfigPath, preferredTerminalEditor())
+      .openInEditor(keybindingsConfigPath, editor)
       .catch((error) => {
         setOpenKeybindingsError(
           error instanceof Error ? error.message : "Unable to open keybindings file.",
@@ -125,63 +131,7 @@ function SettingsRouteView() {
       .finally(() => {
         setIsOpeningKeybindings(false);
       });
-  }, [keybindingsConfigPath]);
-
-  const addCustomModel = useCallback((provider: ProviderKind) => {
-    const customModelInput = customModelInputByProvider[provider];
-    const customModels = getCustomModelsForProvider(settings, provider);
-    const normalized = normalizeModelSlug(customModelInput, provider);
-    if (!normalized) {
-      setCustomModelErrorByProvider((existing) => ({
-        ...existing,
-        [provider]: "Enter a model slug.",
-      }));
-      return;
-    }
-    if (getModelOptions(provider).some((option) => option.slug === normalized)) {
-      setCustomModelErrorByProvider((existing) => ({
-        ...existing,
-        [provider]: "That model is already built in.",
-      }));
-      return;
-    }
-    if (normalized.length > MAX_CUSTOM_MODEL_LENGTH) {
-      setCustomModelErrorByProvider((existing) => ({
-        ...existing,
-        [provider]: `Model slugs must be ${MAX_CUSTOM_MODEL_LENGTH} characters or less.`,
-      }));
-      return;
-    }
-    if (customModels.includes(normalized)) {
-      setCustomModelErrorByProvider((existing) => ({
-        ...existing,
-        [provider]: "That custom model is already saved.",
-      }));
-      return;
-    }
-
-    updateSettings(patchCustomModels(provider, [...customModels, normalized]));
-    setCustomModelInputByProvider((existing) => ({
-      ...existing,
-      [provider]: "",
-    }));
-    setCustomModelErrorByProvider((existing) => ({
-      ...existing,
-      [provider]: null,
-    }));
-  }, [customModelInputByProvider, settings, updateSettings]);
-
-  const removeCustomModel = useCallback(
-    (provider: ProviderKind, slug: string) => {
-      const customModels = getCustomModelsForProvider(settings, provider);
-      updateSettings(patchCustomModels(provider, customModels.filter((model) => model !== slug)));
-      setCustomModelErrorByProvider((existing) => ({
-        ...existing,
-        [provider]: null,
-      }));
-    },
-    [settings, updateSettings],
-  );
+  }, [availableEditors, keybindingsConfigPath]);
 
   const handleDevServerAction = useCallback(() => {
     if (devServerStatus === "connected") {
@@ -190,6 +140,70 @@ function SettingsRouteView() {
     }
     void start();
   }, [devServerStatus, restart, start]);
+
+  const addCustomModel = useCallback(
+    (provider: ProviderKind) => {
+      const customModelInput = customModelInputByProvider[provider];
+      const customModels = getCustomModelsForProvider(settings, provider);
+      const normalized = normalizeModelSlug(customModelInput, provider);
+      if (!normalized) {
+        setCustomModelErrorByProvider((existing) => ({
+          ...existing,
+          [provider]: "Enter a model slug.",
+        }));
+        return;
+      }
+      if (getModelOptions(provider).some((option) => option.slug === normalized)) {
+        setCustomModelErrorByProvider((existing) => ({
+          ...existing,
+          [provider]: "That model is already built in.",
+        }));
+        return;
+      }
+      if (normalized.length > MAX_CUSTOM_MODEL_LENGTH) {
+        setCustomModelErrorByProvider((existing) => ({
+          ...existing,
+          [provider]: `Model slugs must be ${MAX_CUSTOM_MODEL_LENGTH} characters or less.`,
+        }));
+        return;
+      }
+      if (customModels.includes(normalized)) {
+        setCustomModelErrorByProvider((existing) => ({
+          ...existing,
+          [provider]: "That custom model is already saved.",
+        }));
+        return;
+      }
+
+      updateSettings(patchCustomModels(provider, [...customModels, normalized]));
+      setCustomModelInputByProvider((existing) => ({
+        ...existing,
+        [provider]: "",
+      }));
+      setCustomModelErrorByProvider((existing) => ({
+        ...existing,
+        [provider]: null,
+      }));
+    },
+    [customModelInputByProvider, settings, updateSettings],
+  );
+
+  const removeCustomModel = useCallback(
+    (provider: ProviderKind, slug: string) => {
+      const customModels = getCustomModelsForProvider(settings, provider);
+      updateSettings(
+        patchCustomModels(
+          provider,
+          customModels.filter((model) => model !== slug),
+        ),
+      );
+      setCustomModelErrorByProvider((existing) => ({
+        ...existing,
+        [provider]: null,
+      }));
+    },
+    [settings, updateSettings],
+  );
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
@@ -281,7 +295,8 @@ function SettingsRouteView() {
 
               {serverVersion && (
                 <p className="mt-3 text-xs text-muted-foreground">
-                  Server version: <span className="font-medium text-foreground">{serverVersion}</span>
+                  Server version:{" "}
+                  <span className="font-medium text-foreground">{serverVersion}</span>
                 </p>
               )}
             </section>
@@ -366,14 +381,17 @@ function SettingsRouteView() {
                   </span>
                 </label>
 
-                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <p>
-                    Binary source:{" "}
-                    <span className="font-medium text-foreground">{codexBinaryPath || "PATH"}</span>
-                  </p>
+                <div className="flex flex-col gap-3 text-xs text-muted-foreground sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p>Binary source</p>
+                    <p className="mt-1 break-all font-mono text-[11px] text-foreground">
+                      {codexBinaryPath || "PATH"}
+                    </p>
+                  </div>
                   <Button
                     size="xs"
                     variant="outline"
+                    className="self-start"
                     onClick={() =>
                       updateSettings({
                         codexBinaryPath: defaults.codexBinaryPath,
@@ -476,10 +494,9 @@ function SettingsRouteView() {
                                 variant="outline"
                                 onClick={() =>
                                   updateSettings(
-                                    patchCustomModels(
-                                      provider,
-                                      [...getDefaultCustomModelsForProvider(defaults, provider)],
-                                    ),
+                                    patchCustomModels(provider, [
+                                      ...getDefaultCustomModelsForProvider(defaults, provider),
+                                    ]),
                                   )
                                 }
                               >
@@ -641,6 +658,24 @@ function SettingsRouteView() {
                   </Button>
                 </div>
               ) : null}
+            </section>
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-4">
+                <h2 className="text-sm font-medium text-foreground">About</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Application version and environment information.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Version</p>
+                  <p className="text-xs text-muted-foreground">
+                    Current version of the application.
+                  </p>
+                </div>
+                <code className="text-xs font-medium text-muted-foreground">{APP_VERSION}</code>
+              </div>
             </section>
           </div>
         </div>

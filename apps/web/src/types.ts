@@ -39,14 +39,23 @@ export interface ChatImageAttachment {
 
 export type ChatAttachment = ChatImageAttachment;
 
+export interface ChatMessageFeedback {
+  rating: "up" | "down" | "mixed" | null;
+  note?: string | undefined;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ChatMessage {
   id: MessageId;
   role: "user" | "assistant" | "system";
   text: string;
   attachments?: ChatAttachment[];
+  turnId: TurnId | null;
   createdAt: string;
   completedAt?: string | undefined;
   streaming: boolean;
+  feedback?: ChatMessageFeedback | undefined;
 }
 
 export interface ProposedPlan {
