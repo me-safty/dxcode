@@ -26,10 +26,26 @@ export const PROVIDER_OPTIONS: Array<{
   value: ProviderPickerKind;
   label: string;
   available: boolean;
+  docsUrl: string | null;
 }> = [
-  { value: "codex", label: "Codex", available: true },
-  { value: "claudeAgent", label: "Claude", available: true },
-  { value: "cursor", label: "Cursor", available: false },
+  {
+    value: "codex",
+    label: "Codex",
+    available: true,
+    docsUrl: "https://developers.openai.com/codex/cli/#cli-setup",
+  },
+  {
+    value: "claudeAgent",
+    label: "Claude",
+    available: true,
+    docsUrl: "https://code.claude.com/docs/en/quickstart#step-1-install-claude-code",
+  },
+  {
+    value: "cursor",
+    label: "Cursor",
+    available: false,
+    docsUrl: "https://cursor.com/docs/cli/installation#installation",
+  },
 ];
 
 export interface WorkLogEntry {
