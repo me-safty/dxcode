@@ -1002,6 +1002,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
   const availableEditors = serverConfigQuery.data?.availableEditors ?? EMPTY_AVAILABLE_EDITORS;
+  const terminalName = serverConfigQuery.data?.terminalName ?? "Terminal";
   const providerStatuses = serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES;
   const activeProvider = activeThread?.session?.provider ?? "codex";
   const activeProviderStatus = useMemo(
@@ -3236,6 +3237,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }
           keybindings={keybindings}
           availableEditors={availableEditors}
+          terminalName={terminalName}
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}

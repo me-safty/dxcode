@@ -831,6 +831,7 @@ describe("WebSocket Server", () => {
       issues: [],
       providers: defaultProviderStatuses,
       availableEditors: expect.any(Array),
+      terminalName: expect.any(String),
     });
     expectAvailableEditors((response.result as { availableEditors: unknown }).availableEditors);
   });
@@ -856,6 +857,7 @@ describe("WebSocket Server", () => {
       issues: [],
       providers: defaultProviderStatuses,
       availableEditors: expect.any(Array),
+      terminalName: expect.any(String),
     });
     expectAvailableEditors((response.result as { availableEditors: unknown }).availableEditors);
 
@@ -891,6 +893,7 @@ describe("WebSocket Server", () => {
       ],
       providers: defaultProviderStatuses,
       availableEditors: expect.any(Array),
+      terminalName: expect.any(String),
     });
     expectAvailableEditors((response.result as { availableEditors: unknown }).availableEditors);
     expect(fs.readFileSync(keybindingsPath, "utf8")).toBe("{ not-json");
@@ -925,6 +928,7 @@ describe("WebSocket Server", () => {
       issues: Array<{ kind: string; index?: number; message: string }>;
       providers: ReadonlyArray<ServerProviderStatus>;
       availableEditors: unknown;
+      terminalName: string;
     };
     expect(result.cwd).toBe("/my/workspace");
     expect(result.keybindingsConfigPath).toBe(keybindingsPath);
@@ -944,6 +948,7 @@ describe("WebSocket Server", () => {
     expect(result.keybindings.some((entry) => entry.command === "terminal.toggle")).toBe(true);
     expect(result.keybindings.some((entry) => entry.command === "terminal.new")).toBe(true);
     expect(result.providers).toEqual(defaultProviderStatuses);
+    expect(typeof result.terminalName).toBe("string");
     expectAvailableEditors(result.availableEditors);
   });
 
@@ -1038,6 +1043,7 @@ describe("WebSocket Server", () => {
       issues: [],
       providers: defaultProviderStatuses,
       availableEditors: expect.any(Array),
+      terminalName: expect.any(String),
     });
     expectAvailableEditors((response.result as { availableEditors: unknown }).availableEditors);
   });
@@ -1085,6 +1091,7 @@ describe("WebSocket Server", () => {
       issues: [],
       providers: defaultProviderStatuses,
       availableEditors: expect.any(Array),
+      terminalName: expect.any(String),
     });
     expectAvailableEditors(
       (configResponse.result as { availableEditors: unknown }).availableEditors,

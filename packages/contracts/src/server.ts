@@ -52,6 +52,7 @@ export const ServerConfig = Schema.Struct({
   issues: ServerConfigIssues,
   providers: ServerProviderStatuses,
   availableEditors: Schema.Array(EditorId),
+  terminalName: Schema.String,
 });
 export type ServerConfig = typeof ServerConfig.Type;
 

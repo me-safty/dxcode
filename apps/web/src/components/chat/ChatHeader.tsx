@@ -24,6 +24,7 @@ interface ChatHeaderProps {
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
+  terminalName: string;
   diffToggleShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
@@ -44,6 +45,7 @@ export const ChatHeader = memo(function ChatHeader({
   preferredScriptId,
   keybindings,
   availableEditors,
+  terminalName,
   diffToggleShortcutLabel,
   gitCwd,
   diffOpen,
@@ -91,6 +93,7 @@ export const ChatHeader = memo(function ChatHeader({
             keybindings={keybindings}
             availableEditors={availableEditors}
             openInCwd={openInCwd}
+            terminalName={terminalName}
           />
         )}
         {activeProjectName && <GitActionsControl gitCwd={gitCwd} activeThreadId={activeThreadId} />}

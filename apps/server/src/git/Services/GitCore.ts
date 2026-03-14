@@ -230,4 +230,4 @@ export interface GitCoreShape {
  */
 export class GitCore extends ServiceMap.Service<GitCore, GitCoreShape>()(
   "t3/git/Services/GitCore",
-) { }
+) {}

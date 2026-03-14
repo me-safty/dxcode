@@ -57,7 +57,7 @@ import { ProviderService } from "./provider/Services/ProviderService";
 import { ProviderHealth } from "./provider/Services/ProviderHealth";
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery";
 import { clamp } from "effect/Number";
-import { Open, resolveAvailableEditors } from "./open";
+import { Open, resolveAvailableEditors, resolveTerminalName } from "./open";
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore.ts";
 import { tryHandleProjectFaviconRequest } from "./projectFaviconRoute";
@@ -249,6 +249,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     autoBootstrapProjectFromCwd,
   } = serverConfig;
   const availableEditors = resolveAvailableEditors();
+  const terminalName = resolveTerminalName();
 
   const gitManager = yield* GitManager;
   const terminalManager = yield* TerminalManager;
@@ -875,6 +876,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           issues: keybindingsConfig.issues,
           providers: providerStatuses,
           availableEditors,
+          terminalName,
         };
 
       case WS_METHODS.serverUpsertKeybinding: {
