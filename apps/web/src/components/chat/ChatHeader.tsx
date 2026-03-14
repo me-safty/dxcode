@@ -11,7 +11,7 @@ import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
-import { SidebarTrigger } from "../ui/sidebar";
+import { SidebarTrigger, useSidebar } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 
 interface ChatHeaderProps {
@@ -55,10 +55,13 @@ export const ChatHeader = memo(function ChatHeader({
   onDeleteProjectScript,
   onToggleDiff,
 }: ChatHeaderProps) {
+  const { isMobile, open } = useSidebar();
+  const showSidebarTrigger = isMobile || !open;
+
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+        {showSidebarTrigger ? <SidebarTrigger className="size-7 shrink-0" /> : null}
         <h2
           className="min-w-0 shrink truncate text-sm font-medium text-foreground"
           title={activeThreadTitle}

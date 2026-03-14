@@ -19,6 +19,7 @@ import type { MenuItemConstructorOptions } from "electron";
 import * as Effect from "effect/Effect";
 import type {
   DesktopTheme,
+  DesktopWindowTitlebarState,
   DesktopUpdateActionResult,
   DesktopUpdateState,
 } from "@t3tools/contracts";
@@ -49,6 +50,8 @@ fixPath();
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
+const WINDOW_TITLEBAR_STATE_CHANNEL = "desktop:window-titlebar-state";
+const WINDOW_TITLEBAR_GET_STATE_CHANNEL = "desktop:window-titlebar-get-state";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
@@ -158,6 +161,20 @@ function getSafeTheme(rawTheme: unknown): DesktopTheme | null {
   }
 
   return null;
+}
+
+function getWindowTitlebarState(window: BrowserWindow | null): DesktopWindowTitlebarState {
+  return {
+    trafficLightsVisible: process.platform === "darwin" && window?.isFullScreen() !== true,
+  };
+}
+
+function emitWindowTitlebarState(targetWindow: BrowserWindow | null = mainWindow): void {
+  if (!targetWindow || targetWindow.isDestroyed()) return;
+  targetWindow.webContents.send(
+    WINDOW_TITLEBAR_STATE_CHANNEL,
+    getWindowTitlebarState(targetWindow),
+  );
 }
 
 function writeDesktopStreamChunk(
@@ -1106,6 +1123,9 @@ function registerIpcHandlers(): void {
     nativeTheme.themeSource = theme;
   });
 
+  ipcMain.removeHandler(WINDOW_TITLEBAR_GET_STATE_CHANNEL);
+  ipcMain.handle(WINDOW_TITLEBAR_GET_STATE_CHANNEL, async () => getWindowTitlebarState(mainWindow));
+
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
   ipcMain.handle(
     CONTEXT_MENU_CHANNEL,
@@ -1282,10 +1302,17 @@ function createWindow(): BrowserWindow {
   });
   window.webContents.on("did-finish-load", () => {
     window.setTitle(APP_DISPLAY_NAME);
+    emitWindowTitlebarState(window);
     emitUpdateState();
   });
   window.once("ready-to-show", () => {
     window.show();
+  });
+  window.on("enter-full-screen", () => {
+    emitWindowTitlebarState(window);
+  });
+  window.on("leave-full-screen", () => {
+    emitWindowTitlebarState(window);
   });
 
   if (isDevelopment) {

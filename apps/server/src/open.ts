@@ -311,7 +311,7 @@ function resolveDarwinTerminal():
   if (isCommandAvailable("ghostty")) return { command: "ghostty", rich: true };
   if (isCommandAvailable("kitty")) return { command: "kitty", rich: true };
 
-  for (const { bin, path } of DARWIN_APP_BUNDLE_TERMINALS) {
+  for (const { bin: _bin, path } of DARWIN_APP_BUNDLE_TERMINALS) {
     if (isExecutableFile(path, "darwin", [])) {
       return { command: path, rich: true };
     }

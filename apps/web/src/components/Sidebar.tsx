@@ -47,6 +47,7 @@ import { gitRemoveWorktreeMutationOptions, gitStatusQueryOptions } from "../lib/
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
+import { useDesktopWindowTitlebarState } from "../hooks/useDesktopWindowTitlebarState";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { toastManager } from "./ui/toast";
@@ -252,6 +253,7 @@ function SortableProjectItem({
 }
 
 export default function Sidebar() {
+  const { trafficLightsVisible } = useDesktopWindowTitlebarState();
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
   const markThreadUnread = useStore((store) => store.markThreadUnread);
@@ -1108,7 +1110,7 @@ export default function Sidebar() {
 
   const wordmark = (
     <div className="flex items-center gap-2">
-      <SidebarTrigger className="shrink-0 md:hidden" />
+      <SidebarTrigger className="shrink-0" />
       <Tooltip>
         <TooltipTrigger
           render={
@@ -1134,7 +1136,9 @@ export default function Sidebar() {
     <>
       {isElectron ? (
         <>
-          <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]">
+          <SidebarHeader
+            className={`drag-region h-[52px] flex-row items-center gap-2 px-4 py-0${trafficLightsVisible ? " pl-[90px]" : ""}`}
+          >
             {wordmark}
             {showDesktopUpdateButton && (
               <Tooltip>

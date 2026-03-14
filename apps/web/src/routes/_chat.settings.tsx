@@ -6,6 +6,7 @@ import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import { MAX_CUSTOM_MODEL_LENGTH, useAppSettings } from "../appSettings";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
+import { useDesktopWindowTitlebarState } from "../hooks/useDesktopWindowTitlebarState";
 import { useTheme } from "../hooks/useTheme";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { ensureNativeApi } from "../nativeApi";
@@ -20,7 +21,7 @@ import {
 } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { APP_VERSION } from "../branding";
-import { SidebarInset } from "~/components/ui/sidebar";
+import { SidebarInset, SidebarTrigger, useSidebar } from "~/components/ui/sidebar";
 
 const THEME_OPTIONS = [
   {
@@ -93,6 +94,9 @@ function patchCustomModels(provider: ProviderKind, models: string[]) {
 }
 
 function SettingsRouteView() {
+  const { isMobile, open } = useSidebar();
+  const showSidebarTrigger = isMobile || !open;
+  const { trafficLightsVisible } = useDesktopWindowTitlebarState();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { settings, defaults, updateSettings } = useAppSettings();
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
@@ -203,10 +207,19 @@ function SettingsRouteView() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         {isElectron && (
-          <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
+          <div
+            className={`drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5${showSidebarTrigger && trafficLightsVisible ? " pl-[90px]" : ""}`}
+          >
+            {showSidebarTrigger ? <SidebarTrigger className="mr-2 shrink-0" /> : null}
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
               Settings
             </span>
+          </div>
+        )}
+        {!isElectron && (
+          <div className="flex h-12 shrink-0 items-center border-b border-border px-4 sm:px-5">
+            {showSidebarTrigger ? <SidebarTrigger className="mr-2 shrink-0" /> : null}
+            <span className="text-sm font-medium text-foreground">Settings</span>
           </div>
         )}
 

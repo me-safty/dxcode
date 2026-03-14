@@ -85,6 +85,7 @@ import {
 import { basenameOfPath } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
+import { useDesktopWindowTitlebarState } from "../hooks/useDesktopWindowTitlebarState";
 import BranchToolbar from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
@@ -115,7 +116,7 @@ import {
   projectScriptIdFromCommand,
   setupProjectScript,
 } from "~/projectScripts";
-import { SidebarTrigger } from "./ui/sidebar";
+import { SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import { resolveAppModelSelection, useAppSettings } from "../appSettings";
@@ -190,6 +191,9 @@ interface ChatViewProps {
 }
 
 export default function ChatView({ threadId }: ChatViewProps) {
+  const { isMobile: isSidebarMobile, open: sidebarOpen } = useSidebar();
+  const showSidebarTrigger = isSidebarMobile || !sidebarOpen;
+  const { trafficLightsVisible } = useDesktopWindowTitlebarState();
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
   const markThreadVisited = useStore((store) => store.markThreadVisited);
@@ -3195,15 +3199,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-muted-foreground/40">
         {!isElectron && (
-          <header className="border-b border-border px-3 py-2 md:hidden">
+          <header className="border-b border-border px-3 py-2">
             <div className="flex items-center gap-2">
-              <SidebarTrigger className="size-7 shrink-0" />
+              {showSidebarTrigger ? <SidebarTrigger className="size-7 shrink-0" /> : null}
               <span className="text-sm font-medium text-foreground">Threads</span>
             </div>
           </header>
         )}
         {isElectron && (
-          <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
+          <div
+            className={cn(
+              "drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5",
+              showSidebarTrigger && trafficLightsVisible ? "pl-[90px]" : null,
+            )}
+          >
+            {showSidebarTrigger ? <SidebarTrigger className="mr-2 shrink-0" /> : null}
             <span className="text-xs text-muted-foreground/50">No active thread</span>
           </div>
         )}
@@ -3223,6 +3233,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         className={cn(
           "border-b border-border px-3 sm:px-5",
           isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
+          isElectron && showSidebarTrigger && trafficLightsVisible ? "pl-[90px]" : null,
         )}
       >
         <ChatHeader

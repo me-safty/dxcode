@@ -4,6 +4,8 @@ import type { DesktopBridge } from "@t3tools/contracts";
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
+const WINDOW_TITLEBAR_STATE_CHANNEL = "desktop:window-titlebar-state";
+const WINDOW_TITLEBAR_GET_STATE_CHANNEL = "desktop:window-titlebar-get-state";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
@@ -18,6 +20,18 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   pickFolder: () => ipcRenderer.invoke(PICK_FOLDER_CHANNEL),
   confirm: (message) => ipcRenderer.invoke(CONFIRM_CHANNEL, message),
   setTheme: (theme) => ipcRenderer.invoke(SET_THEME_CHANNEL, theme),
+  getWindowTitlebarState: () => ipcRenderer.invoke(WINDOW_TITLEBAR_GET_STATE_CHANNEL),
+  onWindowTitlebarState: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+      if (typeof state !== "object" || state === null) return;
+      listener(state as Parameters<typeof listener>[0]);
+    };
+
+    ipcRenderer.on(WINDOW_TITLEBAR_STATE_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(WINDOW_TITLEBAR_STATE_CHANNEL, wrappedListener);
+    };
+  },
   showContextMenu: (items, position) => ipcRenderer.invoke(CONTEXT_MENU_CHANNEL, items, position),
   openExternal: (url: string) => ipcRenderer.invoke(OPEN_EXTERNAL_CHANNEL, url),
   onMenuAction: (listener) => {
