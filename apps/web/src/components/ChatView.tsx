@@ -3408,7 +3408,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                     <span
                                       role="img"
                                       aria-label="Draft attachment may not persist"
-                                      className="absolute left-1 top-1 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600"
+                                      className="absolute left-1 top-1 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-warning"
                                     >
                                       <CircleAlertIcon className="size-3" />
                                     </span>
@@ -3597,7 +3597,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 className={cn(
                                   "shrink-0 whitespace-nowrap px-2 sm:px-3",
                                   planSidebarOpen
-                                    ? "text-blue-400 hover:text-blue-300"
+                                    ? "text-primary hover:text-primary/80"
                                     : "text-muted-foreground/70 hover:text-foreground/80",
                                 )}
                                 size="sm"
@@ -3658,7 +3658,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       ) : phase === "running" ? (
                         <button
                           type="button"
-                          className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
+                          className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white transition-all duration-150 hover:bg-destructive hover:scale-105 sm:h-8 sm:w-8"
                           onClick={() => void onInterrupt()}
                           aria-label="Stop generation"
                         >

@@ -26,17 +26,17 @@ const THEME_OPTIONS = [
   {
     value: "system",
     label: "System",
-    description: "Match your OS appearance setting.",
+    description: "Match your OS appearance setting with Catppuccin palettes.",
   },
   {
     value: "light",
     label: "Light",
-    description: "Always use the light theme.",
+    description: "Always use Catppuccin Latte.",
   },
   {
     value: "dark",
     label: "Dark",
-    description: "Always use the dark theme.",
+    description: "Always use Catppuccin Mocha.",
   },
 ] as const;
 

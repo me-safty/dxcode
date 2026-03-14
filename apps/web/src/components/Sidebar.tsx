@@ -127,7 +127,7 @@ function terminalStatusFromRunningIds(
   }
   return {
     label: "Terminal process running",
-    colorClass: "text-teal-600 dark:text-teal-300/90",
+    colorClass: "text-info",
     pulse: true,
   };
 }
@@ -138,7 +138,7 @@ function prStatusIndicator(pr: ThreadPr): PrStatusIndicator | null {
   if (pr.state === "open") {
     return {
       label: "PR open",
-      colorClass: "text-emerald-600 dark:text-emerald-300/90",
+      colorClass: "text-success",
       tooltip: `#${pr.number} PR open: ${pr.title}`,
       url: pr.url,
     };
@@ -146,7 +146,7 @@ function prStatusIndicator(pr: ThreadPr): PrStatusIndicator | null {
   if (pr.state === "closed") {
     return {
       label: "PR closed",
-      colorClass: "text-zinc-500 dark:text-zinc-400/80",
+      colorClass: "text-muted-foreground",
       tooltip: `#${pr.number} PR closed: ${pr.title}`,
       url: pr.url,
     };
@@ -154,7 +154,7 @@ function prStatusIndicator(pr: ThreadPr): PrStatusIndicator | null {
   if (pr.state === "merged") {
     return {
       label: "PR merged",
-      colorClass: "text-violet-600 dark:text-violet-300/90",
+      colorClass: "text-primary",
       tooltip: `#${pr.number} PR merged: ${pr.title}`,
       url: pr.url,
     };
@@ -1017,12 +1017,12 @@ export default function Sidebar() {
     : "hover:bg-accent hover:text-foreground";
   const desktopUpdateButtonClasses =
     desktopUpdateState?.status === "downloaded"
-      ? "text-emerald-500"
+      ? "text-success"
       : desktopUpdateState?.status === "downloading"
-        ? "text-sky-400"
+        ? "text-info"
         : shouldHighlightDesktopUpdateError(desktopUpdateState)
-          ? "text-rose-500 animate-pulse"
-          : "text-amber-500 animate-pulse";
+          ? "text-destructive animate-pulse"
+          : "text-warning animate-pulse";
   const newThreadShortcutLabel = useMemo(
     () =>
       shortcutLabelForCommand(keybindings, "chat.newLocal") ??
@@ -1232,7 +1232,7 @@ export default function Sidebar() {
                   ref={addProjectInputRef}
                   className={`min-w-0 flex-1 rounded-md border bg-secondary px-2 py-1 font-mono text-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none ${
                     addProjectError
-                      ? "border-red-500/70 focus:border-red-500"
+                      ? "border-destructive/70 focus:border-destructive"
                       : "border-border focus:border-ring"
                   }`}
                   placeholder="/path/to/project"
@@ -1260,7 +1260,7 @@ export default function Sidebar() {
                 </button>
               </div>
               {addProjectError && (
-                <p className="mt-1 px-0.5 text-[11px] leading-tight text-red-400">
+                <p className="text-destructive mt-1 px-0.5 text-[11px] leading-tight">
                   {addProjectError}
                 </p>
               )}
