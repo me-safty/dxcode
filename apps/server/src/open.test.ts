@@ -302,8 +302,12 @@ it.layer(NodeServices.layer)("resolveTerminalLaunch", (it) => {
   it.effect("returns a valid macOS terminal command", () =>
     Effect.gen(function* () {
       const launch = yield* resolveTerminalLaunch("/tmp/workspace", "darwin");
-      // Depending on the host: ghostty, kitty, or osascript (Terminal.app fallback)
-      assert.include(["ghostty", "kitty", "osascript"], launch.command);
+      // Depending on the host: ghostty, kitty (possibly full app bundle path), or osascript (Terminal.app fallback)
+      const isExpectedTerminal =
+        launch.command.endsWith("ghostty") ||
+        launch.command.endsWith("kitty") ||
+        launch.command === "osascript";
+      assert.isTrue(isExpectedTerminal, `Unexpected terminal command: ${launch.command}`);
     }),
   );
 

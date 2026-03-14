@@ -238,9 +238,9 @@ export const recordStartupHeartbeat = Effect.gen(function* () {
 const makeServerProgram = (input: CliInput) =>
   Effect.gen(function* () {
     const cliConfig = yield* CliConfig;
+    yield* cliConfig.fixPath;
     const { start, stopSignal } = yield* Server;
     const openDeps = yield* Open;
-    yield* cliConfig.fixPath;
 
     const config = yield* ServerConfig;
 

@@ -288,15 +288,35 @@ export function buildDarwinTerminalAppLaunch(shellCommand: string): EditorLaunch
 }
 
 /**
+ * Well-known macOS `.app` bundle binary paths for rich terminals.
+ * Used as a fallback when PATH-based lookup fails (common in packaged Electron builds
+ * where the login shell PATH may not be available).
+ */
+const DARWIN_APP_BUNDLE_TERMINALS: ReadonlyArray<{ bin: string; path: string }> = [
+  { bin: "ghostty", path: "/Applications/Ghostty.app/Contents/MacOS/ghostty" },
+  { bin: "kitty", path: "/Applications/kitty.app/Contents/MacOS/kitty" },
+];
+
+/**
  * macOS terminal preference order: ghostty → kitty → Terminal.app.
  * Returns the resolved terminal and whether it's a "rich" terminal (ghostty/kitty)
  * that supports `-e` and working-directory flags directly.
+ *
+ * First checks PATH, then falls back to well-known `.app` bundle locations
+ * for packaged builds where `fixPath` may not have resolved the full user PATH.
  */
 function resolveDarwinTerminal():
   | { command: string; rich: true }
   | { command: "open"; rich: false } {
   if (isCommandAvailable("ghostty")) return { command: "ghostty", rich: true };
   if (isCommandAvailable("kitty")) return { command: "kitty", rich: true };
+
+  for (const { bin, path } of DARWIN_APP_BUNDLE_TERMINALS) {
+    if (isExecutableFile(path, "darwin", [])) {
+      return { command: path, rich: true };
+    }
+  }
+
   return { command: "open", rich: false };
 }
 
@@ -310,8 +330,8 @@ function resolveDarwinTerminal():
 export function resolveTerminalName(platform: NodeJS.Platform = process.platform): string {
   if (platform === "darwin") {
     const terminal = resolveDarwinTerminal();
-    if (terminal.command === "ghostty") return "Ghostty";
-    if (terminal.command === "kitty") return "Kitty";
+    if (terminal.command.endsWith("ghostty")) return "Ghostty";
+    if (terminal.command.endsWith("kitty")) return "Kitty";
     return "Terminal";
   }
   if (platform === "win32") return "Command Prompt";
@@ -319,8 +339,8 @@ export function resolveTerminalName(platform: NodeJS.Platform = process.platform
 }
 
 function richTerminalCwdArgs(command: string, cwd: string): ReadonlyArray<string> {
-  if (command === "ghostty") return [`--working-directory=${cwd}`];
-  if (command === "kitty") return ["--directory", cwd];
+  if (command.endsWith("ghostty")) return [`--working-directory=${cwd}`];
+  if (command.endsWith("kitty")) return ["--directory", cwd];
   return [];
 }
 
