@@ -97,6 +97,7 @@ const makeIsolatedGitCore = (gitService: GitServiceShape) =>
     return {
       status: (input) => core.status(input),
       statusDetails: (cwd) => core.statusDetails(cwd),
+      recentCommitSubjects: (cwd, count?) => core.recentCommitSubjects(cwd, count),
       prepareCommitContext: (cwd, filePaths?) => core.prepareCommitContext(cwd, filePaths),
       commit: (cwd, subject, body) => core.commit(cwd, subject, body),
       pushCurrentBranch: (cwd, fallbackBranch) => core.pushCurrentBranch(cwd, fallbackBranch),

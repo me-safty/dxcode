@@ -658,12 +658,15 @@ export const makeGitManager = Effect.gen(function* () {
         };
       }
 
+      const recentCommitSubjects = yield* gitCore.recentCommitSubjects(input.cwd);
+
       const generated = yield* textGeneration
         .generateCommitMessage({
           cwd: input.cwd,
           branch: input.branch,
           stagedSummary: limitContext(context.stagedSummary, 8_000),
           stagedPatch: limitContext(context.stagedPatch, 50_000),
+          ...(recentCommitSubjects ? { recentCommitSubjects } : {}),
           ...(input.includeBranch ? { includeBranch: true } : {}),
         })
         .pipe(Effect.map((result) => sanitizeCommitMessage(result)));

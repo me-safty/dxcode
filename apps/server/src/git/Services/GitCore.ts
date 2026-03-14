@@ -105,6 +105,14 @@ export interface GitCoreShape {
   ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
 
   /**
+   * Return the subject lines of recent commits (up to `count`), one per line.
+   */
+  readonly recentCommitSubjects: (
+    cwd: string,
+    count?: number,
+  ) => Effect.Effect<string, GitCommandError>;
+
+  /**
    * Create a commit with provided subject/body.
    */
   readonly commit: (
@@ -222,4 +230,4 @@ export interface GitCoreShape {
  */
 export class GitCore extends ServiceMap.Service<GitCore, GitCoreShape>()(
   "t3/git/Services/GitCore",
-) {}
+) { }

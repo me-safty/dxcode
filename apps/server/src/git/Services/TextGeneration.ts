@@ -17,6 +17,8 @@ export interface CommitMessageGenerationInput {
   branch: string | null;
   stagedSummary: string;
   stagedPatch: string;
+  /** Recent commit subjects from the repo, used to match the project's commit style. */
+  recentCommitSubjects?: string;
   /** When true, the model also returns a semantic branch name for the change. */
   includeBranch?: boolean;
 }

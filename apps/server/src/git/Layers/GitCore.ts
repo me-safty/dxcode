@@ -1401,9 +1401,17 @@ const makeGitCore = Effect.gen(function* () {
       ),
     );
 
+  const recentCommitSubjects: GitCoreShape["recentCommitSubjects"] = (cwd, count = 20) =>
+    runGitStdout("GitCore.recentCommitSubjects", cwd, [
+      "log",
+      `--max-count=${count}`,
+      "--format=%s",
+    ]).pipe(Effect.catch(() => Effect.succeed("")));
+
   return {
     status,
     statusDetails,
+    recentCommitSubjects,
     prepareCommitContext,
     commit,
     pushCurrentBranch,

@@ -315,18 +315,31 @@ const makeCodexTextGeneration = Effect.gen(function* () {
   const generateCommitMessage: TextGenerationShape["generateCommitMessage"] = (input) => {
     const wantsBranch = input.includeBranch === true;
 
+    const recentCommitsSection =
+      input.recentCommitSubjects && input.recentCommitSubjects.trim().length > 0
+        ? [
+            "",
+            "Recent commits in this repo (match this style closely):",
+            limitSection(input.recentCommitSubjects, 2_000),
+            "",
+            "IMPORTANT: Your subject line MUST follow the same format, casing, and prefix conventions as the recent commits above.",
+          ]
+        : [];
+
     const prompt = [
       "You write concise git commit messages.",
       wantsBranch
         ? "Return a JSON object with keys: subject, body, branch."
         : "Return a JSON object with keys: subject, body.",
       "Rules:",
-      "- subject must be imperative, <= 72 chars, and no trailing period",
-      "- body can be empty string or short bullet points",
+      "- subject must be a single line, imperative, <= 72 chars, and no trailing period",
+      "- body must be an empty string (no multi-line commit messages)",
       ...(wantsBranch
         ? ["- branch must be a short semantic git branch fragment for this change"]
         : []),
       "- capture the primary user-visible or developer-visible change",
+      "- match the commit message style of the repository (see recent commits below if available)",
+      ...recentCommitsSection,
       "",
       `Branch: ${input.branch ?? "(detached)"}`,
       "",
