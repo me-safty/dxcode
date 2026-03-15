@@ -351,6 +351,56 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  it("forwards claude effort options through session start and turn send", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-claude-effort"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-claude-effort"),
+          role: "user",
+          text: "hello with effort",
+          attachments: [],
+        },
+        provider: "claudeCode",
+        model: "claude-sonnet-4-6",
+        modelOptions: {
+          claudeCode: {
+            effort: "max",
+          },
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+      provider: "claudeCode",
+      model: "claude-sonnet-4-6",
+      modelOptions: {
+        claudeCode: {
+          effort: "max",
+        },
+      },
+    });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      model: "claude-sonnet-4-6",
+      modelOptions: {
+        claudeCode: {
+          effort: "max",
+        },
+      },
+    });
+  });
+
   it("forwards plan interaction mode to the provider turn request", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -490,6 +540,73 @@ describe("ProviderCommandReactor", () => {
     expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
       provider: "claudeCode",
       runtimeMode: "full-access",
+    });
+  });
+
+  it("restarts claude sessions when claude effort changes", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-claude-effort-1"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-claude-effort-1"),
+          role: "user",
+          text: "first claude turn",
+          attachments: [],
+        },
+        provider: "claudeCode",
+        model: "claude-sonnet-4-6",
+        modelOptions: {
+          claudeCode: {
+            effort: "medium",
+          },
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-claude-effort-2"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-claude-effort-2"),
+          role: "user",
+          text: "second claude turn",
+          attachments: [],
+        },
+        provider: "claudeCode",
+        model: "claude-sonnet-4-6",
+        modelOptions: {
+          claudeCode: {
+            effort: "max",
+          },
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 2);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      provider: "claudeCode",
+      modelOptions: {
+        claudeCode: {
+          effort: "max",
+        },
+      },
     });
   });
 

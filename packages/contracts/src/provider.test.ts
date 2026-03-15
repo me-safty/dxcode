@@ -42,6 +42,7 @@ describe("ProviderSessionStartInput", () => {
       modelOptions: {
         claudeCode: {
           thinking: true,
+          effort: "max",
         },
       },
       runtimeMode: "full-access",
@@ -55,6 +56,7 @@ describe("ProviderSessionStartInput", () => {
     });
 
     expect(parsed.modelOptions?.claudeCode?.thinking).toBe(true);
+    expect(parsed.modelOptions?.claudeCode?.effort).toBe("max");
     expect(parsed.providerOptions?.claudeCode?.binaryPath).toBe("/usr/local/bin/claude");
     expect(parsed.providerOptions?.claudeCode?.permissionMode).toBe("plan");
     expect(parsed.providerOptions?.claudeCode?.maxThinkingTokens).toBe(4000);
@@ -86,5 +88,19 @@ describe("ProviderSendTurnInput", () => {
     expect(parsed.model).toBe("gpt-5.3-codex");
     expect(parsed.modelOptions?.codex?.reasoningEffort).toBe("xhigh");
     expect(parsed.modelOptions?.codex?.fastMode).toBe(true);
+  });
+
+  it("accepts claude provider effort options including ultrathink", () => {
+    const parsed = decodeProviderSendTurnInput({
+      threadId: "thread-1",
+      model: "claude-sonnet-4-6",
+      modelOptions: {
+        claudeCode: {
+          effort: "ultrathink",
+        },
+      },
+    });
+
+    expect(parsed.modelOptions?.claudeCode?.effort).toBe("ultrathink");
   });
 });

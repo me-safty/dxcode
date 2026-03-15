@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_MODEL_BY_PROVIDER, MODEL_OPTIONS_BY_PROVIDER } from "@t3tools/contracts";
 
 import {
+  applyClaudePromptEffortPrefix,
+  getEffectiveClaudeCodeEffort,
   getDefaultModel,
   getDefaultReasoningEffort,
   getModelOptions,
   getReasoningEffortOptions,
   normalizeModelSlug,
+  resolveReasoningEffortForProvider,
   resolveModelSlug,
 } from "./model";
 
@@ -64,11 +67,60 @@ describe("getReasoningEffortOptions", () => {
   it("returns codex reasoning options for codex", () => {
     expect(getReasoningEffortOptions("codex")).toEqual(["xhigh", "high", "medium", "low"]);
   });
+
+  it("returns claude effort options for claudeCode", () => {
+    expect(getReasoningEffortOptions("claudeCode")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "max",
+      "ultrathink",
+    ]);
+  });
 });
 
 describe("getDefaultReasoningEffort", () => {
   it("returns provider-scoped defaults", () => {
     expect(getDefaultReasoningEffort("codex")).toBe("high");
-    expect(getDefaultReasoningEffort("claudeCode")).toBeNull();
+    expect(getDefaultReasoningEffort("claudeCode")).toBe("high");
+  });
+});
+
+describe("resolveReasoningEffortForProvider", () => {
+  it("accepts provider-scoped effort values", () => {
+    expect(resolveReasoningEffortForProvider("codex", "xhigh")).toBe("xhigh");
+    expect(resolveReasoningEffortForProvider("claudeCode", "ultrathink")).toBe("ultrathink");
+  });
+
+  it("rejects effort values from the wrong provider", () => {
+    expect(resolveReasoningEffortForProvider("codex", "max")).toBeNull();
+    expect(resolveReasoningEffortForProvider("claudeCode", "xhigh")).toBeNull();
+  });
+});
+
+describe("applyClaudePromptEffortPrefix", () => {
+  it("prefixes ultrathink prompts exactly once", () => {
+    expect(applyClaudePromptEffortPrefix("Investigate this", "ultrathink")).toBe(
+      "Ultrathink:\nInvestigate this",
+    );
+    expect(applyClaudePromptEffortPrefix("Ultrathink:\nInvestigate this", "ultrathink")).toBe(
+      "Ultrathink:\nInvestigate this",
+    );
+  });
+
+  it("leaves non-ultrathink prompts unchanged", () => {
+    expect(applyClaudePromptEffortPrefix("Investigate this", "high")).toBe("Investigate this");
+  });
+});
+
+describe("getEffectiveClaudeCodeEffort", () => {
+  it("maps ultrathink to max for Claude runtime configuration", () => {
+    expect(getEffectiveClaudeCodeEffort("ultrathink")).toBe("max");
+    expect(getEffectiveClaudeCodeEffort("high")).toBe("high");
+  });
+
+  it("returns null when no claude effort is selected", () => {
+    expect(getEffectiveClaudeCodeEffort(null)).toBeNull();
+    expect(getEffectiveClaudeCodeEffort(undefined)).toBeNull();
   });
 });

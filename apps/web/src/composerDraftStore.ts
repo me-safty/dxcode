@@ -1,11 +1,12 @@
 import {
+  CLAUDE_CODE_EFFORT_OPTIONS,
   DEFAULT_REASONING_EFFORT_BY_PROVIDER,
   ProjectId,
   REASONING_EFFORT_OPTIONS_BY_PROVIDER,
   ThreadId,
-  type CodexReasoningEffort,
   type ProviderKind,
   type ProviderInteractionMode,
+  type ProviderReasoningEffort,
   type RuntimeMode,
 } from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
@@ -78,7 +79,7 @@ interface PersistedComposerThreadDraftState {
   model?: string | null;
   runtimeMode?: RuntimeMode | null;
   interactionMode?: ProviderInteractionMode | null;
-  effort?: CodexReasoningEffort | null;
+  effort?: ProviderReasoningEffort | null;
   codexFastMode?: boolean | null;
   serviceTier?: string | null;
 }
@@ -108,7 +109,7 @@ interface ComposerThreadDraftState {
   model: string | null;
   runtimeMode: RuntimeMode | null;
   interactionMode: ProviderInteractionMode | null;
-  effort: CodexReasoningEffort | null;
+  effort: ProviderReasoningEffort | null;
   codexFastMode: boolean;
 }
 
@@ -168,7 +169,7 @@ interface ComposerDraftStoreState {
     threadId: ThreadId,
     interactionMode: ProviderInteractionMode | null | undefined,
   ) => void;
-  setEffort: (threadId: ThreadId, effort: CodexReasoningEffort | null | undefined) => void;
+  setEffort: (threadId: ThreadId, effort: ProviderReasoningEffort | null | undefined) => void;
   setCodexFastMode: (threadId: ThreadId, enabled: boolean | null | undefined) => void;
   addImage: (threadId: ThreadId, image: ComposerImageAttachment) => void;
   addImages: (threadId: ThreadId, images: ComposerImageAttachment[]) => void;
@@ -208,9 +209,14 @@ const EMPTY_THREAD_DRAFT = Object.freeze({
   codexFastMode: false,
 }) as ComposerThreadDraftState;
 
-const REASONING_EFFORT_VALUES = new Set<CodexReasoningEffort>(
-  REASONING_EFFORT_OPTIONS_BY_PROVIDER.codex,
-);
+const REASONING_EFFORT_VALUES = new Set<ProviderReasoningEffort>([
+  ...REASONING_EFFORT_OPTIONS_BY_PROVIDER.codex,
+  ...CLAUDE_CODE_EFFORT_OPTIONS,
+]);
+const DEFAULT_REASONING_EFFORT_VALUES = new Set<ProviderReasoningEffort>([
+  DEFAULT_REASONING_EFFORT_BY_PROVIDER.codex,
+  DEFAULT_REASONING_EFFORT_BY_PROVIDER.claudeCode,
+]);
 
 function createEmptyThreadDraft(): ComposerThreadDraftState {
   return {
@@ -439,8 +445,8 @@ export function normalizePersistedComposerDraftState(
     const effortCandidate =
       typeof draftCandidate.effort === "string" ? draftCandidate.effort : null;
     const effort =
-      effortCandidate && REASONING_EFFORT_VALUES.has(effortCandidate as CodexReasoningEffort)
-        ? (effortCandidate as CodexReasoningEffort)
+      effortCandidate && REASONING_EFFORT_VALUES.has(effortCandidate as ProviderReasoningEffort)
+        ? (effortCandidate as ProviderReasoningEffort)
         : null;
     const codexFastMode =
       draftCandidate.codexFastMode === true ||
@@ -977,7 +983,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         const nextEffort =
           effort &&
           REASONING_EFFORT_VALUES.has(effort) &&
-          effort !== DEFAULT_REASONING_EFFORT_BY_PROVIDER.codex
+          !DEFAULT_REASONING_EFFORT_VALUES.has(effort)
             ? effort
             : null;
         set((state) => {

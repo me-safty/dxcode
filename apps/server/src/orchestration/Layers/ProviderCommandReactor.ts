@@ -74,6 +74,11 @@ const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const WORKTREE_BRANCH_PREFIX = "t3code";
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
 
+const sameModelOptions = (
+  left: ProviderModelOptions | undefined,
+  right: ProviderModelOptions | undefined,
+): boolean => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+
 function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
   const error = Cause.squash(cause);
   if (Schema.is(ProviderAdapterRequestError)(error)) {
@@ -136,6 +141,7 @@ const make = Effect.gen(function* () {
     );
 
   const threadProviderOptions = new Map<string, ProviderStartOptions>();
+  const threadModelOptions = new Map<string, ProviderModelOptions>();
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -269,13 +275,23 @@ const make = Effect.gen(function* () {
           : (yield* providerService.getCapabilities(currentProvider)).sessionModelSwitch;
       const modelChanged = options?.model !== undefined && options.model !== activeSession?.model;
       const shouldRestartForModelChange = modelChanged && sessionModelSwitch === "restart-session";
+      const previousModelOptions = threadModelOptions.get(threadId);
+      const shouldRestartForModelOptionsChange =
+        currentProvider === "claudeCode" &&
+        options?.modelOptions !== undefined &&
+        !sameModelOptions(previousModelOptions, options.modelOptions);
 
-      if (!runtimeModeChanged && !providerChanged && !shouldRestartForModelChange) {
+      if (
+        !runtimeModeChanged &&
+        !providerChanged &&
+        !shouldRestartForModelChange &&
+        !shouldRestartForModelOptionsChange
+      ) {
         return existingSessionThreadId;
       }
 
       const resumeCursor =
-        providerChanged || shouldRestartForModelChange
+        providerChanged || shouldRestartForModelChange || shouldRestartForModelOptionsChange
           ? undefined
           : (activeSession?.resumeCursor ?? undefined);
       yield* Effect.logInfo("provider command reactor restarting provider session", {
@@ -289,6 +305,7 @@ const make = Effect.gen(function* () {
         providerChanged,
         modelChanged,
         shouldRestartForModelChange,
+        shouldRestartForModelOptionsChange,
         hasResumeCursor: resumeCursor !== undefined,
       });
       const restartedSession = yield* startProviderSession({
@@ -328,15 +345,18 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
-    if (input.providerOptions !== undefined) {
-      threadProviderOptions.set(input.threadId, input.providerOptions);
-    }
     yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.provider !== undefined ? { provider: input.provider } : {}),
       ...(input.model !== undefined ? { model: input.model } : {}),
       ...(input.modelOptions !== undefined ? { modelOptions: input.modelOptions } : {}),
       ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
     });
+    if (input.providerOptions !== undefined) {
+      threadProviderOptions.set(input.threadId, input.providerOptions);
+    }
+    if (input.modelOptions !== undefined) {
+      threadModelOptions.set(input.threadId, input.modelOptions);
+    }
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
     const normalizedAttachments = input.attachments ?? [];
     const activeSession = yield* providerService
@@ -626,13 +646,13 @@ const make = Effect.gen(function* () {
             return;
           }
           const cachedProviderOptions = threadProviderOptions.get(event.payload.threadId);
-          yield* ensureSessionForThread(
-            event.payload.threadId,
-            event.occurredAt,
-            cachedProviderOptions !== undefined
+          const cachedModelOptions = threadModelOptions.get(event.payload.threadId);
+          yield* ensureSessionForThread(event.payload.threadId, event.occurredAt, {
+            ...(cachedProviderOptions !== undefined
               ? { providerOptions: cachedProviderOptions }
-              : undefined,
-          );
+              : {}),
+            ...(cachedModelOptions !== undefined ? { modelOptions: cachedModelOptions } : {}),
+          });
           return;
         }
         case "thread.turn-start-requested":
