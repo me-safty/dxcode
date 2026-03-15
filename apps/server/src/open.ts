@@ -246,13 +246,13 @@ export function buildPosixTmuxBootstrapCommand(cwd: string, sessionName: string)
   return [
     `if tmux has-session -t ${quotedSessionName} 2>/dev/null; then`,
     `if [ "${paneCountCommand}" = "1" ]; then`,
-    `tmux split-window -h -t ${quotedSessionName} -c ${quotedCwd} -p 40;`,
+    `tmux split-window -h -t ${quotedSessionName} -c ${quotedCwd} -p 30;`,
     `tmux select-pane -L -t ${quotedSessionName};`,
     "fi;",
     `exec tmux attach-session -t ${quotedSessionName};`,
     "fi;",
     `tmux new-session -d -s ${quotedSessionName} -c ${quotedCwd};`,
-    `tmux split-window -h -t ${quotedSessionName} -c ${quotedCwd} -p 40;`,
+    `tmux split-window -h -t ${quotedSessionName} -c ${quotedCwd} -p 30;`,
     `tmux select-pane -L -t ${quotedSessionName};`,
     `tmux new-window -t ${quotedSessionName} -c ${quotedCwd};`,
     `tmux select-window -l -t ${quotedSessionName};`,
@@ -265,9 +265,9 @@ export function buildWindowsTmuxBootstrapCommand(cwd: string, sessionName: strin
 
   return [
     `tmux has-session -t ${sessionName} 2>nul`,
-    `&& (for /f "usebackq delims=" %p in (\`tmux display-message -p -t ${sessionName} "#{window_panes}" 2^>nul\`) do @if "%p"=="1" tmux split-window -h -t ${sessionName} -c ${quotedCwd} -p 40 && tmux select-pane -L -t ${sessionName}) && tmux attach-session -t ${sessionName}`,
+    `&& (for /f "usebackq delims=" %p in (\`tmux display-message -p -t ${sessionName} "#{window_panes}" 2^>nul\`) do @if "%p"=="1" tmux split-window -h -t ${sessionName} -c ${quotedCwd} -p 30 && tmux select-pane -L -t ${sessionName}) && tmux attach-session -t ${sessionName}`,
     `|| (tmux new-session -d -s ${sessionName} -c ${quotedCwd}`,
-    `&& tmux split-window -h -t ${sessionName} -c ${quotedCwd} -p 40`,
+    `&& tmux split-window -h -t ${sessionName} -c ${quotedCwd} -p 30`,
     `&& tmux select-pane -L -t ${sessionName}`,
     `&& tmux new-window -t ${sessionName} -c ${quotedCwd}`,
     `&& tmux select-window -l -t ${sessionName}`,

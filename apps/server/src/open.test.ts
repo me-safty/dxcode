@@ -218,7 +218,7 @@ it.layer(NodeServices.layer)("isCommandAvailable", (it) => {
   );
 });
 
-it("buildPosixTmuxBootstrapCommand creates a 60/40 split for new sessions", () => {
+it("buildPosixTmuxBootstrapCommand creates a 70/30 split for new sessions", () => {
   const command = buildPosixTmuxBootstrapCommand("/tmp/workspace's", "t3-workspace");
   assert.include(command, "tmux has-session -t 't3-workspace' 2>/dev/null");
   assert.include(
@@ -232,7 +232,7 @@ it("buildPosixTmuxBootstrapCommand creates a 60/40 split for new sessions", () =
   assert.include(command, "tmux new-session -d -s 't3-workspace' -c '/tmp/workspace'\"'\"'s'");
   assert.include(
     command,
-    "tmux split-window -h -t 't3-workspace' -c '/tmp/workspace'\"'\"'s' -p 40",
+    "tmux split-window -h -t 't3-workspace' -c '/tmp/workspace'\"'\"'s' -p 30",
   );
   assert.include(command, "tmux select-pane -L -t 't3-workspace'");
   assert.include(command, "tmux new-window -t 't3-workspace' -c '/tmp/workspace'\"'\"'s'");
@@ -240,12 +240,12 @@ it("buildPosixTmuxBootstrapCommand creates a 60/40 split for new sessions", () =
   assert.include(command, "exec tmux attach-session -t 't3-workspace'");
 });
 
-it("buildWindowsTmuxBootstrapCommand creates a 60/40 split for new sessions", () => {
+it("buildWindowsTmuxBootstrapCommand creates a 70/30 split for new sessions", () => {
   const command = buildWindowsTmuxBootstrapCommand("C:\\workspace", "t3-workspace");
   assert.include(command, "tmux has-session -t t3-workspace 2>nul");
   assert.include(command, 'tmux display-message -p -t t3-workspace "#{window_panes}"');
   assert.include(command, 'tmux new-session -d -s t3-workspace -c "C:\\workspace"');
-  assert.include(command, 'tmux split-window -h -t t3-workspace -c "C:\\workspace" -p 40');
+  assert.include(command, 'tmux split-window -h -t t3-workspace -c "C:\\workspace" -p 30');
   assert.include(command, "tmux select-pane -L -t t3-workspace");
   assert.include(command, 'tmux new-window -t t3-workspace -c "C:\\workspace"');
   assert.include(command, "tmux select-window -l -t t3-workspace");
