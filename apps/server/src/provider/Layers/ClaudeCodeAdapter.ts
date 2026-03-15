@@ -207,6 +207,14 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
 function classifyToolItemType(toolName: string): CanonicalItemType {
   const normalized = toolName.toLowerCase();
   if (
+    normalized === "task" ||
+    normalized === "agent" ||
+    normalized.includes("subagent") ||
+    normalized.includes("sub-agent")
+  ) {
+    return "collab_agent_tool_call";
+  }
+  if (
     normalized.includes("bash") ||
     normalized.includes("command") ||
     normalized.includes("shell") ||
@@ -263,6 +271,8 @@ function titleForTool(itemType: CanonicalItemType): string {
       return "File change";
     case "mcp_tool_call":
       return "MCP tool call";
+    case "collab_agent_tool_call":
+      return "Subagent task";
     case "dynamic_tool_call":
       return "Tool call";
     default:
@@ -1107,6 +1117,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               payload: {
                 taskId: RuntimeTaskId.makeUnsafe(message.task_id),
                 description: message.description,
+                ...(message.summary ? { summary: message.summary } : {}),
                 ...(message.usage ? { usage: message.usage } : {}),
                 ...(message.last_tool_name ? { lastToolName: message.last_tool_name } : {}),
               },
