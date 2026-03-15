@@ -2,14 +2,16 @@ import {
   ArchiveIcon,
   ArrowUpDownIcon,
   ChevronRightIcon,
+  DownloadIcon,
   FolderIcon,
   GitPullRequestIcon,
   PlusIcon,
-  RocketIcon,
+  RotateCwIcon,
   SettingsIcon,
   SquarePenIcon,
   TerminalIcon,
   TriangleAlertIcon,
+  XIcon,
 } from "lucide-react";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { autoAnimate } from "@formkit/auto-animate";
@@ -66,7 +68,6 @@ import {
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
   shouldShowArm64IntelBuildWarning,
-  shouldHighlightDesktopUpdateError,
   shouldShowDesktopUpdateButton,
   shouldToastDesktopUpdateActionResult,
 } from "./desktopUpdate.logic";
@@ -350,6 +351,7 @@ export default function Sidebar() {
   const dragInProgressRef = useRef(false);
   const suppressProjectClickAfterDragRef = useRef(false);
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
   const selectedThreadIds = useThreadSelectionStore((s) => s.selectedThreadIds);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
   const rangeSelectTo = useThreadSelectionStore((s) => s.rangeSelectTo);
@@ -1425,7 +1427,7 @@ export default function Sidebar() {
     };
   }, []);
 
-  const showDesktopUpdateButton = isElectron && shouldShowDesktopUpdateButton(desktopUpdateState);
+  const showDesktopUpdateButton = isElectron && shouldShowDesktopUpdateButton(desktopUpdateState) && !updateDismissed;
 
   const desktopUpdateTooltip = desktopUpdateState
     ? getDesktopUpdateButtonTooltip(desktopUpdateState)
@@ -1452,9 +1454,12 @@ export default function Sidebar() {
         : shouldHighlightDesktopUpdateError(desktopUpdateState)
           ? "text-rose-500 animate-pulse"
           : "text-amber-500 animate-pulse";
-  const newThreadShortcutLabel =
-    shortcutLabelForCommand(keybindings, "chat.newLocal") ??
-    shortcutLabelForCommand(keybindings, "chat.new");
+  const newThreadShortcutLabel = useMemo(
+    () =>
+      shortcutLabelForCommand(keybindings, "chat.newLocal") ??
+      shortcutLabelForCommand(keybindings, "chat.new"),
+    [keybindings],
+  );
 
   const handleDesktopUpdateButtonClick = useCallback(() => {
     const bridge = window.desktopBridge;
@@ -1562,25 +1567,6 @@ export default function Sidebar() {
         <>
           <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]">
             {wordmark}
-            {showDesktopUpdateButton && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label={desktopUpdateTooltip}
-                      aria-disabled={desktopUpdateButtonDisabled || undefined}
-                      disabled={desktopUpdateButtonDisabled}
-                      className={`inline-flex size-7 ml-auto mt-1.5 items-center justify-center rounded-md text-muted-foreground transition-colors ${desktopUpdateButtonInteractivityClasses} ${desktopUpdateButtonClasses}`}
-                      onClick={handleDesktopUpdateButtonClick}
-                    >
-                      <RocketIcon className="size-3.5" />
-                    </button>
-                  }
-                />
-                <TooltipPopup side="bottom">{desktopUpdateTooltip}</TooltipPopup>
-              </Tooltip>
-            )}
           </SidebarHeader>
         </>
       ) : (
@@ -1767,6 +1753,71 @@ export default function Sidebar() {
 
           <SidebarSeparator />
           <SidebarFooter className="p-2">
+            {showDesktopUpdateButton && (
+              <div className="px-1 pb-1">
+                <div
+                  className={`group/update relative flex w-full items-center rounded-full bg-sky-400/15 text-xs font-medium text-sky-400${
+                    desktopUpdateButtonDisabled ? " cursor-not-allowed opacity-60" : ""
+                  }`}
+                >
+                  <div className="pointer-events-none absolute inset-0 rounded-full transition-colors group-has-[button.update-main:hover]/update:bg-sky-400/25" />
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label={desktopUpdateTooltip}
+                          aria-disabled={desktopUpdateButtonDisabled || undefined}
+                          disabled={desktopUpdateButtonDisabled}
+                          className="update-main relative flex flex-1 items-center gap-2 px-3 py-1.5"
+                          onClick={handleDesktopUpdateButtonClick}
+                        >
+                          {desktopUpdateButtonAction === "install" ? (
+                            <>
+                              <RotateCwIcon className="size-3.5" />
+                              <span>Restart to update</span>
+                            </>
+                          ) : desktopUpdateState?.status === "downloading" ? (
+                            <>
+                              <DownloadIcon className="size-3.5" />
+                              <span>
+                                Downloading
+                                {typeof desktopUpdateState.downloadPercent === "number"
+                                  ? ` (${Math.floor(desktopUpdateState.downloadPercent)}%)`
+                                  : "…"}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <DownloadIcon className="size-3.5" />
+                              <span>Update available</span>
+                            </>
+                          )}
+                        </button>
+                      }
+                    />
+                    <TooltipPopup side="top">{desktopUpdateTooltip}</TooltipPopup>
+                  </Tooltip>
+                  {desktopUpdateButtonAction === "download" && (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label="Dismiss update"
+                            className="mr-1 inline-flex size-6 items-center justify-center rounded-md text-sky-400/60 transition-colors hover:text-sky-400"
+                            onClick={() => setUpdateDismissed(true)}
+                          >
+                            <XIcon className="size-3.5" />
+                          </button>
+                        }
+                      />
+                      <TooltipPopup side="top">Dismiss until next launch</TooltipPopup>
+                    </Tooltip>
+                  )}
+                </div>
+              </div>
+            )}
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
