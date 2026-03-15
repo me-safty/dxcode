@@ -20,6 +20,9 @@ export function useHandleNewThread() {
   const activeDraftThread = useComposerDraftStore((store) =>
     routeThreadId ? (store.draftThreadsByThreadId[routeThreadId] ?? null) : null,
   );
+  const activeComposerDraft = useComposerDraftStore((store) =>
+    routeThreadId ? (store.draftsByThreadId[routeThreadId] ?? null) : null,
+  );
 
   const activeThread = routeThreadId
     ? threads.find((thread) => thread.id === routeThreadId)
@@ -38,6 +41,7 @@ export function useHandleNewThread() {
         clearProjectDraftThreadId,
         getDraftThread,
         getDraftThreadByProjectId,
+        copyThreadSettings,
         setDraftThreadContext,
         setProjectDraftThreadId,
       } = useComposerDraftStore.getState();
@@ -96,6 +100,9 @@ export function useHandleNewThread() {
           envMode: options?.envMode ?? "local",
           runtimeMode: DEFAULT_RUNTIME_MODE,
         });
+        if (routeThreadId && activeComposerDraft) {
+          copyThreadSettings(routeThreadId, threadId);
+        }
 
         await navigate({
           to: "/$threadId",
@@ -103,7 +110,7 @@ export function useHandleNewThread() {
         });
       })();
     },
-    [navigate, routeThreadId],
+    [activeComposerDraft, navigate, routeThreadId],
   );
 
   return {

@@ -45,6 +45,17 @@ describe("getAppModelOptions", () => {
       isCustom: true,
     });
   });
+
+  it("supports Claude built-ins and saved custom models", () => {
+    const options = getAppModelOptions("claudeCode", ["claude-internal-preview"]);
+
+    expect(options.map((option) => option.slug)).toEqual([
+      "claude-opus-4-6",
+      "claude-sonnet-4-6",
+      "claude-haiku-4-5",
+      "claude-internal-preview",
+    ]);
+  });
 });
 
 describe("resolveAppModelSelection", () => {
@@ -56,6 +67,12 @@ describe("resolveAppModelSelection", () => {
 
   it("falls back to the provider default when no model is selected", () => {
     expect(resolveAppModelSelection("codex", [], "")).toBe("gpt-5.4");
+  });
+
+  it("preserves Claude custom model slugs instead of falling back", () => {
+    expect(
+      resolveAppModelSelection("claudeCode", ["claude-sonnet-internal"], "claude-sonnet-internal"),
+    ).toBe("claude-sonnet-internal");
   });
 });
 

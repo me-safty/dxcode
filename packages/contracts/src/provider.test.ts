@@ -34,6 +34,32 @@ describe("ProviderSessionStartInput", () => {
     expect(parsed.providerOptions?.codex?.homePath).toBe("/tmp/.codex");
   });
 
+  it("accepts claude-compatible payloads", () => {
+    const parsed = decodeProviderSessionStartInput({
+      threadId: "thread-1",
+      provider: "claudeCode",
+      model: "claude-sonnet-4-6",
+      modelOptions: {
+        claudeCode: {
+          thinking: true,
+        },
+      },
+      runtimeMode: "full-access",
+      providerOptions: {
+        claudeCode: {
+          binaryPath: "/usr/local/bin/claude",
+          permissionMode: "plan",
+          maxThinkingTokens: 4000,
+        },
+      },
+    });
+
+    expect(parsed.modelOptions?.claudeCode?.thinking).toBe(true);
+    expect(parsed.providerOptions?.claudeCode?.binaryPath).toBe("/usr/local/bin/claude");
+    expect(parsed.providerOptions?.claudeCode?.permissionMode).toBe("plan");
+    expect(parsed.providerOptions?.claudeCode?.maxThinkingTokens).toBe(4000);
+  });
+
   it("rejects payloads without runtime mode", () => {
     expect(() =>
       decodeProviderSessionStartInput({

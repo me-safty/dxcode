@@ -2,8 +2,10 @@ import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  clearPromotedDraftThreads,
   type ComposerImageAttachment,
   createDebouncedStorage,
+  normalizePersistedComposerDraftState,
   useComposerDraftStore,
 } from "./composerDraftStore";
 
@@ -405,6 +407,22 @@ describe("composerDraftStore setProvider", () => {
     expect(useComposerDraftStore.getState().draftsByThreadId[threadId]?.provider).toBe("codex");
   });
 
+  it("keeps claude provider selections when normalizing persisted drafts", () => {
+    const normalized = normalizePersistedComposerDraftState({
+      draftsByThreadId: {
+        [threadId]: {
+          prompt: "",
+          attachments: [],
+          provider: "claudeCode",
+        },
+      },
+      draftThreadsByThreadId: {},
+      projectDraftThreadIdByProjectId: {},
+    });
+
+    expect(normalized.draftsByThreadId[threadId]?.provider).toBe("claudeCode");
+  });
+
   it("removes empty provider-only draft when provider is reset", () => {
     const store = useComposerDraftStore.getState();
 
@@ -412,6 +430,47 @@ describe("composerDraftStore setProvider", () => {
     store.setProvider(threadId, null);
 
     expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toBeUndefined();
+  });
+});
+
+describe("composerDraftStore copyThreadSettings", () => {
+  const sourceThreadId = ThreadId.makeUnsafe("thread-source");
+  const targetThreadId = ThreadId.makeUnsafe("thread-target");
+
+  beforeEach(() => {
+    useComposerDraftStore.setState({
+      draftsByThreadId: {},
+      draftThreadsByThreadId: {},
+      projectDraftThreadIdByProjectId: {},
+    });
+  });
+
+  it("copies non-content chat selections into a fresh draft thread", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProvider(sourceThreadId, "claudeCode");
+    store.setModel(sourceThreadId, "claude-sonnet-4-6");
+    store.setRuntimeMode(sourceThreadId, "approval-required");
+    store.setInteractionMode(sourceThreadId, "plan");
+
+    store.copyThreadSettings(sourceThreadId, targetThreadId);
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[targetThreadId]).toMatchObject({
+      provider: "claudeCode",
+      model: "claude-sonnet-4-6",
+      runtimeMode: "approval-required",
+      interactionMode: "plan",
+    });
+    expect(useComposerDraftStore.getState().draftsByThreadId[targetThreadId]?.prompt).toBe("");
+    expect(useComposerDraftStore.getState().draftsByThreadId[targetThreadId]?.images).toEqual([]);
+  });
+
+  it("ignores source drafts that only contain prompt content", () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(sourceThreadId, "do not copy me");
+
+    store.copyThreadSettings(sourceThreadId, targetThreadId);
+
+    expect(useComposerDraftStore.getState().draftsByThreadId[targetThreadId]).toBeUndefined();
   });
 });
 
@@ -455,6 +514,39 @@ describe("composerDraftStore runtime and interaction settings", () => {
     store.setInteractionMode(threadId, null);
 
     expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toBeUndefined();
+  });
+});
+
+describe("clearPromotedDraftThreads", () => {
+  const projectId = ProjectId.makeUnsafe("project-promoted");
+  const threadId = ThreadId.makeUnsafe("thread-promoted");
+
+  beforeEach(() => {
+    useComposerDraftStore.setState({
+      draftsByThreadId: {},
+      draftThreadsByThreadId: {},
+      projectDraftThreadIdByProjectId: {},
+    });
+  });
+
+  it("preserves chat-window selections after a draft thread is promoted", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectId, threadId);
+    store.setProvider(threadId, "claudeCode");
+    store.setModel(threadId, "claude-sonnet-4-6");
+    store.setRuntimeMode(threadId, "approval-required");
+    store.setInteractionMode(threadId, "plan");
+
+    clearPromotedDraftThreads(new Set([threadId]));
+
+    expect(useComposerDraftStore.getState().getDraftThread(threadId)).toBeNull();
+    expect(useComposerDraftStore.getState().getDraftThreadByProjectId(projectId)).toBeNull();
+    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toMatchObject({
+      provider: "claudeCode",
+      model: "claude-sonnet-4-6",
+      runtimeMode: "approval-required",
+      interactionMode: "plan",
+    });
   });
 });
 

@@ -2,6 +2,7 @@ import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
   CommandId,
+  EventId,
   MessageId,
   type OrchestrationEvent,
   CheckpointRef,
@@ -34,6 +35,8 @@ const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_CACHE_CAPACITY = 20_000;
 const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL = Duration.minutes(120);
 const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
+const BUFFERED_REASONING_BY_ID_CACHE_CAPACITY = 10_000;
+const BUFFERED_REASONING_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
 
@@ -92,6 +95,17 @@ function proposedPlanIdFromEvent(event: ProviderRuntimeEvent, threadId: ThreadId
     return `plan:${threadId}:item:${event.itemId}`;
   }
   return `plan:${threadId}:event:${event.eventId}`;
+}
+
+function reasoningActivityIdFromEvent(event: ProviderRuntimeEvent, threadId: ThreadId): EventId {
+  const turnId = toTurnId(event.turnId);
+  if (turnId) {
+    return EventId.makeUnsafe(`thinking:${threadId}:turn:${turnId}`);
+  }
+  if (event.itemId) {
+    return EventId.makeUnsafe(`thinking:${threadId}:item:${event.itemId}`);
+  }
+  return EventId.makeUnsafe(`thinking:${threadId}:event:${event.eventId}`);
 }
 
 function asString(value: unknown): string | undefined {
@@ -503,6 +517,12 @@ const make = Effect.gen(function* () {
     lookup: () => Effect.succeed({ text: "", createdAt: "" }),
   });
 
+  const bufferedReasoningById = yield* Cache.make<string, { text: string; createdAt: string }>({
+    capacity: BUFFERED_REASONING_BY_ID_CACHE_CAPACITY,
+    timeToLive: BUFFERED_REASONING_BY_ID_TTL,
+    lookup: () => Effect.succeed({ text: "", createdAt: "" }),
+  });
+
   const isGitRepoForThread = Effect.fnUntraced(function* (threadId: ThreadId) {
     const readModel = yield* orchestrationEngine.getReadModel();
     const thread = readModel.threads.find((entry) => entry.id === threadId);
@@ -619,6 +639,56 @@ const make = Effect.gen(function* () {
 
   const clearBufferedProposedPlan = (planId: string) =>
     Cache.invalidate(bufferedProposedPlanById, planId);
+
+  const appendBufferedReasoning = (activityId: EventId, delta: string, createdAt: string) =>
+    Cache.getOption(bufferedReasoningById, activityId).pipe(
+      Effect.flatMap((existingEntry) => {
+        const existing = Option.getOrUndefined(existingEntry);
+        return Cache.set(bufferedReasoningById, activityId, {
+          text: `${existing?.text ?? ""}${delta}`,
+          createdAt:
+            existing?.createdAt && existing.createdAt.length > 0 ? existing.createdAt : createdAt,
+        });
+      }),
+    );
+
+  const upsertReasoningActivity = (input: {
+    readonly event: ProviderRuntimeEvent;
+    readonly threadId: ThreadId;
+    readonly activityId: EventId;
+    readonly turnId?: TurnId;
+    readonly streamKind: "reasoning_text" | "reasoning_summary_text";
+    readonly updatedAt: string;
+  }) =>
+    Effect.gen(function* () {
+      const bufferedReasoning = yield* Cache.getOption(
+        bufferedReasoningById,
+        input.activityId,
+      ).pipe(Effect.map(Option.getOrUndefined));
+      const detail = bufferedReasoning?.text.trim();
+      if (!detail) {
+        return;
+      }
+
+      yield* orchestrationEngine.dispatch({
+        type: "thread.activity.append",
+        commandId: providerCommandId(input.event, "reasoning-activity-upsert"),
+        threadId: input.threadId,
+        activity: {
+          id: input.activityId,
+          tone: "thinking",
+          kind: "reasoning.trace",
+          summary: "Thinking",
+          payload: {
+            detail,
+            streamKind: input.streamKind,
+          },
+          turnId: input.turnId ?? null,
+          createdAt: bufferedReasoning?.createdAt ?? input.updatedAt,
+        },
+        createdAt: input.updatedAt,
+      });
+    });
 
   const clearAssistantMessageState = (messageId: MessageId) =>
     clearBufferedAssistantText(messageId);
@@ -741,8 +811,10 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const prefix = `${threadId}:`;
       const proposedPlanPrefix = `plan:${threadId}:`;
+      const reasoningPrefix = `thinking:${threadId}:`;
       const turnKeys = Array.from(yield* Cache.keys(turnMessageIdsByTurnKey));
       const proposedPlanKeys = Array.from(yield* Cache.keys(bufferedProposedPlanById));
+      const reasoningKeys = Array.from(yield* Cache.keys(bufferedReasoningById));
       yield* Effect.forEach(
         turnKeys,
         (key) =>
@@ -767,6 +839,14 @@ const make = Effect.gen(function* () {
         (key) =>
           key.startsWith(proposedPlanPrefix)
             ? Cache.invalidate(bufferedProposedPlanById, key)
+            : Effect.void,
+        { concurrency: 1 },
+      ).pipe(Effect.asVoid);
+      yield* Effect.forEach(
+        reasoningKeys,
+        (key) =>
+          key.startsWith(reasoningPrefix)
+            ? Cache.invalidate(bufferedReasoningById, key)
             : Effect.void,
         { concurrency: 1 },
       ).pipe(Effect.asVoid);
@@ -918,6 +998,26 @@ const make = Effect.gen(function* () {
       if (proposedPlanDelta && proposedPlanDelta.length > 0) {
         const planId = proposedPlanIdFromEvent(event, thread.id);
         yield* appendBufferedProposedPlan(planId, proposedPlanDelta, now);
+      }
+
+      if (
+        event.type === "content.delta" &&
+        (event.payload.streamKind === "reasoning_text" ||
+          event.payload.streamKind === "reasoning_summary_text") &&
+        event.payload.delta.length > 0
+      ) {
+        const activityId = reasoningActivityIdFromEvent(event, thread.id);
+        const reasoningTurnId = toTurnId(event.turnId);
+        const reasoningStreamKind = event.payload.streamKind;
+        yield* appendBufferedReasoning(activityId, event.payload.delta, now);
+        yield* upsertReasoningActivity({
+          event,
+          threadId: thread.id,
+          activityId,
+          ...(reasoningTurnId ? { turnId: reasoningTurnId } : {}),
+          streamKind: reasoningStreamKind,
+          updatedAt: now,
+        });
       }
 
       const assistantCompletion =

@@ -204,4 +204,26 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
 
       fs.rmSync(tempDir, { recursive: true, force: true });
     }));
+
+  it("accepts claude provider bindings", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = ThreadId.makeUnsafe("thread-claude");
+
+      yield* directory.upsert({
+        provider: "claudeCode",
+        threadId,
+      });
+
+      const provider = yield* directory.getProvider(threadId);
+      assert.equal(provider, "claudeCode");
+      const resolvedBinding = yield* directory.getBinding(threadId);
+      assertSome(resolvedBinding, {
+        threadId,
+        provider: "claudeCode",
+      });
+      if (Option.isSome(resolvedBinding)) {
+        assert.equal(resolvedBinding.value.threadId, threadId);
+      }
+    }));
 });

@@ -158,6 +158,7 @@ interface ComposerDraftStoreState {
   ) => void;
   clearProjectDraftThreadId: (projectId: ProjectId) => void;
   clearProjectDraftThreadById: (projectId: ProjectId, threadId: ThreadId) => void;
+  clearDraftThreadRegistration: (threadId: ThreadId) => void;
   clearDraftThread: (threadId: ThreadId) => void;
   setPrompt: (threadId: ThreadId, prompt: string) => void;
   setProvider: (threadId: ThreadId, provider: ProviderKind | null | undefined) => void;
@@ -177,6 +178,7 @@ interface ComposerDraftStoreState {
     threadId: ThreadId,
     attachments: PersistedComposerImageAttachment[],
   ) => void;
+  copyThreadSettings: (sourceThreadId: ThreadId, targetThreadId: ThreadId) => void;
   clearComposerContent: (threadId: ThreadId) => void;
   clearThreadDraft: (threadId: ThreadId) => void;
 }
@@ -245,8 +247,22 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
   );
 }
 
+function hasNonContentDraftSettings(draft: ComposerThreadDraftState | undefined): boolean {
+  if (!draft) {
+    return false;
+  }
+  return (
+    draft.provider !== null ||
+    draft.model !== null ||
+    draft.runtimeMode !== null ||
+    draft.interactionMode !== null ||
+    draft.effort !== null ||
+    draft.codexFastMode
+  );
+}
+
 function normalizeProviderKind(value: unknown): ProviderKind | null {
-  return value === "codex" ? value : null;
+  return value === "codex" || value === "claudeCode" ? value : null;
 }
 
 function revokeObjectPreviewUrl(previewUrl: string): void {
@@ -300,7 +316,9 @@ function normalizeDraftThreadEnvMode(
   return fallbackWorktreePath ? "worktree" : "local";
 }
 
-function normalizePersistedComposerDraftState(value: unknown): PersistedComposerDraftStoreState {
+export function normalizePersistedComposerDraftState(
+  value: unknown,
+): PersistedComposerDraftStoreState {
   if (!value || typeof value !== "object") {
     return EMPTY_PERSISTED_DRAFT_STORE_STATE;
   }
@@ -773,6 +791,31 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           };
         });
       },
+      clearDraftThreadRegistration: (threadId) => {
+        if (threadId.length === 0) {
+          return;
+        }
+        set((state) => {
+          const hasDraftThread = state.draftThreadsByThreadId[threadId] !== undefined;
+          const hasProjectMapping = Object.values(state.projectDraftThreadIdByProjectId).includes(
+            threadId,
+          );
+          if (!hasDraftThread && !hasProjectMapping) {
+            return state;
+          }
+          const nextProjectDraftThreadIdByProjectId = Object.fromEntries(
+            Object.entries(state.projectDraftThreadIdByProjectId).filter(
+              ([, draftThreadId]) => draftThreadId !== threadId,
+            ),
+          ) as Record<ProjectId, ThreadId>;
+          const { [threadId]: _removedDraftThread, ...restDraftThreadsByThreadId } =
+            state.draftThreadsByThreadId;
+          return {
+            draftThreadsByThreadId: restDraftThreadsByThreadId,
+            projectDraftThreadIdByProjectId: nextProjectDraftThreadIdByProjectId,
+          };
+        });
+      },
       clearDraftThread: (threadId) => {
         if (threadId.length === 0) {
           return;
@@ -1144,6 +1187,48 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           });
         });
       },
+      copyThreadSettings: (sourceThreadId, targetThreadId) => {
+        if (sourceThreadId.length === 0 || targetThreadId.length === 0) {
+          return;
+        }
+        if (sourceThreadId === targetThreadId) {
+          return;
+        }
+        set((state) => {
+          const source = state.draftsByThreadId[sourceThreadId];
+          if (!source || !hasNonContentDraftSettings(source)) {
+            return state;
+          }
+          const existingTarget = state.draftsByThreadId[targetThreadId];
+          const target = existingTarget ?? createEmptyThreadDraft();
+          const nextDraft: ComposerThreadDraftState = {
+            ...target,
+            provider: source.provider,
+            model: source.model,
+            runtimeMode: source.runtimeMode,
+            interactionMode: source.interactionMode,
+            effort: source.effort,
+            codexFastMode: source.codexFastMode,
+          };
+          const isUnchanged =
+            existingTarget &&
+            existingTarget.provider === nextDraft.provider &&
+            existingTarget.model === nextDraft.model &&
+            existingTarget.runtimeMode === nextDraft.runtimeMode &&
+            existingTarget.interactionMode === nextDraft.interactionMode &&
+            existingTarget.effort === nextDraft.effort &&
+            existingTarget.codexFastMode === nextDraft.codexFastMode;
+          if (isUnchanged) {
+            return state;
+          }
+          return {
+            draftsByThreadId: {
+              ...state.draftsByThreadId,
+              [targetThreadId]: nextDraft,
+            },
+          };
+        });
+      },
       clearComposerContent: (threadId) => {
         if (threadId.length === 0) {
           return;
@@ -1284,15 +1369,16 @@ export function useComposerThreadDraft(threadId: ThreadId): ComposerThreadDraftS
  * Clear draft threads that have been promoted to server threads.
  *
  * Call this after a snapshot sync so the route guard in `_chat.$threadId`
- * sees the server thread before the draft is removed — avoids a redirect
- * to `/` caused by a gap where neither draft nor server thread exists.
+ * sees the server thread before the draft registration is removed. Preserve
+ * non-content composer selections so provider/model choices continue to stick
+ * after the first local-draft send promotes the thread.
  */
 export function clearPromotedDraftThreads(serverThreadIds: ReadonlySet<ThreadId>): void {
   const store = useComposerDraftStore.getState();
   const draftThreadIds = Object.keys(store.draftThreadsByThreadId) as ThreadId[];
   for (const draftId of draftThreadIds) {
     if (serverThreadIds.has(draftId)) {
-      store.clearDraftThread(draftId);
+      store.clearDraftThreadRegistration(draftId);
     }
   }
 }

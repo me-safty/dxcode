@@ -45,7 +45,7 @@ const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 type LegacyProviderRuntimeEvent = {
   readonly type: string;
   readonly eventId: EventId;
-  readonly provider: "codex";
+  readonly provider: "codex" | "claudeCode";
   readonly createdAt: string;
   readonly threadId: ThreadId;
   readonly turnId?: string | undefined;
@@ -564,6 +564,81 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(message?.text).toBe("hello world");
     expect(message?.streaming).toBe(false);
+  });
+
+  it("upserts claude reasoning deltas into a single thinking activity", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-seed-claude"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "running",
+          providerName: "claudeCode",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-thinking"),
+          updatedAt: now,
+          lastError: null,
+        },
+        createdAt: now,
+      }),
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-thinking-delta-1"),
+      provider: "claudeCode",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-thinking"),
+      itemId: asItemId("item-thinking"),
+      payload: {
+        streamKind: "reasoning_text",
+        delta: "Inspecting the provider state.",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-thinking-delta-2"),
+      provider: "claudeCode",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-thinking"),
+      itemId: asItemId("item-thinking"),
+      payload: {
+        streamKind: "reasoning_summary_text",
+        delta: " Verifying restart routing.",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.id === "thinking:thread-1:turn:turn-thinking" &&
+          typeof (activity.payload as { detail?: unknown } | null)?.detail === "string" &&
+          (activity.payload as { detail: string }).detail.includes("Verifying restart routing."),
+      ),
+    );
+    const reasoningActivities = thread.activities.filter(
+      (activity: ProviderRuntimeTestActivity) =>
+        activity.id === "thinking:thread-1:turn:turn-thinking",
+    );
+
+    expect(reasoningActivities).toHaveLength(1);
+    expect(reasoningActivities[0]).toMatchObject({
+      tone: "thinking",
+      kind: "reasoning.trace",
+      summary: "Thinking",
+      turnId: "turn-thinking",
+      payload: {
+        detail: "Inspecting the provider state. Verifying restart routing.",
+        streamKind: "reasoning_summary_text",
+      },
+    });
   });
 
   it("uses assistant item completion detail when no assistant deltas were streamed", async () => {
