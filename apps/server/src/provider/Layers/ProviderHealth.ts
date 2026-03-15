@@ -16,7 +16,7 @@ import type {
   ServerProviderStatus,
   ServerProviderStatusState,
 } from "@t3tools/contracts";
-import { Array, Effect, Fiber, FileSystem, Layer, Option, Path, Result, Stream } from "effect";
+import { Array, Effect, FileSystem, Layer, Option, Path, Result, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -584,13 +584,19 @@ export const checkClaudeProviderStatus: Effect.Effect<
 export const ProviderHealthLive = Layer.effect(
   ProviderHealth,
   Effect.gen(function* () {
-    const providerStatusesFiber = yield* Effect.all(
-      [checkCodexProviderStatus, checkClaudeProviderStatus],
-      { concurrency: "unbounded" },
-    ).pipe(Effect.forkScoped);
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const healthRuntime = Layer.mergeAll(
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Layer.succeed(FileSystem.FileSystem, fileSystem),
+      Layer.succeed(Path.Path, path),
+    );
 
     return {
-      getStatuses: Fiber.join(providerStatusesFiber),
+      getStatuses: Effect.all([checkCodexProviderStatus, checkClaudeProviderStatus], {
+        concurrency: "unbounded",
+      }).pipe(Effect.provide(healthRuntime)),
     } satisfies ProviderHealthShape;
   }),
 );
