@@ -3400,10 +3400,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
             >
               <div
                 className={cn(
-                  "group rounded-[22px] p-px transition-colors duration-200",
-                  isClaudeUltrathink
-                    ? "ultrathink-frame bg-[linear-gradient(120deg,#ff6b6b_0%,#f59e0b_18%,#22c55e_36%,#14b8a6_54%,#3b82f6_72%,#ec4899_90%,#ff6b6b_100%)]"
-                    : "",
+                  "group rounded-[22px] transition-colors duration-200",
+                  isClaudeUltrathink ? "ultrathink-frame p-[2px]" : "p-px",
                 )}
                 onDragEnter={onComposerDragEnter}
                 onDragOver={onComposerDragOver}
@@ -3453,8 +3451,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   >
                     {isClaudeUltrathink ? (
                       <div className="mb-2 flex items-center gap-2">
-                        <span className="ultrathink-pill inline-flex items-center rounded-md border border-border/70 px-2 py-0.5 font-medium text-[11px] text-foreground/85">
-                          Ultrathink
+                        <span className="ultrathink-pill inline-flex items-center rounded-md border border-transparent px-2.5 py-0.5 font-medium text-[12px] sm:text-[13px]">
+                          <span className="ultrathink-word">Ultrathink</span>
                         </span>
                       </div>
                     ) : null}
@@ -3606,6 +3604,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           model={selectedModelForPickerWithCustomFallback}
                           lockedProvider={lockedProvider}
                           modelOptionsByProvider={modelOptionsByProvider}
+                          ultrathinkActive={isClaudeUltrathink}
                           onProviderModelChange={onProviderModelSelect}
                         />
 
