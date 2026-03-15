@@ -1,10 +1,21 @@
 import type { DesktopWindowTitlebarState } from "@t3tools/contracts";
 import { useSyncExternalStore } from "react";
 import { isElectron } from "../env";
+import { isMacPlatform } from "../lib/utils";
 
-const DEFAULT_SNAPSHOT: DesktopWindowTitlebarState = {
-  trafficLightsVisible: false,
-};
+export function getDefaultWindowTitlebarState({
+  electron = isElectron,
+  platform = typeof navigator === "undefined" ? "" : navigator.platform,
+}: {
+  electron?: boolean;
+  platform?: string;
+} = {}): DesktopWindowTitlebarState {
+  return {
+    trafficLightsVisible: electron && isMacPlatform(platform),
+  };
+}
+
+const DEFAULT_SNAPSHOT = getDefaultWindowTitlebarState();
 
 let snapshot = DEFAULT_SNAPSHOT;
 let listeners: Array<() => void> = [];
