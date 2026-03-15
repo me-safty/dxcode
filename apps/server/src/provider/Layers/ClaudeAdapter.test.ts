@@ -156,6 +156,28 @@ function makeDeterministicRandomService(seed = 0x1234_5678): {
   };
 }
 
+async function readFirstPromptText(
+  input:
+    | {
+        readonly prompt: AsyncIterable<SDKUserMessage>;
+      }
+    | undefined,
+): Promise<string | undefined> {
+  const iterator = input?.prompt[Symbol.asyncIterator]();
+  if (!iterator) {
+    return undefined;
+  }
+  const next = await iterator.next();
+  if (next.done) {
+    return undefined;
+  }
+  const content = next.value.message.content[0];
+  if (!content || content.type !== "text") {
+    return undefined;
+  }
+  return content.text;
+}
+
 const THREAD_ID = ThreadId.makeUnsafe("thread-claude-1");
 const RESUME_THREAD_ID = ThreadId.makeUnsafe("thread-claude-resume");
 
@@ -223,6 +245,65 @@ describe("ClaudeAdapterLive", () => {
       const createInput = harness.getLastCreateQueryInput();
       assert.equal(createInput?.options.permissionMode, "plan");
       assert.equal(createInput?.options.allowDangerouslySkipPermissions, undefined);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("forwards claude effort levels into query options", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeCodeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeCode",
+        runtimeMode: "full-access",
+        modelOptions: {
+          claudeCode: {
+            effort: "max",
+          },
+        },
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.effort, "max");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("maps ultrathink to max effort and prefixes the prompt", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeCodeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeCode",
+        runtimeMode: "full-access",
+        modelOptions: {
+          claudeCode: {
+            effort: "ultrathink",
+          },
+        },
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "Investigate the edge cases",
+        attachments: [],
+        modelOptions: {
+          claudeCode: {
+            effort: "ultrathink",
+          },
+        },
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.effort, "max");
+      const promptText = yield* Effect.promise(() => readFirstPromptText(createInput));
+      assert.equal(promptText, "Ultrathink:\nInvestigate the edge cases");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

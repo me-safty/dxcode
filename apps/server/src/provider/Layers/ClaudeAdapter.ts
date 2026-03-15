@@ -37,6 +37,7 @@ import {
   TurnId,
   type UserInputQuestion,
 } from "@t3tools/contracts";
+import { applyClaudePromptEffortPrefix, getEffectiveClaudeCodeEffort } from "@t3tools/shared/model";
 import { Cause, DateTime, Deferred, Effect, Layer, Queue, Random, Ref, Stream } from "effect";
 
 import {
@@ -338,7 +339,10 @@ function buildUserMessage(input: ProviderSendTurnInput): SDKUserMessage {
     }
   }
 
-  const text = fragments.join("\n\n");
+  const text = applyClaudePromptEffortPrefix(
+    fragments.join("\n\n"),
+    input.modelOptions?.claudeCode?.effort ?? null,
+  );
 
   return {
     type: "user",
@@ -2138,6 +2142,8 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           );
 
         const providerOptions = input.providerOptions?.claudeAgent;
+        const effort = input.modelOptions?.claudeAgent?.effort;
+        const effectiveEffort = getEffectiveClaudeCodeEffort(effort);
         const permissionMode =
           toPermissionMode(providerOptions?.permissionMode) ??
           (input.runtimeMode === "full-access" ? "bypassPermissions" : undefined);
@@ -2148,6 +2154,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           ...(providerOptions?.binaryPath
             ? { pathToClaudeCodeExecutable: providerOptions.binaryPath }
             : {}),
+          ...(effectiveEffort ? { effort: effectiveEffort } : {}),
           ...(permissionMode ? { permissionMode } : {}),
           ...(permissionMode === "bypassPermissions"
             ? { allowDangerouslySkipPermissions: true }
@@ -2239,6 +2246,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             config: {
               ...(input.model ? { model: input.model } : {}),
               ...(input.cwd ? { cwd: input.cwd } : {}),
+              ...(effectiveEffort ? { effort: effectiveEffort } : {}),
               ...(permissionMode ? { permissionMode } : {}),
               ...(providerOptions?.maxThinkingTokens !== undefined
                 ? { maxThinkingTokens: providerOptions.maxThinkingTokens }

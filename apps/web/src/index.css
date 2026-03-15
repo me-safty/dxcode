@@ -404,3 +404,22 @@ label:has(> select#reasoning-effort) select {
   overflow: clip;
   background: color-mix(in srgb, var(--card) 92%, var(--background));
 }
+
+@keyframes ultrathink-rainbow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+.ultrathink-frame {
+  background-size: 220% 220%;
+  animation: ultrathink-rainbow 10s linear infinite;
+}
+
+.ultrathink-pill {
+  background: color-mix(in srgb, var(--card) 84%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 70%, white 8%);
+}
