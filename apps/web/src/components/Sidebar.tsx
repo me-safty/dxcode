@@ -2,16 +2,12 @@ import {
   ArchiveIcon,
   ArrowUpDownIcon,
   ChevronRightIcon,
-  DownloadIcon,
   FolderIcon,
   GitPullRequestIcon,
   PlusIcon,
-  RotateCwIcon,
   SettingsIcon,
   SquarePenIcon,
   TerminalIcon,
-  TriangleAlertIcon,
-  XIcon,
 } from "lucide-react";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { autoAnimate } from "@formkit/auto-animate";
@@ -33,7 +29,6 @@ import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-
 import { CSS } from "@dnd-kit/utilities";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
-  type DesktopUpdateState,
   ProjectId,
   ThreadId,
   type GitStatusResult,
@@ -61,18 +56,6 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../terminalSta
 import { toastManager } from "./ui/toast";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
-import {
-  getArm64IntelBuildWarningDescription,
-  getDesktopUpdateActionError,
-  getDesktopUpdateButtonTooltip,
-  isDesktopUpdateButtonDisabled,
-  resolveDesktopUpdateButtonAction,
-  shouldShowArm64IntelBuildWarning,
-  shouldShowDesktopUpdateButton,
-  shouldToastDesktopUpdateActionResult,
-} from "./desktopUpdate.logic";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
-import { Button } from "./ui/button";
 import { Collapsible, CollapsibleContent } from "./ui/collapsible";
 import { Menu, MenuGroup, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -103,6 +86,7 @@ import {
   sortProjectsForSidebar,
   sortThreadsForSidebar,
 } from "./Sidebar.logic";
+import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 
@@ -350,8 +334,6 @@ export default function Sidebar() {
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const dragInProgressRef = useRef(false);
   const suppressProjectClickAfterDragRef = useRef(false);
-  const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
-  const [updateDismissed, setUpdateDismissed] = useState(false);
   const selectedThreadIds = useThreadSelectionStore((s) => s.selectedThreadIds);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
   const rangeSelectTo = useThreadSelectionStore((s) => s.rangeSelectTo);
@@ -1394,130 +1376,12 @@ export default function Sidebar() {
     };
   }, [clearSelection, selectedThreadIds.size]);
 
-  useEffect(() => {
-    if (!isElectron) return;
-    const bridge = window.desktopBridge;
-    if (
-      !bridge ||
-      typeof bridge.getUpdateState !== "function" ||
-      typeof bridge.onUpdateState !== "function"
-    ) {
-      return;
-    }
-
-    let disposed = false;
-    let receivedSubscriptionUpdate = false;
-    const unsubscribe = bridge.onUpdateState((nextState) => {
-      if (disposed) return;
-      receivedSubscriptionUpdate = true;
-      setDesktopUpdateState(nextState);
-    });
-
-    void bridge
-      .getUpdateState()
-      .then((nextState) => {
-        if (disposed || receivedSubscriptionUpdate) return;
-        setDesktopUpdateState(nextState);
-      })
-      .catch(() => undefined);
-
-    return () => {
-      disposed = true;
-      unsubscribe();
-    };
-  }, []);
-
-  const showDesktopUpdateButton = isElectron && shouldShowDesktopUpdateButton(desktopUpdateState) && !updateDismissed;
-
-  const desktopUpdateTooltip = desktopUpdateState
-    ? getDesktopUpdateButtonTooltip(desktopUpdateState)
-    : "Update available";
-
-  const desktopUpdateButtonDisabled = isDesktopUpdateButtonDisabled(desktopUpdateState);
-  const desktopUpdateButtonAction = desktopUpdateState
-    ? resolveDesktopUpdateButtonAction(desktopUpdateState)
-    : "none";
-  const showArm64IntelBuildWarning =
-    isElectron && shouldShowArm64IntelBuildWarning(desktopUpdateState);
-  const arm64IntelBuildWarningDescription =
-    desktopUpdateState && showArm64IntelBuildWarning
-      ? getArm64IntelBuildWarningDescription(desktopUpdateState)
-      : null;
-  const desktopUpdateButtonInteractivityClasses = desktopUpdateButtonDisabled
-    ? "cursor-not-allowed opacity-60"
-    : "hover:bg-accent hover:text-foreground";
-  const desktopUpdateButtonClasses =
-    desktopUpdateState?.status === "downloaded"
-      ? "text-emerald-500"
-      : desktopUpdateState?.status === "downloading"
-        ? "text-sky-400"
-        : shouldHighlightDesktopUpdateError(desktopUpdateState)
-          ? "text-rose-500 animate-pulse"
-          : "text-amber-500 animate-pulse";
   const newThreadShortcutLabel = useMemo(
     () =>
       shortcutLabelForCommand(keybindings, "chat.newLocal") ??
       shortcutLabelForCommand(keybindings, "chat.new"),
     [keybindings],
   );
-
-  const handleDesktopUpdateButtonClick = useCallback(() => {
-    const bridge = window.desktopBridge;
-    if (!bridge || !desktopUpdateState) return;
-    if (desktopUpdateButtonDisabled || desktopUpdateButtonAction === "none") return;
-
-    if (desktopUpdateButtonAction === "download") {
-      void bridge
-        .downloadUpdate()
-        .then((result) => {
-          if (result.completed) {
-            toastManager.add({
-              type: "success",
-              title: "Update downloaded",
-              description: "Restart the app from the update button to install it.",
-            });
-          }
-          if (!shouldToastDesktopUpdateActionResult(result)) return;
-          const actionError = getDesktopUpdateActionError(result);
-          if (!actionError) return;
-          toastManager.add({
-            type: "error",
-            title: "Could not download update",
-            description: actionError,
-          });
-        })
-        .catch((error) => {
-          toastManager.add({
-            type: "error",
-            title: "Could not start update download",
-            description: error instanceof Error ? error.message : "An unexpected error occurred.",
-          });
-        });
-      return;
-    }
-
-    if (desktopUpdateButtonAction === "install") {
-      void bridge
-        .installUpdate()
-        .then((result) => {
-          if (!shouldToastDesktopUpdateActionResult(result)) return;
-          const actionError = getDesktopUpdateActionError(result);
-          if (!actionError) return;
-          toastManager.add({
-            type: "error",
-            title: "Could not install update",
-            description: actionError,
-          });
-        })
-        .catch((error) => {
-          toastManager.add({
-            type: "error",
-            title: "Could not install update",
-            description: error instanceof Error ? error.message : "An unexpected error occurred.",
-          });
-        });
-    }
-  }, [desktopUpdateButtonAction, desktopUpdateButtonDisabled, desktopUpdateState]);
 
   const expandThreadListForProject = useCallback((projectId: ProjectId) => {
     setExpandedThreadListsByProject((current) => {
@@ -1580,29 +1444,6 @@ export default function Sidebar() {
       ) : (
         <>
           <SidebarContent className="gap-0">
-            {showArm64IntelBuildWarning && arm64IntelBuildWarningDescription ? (
-              <SidebarGroup className="px-2 pt-2 pb-0">
-                <Alert variant="warning" className="rounded-2xl border-warning/40 bg-warning/8">
-                  <TriangleAlertIcon />
-                  <AlertTitle>Intel build on Apple Silicon</AlertTitle>
-                  <AlertDescription>{arm64IntelBuildWarningDescription}</AlertDescription>
-                  {desktopUpdateButtonAction !== "none" ? (
-                    <AlertAction>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        disabled={desktopUpdateButtonDisabled}
-                        onClick={handleDesktopUpdateButtonClick}
-                      >
-                        {desktopUpdateButtonAction === "download"
-                          ? "Download ARM build"
-                          : "Install ARM build"}
-                      </Button>
-                    </AlertAction>
-                  ) : null}
-                </Alert>
-              </SidebarGroup>
-            ) : null}
             <SidebarGroup className="px-2 py-2">
               <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
                 <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
@@ -1753,71 +1594,7 @@ export default function Sidebar() {
 
           <SidebarSeparator />
           <SidebarFooter className="p-2">
-            {showDesktopUpdateButton && (
-              <div className="px-1 pb-1">
-                <div
-                  className={`group/update relative flex w-full items-center rounded-full bg-sky-400/15 text-xs font-medium text-sky-400${
-                    desktopUpdateButtonDisabled ? " cursor-not-allowed opacity-60" : ""
-                  }`}
-                >
-                  <div className="pointer-events-none absolute inset-0 rounded-full transition-colors group-has-[button.update-main:hover]/update:bg-sky-400/25" />
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          aria-label={desktopUpdateTooltip}
-                          aria-disabled={desktopUpdateButtonDisabled || undefined}
-                          disabled={desktopUpdateButtonDisabled}
-                          className="update-main relative flex flex-1 items-center gap-2 px-3 py-1.5"
-                          onClick={handleDesktopUpdateButtonClick}
-                        >
-                          {desktopUpdateButtonAction === "install" ? (
-                            <>
-                              <RotateCwIcon className="size-3.5" />
-                              <span>Restart to update</span>
-                            </>
-                          ) : desktopUpdateState?.status === "downloading" ? (
-                            <>
-                              <DownloadIcon className="size-3.5" />
-                              <span>
-                                Downloading
-                                {typeof desktopUpdateState.downloadPercent === "number"
-                                  ? ` (${Math.floor(desktopUpdateState.downloadPercent)}%)`
-                                  : "…"}
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <DownloadIcon className="size-3.5" />
-                              <span>Update available</span>
-                            </>
-                          )}
-                        </button>
-                      }
-                    />
-                    <TooltipPopup side="top">{desktopUpdateTooltip}</TooltipPopup>
-                  </Tooltip>
-                  {desktopUpdateButtonAction === "download" && (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <button
-                            type="button"
-                            aria-label="Dismiss update"
-                            className="mr-1 inline-flex size-6 items-center justify-center rounded-md text-sky-400/60 transition-colors hover:text-sky-400"
-                            onClick={() => setUpdateDismissed(true)}
-                          >
-                            <XIcon className="size-3.5" />
-                          </button>
-                        }
-                      />
-                      <TooltipPopup side="top">Dismiss until next launch</TooltipPopup>
-                    </Tooltip>
-                  )}
-                </div>
-              </div>
-            )}
+            <SidebarUpdatePill />
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
