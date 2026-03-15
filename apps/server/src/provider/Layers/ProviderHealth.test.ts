@@ -5,11 +5,16 @@ import * as PlatformError from "effect/PlatformError";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
+  CLAUDE_CLI_PATH,
+  checkClaudeProviderStatus,
   checkCodexProviderStatus,
   hasCustomModelProvider,
+  parseClaudeAuthStatusFromOutput,
   parseAuthStatusFromOutput,
+  ProviderHealthLive,
   readCodexConfigModelProvider,
 } from "./ProviderHealth";
+import { ProviderHealth } from "../Services/ProviderHealth";
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -38,6 +43,22 @@ function mockSpawnerLayer(
     ChildProcessSpawner.make((command) => {
       const cmd = command as unknown as { args: ReadonlyArray<string> };
       return Effect.succeed(mockHandle(handler(cmd.args)));
+    }),
+  );
+}
+
+function mockSpawnerCommandLayer(
+  handler: (input: { command: string; args: ReadonlyArray<string> }) => {
+    stdout: string;
+    stderr: string;
+    code: number;
+  },
+) {
+  return Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make((command) => {
+      const cmd = command as unknown as { command: string; args: ReadonlyArray<string> };
+      return Effect.succeed(mockHandle(handler({ command: cmd.command, args: cmd.args })));
     }),
   );
 }
@@ -235,6 +256,75 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
     );
   });
 
+  describe("checkClaudeProviderStatus", () => {
+    it.effect("returns ready when claude runtime is installed and authenticated", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus;
+        assert.strictEqual(status.provider, "claudeCode");
+        assert.strictEqual(status.status, "ready");
+        assert.strictEqual(status.available, true);
+        assert.strictEqual(status.authStatus, "authenticated");
+      }).pipe(
+        Effect.provide(
+          mockSpawnerCommandLayer(({ command, args }) => {
+            assert.strictEqual(command, CLAUDE_CLI_PATH);
+            const joined = args.join(" ");
+            if (joined === "--version") {
+              return { stdout: "2.1.76 (Claude Code)\n", stderr: "", code: 0 };
+            }
+            if (joined === "auth status --json") {
+              return {
+                stdout: '{"authenticated":true,"email":"test@example.com"}\n',
+                stderr: "",
+                code: 0,
+              };
+            }
+            throw new Error(`Unexpected Claude args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("returns unavailable when claude runtime is missing", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus;
+        assert.strictEqual(status.provider, "claudeCode");
+        assert.strictEqual(status.status, "error");
+        assert.strictEqual(status.available, false);
+        assert.strictEqual(status.authStatus, "unknown");
+        assert.strictEqual(status.message, "Claude Code runtime is not available.");
+      }).pipe(Effect.provide(failingSpawnerLayer("spawn claude ENOENT"))),
+    );
+
+    it.effect("returns unauthenticated when claude auth probe reports login required", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus;
+        assert.strictEqual(status.provider, "claudeCode");
+        assert.strictEqual(status.status, "error");
+        assert.strictEqual(status.available, true);
+        assert.strictEqual(status.authStatus, "unauthenticated");
+        assert.strictEqual(
+          status.message,
+          "Claude Code is not authenticated. Run `claude auth login` and try again.",
+        );
+      }).pipe(
+        Effect.provide(
+          mockSpawnerCommandLayer(({ command, args }) => {
+            assert.strictEqual(command, CLAUDE_CLI_PATH);
+            const joined = args.join(" ");
+            if (joined === "--version") {
+              return { stdout: "2.1.76 (Claude Code)\n", stderr: "", code: 0 };
+            }
+            if (joined === "auth status --json") {
+              return { stdout: "", stderr: "Not logged in. Run claude auth login.", code: 1 };
+            }
+            throw new Error(`Unexpected Claude args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+  });
+
   // ── Custom model provider: checkCodexProviderStatus integration ───
 
   describe("checkCodexProviderStatus with custom model provider", () => {
@@ -339,6 +429,72 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
       assert.strictEqual(parsed.status, "warning");
       assert.strictEqual(parsed.authStatus, "unknown");
     });
+  });
+
+  describe("parseClaudeAuthStatusFromOutput", () => {
+    it("exit code 0 with authenticated=true is ready", () => {
+      const parsed = parseClaudeAuthStatusFromOutput({
+        stdout: '{"authenticated":true}\n',
+        stderr: "",
+        code: 0,
+      });
+      assert.strictEqual(parsed.status, "ready");
+      assert.strictEqual(parsed.authStatus, "authenticated");
+    });
+
+    it("login required output is unauthenticated", () => {
+      const parsed = parseClaudeAuthStatusFromOutput({
+        stdout: "",
+        stderr: "Not logged in. Run claude auth login.",
+        code: 1,
+      });
+      assert.strictEqual(parsed.status, "error");
+      assert.strictEqual(parsed.authStatus, "unauthenticated");
+    });
+  });
+
+  describe("ProviderHealthLive", () => {
+    it.effect("publishes codex and claude provider statuses", () =>
+      Effect.gen(function* () {
+        yield* withTempCodexHome();
+        const providerHealth = yield* ProviderHealth;
+        const statuses = yield* providerHealth.getStatuses;
+
+        assert.deepStrictEqual(
+          statuses.map((status) => status.provider),
+          ["codex", "claudeCode"],
+        );
+      }).pipe(
+        Effect.provide(
+          ProviderHealthLive.pipe(
+            Layer.provide(
+              mockSpawnerCommandLayer(({ command, args }) => {
+                const joined = args.join(" ");
+                if (command === "codex") {
+                  if (joined === "--version") {
+                    return { stdout: "codex 1.0.0\n", stderr: "", code: 0 };
+                  }
+                  if (joined === "login status") {
+                    return { stdout: "Logged in\n", stderr: "", code: 0 };
+                  }
+                }
+
+                if (command === CLAUDE_CLI_PATH) {
+                  if (joined === "--version") {
+                    return { stdout: "2.1.76 (Claude Code)\n", stderr: "", code: 0 };
+                  }
+                  if (joined === "auth status --json") {
+                    return { stdout: '{"authenticated":true}\n', stderr: "", code: 0 };
+                  }
+                }
+
+                throw new Error(`Unexpected provider health command: ${command} ${joined}`);
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
   });
 
   // ── readCodexConfigModelProvider tests ─────────────────────────────
