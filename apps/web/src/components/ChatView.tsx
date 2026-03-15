@@ -139,6 +139,7 @@ import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/Provider
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CodexTraitsPicker } from "./chat/CodexTraitsPicker";
+import { ClaudeCodeTraitsPicker } from "./chat/ClaudeCodeTraitsPicker";
 import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu";
 import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
@@ -223,6 +224,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const setComposerDraftEffort = useComposerDraftStore((store) => store.setEffort);
   const setComposerDraftCodexFastMode = useComposerDraftStore((store) => store.setCodexFastMode);
+  const setComposerDraftClaudeCodeThinking = useComposerDraftStore(
+    (store) => store.setClaudeCodeThinking,
+  );
+  const setComposerDraftClaudeCodeEffort = useComposerDraftStore(
+    (store) => store.setClaudeCodeEffort,
+  );
   const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
@@ -520,16 +527,34 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const selectedEffort = composerDraft.effort ?? getDefaultReasoningEffort(selectedProvider);
   const selectedCodexFastModeEnabled =
     selectedProvider === "codex" ? composerDraft.codexFastMode : false;
+  const selectedClaudeCodeThinkingEnabled =
+    selectedProvider === "claudeCode" ? composerDraft.claudeCodeThinking : false;
+  const selectedClaudeCodeEffort = composerDraft.claudeCodeEffort ?? "high";
   const selectedModelOptionsForDispatch = useMemo(() => {
-    if (selectedProvider !== "codex") {
-      return undefined;
+    if (selectedProvider === "codex") {
+      const codexOptions = {
+        ...(supportsReasoningEffort && selectedEffort ? { reasoningEffort: selectedEffort } : {}),
+        ...(selectedCodexFastModeEnabled ? { fastMode: true } : {}),
+      };
+      return Object.keys(codexOptions).length > 0 ? { codex: codexOptions } : undefined;
     }
-    const codexOptions = {
-      ...(supportsReasoningEffort && selectedEffort ? { reasoningEffort: selectedEffort } : {}),
-      ...(selectedCodexFastModeEnabled ? { fastMode: true } : {}),
-    };
-    return Object.keys(codexOptions).length > 0 ? { codex: codexOptions } : undefined;
-  }, [selectedCodexFastModeEnabled, selectedEffort, selectedProvider, supportsReasoningEffort]);
+    if (selectedProvider === "claudeCode") {
+      return {
+        claudeCode: {
+          thinking: selectedClaudeCodeThinkingEnabled,
+          effort: selectedClaudeCodeEffort,
+        },
+      };
+    }
+    return undefined;
+  }, [
+    selectedClaudeCodeEffort,
+    selectedClaudeCodeThinkingEnabled,
+    selectedCodexFastModeEnabled,
+    selectedEffort,
+    selectedProvider,
+    supportsReasoningEffort,
+  ]);
   const providerOptionsForDispatch = useMemo(() => {
     if (!settings.codexBinaryPath && !settings.codexHomePath) {
       return undefined;
@@ -2912,6 +2937,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [scheduleComposerFocus, setComposerDraftCodexFastMode, threadId],
   );
+  const onClaudeCodeThinkingChange = useCallback(
+    (enabled: boolean) => {
+      setComposerDraftClaudeCodeThinking(threadId, enabled);
+      scheduleComposerFocus();
+    },
+    [scheduleComposerFocus, setComposerDraftClaudeCodeThinking, threadId],
+  );
+  const onClaudeCodeEffortChange = useCallback(
+    (effort: import("@t3tools/contracts").ClaudeCodeEffort) => {
+      setComposerDraftClaudeCodeEffort(threadId, effort);
+      scheduleComposerFocus();
+    },
+    [scheduleComposerFocus, setComposerDraftClaudeCodeEffort, threadId],
+  );
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) => {
       if (isLocalDraftThread) {
@@ -3522,9 +3561,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           selectedEffort={selectedEffort}
                           selectedProvider={selectedProvider}
                           selectedCodexFastModeEnabled={selectedCodexFastModeEnabled}
+                          selectedClaudeCodeThinkingEnabled={selectedClaudeCodeThinkingEnabled}
+                          selectedClaudeCodeEffort={selectedClaudeCodeEffort}
                           reasoningOptions={reasoningOptions}
                           onEffortSelect={onEffortSelect}
                           onCodexFastModeChange={onCodexFastModeChange}
+                          onClaudeCodeThinkingChange={onClaudeCodeThinkingChange}
+                          onClaudeCodeEffortChange={onClaudeCodeEffortChange}
                           onToggleInteractionMode={toggleInteractionMode}
                           onTogglePlanSidebar={togglePlanSidebar}
                           onToggleRuntimeMode={toggleRuntimeMode}
@@ -3543,6 +3586,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 options={reasoningOptions}
                                 onEffortChange={onEffortSelect}
                                 onFastModeChange={onCodexFastModeChange}
+                              />
+                            </>
+                          ) : null}
+                          {selectedProvider === "claudeCode" ? (
+                            <>
+                              <Separator
+                                orientation="vertical"
+                                className="mx-0.5 hidden h-4 sm:block"
+                              />
+                              <ClaudeCodeTraitsPicker
+                                effort={selectedClaudeCodeEffort}
+                                thinkingEnabled={selectedClaudeCodeThinkingEnabled}
+                                onEffortChange={onClaudeCodeEffortChange}
+                                onThinkingChange={onClaudeCodeThinkingChange}
                               />
                             </>
                           ) : null}

@@ -1,4 +1,5 @@
 import {
+  type ClaudeCodeEffort,
   type CodexReasoningEffort,
   type ProviderKind,
   RuntimeMode,
@@ -27,9 +28,13 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   selectedEffort: CodexReasoningEffort | null;
   selectedProvider: ProviderKind;
   selectedCodexFastModeEnabled: boolean;
+  selectedClaudeCodeThinkingEnabled: boolean;
+  selectedClaudeCodeEffort: ClaudeCodeEffort;
   reasoningOptions: ReadonlyArray<CodexReasoningEffort>;
   onEffortSelect: (effort: CodexReasoningEffort) => void;
   onCodexFastModeChange: (enabled: boolean) => void;
+  onClaudeCodeThinkingChange: (enabled: boolean) => void;
+  onClaudeCodeEffortChange: (effort: ClaudeCodeEffort) => void;
   onToggleInteractionMode: () => void;
   onTogglePlanSidebar: () => void;
   onToggleRuntimeMode: () => void;
@@ -89,6 +94,41 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
               >
                 <MenuRadioItem value="off">off</MenuRadioItem>
                 <MenuRadioItem value="on">on</MenuRadioItem>
+              </MenuRadioGroup>
+            </MenuGroup>
+            <MenuDivider />
+          </>
+        ) : null}
+        {props.selectedProvider === "claudeCode" ? (
+          <>
+            <MenuGroup>
+              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Effort</div>
+              <MenuRadioGroup
+                value={props.selectedClaudeCodeEffort}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  props.onClaudeCodeEffortChange(value as ClaudeCodeEffort);
+                }}
+              >
+                <MenuRadioItem value="low">Low</MenuRadioItem>
+                <MenuRadioItem value="medium">Medium</MenuRadioItem>
+                <MenuRadioItem value="high">High (default)</MenuRadioItem>
+                <MenuRadioItem value="max">Max</MenuRadioItem>
+              </MenuRadioGroup>
+            </MenuGroup>
+            <MenuDivider />
+            <MenuGroup>
+              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
+                Extended Thinking
+              </div>
+              <MenuRadioGroup
+                value={props.selectedClaudeCodeThinkingEnabled ? "on" : "off"}
+                onValueChange={(value) => {
+                  props.onClaudeCodeThinkingChange(value === "on");
+                }}
+              >
+                <MenuRadioItem value="off">off</MenuRadioItem>
+                <MenuRadioItem value="on">on (default)</MenuRadioItem>
               </MenuRadioGroup>
             </MenuGroup>
             <MenuDivider />
