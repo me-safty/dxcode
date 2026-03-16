@@ -1,14 +1,29 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { ChevronDownIcon } from "lucide-react";
 import { type ProviderKind } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
-import { MAX_CUSTOM_MODEL_LENGTH, useAppSettings } from "../appSettings";
+import {
+  MAX_CUSTOM_MODEL_LENGTH,
+  MAX_CUSTOM_NOTIFICATION_SOUND_BYTES,
+  useAppSettings,
+} from "../appSettings";
+import {
+  getNotificationPermissionState,
+  playConfiguredCompletionSound,
+  requestNotificationPermission,
+  type NotificationPermissionState,
+} from "../agentCompletionNotifications";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { ensureNativeApi } from "../nativeApi";
+import {
+  deleteCustomNotificationSound,
+  saveCustomNotificationSound,
+} from "../notificationSoundStorage";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import {
@@ -20,6 +35,7 @@ import {
 } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { APP_VERSION } from "../branding";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/components/ui/collapsible";
 import { SidebarInset } from "~/components/ui/sidebar";
 
 const THEME_OPTIONS = [
@@ -62,6 +78,13 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
+const NOTIFICATION_SOUND_OPTIONS = [
+  { value: "off", label: "Off" },
+  { value: "default", label: "Dragon Studio" },
+  { value: "custom", label: "Custom file" },
+] as const;
+type NotificationSoundOption = (typeof NOTIFICATION_SOUND_OPTIONS)[number]["value"];
+
 function getCustomModelsForProvider(
   settings: ReturnType<typeof useAppSettings>["settings"],
   provider: ProviderKind,
@@ -98,6 +121,12 @@ function SettingsRouteView() {
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
+  const [notificationPermissionState, setNotificationPermissionState] =
+    useState<NotificationPermissionState>(() => getNotificationPermissionState());
+  const [notificationError, setNotificationError] = useState<string | null>(null);
+  const [soundTestError, setSoundTestError] = useState<string | null>(null);
+  const [soundSelectionError, setSoundSelectionError] = useState<string | null>(null);
+  const [soundAccordionOpen, setSoundAccordionOpen] = useState(false);
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
   >({
@@ -111,6 +140,43 @@ function SettingsRouteView() {
   const codexHomePath = settings.codexHomePath;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
+  const customSoundInputRef = useRef<HTMLInputElement | null>(null);
+  const hasCustomNotificationSound = settings.notificationCustomSoundId.length > 0;
+  const systemNotificationsEnabled =
+    settings.enableSystemNotifications && notificationPermissionState === "granted";
+  const selectedSoundOption: NotificationSoundOption = !settings.enableCompletionSound
+    ? "off"
+    : settings.notificationSoundSelection === "custom" && hasCustomNotificationSound
+      ? "custom"
+      : "default";
+  const selectedSoundLabel =
+    NOTIFICATION_SOUND_OPTIONS.find((option) => option.value === selectedSoundOption)?.label ??
+    "Off";
+  const selectedCustomSoundLabel = settings.notificationCustomSoundName || "Custom file";
+
+  useEffect(() => {
+    const refreshPermissionState = () => {
+      setNotificationPermissionState(getNotificationPermissionState());
+    };
+
+    refreshPermissionState();
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.addEventListener("focus", refreshPermissionState);
+    document.addEventListener("visibilitychange", refreshPermissionState);
+    return () => {
+      window.removeEventListener("focus", refreshPermissionState);
+      document.removeEventListener("visibilitychange", refreshPermissionState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (settings.enableSystemNotifications && notificationPermissionState !== "granted") {
+      updateSettings({ enableSystemNotifications: false });
+    }
+  }, [notificationPermissionState, settings.enableSystemNotifications, updateSettings]);
 
   const openKeybindingsFile = useCallback(() => {
     if (!keybindingsConfigPath) return;
@@ -198,6 +264,151 @@ function SettingsRouteView() {
     },
     [settings, updateSettings],
   );
+
+  const toggleSystemNotifications = useCallback(
+    async (checked: boolean) => {
+      setNotificationError(null);
+      if (!checked) {
+        updateSettings({ enableSystemNotifications: false });
+        return;
+      }
+
+      const permissionState = getNotificationPermissionState();
+      if (permissionState === "unavailable") {
+        updateSettings({ enableSystemNotifications: false });
+        setNotificationPermissionState(permissionState);
+        setNotificationError("System notifications are unavailable in this environment.");
+        return;
+      }
+
+      if (permissionState === "denied") {
+        updateSettings({ enableSystemNotifications: false });
+        setNotificationPermissionState(permissionState);
+        setNotificationError("System notifications are blocked in your browser or OS settings.");
+        return;
+      }
+
+      const nextPermissionState =
+        permissionState === "default" ? await requestNotificationPermission() : permissionState;
+      setNotificationPermissionState(nextPermissionState);
+      if (nextPermissionState !== "granted") {
+        updateSettings({ enableSystemNotifications: false });
+        if (nextPermissionState === "denied") {
+          setNotificationError("System notifications are blocked in your browser or OS settings.");
+        }
+        return;
+      }
+
+      updateSettings({ enableSystemNotifications: true });
+    },
+    [updateSettings],
+  );
+
+  const playTestSound = useCallback(() => {
+    setSoundTestError(null);
+    void playConfiguredCompletionSound(settings).catch((error) => {
+      setSoundTestError(
+        error instanceof Error ? error.message : "Unable to play the completion sound.",
+      );
+    });
+  }, [settings]);
+
+  const openCustomSoundPicker = useCallback(() => {
+    setSoundSelectionError(null);
+    customSoundInputRef.current?.click();
+  }, []);
+
+  const handleCustomSoundSelected = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      setSoundSelectionError(null);
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) {
+        return;
+      }
+
+      if (file.type.length > 0 && !file.type.startsWith("audio/")) {
+        setSoundSelectionError("Choose an audio file.");
+        return;
+      }
+
+      if (file.size > MAX_CUSTOM_NOTIFICATION_SOUND_BYTES) {
+        setSoundSelectionError(
+          `Custom sounds must be ${Math.floor(MAX_CUSTOM_NOTIFICATION_SOUND_BYTES / (1024 * 1024))}MB or smaller.`,
+        );
+        return;
+      }
+
+      try {
+        const savedSound = await saveCustomNotificationSound({
+          file,
+          name: file.name,
+          previousId: settings.notificationCustomSoundId,
+        });
+        updateSettings({
+          enableCompletionSound: true,
+          notificationSoundSelection: "custom",
+          notificationCustomSoundName: savedSound.name,
+          notificationCustomSoundId: savedSound.id,
+        });
+      } catch (error) {
+        setSoundSelectionError(
+          error instanceof Error ? error.message : "Unable to load the selected sound file.",
+        );
+      }
+    },
+    [settings.notificationCustomSoundId, updateSettings],
+  );
+
+  const handleNotificationSoundChange = useCallback(
+    (value: NotificationSoundOption) => {
+      setSoundSelectionError(null);
+      setSoundTestError(null);
+      if (value === "off") {
+        updateSettings({
+          enableCompletionSound: false,
+        });
+        return;
+      }
+
+      if (value === "default") {
+        updateSettings({
+          enableCompletionSound: true,
+          notificationSoundSelection: "default",
+        });
+        return;
+      }
+
+      if (settings.notificationCustomSoundId.length > 0) {
+        updateSettings({
+          enableCompletionSound: true,
+          notificationSoundSelection: "custom",
+        });
+        return;
+      }
+
+      openCustomSoundPicker();
+    },
+    [openCustomSoundPicker, settings.notificationCustomSoundId, updateSettings],
+  );
+
+  const restoreNotificationDefaults = useCallback(() => {
+    setNotificationError(null);
+    setSoundSelectionError(null);
+    setSoundTestError(null);
+    const previousCustomSoundId = settings.notificationCustomSoundId;
+    updateSettings({
+      enableSystemNotifications: defaults.enableSystemNotifications,
+      enableCompletionSound: defaults.enableCompletionSound,
+      notificationSoundSelection: defaults.notificationSoundSelection,
+      notificationCustomSoundName: defaults.notificationCustomSoundName,
+      notificationCustomSoundId: defaults.notificationCustomSoundId,
+    });
+
+    if (previousCustomSoundId) {
+      void deleteCustomNotificationSound(previousCustomSoundId);
+    }
+  }, [defaults, settings.notificationCustomSoundId, updateSettings]);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
@@ -586,6 +797,138 @@ function SettingsRouteView() {
                   </Button>
                 </div>
               ) : null}
+            </section>
+
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-4">
+                <h2 className="text-sm font-medium text-foreground">Notifications</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Alert you when an agent turn settles while T3 Code is in the background.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">System notifications</p>
+                    <p className="text-xs text-muted-foreground">
+                      Show desktop or browser notifications for completed, failed, or interrupted
+                      turns.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={systemNotificationsEnabled}
+                    disabled={notificationPermissionState === "unavailable"}
+                    onCheckedChange={(checked) => {
+                      void toggleSystemNotifications(Boolean(checked));
+                    }}
+                    aria-label="System notifications"
+                  />
+                </div>
+
+                <Collapsible
+                  className="rounded-lg border border-border bg-background"
+                  open={soundAccordionOpen}
+                  onOpenChange={setSoundAccordionOpen}
+                >
+                  <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-3 py-2 text-left">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Notification sound</p>
+                      <p className="text-xs text-muted-foreground">
+                        {selectedSoundOption === "custom"
+                          ? selectedCustomSoundLabel
+                          : selectedSoundLabel}
+                      </p>
+                    </div>
+                    <ChevronDownIcon
+                      className={`size-4 text-muted-foreground transition-transform ${
+                        soundAccordionOpen ? "rotate-180" : ""
+                      }`}
+                    />
+                  </CollapsibleTrigger>
+
+                  <CollapsibleContent className="border-t border-border px-3 py-3">
+                    <div className="space-y-3">
+                      <p className="text-xs text-muted-foreground">
+                        Choose what plays when a background turn settles.
+                      </p>
+
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <Select
+                          value={selectedSoundOption}
+                          onValueChange={(value) => {
+                            if (value !== "off" && value !== "default" && value !== "custom") {
+                              return;
+                            }
+                            handleNotificationSoundChange(value);
+                          }}
+                        >
+                          <SelectTrigger className="w-44" aria-label="Notification sound">
+                            <SelectValue>{selectedSoundLabel}</SelectValue>
+                          </SelectTrigger>
+                          <SelectPopup align="start">
+                            {NOTIFICATION_SOUND_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectPopup>
+                        </Select>
+
+                        <div className="flex flex-wrap gap-2">
+                          {selectedSoundOption === "custom" ? (
+                            <Button size="xs" variant="outline" onClick={openCustomSoundPicker}>
+                              Browse local file
+                            </Button>
+                          ) : null}
+                          {selectedSoundOption !== "off" ? (
+                            <Button size="xs" variant="outline" onClick={playTestSound}>
+                              Test sound
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <input
+                        ref={customSoundInputRef}
+                        className="hidden"
+                        type="file"
+                        accept="audio/*"
+                        onChange={(event) => {
+                          void handleCustomSoundSelected(event);
+                        }}
+                      />
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+
+                {notificationPermissionState === "denied" && !notificationError ? (
+                  <p className="text-xs text-muted-foreground">
+                    Notifications are blocked in your browser or OS settings.
+                  </p>
+                ) : null}
+                {notificationError ? (
+                  <p className="text-xs text-destructive">{notificationError}</p>
+                ) : null}
+                {soundSelectionError ? (
+                  <p className="text-xs text-destructive">{soundSelectionError}</p>
+                ) : null}
+                {soundTestError ? (
+                  <p className="text-xs text-destructive">{soundTestError}</p>
+                ) : null}
+
+                {settings.enableSystemNotifications !== defaults.enableSystemNotifications ||
+                settings.enableCompletionSound !== defaults.enableCompletionSound ||
+                settings.notificationSoundSelection !== defaults.notificationSoundSelection ||
+                settings.notificationCustomSoundName !== defaults.notificationCustomSoundName ||
+                settings.notificationCustomSoundId !== defaults.notificationCustomSoundId ? (
+                  <div className="flex justify-end">
+                    <Button size="xs" variant="outline" onClick={restoreNotificationDefaults}>
+                      Restore default
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
             </section>
 
             <section className="rounded-2xl border border-border bg-card p-5">

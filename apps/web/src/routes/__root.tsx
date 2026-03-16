@@ -11,6 +11,14 @@ import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
 
 import { APP_DISPLAY_NAME } from "../branding";
+import {
+  collectNewlySettledTurns,
+  createNotificationDedupeState,
+  dispatchTurnCompletionEffects,
+  isAppBackgrounded,
+  seedNotificationDedupeStateFromSnapshot,
+} from "../agentCompletionNotifications";
+import { readAppSettings } from "../appSettings";
 import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
@@ -151,12 +159,44 @@ function EventRouter() {
     let latestSequence = 0;
     let syncing = false;
     let pending = false;
+    let pendingSyncOptions = { seedNotificationBaseline: false };
     let needsProviderInvalidation = false;
+    let previousSnapshot: Awaited<ReturnType<typeof api.orchestration.getSnapshot>> | null = null;
+    const notificationDedupeState = createNotificationDedupeState();
 
-    const flushSnapshotSync = async (): Promise<void> => {
+    const flushSnapshotSync = async (
+      options: { seedNotificationBaseline: boolean } = { seedNotificationBaseline: false },
+    ): Promise<void> => {
       const snapshot = await api.orchestration.getSnapshot();
       if (disposed) return;
       latestSequence = Math.max(latestSequence, snapshot.snapshotSequence);
+      if (options.seedNotificationBaseline) {
+        seedNotificationDedupeStateFromSnapshot(snapshot, notificationDedupeState);
+      } else {
+        const settledTurns = collectNewlySettledTurns(
+          previousSnapshot,
+          snapshot,
+          notificationDedupeState,
+        );
+        if (settledTurns.length > 0) {
+          const settings = readAppSettings();
+          const backgrounded = isAppBackgrounded();
+          for (const settledTurn of settledTurns) {
+            await dispatchTurnCompletionEffects({
+              settledTurn,
+              settings,
+              backgrounded,
+              onOpenThread: (threadId) => {
+                void navigate({
+                  to: "/$threadId",
+                  params: { threadId },
+                });
+              },
+            });
+          }
+        }
+      }
+      previousSnapshot = snapshot;
       syncServerReadModel(snapshot);
       clearPromotedDraftThreads(new Set(snapshot.threads.map((t) => t.id)));
       const draftThreadIds = Object.keys(
@@ -168,20 +208,29 @@ function EventRouter() {
       });
       removeOrphanedTerminalStates(activeThreadIds);
       if (pending) {
+        const nextOptions = pendingSyncOptions;
         pending = false;
-        await flushSnapshotSync();
+        pendingSyncOptions = { seedNotificationBaseline: false };
+        await flushSnapshotSync(nextOptions);
       }
     };
 
-    const syncSnapshot = async () => {
+    const syncSnapshot = async (
+      options: { seedNotificationBaseline: boolean } = { seedNotificationBaseline: false },
+    ) => {
       if (syncing) {
         pending = true;
+        pendingSyncOptions = {
+          seedNotificationBaseline:
+            pendingSyncOptions.seedNotificationBaseline || options.seedNotificationBaseline,
+        };
         return;
       }
       syncing = true;
       pending = false;
+      pendingSyncOptions = { seedNotificationBaseline: false };
       try {
-        await flushSnapshotSync();
+        await flushSnapshotSync(options);
       } catch {
         // Keep prior state and wait for next domain event to trigger a resync.
       }
@@ -231,7 +280,7 @@ function EventRouter() {
     });
     const unsubWelcome = onServerWelcome((payload) => {
       void (async () => {
-        await syncSnapshot();
+        await syncSnapshot({ seedNotificationBaseline: true });
         if (disposed) {
           return;
         }
