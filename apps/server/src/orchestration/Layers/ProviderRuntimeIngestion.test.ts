@@ -641,6 +641,116 @@ describe("ProviderRuntimeIngestion", () => {
     });
   });
 
+  it("projects Claude teammate lifecycle into stable team activities", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "task.started",
+      eventId: asEventId("evt-team-task-started"),
+      provider: "claudeCode",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-team"),
+      payload: {
+        taskId: "task-team-1",
+        description: "Review the migration plan",
+        toolUseId: "tool-task-1",
+        teammateName: "db-reviewer",
+        teamName: "release-squad",
+        agentType: "code-reviewer",
+      },
+    });
+
+    harness.emit({
+      type: "task.progress",
+      eventId: asEventId("evt-team-task-progress"),
+      provider: "claudeCode",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-team"),
+      payload: {
+        taskId: "task-team-1",
+        description: "Reviewing rollback flow",
+        summary: "Checking migration rollback safety.",
+        toolUseId: "tool-task-1",
+        teammateName: "db-reviewer",
+        teamName: "release-squad",
+        agentType: "code-reviewer",
+      },
+    });
+
+    harness.emit({
+      type: "hook.started",
+      eventId: asEventId("evt-team-hook-idle"),
+      provider: "claudeCode",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-team"),
+      payload: {
+        hookId: "hook-team-idle",
+        hookName: "Team idle hook",
+        hookEvent: "TeammateIdle",
+        teammateName: "db-reviewer",
+        teamName: "release-squad",
+      },
+    });
+
+    harness.emit({
+      type: "task.completed",
+      eventId: asEventId("evt-team-task-completed"),
+      provider: "claudeCode",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-team"),
+      payload: {
+        taskId: "task-team-1",
+        status: "completed",
+        summary: "Migration review finished.",
+        toolUseId: "tool-task-1",
+        teammateName: "db-reviewer",
+        teamName: "release-squad",
+        agentType: "code-reviewer",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "teammate.completed",
+      ),
+    );
+
+    expect(thread.activities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "teammate.started",
+          summary: "db-reviewer started",
+          payload: expect.objectContaining({
+            taskId: "task-team-1",
+            toolUseId: "tool-task-1",
+            teammateName: "db-reviewer",
+            teamName: "release-squad",
+          }),
+        }),
+        expect.objectContaining({
+          kind: "teammate.progress",
+          summary: "db-reviewer update",
+        }),
+        expect.objectContaining({
+          kind: "teammate.idle",
+          summary: "Teammate idle",
+          payload: expect.objectContaining({
+            hookEvent: "TeammateIdle",
+          }),
+        }),
+        expect.objectContaining({
+          kind: "teammate.completed",
+          summary: "db-reviewer completed",
+        }),
+      ]),
+    );
+  });
+
   it("uses assistant item completion detail when no assistant deltas were streamed", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

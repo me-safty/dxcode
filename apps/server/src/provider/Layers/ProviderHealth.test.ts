@@ -9,6 +9,7 @@ import {
   checkClaudeProviderStatus,
   checkCodexProviderStatus,
   hasCustomModelProvider,
+  parseClaudeCliVersion,
   parseClaudeAuthStatusFromOutput,
   parseAuthStatusFromOutput,
   ProviderHealthLive,
@@ -264,6 +265,8 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
         assert.strictEqual(status.status, "ready");
         assert.strictEqual(status.available, true);
         assert.strictEqual(status.authStatus, "authenticated");
+        assert.strictEqual(status.version, "2.1.76");
+        assert.strictEqual(status.capabilities?.agentTeams?.state, "available");
       }).pipe(
         Effect.provide(
           mockSpawnerCommandLayer(({ command, args }) => {
@@ -293,6 +296,7 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
         assert.strictEqual(status.available, false);
         assert.strictEqual(status.authStatus, "unknown");
         assert.strictEqual(status.message, "Claude Code runtime is not available.");
+        assert.strictEqual(status.capabilities?.agentTeams?.state, "misconfigured");
       }).pipe(Effect.provide(failingSpawnerLayer("spawn claude ENOENT"))),
     );
 
@@ -303,6 +307,7 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
         assert.strictEqual(status.status, "error");
         assert.strictEqual(status.available, true);
         assert.strictEqual(status.authStatus, "unauthenticated");
+        assert.strictEqual(status.version, "2.1.76");
         assert.strictEqual(
           status.message,
           "Claude Code is not authenticated. Run `claude auth login` and try again.",
@@ -317,6 +322,34 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
             }
             if (joined === "auth status --json") {
               return { stdout: "", stderr: "Not logged in. Run claude auth login.", code: 1 };
+            }
+            throw new Error(`Unexpected Claude args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("marks agent teams unsupported on older Claude Code versions", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeProviderStatus;
+        assert.strictEqual(status.provider, "claudeCode");
+        assert.strictEqual(status.status, "ready");
+        assert.strictEqual(status.version, "2.1.20");
+        assert.strictEqual(status.capabilities?.agentTeams?.state, "unsupported");
+        assert.strictEqual(
+          status.capabilities?.agentTeams?.message,
+          "Agent Teams requires Claude Code v2.1.32 or newer.",
+        );
+      }).pipe(
+        Effect.provide(
+          mockSpawnerCommandLayer(({ command, args }) => {
+            assert.strictEqual(command, CLAUDE_CLI_PATH);
+            const joined = args.join(" ");
+            if (joined === "--version") {
+              return { stdout: "2.1.20 (Claude Code)\n", stderr: "", code: 0 };
+            }
+            if (joined === "auth status --json") {
+              return { stdout: '{"authenticated":true}\n', stderr: "", code: 0 };
             }
             throw new Error(`Unexpected Claude args: ${joined}`);
           }),
@@ -450,6 +483,12 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
       });
       assert.strictEqual(parsed.status, "error");
       assert.strictEqual(parsed.authStatus, "unauthenticated");
+    });
+  });
+
+  describe("parseClaudeCliVersion", () => {
+    it("extracts the Claude Code semver from version output", () => {
+      assert.strictEqual(parseClaudeCliVersion("2.1.76 (Claude Code)\n"), "2.1.76");
     });
   });
 

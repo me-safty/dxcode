@@ -113,6 +113,73 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.payload.answers.sandbox_mode).toBe("workspace-write");
   });
 
+  it("decodes task and hook metadata for Claude agent teams", () => {
+    const taskEvent = decodeRuntimeEvent({
+      type: "task.progress",
+      eventId: "event-task-progress-1",
+      provider: "claudeCode",
+      createdAt: "2026-02-28T00:00:02.000Z",
+      threadId: "thread-2",
+      turnId: "turn-2",
+      payload: {
+        taskId: "task-1",
+        description: "Reviewing migration plan",
+        summary: "DB reviewer is checking rollback paths.",
+        agentId: "agent-db-reviewer",
+        agentName: "db-reviewer",
+        agentColor: "purple",
+        toolUseId: "tool-task-1",
+        teammateName: "db-reviewer",
+        teamName: "release-squad",
+        agentType: "code-reviewer",
+        parentSessionId: "session-lead-1",
+        teammateMode: "in-process",
+        planModeRequired: true,
+      },
+    });
+
+    expect(taskEvent.type).toBe("task.progress");
+    if (taskEvent.type !== "task.progress") {
+      throw new Error("expected task.progress");
+    }
+    expect(taskEvent.payload.toolUseId).toBe("tool-task-1");
+    expect(taskEvent.payload.agentId).toBe("agent-db-reviewer");
+    expect(taskEvent.payload.agentName).toBe("db-reviewer");
+    expect(taskEvent.payload.agentColor).toBe("purple");
+    expect(taskEvent.payload.teammateName).toBe("db-reviewer");
+    expect(taskEvent.payload.teamName).toBe("release-squad");
+    expect(taskEvent.payload.parentSessionId).toBe("session-lead-1");
+    expect(taskEvent.payload.teammateMode).toBe("in-process");
+    expect(taskEvent.payload.planModeRequired).toBe(true);
+
+    const hookEvent = decodeRuntimeEvent({
+      type: "hook.started",
+      eventId: "event-hook-started-1",
+      provider: "claudeCode",
+      createdAt: "2026-02-28T00:00:03.000Z",
+      threadId: "thread-2",
+      payload: {
+        hookId: "hook-1",
+        hookName: "Team idle notifier",
+        hookEvent: "TeammateIdle",
+        agentId: "agent-db-reviewer",
+        agentName: "db-reviewer",
+        teamName: "release-squad",
+        teammateName: "db-reviewer",
+      },
+    });
+
+    expect(hookEvent.type).toBe("hook.started");
+    if (hookEvent.type !== "hook.started") {
+      throw new Error("expected hook.started");
+    }
+    expect(hookEvent.payload.hookEvent).toBe("TeammateIdle");
+    expect(hookEvent.payload.agentId).toBe("agent-db-reviewer");
+    expect(hookEvent.payload.agentName).toBe("db-reviewer");
+    expect(hookEvent.payload.teamName).toBe("release-squad");
+    expect(hookEvent.payload.teammateName).toBe("db-reviewer");
+  });
+
   it("rejects legacy message.delta type", () => {
     expect(() =>
       decodeRuntimeEvent({

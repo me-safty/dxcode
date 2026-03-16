@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_TIMESTAMP_FORMAT,
+  DEFAULT_APP_SETTINGS,
   getAppModelOptions,
   normalizeCustomModelSlugs,
   resolveAppModelSelection,
@@ -79,5 +80,15 @@ describe("resolveAppModelSelection", () => {
 describe("timestamp format defaults", () => {
   it("defaults timestamp format to locale", () => {
     expect(DEFAULT_TIMESTAMP_FORMAT).toBe("locale");
+  });
+});
+
+describe("Claude teams defaults", () => {
+  it("defaults Claude agent teams settings to disabled, self-claim, and blank agent", () => {
+    expect(DEFAULT_APP_SETTINGS.claudeExperimentalAgentTeams).toBe(false);
+    expect(DEFAULT_APP_SETTINGS.claudeAgentProgressSummaries).toBe(false);
+    expect(DEFAULT_APP_SETTINGS.claudeTeammateMode).toBe("auto");
+    expect(DEFAULT_APP_SETTINGS.claudeTeamTaskDelegation).toBe("self-claim");
+    expect(DEFAULT_APP_SETTINGS.claudeDefaultAgent).toBe("");
   });
 });

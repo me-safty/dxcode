@@ -33,13 +33,35 @@ export const ServerProviderAuthStatus = Schema.Literals([
 ]);
 export type ServerProviderAuthStatus = typeof ServerProviderAuthStatus.Type;
 
+const ServerProviderCapabilityState = Schema.Literals([
+  "available",
+  "unsupported",
+  "misconfigured",
+]);
+export type ServerProviderCapabilityState = typeof ServerProviderCapabilityState.Type;
+
+const ServerProviderCapability = Schema.Struct({
+  state: ServerProviderCapabilityState,
+  minimumVersion: Schema.optional(TrimmedNonEmptyString),
+  requiresExperimentalFlag: Schema.optional(Schema.Boolean),
+  message: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerProviderCapability = typeof ServerProviderCapability.Type;
+
+const ServerProviderCapabilities = Schema.Struct({
+  agentTeams: Schema.optional(ServerProviderCapability),
+});
+export type ServerProviderCapabilities = typeof ServerProviderCapabilities.Type;
+
 export const ServerProviderStatus = Schema.Struct({
   provider: ProviderKind,
   status: ServerProviderStatusState,
   available: Schema.Boolean,
   authStatus: ServerProviderAuthStatus,
   checkedAt: IsoDateTime,
+  version: Schema.optional(TrimmedNonEmptyString),
   message: Schema.optional(TrimmedNonEmptyString),
+  capabilities: Schema.optional(ServerProviderCapabilities),
 });
 export type ServerProviderStatus = typeof ServerProviderStatus.Type;
 

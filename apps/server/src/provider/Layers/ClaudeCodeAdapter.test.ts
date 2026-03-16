@@ -277,6 +277,73 @@ describe("ClaudeCodeAdapterLive", () => {
     );
   });
 
+  it.effect("forwards Claude agent teams session options and env flags", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeCodeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeCode",
+        runtimeMode: "full-access",
+        providerOptions: {
+          claudeCode: {
+            experimentalAgentTeams: true,
+            agentProgressSummaries: true,
+            teammateMode: "in-process",
+            teamTaskDelegation: "lead-assigns",
+            defaultAgent: "code-review-lead",
+          },
+        },
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.agent, "code-review-lead");
+      assert.equal(createInput?.options.agentProgressSummaries, true);
+      assert.deepEqual(createInput?.options.settings, { teammateMode: "in-process" });
+      assert.equal(createInput?.options.env?.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS, "1");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect(
+    "prefixes Claude turns with the team delegation preference when teams are enabled",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeCodeAdapter;
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeCode",
+          runtimeMode: "full-access",
+          providerOptions: {
+            claudeCode: {
+              experimentalAgentTeams: true,
+              teamTaskDelegation: "lead-assigns",
+            },
+          },
+        });
+
+        yield* adapter.sendTurn({
+          threadId: session.threadId,
+          input: "Create a team for a quick review.",
+          attachments: [],
+        });
+
+        const createInput = harness.getLastCreateQueryInput();
+        const promptText = yield* Effect.promise(() => readFirstPromptText(createInput));
+        assert.equal(
+          promptText,
+          "Agent Teams preference: the lead should assign tasks explicitly to named teammates.\n\nCreate a team for a quick review.",
+        );
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
   it.effect("maps ultrathink to max effort and prefixes the prompt", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -307,6 +374,91 @@ describe("ClaudeCodeAdapterLive", () => {
       assert.equal(createInput?.options.effort, "max");
       const promptText = yield* Effect.promise(() => readFirstPromptText(createInput));
       assert.equal(promptText, "Ultrathink:\nInvestigate the edge cases");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("maps teammate idle and shutdown user messages into hook lifecycle events", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeCodeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 8).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeCode",
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "create a small agent team",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "user",
+        session_id: "sdk-session-team-user",
+        uuid: "user-team-user",
+        parent_tool_use_id: null,
+        teamName: "tiny-team",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `<teammate-message teammate_id="researcher" color="blue">
+{"type":"idle_notification","from":"researcher","timestamp":"2026-03-16T12:00:00.000Z","idleReason":"available"}
+</teammate-message>
+
+<teammate-message teammate_id="researcher" color="blue">
+{"type":"shutdown_approved","requestId":"shutdown-1","from":"researcher","timestamp":"2026-03-16T12:01:00.000Z"}
+</teammate-message>
+
+<teammate-message teammate_id="system">
+{"type":"teammate_terminated","message":"executor has shut down."}
+</teammate-message>`,
+            },
+          ],
+        },
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const hookEvents = runtimeEvents.filter((event) => event.type === "hook.started");
+      assert.equal(hookEvents.length, 3);
+
+      const [idleEvent, shutdownEvent, terminatedEvent] = hookEvents;
+      assert.equal(idleEvent?.type, "hook.started");
+      if (idleEvent?.type === "hook.started") {
+        assert.equal(idleEvent.payload.hookEvent, "TeammateIdle");
+        assert.equal(idleEvent.payload.hookName, "idle_notification");
+        assert.equal(idleEvent.payload.teammateName, "researcher");
+        assert.equal(idleEvent.payload.teamName, "tiny-team");
+        assert.equal(idleEvent.payload.agentColor, "blue");
+      }
+
+      assert.equal(shutdownEvent?.type, "hook.started");
+      if (shutdownEvent?.type === "hook.started") {
+        assert.equal(shutdownEvent.payload.hookEvent, "SubagentStop");
+        assert.equal(shutdownEvent.payload.hookName, "shutdown_approved");
+        assert.equal(shutdownEvent.payload.teammateName, "researcher");
+        assert.equal(shutdownEvent.payload.teamName, "tiny-team");
+        assert.equal(shutdownEvent.payload.agentColor, "blue");
+      }
+
+      assert.equal(terminatedEvent?.type, "hook.started");
+      if (terminatedEvent?.type === "hook.started") {
+        assert.equal(terminatedEvent.payload.hookEvent, "SubagentStop");
+        assert.equal(terminatedEvent.payload.hookName, "teammate_terminated");
+        assert.equal(terminatedEvent.payload.teammateName, "executor");
+        assert.equal(terminatedEvent.payload.teamName, "tiny-team");
+      }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -488,6 +640,8 @@ describe("ClaudeCodeAdapterLive", () => {
               description: "Review the database layer",
               prompt: "Audit the SQL changes",
               subagent_type: "code-reviewer",
+              team_name: "release-squad",
+              name: "db-reviewer",
             },
           },
         },
@@ -519,6 +673,10 @@ describe("ClaudeCodeAdapterLive", () => {
       if (toolStarted?.type === "item.started") {
         assert.equal(toolStarted.payload.itemType, "collab_agent_tool_call");
         assert.equal(toolStarted.payload.title, "Subagent task");
+        assert.equal(toolStarted.payload.toolUseId, "tool-task-1");
+        assert.equal(toolStarted.payload.agentType, "code-reviewer");
+        assert.equal(toolStarted.payload.teamName, "release-squad");
+        assert.equal(toolStarted.payload.teammateName, "db-reviewer");
       }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
@@ -546,6 +704,7 @@ describe("ClaudeCodeAdapterLive", () => {
         type: "system",
         subtype: "task_progress",
         task_id: "task-subagent-1",
+        tool_use_id: "tool-task-1",
         description: "Running background teammate",
         summary: "Code reviewer checked the migration edge cases.",
         usage: {
@@ -566,6 +725,7 @@ describe("ClaudeCodeAdapterLive", () => {
           "Code reviewer checked the migration edge cases.",
         );
         assert.equal(progressEvent.payload.description, "Running background teammate");
+        assert.equal(progressEvent.payload.toolUseId, "tool-task-1");
       }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),

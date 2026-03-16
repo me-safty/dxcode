@@ -376,6 +376,17 @@ export const ItemLifecyclePayload = Schema.Struct({
   status: Schema.optional(RuntimeItemStatus),
   title: Schema.optional(TrimmedNonEmptyStringSchema),
   detail: Schema.optional(TrimmedNonEmptyStringSchema),
+  agentId: Schema.optional(TrimmedNonEmptyStringSchema),
+  agentName: Schema.optional(TrimmedNonEmptyStringSchema),
+  agentColor: Schema.optional(TrimmedNonEmptyStringSchema),
+  agentType: Schema.optional(TrimmedNonEmptyStringSchema),
+  teamName: Schema.optional(TrimmedNonEmptyStringSchema),
+  teammateName: Schema.optional(TrimmedNonEmptyStringSchema),
+  parentSessionId: Schema.optional(TrimmedNonEmptyStringSchema),
+  teammateMode: Schema.optional(TrimmedNonEmptyStringSchema),
+  toolUseId: Schema.optional(TrimmedNonEmptyStringSchema),
+  planModeRequired: Schema.optional(Schema.Boolean),
+  awaitingLeaderApproval: Schema.optional(Schema.Boolean),
   data: Schema.optional(Schema.Unknown),
 });
 export type ItemLifecyclePayload = typeof ItemLifecyclePayload.Type;
@@ -388,10 +399,25 @@ const ContentDeltaPayload = Schema.Struct({
 });
 export type ContentDeltaPayload = typeof ContentDeltaPayload.Type;
 
+const RuntimeAgentMetadataFields = {
+  agentId: Schema.optional(TrimmedNonEmptyStringSchema),
+  agentName: Schema.optional(TrimmedNonEmptyStringSchema),
+  agentColor: Schema.optional(TrimmedNonEmptyStringSchema),
+  agentType: Schema.optional(TrimmedNonEmptyStringSchema),
+  teamName: Schema.optional(TrimmedNonEmptyStringSchema),
+  teammateName: Schema.optional(TrimmedNonEmptyStringSchema),
+  parentSessionId: Schema.optional(TrimmedNonEmptyStringSchema),
+  teammateMode: Schema.optional(TrimmedNonEmptyStringSchema),
+  toolUseId: Schema.optional(TrimmedNonEmptyStringSchema),
+  planModeRequired: Schema.optional(Schema.Boolean),
+  awaitingLeaderApproval: Schema.optional(Schema.Boolean),
+} as const;
+
 const RequestOpenedPayload = Schema.Struct({
   requestType: CanonicalRequestType,
   detail: Schema.optional(TrimmedNonEmptyStringSchema),
   args: Schema.optional(Schema.Unknown),
+  ...RuntimeAgentMetadataFields,
 });
 export type RequestOpenedPayload = typeof RequestOpenedPayload.Type;
 
@@ -399,6 +425,7 @@ const RequestResolvedPayload = Schema.Struct({
   requestType: CanonicalRequestType,
   decision: Schema.optional(TrimmedNonEmptyStringSchema),
   resolution: Schema.optional(Schema.Unknown),
+  ...RuntimeAgentMetadataFields,
 });
 export type RequestResolvedPayload = typeof RequestResolvedPayload.Type;
 
@@ -430,6 +457,7 @@ const TaskStartedPayload = Schema.Struct({
   taskId: RuntimeTaskId,
   description: Schema.optional(TrimmedNonEmptyStringSchema),
   taskType: Schema.optional(TrimmedNonEmptyStringSchema),
+  ...RuntimeAgentMetadataFields,
 });
 export type TaskStartedPayload = typeof TaskStartedPayload.Type;
 
@@ -439,6 +467,7 @@ const TaskProgressPayload = Schema.Struct({
   summary: Schema.optional(TrimmedNonEmptyStringSchema),
   usage: Schema.optional(Schema.Unknown),
   lastToolName: Schema.optional(TrimmedNonEmptyStringSchema),
+  ...RuntimeAgentMetadataFields,
 });
 export type TaskProgressPayload = typeof TaskProgressPayload.Type;
 
@@ -447,6 +476,7 @@ const TaskCompletedPayload = Schema.Struct({
   status: Schema.Literals(["completed", "failed", "stopped"]),
   summary: Schema.optional(TrimmedNonEmptyStringSchema),
   usage: Schema.optional(Schema.Unknown),
+  ...RuntimeAgentMetadataFields,
 });
 export type TaskCompletedPayload = typeof TaskCompletedPayload.Type;
 
@@ -454,6 +484,7 @@ const HookStartedPayload = Schema.Struct({
   hookId: TrimmedNonEmptyStringSchema,
   hookName: TrimmedNonEmptyStringSchema,
   hookEvent: TrimmedNonEmptyStringSchema,
+  ...RuntimeAgentMetadataFields,
 });
 export type HookStartedPayload = typeof HookStartedPayload.Type;
 
@@ -462,6 +493,7 @@ const HookProgressPayload = Schema.Struct({
   output: Schema.optional(Schema.String),
   stdout: Schema.optional(Schema.String),
   stderr: Schema.optional(Schema.String),
+  ...RuntimeAgentMetadataFields,
 });
 export type HookProgressPayload = typeof HookProgressPayload.Type;
 
@@ -472,6 +504,7 @@ const HookCompletedPayload = Schema.Struct({
   stdout: Schema.optional(Schema.String),
   stderr: Schema.optional(Schema.String),
   exitCode: Schema.optional(Schema.Int),
+  ...RuntimeAgentMetadataFields,
 });
 export type HookCompletedPayload = typeof HookCompletedPayload.Type;
 

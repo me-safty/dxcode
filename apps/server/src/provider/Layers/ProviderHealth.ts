@@ -29,6 +29,7 @@ import { ProviderHealth, type ProviderHealthShape } from "../Services/ProviderHe
 const DEFAULT_TIMEOUT_MS = 4_000;
 const CODEX_PROVIDER = "codex" as const;
 const CLAUDE_PROVIDER = "claudeCode" as const;
+const MIN_CLAUDE_AGENT_TEAMS_VERSION = "2.1.32";
 const require = createRequire(import.meta.url);
 export const CLAUDE_CLI_PATH = path.join(
   path.dirname(require.resolve("@anthropic-ai/claude-agent-sdk")),
@@ -94,6 +95,69 @@ function extractAuthBoolean(value: unknown): boolean | undefined {
     if (nested !== undefined) return nested;
   }
   return undefined;
+}
+
+function parseSemverParts(value: string): [number, number, number] | null {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(value);
+  if (!match) {
+    return null;
+  }
+  return [
+    Number.parseInt(match[1] ?? "", 10),
+    Number.parseInt(match[2] ?? "", 10),
+    Number.parseInt(match[3] ?? "", 10),
+  ];
+}
+
+export function parseClaudeCliVersion(output: string): string | undefined {
+  const match = /(\d+\.\d+\.\d+)/.exec(output);
+  return match?.[1];
+}
+
+function isClaudeCliVersionAtLeast(version: string, minimumVersion: string): boolean {
+  const current = parseSemverParts(version);
+  const minimum = parseSemverParts(minimumVersion);
+  if (!current || !minimum) {
+    return false;
+  }
+  for (let index = 0; index < 3; index += 1) {
+    const currentPart = current[index] ?? 0;
+    const minimumPart = minimum[index] ?? 0;
+    if (currentPart > minimumPart) {
+      return true;
+    }
+    if (currentPart < minimumPart) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function buildClaudeAgentTeamsCapability(version: string | undefined) {
+  if (!version) {
+    return {
+      state: "misconfigured" as const,
+      minimumVersion: MIN_CLAUDE_AGENT_TEAMS_VERSION,
+      requiresExperimentalFlag: true,
+      message: "Could not determine Claude Code version for Agent Teams support.",
+    };
+  }
+
+  if (!isClaudeCliVersionAtLeast(version, MIN_CLAUDE_AGENT_TEAMS_VERSION)) {
+    return {
+      state: "unsupported" as const,
+      minimumVersion: MIN_CLAUDE_AGENT_TEAMS_VERSION,
+      requiresExperimentalFlag: true,
+      message: `Agent Teams requires Claude Code v${MIN_CLAUDE_AGENT_TEAMS_VERSION} or newer.`,
+    };
+  }
+
+  return {
+    state: "available" as const,
+    minimumVersion: MIN_CLAUDE_AGENT_TEAMS_VERSION,
+    requiresExperimentalFlag: true,
+    message: "Agent Teams is available and will be enabled per session when requested.",
+  };
 }
 
 export function parseAuthStatusFromOutput(result: CommandResult): {
@@ -506,6 +570,9 @@ export const checkClaudeProviderStatus: Effect.Effect<
       message: isCommandMissingCause("claude", error)
         ? "Claude Code runtime is not available."
         : `Failed to execute Claude Code health check: ${error instanceof Error ? error.message : String(error)}.`,
+      capabilities: {
+        agentTeams: buildClaudeAgentTeamsCapability(undefined),
+      },
     };
   }
 
@@ -518,10 +585,14 @@ export const checkClaudeProviderStatus: Effect.Effect<
       checkedAt,
       message:
         "Claude Code runtime is installed but failed to run. Timed out while running command.",
+      capabilities: {
+        agentTeams: buildClaudeAgentTeamsCapability(undefined),
+      },
     };
   }
 
   const version = versionProbe.success.value;
+  const parsedVersion = parseClaudeCliVersion(`${version.stdout}\n${version.stderr}`);
   if (version.code !== 0) {
     const detail = detailFromResult(version);
     return {
@@ -530,9 +601,13 @@ export const checkClaudeProviderStatus: Effect.Effect<
       available: false,
       authStatus: "unknown" as const,
       checkedAt,
+      ...(parsedVersion ? { version: parsedVersion } : {}),
       message: detail
         ? `Claude Code runtime is installed but failed to run. ${detail}`
         : "Claude Code runtime is installed but failed to run.",
+      capabilities: {
+        agentTeams: buildClaudeAgentTeamsCapability(parsedVersion),
+      },
     };
   }
 
@@ -575,7 +650,11 @@ export const checkClaudeProviderStatus: Effect.Effect<
     available: true,
     authStatus: parsed.authStatus,
     checkedAt,
+    ...(parsedVersion ? { version: parsedVersion } : {}),
     ...(parsed.message ? { message: parsed.message } : {}),
+    capabilities: {
+      agentTeams: buildClaudeAgentTeamsCapability(parsedVersion),
+    },
   } satisfies ServerProviderStatus;
 });
 

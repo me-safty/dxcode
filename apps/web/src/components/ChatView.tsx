@@ -50,6 +50,7 @@ import {
   replaceTextRange,
 } from "../composer-logic";
 import {
+  deriveAgentTeamsState,
   derivePendingApprovals,
   derivePendingUserInputs,
   derivePhase,
@@ -134,6 +135,7 @@ import { shouldUseCompactComposerFooter } from "./composerFooterLayout";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
+import { AgentTeamsPanel } from "./chat/AgentTeamsPanel";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -221,6 +223,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const { resolvedTheme } = useTheme();
   const queryClient = useQueryClient();
   const createWorktreeMutation = useMutation(gitCreateWorktreeMutationOptions({ queryClient }));
+  const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const composerDraft = useComposerThreadDraft(threadId);
   const prompt = composerDraft.prompt;
   const composerImages = composerDraft.images;
@@ -549,6 +552,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const selectedCodexFastModeEnabled =
     selectedProvider === "codex" ? composerDraft.codexFastMode : false;
   const isClaudeUltrathink = selectedClaudeEffort === "ultrathink";
+  const claudeDefaultAgent = settings.claudeDefaultAgent.trim() || null;
+  const providerStatuses = serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES;
+  const activeProvider = activeThread?.session?.provider ?? "codex";
+  const activeProviderStatus = useMemo(
+    () => providerStatuses.find((status) => status.provider === activeProvider) ?? null,
+    [activeProvider, providerStatuses],
+  );
+  const claudeProviderStatus = useMemo(
+    () => providerStatuses.find((status) => status.provider === "claudeCode") ?? null,
+    [providerStatuses],
+  );
+  const claudeAgentTeamsCapability = claudeProviderStatus?.capabilities?.agentTeams;
+  const claudeAgentTeamsEnabledForDispatch =
+    settings.claudeExperimentalAgentTeams &&
+    (claudeProviderStatus === null || claudeAgentTeamsCapability?.state === "available");
   const selectedModelOptionsForDispatch = useMemo(() => {
     if (selectedProvider === "codex") {
       const codexOptions = {
@@ -575,8 +593,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
     supportsReasoningEffort,
   ]);
   const providerOptionsForDispatch = useMemo(() => {
-    if (selectedProvider !== "codex") {
-      return undefined;
+    if (selectedProvider === "claudeCode") {
+      return {
+        claudeCode: {
+          experimentalAgentTeams: claudeAgentTeamsEnabledForDispatch,
+          agentProgressSummaries: settings.claudeAgentProgressSummaries,
+          teammateMode: settings.claudeTeammateMode,
+          teamTaskDelegation: settings.claudeTeamTaskDelegation,
+          ...(claudeDefaultAgent ? { defaultAgent: claudeDefaultAgent } : {}),
+        },
+      };
     }
     if (!settings.codexBinaryPath && !settings.codexHomePath) {
       return undefined;
@@ -587,7 +613,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ...(settings.codexHomePath ? { homePath: settings.codexHomePath } : {}),
       },
     };
-  }, [selectedProvider, settings.codexBinaryPath, settings.codexHomePath]);
+  }, [
+    claudeAgentTeamsEnabledForDispatch,
+    claudeDefaultAgent,
+    selectedProvider,
+    settings.claudeAgentProgressSummaries,
+    settings.claudeTeammateMode,
+    settings.claudeTeamTaskDelegation,
+    settings.codexBinaryPath,
+    settings.codexHomePath,
+  ]);
   const selectedModelForPicker = selectedModel;
   const modelOptionsByProvider = useMemo(
     () => getCustomModelOptionsByProvider(settings),
@@ -631,6 +666,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
+  const agentTeamsState = useMemo(
+    () => deriveAgentTeamsState(threadActivities, claudeDefaultAgent),
+    [claudeDefaultAgent, threadActivities],
+  );
+  const showAgentTeamsPanel =
+    (selectedProvider === "claudeCode" || activeThread?.session?.provider === "claudeCode") &&
+    agentTeamsState.hasTeamActivity;
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),
     [activeLatestTurn?.turnId, threadActivities],
@@ -963,7 +1005,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const effectivePathQuery = pathTriggerQuery.length > 0 ? debouncedPathQuery : "";
   const branchesQuery = useQuery(gitBranchesQueryOptions(gitCwd));
-  const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const workspaceEntriesQuery = useQuery(
     projectSearchEntriesQueryOptions({
       cwd: gitCwd,
@@ -1053,12 +1094,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
   const availableEditors = serverConfigQuery.data?.availableEditors ?? EMPTY_AVAILABLE_EDITORS;
-  const providerStatuses = serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES;
-  const activeProvider = activeThread?.session?.provider ?? "codex";
-  const activeProviderStatus = useMemo(
-    () => providerStatuses.find((status) => status.provider === activeProvider) ?? null,
-    [activeProvider, providerStatuses],
-  );
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const threadTerminalRuntimeEnv = useMemo(() => {
@@ -3328,6 +3363,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
         error={activeThread.error}
         onDismiss={() => setThreadError(activeThread.id, null)}
       />
+      {showAgentTeamsPanel ? (
+        <div className="flex bg-transparent px-3 pt-1 sm:px-5">
+          <AgentTeamsPanel
+            state={agentTeamsState}
+            enabled={claudeAgentTeamsEnabledForDispatch}
+            capabilityMessage={claudeAgentTeamsCapability?.message ?? null}
+            {...(claudeAgentTeamsCapability?.state
+              ? { capabilityState: claudeAgentTeamsCapability.state }
+              : {})}
+          />
+        </div>
+      ) : null}
       {/* Main content area with optional plan sidebar */}
       <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}

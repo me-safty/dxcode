@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   deriveActiveWorkStartedAt,
+  deriveAgentTeamsState,
   deriveActivePlanState,
   PROVIDER_OPTIONS,
   derivePendingApprovals,
@@ -218,6 +219,275 @@ describe("derivePendingUserInputs", () => {
           },
         ],
       },
+    ]);
+  });
+});
+
+describe("deriveAgentTeamsState", () => {
+  it("builds team runs from teammate activities without duplicating the lead", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "tool-team-start",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Subagent task started",
+        tone: "tool",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          toolUseId: "tool-task-1",
+          data: {
+            input: {
+              name: "db-reviewer",
+              team_name: "release-squad",
+              subagent_type: "code-reviewer",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "team-started",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "teammate.started",
+        summary: "db-reviewer started",
+        tone: "info",
+        payload: {
+          agentId: "agent-db-reviewer",
+          taskId: "task-1",
+          toolUseId: "tool-task-1",
+        },
+      }),
+      makeActivity({
+        id: "team-progress",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "teammate.progress",
+        summary: "db-reviewer update",
+        tone: "info",
+        payload: {
+          agentId: "agent-db-reviewer",
+          taskId: "task-1",
+          toolUseId: "tool-task-1",
+          summary: "Checking rollback safety.",
+        },
+      }),
+      makeActivity({
+        id: "team-completed",
+        createdAt: "2026-02-23T00:00:04.000Z",
+        kind: "teammate.completed",
+        summary: "db-reviewer completed",
+        tone: "info",
+        payload: {
+          agentId: "agent-db-reviewer",
+          taskId: "task-1",
+          toolUseId: "tool-task-1",
+          detail: "Migration review finished.",
+        },
+      }),
+    ];
+
+    const state = deriveAgentTeamsState(activities, "code-review-lead");
+
+    expect(state.leadLabel).toBe("code-review-lead");
+    expect(state.hasTeamActivity).toBe(true);
+    expect(state.activeRunId).toBeNull();
+    expect(state.runs).toHaveLength(1);
+    expect(state.runs[0]).toMatchObject({
+      label: "release-squad",
+      status: "completed",
+      teamName: "release-squad",
+      activeCount: 0,
+      pendingApprovalCount: 0,
+    });
+    expect(state.runs[0]?.members[0]).toMatchObject({
+      label: "db-reviewer",
+      status: "completed",
+      agentId: "agent-db-reviewer",
+      agentType: "code-reviewer",
+      teamName: "release-squad",
+      taskId: "task-1",
+      toolUseId: "tool-task-1",
+      teammateName: "db-reviewer",
+    });
+    expect(state.runs[0]?.members[0]?.activities.map((activity) => activity.kind)).toEqual([
+      "tool.started",
+      "teammate.started",
+      "teammate.progress",
+      "teammate.completed",
+    ]);
+  });
+
+  it("uses stable agent ids so stop events replace running state instead of creating duplicates", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "agent-start",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "teammate.started",
+        summary: "reviewer started",
+        tone: "info",
+        payload: {
+          agentId: "agent-reviewer",
+          agentName: "reviewer",
+          teamName: "triage",
+        },
+      }),
+      makeActivity({
+        id: "agent-idle",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "teammate.idle",
+        summary: "reviewer idle",
+        tone: "info",
+        payload: {
+          agentId: "agent-reviewer",
+          agentName: "reviewer",
+          teamName: "triage",
+        },
+      }),
+      makeActivity({
+        id: "agent-stopped",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "teammate.stopped",
+        summary: "reviewer stopped",
+        tone: "info",
+        payload: {
+          agentId: "agent-reviewer",
+          agentName: "reviewer",
+          teamName: "triage",
+        },
+      }),
+    ];
+
+    const state = deriveAgentTeamsState(activities);
+    expect(state.runs).toHaveLength(1);
+    expect(state.runs[0]?.members).toHaveLength(1);
+    expect(state.runs[0]?.members[0]?.status).toBe("stopped");
+  });
+
+  it("surfaces teammate activity even when Claude only provides free-text detail", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "team-fallback-start",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "teammate.started",
+        summary: "Teammate started",
+        tone: "info",
+        payload: {
+          detail: "researcher: You are a researcher in a small test team.",
+        },
+      }),
+      makeActivity({
+        id: "team-fallback-stop",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "teammate.stopped",
+        summary: "researcher stopped",
+        tone: "info",
+        payload: {
+          detail: "researcher: Finished the small test.",
+        },
+      }),
+    ];
+
+    const state = deriveAgentTeamsState(activities);
+    expect(state.hasTeamActivity).toBe(true);
+    expect(state.runs[0]?.members[0]).toMatchObject({
+      label: "researcher",
+      status: "stopped",
+    });
+  });
+
+  it("shows team activity for sparse collab agent tool calls before teammate metadata arrives", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "team-create",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "File change - TeamCreate: {}",
+        tone: "tool",
+        payload: {
+          itemType: "file_change",
+          detail: "TeamCreate: {}",
+        },
+      }),
+      makeActivity({
+        id: "subagent-task",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.updated",
+        summary: "Subagent task - Agent: {}",
+        tone: "tool",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          detail: "Agent: {}",
+        },
+      }),
+    ];
+
+    const state = deriveAgentTeamsState(activities);
+    expect(state.hasTeamActivity).toBe(true);
+    expect(state.runs).toHaveLength(1);
+    expect(state.runs[0]).toMatchObject({
+      label: "Agent",
+      status: "running",
+      activeCount: 1,
+    });
+    expect(state.runs[0]?.members[0]).toMatchObject({
+      label: "Agent",
+      status: "running",
+    });
+  });
+
+  it("groups unnamed tool activity and later named teammates into one run", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "agent-tool-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Subagent task - Agent: {}",
+        tone: "tool",
+        turnId: "turn-team",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          detail: "Agent: {}",
+        },
+      }),
+      makeActivity({
+        id: "agent-tool-2",
+        createdAt: "2026-02-23T00:00:01.500Z",
+        kind: "tool.updated",
+        summary: "Subagent task - Agent: {}",
+        tone: "tool",
+        turnId: "turn-team",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          detail: "Agent: {}",
+        },
+      }),
+      makeActivity({
+        id: "researcher-start",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "teammate.started",
+        summary: "Teammate started",
+        tone: "info",
+        turnId: "turn-team",
+        payload: {
+          detail: "researcher: You are a researcher in a small test team.",
+        },
+      }),
+      makeActivity({
+        id: "executor-start",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "teammate.started",
+        summary: "Teammate started",
+        tone: "info",
+        turnId: "turn-team",
+        payload: {
+          detail: "executor: You are an executor in a small test team.",
+        },
+      }),
+    ];
+
+    const state = deriveAgentTeamsState(activities);
+    expect(state.runs).toHaveLength(1);
+    expect(state.runs[0]?.members.map((member) => member.label).toSorted()).toEqual([
+      "executor",
+      "researcher",
     ]);
   });
 });

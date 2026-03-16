@@ -69,6 +69,37 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
+const CLAUDE_TEAMMATE_MODE_OPTIONS = [
+  {
+    value: "auto",
+    label: "Auto",
+    description: "Use split panes inside tmux when possible, otherwise run teammates inline.",
+  },
+  {
+    value: "in-process",
+    label: "In-process",
+    description: "Keep teammates inside the main terminal session.",
+  },
+  {
+    value: "tmux",
+    label: "Split panes",
+    description: "Prefer tmux or iTerm pane layouts for each teammate.",
+  },
+] as const;
+
+const CLAUDE_TEAM_TASK_DELEGATION_OPTIONS = [
+  {
+    value: "self-claim",
+    label: "Self-claim",
+    description: "Let teammates pick the next unassigned task after they finish work.",
+  },
+  {
+    value: "lead-assigns",
+    label: "Lead assigns",
+    description: "Tell the lead to hand tasks to named teammates explicitly.",
+  },
+] as const;
+
 function getCustomModelsForProvider(
   settings: ReturnType<typeof useAppSettings>["settings"],
   provider: ProviderKind,
@@ -125,6 +156,12 @@ function SettingsRouteView() {
   const codexHomePath = settings.codexHomePath;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
+  const claudeProviderStatus =
+    serverConfigQuery.data?.providers.find((status) => status.provider === "claudeCode") ?? null;
+  const claudeAgentTeamsCapability = claudeProviderStatus?.capabilities?.agentTeams;
+  const claudeAgentTeamsForwardingEnabled =
+    settings.claudeExperimentalAgentTeams &&
+    (claudeProviderStatus === null || claudeAgentTeamsCapability?.state === "available");
 
   const openKeybindingsFile = useCallback(() => {
     if (!keybindingsConfigPath) return;
@@ -380,6 +417,207 @@ function SettingsRouteView() {
                     Reset codex overrides
                   </Button>
                 </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-4">
+                <h2 className="text-sm font-medium text-foreground">Claude Code</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Configure app-level Claude team controls. Team definitions stay in Claude-managed
+                  files like <code>.claude/settings.json</code> and <code>.claude/agents</code>.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="rounded-xl border border-border bg-background/60 px-3 py-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-foreground">Runtime capability</p>
+                      <p className="text-xs text-muted-foreground">
+                        Claude version:{" "}
+                        <span className="font-mono text-foreground">
+                          {claudeProviderStatus?.version ?? "unknown"}
+                        </span>
+                      </p>
+                    </div>
+                    <span
+                      className={`self-start rounded-full border px-2 py-0.5 text-[11px] ${
+                        claudeAgentTeamsCapability?.state === "available"
+                          ? "border-emerald-500/25 bg-emerald-500/8 text-emerald-700 dark:text-emerald-200"
+                          : claudeAgentTeamsCapability?.state === "unsupported"
+                            ? "border-orange-500/25 bg-orange-500/8 text-orange-800 dark:text-orange-100"
+                            : "border-border bg-background text-muted-foreground"
+                      }`}
+                    >
+                      {claudeAgentTeamsCapability?.state === "available"
+                        ? "Agent Teams available"
+                        : claudeAgentTeamsCapability?.state === "unsupported"
+                          ? "Upgrade required"
+                          : "Capability unknown"}
+                    </span>
+                  </div>
+                  {claudeAgentTeamsCapability?.message ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {claudeAgentTeamsCapability.message}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Enable Agent Teams</p>
+                    <p className="text-xs text-muted-foreground">
+                      T3 Code will inject the experimental Claude Agent Teams flag on new Claude
+                      sessions when supported.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.claudeExperimentalAgentTeams}
+                    onCheckedChange={(checked) =>
+                      updateSettings({
+                        claudeExperimentalAgentTeams: Boolean(checked),
+                      })
+                    }
+                    aria-label="Enable Claude Agent Teams"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Agent progress summaries</p>
+                    <p className="text-xs text-muted-foreground">
+                      Request periodic Claude summaries for background teammates.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.claudeAgentProgressSummaries}
+                    onCheckedChange={(checked) =>
+                      updateSettings({
+                        claudeAgentProgressSummaries: Boolean(checked),
+                      })
+                    }
+                    aria-label="Enable Claude agent progress summaries"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <span className="text-xs font-medium text-foreground">Teammate display mode</span>
+                  <Select
+                    value={settings.claudeTeammateMode}
+                    onValueChange={(value) =>
+                      updateSettings({
+                        claudeTeammateMode:
+                          value as (typeof CLAUDE_TEAMMATE_MODE_OPTIONS)[number]["value"],
+                      })
+                    }
+                  >
+                    <SelectTrigger className="w-full justify-between">
+                      <SelectValue placeholder="Select teammate mode" />
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {CLAUDE_TEAMMATE_MODE_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          <div className="flex flex-col items-start">
+                            <span>{option.label}</span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {option.description}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                  <span className="text-xs text-muted-foreground">
+                    Forwarded to Claude as <code>teammateMode</code>.
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <span className="text-xs font-medium text-foreground">Task delegation</span>
+                  <Select
+                    value={settings.claudeTeamTaskDelegation}
+                    onValueChange={(value) =>
+                      updateSettings({
+                        claudeTeamTaskDelegation:
+                          value as (typeof CLAUDE_TEAM_TASK_DELEGATION_OPTIONS)[number]["value"],
+                      })
+                    }
+                  >
+                    <SelectTrigger className="w-full justify-between">
+                      <SelectValue placeholder="Select delegation mode" />
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {CLAUDE_TEAM_TASK_DELEGATION_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          <div className="flex flex-col items-start">
+                            <span>{option.label}</span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {option.description}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                  <span className="text-xs text-muted-foreground">
+                    This is a lead guidance preference T3 Code injects into new Claude turns.
+                  </span>
+                </div>
+
+                <label htmlFor="claude-default-agent" className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">Default lead agent</span>
+                  <Input
+                    id="claude-default-agent"
+                    value={settings.claudeDefaultAgent}
+                    onChange={(event) => updateSettings({ claudeDefaultAgent: event.target.value })}
+                    placeholder="code-review-lead"
+                    spellCheck={false}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    Optional Claude <code>agent</code> session option for the main thread.
+                  </span>
+                </label>
+
+                {settings.claudeExperimentalAgentTeams &&
+                claudeAgentTeamsCapability?.state !== "available" ? (
+                  <div className="rounded-lg border border-orange-500/25 bg-orange-500/8 px-3 py-2 text-xs text-orange-800 dark:text-orange-100">
+                    Agent Teams is saved as enabled, but this Claude install does not currently
+                    support it. T3 Code will hold the toggle and skip forwarding it until the
+                    runtime is compatible.
+                  </div>
+                ) : null}
+
+                <div className="flex items-center justify-between rounded-lg border border-dashed border-border bg-background/40 px-3 py-2 text-xs text-muted-foreground">
+                  <span>Forwarding state</span>
+                  <span className="font-medium text-foreground">
+                    {claudeAgentTeamsForwardingEnabled ? "Enabled for new Claude sessions" : "Off"}
+                  </span>
+                </div>
+
+                {(settings.claudeExperimentalAgentTeams !== defaults.claudeExperimentalAgentTeams ||
+                  settings.claudeAgentProgressSummaries !== defaults.claudeAgentProgressSummaries ||
+                  settings.claudeTeammateMode !== defaults.claudeTeammateMode ||
+                  settings.claudeTeamTaskDelegation !== defaults.claudeTeamTaskDelegation ||
+                  settings.claudeDefaultAgent !== defaults.claudeDefaultAgent) && (
+                  <div className="flex justify-end">
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() =>
+                        updateSettings({
+                          claudeExperimentalAgentTeams: defaults.claudeExperimentalAgentTeams,
+                          claudeAgentProgressSummaries: defaults.claudeAgentProgressSummaries,
+                          claudeTeammateMode: defaults.claudeTeammateMode,
+                          claudeTeamTaskDelegation: defaults.claudeTeamTaskDelegation,
+                          claudeDefaultAgent: defaults.claudeDefaultAgent,
+                        })
+                      }
+                    >
+                      Reset Claude settings
+                    </Button>
+                  </div>
+                )}
               </div>
             </section>
 

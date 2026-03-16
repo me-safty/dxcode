@@ -151,6 +151,46 @@ function runtimeErrorMessageFromEvent(event: ProviderRuntimeEvent): string | und
   return payloadMessage;
 }
 
+function teamMetadataPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...(asString(payload.agentId) ? { agentId: asString(payload.agentId) } : {}),
+    ...(asString(payload.agentName) ? { agentName: asString(payload.agentName) } : {}),
+    ...(asString(payload.agentColor) ? { agentColor: asString(payload.agentColor) } : {}),
+    ...(asString(payload.agentType) ? { agentType: asString(payload.agentType) } : {}),
+    ...(asString(payload.teamName) ? { teamName: asString(payload.teamName) } : {}),
+    ...(asString(payload.teammateName) ? { teammateName: asString(payload.teammateName) } : {}),
+    ...(asString(payload.parentSessionId)
+      ? { parentSessionId: asString(payload.parentSessionId) }
+      : {}),
+    ...(asString(payload.teammateMode) ? { teammateMode: asString(payload.teammateMode) } : {}),
+    ...(asString(payload.toolUseId) ? { toolUseId: asString(payload.toolUseId) } : {}),
+    ...(typeof payload.planModeRequired === "boolean"
+      ? { planModeRequired: payload.planModeRequired }
+      : {}),
+    ...(typeof payload.awaitingLeaderApproval === "boolean"
+      ? { awaitingLeaderApproval: payload.awaitingLeaderApproval }
+      : {}),
+  };
+}
+
+function hasTeamMetadata(payload: Record<string, unknown>): boolean {
+  return (
+    asString(payload.teamName) !== undefined ||
+    asString(payload.teammateName) !== undefined ||
+    asString(payload.agentName) !== undefined
+  );
+}
+
+function teammateActivityLabel(payload: Record<string, unknown>): string {
+  return (
+    asString(payload.teammateName) ??
+    asString(payload.agentName) ??
+    asString(payload.agentType) ??
+    asString(payload.teamName) ??
+    "Teammate"
+  );
+}
+
 function orchestrationSessionStatusFromRuntimeState(
   state: "starting" | "running" | "waiting" | "ready" | "interrupted" | "stopped" | "error",
 ): "starting" | "running" | "ready" | "interrupted" | "stopped" | "error" {
@@ -349,14 +389,18 @@ function runtimeEventToActivities(
     }
 
     case "task.started": {
+      const metadata = teamMetadataPayload(event.payload as Record<string, unknown>);
+      const teammateLabel = teammateActivityLabel(event.payload as Record<string, unknown>);
+      const isTeamTask = hasTeamMetadata(event.payload as Record<string, unknown>);
       return [
         {
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "info",
-          kind: "task.started",
-          summary:
-            event.payload.taskType === "plan"
+          kind: isTeamTask ? "teammate.started" : "task.started",
+          summary: isTeamTask
+            ? `${teammateLabel} started`
+            : event.payload.taskType === "plan"
               ? "Plan task started"
               : event.payload.taskType
                 ? `${event.payload.taskType} task started`
@@ -367,6 +411,7 @@ function runtimeEventToActivities(
             ...(event.payload.description
               ? { detail: truncateDetail(event.payload.description) }
               : {}),
+            ...metadata,
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -375,19 +420,32 @@ function runtimeEventToActivities(
     }
 
     case "task.progress": {
+      const metadata = teamMetadataPayload(event.payload as Record<string, unknown>);
+      const teammateLabel = teammateActivityLabel(event.payload as Record<string, unknown>);
+      const isTeamTask = hasTeamMetadata(event.payload as Record<string, unknown>);
+      const awaitingLeaderApproval = event.payload.awaitingLeaderApproval === true;
       return [
         {
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "info",
-          kind: "task.progress",
-          summary: "Reasoning update",
+          kind: awaitingLeaderApproval
+            ? "teammate.awaiting-approval"
+            : isTeamTask
+              ? "teammate.progress"
+              : "task.progress",
+          summary: awaitingLeaderApproval
+            ? "Leader approval requested"
+            : isTeamTask
+              ? `${teammateLabel} update`
+              : "Reasoning update",
           payload: {
             taskId: event.payload.taskId,
             detail: truncateDetail(event.payload.summary ?? event.payload.description),
             ...(event.payload.summary ? { summary: truncateDetail(event.payload.summary) } : {}),
             ...(event.payload.lastToolName ? { lastToolName: event.payload.lastToolName } : {}),
             ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
+            ...metadata,
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -396,14 +454,28 @@ function runtimeEventToActivities(
     }
 
     case "task.completed": {
+      const metadata = teamMetadataPayload(event.payload as Record<string, unknown>);
+      const teammateLabel = teammateActivityLabel(event.payload as Record<string, unknown>);
+      const isTeamTask = hasTeamMetadata(event.payload as Record<string, unknown>);
       return [
         {
           id: event.eventId,
           createdAt: event.createdAt,
           tone: event.payload.status === "failed" ? "error" : "info",
-          kind: "task.completed",
-          summary:
-            event.payload.status === "failed"
+          kind: isTeamTask
+            ? event.payload.status === "failed"
+              ? "teammate.failed"
+              : event.payload.status === "stopped"
+                ? "teammate.stopped"
+                : "teammate.completed"
+            : "task.completed",
+          summary: isTeamTask
+            ? event.payload.status === "failed"
+              ? `${teammateLabel} failed`
+              : event.payload.status === "stopped"
+                ? `${teammateLabel} stopped`
+                : `${teammateLabel} completed`
+            : event.payload.status === "failed"
               ? "Task failed"
               : event.payload.status === "stopped"
                 ? "Task stopped"
@@ -413,6 +485,50 @@ function runtimeEventToActivities(
             status: event.payload.status,
             ...(event.payload.summary ? { detail: truncateDetail(event.payload.summary) } : {}),
             ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
+            ...metadata,
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "hook.started": {
+      const metadata = teamMetadataPayload(event.payload as Record<string, unknown>);
+      const hookEvent = event.payload.hookEvent;
+      const isTeamHook = hasTeamMetadata(event.payload as Record<string, unknown>);
+      const hookEventKind =
+        isTeamHook && hookEvent === "SubagentStart"
+          ? "teammate.started"
+          : isTeamHook && hookEvent === "TeammateIdle"
+            ? "teammate.idle"
+            : isTeamHook && hookEvent === "TaskCompleted"
+              ? "teammate.completed"
+              : isTeamHook && hookEvent === "SubagentStop"
+                ? "teammate.stopped"
+                : "hook.started";
+      const hookSummary =
+        isTeamHook && hookEvent === "SubagentStart"
+          ? "Teammate started"
+          : isTeamHook && hookEvent === "TeammateIdle"
+            ? "Teammate idle"
+            : isTeamHook && hookEvent === "TaskCompleted"
+              ? "Teammate completed"
+              : isTeamHook && hookEvent === "SubagentStop"
+                ? "Teammate stopped"
+                : `Hook started: ${event.payload.hookEvent}`;
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: hookEventKind,
+          summary: hookSummary,
+          payload: {
+            hookId: event.payload.hookId,
+            hookName: event.payload.hookName,
+            hookEvent,
+            ...metadata,
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,

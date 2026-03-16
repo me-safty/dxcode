@@ -89,6 +89,7 @@ interface ToolInFlight {
   readonly toolName: string;
   readonly title: string;
   readonly detail?: string;
+  readonly metadata: ClaudeAgentMetadata;
 }
 
 interface ClaudeSessionContext {
@@ -103,6 +104,7 @@ interface ClaudeSessionContext {
     items: Array<unknown>;
   }>;
   readonly inFlightTools: Map<number, ToolInFlight>;
+  readonly teamPreferences: ClaudeTeamPreferences;
   turnState: ClaudeTurnState | undefined;
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
@@ -124,6 +126,32 @@ export interface ClaudeCodeAdapterLiveOptions {
   }) => ClaudeQueryRuntime;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+}
+
+interface ClaudeAgentMetadata {
+  agentId?: string;
+  agentName?: string;
+  agentColor?: string;
+  agentType?: string;
+  teamName?: string;
+  teammateName?: string;
+  parentSessionId?: string;
+  teammateMode?: string;
+  toolUseId?: string;
+  planModeRequired?: boolean;
+  awaitingLeaderApproval?: boolean;
+}
+
+interface ClaudeTeamPreferences {
+  readonly experimentalAgentTeams: boolean;
+  readonly teamTaskDelegation?: "lead-assigns" | "self-claim";
+}
+
+interface ParsedClaudeTeammateUserEvent {
+  readonly hookEvent: "TeammateIdle" | "SubagentStop";
+  readonly hookName: string;
+  readonly detail?: string;
+  readonly metadata: ClaudeAgentMetadata;
 }
 
 function isUuid(value: string): boolean {
@@ -151,6 +179,136 @@ function asCanonicalTurnId(value: TurnId): TurnId {
 
 function asRuntimeRequestId(value: ApprovalRequestId): RuntimeRequestId {
   return RuntimeRequestId.makeUnsafe(value);
+}
+
+function asTrimmedString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function metadataFields(metadata: ClaudeAgentMetadata): ClaudeAgentMetadata {
+  return metadata;
+}
+
+function mergeClaudeAgentMetadata(
+  ...parts: ReadonlyArray<ClaudeAgentMetadata | undefined>
+): ClaudeAgentMetadata {
+  const metadata: ClaudeAgentMetadata = {};
+
+  for (const part of parts) {
+    if (!part) {
+      continue;
+    }
+    if (part.agentId) {
+      metadata.agentId = part.agentId;
+    }
+    if (part.agentName) {
+      metadata.agentName = part.agentName;
+    }
+    if (part.agentColor) {
+      metadata.agentColor = part.agentColor;
+    }
+    if (part.agentType) {
+      metadata.agentType = part.agentType;
+    }
+    if (part.teamName) {
+      metadata.teamName = part.teamName;
+    }
+    if (part.teammateName) {
+      metadata.teammateName = part.teammateName;
+    }
+    if (part.parentSessionId) {
+      metadata.parentSessionId = part.parentSessionId;
+    }
+    if (part.teammateMode) {
+      metadata.teammateMode = part.teammateMode;
+    }
+    if (part.toolUseId) {
+      metadata.toolUseId = part.toolUseId;
+    }
+    if (part.planModeRequired !== undefined) {
+      metadata.planModeRequired = part.planModeRequired;
+    }
+    if (part.awaitingLeaderApproval !== undefined) {
+      metadata.awaitingLeaderApproval = part.awaitingLeaderApproval;
+    }
+  }
+
+  return metadata;
+}
+
+function extractAgentMetadataFromRecord(
+  value: Record<string, unknown> | undefined,
+  overrides?: ClaudeAgentMetadata,
+): ClaudeAgentMetadata {
+  const agentId = asTrimmedString(value?.agent_id) ?? asTrimmedString(value?.agentId);
+  const agentName = asTrimmedString(value?.agent_name) ?? asTrimmedString(value?.agentName);
+  const agentColor =
+    asTrimmedString(value?.agent_color) ??
+    asTrimmedString(value?.agentColor) ??
+    asTrimmedString(
+      value?.routing && typeof value.routing === "object"
+        ? (value.routing as Record<string, unknown>).senderColor
+        : undefined,
+    );
+  const agentType = asTrimmedString(value?.agent_type) ?? asTrimmedString(value?.agentType);
+  const teamName = asTrimmedString(value?.team_name) ?? asTrimmedString(value?.teamName);
+  const teammateName =
+    asTrimmedString(value?.teammate_name) ?? asTrimmedString(value?.teammateName);
+  const parentSessionId =
+    asTrimmedString(value?.parent_session_id) ?? asTrimmedString(value?.parentSessionId);
+  const teammateMode =
+    asTrimmedString(value?.teammate_mode) ?? asTrimmedString(value?.teammateMode);
+  const toolUseId = asTrimmedString(value?.tool_use_id) ?? asTrimmedString(value?.toolUseId);
+  const planModeRequired =
+    asBoolean(value?.plan_mode_required) ?? asBoolean(value?.planModeRequired);
+  const awaitingLeaderApproval =
+    asBoolean(value?.awaitingLeaderApproval) ?? asBoolean(value?.awaiting_leader_approval);
+
+  return mergeClaudeAgentMetadata(
+    {
+      ...(agentId ? { agentId } : {}),
+      ...(agentName ? { agentName } : {}),
+      ...(agentColor ? { agentColor } : {}),
+      ...(agentType ? { agentType } : {}),
+      ...(teamName ? { teamName } : {}),
+      ...(teammateName ? { teammateName } : {}),
+      ...(parentSessionId ? { parentSessionId } : {}),
+      ...(teammateMode ? { teammateMode } : {}),
+      ...(toolUseId ? { toolUseId } : {}),
+      ...(planModeRequired !== undefined ? { planModeRequired } : {}),
+      ...(awaitingLeaderApproval !== undefined ? { awaitingLeaderApproval } : {}),
+    },
+    overrides,
+  );
+}
+
+function extractCollabAgentMetadata(
+  itemType: CanonicalItemType,
+  toolInput: Record<string, unknown>,
+  toolUseId: string,
+): ClaudeAgentMetadata {
+  if (itemType !== "collab_agent_tool_call") {
+    return {};
+  }
+
+  const base = extractAgentMetadataFromRecord(toolInput, {
+    toolUseId,
+  });
+  const teammateName = asTrimmedString(toolInput.name);
+  const agentType = asTrimmedString(toolInput.subagent_type);
+
+  return mergeClaudeAgentMetadata(base, {
+    ...(teammateName ? { teammateName } : {}),
+    ...(agentType ? { agentType } : {}),
+  });
 }
 
 function toPermissionMode(value: unknown): PermissionMode | undefined {
@@ -280,6 +438,149 @@ function titleForTool(itemType: CanonicalItemType): string {
   }
 }
 
+function extractTextContentFromClaudeUserMessage(message: SDKUserMessage): string {
+  const content = (message.message as { content?: unknown }).content;
+
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  const fragments: string[] = [];
+  for (const block of content) {
+    if (typeof block === "string") {
+      fragments.push(block);
+      continue;
+    }
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const record = block as { type?: unknown; text?: unknown };
+    if (record.type === "text" && typeof record.text === "string") {
+      fragments.push(record.text);
+    }
+  }
+
+  return fragments.join("\n");
+}
+
+function parseTeammateMessageAttributes(rawAttributes: string): Record<string, string> {
+  const attributes: Record<string, string> = {};
+  const attributePattern = /([A-Za-z_:][\w:.-]*)="([^"]*)"/g;
+
+  for (const match of rawAttributes.matchAll(attributePattern)) {
+    const key = match[1];
+    const value = match[2];
+    if (key && value !== undefined) {
+      attributes[key] = value;
+    }
+  }
+
+  return attributes;
+}
+
+function teammateNameFromTerminationMessage(value: unknown): string | undefined {
+  const message = asTrimmedString(value);
+  if (!message) {
+    return undefined;
+  }
+  const match = /^(?<name>.+?) has shut down\.?$/i.exec(message);
+  return match?.groups?.name?.trim();
+}
+
+function parseClaudeTeammateUserEvents(
+  message: SDKUserMessage,
+): ReadonlyArray<ParsedClaudeTeammateUserEvent> {
+  const textContent = extractTextContentFromClaudeUserMessage(message);
+  if (!textContent) {
+    return [];
+  }
+
+  const baseMetadata = extractAgentMetadataFromRecord(
+    message as unknown as Record<string, unknown>,
+  );
+  const blockPattern =
+    /<teammate-message(?<attributes>[^>]*)>(?<body>[\s\S]*?)<\/teammate-message>/g;
+  const parsedEvents: ParsedClaudeTeammateUserEvent[] = [];
+
+  for (const match of textContent.matchAll(blockPattern)) {
+    const attributes = parseTeammateMessageAttributes(match.groups?.attributes ?? "");
+    const bodyText = match.groups?.body?.trim();
+    if (!bodyText) {
+      continue;
+    }
+
+    let bodyRecord: Record<string, unknown> | undefined;
+    try {
+      const parsed = JSON.parse(bodyText);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        bodyRecord = parsed as Record<string, unknown>;
+      }
+    } catch {
+      bodyRecord = undefined;
+    }
+
+    const teammateId = asTrimmedString(attributes.teammate_id);
+    const color = asTrimmedString(attributes.color);
+    const summary = asTrimmedString(attributes.summary);
+    const eventType = asTrimmedString(bodyRecord?.type);
+    const from = asTrimmedString(bodyRecord?.from);
+    const terminatedTeammate = teammateNameFromTerminationMessage(bodyRecord?.message);
+    const teammateNameCandidate =
+      terminatedTeammate ??
+      (from && from !== "team-lead" && from !== "system" ? from : undefined) ??
+      (teammateId && teammateId !== "team-lead" && teammateId !== "system"
+        ? teammateId
+        : undefined);
+    const metadata = mergeClaudeAgentMetadata(
+      baseMetadata,
+      extractAgentMetadataFromRecord(bodyRecord),
+      {
+        ...(teammateNameCandidate
+          ? {
+              agentId: teammateNameCandidate,
+              agentName: teammateNameCandidate,
+              teammateName: teammateNameCandidate,
+            }
+          : {}),
+        ...(color ? { agentColor: color } : {}),
+      },
+    );
+
+    switch (eventType) {
+      case "idle_notification": {
+        const detail = summary ?? asTrimmedString(bodyRecord?.idleReason);
+        parsedEvents.push({
+          hookEvent: "TeammateIdle",
+          hookName: "idle_notification",
+          metadata,
+          ...(detail ? { detail } : {}),
+        });
+        break;
+      }
+      case "shutdown_approved":
+      case "teammate_terminated": {
+        const detail =
+          summary ?? asTrimmedString(bodyRecord?.reason) ?? asTrimmedString(bodyRecord?.message);
+        parsedEvents.push({
+          hookEvent: "SubagentStop",
+          hookName: eventType,
+          metadata,
+          ...(detail ? { detail } : {}),
+        });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  return parsedEvents;
+}
+
 function buildUserMessage(input: ProviderSendTurnInput): SDKUserMessage {
   const fragments: string[] = [];
 
@@ -309,6 +610,19 @@ function buildUserMessage(input: ProviderSendTurnInput): SDKUserMessage {
       content: [{ type: "text", text }],
     },
   } as SDKUserMessage;
+}
+
+function applyClaudeTeamPromptPreference(text: string, preferences: ClaudeTeamPreferences): string {
+  if (!preferences.experimentalAgentTeams || !preferences.teamTaskDelegation) {
+    return text;
+  }
+
+  const delegationInstruction =
+    preferences.teamTaskDelegation === "lead-assigns"
+      ? "Agent Teams preference: the lead should assign tasks explicitly to named teammates."
+      : "Agent Teams preference: teammates may self-claim the next unassigned, unblocked task after finishing work.";
+
+  return `${delegationInstruction}\n\n${text}`;
 }
 
 function turnStatusFromResult(result: SDKResultMessage): ProviderRuntimeTurnStatus {
@@ -850,6 +1164,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               : {};
           const itemId = block.id;
           const detail = summarizeToolRequest(toolName, toolInput);
+          const metadata = extractCollabAgentMetadata(itemType, toolInput, itemId);
 
           const tool: ToolInFlight = {
             itemId,
@@ -857,6 +1172,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             toolName,
             title: titleForTool(itemType),
             detail,
+            metadata,
           };
           context.inFlightTools.set(index, tool);
 
@@ -874,6 +1190,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               status: "inProgress",
               title: tool.title,
               ...(tool.detail ? { detail: tool.detail } : {}),
+              ...metadataFields(tool.metadata),
               data: {
                 toolName: tool.toolName,
                 input: toolInput,
@@ -915,6 +1232,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               status: "completed",
               title: tool.title,
               ...(tool.detail ? { detail: tool.detail } : {}),
+              ...metadataFields(tool.metadata),
             },
             providerRefs: {
               ...providerThreadRef(context),
@@ -1013,6 +1331,8 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         }
 
         const stamp = yield* makeEventStamp();
+        const messageRecord = message as unknown as Record<string, unknown>;
+        const baseMetadata = extractAgentMetadataFromRecord(messageRecord);
         const base = {
           eventId: stamp.eventId,
           provider: PROVIDER,
@@ -1070,6 +1390,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 hookId: message.hook_id,
                 hookName: message.hook_name,
                 hookEvent: message.hook_event,
+                ...metadataFields(baseMetadata),
               },
             });
             return;
@@ -1082,6 +1403,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 output: message.output,
                 stdout: message.stdout,
                 stderr: message.stderr,
+                ...metadataFields(baseMetadata),
               },
             });
             return;
@@ -1096,6 +1418,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 stdout: message.stdout,
                 stderr: message.stderr,
                 ...(typeof message.exit_code === "number" ? { exitCode: message.exit_code } : {}),
+                ...metadataFields(baseMetadata),
               },
             });
             return;
@@ -1107,6 +1430,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 taskId: RuntimeTaskId.makeUnsafe(message.task_id),
                 description: message.description,
                 ...(message.task_type ? { taskType: message.task_type } : {}),
+                ...metadataFields(baseMetadata),
               },
             });
             return;
@@ -1120,6 +1444,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 ...(message.summary ? { summary: message.summary } : {}),
                 ...(message.usage ? { usage: message.usage } : {}),
                 ...(message.last_tool_name ? { lastToolName: message.last_tool_name } : {}),
+                ...metadataFields(baseMetadata),
               },
             });
             return;
@@ -1132,8 +1457,12 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 status: message.status,
                 ...(message.summary ? { summary: message.summary } : {}),
                 ...(message.usage ? { usage: message.usage } : {}),
+                ...metadataFields(baseMetadata),
               },
             });
+            return;
+          case "local_command_output":
+          case "elicitation_complete":
             return;
           case "files_persisted":
             yield* offerRuntimeEvent({
@@ -1158,9 +1487,10 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             });
             return;
           default:
+            const subtype = String((message as { subtype?: unknown }).subtype ?? "unknown");
             yield* emitRuntimeWarning(
               context,
-              `Unhandled Claude system message subtype '${message.subtype}'.`,
+              `Unhandled Claude system message subtype '${subtype}'.`,
               message,
             );
             return;
@@ -1192,6 +1522,9 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         };
 
         if (message.type === "tool_progress") {
+          const metadata = extractAgentMetadataFromRecord(
+            message as unknown as Record<string, unknown>,
+          );
           yield* offerRuntimeEvent({
             ...base,
             type: "tool.progress",
@@ -1200,6 +1533,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               toolName: message.tool_name,
               elapsedSeconds: message.elapsed_time_seconds,
               ...(message.task_id ? { summary: `task:${message.task_id}` } : {}),
+              ...metadataFields(metadata),
             },
           });
           return;
@@ -1244,6 +1578,46 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         }
       });
 
+    const handleUserMessage = (
+      context: ClaudeSessionContext,
+      message: SDKUserMessage,
+    ): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const parsedEvents = parseClaudeTeammateUserEvents(message);
+        if (parsedEvents.length === 0) {
+          return;
+        }
+
+        for (const parsedEvent of parsedEvents) {
+          const stamp = yield* makeEventStamp();
+          yield* offerRuntimeEvent({
+            type: "hook.started",
+            eventId: stamp.eventId,
+            provider: PROVIDER,
+            createdAt: stamp.createdAt,
+            threadId: context.session.threadId,
+            ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+            providerRefs: {
+              ...providerThreadRef(context),
+              ...(context.turnState ? { providerTurnId: context.turnState.turnId } : {}),
+            },
+            raw: {
+              source: "claude.sdk.message" as const,
+              method: "claude/user/teammate-message",
+              messageType: message.type,
+              payload: message,
+            },
+            payload: {
+              hookId: crypto.randomUUID(),
+              hookName: parsedEvent.hookName,
+              hookEvent: parsedEvent.hookEvent,
+              ...(parsedEvent.detail ? { detail: parsedEvent.detail } : {}),
+              ...metadataFields(parsedEvent.metadata),
+            },
+          });
+        }
+      });
+
     const handleSdkMessage = (
       context: ClaudeSessionContext,
       message: SDKMessage,
@@ -1257,6 +1631,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             yield* handleStreamEvent(context, message);
             return;
           case "user":
+            yield* handleUserMessage(context, message);
             return;
           case "assistant":
             yield* handleAssistantMessage(context, message);
@@ -1273,10 +1648,13 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           case "rate_limit_event":
             yield* handleSdkTelemetryMessage(context, message);
             return;
+          case "prompt_suggestion":
+            return;
           default:
+            const messageType = String((message as { type?: unknown }).type ?? "unknown");
             yield* emitRuntimeWarning(
               context,
-              `Unhandled Claude SDK message type '${message.type}'.`,
+              `Unhandled Claude SDK message type '${messageType}'.`,
               message,
             );
             return;
@@ -1438,6 +1816,10 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               const requestId = ApprovalRequestId.makeUnsafe(yield* Random.nextUUIDv4);
               const requestType = classifyRequestType(toolName);
               const detail = summarizeToolRequest(toolName, toolInput);
+              const requestMetadata = extractAgentMetadataFromRecord(toolInput, {
+                ...(callbackOptions.agentID ? { agentId: callbackOptions.agentID } : {}),
+                ...(callbackOptions.toolUseID ? { toolUseId: callbackOptions.toolUseID } : {}),
+              });
               const decisionDeferred = yield* Deferred.make<ProviderApprovalDecision>();
               const pendingApproval: PendingApproval = {
                 requestType,
@@ -1462,6 +1844,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 payload: {
                   requestType,
                   detail,
+                  ...metadataFields(requestMetadata),
                   args: {
                     toolName,
                     input: toolInput,
@@ -1518,6 +1901,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 payload: {
                   requestType,
                   decision,
+                  ...metadataFields(requestMetadata),
                 },
                 providerRefs: {
                   ...(context.session.threadId
@@ -1560,9 +1944,21 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         const providerOptions = input.providerOptions?.claudeCode;
         const effort = input.modelOptions?.claudeCode?.effort;
         const effectiveEffort = getEffectiveClaudeCodeEffort(effort);
+        const teamPreferences: ClaudeTeamPreferences = {
+          experimentalAgentTeams: providerOptions?.experimentalAgentTeams === true,
+          ...(providerOptions?.teamTaskDelegation
+            ? { teamTaskDelegation: providerOptions.teamTaskDelegation }
+            : {}),
+        };
         const permissionMode =
           toPermissionMode(providerOptions?.permissionMode) ??
           (input.runtimeMode === "full-access" ? "bypassPermissions" : undefined);
+        const queryEnv = {
+          ...process.env,
+          ...(providerOptions?.experimentalAgentTeams
+            ? { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1" }
+            : {}),
+        };
 
         const queryOptions: ClaudeQueryOptions = {
           ...(input.cwd ? { cwd: input.cwd } : {}),
@@ -1578,11 +1974,18 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           ...(providerOptions?.maxThinkingTokens !== undefined
             ? { maxThinkingTokens: providerOptions.maxThinkingTokens }
             : {}),
+          ...(providerOptions?.defaultAgent ? { agent: providerOptions.defaultAgent } : {}),
+          ...(providerOptions?.agentProgressSummaries !== undefined
+            ? { agentProgressSummaries: providerOptions.agentProgressSummaries }
+            : {}),
+          ...(providerOptions?.teammateMode
+            ? { settings: { teammateMode: providerOptions.teammateMode } }
+            : {}),
           ...(resumeState?.resume ? { resume: resumeState.resume } : {}),
           ...(resumeState?.resumeSessionAt ? { resumeSessionAt: resumeState.resumeSessionAt } : {}),
           includePartialMessages: true,
           canUseTool,
-          env: process.env,
+          env: queryEnv,
           ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         };
 
@@ -1630,6 +2033,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           pendingApprovals,
           turns: [],
           inFlightTools,
+          teamPreferences,
           turnState: undefined,
           lastAssistantUuid: resumeState?.resumeSessionAt,
           lastThreadStartedId: undefined,
@@ -1664,6 +2068,19 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               ...(permissionMode ? { permissionMode } : {}),
               ...(providerOptions?.maxThinkingTokens !== undefined
                 ? { maxThinkingTokens: providerOptions.maxThinkingTokens }
+                : {}),
+              ...(providerOptions?.experimentalAgentTeams ? { experimentalAgentTeams: true } : {}),
+              ...(providerOptions?.agentProgressSummaries !== undefined
+                ? { agentProgressSummaries: providerOptions.agentProgressSummaries }
+                : {}),
+              ...(providerOptions?.teammateMode
+                ? { teammateMode: providerOptions.teammateMode }
+                : {}),
+              ...(providerOptions?.teamTaskDelegation
+                ? { teamTaskDelegation: providerOptions.teamTaskDelegation }
+                : {}),
+              ...(providerOptions?.defaultAgent
+                ? { defaultAgent: providerOptions.defaultAgent }
                 : {}),
             },
           },
@@ -1743,7 +2160,10 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           },
         });
 
-        const message = buildUserMessage(input);
+        const message = buildUserMessage({
+          ...input,
+          input: applyClaudeTeamPromptPreference(input.input ?? "", context.teamPreferences),
+        });
 
         yield* Queue.offer(context.promptQueue, {
           type: "message",
