@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
-import { type ProviderKind, type DesktopUpdateState } from "@t3tools/contracts";
+import { type ProviderKind } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import { MAX_CUSTOM_MODEL_LENGTH, useAppSettings } from "../appSettings";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
@@ -20,7 +20,12 @@ import {
 } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { APP_VERSION } from "../branding";
-import { canCheckForUpdate, getCheckForUpdateButtonLabel } from "../components/desktopUpdate.logic";
+import {
+  canCheckForUpdate,
+  getCheckForUpdateButtonLabel,
+  resolveDesktopUpdateButtonAction,
+} from "../components/desktopUpdate.logic";
+import { desktopUpdateStateQueryOptions } from "../lib/desktopUpdateReactQuery";
 import { SidebarInset } from "~/components/ui/sidebar";
 
 const THEME_OPTIONS = [
@@ -94,50 +99,63 @@ function patchCustomModels(provider: ProviderKind, models: string[]) {
 }
 
 function DesktopUpdateCheckSection() {
-  const [updateState, setUpdateState] = useState<DesktopUpdateState | null>(null);
+  const queryClient = useQueryClient();
+  const updateStateQuery = useQuery(desktopUpdateStateQueryOptions());
   const [checkError, setCheckError] = useState<string | null>(null);
+
+  const updateState = updateStateQuery.data ?? null;
 
   useEffect(() => {
     const bridge = window.desktopBridge;
-    if (
-      !bridge ||
-      typeof bridge.getUpdateState !== "function" ||
-      typeof bridge.onUpdateState !== "function"
-    ) {
+    if (!bridge || typeof bridge.onUpdateState !== "function") return;
+
+    const opts = desktopUpdateStateQueryOptions();
+    const unsubscribe = bridge.onUpdateState((nextState) => {
+      queryClient.setQueryData(opts.queryKey, nextState);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [queryClient]);
+
+  const handleButtonClick = useCallback(() => {
+    const bridge = window.desktopBridge;
+    if (!bridge) return;
+    setCheckError(null);
+
+    const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
+    const opts = desktopUpdateStateQueryOptions();
+
+    if (action === "download") {
+      void bridge
+        .downloadUpdate()
+        .then((result) => {
+          queryClient.setQueryData(opts.queryKey, result.state);
+        })
+        .catch((error: unknown) => {
+          setCheckError(error instanceof Error ? error.message : "Download failed.");
+        });
       return;
     }
 
-    let disposed = false;
-    let receivedSubscriptionUpdate = false;
-    const unsubscribe = bridge.onUpdateState((nextState) => {
-      if (disposed) return;
-      receivedSubscriptionUpdate = true;
-      setUpdateState(nextState);
-    });
+    if (action === "install") {
+      void bridge
+        .installUpdate()
+        .then((result) => {
+          queryClient.setQueryData(opts.queryKey, result.state);
+        })
+        .catch((error: unknown) => {
+          setCheckError(error instanceof Error ? error.message : "Install failed.");
+        });
+      return;
+    }
 
-    void bridge
-      .getUpdateState()
-      .then((nextState) => {
-        if (disposed || receivedSubscriptionUpdate) return;
-        setUpdateState(nextState);
-      })
-      .catch(() => undefined);
-
-    return () => {
-      disposed = true;
-      unsubscribe();
-    };
-  }, []);
-
-  const handleCheckForUpdate = useCallback(() => {
-    const bridge = window.desktopBridge;
-    if (!bridge || typeof bridge.checkForUpdate !== "function") return;
-    setCheckError(null);
-
+    if (typeof bridge.checkForUpdate !== "function") return;
     void bridge
       .checkForUpdate()
       .then((result) => {
-        setUpdateState(result.state);
+        queryClient.setQueryData(opts.queryKey, result.state);
         if (!result.checked) {
           setCheckError(
             result.state.message ?? "Automatic updates are not available in this build.",
@@ -147,7 +165,7 @@ function DesktopUpdateCheckSection() {
       .catch((error: unknown) => {
         setCheckError(error instanceof Error ? error.message : "Update check failed.");
       });
-  }, []);
+  }, [queryClient, updateState]);
 
   const buttonLabel = getCheckForUpdateButtonLabel(updateState);
   const buttonDisabled = !canCheckForUpdate(updateState);
@@ -163,12 +181,7 @@ function DesktopUpdateCheckSection() {
               : "Check for available updates."}
           </p>
         </div>
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={buttonDisabled}
-          onClick={handleCheckForUpdate}
-        >
+        <Button size="xs" variant="outline" disabled={buttonDisabled} onClick={handleButtonClick}>
           {buttonLabel}
         </Button>
       </div>

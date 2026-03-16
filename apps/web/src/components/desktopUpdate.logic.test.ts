@@ -268,14 +268,14 @@ describe("getCheckForUpdateButtonLabel", () => {
     expect(getCheckForUpdateButtonLabel({ ...baseState, status: "up-to-date" })).toBe("Up to Date");
   });
 
-  it("returns the available version when an update is available", () => {
+  it("returns 'Download Update' when an update is available", () => {
     expect(
       getCheckForUpdateButtonLabel({
         ...baseState,
         status: "available",
         availableVersion: "1.2.0",
       }),
-    ).toBe("Update Available: 1.2.0");
+    ).toBe("Download Update");
   });
 
   it("returns 'Downloading…' while downloading", () => {
@@ -284,14 +284,14 @@ describe("getCheckForUpdateButtonLabel", () => {
     ).toBe("Downloading…");
   });
 
-  it("returns 'Update Ready to Install' when downloaded", () => {
+  it("returns 'Install Update' when downloaded", () => {
     expect(
       getCheckForUpdateButtonLabel({
         ...baseState,
         status: "downloaded",
         downloadedVersion: "1.2.0",
       }),
-    ).toBe("Update Ready to Install");
+    ).toBe("Install Update");
   });
 
   it("returns the default label for idle and error states", () => {

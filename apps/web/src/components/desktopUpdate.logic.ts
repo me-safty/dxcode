@@ -106,8 +106,8 @@ export function getCheckForUpdateButtonLabel(state: DesktopUpdateState | null): 
   if (!state) return "Check for Updates";
   if (state.status === "checking") return "Checking…";
   if (state.status === "up-to-date") return "Up to Date";
-  if (state.status === "available") return `Update Available: ${state.availableVersion ?? ""}`;
+  if (state.status === "available") return "Download Update";
   if (state.status === "downloading") return "Downloading…";
-  if (state.status === "downloaded") return "Update Ready to Install";
+  if (state.status === "downloaded") return "Install Update";
   return "Check for Updates";
 }
