@@ -14,6 +14,13 @@ const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>
   codex: new Set(getModelOptions("codex").map((option) => option.slug)),
 };
 
+export enum NotificationLevel {
+  Off = "off",
+  Important = "important",
+  Normal = "normal",
+  Verbose = "verbose",
+}
+
 const AppSettingsSchema = Schema.Struct({
   codexBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(
     Schema.withConstructorDefault(() => Option.some("")),
@@ -28,10 +35,15 @@ const AppSettingsSchema = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(
     Schema.withConstructorDefault(() => Option.some(false)),
   ),
-  enableNotifications: Schema.Boolean.pipe(Schema.withConstructorDefault(() => Option.some(true))),
   timestampFormat: Schema.Literals(["locale", "12-hour", "24-hour"]).pipe(
     Schema.withConstructorDefault(() => Option.some(DEFAULT_TIMESTAMP_FORMAT)),
   ),
+  notificationLevel: Schema.Literals([
+    NotificationLevel.Off,
+    NotificationLevel.Important,
+    NotificationLevel.Normal,
+    NotificationLevel.Verbose,
+  ]).pipe(Schema.withConstructorDefault(() => Option.some(NotificationLevel.Normal))),
   customCodexModels: Schema.Array(Schema.String).pipe(
     Schema.withConstructorDefault(() => Option.some([])),
   ),

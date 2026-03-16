@@ -20,7 +20,7 @@ import { AnchoredToastProvider, ToastProvider, toastManager } from "../component
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
-import { useAppSettings } from "../appSettings";
+import { NotificationLevel, useAppSettings } from "../appSettings";
 import { clearPromotedDraftThreads, useComposerDraftStore } from "../composerDraftStore";
 import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
@@ -29,7 +29,12 @@ import { onServerConfigUpdated, onServerWelcome } from "../wsNativeApi";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
-import { isAppBackgrounded, showNativeNotification } from "../lib/nativeNotifications";
+import {
+  isAppBackgrounded,
+  resolveAttentionNotification,
+  resolveTurnCompletionNotification,
+  showNativeNotification,
+} from "../lib/nativeNotifications";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -152,6 +157,7 @@ function EventRouter() {
     new Map<string, { status: OrchestrationSessionStatus; activeTurnId: string | null }>(),
   );
   const lastNotifiedTurnByThreadRef = useRef(new Map<string, string>());
+  const lastNotifiedActivityByThreadRef = useRef(new Map<string, string>());
 
   pathnameRef.current = pathname;
 
@@ -164,38 +170,42 @@ function EventRouter() {
     let pending = false;
     let needsProviderInvalidation = false;
 
-    const maybeNotifyForTurnCompletion = (snapshot: OrchestrationReadModel) => {
-      // Only notify when the app is backgrounded and the user has enabled notifications.
-      const shouldNotify = isAppBackgrounded() && settings.enableNotifications;
+    const maybeNotifyForThread = (snapshot: OrchestrationReadModel) => {
+      const notificationLevel = settings.notificationLevel;
+      // Only notify when the app is backgrounded and notifications are enabled.
+      const shouldNotify = isAppBackgrounded() && notificationLevel !== NotificationLevel.Off;
       const seenThreadIds = new Set<string>();
       for (const thread of snapshot.threads) {
         seenThreadIds.add(thread.id);
         const session = thread.session;
         const previous = lastSessionByThreadRef.current.get(thread.id);
 
-        // A completed/failed turn transitions from running with an activeTurnId
-        // to a session with no active turn and status ready/error.
-        if (
-          shouldNotify &&
-          session &&
-          previous &&
-          previous.status === "running" &&
-          previous.activeTurnId &&
-          session.activeTurnId === null &&
-          (session.status === "ready" || session.status === "error")
-        ) {
-          const lastNotifiedTurnId = lastNotifiedTurnByThreadRef.current.get(thread.id);
+        const completionNotification = resolveTurnCompletionNotification({
+          shouldNotify,
+          level: notificationLevel,
+          thread,
+          previous,
+          lastNotifiedTurnId: lastNotifiedTurnByThreadRef.current.get(thread.id),
+        });
 
-          if (lastNotifiedTurnId !== previous.activeTurnId) {
-            const title = session.status === "error" ? "Task failed" : "Task completed";
-            const detail =
-              session.status === "error" && session.lastError ? session.lastError : thread.title;
-            const body = detail.length > 180 ? `${detail.slice(0, 177)}...` : detail;
-            const tag = `t3code:${thread.id}:${previous.activeTurnId}:${session.status}`;
+        if (completionNotification) {
+          const { title, body, tag, turnId } = completionNotification;
+          if (showNativeNotification({ title, body, tag })) {
+            lastNotifiedTurnByThreadRef.current.set(thread.id, turnId);
+          }
+        }
 
-            if (showNativeNotification({ title, body, tag })) {
-              lastNotifiedTurnByThreadRef.current.set(thread.id, previous.activeTurnId);
-            }
+        const attentionNotification = resolveAttentionNotification({
+          shouldNotify,
+          level: notificationLevel,
+          thread,
+          lastNotifiedActivityId: lastNotifiedActivityByThreadRef.current.get(thread.id),
+        });
+
+        if (attentionNotification) {
+          const { title, body, tag, activityId } = attentionNotification;
+          if (showNativeNotification({ title, body, tag })) {
+            lastNotifiedActivityByThreadRef.current.set(thread.id, activityId);
           }
         }
 
@@ -215,6 +225,7 @@ function EventRouter() {
         if (!seenThreadIds.has(threadId)) {
           lastSessionByThreadRef.current.delete(threadId);
           lastNotifiedTurnByThreadRef.current.delete(threadId);
+          lastNotifiedActivityByThreadRef.current.delete(threadId);
         }
       }
     };
@@ -223,7 +234,7 @@ function EventRouter() {
       const snapshot = await api.orchestration.getSnapshot();
       if (disposed) return;
       latestSequence = Math.max(latestSequence, snapshot.snapshotSequence);
-      maybeNotifyForTurnCompletion(snapshot);
+      maybeNotifyForThread(snapshot);
       syncServerReadModel(snapshot);
       clearPromotedDraftThreads(new Set(snapshot.threads.map((t) => t.id)));
       const draftThreadIds = Object.keys(
@@ -382,7 +393,7 @@ function EventRouter() {
     queryClient,
     removeOrphanedTerminalStates,
     setProjectExpanded,
-    settings.enableNotifications,
+    settings.notificationLevel,
     syncServerReadModel,
   ]);
 

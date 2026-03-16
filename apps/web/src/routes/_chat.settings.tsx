@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { type ProviderKind } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
-import { MAX_CUSTOM_MODEL_LENGTH, useAppSettings } from "../appSettings";
+import { MAX_CUSTOM_MODEL_LENGTH, NotificationLevel, useAppSettings } from "../appSettings";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";
@@ -23,6 +23,29 @@ import {
 import { Switch } from "../components/ui/switch";
 import { APP_VERSION } from "../branding";
 import { SidebarInset } from "~/components/ui/sidebar";
+
+const NOTIFICATION_LEVELS = [
+  {
+    value: NotificationLevel.Off,
+    label: "Off",
+    description: "Disable all OS notifications.",
+  },
+  {
+    value: NotificationLevel.Important,
+    label: "Important",
+    description: "Approval/input required and failed tasks only.",
+  },
+  {
+    value: NotificationLevel.Normal,
+    label: "Normal",
+    description: "Important plus completed tasks.",
+  },
+  {
+    value: NotificationLevel.Verbose,
+    label: "Verbose",
+    description: "Normal plus task activity updates.",
+  },
+] as const;
 
 const THEME_OPTIONS = [
   {
@@ -599,22 +622,32 @@ function SettingsRouteView() {
                 </p>
               </div>
 
-              <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
-                <div>
-                  <p className="text-sm font-medium text-foreground">Enable notifications</p>
-                  <p className="text-xs text-muted-foreground">
-                    Show OS notifications for completed or failed tasks.
-                  </p>
-                </div>
-                <Switch
-                  checked={settings.enableNotifications}
-                  onCheckedChange={(checked) =>
-                    updateSettings({
-                      enableNotifications: Boolean(checked),
-                    })
-                  }
-                  aria-label="Enable notifications"
-                />
+              <div className="space-y-2">
+                {NOTIFICATION_LEVELS.map((option) => {
+                  const selected = settings.notificationLevel === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      className={`flex w-full items-start justify-between rounded-lg border px-3 py-2 text-left transition-colors ${selected
+                          ? "border-primary/60 bg-primary/8 text-foreground"
+                          : "border-border bg-background text-muted-foreground hover:bg-accent"
+                        }`}
+                      onClick={() =>
+                        updateSettings({
+                          notificationLevel: option.value,
+                        })
+                      }
+                    >
+                      <span className="flex flex-col">
+                        <span className="text-sm font-medium text-foreground">{option.label}</span>
+                        <span className="text-xs text-muted-foreground">{option.description}</span>
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
 
               <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2">
@@ -652,7 +685,7 @@ function SettingsRouteView() {
                   size="xs"
                   variant="outline"
                   disabled={
-                    !settings.enableNotifications ||
+                    settings.notificationLevel === NotificationLevel.Off ||
                     (!isElectron && notificationPermission !== "granted")
                   }
                   onClick={() => {
