@@ -1,6 +1,13 @@
 import type { UserInputQuestion } from "@t3tools/contracts";
 
+// ponytail: answerSource makes the active input source authoritative so a
+// clicked preset cannot be overwritten by stale custom editor state at submit
+// (the #918/#528 preset/custom race). Kept as a discriminator over upstream's
+// existing selectedOptionLabels[] shape to preserve multiSelect.
+export type PendingUserInputAnswerSource = "option" | "custom";
+
 export interface PendingUserInputDraftAnswer {
+  answerSource?: PendingUserInputAnswerSource;
   selectedOptionLabels?: string[];
   customAnswer?: string;
 }
@@ -50,11 +57,22 @@ export function resolvePendingUserInputAnswer(
   draft: PendingUserInputDraftAnswer | undefined,
 ): string | string[] | null {
   const customAnswer = normalizeDraftAnswer(draft?.customAnswer);
+  const selectedOptionLabels = normalizeSelectedOptionLabels(draft?.selectedOptionLabels);
+
+  if (draft?.answerSource === "custom") {
+    return customAnswer;
+  }
+  if (draft?.answerSource === "option") {
+    if (question.multiSelect) {
+      return selectedOptionLabels.length > 0 ? selectedOptionLabels : null;
+    }
+    return selectedOptionLabels[0] ?? null;
+  }
+
+  // No explicit source — legacy fallback (custom takes precedence).
   if (customAnswer) {
     return customAnswer;
   }
-
-  const selectedOptionLabels = normalizeSelectedOptionLabels(draft?.selectedOptionLabels);
   if (question.multiSelect) {
     return selectedOptionLabels.length > 0 ? selectedOptionLabels : null;
   }
@@ -66,14 +84,20 @@ export function setPendingUserInputCustomAnswer(
   draft: PendingUserInputDraftAnswer | undefined,
   customAnswer: string,
 ): PendingUserInputDraftAnswer {
-  const selectedOptionLabels =
-    customAnswer.trim().length > 0
-      ? undefined
-      : normalizeSelectedOptionLabels(draft?.selectedOptionLabels);
+  const normalizedCustomAnswer = normalizeDraftAnswer(customAnswer);
+  const selectedOptionLabels = normalizedCustomAnswer
+    ? undefined
+    : normalizeSelectedOptionLabels(draft?.selectedOptionLabels);
+  const answerSource: PendingUserInputAnswerSource | undefined = normalizedCustomAnswer
+    ? "custom"
+    : selectedOptionLabels.length > 0
+      ? "option"
+      : undefined;
 
   return {
+    ...(answerSource ? { answerSource } : {}),
     customAnswer,
-    ...(selectedOptionLabels && selectedOptionLabels.length > 0 ? { selectedOptionLabels } : {}),
+    ...(selectedOptionLabels.length > 0 ? { selectedOptionLabels } : {}),
   };
 }
 
@@ -89,6 +113,7 @@ export function togglePendingUserInputOptionSelection(
       : [...selectedOptionLabels, optionLabel];
 
     return {
+      answerSource: nextSelectedOptionLabels.length > 0 ? "option" : undefined,
       customAnswer: "",
       ...(nextSelectedOptionLabels.length > 0
         ? { selectedOptionLabels: nextSelectedOptionLabels }
@@ -97,8 +122,20 @@ export function togglePendingUserInputOptionSelection(
   }
 
   return {
+    answerSource: "option",
     customAnswer: "",
     selectedOptionLabels: [optionLabel],
+  };
+}
+
+export function setPendingUserInputSelectedOption(
+  _draft: PendingUserInputDraftAnswer | undefined,
+  selectedOptionLabel: string,
+): PendingUserInputDraftAnswer {
+  return {
+    answerSource: "option",
+    selectedOptionLabels: [selectedOptionLabel],
+    customAnswer: "",
   };
 }
 
@@ -152,6 +189,13 @@ export function derivePendingUserInputProgress(
     ? resolvePendingUserInputAnswer(activeQuestion, activeDraft)
     : null;
   const customAnswer = activeDraft?.customAnswer ?? "";
+  const normalizedCustomAnswer = normalizeDraftAnswer(customAnswer);
+  const usingCustomAnswer =
+    activeDraft?.answerSource === "custom"
+      ? normalizedCustomAnswer !== null
+      : activeDraft?.answerSource === "option"
+        ? false
+        : normalizedCustomAnswer !== null;
   const answeredQuestionCount = countAnsweredPendingUserInputQuestions(questions, draftAnswers);
   const isLastQuestion =
     questions.length === 0 ? true : normalizedQuestionIndex >= questions.length - 1;
@@ -163,7 +207,7 @@ export function derivePendingUserInputProgress(
     selectedOptionLabels: normalizeSelectedOptionLabels(activeDraft?.selectedOptionLabels),
     customAnswer,
     resolvedAnswer,
-    usingCustomAnswer: customAnswer.trim().length > 0,
+    usingCustomAnswer,
     answeredQuestionCount,
     isLastQuestion,
     isComplete: buildPendingUserInputAnswers(questions, draftAnswers) !== null,
