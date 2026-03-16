@@ -416,4 +416,27 @@ describe("agent completion notifications", () => {
       }),
     ).resolves.toBeNull();
   });
+
+  it("does not play the default sound when configured playback is disabled", async () => {
+    const playMock = vi.fn(async () => undefined);
+
+    class FakeAudio {
+      currentTime = 0;
+      preload = "";
+      play = playMock;
+      constructor(public readonly src: string) {}
+    }
+
+    vi.stubGlobal("Audio", FakeAudio);
+
+    const { playConfiguredCompletionSound } = await import("./agentCompletionNotifications");
+
+    await playConfiguredCompletionSound({
+      enableCompletionSound: false,
+      notificationSoundSelection: "default",
+      notificationCustomSoundId: "",
+    });
+
+    expect(playMock).not.toHaveBeenCalled();
+  });
 });

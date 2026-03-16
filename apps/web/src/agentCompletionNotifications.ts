@@ -270,10 +270,10 @@ export function collectNewlySettledTurns(
 
 export async function playCompletionSound(options: PlayCompletionSoundOptions = {}): Promise<void> {
   try {
-    const src = options.src ?? "/sounds/agent-finished.mp3";
-    if (!src) {
+    if (options.src === null) {
       return;
     }
+    const src = options.src ?? "/sounds/agent-finished.mp3";
     if (!completionSound || completionSoundSrc !== src) {
       completionSound = createCompletionSound(src);
       completionSoundSrc = src;
