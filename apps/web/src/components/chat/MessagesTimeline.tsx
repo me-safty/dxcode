@@ -5,7 +5,12 @@ import {
   type VirtualItem,
   useVirtualizer,
 } from "@tanstack/react-virtual";
-import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
+import {
+  deriveTimelineEntries,
+  formatDuration,
+  formatElapsed,
+  type WorkLogEntry,
+} from "../../session-logic";
 import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX } from "../../chat-scroll";
 import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
@@ -13,10 +18,12 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
   HammerIcon,
+  Loader2Icon,
   type LucideIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -121,6 +128,68 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
     );
 
+    // Pre-scan: group work entries by parentTaskId to identify agent children.
+    // parentTaskId comes from parentToolUseId (the Anthropic tool_use block ID).
+    // Agent tool entries carry itemId (the same tool_use block ID) so we can match them.
+    const agentChildrenByParent = new Map<string, WorkLogEntry[]>();
+    const consumedEntryIds = new Set<string>();
+    // Map itemId → Agent tool entries (tool.started/tool.completed)
+    const agentEntriesByItemId = new Map<
+      string,
+      { started?: WorkLogEntry; completed?: WorkLogEntry }
+    >();
+
+    for (const te of timelineEntries) {
+      if (te.kind !== "work") continue;
+      const entry = te.entry;
+
+      // Index Agent tool entries by their itemId for later parent matching
+      if (entry.itemId && entry.toolName === "Agent") {
+        const existing = agentEntriesByItemId.get(entry.itemId) ?? {};
+        if (entry.label.toLowerCase().includes("started")) {
+          existing.started = entry;
+        } else {
+          existing.completed = entry;
+        }
+        agentEntriesByItemId.set(entry.itemId, existing);
+      }
+
+      if (entry.parentTaskId) {
+        // This is a child of an agent execution
+        let children = agentChildrenByParent.get(entry.parentTaskId);
+        if (!children) {
+          children = [];
+          agentChildrenByParent.set(entry.parentTaskId, children);
+        }
+        children.push(entry);
+        consumedEntryIds.add(te.id);
+        continue;
+      }
+
+      // task.started/task.completed without parentTaskId are agent lifecycle
+      // events — consume them so they don't appear as separate rows.
+      if (
+        entry.taskId &&
+        (entry.label.toLowerCase().includes("task started") ||
+          entry.label.toLowerCase().includes("task completed") ||
+          entry.label.toLowerCase().includes("task failed"))
+      ) {
+        consumedEntryIds.add(te.id);
+        continue;
+      }
+    }
+
+    // Consume Agent tool entries whose itemId matches a known parent group
+    for (const [itemId, agents] of agentEntriesByItemId) {
+      if (agentChildrenByParent.has(itemId)) {
+        if (agents.started) consumedEntryIds.add(agents.started.id);
+        if (agents.completed) consumedEntryIds.add(agents.completed.id);
+      }
+    }
+
+    // Track which agent groups have been emitted
+    const emittedAgentGroups = new Set<string>();
+
     for (let index = 0; index < timelineEntries.length; index += 1) {
       const timelineEntry = timelineEntries[index];
       if (!timelineEntry) {
@@ -128,12 +197,45 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       }
 
       if (timelineEntry.kind === "work") {
-        const groupedEntries = [timelineEntry.entry];
+        const entry = timelineEntry.entry;
+
+        // Skip entries consumed by agent grouping
+        if (consumedEntryIds.has(timelineEntry.id)) {
+          // If this is an Agent tool entry with children, emit the agent group here
+          const agentItemId = entry.itemId ?? entry.parentTaskId;
+          if (agentItemId && !emittedAgentGroups.has(agentItemId)) {
+            const children = agentChildrenByParent.get(agentItemId);
+            if (children && children.length > 0) {
+              emittedAgentGroups.add(agentItemId);
+              const agents = agentEntriesByItemId.get(agentItemId);
+              const agentEntry: WorkLogEntry = agents?.completed ??
+                agents?.started ?? {
+                  id: `agent-group:${agentItemId}`,
+                  createdAt: children[0]?.createdAt ?? entry.createdAt,
+                  label: "Agent",
+                  tone: "tool",
+                  toolName: "Agent",
+                };
+              nextRows.push({
+                kind: "agent-execution",
+                id: `agent-group:${agentItemId}`,
+                createdAt: agents?.started?.createdAt ?? children[0]?.createdAt ?? entry.createdAt,
+                agentEntry,
+                childEntries: children,
+              });
+            }
+          }
+          continue;
+        }
+
+        // Regular tool call grouping (non-agent entries)
+        const groupedEntries = [entry];
         let cursor = index + 1;
         while (cursor < timelineEntries.length) {
-          const nextEntry = timelineEntries[cursor];
-          if (!nextEntry || nextEntry.kind !== "work") break;
-          groupedEntries.push(nextEntry.entry);
+          const nextTimelineEntry = timelineEntries[cursor];
+          if (!nextTimelineEntry || nextTimelineEntry.kind !== "work") break;
+          if (consumedEntryIds.has(nextTimelineEntry.id)) break;
+          groupedEntries.push(nextTimelineEntry.entry);
           cursor += 1;
         }
         nextRows.push({
@@ -231,6 +333,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     estimateSize: (index: number) => {
       const row = rows[index];
       if (!row) return 96;
+      if (row.kind === "agent-execution") return 56 + 28 * row.childEntries.length + 40;
       if (row.kind === "work") return 112;
       if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
       if (row.kind === "working") return 40;
@@ -332,6 +435,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             </div>
           );
         })()}
+
+      {row.kind === "agent-execution" && (
+        <AgentExecutionContainer
+          agentEntry={row.agentEntry}
+          childEntries={row.childEntries}
+          isLive={
+            isWorking && (row.agentEntry.status === "inProgress" || row.agentEntry.status == null)
+          }
+        />
+      )}
 
       {row.kind === "message" &&
         row.message.role === "user" &&
@@ -597,7 +710,14 @@ type TimelineRow =
       createdAt: string;
       proposedPlan: TimelineProposedPlan;
     }
-  | { kind: "working"; id: string; createdAt: string | null };
+  | { kind: "working"; id: string; createdAt: string | null }
+  | {
+      kind: "agent-execution";
+      id: string;
+      createdAt: string;
+      agentEntry: WorkLogEntry;
+      childEntries: WorkLogEntry[];
+    };
 
 function estimateTimelineProposedPlanHeight(proposedPlan: TimelineProposedPlan): number {
   const estimatedLines = Math.max(1, Math.ceil(proposedPlan.planMarkdown.length / 72));
@@ -723,6 +843,97 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
   }
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
 }
+
+const AgentExecutionContainer = memo(function AgentExecutionContainer({
+  agentEntry,
+  childEntries,
+  isLive,
+}: {
+  agentEntry: WorkLogEntry;
+  childEntries: WorkLogEntry[];
+  isLive: boolean;
+}) {
+  const [expanded, setExpanded] = useState(isLive);
+
+  useEffect(() => {
+    if (isLive) setExpanded(true);
+  }, [isLive]);
+
+  const description = (() => {
+    // Extract "description" from Agent tool JSON input (may be truncated, so use regex)
+    const raw = agentEntry.detail ?? "";
+    const match = raw.match(/"description"\s*:\s*"([^"]+)"/);
+    if (match?.[1]) return match[1];
+    return agentEntry.label === "Agent complete" ? "Agent" : agentEntry.label;
+  })();
+  const totalCount = childEntries.length;
+  const isFailed = agentEntry.tone === "error" || agentEntry.label.toLowerCase().includes("failed");
+
+  const accentClass = isFailed
+    ? "border-l-rose-400/60"
+    : isLive
+      ? "border-l-blue-400/60"
+      : "border-l-muted-foreground/20";
+
+  return (
+    <div
+      className={cn(
+        "overflow-hidden rounded-lg border border-border/60 border-l-2 bg-card/30",
+        accentClass,
+      )}
+    >
+      <button
+        type="button"
+        className="flex w-full items-start gap-2 px-3 py-2 text-left transition-colors duration-100 hover:bg-muted/20"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <ChevronRightIcon
+          className={cn(
+            "mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/40 transition-transform duration-150",
+            expanded && "rotate-90",
+          )}
+        />
+        <BotIcon
+          className={cn(
+            "mt-0.5 h-4 w-4 shrink-0",
+            isLive ? "text-blue-400" : isFailed ? "text-rose-400" : "text-muted-foreground/50",
+          )}
+        />
+        <div className="min-w-0 flex-1">
+          <p className="text-[12px] font-medium leading-snug text-foreground/80">{description}</p>
+          <p className="mt-0.5 text-[10px] text-muted-foreground/50">
+            {isLive ? (
+              <>
+                {totalCount} tool call{totalCount !== 1 ? "s" : ""} so far
+              </>
+            ) : isFailed ? (
+              "Failed"
+            ) : (
+              <>
+                {totalCount} tool call{totalCount !== 1 ? "s" : ""} completed
+              </>
+            )}
+          </p>
+        </div>
+        {isLive ? (
+          <Loader2Icon className="ml-auto h-3.5 w-3.5 shrink-0 animate-spin text-blue-400" />
+        ) : agentEntry.elapsedMs != null ? (
+          <span className="ml-auto shrink-0 tabular-nums text-[10px] text-muted-foreground/40">
+            {formatDuration(agentEntry.elapsedMs)}
+          </span>
+        ) : null}
+      </button>
+
+      {expanded && childEntries.length > 0 && (
+        <div className="ml-3 space-y-0.5 border-l-2 border-l-border/40 py-1 pl-3">
+          {childEntries.map((child) => (
+            <SimpleWorkEntryRow key={child.id} workEntry={child} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
 
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
