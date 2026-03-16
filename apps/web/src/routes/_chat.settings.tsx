@@ -631,10 +631,11 @@ function SettingsRouteView() {
                       type="button"
                       role="radio"
                       aria-checked={selected}
-                      className={`flex w-full items-start justify-between rounded-lg border px-3 py-2 text-left transition-colors ${selected
+                      className={`flex w-full items-start justify-between rounded-lg border px-3 py-2 text-left transition-colors ${
+                        selected
                           ? "border-primary/60 bg-primary/8 text-foreground"
                           : "border-border bg-background text-muted-foreground hover:bg-accent"
-                        }`}
+                      }`}
                       onClick={() =>
                         updateSettings({
                           notificationLevel: option.value,
