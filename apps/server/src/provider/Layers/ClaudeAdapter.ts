@@ -1044,8 +1044,6 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       result?: SDKResultMessage,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
-        // Clear any stale in-flight tools from interrupted content blocks
-        context.inFlightTools.clear();
         const turnState = context.turnState;
         if (!turnState) {
           const stamp = yield* makeEventStamp();
@@ -1099,6 +1097,8 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           });
           context.inFlightTools.delete(index);
         }
+        // Clear any remaining stale entries (e.g. from interrupted content blocks)
+        context.inFlightTools.clear();
 
         for (const blockIndex of turnState.assistantTextBlockOrder) {
           yield* completeAssistantTextBlock(context, blockIndex, {
