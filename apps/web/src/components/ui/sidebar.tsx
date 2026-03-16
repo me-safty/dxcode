@@ -86,6 +86,12 @@ function useSidebar() {
 }
 
 const SWIPE_THRESHOLD = 80;
+// Minimum horizontal movement before we consider it a swipe intent
+const SWIPE_LOCK_PX = 20;
+// Horizontal movement must be this many times greater than vertical to count as a swipe
+const SWIPE_AXIS_RATIO = 2;
+// If vertical movement exceeds this before horizontal lock-in, treat as a scroll and cancel
+const SCROLL_CANCEL_PX = 12;
 
 function SwipeToDismiss({
   children,
@@ -98,24 +104,32 @@ function SwipeToDismiss({
 }) {
   const touchStartRef = React.useRef<{ x: number; y: number } | null>(null);
   const swipingRef = React.useRef(false);
+  const cancelledRef = React.useRef(false);
 
   const handleTouchStart = React.useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0];
     if (!touch) return;
     touchStartRef.current = { x: touch.clientX, y: touch.clientY };
     swipingRef.current = false;
+    cancelledRef.current = false;
   }, []);
 
   const handleTouchMove = React.useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0];
     const start = touchStartRef.current;
-    if (!touch || !start) return;
+    if (!touch || !start || cancelledRef.current) return;
 
     const dx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
 
-    // Only treat as a horizontal swipe if horizontal movement exceeds vertical
-    if (!swipingRef.current && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+    // If vertical scroll is detected before horizontal lock-in, cancel the swipe
+    if (!swipingRef.current && Math.abs(dy) > SCROLL_CANCEL_PX) {
+      cancelledRef.current = true;
+      return;
+    }
+
+    // Require decisive horizontal intent: enough movement and 2x horizontal vs vertical
+    if (!swipingRef.current && Math.abs(dx) > SWIPE_LOCK_PX && Math.abs(dx) > Math.abs(dy) * SWIPE_AXIS_RATIO) {
       swipingRef.current = true;
     }
   }, []);
@@ -732,6 +746,7 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
 
   const touchStartRef = React.useRef<{ x: number; y: number } | null>(null);
   const swipingRef = React.useRef(false);
+  const cancelledRef = React.useRef(false);
 
   const handleTouchStart = React.useCallback(
     (e: React.TouchEvent) => {
@@ -742,6 +757,7 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
       if (touch.clientX > SWIPE_OPEN_EDGE_PX) return;
       touchStartRef.current = { x: touch.clientX, y: touch.clientY };
       swipingRef.current = false;
+      cancelledRef.current = false;
     },
     [isMobile],
   );
@@ -749,10 +765,18 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
   const handleTouchMove = React.useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0];
     const start = touchStartRef.current;
-    if (!touch || !start) return;
+    if (!touch || !start || cancelledRef.current) return;
     const dx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
-    if (!swipingRef.current && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+
+    // If vertical scroll is detected before horizontal lock-in, cancel the swipe
+    if (!swipingRef.current && Math.abs(dy) > SCROLL_CANCEL_PX) {
+      cancelledRef.current = true;
+      return;
+    }
+
+    // Require decisive horizontal intent: enough movement and 2x horizontal vs vertical
+    if (!swipingRef.current && Math.abs(dx) > SWIPE_LOCK_PX && Math.abs(dx) > Math.abs(dy) * SWIPE_AXIS_RATIO) {
       swipingRef.current = true;
     }
   }, []);
