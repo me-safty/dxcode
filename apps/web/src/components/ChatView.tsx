@@ -164,6 +164,8 @@ import {
   SendPhase,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { useMessageQueue } from "../hooks/useMessageQueue";
+import { QueuedMessagesBanner } from "./chat/QueuedMessagesBanner";
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
@@ -323,6 +325,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const attachmentPreviewHandoffTimeoutByMessageIdRef = useRef<Record<string, number>>({});
   const sendInFlightRef = useRef(false);
   const dragDepthRef = useRef(0);
+  const {
+    queue: messageQueue,
+    enqueue: enqueueMessage,
+    drainAll: drainAllQueuedMessages,
+    removeById: removeQueuedMessage,
+  } = useMessageQueue(threadId);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
   const setMessagesScrollContainerRef = useCallback((element: HTMLDivElement | null) => {
     messagesScrollRef.current = element;
@@ -2272,7 +2280,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeThread, isConnecting, isRevertingCheckpoint, isSendBusy, phase, setThreadError],
   );
 
-  const onSend = async (e?: { preventDefault: () => void }) => {
+  const onSend = async (
+    e?: { preventDefault: () => void },
+    queuedContent?: { text: string; images: ComposerImageAttachment[] },
+  ) => {
     e?.preventDefault();
     const api = readNativeApi();
     if (
@@ -2288,7 +2299,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
       onAdvanceActivePendingUserInput();
       return;
     }
-    const trimmed = prompt.trim();
+    // If a turn is already running and this isn't a queued flush, queue the message instead
+    if (!queuedContent && !latestTurnSettled) {
+      // Let plan follow-up and slash commands fall through — they have their own flow
+      if (!activePendingProgress && !showPlanFollowUpPrompt) {
+        const text = prompt.trim();
+        if (!text && composerImages.length === 0) return;
+        enqueueMessage(text, [...composerImages]);
+        promptRef.current = "";
+        clearComposerDraftContent(activeThread.id);
+        setComposerHighlightedItemId(null);
+        setComposerCursor(0);
+        setComposerTrigger(null);
+        return;
+      }
+    }
+    const trimmed = (queuedContent?.text ?? prompt).trim();
     if (showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
         draftText: trimmed,
@@ -2305,8 +2331,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       });
       return;
     }
+    const effectiveImages = queuedContent?.images ?? composerImages;
     const standaloneSlashCommand =
-      composerImages.length === 0 ? parseStandaloneComposerSlashCommand(trimmed) : null;
+      effectiveImages.length === 0 ? parseStandaloneComposerSlashCommand(trimmed) : null;
     if (standaloneSlashCommand) {
       await handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
@@ -2316,7 +2343,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerTrigger(null);
       return;
     }
-    if (!trimmed && composerImages.length === 0) return;
+    if (!trimmed && effectiveImages.length === 0) return;
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
@@ -2340,7 +2367,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     sendInFlightRef.current = true;
     beginSendPhase(baseBranchForWorktree ? "preparing-worktree" : "sending-turn");
 
-    const composerImagesSnapshot = [...composerImages];
+    const composerImagesSnapshot = [...effectiveImages];
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
     const turnAttachmentsPromise = Promise.all(
@@ -2376,11 +2403,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
     forceStickToBottom();
 
     setThreadError(threadIdForSend, null);
-    promptRef.current = "";
-    clearComposerDraftContent(threadIdForSend);
-    setComposerHighlightedItemId(null);
-    setComposerCursor(0);
-    setComposerTrigger(null);
+    // Only clear the composer when the user initiated the send directly.
+    // Queued flushes should not wipe what the user is currently typing.
+    if (!queuedContent) {
+      promptRef.current = "";
+      clearComposerDraftContent(threadIdForSend);
+      setComposerHighlightedItemId(null);
+      setComposerCursor(0);
+      setComposerTrigger(null);
+    }
 
     let createdServerThreadForLocalDraft = false;
     let turnStartSucceeded = false;
@@ -2557,6 +2588,26 @@ export default function ChatView({ threadId }: ChatViewProps) {
       resetSendPhase();
     }
   };
+
+  // Keep a stable ref to onSend so the auto-flush effect doesn't need it as a dep
+  const onSendRef = useRef(onSend);
+  onSendRef.current = onSend;
+
+  // Auto-flush queued messages when the AI becomes idle.
+  // All queued messages are drained and merged into a single turn.
+  useEffect(() => {
+    if (!latestTurnSettled) return;
+    if (messageQueue.length === 0) return;
+    if (isSendBusy || sendInFlightRef.current) return;
+
+    const items = drainAllQueuedMessages();
+    if (items.length === 0) return;
+
+    const mergedText = items.map((m) => m.text).join("\n\n");
+    const mergedImages = items.flatMap((m) => m.images);
+
+    void onSendRef.current(undefined, { text: mergedText, images: mergedImages });
+  }, [latestTurnSettled, messageQueue, isSendBusy, drainAllQueuedMessages]);
 
   const onInterrupt = async () => {
     const api = readNativeApi();
@@ -3454,6 +3505,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
           {/* Input bar */}
           <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
+            {messageQueue.length > 0 && (
+              <div className="mx-auto w-full min-w-0 max-w-3xl">
+                <QueuedMessagesBanner queue={messageQueue} onCancel={removeQueuedMessage} />
+              </div>
+            )}
             <form
               ref={composerFormRef}
               onSubmit={onSend}
