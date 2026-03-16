@@ -1044,6 +1044,8 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       result?: SDKResultMessage,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
+        // Clear any stale in-flight tools from interrupted content blocks
+        context.inFlightTools.clear();
         const turnState = context.turnState;
         if (!turnState) {
           const stamp = yield* makeEventStamp();
@@ -1475,6 +1477,48 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       Effect.gen(function* () {
         if (message.type !== "assistant") {
           return;
+        }
+
+        // Auto-start a synthetic turn for assistant messages that arrive without
+        // an active turn (e.g., background agent/subagent responses between user prompts).
+        if (!context.turnState) {
+          const turnId = TurnId.makeUnsafe(yield* Random.nextUUIDv4);
+          const assistantItemId = yield* Random.nextUUIDv4;
+          const startedAt = yield* nowIso;
+          context.turnState = {
+            turnId,
+            assistantItemId,
+            startedAt,
+            items: [],
+            messageCompleted: false,
+            emittedTextDelta: false,
+            fallbackAssistantText: "",
+          };
+          context.session = {
+            ...context.session,
+            status: "running",
+            activeTurnId: turnId,
+            updatedAt: startedAt,
+          };
+          const turnStartedStamp = yield* makeEventStamp();
+          yield* offerRuntimeEvent({
+            type: "turn.started",
+            eventId: turnStartedStamp.eventId,
+            provider: PROVIDER,
+            createdAt: turnStartedStamp.createdAt,
+            threadId: context.session.threadId,
+            turnId,
+            payload: {},
+            providerRefs: {
+              ...providerThreadRef(context),
+              providerTurnId: turnId,
+            },
+            raw: {
+              source: "claude.sdk.message",
+              method: "claude/synthetic-turn-start",
+              payload: {},
+            },
+          });
         }
 
         if (context.turnState) {
@@ -2290,11 +2334,9 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         const context = yield* requireSession(input.threadId);
 
         if (context.turnState) {
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "sendTurn",
-            issue: `Thread '${input.threadId}' already has an active turn '${context.turnState.turnId}'.`,
-          });
+          // Auto-close a stale synthetic turn (from background agent responses
+          // between user prompts) to prevent blocking the user's next turn.
+          yield* completeTurn(context, "completed");
         }
 
         if (input.model) {
