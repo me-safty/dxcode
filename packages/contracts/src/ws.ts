@@ -1,5 +1,10 @@
 import { Schema, Struct } from "effect";
-import { NonNegativeInt, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
+import {
+  NonNegativeInt,
+  ProjectId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas";
 
 import {
   ClientOrchestrationCommand,
@@ -37,6 +42,7 @@ import { KeybindingRule } from "./keybindings";
 import { ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
 import { OpenInEditorInput } from "./editor";
 import { ServerConfigUpdatedPayload } from "./server";
+import { CodexSetOpenAiEnvInput } from "./codex";
 
 // ── WebSocket RPC Method Names ───────────────────────────────────────
 
@@ -75,6 +81,9 @@ export const WS_METHODS = {
   // Server meta
   serverGetConfig: "server.getConfig",
   serverUpsertKeybinding: "server.upsertKeybinding",
+
+  // Codex meta
+  codexSetOpenAiEnv: "codex.setOpenAiEnv",
 } as const;
 
 // ── Push Event Channels ──────────────────────────────────────────────
@@ -87,7 +96,10 @@ export const WS_CHANNELS = {
 
 // -- Tagged Union of all request body schemas ─────────────────────────
 
-const tagRequestBody = <const Tag extends string, const Fields extends Schema.Struct.Fields>(
+const tagRequestBody = <
+  const Tag extends string,
+  const Fields extends Schema.Struct.Fields,
+>(
   tag: Tag,
   schema: Schema.Struct<Fields>,
 ) =>
@@ -103,10 +115,22 @@ const WebSocketRequestBody = Schema.Union([
     ORCHESTRATION_WS_METHODS.dispatchCommand,
     Schema.Struct({ command: ClientOrchestrationCommand }),
   ),
-  tagRequestBody(ORCHESTRATION_WS_METHODS.getSnapshot, OrchestrationGetSnapshotInput),
-  tagRequestBody(ORCHESTRATION_WS_METHODS.getTurnDiff, OrchestrationGetTurnDiffInput),
-  tagRequestBody(ORCHESTRATION_WS_METHODS.getFullThreadDiff, OrchestrationGetFullThreadDiffInput),
-  tagRequestBody(ORCHESTRATION_WS_METHODS.replayEvents, OrchestrationReplayEventsInput),
+  tagRequestBody(
+    ORCHESTRATION_WS_METHODS.getSnapshot,
+    OrchestrationGetSnapshotInput,
+  ),
+  tagRequestBody(
+    ORCHESTRATION_WS_METHODS.getTurnDiff,
+    OrchestrationGetTurnDiffInput,
+  ),
+  tagRequestBody(
+    ORCHESTRATION_WS_METHODS.getFullThreadDiff,
+    OrchestrationGetFullThreadDiffInput,
+  ),
+  tagRequestBody(
+    ORCHESTRATION_WS_METHODS.replayEvents,
+    OrchestrationReplayEventsInput,
+  ),
 
   // Project Search
   tagRequestBody(WS_METHODS.projectsSearchEntries, ProjectSearchEntriesInput),
@@ -126,7 +150,10 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.gitCheckout, GitCheckoutInput),
   tagRequestBody(WS_METHODS.gitInit, GitInitInput),
   tagRequestBody(WS_METHODS.gitResolvePullRequest, GitPullRequestRefInput),
-  tagRequestBody(WS_METHODS.gitPreparePullRequestThread, GitPreparePullRequestThreadInput),
+  tagRequestBody(
+    WS_METHODS.gitPreparePullRequestThread,
+    GitPreparePullRequestThreadInput,
+  ),
 
   // Terminal methods
   tagRequestBody(WS_METHODS.terminalOpen, TerminalOpenInput),
@@ -139,6 +166,9 @@ const WebSocketRequestBody = Schema.Union([
   // Server meta
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverUpsertKeybinding, KeybindingRule),
+
+  // Codex meta
+  tagRequestBody(WS_METHODS.codexSetOpenAiEnv, CodexSetOpenAiEnvInput),
 ]);
 
 export const WebSocketRequest = Schema.Struct({
@@ -179,7 +209,10 @@ export interface WsPushPayloadByChannel {
 export type WsPushChannel = keyof WsPushPayloadByChannel;
 export type WsPushData<C extends WsPushChannel> = WsPushPayloadByChannel[C];
 
-const makeWsPushSchema = <const Channel extends string, Payload extends Schema.Schema<any>>(
+const makeWsPushSchema = <
+  const Channel extends string,
+  Payload extends Schema.Schema<any>,
+>(
   channel: Channel,
   payload: Payload,
 ) =>
@@ -190,12 +223,18 @@ const makeWsPushSchema = <const Channel extends string, Payload extends Schema.S
     data: payload,
   });
 
-export const WsPushServerWelcome = makeWsPushSchema(WS_CHANNELS.serverWelcome, WsWelcomePayload);
+export const WsPushServerWelcome = makeWsPushSchema(
+  WS_CHANNELS.serverWelcome,
+  WsWelcomePayload,
+);
 export const WsPushServerConfigUpdated = makeWsPushSchema(
   WS_CHANNELS.serverConfigUpdated,
   ServerConfigUpdatedPayload,
 );
-export const WsPushTerminalEvent = makeWsPushSchema(WS_CHANNELS.terminalEvent, TerminalEvent);
+export const WsPushTerminalEvent = makeWsPushSchema(
+  WS_CHANNELS.terminalEvent,
+  TerminalEvent,
+);
 export const WsPushOrchestrationDomainEvent = makeWsPushSchema(
   ORCHESTRATION_WS_CHANNELS.domainEvent,
   OrchestrationEvent,
@@ -217,7 +256,10 @@ export const WsPush = Schema.Union([
 ]);
 export type WsPush = typeof WsPush.Type;
 
-export type WsPushMessage<C extends WsPushChannel> = Extract<WsPush, { channel: C }>;
+export type WsPushMessage<C extends WsPushChannel> = Extract<
+  WsPush,
+  { channel: C }
+>;
 
 export const WsPushEnvelopeBase = Schema.Struct({
   type: Schema.Literal("push"),

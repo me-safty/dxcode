@@ -6,7 +6,17 @@
  *
  * @module CliConfig
  */
-import { Config, Data, Effect, FileSystem, Layer, Option, Path, Schema, ServiceMap } from "effect";
+import {
+  Config,
+  Data,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Schema,
+  ServiceMap,
+} from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { NetService } from "@t3tools/shared/Net";
 import {
@@ -19,7 +29,11 @@ import {
 import { fixPath, resolveStateDir } from "./os-jank";
 import { Open } from "./open";
 import * as SqlitePersistence from "./persistence/Layers/Sqlite";
-import { makeServerProviderLayer, makeServerRuntimeServicesLayer } from "./serverLayers";
+import {
+  makeServerProviderLayer,
+  makeServerRuntimeServicesLayer,
+} from "./serverLayers";
+import { CodexOpenAiEnvOverridesLive } from "./provider/Services/CodexOpenAiEnvOverrides";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ProviderHealthLive } from "./provider/Layers/ProviderHealth";
 import { Server } from "./wsServer";
@@ -97,13 +111,22 @@ const CliEnvConfig = Config.all({
       }),
     ),
   ),
-  port: Config.port("T3CODE_PORT").pipe(Config.option, Config.map(Option.getOrUndefined)),
-  host: Config.string("T3CODE_HOST").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  port: Config.port("T3CODE_PORT").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  host: Config.string("T3CODE_HOST").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   stateDir: Config.string("T3CODE_STATE_DIR").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
-  devUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  devUrl: Config.url("VITE_DEV_SERVER_URL").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   noBrowser: Config.boolean("T3CODE_NO_BROWSER").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -112,10 +135,9 @@ const CliEnvConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
-  autoBootstrapProjectFromCwd: Config.boolean("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD").pipe(
-    Config.option,
-    Config.map(Option.getOrUndefined),
-  ),
+  autoBootstrapProjectFromCwd: Config.boolean(
+    "T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
+  ).pipe(Config.option, Config.map(Option.getOrUndefined)),
   logWebSocketEvents: Config.boolean("T3CODE_LOG_WS_EVENTS").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -134,7 +156,10 @@ const ServerConfigLive = (input: CliInput) =>
       const env = yield* CliEnvConfig.asEffect().pipe(
         Effect.mapError(
           (cause) =>
-            new StartupError({ message: "Failed to read environment configuration", cause }),
+            new StartupError({
+              message: "Failed to read environment configuration",
+              cause,
+            }),
         ),
       );
 
@@ -156,7 +181,10 @@ const ServerConfigLive = (input: CliInput) =>
         Option.getOrUndefined(input.stateDir) ?? env.stateDir,
       );
       const devUrl = Option.getOrElse(input.devUrl, () => env.devUrl);
-      const noBrowser = resolveBooleanFlag(input.noBrowser, env.noBrowser ?? mode === "desktop");
+      const noBrowser = resolveBooleanFlag(
+        input.noBrowser,
+        env.noBrowser ?? mode === "desktop",
+      );
       const authToken = Option.getOrUndefined(input.authToken) ?? env.authToken;
       const autoBootstrapProjectFromCwd = resolveBooleanFlag(
         input.autoBootstrapProjectFromCwd,
@@ -196,6 +224,7 @@ const ServerConfigLive = (input: CliInput) =>
 const LayerLive = (input: CliInput) =>
   Layer.empty.pipe(
     Layer.provideMerge(makeServerRuntimeServicesLayer()),
+    Layer.provideMerge(CodexOpenAiEnvOverridesLive),
     Layer.provideMerge(makeServerProviderLayer()),
     Layer.provideMerge(ProviderHealthLive),
     Layer.provideMerge(SqlitePersistence.layerConfig),
@@ -214,20 +243,24 @@ export const recordStartupHeartbeat = Effect.gen(function* () {
   const analytics = yield* AnalyticsService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
 
-  const { threadCount, projectCount } = yield* projectionSnapshotQuery.getSnapshot().pipe(
-    Effect.map((snapshot) => ({
-      threadCount: snapshot.threads.length,
-      projectCount: snapshot.projects.length,
-    })),
-    Effect.catch((cause) =>
-      Effect.logWarning("failed to gather startup snapshot for telemetry", { cause }).pipe(
-        Effect.as({
-          threadCount: 0,
-          projectCount: 0,
-        }),
+  const { threadCount, projectCount } = yield* projectionSnapshotQuery
+    .getSnapshot()
+    .pipe(
+      Effect.map((snapshot) => ({
+        threadCount: snapshot.threads.length,
+        projectCount: snapshot.projects.length,
+      })),
+      Effect.catch((cause) =>
+        Effect.logWarning("failed to gather startup snapshot for telemetry", {
+          cause,
+        }).pipe(
+          Effect.as({
+            threadCount: 0,
+            projectCount: 0,
+          }),
+        ),
       ),
-    ),
-  );
+    );
 
   yield* analytics.record("server.boot.heartbeat", {
     threadCount,
@@ -287,25 +320,35 @@ const makeServerProgram = (input: CliInput) =>
  */
 
 const modeFlag = Flag.choice("mode", ["web", "desktop"]).pipe(
-  Flag.withDescription("Runtime mode. `desktop` keeps loopback defaults unless overridden."),
+  Flag.withDescription(
+    "Runtime mode. `desktop` keeps loopback defaults unless overridden.",
+  ),
   Flag.optional,
 );
 const portFlag = Flag.integer("port").pipe(
-  Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
+  Flag.withSchema(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
+  ),
   Flag.withDescription("Port for the HTTP/WebSocket server."),
   Flag.optional,
 );
 const hostFlag = Flag.string("host").pipe(
-  Flag.withDescription("Host/interface to bind (for example 127.0.0.1, 0.0.0.0, or a Tailnet IP)."),
+  Flag.withDescription(
+    "Host/interface to bind (for example 127.0.0.1, 0.0.0.0, or a Tailnet IP).",
+  ),
   Flag.optional,
 );
 const stateDirFlag = Flag.string("state-dir").pipe(
-  Flag.withDescription("State directory path (equivalent to T3CODE_STATE_DIR)."),
+  Flag.withDescription(
+    "State directory path (equivalent to T3CODE_STATE_DIR).",
+  ),
   Flag.optional,
 );
 const devUrlFlag = Flag.string("dev-url").pipe(
   Flag.withSchema(Schema.URLFromString),
-  Flag.withDescription("Dev web URL to proxy/redirect to (equivalent to VITE_DEV_SERVER_URL)."),
+  Flag.withDescription(
+    "Dev web URL to proxy/redirect to (equivalent to VITE_DEV_SERVER_URL).",
+  ),
   Flag.optional,
 );
 const noBrowserFlag = Flag.boolean("no-browser").pipe(
@@ -317,7 +360,9 @@ const authTokenFlag = Flag.string("auth-token").pipe(
   Flag.withAlias("token"),
   Flag.optional,
 );
-const autoBootstrapProjectFromCwdFlag = Flag.boolean("auto-bootstrap-project-from-cwd").pipe(
+const autoBootstrapProjectFromCwdFlag = Flag.boolean(
+  "auto-bootstrap-project-from-cwd",
+).pipe(
   Flag.withDescription(
     "Create a project for the current working directory on startup when missing.",
   ),

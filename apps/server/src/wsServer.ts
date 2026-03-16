@@ -55,6 +55,7 @@ import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnap
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
 import { ProviderService } from "./provider/Services/ProviderService";
 import { ProviderHealth } from "./provider/Services/ProviderHealth";
+import { CodexOpenAiEnvOverrides } from "./provider/Services/CodexOpenAiEnvOverrides";
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery";
 import { clamp } from "effect/Number";
 import { Open, resolveAvailableEditors } from "./open";
@@ -77,7 +78,10 @@ import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
-import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import {
+  decodeJsonResult,
+  formatSchemaError,
+} from "@t3tools/shared/schemaJson";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -89,7 +93,11 @@ export interface ServerShape {
   readonly start: Effect.Effect<
     http.Server,
     ServerLifecycleError,
-    Scope.Scope | ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path
+    | Scope.Scope
+    | ServerRuntimeServices
+    | ServerConfig
+    | FileSystem.FileSystem
+    | Path.Path
   >;
 
   /**
@@ -101,16 +109,23 @@ export interface ServerShape {
 /**
  * Server - Service tag for HTTP/WebSocket lifecycle management.
  */
-export class Server extends ServiceMap.Service<Server, ServerShape>()("t3/wsServer/Server") {}
+export class Server extends ServiceMap.Service<Server, ServerShape>()(
+  "t3/wsServer/Server",
+) {}
 
 const isServerNotRunningError = (error: Error): boolean => {
   const maybeCode = (error as NodeJS.ErrnoException).code;
   return (
-    maybeCode === "ERR_SERVER_NOT_RUNNING" || error.message.toLowerCase().includes("not running")
+    maybeCode === "ERR_SERVER_NOT_RUNNING" ||
+    error.message.toLowerCase().includes("not running")
   );
 };
 
-function rejectUpgrade(socket: Duplex, statusCode: number, message: string): void {
+function rejectUpgrade(
+  socket: Duplex,
+  statusCode: number,
+  message: string,
+): void {
   socket.end(
     `HTTP/1.1 ${statusCode} ${statusCode === 401 ? "Unauthorized" : "Bad Request"}\r\n` +
       "Connection: close\r\n" +
@@ -161,7 +176,10 @@ function resolveWorkspaceWritePath(params: {
   workspaceRoot: string;
   relativePath: string;
   path: Path.Path;
-}): Effect.Effect<{ absolutePath: string; relativePath: string }, RouteRequestError> {
+}): Effect.Effect<
+  { absolutePath: string; relativePath: string },
+  RouteRequestError
+> {
   const normalizedInputPath = params.relativePath.trim();
   if (params.path.isAbsolute(normalizedInputPath)) {
     return Effect.fail(
@@ -171,7 +189,10 @@ function resolveWorkspaceWritePath(params: {
     );
   }
 
-  const absolutePath = params.path.resolve(params.workspaceRoot, normalizedInputPath);
+  const absolutePath = params.path.resolve(
+    params.workspaceRoot,
+    normalizedInputPath,
+  );
   const relativeToRoot = toPosixRelativePath(
     params.path.relative(params.workspaceRoot, absolutePath),
   );
@@ -208,7 +229,8 @@ export type ServerCoreRuntimeServices =
   | CheckpointDiffQuery
   | OrchestrationReactor
   | ProviderService
-  | ProviderHealth;
+  | ProviderHealth
+  | CodexOpenAiEnvOverrides;
 
 export type ServerRuntimeServices =
   | ServerCoreRuntimeServices
@@ -227,14 +249,21 @@ export class ServerLifecycleError extends Schema.TaggedErrorClass<ServerLifecycl
   },
 ) {}
 
-class RouteRequestError extends Schema.TaggedErrorClass<RouteRequestError>()("RouteRequestError", {
-  message: Schema.String,
-}) {}
+class RouteRequestError extends Schema.TaggedErrorClass<RouteRequestError>()(
+  "RouteRequestError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 export const createServer = Effect.fn(function* (): Effect.fn.Return<
   http.Server,
   ServerLifecycleError,
-  Scope.Scope | ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path
+  | Scope.Scope
+  | ServerRuntimeServices
+  | ServerConfig
+  | FileSystem.FileSystem
+  | Path.Path
 > {
   const serverConfig = yield* ServerConfig;
   const {
@@ -254,6 +283,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const terminalManager = yield* TerminalManager;
   const keybindingsManager = yield* Keybindings;
   const providerHealth = yield* ProviderHealth;
+  const codexOpenAiEnvOverrides = yield* CodexOpenAiEnvOverrides;
   const git = yield* GitCore;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -291,7 +321,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   yield* readiness.markPushBusReady;
   yield* keybindingsManager.start.pipe(
     Effect.mapError(
-      (cause) => new ServerLifecycleError({ operation: "keybindingsRuntimeStart", cause }),
+      (cause) =>
+        new ServerLifecycleError({
+          operation: "keybindingsRuntimeStart",
+          cause,
+        }),
     ),
   );
   yield* readiness.markKeybindingsReady;
@@ -299,8 +333,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const normalizeDispatchCommand = Effect.fnUntraced(function* (input: {
     readonly command: ClientOrchestrationCommand;
   }) {
-    const normalizeProjectWorkspaceRoot = Effect.fnUntraced(function* (workspaceRoot: string) {
-      const normalizedWorkspaceRoot = path.resolve(yield* expandHomePath(workspaceRoot.trim()));
+    const normalizeProjectWorkspaceRoot = Effect.fnUntraced(function* (
+      workspaceRoot: string,
+    ) {
+      const normalizedWorkspaceRoot = path.resolve(
+        yield* expandHomePath(workspaceRoot.trim()),
+      );
       const workspaceStat = yield* fileSystem
         .stat(normalizedWorkspaceRoot)
         .pipe(Effect.catch(() => Effect.succeed(null)));
@@ -320,14 +358,21 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     if (input.command.type === "project.create") {
       return {
         ...input.command,
-        workspaceRoot: yield* normalizeProjectWorkspaceRoot(input.command.workspaceRoot),
+        workspaceRoot: yield* normalizeProjectWorkspaceRoot(
+          input.command.workspaceRoot,
+        ),
       } satisfies OrchestrationCommand;
     }
 
-    if (input.command.type === "project.meta.update" && input.command.workspaceRoot !== undefined) {
+    if (
+      input.command.type === "project.meta.update" &&
+      input.command.workspaceRoot !== undefined
+    ) {
       return {
         ...input.command,
-        workspaceRoot: yield* normalizeProjectWorkspaceRoot(input.command.workspaceRoot),
+        workspaceRoot: yield* normalizeProjectWorkspaceRoot(
+          input.command.workspaceRoot,
+        ),
       } satisfies OrchestrationCommand;
     }
 
@@ -348,7 +393,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           }
 
           const bytes = Buffer.from(parsed.base64, "base64");
-          if (bytes.byteLength === 0 || bytes.byteLength > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
+          if (
+            bytes.byteLength === 0 ||
+            bytes.byteLength > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
+          ) {
             return yield* new RouteRequestError({
               message: `Image attachment '${attachment.name}' is empty or too large.`,
             });
@@ -379,14 +427,16 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             });
           }
 
-          yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true }).pipe(
-            Effect.mapError(
-              () =>
-                new RouteRequestError({
-                  message: `Failed to create attachment directory for '${attachment.name}'.`,
-                }),
-            ),
-          );
+          yield* fileSystem
+            .makeDirectory(path.dirname(attachmentPath), { recursive: true })
+            .pipe(
+              Effect.mapError(
+                () =>
+                  new RouteRequestError({
+                    message: `Failed to create attachment directory for '${attachment.name}'.`,
+                  }),
+              ),
+            );
           yield* fileSystem.writeFile(attachmentPath, bytes).pipe(
             Effect.mapError(
               () =>
@@ -429,15 +479,23 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         }
 
         if (url.pathname.startsWith(ATTACHMENTS_ROUTE_PREFIX)) {
-          const rawRelativePath = url.pathname.slice(ATTACHMENTS_ROUTE_PREFIX.length);
-          const normalizedRelativePath = normalizeAttachmentRelativePath(rawRelativePath);
+          const rawRelativePath = url.pathname.slice(
+            ATTACHMENTS_ROUTE_PREFIX.length,
+          );
+          const normalizedRelativePath =
+            normalizeAttachmentRelativePath(rawRelativePath);
           if (!normalizedRelativePath) {
-            respond(400, { "Content-Type": "text/plain" }, "Invalid attachment path");
+            respond(
+              400,
+              { "Content-Type": "text/plain" },
+              "Invalid attachment path",
+            );
             return;
           }
 
           const isIdLookup =
-            !normalizedRelativePath.includes("/") && !normalizedRelativePath.includes(".");
+            !normalizedRelativePath.includes("/") &&
+            !normalizedRelativePath.includes(".");
           const filePath = isIdLookup
             ? resolveAttachmentPathById({
                 stateDir: serverConfig.stateDir,
@@ -464,17 +522,20 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             return;
           }
 
-          const contentType = Mime.getType(filePath) ?? "application/octet-stream";
+          const contentType =
+            Mime.getType(filePath) ?? "application/octet-stream";
           res.writeHead(200, {
             "Content-Type": contentType,
             "Cache-Control": "public, max-age=31536000, immutable",
           });
-          const streamExit = yield* Stream.runForEach(fileSystem.stream(filePath), (chunk) =>
-            Effect.sync(() => {
-              if (!res.destroyed) {
-                res.write(chunk);
-              }
-            }),
+          const streamExit = yield* Stream.runForEach(
+            fileSystem.stream(filePath),
+            (chunk) =>
+              Effect.sync(() => {
+                if (!res.destroyed) {
+                  res.write(chunk);
+                }
+              }),
           ).pipe(Effect.exit);
           if (Exit.isFailure(streamExit)) {
             if (!res.destroyed) {
@@ -505,10 +566,14 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         }
 
         const staticRoot = path.resolve(staticDir);
-        const staticRequestPath = url.pathname === "/" ? "/index.html" : url.pathname;
+        const staticRequestPath =
+          url.pathname === "/" ? "/index.html" : url.pathname;
         const rawStaticRelativePath = staticRequestPath.replace(/^[/\\]+/, "");
-        const hasRawLeadingParentSegment = rawStaticRelativePath.startsWith("..");
-        const staticRelativePath = path.normalize(rawStaticRelativePath).replace(/^[/\\]+/, "");
+        const hasRawLeadingParentSegment =
+          rawStaticRelativePath.startsWith("..");
+        const staticRelativePath = path
+          .normalize(rawStaticRelativePath)
+          .replace(/^[/\\]+/, "");
         const hasPathTraversalSegment = staticRelativePath.startsWith("..");
         if (
           staticRelativePath.length === 0 ||
@@ -516,19 +581,29 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           hasPathTraversalSegment ||
           staticRelativePath.includes("\0")
         ) {
-          respond(400, { "Content-Type": "text/plain" }, "Invalid static file path");
+          respond(
+            400,
+            { "Content-Type": "text/plain" },
+            "Invalid static file path",
+          );
           return;
         }
 
         const isWithinStaticRoot = (candidate: string) =>
           candidate === staticRoot ||
           candidate.startsWith(
-            staticRoot.endsWith(path.sep) ? staticRoot : `${staticRoot}${path.sep}`,
+            staticRoot.endsWith(path.sep)
+              ? staticRoot
+              : `${staticRoot}${path.sep}`,
           );
 
         let filePath = path.resolve(staticRoot, staticRelativePath);
         if (!isWithinStaticRoot(filePath)) {
-          respond(400, { "Content-Type": "text/plain" }, "Invalid static file path");
+          respond(
+            400,
+            { "Content-Type": "text/plain" },
+            "Invalid static file path",
+          );
           return;
         }
 
@@ -536,7 +611,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         if (!ext) {
           filePath = path.resolve(filePath, "index.html");
           if (!isWithinStaticRoot(filePath)) {
-            respond(400, { "Content-Type": "text/plain" }, "Invalid static file path");
+            respond(
+              400,
+              { "Content-Type": "text/plain" },
+              "Invalid static file path",
+            );
             return;
           }
         }
@@ -553,16 +632,25 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             respond(404, { "Content-Type": "text/plain" }, "Not Found");
             return;
           }
-          respond(200, { "Content-Type": "text/html; charset=utf-8" }, indexData);
+          respond(
+            200,
+            { "Content-Type": "text/html; charset=utf-8" },
+            indexData,
+          );
           return;
         }
 
-        const contentType = Mime.getType(filePath) ?? "application/octet-stream";
+        const contentType =
+          Mime.getType(filePath) ?? "application/octet-stream";
         const data = yield* fileSystem
           .readFile(filePath)
           .pipe(Effect.catch(() => Effect.succeed(null)));
         if (!data) {
-          respond(500, { "Content-Type": "text/plain" }, "Internal Server Error");
+          respond(
+            500,
+            { "Content-Type": "text/plain" },
+            "Internal Server Error",
+          );
           return;
         }
         respond(200, { "Content-Type": contentType }, data);
@@ -577,22 +665,29 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   // WebSocket server — upgrades from the HTTP server
   const wss = new WebSocketServer({ noServer: true });
 
-  const closeWebSocketServer = Effect.callback<void, ServerLifecycleError>((resume) => {
-    wss.close((error) => {
-      if (error && !isServerNotRunningError(error)) {
-        resume(
-          Effect.fail(
-            new ServerLifecycleError({ operation: "closeWebSocketServer", cause: error }),
-          ),
-        );
-      } else {
-        resume(Effect.void);
-      }
-    });
-  });
+  const closeWebSocketServer = Effect.callback<void, ServerLifecycleError>(
+    (resume) => {
+      wss.close((error) => {
+        if (error && !isServerNotRunningError(error)) {
+          resume(
+            Effect.fail(
+              new ServerLifecycleError({
+                operation: "closeWebSocketServer",
+                cause: error,
+              }),
+            ),
+          );
+        } else {
+          resume(Effect.void);
+        }
+      });
+    },
+  );
 
   const closeAllClients = Ref.get(clients).pipe(
-    Effect.flatMap(Effect.forEach((client) => Effect.sync(() => client.close()))),
+    Effect.flatMap(
+      Effect.forEach((client) => Effect.sync(() => client.close())),
+    ),
     Effect.flatMap(() => Ref.set(clients, new Set())),
   );
 
@@ -628,7 +723,8 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     yield* Effect.gen(function* () {
       const snapshot = yield* projectionReadModelQuery.getSnapshot();
       const existingProject = snapshot.projects.find(
-        (project) => project.workspaceRoot === cwd && project.deletedAt === null,
+        (project) =>
+          project.workspaceRoot === cwd && project.deletedAt === null,
       );
       let bootstrapProjectId: ProjectId;
       let bootstrapProjectDefaultModel: string;
@@ -649,11 +745,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         });
       } else {
         bootstrapProjectId = existingProject.id;
-        bootstrapProjectDefaultModel = existingProject.defaultModel ?? "gpt-5-codex";
+        bootstrapProjectDefaultModel =
+          existingProject.defaultModel ?? "gpt-5-codex";
       }
 
       const existingThread = snapshot.threads.find(
-        (thread) => thread.projectId === bootstrapProjectId && thread.deletedAt === null,
+        (thread) =>
+          thread.projectId === bootstrapProjectId && thread.deletedAt === null,
       );
       if (!existingThread) {
         const createdAt = new Date().toISOString();
@@ -679,7 +777,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       }
     }).pipe(
       Effect.mapError(
-        (cause) => new ServerLifecycleError({ operation: "autoBootstrapProject", cause }),
+        (cause) =>
+          new ServerLifecycleError({
+            operation: "autoBootstrapProject",
+            cause,
+          }),
       ),
     );
   }
@@ -690,18 +792,29 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const runPromise = Effect.runPromiseWith(runtimeServices);
 
   const unsubscribeTerminalEvents = yield* terminalManager.subscribe(
-    (event) => void Effect.runPromise(pushBus.publishAll(WS_CHANNELS.terminalEvent, event)),
+    (event) =>
+      void Effect.runPromise(
+        pushBus.publishAll(WS_CHANNELS.terminalEvent, event),
+      ),
   );
-  yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeTerminalEvents()));
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() => unsubscribeTerminalEvents()),
+  );
   yield* readiness.markTerminalSubscriptionsReady;
 
   yield* NodeHttpServer.make(() => httpServer, listenOptions).pipe(
-    Effect.mapError((cause) => new ServerLifecycleError({ operation: "httpServerListen", cause })),
+    Effect.mapError(
+      (cause) =>
+        new ServerLifecycleError({ operation: "httpServerListen", cause }),
+    ),
   );
   yield* readiness.markHttpListening;
 
   yield* Effect.addFinalizer(() =>
-    Effect.all([closeAllClients, closeWebSocketServer.pipe(Effect.ignoreCause({ log: true }))]),
+    Effect.all([
+      closeAllClients,
+      closeWebSocketServer.pipe(Effect.ignoreCause({ log: true })),
+    ]),
   );
 
   const routeRequest = Effect.fnUntraced(function* (request: WebSocketRequest) {
@@ -765,14 +878,16 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                 }),
             ),
           );
-        yield* fileSystem.writeFileString(target.absolutePath, body.contents).pipe(
-          Effect.mapError(
-            (cause) =>
-              new RouteRequestError({
-                message: `Failed to write workspace file: ${String(cause)}`,
-              }),
-          ),
-        );
+        yield* fileSystem
+          .writeFileString(target.absolutePath, body.contents)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new RouteRequestError({
+                  message: `Failed to write workspace file: ${String(cause)}`,
+                }),
+            ),
+          );
         return { relativePath: target.relativePath };
       }
 
@@ -879,8 +994,14 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.serverUpsertKeybinding: {
         const body = stripRequestTag(request.body);
-        const keybindingsConfig = yield* keybindingsManager.upsertKeybindingRule(body);
+        const keybindingsConfig =
+          yield* keybindingsManager.upsertKeybindingRule(body);
         return { keybindings: keybindingsConfig, issues: [] };
+      }
+
+      case WS_METHODS.codexSetOpenAiEnv: {
+        const body = stripRequestTag(request.body);
+        return yield* codexOpenAiEnvOverrides.set(body);
       }
 
       default: {
@@ -892,10 +1013,15 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     }
   });
 
-  const handleMessage = Effect.fnUntraced(function* (ws: WebSocket, raw: unknown) {
+  const handleMessage = Effect.fnUntraced(function* (
+    ws: WebSocket,
+    raw: unknown,
+  ) {
     const sendWsResponse = (response: WsResponseMessage) =>
       encodeWsResponse(response).pipe(
-        Effect.tap((encodedResponse) => Effect.sync(() => ws.send(encodedResponse))),
+        Effect.tap((encodedResponse) =>
+          Effect.sync(() => ws.send(encodedResponse)),
+        ),
         Effect.asVoid,
       );
 
@@ -911,7 +1037,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     if (Result.isFailure(request)) {
       return yield* sendWsResponse({
         id: "unknown",
-        error: { message: `Invalid request format: ${formatSchemaError(request.failure)}` },
+        error: {
+          message: `Invalid request format: ${formatSchemaError(request.failure)}`,
+        },
       });
     }
 
@@ -960,22 +1088,32 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     const welcomeData = {
       cwd,
       projectName,
-      ...(welcomeBootstrapProjectId ? { bootstrapProjectId: welcomeBootstrapProjectId } : {}),
-      ...(welcomeBootstrapThreadId ? { bootstrapThreadId: welcomeBootstrapThreadId } : {}),
+      ...(welcomeBootstrapProjectId
+        ? { bootstrapProjectId: welcomeBootstrapProjectId }
+        : {}),
+      ...(welcomeBootstrapThreadId
+        ? { bootstrapThreadId: welcomeBootstrapThreadId }
+        : {}),
     };
     // Send welcome before adding to broadcast set so publishAll calls
     // cannot reach this client before the welcome arrives.
     void runPromise(
       readiness.awaitServerReady.pipe(
-        Effect.flatMap(() => pushBus.publishClient(ws, WS_CHANNELS.serverWelcome, welcomeData)),
+        Effect.flatMap(() =>
+          pushBus.publishClient(ws, WS_CHANNELS.serverWelcome, welcomeData),
+        ),
         Effect.flatMap((delivered) =>
-          delivered ? Ref.update(clients, (clients) => clients.add(ws)) : Effect.void,
+          delivered
+            ? Ref.update(clients, (clients) => clients.add(ws))
+            : Effect.void,
         ),
       ),
     );
 
     ws.on("message", (raw) => {
-      void runPromise(handleMessage(ws, raw).pipe(Effect.ignoreCause({ log: true })));
+      void runPromise(
+        handleMessage(ws, raw).pipe(Effect.ignoreCause({ log: true })),
+      );
     });
 
     ws.on("close", () => {

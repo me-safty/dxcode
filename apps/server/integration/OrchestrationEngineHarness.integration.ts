@@ -25,7 +25,10 @@ import {
 import { CheckpointStoreLive } from "../src/checkpointing/Layers/CheckpointStore.ts";
 import { CheckpointStore } from "../src/checkpointing/Services/CheckpointStore.ts";
 import { GitCore, type GitCoreShape } from "../src/git/Services/GitCore.ts";
-import { TextGeneration, type TextGenerationShape } from "../src/git/Services/TextGeneration.ts";
+import {
+  TextGeneration,
+  type TextGenerationShape,
+} from "../src/git/Services/TextGeneration.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../src/persistence/Layers/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../src/persistence/Layers/OrchestrationEventStore.ts";
 import { ProjectionCheckpointRepositoryLive } from "../src/persistence/Layers/ProjectionCheckpoints.ts";
@@ -41,6 +44,7 @@ import { makeProviderServiceLive } from "../src/provider/Layers/ProviderService.
 import { makeCodexAdapterLive } from "../src/provider/Layers/CodexAdapter.ts";
 import { CodexAdapter } from "../src/provider/Services/CodexAdapter.ts";
 import { ProviderService } from "../src/provider/Services/ProviderService.ts";
+import { CodexOpenAiEnvOverridesLive } from "../src/provider/Services/CodexOpenAiEnvOverrides.ts";
 import { AnalyticsService } from "../src/telemetry/Services/AnalyticsService.ts";
 import { CheckpointReactorLive } from "../src/orchestration/Layers/CheckpointReactor.ts";
 import { OrchestrationEngineLive } from "../src/orchestration/Layers/OrchestrationEngine.ts";
@@ -93,7 +97,11 @@ export function gitRefExists(cwd: string, ref: string): boolean {
   }
 }
 
-export function gitShowFileAtRef(cwd: string, ref: string, filePath: string): string {
+export function gitShowFileAtRef(
+  cwd: string,
+  ref: string,
+  filePath: string,
+): string {
   return runGit(cwd, ["show", `${ref}:${filePath}`]);
 }
 
@@ -152,7 +160,8 @@ class OrchestrationHarnessRuntimeError extends Schema.TaggedErrorClass<Orchestra
 const tryRuntimePromise = <A>(operation: string, run: () => Promise<A>) =>
   Effect.tryPromise({
     try: run,
-    catch: (cause) => new OrchestrationHarnessRuntimeError({ operation, cause }),
+    catch: (cause) =>
+      new OrchestrationHarnessRuntimeError({ operation, cause }),
   });
 
 export interface OrchestrationIntegrationHarness {
@@ -179,14 +188,24 @@ export interface OrchestrationIntegrationHarness {
     requestId: string,
     predicate: (row: {
       readonly status: "pending" | "resolved";
-      readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
+      readonly decision:
+        | "accept"
+        | "acceptForSession"
+        | "decline"
+        | "cancel"
+        | null;
       readonly resolvedAt: string | null;
     }) => boolean,
     timeoutMs?: number,
   ) => Effect.Effect<
     {
       readonly status: "pending" | "resolved";
-      readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
+      readonly decision:
+        | "accept"
+        | "acceptForSession"
+        | "decline"
+        | "cancel"
+        | null;
       readonly resolvedAt: string | null;
     },
     never
@@ -226,11 +245,15 @@ export const makeOrchestrationIntegrationHarness = (
           getByProvider: (resolvedProvider) =>
             resolvedProvider === adapterHarness.provider
               ? Effect.succeed(adapterHarness.adapter)
-              : Effect.fail(new ProviderUnsupportedError({ provider: resolvedProvider })),
+              : Effect.fail(
+                  new ProviderUnsupportedError({ provider: resolvedProvider }),
+                ),
           listProviders: () => Effect.succeed([adapterHarness.provider]),
         } as typeof ProviderAdapterRegistry.Service)
       : null;
-    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-orchestration-integration-"));
+    const rootDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "t3-orchestration-integration-"),
+    );
     const workspaceDir = path.join(rootDir, "workspace");
     const stateDir = path.join(rootDir, "state");
     const dbPath = path.join(stateDir, "state.sqlite");
@@ -255,7 +278,9 @@ export const makeOrchestrationIntegrationHarness = (
           getByProvider: (resolvedProvider) =>
             resolvedProvider === "codex"
               ? Effect.succeed(codexAdapter)
-              : Effect.fail(new ProviderUnsupportedError({ provider: resolvedProvider })),
+              : Effect.fail(
+                  new ProviderUnsupportedError({ provider: resolvedProvider }),
+                ),
           listProviders: () => Effect.succeed(["codex"] as const),
         } as typeof ProviderAdapterRegistry.Service;
       }),
@@ -263,6 +288,7 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provide(makeCodexAdapterLive()),
       Layer.provideMerge(ServerConfig.layerTest(workspaceDir, stateDir)),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(CodexOpenAiEnvOverridesLive),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
     const providerLayer = useRealCodex
@@ -316,20 +342,25 @@ export const makeOrchestrationIntegrationHarness = (
     );
 
     const runtime = ManagedRuntime.make(layer);
-    const engine = yield* tryRuntimePromise("load OrchestrationEngine service", () =>
-      runtime.runPromise(Effect.service(OrchestrationEngineService)),
+    const engine = yield* tryRuntimePromise(
+      "load OrchestrationEngine service",
+      () => runtime.runPromise(Effect.service(OrchestrationEngineService)),
     ).pipe(Effect.orDie);
-    const reactor = yield* tryRuntimePromise("load OrchestrationReactor service", () =>
-      runtime.runPromise(Effect.service(OrchestrationReactor)),
+    const reactor = yield* tryRuntimePromise(
+      "load OrchestrationReactor service",
+      () => runtime.runPromise(Effect.service(OrchestrationReactor)),
     ).pipe(Effect.orDie);
-    const snapshotQuery = yield* tryRuntimePromise("load ProjectionSnapshotQuery service", () =>
-      runtime.runPromise(Effect.service(ProjectionSnapshotQuery)),
+    const snapshotQuery = yield* tryRuntimePromise(
+      "load ProjectionSnapshotQuery service",
+      () => runtime.runPromise(Effect.service(ProjectionSnapshotQuery)),
     ).pipe(Effect.orDie);
-    const providerService = yield* tryRuntimePromise("load ProviderService service", () =>
-      runtime.runPromise(Effect.service(ProviderService)),
+    const providerService = yield* tryRuntimePromise(
+      "load ProviderService service",
+      () => runtime.runPromise(Effect.service(ProviderService)),
     ).pipe(Effect.orDie);
-    const checkpointStore = yield* tryRuntimePromise("load CheckpointStore service", () =>
-      runtime.runPromise(Effect.service(CheckpointStore)),
+    const checkpointStore = yield* tryRuntimePromise(
+      "load CheckpointStore service",
+      () => runtime.runPromise(Effect.service(CheckpointStore)),
     ).pipe(Effect.orDie);
     const checkpointRepository = yield* tryRuntimePromise(
       "load ProjectionCheckpointRepository service",
@@ -337,19 +368,25 @@ export const makeOrchestrationIntegrationHarness = (
     ).pipe(Effect.orDie);
     const pendingApprovalRepository = yield* tryRuntimePromise(
       "load ProjectionPendingApprovalRepository service",
-      () => runtime.runPromise(Effect.service(ProjectionPendingApprovalRepository)),
+      () =>
+        runtime.runPromise(Effect.service(ProjectionPendingApprovalRepository)),
     ).pipe(Effect.orDie);
-    const runtimeReceiptBus = yield* tryRuntimePromise("load RuntimeReceiptBus service", () =>
-      runtime.runPromise(Effect.service(RuntimeReceiptBus)),
+    const runtimeReceiptBus = yield* tryRuntimePromise(
+      "load RuntimeReceiptBus service",
+      () => runtime.runPromise(Effect.service(RuntimeReceiptBus)),
     ).pipe(Effect.orDie);
 
     const scope = yield* Scope.make("sequential");
     yield* tryRuntimePromise("start OrchestrationReactor", () =>
       runtime.runPromise(reactor.start.pipe(Scope.provide(scope))),
     ).pipe(Effect.orDie);
-    const receiptHistory = yield* Ref.make<ReadonlyArray<OrchestrationRuntimeReceipt>>([]);
+    const receiptHistory = yield* Ref.make<
+      ReadonlyArray<OrchestrationRuntimeReceipt>
+    >([]);
     yield* Stream.runForEach(runtimeReceiptBus.stream, (receipt) =>
-      Ref.update(receiptHistory, (history) => [...history, receipt]).pipe(Effect.asVoid),
+      Ref.update(receiptHistory, (history) => [...history, receipt]).pipe(
+        Effect.asVoid,
+      ),
     ).pipe(Effect.forkIn(scope));
     yield* sleep(10);
 
@@ -363,64 +400,76 @@ export const makeOrchestrationIntegrationHarness = (
           .getSnapshot()
           .pipe(
             Effect.map(
-              (snapshot) => snapshot.threads.find((thread) => thread.id === threadId) ?? null,
+              (snapshot) =>
+                snapshot.threads.find((thread) => thread.id === threadId) ??
+                null,
             ),
           ),
-        (thread): thread is OrchestrationThread => thread !== null && predicate(thread),
+        (thread): thread is OrchestrationThread =>
+          thread !== null && predicate(thread),
         `projected thread '${threadId}'`,
         timeoutMs,
       ) as Effect.Effect<OrchestrationThread, never>;
 
-    const waitForDomainEvent: OrchestrationIntegrationHarness["waitForDomainEvent"] = (
-      predicate,
-      timeoutMs,
-    ) =>
-      waitFor(
-        Stream.runCollect(engine.readEvents(0)).pipe(
-          Effect.map((chunk): ReadonlyArray<OrchestrationEvent> => Array.from(chunk)),
-        ),
-        (events) => events.some(predicate),
-        "domain event",
-        timeoutMs,
-      );
-
-    const waitForPendingApproval: OrchestrationIntegrationHarness["waitForPendingApproval"] = (
-      requestId,
-      predicate,
-      timeoutMs,
-    ) =>
-      waitFor(
-        pendingApprovalRepository
-          .getByRequestId({ requestId: ApprovalRequestId.makeUnsafe(requestId) })
-          .pipe(
-            Effect.map((row) =>
-              Option.match(row, {
-                onNone: () => null,
-                onSome: (value) => ({
-                  status: value.status,
-                  decision: value.decision,
-                  resolvedAt: value.resolvedAt,
-                }),
-              }),
+    const waitForDomainEvent: OrchestrationIntegrationHarness["waitForDomainEvent"] =
+      (predicate, timeoutMs) =>
+        waitFor(
+          Stream.runCollect(engine.readEvents(0)).pipe(
+            Effect.map(
+              (chunk): ReadonlyArray<OrchestrationEvent> => Array.from(chunk),
             ),
           ),
-        (
-          row,
-        ): row is {
-          readonly status: "pending" | "resolved";
-          readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
-          readonly resolvedAt: string | null;
-        } => row !== null && predicate(row),
-        `pending approval '${requestId}'`,
-        timeoutMs,
-      ) as Effect.Effect<
-        {
-          readonly status: "pending" | "resolved";
-          readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
-          readonly resolvedAt: string | null;
-        },
-        never
-      >;
+          (events) => events.some(predicate),
+          "domain event",
+          timeoutMs,
+        );
+
+    const waitForPendingApproval: OrchestrationIntegrationHarness["waitForPendingApproval"] =
+      (requestId, predicate, timeoutMs) =>
+        waitFor(
+          pendingApprovalRepository
+            .getByRequestId({
+              requestId: ApprovalRequestId.makeUnsafe(requestId),
+            })
+            .pipe(
+              Effect.map((row) =>
+                Option.match(row, {
+                  onNone: () => null,
+                  onSome: (value) => ({
+                    status: value.status,
+                    decision: value.decision,
+                    resolvedAt: value.resolvedAt,
+                  }),
+                }),
+              ),
+            ),
+          (
+            row,
+          ): row is {
+            readonly status: "pending" | "resolved";
+            readonly decision:
+              | "accept"
+              | "acceptForSession"
+              | "decline"
+              | "cancel"
+              | null;
+            readonly resolvedAt: string | null;
+          } => row !== null && predicate(row),
+          `pending approval '${requestId}'`,
+          timeoutMs,
+        ) as Effect.Effect<
+          {
+            readonly status: "pending" | "resolved";
+            readonly decision:
+              | "accept"
+              | "acceptForSession"
+              | "decline"
+              | "cancel"
+              | null;
+            readonly resolvedAt: string | null;
+          },
+          never
+        >;
 
     function waitForReceipt(
       predicate: (receipt: OrchestrationRuntimeReceipt) => boolean,
@@ -440,7 +489,8 @@ export const makeOrchestrationIntegrationHarness = (
 
       return waitFor(
         readMatchingReceipt,
-        (receipt): receipt is OrchestrationRuntimeReceipt => receipt !== undefined,
+        (receipt): receipt is OrchestrationRuntimeReceipt =>
+          receipt !== undefined,
         "runtime receipt",
         timeoutMs,
       );
@@ -454,8 +504,12 @@ export const makeOrchestrationIntegrationHarness = (
       disposed = true;
 
       const shutdown = Effect.gen(function* () {
-        const closeScopeExit = yield* Effect.exit(Scope.close(scope, Exit.void));
-        const disposeRuntimeExit = yield* Effect.exit(Effect.promise(() => runtime.dispose()));
+        const closeScopeExit = yield* Effect.exit(
+          Scope.close(scope, Exit.void),
+        );
+        const disposeRuntimeExit = yield* Effect.exit(
+          Effect.promise(() => runtime.dispose()),
+        );
 
         const failureCause = Exit.isFailure(closeScopeExit)
           ? closeScopeExit.cause
