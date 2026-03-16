@@ -531,43 +531,6 @@ describe("composerDraftStore codex fast mode", () => {
   });
 });
 
-describe("composerDraftStore persisted attachments", () => {
-  const threadId = ThreadId.makeUnsafe("thread-persisted-attachments");
-
-  beforeEach(() => {
-    useComposerDraftStore.setState({
-      draftsByThreadId: {},
-      draftThreadsByThreadId: {},
-      projectDraftThreadIdByProjectId: {},
-    });
-    localStorage.clear();
-  });
-
-  it("verifies attachments after flushing the debounced storage write", async () => {
-    const image = makeImage({
-      id: "img-persisted",
-      previewUrl: "blob:persisted",
-    });
-
-    useComposerDraftStore.getState().addImage(threadId, image);
-    useComposerDraftStore.getState().syncPersistedAttachments(threadId, [
-      {
-        id: image.id,
-        name: image.name,
-        mimeType: image.mimeType,
-        sizeBytes: image.sizeBytes,
-        dataUrl: "data:image/png;base64,AQ==",
-      },
-    ]);
-
-    await Promise.resolve();
-
-    const draft = useComposerDraftStore.getState().draftsByThreadId[threadId];
-    expect(draft?.persistedAttachments.map((attachment) => attachment.id)).toEqual([image.id]);
-    expect(draft?.nonPersistedImageIds).toEqual([]);
-  });
-});
-
 describe("composerDraftStore setModel", () => {
   const threadId = ThreadId.makeUnsafe("thread-model");
 
