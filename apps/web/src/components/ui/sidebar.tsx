@@ -20,6 +20,11 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
 import { Schema } from "effect";
+import {
+  resolveSwipeGestureState,
+  SWIPE_THRESHOLD,
+  type SwipeGestureState,
+} from "./sidebar.swipe.logic";
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
@@ -85,8 +90,6 @@ function useSidebar() {
   return context;
 }
 
-const SWIPE_THRESHOLD = 80;
-
 function SwipeToDismiss({
   children,
   onDismiss,
@@ -97,27 +100,23 @@ function SwipeToDismiss({
   side: "left" | "right";
 }) {
   const touchStartRef = React.useRef<{ x: number; y: number } | null>(null);
-  const swipingRef = React.useRef(false);
+  const gestureStateRef = React.useRef<SwipeGestureState>("idle");
 
   const handleTouchStart = React.useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0];
     if (!touch) return;
     touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-    swipingRef.current = false;
+    gestureStateRef.current = "idle";
   }, []);
 
   const handleTouchMove = React.useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0];
     const start = touchStartRef.current;
     if (!touch || !start) return;
-
-    const dx = touch.clientX - start.x;
-    const dy = touch.clientY - start.y;
-
-    // Only treat as a horizontal swipe if horizontal movement exceeds vertical
-    if (!swipingRef.current && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
-      swipingRef.current = true;
-    }
+    gestureStateRef.current = resolveSwipeGestureState(gestureStateRef.current, {
+      dx: touch.clientX - start.x,
+      dy: touch.clientY - start.y,
+    });
   }, []);
 
   const handleTouchEnd = React.useCallback(
@@ -126,7 +125,7 @@ function SwipeToDismiss({
       const start = touchStartRef.current;
       touchStartRef.current = null;
 
-      if (!touch || !start || !swipingRef.current) return;
+      if (!touch || !start || gestureStateRef.current !== "swiping") return;
 
       const dx = touch.clientX - start.x;
       // Sidebar opens from left → swipe left (negative dx) to close
@@ -731,7 +730,7 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
   const { isMobile, setOpenMobile } = useSidebar();
 
   const touchStartRef = React.useRef<{ x: number; y: number } | null>(null);
-  const swipingRef = React.useRef(false);
+  const gestureStateRef = React.useRef<SwipeGestureState>("idle");
 
   const handleTouchStart = React.useCallback(
     (e: React.TouchEvent) => {
@@ -741,7 +740,7 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
       // Only start tracking if the touch begins near the left edge
       if (touch.clientX > SWIPE_OPEN_EDGE_PX) return;
       touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-      swipingRef.current = false;
+      gestureStateRef.current = "idle";
     },
     [isMobile],
   );
@@ -750,11 +749,10 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     const touch = e.touches[0];
     const start = touchStartRef.current;
     if (!touch || !start) return;
-    const dx = touch.clientX - start.x;
-    const dy = touch.clientY - start.y;
-    if (!swipingRef.current && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
-      swipingRef.current = true;
-    }
+    gestureStateRef.current = resolveSwipeGestureState(gestureStateRef.current, {
+      dx: touch.clientX - start.x,
+      dy: touch.clientY - start.y,
+    });
   }, []);
 
   const handleTouchEnd = React.useCallback(
@@ -762,7 +760,7 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
       const touch = e.changedTouches[0];
       const start = touchStartRef.current;
       touchStartRef.current = null;
-      if (!touch || !start || !swipingRef.current) return;
+      if (!touch || !start || gestureStateRef.current !== "swiping") return;
       const dx = touch.clientX - start.x;
       if (dx > SWIPE_THRESHOLD) {
         setOpenMobile(true);
