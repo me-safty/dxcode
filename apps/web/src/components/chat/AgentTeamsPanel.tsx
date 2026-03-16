@@ -234,66 +234,111 @@ export function AgentTeamsPanel({
   }
 
   return (
-    <section
-      className={cn(
-        "transition-[max-width,width]",
-        expanded ? "w-full max-w-5xl" : "w-auto min-w-[22rem] max-w-[42rem]",
-      )}
-    >
+    <section className="relative z-10 -mt-px w-full">
       <div
         className={cn(
-          "overflow-hidden border border-border/80 bg-card/96 shadow-[0_10px_30px_rgba(0,0,0,0.08)] transition-[border-radius]",
-          expanded ? "rounded-[1.1rem] rounded-t-[1.25rem]" : "rounded-[1.1rem] rounded-b-xl",
+          "overflow-hidden border border-border bg-card transition-[border-radius]",
+          expanded ? "rounded-b-[20px] rounded-t-none" : "rounded-b-[18px] rounded-t-none",
         )}
       >
         <div
           className={cn(
             "bg-card px-3 sm:px-4",
-            expanded ? "border-b border-border/70 py-3" : "py-2",
+            expanded ? "border-b border-border/70 py-3" : "py-2.5",
           )}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <button
               type="button"
               aria-expanded={expanded}
               onClick={() => setExpanded((current) => !current)}
-              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+              className={cn(
+                "flex min-w-0 flex-1 text-left",
+                expanded ? "items-center gap-2.5" : "items-center gap-3 overflow-hidden",
+              )}
             >
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-xl border border-border/80 bg-background text-muted-foreground">
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/40 text-muted-foreground">
                 <SquareDashedBottomCodeIcon className="size-3.5" />
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-foreground">
+              {expanded ? (
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium text-foreground">
+                      {subjectRun.label}
+                    </span>
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
+                        statusTone(subjectRun.status),
+                      )}
+                    >
+                      <StatusGlyph status={subjectRun.status} />
+                      {statusLabel(subjectRun.status)}
+                    </span>
+                  </span>
+                  <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                    <span>{activeRun ? "Active team" : "Recent team"}</span>
+                    <span>{panelSummary(subjectRun)}</span>
+                    {subjectRun.members.slice(0, 2).map((member) => {
+                      const preset = colorPresetForMember(member);
+                      return (
+                        <span key={member.id} className="inline-flex items-center gap-1">
+                          <span className={cn("size-1.5 rounded-full", preset.dot)} />
+                          <span className="truncate">{member.label}</span>
+                        </span>
+                      );
+                    })}
+                    {subjectRun.members.length > 2 ? (
+                      <span>+{subjectRun.members.length - 2} more</span>
+                    ) : null}
+                  </span>
+                </span>
+              ) : (
+                <span className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden whitespace-nowrap">
+                  <span className="min-w-0 truncate text-sm font-medium text-foreground">
                     {subjectRun.label}
                   </span>
                   <span
                     className={cn(
-                      "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
+                      "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
                       statusTone(subjectRun.status),
                     )}
                   >
                     <StatusGlyph status={subjectRun.status} />
                     {statusLabel(subjectRun.status)}
                   </span>
-                </span>
-                <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                  <span>{activeRun ? "Active team" : "Recent team"}</span>
-                  <span>{panelSummary(subjectRun)}</span>
-                  {subjectRun.members.slice(0, 2).map((member) => {
-                    const preset = colorPresetForMember(member);
-                    return (
-                      <span key={member.id} className="inline-flex items-center gap-1">
-                        <span className={cn("size-1.5 rounded-full", preset.dot)} />
-                        <span className="truncate">{member.label}</span>
-                      </span>
-                    );
-                  })}
-                  {subjectRun.members.length > 2 ? (
-                    <span>+{subjectRun.members.length - 2} more</span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                    {activeRun ? "Active team" : "Recent team"}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                    {panelSummary(subjectRun)}
+                  </span>
+                  {subjectRun.teammateMode ? (
+                    <span className="shrink-0 text-[11px] text-muted-foreground">
+                      {subjectRun.teammateMode}
+                    </span>
                   ) : null}
+                  {state.leadLabel ? (
+                    <span className="shrink-0 truncate text-[11px] text-muted-foreground">
+                      Lead: {state.leadLabel}
+                    </span>
+                  ) : null}
+                  <span className="flex min-w-0 items-center gap-2 overflow-hidden text-[11px] text-muted-foreground">
+                    {subjectRun.members.map((member) => {
+                      const preset = colorPresetForMember(member);
+                      return (
+                        <span
+                          key={member.id}
+                          className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap"
+                        >
+                          <span className={cn("size-1.5 rounded-full", preset.dot)} />
+                          <span>{member.label}</span>
+                        </span>
+                      );
+                    })}
+                  </span>
                 </span>
-              </span>
+              )}
             </button>
 
             <button
@@ -301,7 +346,7 @@ export function AgentTeamsPanel({
               aria-label={expanded ? "Collapse agent team panel" : "Expand agent team panel"}
               aria-expanded={expanded}
               onClick={() => setExpanded((current) => !current)}
-              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
             >
               {expanded ? (
                 <ChevronUpIcon className="size-3.5" />
@@ -379,10 +424,10 @@ export function AgentTeamsPanel({
         </div>
 
         {expanded ? (
-          <div className="bg-background/70 px-3 py-3 sm:px-4">
+          <div className="bg-muted/[0.18] px-3 py-3 sm:px-4">
             {selectedMember ? (
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
-                <div className="min-w-0 rounded-2xl border border-border bg-card/70 p-3">
+                <div className="min-w-0 rounded-xl border border-border bg-card/70 p-3">
                   <div className="flex flex-col gap-4">
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
@@ -416,13 +461,13 @@ export function AgentTeamsPanel({
                     </div>
 
                     <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                      <div className="rounded-xl border border-border bg-background/80 px-3 py-2">
+                      <div className="rounded-lg border border-border bg-background/80 px-3 py-2">
                         <span className="block text-[11px]">Started</span>
                         <span className="text-foreground">
                           {formatTimestamp(selectedMember.startedAt)}
                         </span>
                       </div>
-                      <div className="rounded-xl border border-border bg-background/80 px-3 py-2">
+                      <div className="rounded-lg border border-border bg-background/80 px-3 py-2">
                         <span className="block text-[11px]">Last update</span>
                         <span className="text-foreground">
                           {formatTimestamp(selectedMember.updatedAt)}
@@ -438,7 +483,7 @@ export function AgentTeamsPanel({
                           .map((activity) => (
                             <div
                               key={activity.id}
-                              className="rounded-xl border border-border bg-background/75 px-3 py-2"
+                              className="rounded-lg border border-border bg-background/75 px-3 py-2"
                             >
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <p className="text-sm text-foreground">{activity.label}</p>
@@ -456,7 +501,7 @@ export function AgentTeamsPanel({
                   </div>
                 </div>
 
-                <aside className="space-y-2 rounded-2xl border border-border bg-card/60 p-3">
+                <aside className="space-y-2 rounded-xl border border-border bg-card/60 p-3">
                   <p className="text-sm font-medium text-foreground">Team snapshot</p>
                   <div className="space-y-2">
                     {subjectRun.members.map((member) => {
@@ -526,7 +571,7 @@ export function AgentTeamsPanel({
                 </aside>
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-border bg-background/70 px-3 py-4 text-sm text-muted-foreground">
+              <div className="rounded-lg border border-dashed border-border bg-background/70 px-3 py-4 text-sm text-muted-foreground">
                 Select a teammate to inspect their current work.
               </div>
             )}
