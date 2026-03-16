@@ -18,6 +18,11 @@ import {
 } from "./config";
 import { fixPath, resolveStateDir } from "./os-jank";
 import { Open } from "./open";
+
+// Fix PATH eagerly before any Layer construction so that CLI probes
+// (e.g. ProviderHealthLive → `codex --version`) can find binaries
+// installed via version managers (nvm, bun, etc.).
+fixPath();
 import * as SqlitePersistence from "./persistence/Layers/Sqlite";
 import { makeServerProviderLayer, makeServerRuntimeServicesLayer } from "./serverLayers";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";

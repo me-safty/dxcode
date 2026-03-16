@@ -7,7 +7,7 @@ export function syncShellEnvironment(
     readEnvironment?: ShellEnvironmentReader;
   } = {},
 ): void {
-  if ((options.platform ?? process.platform) !== "darwin") return;
+  if ((options.platform ?? process.platform) === "win32") return;
 
   try {
     const shell = env.SHELL ?? "/bin/zsh";
