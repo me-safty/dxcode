@@ -5,6 +5,7 @@ import {
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
   type ProviderKind,
+  type SubagentRun,
   type ToolLifecycleItemType,
   type UserInputQuestion,
   type TurnId,
@@ -92,6 +93,12 @@ export type TimelineEntry =
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
+    }
+  | {
+      id: string;
+      kind: "subagent-run";
+      createdAt: string;
+      subagentRun: SubagentRun;
     };
 
 export function formatDuration(durationMs: number): string {
@@ -634,6 +641,7 @@ export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
+  subagentRuns: ReadonlyArray<SubagentRun> = [],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
@@ -653,7 +661,13 @@ export function deriveTimelineEntries(
     createdAt: entry.createdAt,
     entry,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
+  const subagentRows: TimelineEntry[] = subagentRuns.map((subagentRun) => ({
+    id: subagentRun.id,
+    kind: "subagent-run",
+    createdAt: subagentRun.createdAt,
+    subagentRun,
+  }));
+  return [...messageRows, ...proposedPlanRows, ...workRows, ...subagentRows].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
 }

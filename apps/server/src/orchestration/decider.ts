@@ -16,6 +16,12 @@ import {
 const nowIso = () => new Date().toISOString();
 const DEFAULT_ASSISTANT_DELIVERY_MODE = "buffered" as const;
 
+function hasActiveSubagentRun(readModel: OrchestrationReadModel, threadId: string): boolean {
+  const thread = readModel.threads.find((entry) => entry.id === threadId);
+  const subagentRuns = thread?.subagentRuns ?? [];
+  return subagentRuns.some((run) => run.status === "preparing" || run.status === "running");
+}
+
 const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
   eventId: crypto.randomUUID() as OrchestrationEvent["eventId"],
   aggregateKind: "thread",
@@ -159,6 +165,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           model: command.model,
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
+          threadKind: command.threadKind ?? "primary",
+          parentThreadId: command.parentThreadId ?? null,
           branch: command.branch,
           worktreePath: command.worktreePath,
           createdAt: command.createdAt,
@@ -312,6 +320,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode:
             readModel.threads.find((entry) => entry.id === command.threadId)?.interactionMode ??
             command.interactionMode,
+          ...(command.developerInstructions !== undefined
+            ? { developerInstructions: command.developerInstructions }
+            : {}),
           createdAt: command.createdAt,
         },
       };
@@ -435,6 +446,112 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.subagent.start": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (hasActiveSubagentRun(readModel, command.threadId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' already has an active sub-agent run.`,
+        });
+      }
+      const placeholderRun = {
+        id: command.runId,
+        parentThreadId: command.threadId,
+        subagentThreadId: null,
+        skillId: command.skillId,
+        skillTitle: command.skillId,
+        task: command.task,
+        status: "preparing" as const,
+        branch: null,
+        worktreePath: null,
+        report: null,
+        lastError: null,
+        createdAt: command.createdAt,
+        updatedAt: command.createdAt,
+        completedAt: null,
+        acceptedAt: null,
+      };
+      const upsertedEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.subagent-upserted",
+        payload: {
+          threadId: command.threadId,
+          subagentRun: placeholderRun,
+        },
+      };
+      const requestedEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        causationEventId: upsertedEvent.eventId,
+        type: "thread.subagent-start-requested",
+        payload: {
+          threadId: command.threadId,
+          runId: command.runId,
+          skillId: command.skillId,
+          task: command.task,
+          createdAt: command.createdAt,
+        },
+      };
+      return [upsertedEvent, requestedEvent];
+    }
+
+    case "thread.subagent.acceptReport": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.subagent-report-accepted",
+        payload: {
+          threadId: command.threadId,
+          runId: command.runId,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.subagent.cleanup": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.subagent-cleanup-requested",
+        payload: {
+          threadId: command.threadId,
+          runId: command.runId,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.session.set": {
       yield* requireThread({
         readModel,
@@ -453,6 +570,27 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           session: command.session,
+        },
+      };
+    }
+
+    case "thread.subagent.upsert": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.subagent-upserted",
+        payload: {
+          threadId: command.threadId,
+          subagentRun: command.subagentRun,
         },
       };
     }

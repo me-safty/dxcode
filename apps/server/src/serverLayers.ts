@@ -36,6 +36,8 @@ import { GitServiceLive } from "./git/Layers/GitService";
 import { BunPtyAdapterLive } from "./terminal/Layers/BunPTY";
 import { NodePtyAdapterLive } from "./terminal/Layers/NodePTY";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
+import { SkillCatalogLive } from "./subagents/Layers/SkillCatalog.ts";
+import { SubagentCoordinatorLive } from "./subagents/Layers/SubagentCoordinator.ts";
 
 export function makeServerProviderLayer(): Layer.Layer<
   ProviderService,
@@ -71,6 +73,7 @@ export function makeServerProviderLayer(): Layer.Layer<
 export function makeServerRuntimeServicesLayer() {
   const gitCoreLayer = GitCoreLive.pipe(Layer.provideMerge(GitServiceLive));
   const textGenerationLayer = CodexTextGenerationLive;
+  const skillCatalogLayer = SkillCatalogLive;
 
   const orchestrationLayer = OrchestrationEngineLive.pipe(
     Layer.provide(OrchestrationProjectionPipelineLive),
@@ -101,10 +104,16 @@ export function makeServerRuntimeServicesLayer() {
   const checkpointReactorLayer = CheckpointReactorLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),
   );
+  const subagentCoordinatorLayer = SubagentCoordinatorLive.pipe(
+    Layer.provideMerge(runtimeServicesLayer),
+    Layer.provideMerge(gitCoreLayer),
+    Layer.provideMerge(skillCatalogLayer),
+  );
   const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
     Layer.provideMerge(runtimeIngestionLayer),
     Layer.provideMerge(providerCommandReactorLayer),
     Layer.provideMerge(checkpointReactorLayer),
+    Layer.provideMerge(subagentCoordinatorLayer),
   );
 
   const terminalLayer = TerminalManagerLive.pipe(
@@ -126,6 +135,7 @@ export function makeServerRuntimeServicesLayer() {
     gitCoreLayer,
     gitManagerLayer,
     terminalLayer,
+    skillCatalogLayer,
     KeybindingsLive,
   ).pipe(Layer.provideMerge(NodeServices.layer));
 }

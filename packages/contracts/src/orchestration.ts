@@ -1,5 +1,6 @@
 import { Option, Schema, SchemaIssue, Struct } from "effect";
 import { ProviderModelOptions } from "./model";
+import { SubagentRun, SubagentRunId } from "./subagent";
 import {
   ApprovalRequestId,
   CheckpointRef,
@@ -56,6 +57,8 @@ export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 export const ProviderInteractionMode = Schema.Literals(["default", "plan"]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";
+export const OrchestrationThreadKind = Schema.Literals(["primary", "subagent"]);
+export type OrchestrationThreadKind = typeof OrchestrationThreadKind.Type;
 export const ProviderRequestKind = Schema.Literals(["command", "file-read", "file-change"]);
 export type ProviderRequestKind = typeof ProviderRequestKind.Type;
 export const AssistantDeliveryMode = Schema.Literals(["buffered", "streaming"]);
@@ -259,6 +262,12 @@ export const OrchestrationThread = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
+  threadKind: Schema.optional(
+    OrchestrationThreadKind.pipe(Schema.withDecodingDefault(() => "primary")),
+  ),
+  parentThreadId: Schema.optional(
+    Schema.NullOr(ThreadId).pipe(Schema.withDecodingDefault(() => null)),
+  ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
@@ -269,6 +278,9 @@ export const OrchestrationThread = Schema.Struct({
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(Schema.withDecodingDefault(() => [])),
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
+  subagentRuns: Schema.optional(
+    Schema.Array(SubagentRun).pipe(Schema.withDecodingDefault(() => [])),
+  ),
   session: Schema.NullOr(OrchestrationSession),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
@@ -317,6 +329,12 @@ const ThreadCreateCommand = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
+  ),
+  threadKind: Schema.optional(
+    OrchestrationThreadKind.pipe(Schema.withDecodingDefault(() => "primary")),
+  ),
+  parentThreadId: Schema.optional(
+    Schema.NullOr(ThreadId).pipe(Schema.withDecodingDefault(() => null)),
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
@@ -374,6 +392,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
+  developerInstructions: Schema.optional(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
 });
 
@@ -438,6 +457,32 @@ const ThreadSessionStopCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadSubagentStartCommand = Schema.Struct({
+  type: Schema.Literal("thread.subagent.start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  runId: SubagentRunId,
+  skillId: TrimmedNonEmptyString,
+  task: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const ThreadSubagentAcceptReportCommand = Schema.Struct({
+  type: Schema.Literal("thread.subagent.acceptReport"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  runId: SubagentRunId,
+  createdAt: IsoDateTime,
+});
+
+const ThreadSubagentCleanupCommand = Schema.Struct({
+  type: Schema.Literal("thread.subagent.cleanup"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  runId: SubagentRunId,
+  createdAt: IsoDateTime,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -453,6 +498,9 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadSubagentStartCommand,
+  ThreadSubagentAcceptReportCommand,
+  ThreadSubagentCleanupCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -472,6 +520,9 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadSubagentStartCommand,
+  ThreadSubagentAcceptReportCommand,
+  ThreadSubagentCleanupCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -540,6 +591,14 @@ const ThreadRevertCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadSubagentUpsertCommand = Schema.Struct({
+  type: Schema.Literal("thread.subagent.upsert"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  subagentRun: SubagentRun,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -548,6 +607,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
+  ThreadSubagentUpsertCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -574,10 +634,14 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.checkpoint-revert-requested",
   "thread.reverted",
   "thread.session-stop-requested",
+  "thread.subagent-start-requested",
+  "thread.subagent-report-accepted",
+  "thread.subagent-cleanup-requested",
   "thread.session-set",
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.subagent-upserted",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -617,6 +681,12 @@ export const ThreadCreatedPayload = Schema.Struct({
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(() => DEFAULT_RUNTIME_MODE)),
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
+  ),
+  threadKind: Schema.optional(
+    OrchestrationThreadKind.pipe(Schema.withDecodingDefault(() => "primary")),
+  ),
+  parentThreadId: Schema.optional(
+    Schema.NullOr(ThreadId).pipe(Schema.withDecodingDefault(() => null)),
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
@@ -676,6 +746,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
+  developerInstructions: Schema.optional(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
 });
 
@@ -715,6 +786,26 @@ export const ThreadSessionStopRequestedPayload = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const ThreadSubagentStartRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  runId: SubagentRunId,
+  skillId: TrimmedNonEmptyString,
+  task: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+export const ThreadSubagentReportAcceptedPayload = Schema.Struct({
+  threadId: ThreadId,
+  runId: SubagentRunId,
+  createdAt: IsoDateTime,
+});
+
+export const ThreadSubagentCleanupRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  runId: SubagentRunId,
+  createdAt: IsoDateTime,
+});
+
 export const ThreadSessionSetPayload = Schema.Struct({
   threadId: ThreadId,
   session: OrchestrationSession,
@@ -739,6 +830,11 @@ export const ThreadTurnDiffCompletedPayload = Schema.Struct({
 export const ThreadActivityAppendedPayload = Schema.Struct({
   threadId: ThreadId,
   activity: OrchestrationThreadActivity,
+});
+
+export const ThreadSubagentUpsertedPayload = Schema.Struct({
+  threadId: ThreadId,
+  subagentRun: SubagentRun,
 });
 
 export const OrchestrationEventMetadata = Schema.Struct({
@@ -845,6 +941,21 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("thread.subagent-start-requested"),
+    payload: ThreadSubagentStartRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.subagent-report-accepted"),
+    payload: ThreadSubagentReportAcceptedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.subagent-cleanup-requested"),
+    payload: ThreadSubagentCleanupRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.session-set"),
     payload: ThreadSessionSetPayload,
   }),
@@ -862,6 +973,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.subagent-upserted"),
+    payload: ThreadSubagentUpsertedPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

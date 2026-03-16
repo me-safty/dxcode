@@ -6,6 +6,7 @@ import {
   OrchestrationCheckpointFile,
   OrchestrationReadModel,
   ProjectScript,
+  SubagentReport,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -33,6 +34,7 @@ import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionT
 import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlan } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
+import { ProjectionThreadSubagentRun } from "../../persistence/Services/ProjectionThreadSubagentRuns.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
@@ -54,6 +56,11 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread;
+const ProjectionThreadSubagentRunDbRowSchema = ProjectionThreadSubagentRun.mapFields(
+  Struct.assign({
+    report: Schema.NullOr(Schema.fromJsonString(Schema.NullOr(SubagentReport))),
+  }),
+);
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   Struct.assign({
     payload: Schema.fromJsonString(Schema.Unknown),
@@ -84,6 +91,7 @@ const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
   ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
   ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
+  ORCHESTRATION_PROJECTOR_NAMES.threadSubagentRuns,
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
 ] as const;
 
@@ -159,6 +167,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           model,
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
+          thread_kind AS "threadKind",
+          parent_thread_id AS "parentThreadId",
           branch,
           worktree_path AS "worktreePath",
           latest_turn_id AS "latestTurnId",
@@ -167,6 +177,32 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           deleted_at AS "deletedAt"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
+      `,
+  });
+
+  const listThreadSubagentRunRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadSubagentRunDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          run_id AS "runId",
+          parent_thread_id AS "parentThreadId",
+          subagent_thread_id AS "subagentThreadId",
+          skill_id AS "skillId",
+          skill_title AS "skillTitle",
+          task,
+          status,
+          branch,
+          worktree_path AS "worktreePath",
+          report_json AS "report",
+          last_error AS "lastError",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          completed_at AS "completedAt",
+          accepted_at AS "acceptedAt"
+        FROM projection_thread_subagent_runs
+        ORDER BY parent_thread_id ASC, created_at ASC, run_id ASC
       `,
   });
 
@@ -315,6 +351,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             proposedPlanRows,
             activityRows,
             sessionRows,
+            subagentRunRows,
             checkpointRows,
             latestTurnRows,
             stateRows,
@@ -367,6 +404,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 ),
               ),
             ),
+            listThreadSubagentRunRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getSnapshot:listThreadSubagentRuns:query",
+                  "ProjectionSnapshotQuery.getSnapshot:listThreadSubagentRuns:decodeRows",
+                ),
+              ),
+            ),
             listCheckpointRows(undefined).pipe(
               Effect.mapError(
                 toPersistenceSqlOrDecodeError(
@@ -398,6 +443,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           const activitiesByThread = new Map<string, Array<OrchestrationThreadActivity>>();
           const checkpointsByThread = new Map<string, Array<OrchestrationCheckpointSummary>>();
           const sessionsByThread = new Map<string, OrchestrationSession>();
+          const subagentRunsByThread = new Map<
+            string,
+            Array<NonNullable<OrchestrationThread["subagentRuns"]>[number]>
+          >();
           const latestTurnByThread = new Map<string, OrchestrationLatestTurn>();
 
           let updatedAt: string | null = null;
@@ -409,6 +458,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
           for (const row of stateRows) {
+            updatedAt = maxIso(updatedAt, row.updatedAt);
+          }
+          for (const row of subagentRunRows) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
 
@@ -513,6 +565,28 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             });
           }
 
+          for (const row of subagentRunRows) {
+            const threadRuns = subagentRunsByThread.get(row.parentThreadId) ?? [];
+            threadRuns.push({
+              id: row.runId,
+              parentThreadId: row.parentThreadId,
+              subagentThreadId: row.subagentThreadId,
+              skillId: row.skillId,
+              skillTitle: row.skillTitle,
+              task: row.task,
+              status: row.status,
+              branch: row.branch,
+              worktreePath: row.worktreePath,
+              report: row.report,
+              lastError: row.lastError,
+              createdAt: row.createdAt,
+              updatedAt: row.updatedAt,
+              completedAt: row.completedAt,
+              acceptedAt: row.acceptedAt,
+            });
+            subagentRunsByThread.set(row.parentThreadId, threadRuns);
+          }
+
           const projects: Array<OrchestrationProject> = projectRows.map((row) => ({
             id: row.projectId,
             title: row.title,
@@ -524,25 +598,37 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             deletedAt: row.deletedAt,
           }));
 
-          const threads: Array<OrchestrationThread> = threadRows.map((row) => ({
-            id: row.threadId,
-            projectId: row.projectId,
-            title: row.title,
-            model: row.model,
-            runtimeMode: row.runtimeMode,
-            interactionMode: row.interactionMode,
-            branch: row.branch,
-            worktreePath: row.worktreePath,
-            latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt,
-            deletedAt: row.deletedAt,
-            messages: messagesByThread.get(row.threadId) ?? [],
-            proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
-            activities: activitiesByThread.get(row.threadId) ?? [],
-            checkpoints: checkpointsByThread.get(row.threadId) ?? [],
-            session: sessionsByThread.get(row.threadId) ?? null,
-          }));
+          const threads: Array<OrchestrationThread> = threadRows
+            .filter((row) => (row.threadKind ?? "primary") !== "subagent")
+            .map((row) => ({
+              id: row.threadId,
+              projectId: row.projectId,
+              title: row.title,
+              model: row.model,
+              runtimeMode: row.runtimeMode,
+              interactionMode: row.interactionMode,
+              threadKind: row.threadKind ?? "primary",
+              parentThreadId: row.parentThreadId ?? null,
+              branch: row.branch,
+              worktreePath: row.worktreePath,
+              latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+              createdAt: row.createdAt,
+              updatedAt: row.updatedAt,
+              deletedAt: row.deletedAt,
+              messages: messagesByThread.get(row.threadId) ?? [],
+              proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
+              activities: activitiesByThread.get(row.threadId) ?? [],
+              checkpoints: checkpointsByThread.get(row.threadId) ?? [],
+              subagentRuns:
+                subagentRunsByThread
+                  .get(row.threadId)
+                  ?.toSorted(
+                    (left, right) =>
+                      left.createdAt.localeCompare(right.createdAt) ||
+                      left.id.localeCompare(right.id),
+                  ) ?? [],
+              session: sessionsByThread.get(row.threadId) ?? null,
+            }));
 
           const snapshot = {
             snapshotSequence: computeSnapshotSequence(stateRows),

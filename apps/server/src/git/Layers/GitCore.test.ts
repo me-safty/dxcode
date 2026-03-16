@@ -108,6 +108,7 @@ const makeIsolatedGitCore = (gitService: GitServiceShape) =>
       fetchPullRequestBranch: (input) => core.fetchPullRequestBranch(input),
       ensureRemote: (input) => core.ensureRemote(input),
       fetchRemoteBranch: (input) => core.fetchRemoteBranch(input),
+      deleteLocalBranch: (input) => core.deleteLocalBranch(input),
       setBranchUpstream: (input) => core.setBranchUpstream(input),
       removeWorktree: (input) => core.removeWorktree(input),
       renameBranch: (input) => core.renameBranch(input),
@@ -1633,24 +1634,14 @@ it.layer(TestLayer)("git integration", (it) => {
         }),
     );
 
-    it.effect("includes command context when worktree removal fails", () =>
+    it.effect("treats removing an already-missing worktree as a no-op", () =>
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();
         yield* initRepoWithCommit(tmp);
         const core = yield* GitCore;
         const missingWorktreePath = path.join(tmp, "missing-worktree");
 
-        const removeResult = yield* Effect.result(
-          core.removeWorktree({ cwd: tmp, path: missingWorktreePath }),
-        );
-        expect(removeResult._tag).toBe("Failure");
-        if (removeResult._tag !== "Failure") {
-          return;
-        }
-        const message = removeResult.failure.message;
-        expect(message).toContain("git worktree remove");
-        expect(message).toContain(`cwd: ${tmp}`);
-        expect(message).toContain(missingWorktreePath);
+        yield* core.removeWorktree({ cwd: tmp, path: missingWorktreePath });
       }),
     );
 

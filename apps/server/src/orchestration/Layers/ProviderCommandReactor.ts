@@ -320,6 +320,7 @@ const make = Effect.gen(function* () {
     readonly modelOptions?: ProviderModelOptions;
     readonly providerOptions?: ProviderStartOptions;
     readonly interactionMode?: "default" | "plan";
+    readonly developerInstructions?: string;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -355,6 +356,9 @@ const make = Effect.gen(function* () {
       ...(modelForTurn !== undefined ? { model: modelForTurn } : {}),
       ...(input.modelOptions !== undefined ? { modelOptions: input.modelOptions } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+      ...(input.developerInstructions !== undefined
+        ? { developerInstructions: input.developerInstructions }
+        : {}),
     });
   });
 
@@ -474,6 +478,9 @@ const make = Effect.gen(function* () {
         ? { providerOptions: event.payload.providerOptions }
         : {}),
       interactionMode: event.payload.interactionMode,
+      ...(event.payload.developerInstructions !== undefined
+        ? { developerInstructions: event.payload.developerInstructions }
+        : {}),
       createdAt: event.payload.createdAt,
     });
   });

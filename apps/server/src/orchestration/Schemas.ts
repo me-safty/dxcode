@@ -8,6 +8,10 @@ import {
   ThreadInteractionModeSetPayload as ContractsThreadInteractionModeSetPayloadSchema,
   ThreadDeletedPayload as ContractsThreadDeletedPayloadSchema,
   ThreadMessageSentPayload as ContractsThreadMessageSentPayloadSchema,
+  ThreadSubagentCleanupRequestedPayload as ContractsThreadSubagentCleanupRequestedPayloadSchema,
+  ThreadSubagentReportAcceptedPayload as ContractsThreadSubagentReportAcceptedPayloadSchema,
+  ThreadSubagentStartRequestedPayload as ContractsThreadSubagentStartRequestedPayloadSchema,
+  ThreadSubagentUpsertedPayload as ContractsThreadSubagentUpsertedPayloadSchema,
   ThreadProposedPlanUpsertedPayload as ContractsThreadProposedPlanUpsertedPayloadSchema,
   ThreadSessionSetPayload as ContractsThreadSessionSetPayloadSchema,
   ThreadTurnDiffCompletedPayload as ContractsThreadTurnDiffCompletedPayloadSchema,
@@ -46,3 +50,10 @@ export const ThreadApprovalResponseRequestedPayload =
 export const ThreadCheckpointRevertRequestedPayload =
   ContractsThreadCheckpointRevertRequestedPayloadSchema;
 export const ThreadSessionStopRequestedPayload = ContractsThreadSessionStopRequestedPayloadSchema;
+export const ThreadSubagentStartRequestedPayload =
+  ContractsThreadSubagentStartRequestedPayloadSchema;
+export const ThreadSubagentReportAcceptedPayload =
+  ContractsThreadSubagentReportAcceptedPayloadSchema;
+export const ThreadSubagentCleanupRequestedPayload =
+  ContractsThreadSubagentCleanupRequestedPayloadSchema;
+export const ThreadSubagentUpsertedPayload = ContractsThreadSubagentUpsertedPayloadSchema;

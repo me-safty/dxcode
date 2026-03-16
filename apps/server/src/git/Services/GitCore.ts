@@ -75,6 +75,12 @@ export interface GitFetchRemoteBranchInput {
   localBranch: string;
 }
 
+export interface GitDeleteLocalBranchInput {
+  cwd: string;
+  branch: string;
+  force?: boolean;
+}
+
 export interface GitSetBranchUpstreamInput {
   cwd: string;
   branch: string;
@@ -173,6 +179,13 @@ export interface GitCoreShape {
    */
   readonly fetchRemoteBranch: (
     input: GitFetchRemoteBranchInput,
+  ) => Effect.Effect<void, GitCommandError>;
+
+  /**
+   * Delete a local branch.
+   */
+  readonly deleteLocalBranch: (
+    input: GitDeleteLocalBranchInput,
   ) => Effect.Effect<void, GitCommandError>;
 
   /**

@@ -14,6 +14,7 @@ import {
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
   ThreadActivityAppendedPayload,
+  ThreadSubagentUpsertedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
@@ -255,6 +256,8 @@ export function projectEvent(
             model: payload.model,
             runtimeMode: payload.runtimeMode,
             interactionMode: payload.interactionMode,
+            threadKind: payload.threadKind ?? "primary",
+            parentThreadId: payload.parentThreadId ?? null,
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             latestTurn: null,
@@ -262,6 +265,7 @@ export function projectEvent(
             updatedAt: payload.updatedAt,
             deletedAt: null,
             messages: [],
+            subagentRuns: [],
             activities: [],
             checkpoints: [],
             session: null,
@@ -615,6 +619,37 @@ export function projectEvent(
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               activities,
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.subagent-upserted":
+      return decodeForEvent(
+        ThreadSubagentUpsertedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+
+          const subagentRuns = [
+            ...(thread.subagentRuns?.filter((run) => run.id !== payload.subagentRun.id) ?? []),
+            payload.subagentRun,
+          ].toSorted(
+            (left, right) =>
+              left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+          );
+
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              subagentRuns,
               updatedAt: event.occurredAt,
             }),
           };

@@ -78,6 +78,7 @@ import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import { SkillCatalog } from "./subagents/Services/SkillCatalog.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -217,7 +218,8 @@ export type ServerRuntimeServices =
   | TerminalManager
   | Keybindings
   | Open
-  | AnalyticsService;
+  | AnalyticsService
+  | SkillCatalog;
 
 export class ServerLifecycleError extends Schema.TaggedErrorClass<ServerLifecycleError>()(
   "ServerLifecycleError",
@@ -255,6 +257,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const keybindingsManager = yield* Keybindings;
   const providerHealth = yield* ProviderHealth;
   const git = yield* GitCore;
+  const skillCatalog = yield* SkillCatalog;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -868,6 +871,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.serverGetConfig:
         const keybindingsConfig = yield* keybindingsManager.loadConfigState;
+        const subagentSkills = yield* skillCatalog.listSkills();
         return {
           cwd,
           keybindingsConfigPath,
@@ -875,6 +879,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           issues: keybindingsConfig.issues,
           providers: providerStatuses,
           availableEditors,
+          subagentSkills,
         };
 
       case WS_METHODS.serverUpsertKeybinding: {

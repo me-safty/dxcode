@@ -3,6 +3,7 @@ import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
 import { ProviderKind } from "./orchestration";
+import { SubagentSkill } from "./subagent";
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
   kind: Schema.Literal("keybindings.malformed-config"),
@@ -52,6 +53,9 @@ export const ServerConfig = Schema.Struct({
   issues: ServerConfigIssues,
   providers: ServerProviderStatuses,
   availableEditors: Schema.Array(EditorId),
+  subagentSkills: Schema.optional(
+    Schema.Array(SubagentSkill).pipe(Schema.withDecodingDefault(() => [])),
+  ),
 });
 export type ServerConfig = typeof ServerConfig.Type;
 

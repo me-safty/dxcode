@@ -1,4 +1,4 @@
-import { type MessageId, type TurnId } from "@t3tools/contracts";
+import { type MessageId, type SubagentRun, type TurnId } from "@t3tools/contracts";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   measureElement as measureVirtualElement,
@@ -36,6 +36,7 @@ import { computeMessageDurationStart, normalizeCompactToolLabel } from "./Messag
 import { cn } from "~/lib/utils";
 import { type TimestampFormat } from "../../appSettings";
 import { formatTimestamp } from "../../timestampFormat";
+import { SubagentReportCard } from "./SubagentReportCard";
 
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
@@ -58,6 +59,9 @@ interface MessagesTimelineProps {
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
+  onUseSubagentReport: (run: SubagentRun) => void;
+  onOpenSubagentWorktreeThread: (run: SubagentRun) => void;
+  onDiscardSubagentRun: (run: SubagentRun) => void;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
@@ -82,6 +86,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onRevertUserMessage,
   isRevertingCheckpoint,
   onImageExpand,
+  onUseSubagentReport,
+  onOpenSubagentWorktreeThread,
+  onDiscardSubagentRun,
   markdownCwd,
   resolvedTheme,
   timestampFormat,
@@ -152,6 +159,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           id: timelineEntry.id,
           createdAt: timelineEntry.createdAt,
           proposedPlan: timelineEntry.proposedPlan,
+        });
+        continue;
+      }
+
+      if (timelineEntry.kind === "subagent-run") {
+        nextRows.push({
+          kind: "subagent-run",
+          id: timelineEntry.id,
+          createdAt: timelineEntry.createdAt,
+          subagentRun: timelineEntry.subagentRun,
         });
         continue;
       }
@@ -233,6 +250,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       if (!row) return 96;
       if (row.kind === "work") return 112;
       if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
+      if (row.kind === "subagent-run") return 260;
       if (row.kind === "working") return 40;
       return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
     },
@@ -509,6 +527,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         </div>
       )}
 
+      {row.kind === "subagent-run" && (
+        <div className="min-w-0 px-1 py-0.5">
+          <SubagentReportCard
+            run={row.subagentRun}
+            markdownCwd={markdownCwd}
+            onUseReport={onUseSubagentReport}
+            onOpenWorktreeThread={onOpenSubagentWorktreeThread}
+            onDiscard={onDiscardSubagentRun}
+          />
+        </div>
+      )}
+
       {row.kind === "working" && (
         <div className="py-0.5 pl-1.5">
           <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
@@ -576,6 +606,7 @@ type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineProposedPlan = Extract<TimelineEntry, { kind: "proposed-plan" }>["proposedPlan"];
 type TimelineWorkEntry = Extract<TimelineEntry, { kind: "work" }>["entry"];
+type TimelineSubagentRun = Extract<TimelineEntry, { kind: "subagent-run" }>["subagentRun"];
 type TimelineRow =
   | {
       kind: "work";
@@ -596,6 +627,12 @@ type TimelineRow =
       id: string;
       createdAt: string;
       proposedPlan: TimelineProposedPlan;
+    }
+  | {
+      kind: "subagent-run";
+      id: string;
+      createdAt: string;
+      subagentRun: TimelineSubagentRun;
     }
   | { kind: "working"; id: string; createdAt: string | null };
 

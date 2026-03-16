@@ -15,6 +15,8 @@ import {
   type ProviderApprovalDecision,
   type ServerProviderStatus,
   type ProviderKind,
+  type SubagentRun,
+  type SubagentSkill,
   type ThreadId,
   type TurnId,
   OrchestrationThreadActivity,
@@ -44,6 +46,7 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   parseStandaloneComposerSlashCommand,
+  parseSkillInvocation,
   replaceTextRange,
 } from "../composer-logic";
 import {
@@ -169,6 +172,7 @@ const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_AVAILABLE_EDITORS: EditorId[] = [];
 const EMPTY_PROVIDER_STATUSES: ServerProviderStatus[] = [];
+const EMPTY_SUBAGENT_SKILLS: SubagentSkill[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const SCRIPT_TERMINAL_COLS = 120;
@@ -811,8 +815,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
-    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+      deriveTimelineEntries(
+        timelineMessages,
+        activeThread?.proposedPlans ?? [],
+        workLogEntries,
+        activeThread?.subagentRuns ?? [],
+      ),
+    [activeThread?.proposedPlans, activeThread?.subagentRuns, timelineMessages, workLogEntries],
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
@@ -923,6 +932,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }),
   );
   const workspaceEntries = workspaceEntriesQuery.data?.entries ?? EMPTY_PROJECT_ENTRIES;
+  const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
+  const availableEditors = serverConfigQuery.data?.availableEditors ?? EMPTY_AVAILABLE_EDITORS;
+  const providerStatuses = serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES;
+  const subagentSkills = serverConfigQuery.data?.subagentSkills ?? EMPTY_SUBAGENT_SKILLS;
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
@@ -959,6 +972,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
           label: "/default",
           description: "Switch this thread back to normal chat mode",
         },
+        {
+          id: "slash:skill",
+          type: "slash-command",
+          command: "skill",
+          label: "/skill",
+          description: "Run a specialist sub-agent in an isolated worktree",
+        },
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
       if (!query) {
@@ -967,6 +987,26 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return slashCommandItems.filter(
         (item) => item.command.includes(query) || item.label.slice(1).includes(query),
       );
+    }
+
+    if (composerTrigger.kind === "slash-skill") {
+      const query = composerTrigger.query.trim().toLowerCase();
+      return subagentSkills
+        .filter((skill) => {
+          if (!query) return true;
+          return (
+            skill.id.toLowerCase().includes(query) ||
+            skill.title.toLowerCase().includes(query) ||
+            (skill.summary?.toLowerCase().includes(query) ?? false)
+          );
+        })
+        .map((skill) => ({
+          id: `skill:${skill.id}`,
+          type: "skill" as const,
+          skill,
+          label: skill.id,
+          description: skill.summary ?? skill.title,
+        }));
     }
 
     return searchableModelOptions
@@ -985,7 +1025,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         label: name,
         description: `${providerLabel} · ${slug}`,
       }));
-  }, [composerTrigger, searchableModelOptions, workspaceEntries]);
+  }, [composerTrigger, searchableModelOptions, subagentSkills, workspaceEntries]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -1001,9 +1041,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => new Set(nonPersistedComposerImageIds),
     [nonPersistedComposerImageIds],
   );
-  const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
-  const availableEditors = serverConfigQuery.data?.availableEditors ?? EMPTY_AVAILABLE_EDITORS;
-  const providerStatuses = serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES;
   const activeProvider = activeThread?.session?.provider ?? "codex";
   const activeProviderStatus = useMemo(
     () => providerStatuses.find((status) => status.provider === activeProvider) ?? null,
@@ -2232,6 +2269,37 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerTrigger(null);
       return;
     }
+    const skillInvocation = parseSkillInvocation(trimmed);
+    if (skillInvocation) {
+      if (composerImages.length > 0) {
+        setStoreThreadError(activeThread.id, "Sub-agent runs do not support attachments yet.");
+        return;
+      }
+      const commandId = newCommandId();
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.subagent.start",
+          commandId,
+          threadId: activeThread.id,
+          runId: commandId,
+          skillId: skillInvocation.skillId,
+          task: skillInvocation.task,
+          createdAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        setStoreThreadError(
+          activeThread.id,
+          error instanceof Error ? error.message : "Failed to start the sub-agent.",
+        );
+        return;
+      }
+      promptRef.current = "";
+      clearComposerDraftContent(activeThread.id);
+      setComposerHighlightedItemId(null);
+      setComposerCursor(0);
+      setComposerTrigger(null);
+      return;
+    }
     if (!trimmed && composerImages.length === 0) return;
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
@@ -3038,10 +3106,46 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }
           return;
         }
+        if (item.command === "skill") {
+          const replacement = "/skill ";
+          const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+            snapshot.value,
+            trigger.rangeEnd,
+            replacement,
+          );
+          const applied = applyPromptReplacement(
+            trigger.rangeStart,
+            replacementRangeEnd,
+            replacement,
+            { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+          );
+          if (applied) {
+            setComposerHighlightedItemId(null);
+          }
+          return;
+        }
         void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
+        return;
+      }
+      if (item.type === "skill") {
+        const replacement = `/skill ${item.skill.id} `;
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
         if (applied) {
           setComposerHighlightedItemId(null);
         }
@@ -3190,6 +3294,98 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     void onRevertToTurnCount(targetTurnCount);
   };
+  const onUseSubagentReport = useCallback(
+    async (run: SubagentRun) => {
+      if (!activeThreadId) {
+        return;
+      }
+      const report = run.report;
+      if (!report) {
+        return;
+      }
+      const nextPrompt = [
+        promptRef.current.trim(),
+        `Sub-agent report from ${run.skillTitle} for: ${run.task}`,
+        report.summary,
+        report.markdown,
+      ]
+        .filter((segment) => segment.length > 0)
+        .join("\n\n");
+      promptRef.current = nextPrompt;
+      setComposerDraftPrompt(activeThreadId, nextPrompt);
+      setComposerCursor(collapseExpandedComposerCursor(nextPrompt, nextPrompt.length));
+      setComposerTrigger(null);
+      const api = readNativeApi();
+      if (!api) {
+        return;
+      }
+      await api.orchestration.dispatchCommand({
+        type: "thread.subagent.acceptReport",
+        commandId: newCommandId(),
+        threadId: activeThreadId,
+        runId: run.id,
+        createdAt: new Date().toISOString(),
+      });
+    },
+    [activeThreadId, setComposerDraftPrompt],
+  );
+  const onOpenSubagentWorktreeThread = useCallback(
+    async (run: SubagentRun) => {
+      const api = readNativeApi();
+      if (!api || !activeProject || !activeThread || !run.branch || !run.worktreePath) {
+        return;
+      }
+      const existingThread = threads.find(
+        (thread) =>
+          thread.id !== activeThread.id &&
+          thread.projectId === activeProject.id &&
+          thread.branch === run.branch &&
+          thread.worktreePath === run.worktreePath,
+      );
+      if (existingThread) {
+        void navigate({
+          to: "/$threadId",
+          params: { threadId: existingThread.id },
+        });
+        return;
+      }
+      const nextThreadId = newThreadId();
+      await api.orchestration.dispatchCommand({
+        type: "thread.create",
+        commandId: newCommandId(),
+        threadId: nextThreadId,
+        projectId: activeProject.id,
+        title: truncateTitle(`${run.skillTitle} worktree`),
+        model: activeThread.model as ModelSlug,
+        runtimeMode: activeThread.runtimeMode,
+        interactionMode: "default",
+        branch: run.branch,
+        worktreePath: run.worktreePath,
+        createdAt: new Date().toISOString(),
+      });
+      void navigate({
+        to: "/$threadId",
+        params: { threadId: nextThreadId },
+      });
+    },
+    [activeProject, activeThread, navigate, threads],
+  );
+  const onDiscardSubagentRun = useCallback(
+    async (run: SubagentRun) => {
+      const api = readNativeApi();
+      if (!api || !activeThreadId) {
+        return;
+      }
+      await api.orchestration.dispatchCommand({
+        type: "thread.subagent.cleanup",
+        commandId: newCommandId(),
+        threadId: activeThreadId,
+        runId: run.id,
+        createdAt: new Date().toISOString(),
+      });
+    },
+    [activeThreadId],
+  );
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -3297,6 +3493,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
+                onUseSubagentReport={onUseSubagentReport}
+                onOpenSubagentWorktreeThread={onOpenSubagentWorktreeThread}
+                onDiscardSubagentRun={onDiscardSubagentRun}
                 markdownCwd={gitCwd ?? undefined}
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}

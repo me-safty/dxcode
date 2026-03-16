@@ -1253,26 +1253,45 @@ const makeGitCore = Effect.gen(function* () {
       input.branch,
     ]);
 
+  const deleteLocalBranch: GitCoreShape["deleteLocalBranch"] = (input) =>
+    runGit("GitCore.deleteLocalBranch", input.cwd, [
+      "branch",
+      input.force ? "-D" : "-d",
+      input.branch,
+    ]);
+
   const removeWorktree: GitCoreShape["removeWorktree"] = (input) =>
     Effect.gen(function* () {
+      const worktreeExists = yield* fileSystem
+        .exists(input.path)
+        .pipe(Effect.orElseSucceed(() => false));
+      if (!worktreeExists) {
+        return;
+      }
       const args = ["worktree", "remove"];
       if (input.force) {
         args.push("--force");
       }
       args.push(input.path);
-      yield* executeGit("GitCore.removeWorktree", input.cwd, args, {
-        timeoutMs: 15_000,
-        fallbackErrorMessage: "git worktree remove failed",
-      }).pipe(
-        Effect.mapError((error) =>
-          createGitCommandError(
-            "GitCore.removeWorktree",
-            input.cwd,
-            args,
-            `${commandLabel(args)} failed (cwd: ${input.cwd}): ${error instanceof Error ? error.message : String(error)}`,
-            error,
-          ),
-        ),
+      const result = yield* Effect.result(
+        executeGit("GitCore.removeWorktree", input.cwd, args, {
+          timeoutMs: 15_000,
+          fallbackErrorMessage: "git worktree remove failed",
+        }),
+      );
+      if (result._tag === "Success") {
+        return;
+      }
+      const message = result.failure.message.toLowerCase();
+      if (message.includes("is not a working tree")) {
+        return;
+      }
+      return yield* createGitCommandError(
+        "GitCore.removeWorktree",
+        input.cwd,
+        args,
+        `${commandLabel(args)} failed (cwd: ${input.cwd}): ${result.failure instanceof Error ? result.failure.message : String(result.failure)}`,
+        result.failure,
       );
     });
 
@@ -1415,6 +1434,7 @@ const makeGitCore = Effect.gen(function* () {
     fetchPullRequestBranch,
     ensureRemote,
     fetchRemoteBranch,
+    deleteLocalBranch,
     setBranchUpstream,
     removeWorktree,
     renameBranch,

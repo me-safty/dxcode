@@ -229,6 +229,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           model: "gpt-5-codex",
           interactionMode: "default",
           runtimeMode: "full-access",
+          threadKind: "primary",
+          parentThreadId: null,
           branch: null,
           worktreePath: null,
           latestTurn: {
@@ -276,6 +278,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               completedAt: "2026-02-24T00:00:08.000Z",
             },
           ],
+          subagentRuns: [],
           session: {
             threadId: ThreadId.makeUnsafe("thread-1"),
             status: "running",

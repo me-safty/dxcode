@@ -1,7 +1,12 @@
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 
-export type ComposerTriggerKind = "path" | "slash-command" | "slash-model";
-export type ComposerSlashCommand = "model" | "plan" | "default";
+export type ComposerTriggerKind = "path" | "slash-command" | "slash-model" | "slash-skill";
+export type ComposerSlashCommand = "model" | "plan" | "default" | "skill";
+
+export interface ParsedSkillInvocation {
+  skillId: string;
+  task: string;
+}
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -10,7 +15,7 @@ export interface ComposerTrigger {
   rangeEnd: number;
 }
 
-const SLASH_COMMANDS: readonly ComposerSlashCommand[] = ["model", "plan", "default"];
+const SLASH_COMMANDS: readonly ComposerSlashCommand[] = ["model", "plan", "default", "skill"];
 
 function clampCursor(text: string, cursor: number): number {
   if (!Number.isFinite(cursor)) return text.length;
@@ -188,6 +193,16 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
         rangeEnd: cursor,
       };
     }
+
+    const skillMatch = /^\/skill(?:\s+([^\s]*))?$/.exec(linePrefix);
+    if (skillMatch) {
+      return {
+        kind: "slash-skill",
+        query: (skillMatch[1] ?? "").trim(),
+        rangeStart: lineStart,
+        rangeEnd: cursor,
+      };
+    }
   }
 
   const tokenStart = tokenStartForCursor(text, cursor);
@@ -206,7 +221,7 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
 
 export function parseStandaloneComposerSlashCommand(
   text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
+): Exclude<ComposerSlashCommand, "model" | "skill"> | null {
   const match = /^\/(plan|default)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
@@ -214,6 +229,19 @@ export function parseStandaloneComposerSlashCommand(
   const command = match[1]?.toLowerCase();
   if (command === "plan") return "plan";
   return "default";
+}
+
+export function parseSkillInvocation(text: string): ParsedSkillInvocation | null {
+  const match = /^\/skill\s+(\S+)\s+([\s\S]+)$/i.exec(text.trim());
+  if (!match) {
+    return null;
+  }
+  const skillId = match[1]?.trim() ?? "";
+  const task = match[2]?.trim() ?? "";
+  if (skillId.length === 0 || task.length === 0) {
+    return null;
+  }
+  return { skillId, task };
 }
 
 export function replaceTextRange(

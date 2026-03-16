@@ -6,6 +6,7 @@ import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
+import { SubagentCoordinator } from "../../subagents/Services/SubagentCoordinator.ts";
 
 describe("OrchestrationReactor", () => {
   let runtime: ManagedRuntime.ManagedRuntime<OrchestrationReactor, never> | null = null;
@@ -46,6 +47,13 @@ describe("OrchestrationReactor", () => {
             drain: Effect.void,
           }),
         ),
+        Layer.provideMerge(
+          Layer.succeed(SubagentCoordinator, {
+            start: Effect.sync(() => {
+              started.push("subagent-coordinator");
+            }),
+          }),
+        ),
       ),
     );
 
@@ -57,6 +65,7 @@ describe("OrchestrationReactor", () => {
       "provider-runtime-ingestion",
       "provider-command-reactor",
       "checkpoint-reactor",
+      "subagent-coordinator",
     ]);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));

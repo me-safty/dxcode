@@ -23,6 +23,7 @@ import {
   ProjectionThreadProposedPlanRepository,
 } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadSessionRepository } from "../../persistence/Services/ProjectionThreadSessions.ts";
+import { ProjectionThreadSubagentRunRepository } from "../../persistence/Services/ProjectionThreadSubagentRuns.ts";
 import {
   type ProjectionTurn,
   ProjectionTurnRepository,
@@ -35,6 +36,7 @@ import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers
 import { ProjectionThreadMessageRepositoryLive } from "../../persistence/Layers/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlanRepositoryLive } from "../../persistence/Layers/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/ProjectionThreadSessions.ts";
+import { ProjectionThreadSubagentRunRepositoryLive } from "../../persistence/Layers/ProjectionThreadSubagentRuns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ServerConfig } from "../../config.ts";
@@ -56,6 +58,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadProposedPlans: "projection.thread-proposed-plans",
   threadActivities: "projection.thread-activities",
   threadSessions: "projection.thread-sessions",
+  threadSubagentRuns: "projection.thread-subagent-runs",
   threadTurns: "projection.thread-turns",
   checkpoints: "projection.checkpoints",
   pendingApprovals: "projection.pending-approvals",
@@ -347,6 +350,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
   const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
   const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
+  const projectionThreadSubagentRunRepository = yield* ProjectionThreadSubagentRunRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
 
@@ -423,6 +427,8 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             model: event.payload.model,
             runtimeMode: event.payload.runtimeMode,
             interactionMode: event.payload.interactionMode,
+            threadKind: event.payload.threadKind ?? "primary",
+            parentThreadId: event.payload.parentThreadId ?? null,
             branch: event.payload.branch,
             worktreePath: event.payload.worktreePath,
             latestTurnId: null,
@@ -500,7 +506,8 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
 
         case "thread.message-sent":
         case "thread.proposed-plan-upserted":
-        case "thread.activity-appended": {
+        case "thread.activity-appended":
+        case "thread.subagent-upserted": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           });
@@ -562,6 +569,30 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
         default:
           return;
       }
+    });
+
+  const applyThreadSubagentRunsProjection: ProjectorDefinition["apply"] = (event) =>
+    Effect.gen(function* () {
+      if (event.type !== "thread.subagent-upserted") {
+        return;
+      }
+      yield* projectionThreadSubagentRunRepository.upsert({
+        runId: event.payload.subagentRun.id,
+        parentThreadId: event.payload.threadId,
+        subagentThreadId: event.payload.subagentRun.subagentThreadId,
+        skillId: event.payload.subagentRun.skillId,
+        skillTitle: event.payload.subagentRun.skillTitle,
+        task: event.payload.subagentRun.task,
+        status: event.payload.subagentRun.status,
+        branch: event.payload.subagentRun.branch,
+        worktreePath: event.payload.subagentRun.worktreePath,
+        report: event.payload.subagentRun.report,
+        lastError: event.payload.subagentRun.lastError,
+        createdAt: event.payload.subagentRun.createdAt,
+        updatedAt: event.payload.subagentRun.updatedAt,
+        completedAt: event.payload.subagentRun.completedAt,
+        acceptedAt: event.payload.subagentRun.acceptedAt,
+      });
     });
 
   const applyThreadMessagesProjection: ProjectorDefinition["apply"] = (
@@ -1113,6 +1144,10 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       apply: applyThreadSessionsProjection,
     },
     {
+      name: ORCHESTRATION_PROJECTOR_NAMES.threadSubagentRuns,
+      apply: applyThreadSubagentRunsProjection,
+    },
+    {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
       apply: applyThreadTurnsProjection,
     },
@@ -1226,6 +1261,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),
+  Layer.provideMerge(ProjectionThreadSubagentRunRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),
   Layer.provideMerge(ProjectionPendingApprovalRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),

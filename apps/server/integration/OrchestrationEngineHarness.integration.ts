@@ -60,6 +60,7 @@ import {
   RuntimeReceiptBus,
   type OrchestrationRuntimeReceipt,
 } from "../src/orchestration/Services/RuntimeReceiptBus.ts";
+import { SubagentCoordinator } from "../src/subagents/Services/SubagentCoordinator.ts";
 
 import {
   makeTestProviderAdapterHarness,
@@ -292,6 +293,7 @@ export const makeOrchestrationIntegrationHarness = (
     const gitCoreLayer = Layer.succeed(GitCore, {
       renameBranch: (input: Parameters<GitCoreShape["renameBranch"]>[0]) =>
         Effect.succeed({ branch: input.newBranch }),
+      deleteLocalBranch: () => Effect.void,
     } as unknown as GitCoreShape);
     const textGenerationLayer = Layer.succeed(TextGeneration, {
       generateBranchName: () => Effect.succeed({ branch: null }),
@@ -308,6 +310,11 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(runtimeIngestionLayer),
       Layer.provideMerge(providerCommandReactorLayer),
       Layer.provideMerge(checkpointReactorLayer),
+      Layer.provideMerge(
+        Layer.succeed(SubagentCoordinator, {
+          start: Effect.void,
+        }),
+      ),
     );
     const layer = orchestrationReactorLayer.pipe(
       Layer.provide(persistenceLayer),

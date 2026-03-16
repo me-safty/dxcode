@@ -12,6 +12,7 @@ import type {
   ProviderKind,
   ProviderInteractionMode,
   RuntimeMode,
+  SubagentRun,
 } from "@t3tools/contracts";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
@@ -102,6 +103,7 @@ export interface Thread {
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  subagentRuns?: SubagentRun[] | undefined;
 }
 
 export interface ThreadSession {

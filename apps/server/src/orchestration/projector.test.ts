@@ -76,6 +76,8 @@ describe("orchestration projector", () => {
         model: "gpt-5-codex",
         runtimeMode: "full-access",
         interactionMode: "default",
+        threadKind: "primary",
+        parentThreadId: null,
         branch: null,
         worktreePath: null,
         latestTurn: null,
@@ -86,6 +88,7 @@ describe("orchestration projector", () => {
         proposedPlans: [],
         activities: [],
         checkpoints: [],
+        subagentRuns: [],
         session: null,
       },
     ]);

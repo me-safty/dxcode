@@ -7,16 +7,19 @@ import {
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
+import { SubagentCoordinator } from "../../subagents/Services/SubagentCoordinator.ts";
 
 export const makeOrchestrationReactor = Effect.gen(function* () {
   const providerRuntimeIngestion = yield* ProviderRuntimeIngestionService;
   const providerCommandReactor = yield* ProviderCommandReactor;
   const checkpointReactor = yield* CheckpointReactor;
+  const subagentCoordinator = yield* SubagentCoordinator;
 
   const start: OrchestrationReactorShape["start"] = Effect.gen(function* () {
     yield* providerRuntimeIngestion.start;
     yield* providerCommandReactor.start;
     yield* checkpointReactor.start;
+    yield* subagentCoordinator.start;
   });
 
   return {

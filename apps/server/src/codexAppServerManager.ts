@@ -121,6 +121,7 @@ export interface CodexAppServerSendTurnInput {
   readonly serviceTier?: string | null;
   readonly effort?: string;
   readonly interactionMode?: ProviderInteractionMode;
+  readonly developerInstructions?: string;
 }
 
 export interface CodexAppServerStartSessionInput {
@@ -418,6 +419,7 @@ function buildCodexCollaborationMode(input: {
   readonly interactionMode?: "default" | "plan";
   readonly model?: string;
   readonly effort?: string;
+  readonly developerInstructions?: string;
 }):
   | {
       mode: "default" | "plan";
@@ -428,19 +430,21 @@ function buildCodexCollaborationMode(input: {
       };
     }
   | undefined {
-  if (input.interactionMode === undefined) {
+  if (input.interactionMode === undefined && input.developerInstructions === undefined) {
     return undefined;
   }
+  const mode = input.interactionMode ?? "default";
   const model = normalizeCodexModelSlug(input.model) ?? "gpt-5.3-codex";
   return {
-    mode: input.interactionMode,
+    mode,
     settings: {
       model,
       reasoning_effort: input.effort ?? "medium",
       developer_instructions:
-        input.interactionMode === "plan"
+        input.developerInstructions ??
+        (mode === "plan"
           ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
-          : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
+          : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS),
     },
   };
 }
@@ -800,6 +804,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
       ...(normalizedModel !== undefined ? { model: normalizedModel } : {}),
       ...(input.effort !== undefined ? { effort: input.effort } : {}),
+      ...(input.developerInstructions !== undefined
+        ? { developerInstructions: input.developerInstructions }
+        : {}),
     });
     if (collaborationMode) {
       if (!turnStartParams.model) {
