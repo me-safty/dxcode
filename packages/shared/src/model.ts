@@ -85,7 +85,7 @@ export function inferProviderForModel(
 }
 
 export function getReasoningEffortOptions(provider: "codex"): ReadonlyArray<CodexReasoningEffort>;
-export function getReasoningEffortOptions(provider: "claudeCode"): ReadonlyArray<ClaudeCodeEffort>;
+export function getReasoningEffortOptions(provider: "claudeAgent"): ReadonlyArray<ClaudeCodeEffort>;
 export function getReasoningEffortOptions(
   provider?: ProviderKind,
 ): ReadonlyArray<ProviderReasoningEffort>;
@@ -96,7 +96,7 @@ export function getReasoningEffortOptions(
 }
 
 export function getDefaultReasoningEffort(provider: "codex"): CodexReasoningEffort;
-export function getDefaultReasoningEffort(provider: "claudeCode"): ClaudeCodeEffort;
+export function getDefaultReasoningEffort(provider: "claudeAgent"): ClaudeCodeEffort;
 export function getDefaultReasoningEffort(provider?: ProviderKind): ProviderReasoningEffort;
 export function getDefaultReasoningEffort(
   provider: ProviderKind = "codex",
@@ -109,7 +109,7 @@ export function resolveReasoningEffortForProvider(
   effort: string | null | undefined,
 ): CodexReasoningEffort | null;
 export function resolveReasoningEffortForProvider(
-  provider: "claudeCode",
+  provider: "claudeAgent",
   effort: string | null | undefined,
 ): ClaudeCodeEffort | null;
 export function resolveReasoningEffortForProvider(

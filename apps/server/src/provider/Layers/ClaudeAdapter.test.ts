@@ -254,13 +254,13 @@ describe("ClaudeAdapterLive", () => {
   it.effect("forwards claude effort levels into query options", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
-      const adapter = yield* ClaudeCodeAdapter;
+      const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
-        provider: "claudeCode",
+        provider: "claudeAgent",
         runtimeMode: "full-access",
         modelOptions: {
-          claudeCode: {
+          claudeAgent: {
             effort: "max",
           },
         },
@@ -277,13 +277,13 @@ describe("ClaudeAdapterLive", () => {
   it.effect("maps ultrathink to max effort and prefixes the prompt", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
-      const adapter = yield* ClaudeCodeAdapter;
+      const adapter = yield* ClaudeAdapter;
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
-        provider: "claudeCode",
+        provider: "claudeAgent",
         runtimeMode: "full-access",
         modelOptions: {
-          claudeCode: {
+          claudeAgent: {
             effort: "ultrathink",
           },
         },
@@ -294,7 +294,7 @@ describe("ClaudeAdapterLive", () => {
         input: "Investigate the edge cases",
         attachments: [],
         modelOptions: {
-          claudeCode: {
+          claudeAgent: {
             effort: "ultrathink",
           },
         },
@@ -666,7 +666,7 @@ describe("ClaudeAdapterLive", () => {
   it.effect("classifies Claude Task tool invocations as collaboration agent work", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
-      const adapter = yield* ClaudeCodeAdapter;
+      const adapter = yield* ClaudeAdapter;
 
       const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 8).pipe(
         Stream.runCollect,
@@ -675,7 +675,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
-        provider: "claudeCode",
+        provider: "claudeAgent",
         runtimeMode: "full-access",
       });
 
@@ -742,7 +742,7 @@ describe("ClaudeAdapterLive", () => {
   it.effect("forwards Claude task progress summaries for subagent updates", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
-      const adapter = yield* ClaudeCodeAdapter;
+      const adapter = yield* ClaudeAdapter;
 
       const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 5).pipe(
         Stream.runCollect,
@@ -751,7 +751,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
-        provider: "claudeCode",
+        provider: "claudeAgent",
         runtimeMode: "full-access",
       });
 

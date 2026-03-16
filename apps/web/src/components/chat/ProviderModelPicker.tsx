@@ -134,8 +134,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             aria-hidden="true"
             className={cn(
               "size-4 shrink-0",
-              props.provider === "claudeCode" ? "text-[#d97757]" : "text-muted-foreground/70",
-              props.provider === "claudeCode" && props.ultrathinkActive
+              props.provider === "claudeAgent" ? "text-[#d97757]" : "text-muted-foreground/70",
+              props.provider === "claudeAgent" && props.ultrathinkActive
                 ? "ultrathink-chroma"
                 : undefined,
             )}

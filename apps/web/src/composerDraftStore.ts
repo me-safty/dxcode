@@ -213,7 +213,7 @@ const REASONING_EFFORT_VALUES = new Set<ProviderReasoningEffort>([
 ]);
 const DEFAULT_REASONING_EFFORT_VALUES = new Set<ProviderReasoningEffort>([
   DEFAULT_REASONING_EFFORT_BY_PROVIDER.codex,
-  DEFAULT_REASONING_EFFORT_BY_PROVIDER.claudeCode,
+  DEFAULT_REASONING_EFFORT_BY_PROVIDER.claudeAgent,
 ]);
 
 function createEmptyThreadDraft(): ComposerThreadDraftState {

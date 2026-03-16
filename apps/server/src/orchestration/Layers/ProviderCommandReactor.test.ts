@@ -366,10 +366,10 @@ describe("ProviderCommandReactor", () => {
           text: "hello with effort",
           attachments: [],
         },
-        provider: "claudeCode",
+        provider: "claudeAgent",
         model: "claude-sonnet-4-6",
         modelOptions: {
-          claudeCode: {
+          claudeAgent: {
             effort: "max",
           },
         },
@@ -382,10 +382,10 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.startSession.mock.calls.length === 1);
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
     expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
-      provider: "claudeCode",
+      provider: "claudeAgent",
       model: "claude-sonnet-4-6",
       modelOptions: {
-        claudeCode: {
+        claudeAgent: {
           effort: "max",
         },
       },
@@ -394,7 +394,7 @@ describe("ProviderCommandReactor", () => {
       threadId: ThreadId.makeUnsafe("thread-1"),
       model: "claude-sonnet-4-6",
       modelOptions: {
-        claudeCode: {
+        claudeAgent: {
           effort: "max",
         },
       },
@@ -596,10 +596,10 @@ describe("ProviderCommandReactor", () => {
           text: "first claude turn",
           attachments: [],
         },
-        provider: "claudeCode",
+        provider: "claudeAgent",
         model: "claude-sonnet-4-6",
         modelOptions: {
-          claudeCode: {
+          claudeAgent: {
             effort: "medium",
           },
         },
@@ -623,10 +623,10 @@ describe("ProviderCommandReactor", () => {
           text: "second claude turn",
           attachments: [],
         },
-        provider: "claudeCode",
+        provider: "claudeAgent",
         model: "claude-sonnet-4-6",
         modelOptions: {
-          claudeCode: {
+          claudeAgent: {
             effort: "max",
           },
         },
@@ -639,9 +639,9 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.startSession.mock.calls.length === 2);
     await waitFor(() => harness.sendTurn.mock.calls.length === 2);
     expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
-      provider: "claudeCode",
+      provider: "claudeAgent",
       modelOptions: {
-        claudeCode: {
+        claudeAgent: {
           effort: "max",
         },
       },

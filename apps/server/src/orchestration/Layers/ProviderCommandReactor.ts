@@ -297,7 +297,7 @@ const make = Effect.gen(function* () {
       const shouldRestartForModelChange = modelChanged && sessionModelSwitch === "restart-session";
       const previousModelOptions = threadModelOptions.get(threadId);
       const shouldRestartForModelOptionsChange =
-        currentProvider === "claudeCode" &&
+        currentProvider === "claudeAgent" &&
         options?.modelOptions !== undefined &&
         !sameModelOptions(previousModelOptions, options.modelOptions);
 

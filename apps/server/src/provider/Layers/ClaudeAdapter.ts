@@ -349,7 +349,7 @@ function buildUserMessage(input: ProviderSendTurnInput): SDKUserMessage {
 
   const text = applyClaudePromptEffortPrefix(
     fragments.join("\n\n"),
-    input.modelOptions?.claudeCode?.effort ?? null,
+    input.modelOptions?.claudeAgent?.effort ?? null,
   );
 
   return {
@@ -1483,16 +1483,14 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         // an active turn (e.g., background agent/subagent responses between user prompts).
         if (!context.turnState) {
           const turnId = TurnId.makeUnsafe(yield* Random.nextUUIDv4);
-          const assistantItemId = yield* Random.nextUUIDv4;
           const startedAt = yield* nowIso;
           context.turnState = {
             turnId,
-            assistantItemId,
             startedAt,
             items: [],
-            messageCompleted: false,
-            emittedTextDelta: false,
-            fallbackAssistantText: "",
+            assistantTextBlocks: new Map(),
+            assistantTextBlockOrder: [],
+            nextSyntheticAssistantBlockIndex: -1,
           };
           context.session = {
             ...context.session,

@@ -179,7 +179,7 @@ function formatOutgoingPrompt(params: {
   effort: ProviderReasoningEffort | null;
   text: string;
 }): string {
-  if (params.provider !== "claudeCode") {
+  if (params.provider !== "claudeAgent") {
     return params.text;
   }
   return applyClaudePromptEffortPrefix(params.text, params.effort as ClaudeCodeEffort | null);
@@ -541,9 +541,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
         getDefaultReasoningEffort("codex"))
       : null;
   const selectedClaudeEffort =
-    selectedProvider === "claudeCode"
-      ? (resolveReasoningEffortForProvider("claudeCode", composerDraft.effort) ??
-        getDefaultReasoningEffort("claudeCode"))
+    selectedProvider === "claudeAgent"
+      ? (resolveReasoningEffortForProvider("claudeAgent", composerDraft.effort) ??
+        getDefaultReasoningEffort("claudeAgent"))
       : null;
   const selectedEffort = selectedCodexEffort ?? selectedClaudeEffort;
   const selectedCodexFastModeEnabled =
@@ -559,9 +559,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       };
       return Object.keys(codexOptions).length > 0 ? { codex: codexOptions } : undefined;
     }
-    if (selectedProvider === "claudeCode" && selectedClaudeEffort) {
+    if (selectedProvider === "claudeAgent" && selectedClaudeEffort) {
       return {
-        claudeCode: {
+        claudeAgent: {
           effort: selectedClaudeEffort,
         },
       };
