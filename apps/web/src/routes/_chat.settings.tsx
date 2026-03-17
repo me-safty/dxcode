@@ -23,9 +23,11 @@ import { APP_VERSION } from "../branding";
 import {
   canCheckForUpdate,
   getCheckForUpdateButtonLabel,
+  getDesktopUpdateButtonTooltip,
   resolveDesktopUpdateButtonAction,
 } from "../components/desktopUpdate.logic";
 import { desktopUpdateStateQueryOptions } from "../lib/desktopUpdateReactQuery";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { SidebarInset } from "~/components/ui/sidebar";
 
 const THEME_OPTIONS = [
@@ -169,6 +171,7 @@ function DesktopUpdateCheckSection() {
 
   const buttonLabel = getCheckForUpdateButtonLabel(updateState);
   const buttonDisabled = !canCheckForUpdate(updateState);
+  const buttonTooltip = updateState ? getDesktopUpdateButtonTooltip(updateState) : null;
 
   return (
     <div className="space-y-2">
@@ -181,9 +184,21 @@ function DesktopUpdateCheckSection() {
               : "Check for available updates."}
           </p>
         </div>
-        <Button size="xs" variant="outline" disabled={buttonDisabled} onClick={handleButtonClick}>
-          {buttonLabel}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={buttonDisabled}
+                onClick={handleButtonClick}
+              >
+                {buttonLabel}
+              </Button>
+            }
+          />
+          {buttonTooltip ? <TooltipPopup>{buttonTooltip}</TooltipPopup> : null}
+        </Tooltip>
       </div>
 
       {checkError ? <p className="text-xs text-destructive">{checkError}</p> : null}
