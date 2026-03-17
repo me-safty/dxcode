@@ -122,4 +122,14 @@ describe("resolveDesktopRemoteConnection", () => {
       }),
     ).toBeNull();
   });
+
+  it("throws for blank remote URLs in remote mode", () => {
+    expect(() =>
+      resolveDesktopRemoteConnection({
+        mode: "remote",
+        remoteUrl: "   ",
+        authToken: "secret-token",
+      }),
+    ).toThrowError(DesktopRemoteConnectionConfigError);
+  });
 });

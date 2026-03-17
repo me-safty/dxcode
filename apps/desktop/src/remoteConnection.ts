@@ -59,7 +59,9 @@ export function resolveDesktopRemoteConnection(
 
   const remoteUrlValue = sanitizeEnvValue(settings.remoteUrl);
   if (!remoteUrlValue) {
-    return null;
+    throw new DesktopRemoteConnectionConfigError(
+      "Remote mode requires a remote URL. Use a full URL such as https://host:3773 or wss://host:3773.",
+    );
   }
 
   let parsedRemoteUrl: URL;
