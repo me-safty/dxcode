@@ -88,6 +88,7 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import { Dialog, DialogPopup } from "./ui/dialog";
+import NotificationBell from "./NotificationBell";
 import ReviewPrDialog from "./ReviewPrDialog";
 import StandaloneReviewPrDialog from "./StandaloneReviewPrDialog";
 import {
@@ -442,6 +443,10 @@ export default function Sidebar() {
   const suppressProjectClickAfterDragRef = useRef(false);
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
   const [standaloneReviewOpen, setStandaloneReviewOpen] = useState(false);
+  const [pendingReviewRequest, setPendingReviewRequest] = useState<{
+    prUrl: string;
+    requestId: string;
+  } | null>(null);
   const [reviewPrProject, setReviewPrProject] = useState<{
     id: ProjectId;
     cwd: string;
@@ -1371,30 +1376,46 @@ export default function Sidebar() {
         <>
           <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]">
             {wordmark}
-            {showDesktopUpdateButton && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label={desktopUpdateTooltip}
-                      aria-disabled={desktopUpdateButtonDisabled || undefined}
-                      disabled={desktopUpdateButtonDisabled}
-                      className={`inline-flex size-7 ml-auto mt-1.5 items-center justify-center rounded-md text-muted-foreground transition-colors ${desktopUpdateButtonInteractivityClasses} ${desktopUpdateButtonClasses}`}
-                      onClick={handleDesktopUpdateButtonClick}
-                    >
-                      <RocketIcon className="size-3.5" />
-                    </button>
-                  }
-                />
-                <TooltipPopup side="bottom">{desktopUpdateTooltip}</TooltipPopup>
-              </Tooltip>
-            )}
+            <div className="ml-auto flex items-center gap-1">
+              <NotificationBell
+                onStartReview={(prUrl, requestId) => {
+                  setPendingReviewRequest({ prUrl, requestId });
+                  setStandaloneReviewOpen(true);
+                }}
+              />
+              {showDesktopUpdateButton && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label={desktopUpdateTooltip}
+                        aria-disabled={desktopUpdateButtonDisabled || undefined}
+                        disabled={desktopUpdateButtonDisabled}
+                        className={`inline-flex size-7 mt-1.5 items-center justify-center rounded-md text-muted-foreground transition-colors ${desktopUpdateButtonInteractivityClasses} ${desktopUpdateButtonClasses}`}
+                        onClick={handleDesktopUpdateButtonClick}
+                      >
+                        <RocketIcon className="size-3.5" />
+                      </button>
+                    }
+                  />
+                  <TooltipPopup side="bottom">{desktopUpdateTooltip}</TooltipPopup>
+                </Tooltip>
+              )}
+            </div>
           </SidebarHeader>
         </>
       ) : (
-        <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">
+        <SidebarHeader className="flex-row items-center gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">
           {wordmark}
+          <div className="ml-auto">
+            <NotificationBell
+              onStartReview={(prUrl, requestId) => {
+                setPendingReviewRequest({ prUrl, requestId });
+                setStandaloneReviewOpen(true);
+              }}
+            />
+          </div>
         </SidebarHeader>
       )}
 
@@ -1946,7 +1967,10 @@ export default function Sidebar() {
       <Dialog
         open={standaloneReviewOpen}
         onOpenChange={(open) => {
-          if (!open) setStandaloneReviewOpen(false);
+          if (!open) {
+            setStandaloneReviewOpen(false);
+            setPendingReviewRequest(null);
+          }
         }}
       >
         <DialogPopup>
@@ -1954,7 +1978,25 @@ export default function Sidebar() {
             githubUrlByProjectId={githubUrlByProjectId}
             projects={projects}
             projectsWorkingDirectory={appSettings.projectsWorkingDirectory}
-            onClose={() => setStandaloneReviewOpen(false)}
+            {...(pendingReviewRequest ? { initialPrUrl: pendingReviewRequest.prUrl } : {})}
+            onThreadCreated={(threadId) => {
+              if (pendingReviewRequest) {
+                const api = readNativeApi();
+                if (api) {
+                  void api.reviewRequest
+                    .linkThread({
+                      id: pendingReviewRequest.requestId,
+                      threadId: threadId as ThreadId,
+                    })
+                    .then(() => queryClient.invalidateQueries({ queryKey: ["reviewRequest"] }));
+                }
+                setPendingReviewRequest(null);
+              }
+            }}
+            onClose={() => {
+              setStandaloneReviewOpen(false);
+              setPendingReviewRequest(null);
+            }}
           />
         </DialogPopup>
       </Dialog>

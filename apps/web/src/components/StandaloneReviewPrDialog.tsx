@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -44,6 +44,10 @@ interface StandaloneReviewPrDialogProps {
   githubUrlByProjectId: Map<ProjectId, string>;
   projects: Project[];
   projectsWorkingDirectory: string;
+  /** Pre-fill the PR URL input (e.g. from a notification click). */
+  initialPrUrl?: string;
+  /** Called after a review thread is created, with the thread ID and PR URL. */
+  onThreadCreated?: (threadId: string, prUrl: string) => void;
   onClose: () => void;
 }
 
@@ -65,9 +69,11 @@ export default function StandaloneReviewPrDialog({
   githubUrlByProjectId,
   projects,
   projectsWorkingDirectory,
+  initialPrUrl,
+  onThreadCreated,
   onClose,
 }: StandaloneReviewPrDialogProps) {
-  const [prUrl, setPrUrl] = useState("");
+  const [prUrl, setPrUrl] = useState(initialPrUrl ?? "");
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("input");
   const [prDetails, setPrDetails] = useState<GitFetchPrDetailsResult | null>(null);
@@ -213,6 +219,7 @@ export default function StandaloneReviewPrDialog({
         params: { threadId },
       });
 
+      onThreadCreated?.(threadId, prUrl);
       onClose();
     } catch (err) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred.";
@@ -228,8 +235,18 @@ export default function StandaloneReviewPrDialog({
     queryClient,
     navigate,
     onClose,
+    onThreadCreated,
     setProjectDraftThreadId,
   ]);
+
+  // Auto-trigger resolve when opened with a pre-filled URL (e.g. from notification bell)
+  const autoTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (initialPrUrl && !autoTriggeredRef.current && phase === "input") {
+      autoTriggeredRef.current = true;
+      void handleResolve();
+    }
+  }, [initialPrUrl, handleResolve, phase]);
 
   const isBusy = phase !== "input";
   const canSubmit = prUrl.trim().length > 0 && GITHUB_PR_URL_REGEX.test(prUrl.trim());

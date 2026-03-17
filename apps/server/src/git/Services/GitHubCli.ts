@@ -109,6 +109,21 @@ export interface GitHubCliShape {
   }) => Effect.Effect<GitHubPullRequestDetails, GitHubCliError>;
 
   /**
+   * List open PRs where the current user has been requested as a reviewer.
+   */
+  readonly listReviewRequests: (input: { readonly limit?: number }) => Effect.Effect<
+    ReadonlyArray<{
+      readonly number: number;
+      readonly title: string;
+      readonly url: string;
+      readonly updatedAt: string;
+      readonly repository: { readonly name: string; readonly nameWithOwner: string };
+      readonly author: { readonly login: string };
+    }>,
+    GitHubCliError
+  >;
+
+  /**
    * Checkout a pull request into the current repository worktree.
    */
   readonly checkoutPullRequest: (input: {

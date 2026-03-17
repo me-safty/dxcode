@@ -147,7 +147,11 @@ function normalizeRepositoryCloneUrls(
 function decodeGitHubJson<S extends Schema.Top>(
   raw: string,
   schema: S,
-  operation: "listOpenPullRequests" | "getPullRequest" | "getRepositoryCloneUrls",
+  operation:
+    | "listOpenPullRequests"
+    | "getPullRequest"
+    | "getRepositoryCloneUrls"
+    | "listReviewRequests",
   invalidDetail: string,
 ): Effect.Effect<S["Type"], GitHubCliError, S["DecodingServices"]> {
   return Schema.decodeEffect(Schema.fromJsonString(schema))(raw).pipe(
@@ -161,6 +165,20 @@ function decodeGitHubJson<S extends Schema.Top>(
     ),
   );
 }
+
+const RawGitHubReviewRequestSchema = Schema.Struct({
+  number: PositiveInt,
+  title: TrimmedNonEmptyString,
+  url: TrimmedNonEmptyString,
+  updatedAt: Schema.String,
+  repository: Schema.Struct({
+    name: Schema.String,
+    nameWithOwner: Schema.String,
+  }),
+  author: Schema.Struct({
+    login: Schema.String,
+  }),
+});
 
 const PR_DETAILS_JSON_FIELDS =
   "number,title,body,url,state,headRefName,baseRefName,additions,deletions,changedFiles";
@@ -327,6 +345,33 @@ const makeGitHubCli = Effect.sync(() => {
                 ...(error !== undefined ? { cause: error } : {}),
               }),
           }),
+        ),
+      ),
+    listReviewRequests: (input) =>
+      execute({
+        cwd: process.cwd(),
+        args: [
+          "search",
+          "prs",
+          "--review-requested=@me",
+          "--state",
+          "open",
+          "--limit",
+          String(input.limit ?? 30),
+          "--json",
+          "number,title,url,repository,author,updatedAt",
+        ],
+      }).pipe(
+        Effect.map((result) => result.stdout.trim()),
+        Effect.flatMap((raw) =>
+          raw.length === 0
+            ? Effect.succeed([])
+            : decodeGitHubJson(
+                raw,
+                Schema.Array(RawGitHubReviewRequestSchema),
+                "listReviewRequests",
+                "GitHub CLI returned invalid review request JSON.",
+              ),
         ),
       ),
     checkoutPullRequest: (input) =>

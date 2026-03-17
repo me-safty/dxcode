@@ -38,6 +38,7 @@ import { JiraCliLive } from "./jira/Layers/JiraCli";
 import { JiraManagerLive } from "./jira/Layers/JiraManager";
 import { ReviewCommentRepositoryLive } from "./persistence/Layers/ReviewCommentRepository";
 import { ReviewCommentRepository } from "./persistence/Services/ReviewCommentRepository";
+import { ReviewRequestRepositoryLive } from "./persistence/Layers/ReviewRequestRepository";
 import { BunPtyAdapterLive } from "./terminal/Layers/BunPTY";
 import { NodePtyAdapterLive } from "./terminal/Layers/NodePTY";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
@@ -149,5 +150,6 @@ export function makeServerRuntimeServicesLayer() {
     terminalLayer,
     KeybindingsLive,
     ReviewCommentRepositoryLive,
+    ReviewRequestRepositoryLive,
   ).pipe(Layer.provideMerge(NodeServices.layer));
 }

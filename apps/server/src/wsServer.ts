@@ -62,6 +62,7 @@ import { Open, resolveAvailableEditors } from "./open";
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore.ts";
 import { ReviewCommentRepository } from "./persistence/Services/ReviewCommentRepository.ts";
+import { ReviewRequestRepository } from "./persistence/Services/ReviewRequestRepository.ts";
 import { GitHubCli } from "./git/Services/GitHubCli.ts";
 import { tryHandleProjectFaviconRequest } from "./projectFaviconRoute";
 import {
@@ -265,7 +266,8 @@ export type ServerRuntimeServices =
   | Keybindings
   | Open
   | AnalyticsService
-  | ReviewCommentRepository;
+  | ReviewCommentRepository
+  | ReviewRequestRepository;
 
 export class ServerLifecycleError extends Schema.TaggedErrorClass<ServerLifecycleError>()(
   "ServerLifecycleError",
@@ -306,6 +308,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const git = yield* GitCore;
   const gitHubCli = yield* GitHubCli;
   const reviewCommentRepo = yield* ReviewCommentRepository;
+  const reviewRequestRepo = yield* ReviewRequestRepository;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -1211,6 +1214,62 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           failed: comments.length - published,
           url: `https://github.com/${owner}/${repo}/pull/${prNumber}`,
         };
+      }
+
+      case WS_METHODS.reviewRequestList: {
+        // Fetch current review requests from GitHub and sync to DB
+        const ghResults = yield* gitHubCli
+          .listReviewRequests({ limit: 30 })
+          .pipe(Effect.catch(() => Effect.succeed([] as const)));
+
+        // Upsert each GitHub result into the DB
+        for (const pr of ghResults) {
+          const login = pr.author.login.toLowerCase();
+          const isBot =
+            login.endsWith("[bot]") ||
+            login === "dependabot" ||
+            login === "renovate" ||
+            login === "github-actions" ||
+            login === "greenkeeper" ||
+            login === "snyk-bot" ||
+            login === "mergify" ||
+            login === "codecov" ||
+            login === "allcontributors";
+          yield* reviewRequestRepo
+            .upsert({
+              prUrl: pr.url,
+              prNumber: pr.number,
+              prTitle: pr.title,
+              repoNameWithOwner: pr.repository.nameWithOwner,
+              authorLogin: pr.author.login,
+              isBot,
+            })
+            .pipe(Effect.ignore);
+        }
+
+        // Auto-dismiss stale requests (PRs no longer open / no longer requesting review)
+        if (ghResults.length > 0) {
+          yield* reviewRequestRepo.dismissStale(ghResults.map((pr) => pr.url)).pipe(Effect.ignore);
+        }
+
+        const reviewRequests = yield* reviewRequestRepo.listActive();
+        return { reviewRequests };
+      }
+
+      case WS_METHODS.reviewRequestDismiss: {
+        const body = stripRequestTag(request.body);
+        yield* reviewRequestRepo.updateStatus({ id: body.id, status: "dismissed" });
+        return {};
+      }
+
+      case WS_METHODS.reviewRequestLinkThread: {
+        const body = stripRequestTag(request.body);
+        yield* reviewRequestRepo.updateStatus({
+          id: body.id,
+          status: "in_review",
+          threadId: body.threadId,
+        });
+        return {};
       }
 
       default: {

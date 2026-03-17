@@ -86,6 +86,12 @@ import type {
   ReviewCommentPublishInput,
   ReviewCommentPublishResult,
 } from "./reviewComment";
+import type {
+  ReviewRequestListInput,
+  ReviewRequestListResult,
+  ReviewRequestDismissInput,
+  ReviewRequestLinkThreadInput,
+} from "./reviewRequest";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -222,6 +228,11 @@ export interface NativeApi {
     delete: (input: ReviewCommentDeleteInput) => Promise<void>;
     list: (input: ReviewCommentListInput) => Promise<ReviewCommentListResult>;
     publish: (input: ReviewCommentPublishInput) => Promise<ReviewCommentPublishResult>;
+  };
+  reviewRequest: {
+    list: (input: ReviewRequestListInput) => Promise<ReviewRequestListResult>;
+    dismiss: (input: ReviewRequestDismissInput) => Promise<void>;
+    linkThread: (input: ReviewRequestLinkThreadInput) => Promise<void>;
   };
   contextMenu: {
     show: <T extends string>(

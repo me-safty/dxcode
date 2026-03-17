@@ -102,6 +102,18 @@ export function gitListOpenPrsQueryOptions(cwd: string | null, repo?: string) {
   });
 }
 
+export function reviewRequestListQueryOptions(refetchInterval?: number) {
+  return queryOptions({
+    queryKey: ["reviewRequest", "list"] as const,
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      return api.reviewRequest.list({});
+    },
+    staleTime: 30_000,
+    refetchInterval: refetchInterval ?? 60_000,
+  });
+}
+
 export function gitResolvePullRequestQueryOptions(input: {
   cwd: string | null;
   reference: string | null;
