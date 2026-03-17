@@ -61,6 +61,7 @@ import { clamp } from "effect/Number";
 import { Open, resolveAvailableEditors } from "./open";
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore.ts";
+import { ReviewCommentRepository } from "./persistence/Services/ReviewCommentRepository.ts";
 import { GitHubCli } from "./git/Services/GitHubCli.ts";
 import { tryHandleProjectFaviconRequest } from "./projectFaviconRoute";
 import {
@@ -263,7 +264,8 @@ export type ServerRuntimeServices =
   | TerminalManager
   | Keybindings
   | Open
-  | AnalyticsService;
+  | AnalyticsService
+  | ReviewCommentRepository;
 
 export class ServerLifecycleError extends Schema.TaggedErrorClass<ServerLifecycleError>()(
   "ServerLifecycleError",
@@ -303,6 +305,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const providerHealth = yield* ProviderHealth;
   const git = yield* GitCore;
   const gitHubCli = yield* GitHubCli;
+  const reviewCommentRepo = yield* ReviewCommentRepository;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -808,6 +811,60 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         });
       }
 
+      case WS_METHODS.projectsReadFile: {
+        const body = stripRequestTag(request.body);
+
+        // Build candidate roots: cwd + git repo root (if different).
+        const roots = [body.cwd];
+        const gitRoot = yield* git.getRepoRoot(body.cwd);
+        if (gitRoot && gitRoot !== path.resolve(body.cwd)) {
+          roots.push(gitRoot);
+        }
+
+        // Resolve each candidate and validate it stays within its root
+        // (prevents path traversal via "../../../etc/passwd").
+        const candidates: string[] = [];
+        for (const root of roots) {
+          const resolvedCandidate = yield* resolveWorkspaceWritePath({
+            workspaceRoot: root,
+            relativePath: body.relativePath,
+            path,
+          }).pipe(Effect.catch(() => Effect.succeed(null)));
+          if (resolvedCandidate) {
+            candidates.push(resolvedCandidate.absolutePath);
+          }
+        }
+
+        if (candidates.length === 0) {
+          return yield* new RouteRequestError({
+            message: "File path must be relative and stay within the project root.",
+          });
+        }
+
+        let content: string | null = null;
+        for (const candidate of candidates) {
+          const result = yield* fileSystem.readFileString(candidate).pipe(
+            Effect.map((c) => ({ path: candidate, content: c })),
+            Effect.catch(() => Effect.succeed(null)),
+          );
+          if (result) {
+            content = result.content;
+            break;
+          }
+        }
+
+        if (content === null) {
+          return yield* new RouteRequestError({
+            message: `Failed to read file: ${body.relativePath} (tried: ${candidates.join(", ")})`,
+          });
+        }
+        const allLines = content.split("\n");
+        const startLine = body.startLine ?? 1;
+        const endLine = body.endLine ?? allLines.length;
+        const slicedLines = allLines.slice(startLine - 1, endLine);
+        return { content: slicedLines.join("\n"), totalLines: allLines.length };
+      }
+
       case WS_METHODS.projectsWriteFile: {
         const body = stripRequestTag(request.body);
         const target = yield* resolveWorkspaceWritePath({
@@ -906,6 +963,17 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* Effect.scoped(git.checkoutBranch(body));
       }
 
+      case WS_METHODS.gitCloneRepo: {
+        const body = stripRequestTag(request.body);
+        return yield* git.cloneRepo(body);
+      }
+
+      case WS_METHODS.gitSetBranchUpstream: {
+        const body = stripRequestTag(request.body);
+        yield* git.setBranchUpstream(body);
+        return {};
+      }
+
       case WS_METHODS.gitInit: {
         const body = stripRequestTag(request.body);
         return yield* git.initRepo(body);
@@ -920,6 +988,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const body = stripRequestTag(request.body);
         const pullRequests = yield* gitHubCli.listOpenPullRequests({
           cwd: body.cwd,
+          ...(body.repo ? { repo: body.repo } : {}),
           limit: 30,
         });
         return { pullRequests };
@@ -1030,6 +1099,118 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const body = stripRequestTag(request.body);
         const keybindingsConfig = yield* keybindingsManager.upsertKeybindingRule(body);
         return { keybindings: keybindingsConfig, issues: [] };
+      }
+
+      case WS_METHODS.reviewCommentAdd: {
+        const body = stripRequestTag(request.body);
+        const comment = yield* reviewCommentRepo.add(body);
+        return { comment };
+      }
+
+      case WS_METHODS.reviewCommentUpdate: {
+        const body = stripRequestTag(request.body);
+        yield* reviewCommentRepo.update(body);
+        return {};
+      }
+
+      case WS_METHODS.reviewCommentDelete: {
+        const body = stripRequestTag(request.body);
+        yield* reviewCommentRepo.delete(body);
+        return {};
+      }
+
+      case WS_METHODS.reviewCommentList: {
+        const body = stripRequestTag(request.body);
+        const comments = yield* reviewCommentRepo.listByThreadId(body);
+        return { comments };
+      }
+
+      case WS_METHODS.reviewCommentPublish: {
+        const body = stripRequestTag(request.body);
+        const allComments = yield* reviewCommentRepo.listByThreadId({
+          threadId: body.threadId,
+        });
+        const comments = body.commentId
+          ? allComments.filter((c) => c.id === body.commentId)
+          : [...allComments];
+
+        if (comments.length === 0) {
+          return { published: 0 };
+        }
+
+        // Parse owner/repo/number from PR URL
+        const prUrlMatch = body.prUrl.match(/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/);
+        if (!prUrlMatch) {
+          return yield* new RouteRequestError({
+            message: "Invalid PR URL format. Expected: https://github.com/owner/repo/pull/123",
+          });
+        }
+        const [, owner, repo, prNumber] = prUrlMatch;
+
+        // Get the PR head SHA from GitHub API instead of the local worktree
+        // (worktree git link may be broken if the clone was removed).
+        const headSha = yield* gitHubCli
+          .execute({
+            cwd: body.cwd,
+            args: ["api", `repos/${owner}/${repo}/pulls/${prNumber}`, "--jq", ".head.sha"],
+            timeoutMs: 15_000,
+          })
+          .pipe(
+            Effect.map((r) => r.stdout.trim()),
+            Effect.catch(() =>
+              // Fallback: try local git rev-parse
+              git.resolveRef(body.cwd, "HEAD").pipe(Effect.catch(() => Effect.succeed("HEAD"))),
+            ),
+          );
+
+        // Create individual PR review comments, marking each as published on success.
+        let published = 0;
+        const now = new Date().toISOString();
+        for (const comment of comments) {
+          const ghUrl = yield* gitHubCli
+            .execute({
+              cwd: body.cwd,
+              args: [
+                "api",
+                `repos/${owner}/${repo}/pulls/${prNumber}/comments`,
+                "-X",
+                "POST",
+                "-f",
+                `body=${comment.body}`,
+                "-f",
+                `path=${comment.file}`,
+                "-F",
+                `line=${String(comment.startLine)}`,
+                "-f",
+                `commit_id=${headSha}`,
+              ],
+              timeoutMs: 15_000,
+            })
+            .pipe(
+              Effect.map((r) => {
+                try {
+                  const json = JSON.parse(r.stdout) as { html_url?: string };
+                  return json.html_url ?? null;
+                } catch {
+                  return null;
+                }
+              }),
+              Effect.catch(() => Effect.succeed(null as string | null)),
+            );
+          if (ghUrl !== null) {
+            // Mark comment as published with the GitHub URL
+            yield* reviewCommentRepo
+              .update({ id: comment.id, publishedAt: now, publishedUrl: ghUrl })
+              .pipe(Effect.ignore);
+            published++;
+          }
+        }
+
+        return {
+          published,
+          failed: comments.length - published,
+          url: `https://github.com/${owner}/${repo}/pull/${prNumber}`,
+        };
       }
 
       default: {

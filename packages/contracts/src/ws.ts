@@ -13,6 +13,8 @@ import {
 } from "./orchestration";
 import {
   GitCheckoutInput,
+  GitCloneRepoInput,
+  GitSetBranchUpstreamInput,
   GitCreateBranchInput,
   GitDiffBranchInput,
   GitDiffWorkingTreeInput,
@@ -48,9 +50,16 @@ import {
   TerminalWriteInput,
 } from "./terminal";
 import { KeybindingRule } from "./keybindings";
-import { ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
+import { ProjectReadFileInput, ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
 import { OpenInEditorInput, OpenInWarpInput } from "./editor";
 import { ServerConfigUpdatedPayload } from "./server";
+import {
+  ReviewCommentAddInput,
+  ReviewCommentUpdateInput,
+  ReviewCommentDeleteInput,
+  ReviewCommentListInput,
+  ReviewCommentPublishInput,
+} from "./reviewComment";
 
 // ── WebSocket RPC Method Names ───────────────────────────────────────
 
@@ -60,6 +69,7 @@ export const WS_METHODS = {
   projectsAdd: "projects.add",
   projectsRemove: "projects.remove",
   projectsSearchEntries: "projects.searchEntries",
+  projectsReadFile: "projects.readFile",
   projectsWriteFile: "projects.writeFile",
 
   // Shell methods
@@ -82,6 +92,8 @@ export const WS_METHODS = {
   gitDiffBranch: "git.diffBranch",
   gitDiffWorkingTree: "git.diffWorkingTree",
   gitListOpenPrs: "git.listOpenPrs",
+  gitCloneRepo: "git.cloneRepo",
+  gitSetBranchUpstream: "git.setBranchUpstream",
 
   // Jira methods
   jiraIsConfigured: "jira.isConfigured",
@@ -101,6 +113,13 @@ export const WS_METHODS = {
   terminalClear: "terminal.clear",
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
+
+  // Review comment methods
+  reviewCommentAdd: "reviewComment.add",
+  reviewCommentUpdate: "reviewComment.update",
+  reviewCommentDelete: "reviewComment.delete",
+  reviewCommentList: "reviewComment.list",
+  reviewCommentPublish: "reviewComment.publish",
 
   // Server meta
   serverGetConfig: "server.getConfig",
@@ -140,6 +159,7 @@ const WebSocketRequestBody = Schema.Union([
 
   // Project Search
   tagRequestBody(WS_METHODS.projectsSearchEntries, ProjectSearchEntriesInput),
+  tagRequestBody(WS_METHODS.projectsReadFile, ProjectReadFileInput),
   tagRequestBody(WS_METHODS.projectsWriteFile, ProjectWriteFileInput),
 
   // Shell methods
@@ -162,6 +182,8 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.gitDiffBranch, GitDiffBranchInput),
   tagRequestBody(WS_METHODS.gitDiffWorkingTree, GitDiffWorkingTreeInput),
   tagRequestBody(WS_METHODS.gitListOpenPrs, GitListOpenPrsInput),
+  tagRequestBody(WS_METHODS.gitCloneRepo, GitCloneRepoInput),
+  tagRequestBody(WS_METHODS.gitSetBranchUpstream, GitSetBranchUpstreamInput),
 
   // Jira methods
   tagRequestBody(WS_METHODS.jiraIsConfigured, Schema.Struct({})),
@@ -181,6 +203,13 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.terminalClear, TerminalClearInput),
   tagRequestBody(WS_METHODS.terminalRestart, TerminalRestartInput),
   tagRequestBody(WS_METHODS.terminalClose, TerminalCloseInput),
+
+  // Review comment methods
+  tagRequestBody(WS_METHODS.reviewCommentAdd, ReviewCommentAddInput),
+  tagRequestBody(WS_METHODS.reviewCommentUpdate, ReviewCommentUpdateInput),
+  tagRequestBody(WS_METHODS.reviewCommentDelete, ReviewCommentDeleteInput),
+  tagRequestBody(WS_METHODS.reviewCommentList, ReviewCommentListInput),
+  tagRequestBody(WS_METHODS.reviewCommentPublish, ReviewCommentPublishInput),
 
   // Server meta
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),

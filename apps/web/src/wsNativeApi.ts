@@ -113,6 +113,7 @@ export function createWsNativeApi(): NativeApi {
     },
     projects: {
       searchEntries: (input) => transport.request(WS_METHODS.projectsSearchEntries, input),
+      readFile: (input) => transport.request(WS_METHODS.projectsReadFile, input),
       writeFile: (input) => transport.request(WS_METHODS.projectsWriteFile, input),
     },
     shell: {
@@ -156,6 +157,8 @@ export function createWsNativeApi(): NativeApi {
       createBranch: (input) => transport.request(WS_METHODS.gitCreateBranch, input),
       checkout: (input) => transport.request(WS_METHODS.gitCheckout, input),
       init: (input) => transport.request(WS_METHODS.gitInit, input),
+      cloneRepo: (input) => transport.request(WS_METHODS.gitCloneRepo, input),
+      setBranchUpstream: (input) => transport.request(WS_METHODS.gitSetBranchUpstream, input),
       fetchPrDetails: (input) => transport.request(WS_METHODS.gitFetchPrDetails, input),
       resolvePullRequest: (input) => transport.request(WS_METHODS.gitResolvePullRequest, input),
       preparePullRequestThread: (input) =>
@@ -163,6 +166,13 @@ export function createWsNativeApi(): NativeApi {
       diffBranch: (input) => transport.request(WS_METHODS.gitDiffBranch, input),
       diffWorkingTree: (input) => transport.request(WS_METHODS.gitDiffWorkingTree, input),
       listOpenPrs: (input) => transport.request(WS_METHODS.gitListOpenPrs, input),
+    },
+    reviewComment: {
+      add: (input) => transport.request(WS_METHODS.reviewCommentAdd, input),
+      update: (input) => transport.request(WS_METHODS.reviewCommentUpdate, input),
+      delete: (input) => transport.request(WS_METHODS.reviewCommentDelete, input),
+      list: (input) => transport.request(WS_METHODS.reviewCommentList, input),
+      publish: (input) => transport.request(WS_METHODS.reviewCommentPublish, input),
     },
     contextMenu: {
       show: async <T extends string>(

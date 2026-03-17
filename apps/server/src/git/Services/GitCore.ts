@@ -210,6 +210,14 @@ export interface GitCoreShape {
   ) => Effect.Effect<void, GitCommandError, Scope.Scope>;
 
   /**
+   * Clone a repository into a target directory.
+   */
+  readonly cloneRepo: (input: {
+    url: string;
+    targetDir: string;
+  }) => Effect.Effect<{ clonedPath: string; alreadyExisted: boolean }, GitCommandError>;
+
+  /**
    * Initialize a repository in the provided directory.
    */
   readonly initRepo: (input: GitInitInput) => Effect.Effect<void, GitCommandError>;
@@ -232,6 +240,17 @@ export interface GitCoreShape {
   readonly diffWorkingTree: (
     input: GitDiffWorkingTreeInput,
   ) => Effect.Effect<GitDiffBranchResult, GitCommandError>;
+
+  /**
+   * Return the repository root for a given working directory,
+   * or null if the path is not inside a git repository.
+   */
+  readonly getRepoRoot: (cwd: string) => Effect.Effect<string | null, never>;
+
+  /**
+   * Resolve a git ref (e.g. "HEAD", branch name) to its full commit SHA.
+   */
+  readonly resolveRef: (cwd: string, ref: string) => Effect.Effect<string, GitCommandError>;
 }
 
 /**

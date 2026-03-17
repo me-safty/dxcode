@@ -1,5 +1,8 @@
 import type {
   GitCheckoutInput,
+  GitCloneRepoInput,
+  GitCloneRepoResult,
+  GitSetBranchUpstreamInput,
   GitCreateBranchInput,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
@@ -26,6 +29,8 @@ import type {
   GitStatusResult,
 } from "./git";
 import type {
+  ProjectReadFileInput,
+  ProjectReadFileResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
   ProjectWriteFileInput,
@@ -71,6 +76,16 @@ import type {
   JiraGenerateProgressCommentResult,
 } from "./jira";
 import { EditorId, type OpenInWarpInput } from "./editor";
+import type {
+  ReviewCommentAddInput,
+  ReviewCommentAddResult,
+  ReviewCommentUpdateInput,
+  ReviewCommentDeleteInput,
+  ReviewCommentListInput,
+  ReviewCommentListResult,
+  ReviewCommentPublishInput,
+  ReviewCommentPublishResult,
+} from "./reviewComment";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -152,6 +167,7 @@ export interface NativeApi {
   };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
+    readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
   };
   shell: {
@@ -178,6 +194,9 @@ export interface NativeApi {
     // Diff API
     diffBranch: (input: GitDiffBranchInput) => Promise<GitDiffBranchResult>;
     diffWorkingTree: (input: GitDiffWorkingTreeInput) => Promise<GitDiffBranchResult>;
+    // Clone API
+    cloneRepo: (input: GitCloneRepoInput) => Promise<GitCloneRepoResult>;
+    setBranchUpstream: (input: GitSetBranchUpstreamInput) => Promise<void>;
     // GitHub PR API
     fetchPrDetails: (input: GitFetchPrDetailsInput) => Promise<GitFetchPrDetailsResult>;
     listOpenPrs: (input: GitListOpenPrsInput) => Promise<GitListOpenPrsResult>;
@@ -196,6 +215,13 @@ export interface NativeApi {
     generateProgressComment: (
       input: JiraGenerateProgressCommentInput,
     ) => Promise<JiraGenerateProgressCommentResult>;
+  };
+  reviewComment: {
+    add: (input: ReviewCommentAddInput) => Promise<ReviewCommentAddResult>;
+    update: (input: ReviewCommentUpdateInput) => Promise<void>;
+    delete: (input: ReviewCommentDeleteInput) => Promise<void>;
+    list: (input: ReviewCommentListInput) => Promise<ReviewCommentListResult>;
+    publish: (input: ReviewCommentPublishInput) => Promise<ReviewCommentPublishResult>;
   };
   contextMenu: {
     show: <T extends string>(
