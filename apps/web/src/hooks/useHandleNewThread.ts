@@ -6,12 +6,16 @@ import {
   type DraftThreadState,
   useComposerDraftStore,
 } from "../composerDraftStore";
+import { useStickyComposerSettings } from "../stickyComposerSettings";
 import { newThreadId } from "../lib/utils";
 import { useStore } from "../store";
 
 export function useHandleNewThread() {
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
+  const {
+    settings: { model: stickyModel, effort: stickyEffort, codexFastMode: stickyCodexFastMode },
+  } = useStickyComposerSettings();
   const navigate = useNavigate();
   const routeThreadId = useParams({
     strict: false,
@@ -38,6 +42,9 @@ export function useHandleNewThread() {
         clearProjectDraftThreadId,
         getDraftThread,
         getDraftThreadByProjectId,
+        setCodexFastMode,
+        setEffort,
+        setModel,
         setDraftThreadContext,
         setProjectDraftThreadId,
       } = useComposerDraftStore.getState();
@@ -96,6 +103,15 @@ export function useHandleNewThread() {
           envMode: options?.envMode ?? "local",
           runtimeMode: DEFAULT_RUNTIME_MODE,
         });
+        if (stickyModel) {
+          setModel(threadId, stickyModel);
+        }
+        if (stickyEffort) {
+          setEffort(threadId, stickyEffort);
+        }
+        if (stickyCodexFastMode) {
+          setCodexFastMode(threadId, true);
+        }
 
         await navigate({
           to: "/$threadId",
@@ -103,7 +119,7 @@ export function useHandleNewThread() {
         });
       })();
     },
-    [navigate, routeThreadId],
+    [navigate, routeThreadId, stickyCodexFastMode, stickyEffort, stickyModel],
   );
 
   return {

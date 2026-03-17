@@ -2,6 +2,7 @@ import {
   type ApprovalRequestId,
   DEFAULT_MODEL_BY_PROVIDER,
   type ClaudeCodeEffort,
+  type CodexReasoningEffort,
   type MessageId,
   type ProjectScript,
   type ModelSlug,
@@ -143,6 +144,7 @@ import {
   type TerminalContextDraft,
   type TerminalContextSelection,
 } from "../lib/terminalContext";
+import { useStickyComposerSettings } from "../stickyComposerSettings";
 import { shouldUseCompactComposerFooter } from "./composerFooterLayout";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
@@ -244,6 +246,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const { settings } = useAppSettings();
+  const { updateSettings: updateStickyComposerSettings } = useStickyComposerSettings();
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
   const rawSearch = useSearch({
@@ -3141,20 +3144,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
         scheduleComposerFocus();
         return;
       }
+      const resolvedModel = resolveAppModelSelection(provider, settings.customCodexModels, model);
       setComposerDraftProvider(activeThread.id, provider);
-      setComposerDraftModel(
-        activeThread.id,
-        resolveAppModelSelection(provider, customModelsByProvider[provider], model),
-      );
+      setComposerDraftModel(activeThread.id, resolvedModel);
+      if (provider === "codex") {
+        updateStickyComposerSettings({ model: resolvedModel });
+      }
       scheduleComposerFocus();
     },
     [
       activeThread,
-      customModelsByProvider,
       lockedProvider,
       scheduleComposerFocus,
       setComposerDraftModel,
       setComposerDraftProvider,
+      settings.customCodexModels,
+      updateStickyComposerSettings,
     ],
   );
   const setPromptFromTraits = useCallback(
@@ -3172,6 +3177,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
       scheduleComposerFocus();
     },
     [scheduleComposerFocus, setPrompt],
+  );
+  const onEffortSelect = useCallback(
+    (effort: CodexReasoningEffort) => {
+      setComposerDraftEffort(threadId, effort);
+      updateStickyComposerSettings({ effort });
+      scheduleComposerFocus();
+    },
+    [scheduleComposerFocus, setComposerDraftEffort, threadId, updateStickyComposerSettings],
+  );
+  const onCodexFastModeChange = useCallback(
+    (enabled: boolean) => {
+      setComposerDraftCodexFastMode(threadId, enabled);
+      updateStickyComposerSettings({ codexFastMode: enabled });
+      scheduleComposerFocus();
+    },
+    [scheduleComposerFocus, setComposerDraftCodexFastMode, threadId, updateStickyComposerSettings],
   );
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) => {
