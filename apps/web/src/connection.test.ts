@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDefaultWsUrl,
   resolveHttpOriginFromWsUrl,
+  resolveRuntimeWsUrl,
   resolveWsUrlFromSources,
 } from "./connection";
 
@@ -89,5 +90,11 @@ describe("resolveHttpOriginFromWsUrl", () => {
         fallbackOrigin: "https://fallback.example.com",
       }),
     ).toBe("https://fallback.example.com");
+  });
+});
+
+describe("resolveRuntimeWsUrl", () => {
+  it("treats an empty explicit URL as missing during SSR", () => {
+    expect(resolveRuntimeWsUrl("")).toBe("ws://localhost:3773");
   });
 });

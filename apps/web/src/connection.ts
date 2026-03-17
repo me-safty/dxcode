@@ -40,7 +40,7 @@ export function resolveWsUrlFromSources(input: {
 
 export function resolveRuntimeWsUrl(explicitUrl?: string): string {
   if (typeof window === "undefined") {
-    return explicitUrl ?? "ws://localhost:3773";
+    return asNonEmptyString(explicitUrl) ?? "ws://localhost:3773";
   }
 
   const bridgeWsUrl = window.desktopBridge?.getWsUrl?.();
