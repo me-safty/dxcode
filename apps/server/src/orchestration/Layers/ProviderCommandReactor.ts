@@ -365,6 +365,7 @@ const make = Effect.gen(function* () {
     readonly messageId: string;
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
+    readonly model?: string;
   }) {
     if (!input.branch || !input.worktreePath) {
       return;
@@ -391,6 +392,7 @@ const make = Effect.gen(function* () {
         cwd,
         message: input.messageText,
         ...(attachments.length > 0 ? { attachments } : {}),
+        ...(input.model ? { model: input.model } : {}),
       })
       .pipe(
         Effect.catch((error) =>
@@ -459,6 +461,7 @@ const make = Effect.gen(function* () {
       messageId: message.id,
       messageText: message.text,
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+      ...(event.payload.model !== undefined ? { model: event.payload.model } : {}),
     }).pipe(Effect.forkScoped);
 
     yield* sendTurnForThread({

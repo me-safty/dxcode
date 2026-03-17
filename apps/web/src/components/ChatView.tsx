@@ -3241,6 +3241,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
+          selectedModel={selectedModel}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
           }}

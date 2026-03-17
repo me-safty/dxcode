@@ -19,6 +19,8 @@ export interface CommitMessageGenerationInput {
   stagedPatch: string;
   /** When true, the model also returns a semantic branch name for the change. */
   includeBranch?: boolean;
+  /** Optional model to use for generation. Falls back to default if not provided. */
+  model?: string;
 }
 
 export interface CommitMessageGenerationResult {
@@ -35,6 +37,8 @@ export interface PrContentGenerationInput {
   commitSummary: string;
   diffSummary: string;
   diffPatch: string;
+  /** Optional model to use for generation. Falls back to default if not provided. */
+  model?: string;
 }
 
 export interface PrContentGenerationResult {
@@ -46,6 +50,8 @@ export interface BranchNameGenerationInput {
   cwd: string;
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
+  /** Optional model to use for generation. Falls back to default if not provided. */
+  model?: string;
 }
 
 export interface BranchNameGenerationResult {

@@ -64,6 +64,7 @@ export const GitRunStackedActionInput = Schema.Struct({
   filePaths: Schema.optional(
     Schema.Array(TrimmedNonEmptyStringSchema).check(Schema.isMinLength(1)),
   ),
+  model: Schema.optional(Schema.String),
 });
 export type GitRunStackedActionInput = typeof GitRunStackedActionInput.Type;
 

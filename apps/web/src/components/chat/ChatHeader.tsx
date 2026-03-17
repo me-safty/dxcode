@@ -3,6 +3,7 @@ import {
   type ProjectScript,
   type ResolvedKeybindingsConfig,
   type ThreadId,
+  type ModelSlug,
 } from "@t3tools/contracts";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
@@ -27,6 +28,7 @@ interface ChatHeaderProps {
   diffToggleShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
+  selectedModel: ModelSlug | undefined;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
@@ -47,6 +49,7 @@ export const ChatHeader = memo(function ChatHeader({
   diffToggleShortcutLabel,
   gitCwd,
   diffOpen,
+  selectedModel,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
@@ -93,7 +96,13 @@ export const ChatHeader = memo(function ChatHeader({
             openInCwd={openInCwd}
           />
         )}
-        {activeProjectName && <GitActionsControl gitCwd={gitCwd} activeThreadId={activeThreadId} />}
+        {activeProjectName && (
+          <GitActionsControl
+            gitCwd={gitCwd}
+            activeThreadId={activeThreadId}
+            selectedModel={selectedModel}
+          />
+        )}
         <Tooltip>
           <TooltipTrigger
             render={
