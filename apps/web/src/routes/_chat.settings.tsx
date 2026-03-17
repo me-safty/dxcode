@@ -2,7 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { type ProviderKind } from "@t3tools/contracts";
-import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  DEFAULT_GIT_TEXT_GENERATION_MODEL,
+  getModelOptions,
+  normalizeModelSlug,
+} from "@t3tools/shared/model";
 import { MAX_CUSTOM_MODEL_LENGTH, useAppSettings } from "../appSettings";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
@@ -500,6 +504,69 @@ function SettingsRouteView() {
                   );
                 })}
               </div>
+            </section>
+
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-4">
+                <h2 className="text-sm font-medium text-foreground">Git</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Configure the model used for generating commit messages, PR titles, and branch
+                  names.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Text generation model</p>
+                  <p className="text-xs text-muted-foreground">
+                    Model used for auto-generated git content. Faster models are recommended.
+                    Default: <code>{DEFAULT_GIT_TEXT_GENERATION_MODEL}</code>
+                  </p>
+                </div>
+                <Select
+                  value={settings.gitTextGenerationModel || DEFAULT_GIT_TEXT_GENERATION_MODEL}
+                  onValueChange={(value) => {
+                    updateSettings({
+                      gitTextGenerationModel:
+                        value === DEFAULT_GIT_TEXT_GENERATION_MODEL ? "" : (value ?? ""),
+                    });
+                  }}
+                >
+                  <SelectTrigger className="w-48" aria-label="Git text generation model">
+                    <SelectValue>
+                      {settings.gitTextGenerationModel || DEFAULT_GIT_TEXT_GENERATION_MODEL}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end">
+                    {getModelOptions("codex").map((option) => (
+                      <SelectItem key={option.slug} value={option.slug}>
+                        {option.name}
+                      </SelectItem>
+                    ))}
+                    {settings.customCodexModels.map((slug) => (
+                      <SelectItem key={slug} value={slug}>
+                        {slug}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </div>
+
+              {settings.gitTextGenerationModel !== defaults.gitTextGenerationModel ? (
+                <div className="mt-3 flex justify-end">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() =>
+                      updateSettings({
+                        gitTextGenerationModel: defaults.gitTextGenerationModel,
+                      })
+                    }
+                  >
+                    Restore default
+                  </Button>
+                </div>
+              ) : null}
             </section>
 
             <section className="rounded-2xl border border-border bg-card p-5">
