@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseDiffRouteSearch } from "./diffRouteSearch";
+import { parseDiffRouteSearch, stripDiffSearchParams } from "./diffRouteSearch";
 
 describe("parseDiffRouteSearch", () => {
   it("parses valid diff search values", () => {
@@ -69,6 +69,21 @@ describe("parseDiffRouteSearch", () => {
 
     expect(parsed).toEqual({
       diff: "1",
+    });
+  });
+});
+
+describe("stripDiffSearchParams", () => {
+  it("removes diff-specific keys while preserving unrelated search params", () => {
+    const stripped = stripDiffSearchParams({
+      diff: "1",
+      diffFilePath: "src/app.ts",
+      diffTurnId: "turn-1",
+      tab: "files",
+    });
+
+    expect(stripped).toEqual({
+      tab: "files",
     });
   });
 });
