@@ -1532,9 +1532,28 @@ const makeGitCore = Effect.gen(function* () {
     );
 
   const diffBranch: GitCoreShape["diffBranch"] = (input) =>
-    runGitStdout("GitCore.diffBranch", input.cwd, ["diff", `${input.base}...HEAD`], true).pipe(
-      Effect.map((stdout) => ({ diff: stdout })),
-    );
+    Effect.gen(function* () {
+      // Prefer the remote tracking ref (origin/<base>) so the diff reflects
+      // the latest remote state, not the potentially stale local branch.
+      const remoteRef = `origin/${input.base}`;
+      const remoteExists = yield* runGitStdout(
+        "GitCore.diffBranch:checkRemoteRef",
+        input.cwd,
+        ["rev-parse", "--verify", remoteRef],
+        false,
+      ).pipe(
+        Effect.map(() => true),
+        Effect.catch(() => Effect.succeed(false)),
+      );
+      const base = remoteExists ? remoteRef : input.base;
+      const stdout = yield* runGitStdout(
+        "GitCore.diffBranch",
+        input.cwd,
+        ["diff", `${base}...HEAD`],
+        true,
+      );
+      return { diff: stdout };
+    });
 
   const diffWorkingTree: GitCoreShape["diffWorkingTree"] = (input) =>
     runGitStdout("GitCore.diffWorkingTree", input.cwd, ["diff", "HEAD"], true).pipe(
