@@ -1508,7 +1508,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             turnId,
             payload: {},
             providerRefs: {
-              ...providerThreadRef(context),
+              ...nativeProviderRefs(context),
               providerTurnId: turnId,
             },
             raw: {
