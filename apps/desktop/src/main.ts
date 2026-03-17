@@ -592,7 +592,6 @@ const checkForUpdatesMenuItem: MenuItem = new MenuItem({
   click: async () => await handleCheckForUpdatesMenuClick(),
 });
 
-// TODO: Only the enabled status is actually dynamic here. Wait for upstream to allow for dynamic label updates.
 updateStateListeners.add((state) => {
   switch (state.status) {
     case "checking":
