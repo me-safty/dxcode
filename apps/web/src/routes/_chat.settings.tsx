@@ -118,8 +118,10 @@ function SettingsRouteView() {
     settings.textGenerationModel,
   );
   const selectedGitTextGenerationModelLabel =
-    gitTextGenerationModelOptions.find((option) => option.slug === settings.textGenerationModel)
-      ?.name ?? settings.textGenerationModel;
+    gitTextGenerationModelOptions.find(
+      (option) =>
+        option.slug === (settings.textGenerationModel ?? DEFAULT_GIT_TEXT_GENERATION_MODEL),
+    )?.name ?? settings.textGenerationModel;
 
   const openKeybindingsFile = useCallback(() => {
     if (!keybindingsConfigPath) return;
@@ -530,13 +532,9 @@ function SettingsRouteView() {
                 <Select
                   value={settings.textGenerationModel ?? DEFAULT_GIT_TEXT_GENERATION_MODEL}
                   onValueChange={(value) => {
-                    if (value && value !== DEFAULT_GIT_TEXT_GENERATION_MODEL) {
+                    if (value) {
                       updateSettings({
                         textGenerationModel: value,
-                      });
-                    } else if (value === DEFAULT_GIT_TEXT_GENERATION_MODEL) {
-                      updateSettings({
-                        textGenerationModel: undefined,
                       });
                     }
                   }}
