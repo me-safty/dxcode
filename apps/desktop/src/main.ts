@@ -587,46 +587,55 @@ const CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DOWNLOADED = "Update downloaded";
 const CHECK_FOR_UPDATES_MENU_ITEM_LABEL_AVAILABLE = "Update available";
 const CHECK_FOR_UPDATES_MENU_ITEM_LABEL_UP_TO_DATE = "You're up to date!";
 const CHECK_FOR_UPDATES_MENU_ITEM_LABEL_ERROR = "Update check failed";
-const checkForUpdatesMenuItem: MenuItem = new MenuItem({
-  label: CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DEFAULT,
-  click: async () => await handleCheckForUpdatesMenuClick(),
-});
+function makeCheckForUpdatesMenuItem(): MenuItem {
+  return new MenuItem({
+    label: CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DEFAULT,
+    click: async () => await handleCheckForUpdatesMenuClick(),
+  });
+}
+const checkForUpdatesMenuItemInAppMenu = makeCheckForUpdatesMenuItem();
+const checkForUpdatesMenuItemInHelpMenu = makeCheckForUpdatesMenuItem();
 
-updateStateListeners.add((state) => {
+function updateCheckForUpdatesMenuItem(menuItem: MenuItem, state: DesktopUpdateState): void {
   switch (state.status) {
     case "checking":
-      checkForUpdatesMenuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_CHECKING;
-      checkForUpdatesMenuItem.enabled = false;
+      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_CHECKING;
+      menuItem.enabled = false;
       break;
     case "available":
-      checkForUpdatesMenuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_AVAILABLE;
-      checkForUpdatesMenuItem.enabled = false;
+      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_AVAILABLE;
+      menuItem.enabled = false;
       break;
     case "downloading":
-      checkForUpdatesMenuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DOWNLOADING;
-      checkForUpdatesMenuItem.enabled = false;
+      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DOWNLOADING;
+      menuItem.enabled = false;
       break;
     case "downloaded":
-      checkForUpdatesMenuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DOWNLOADED;
-      checkForUpdatesMenuItem.enabled = false;
+      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DOWNLOADED;
+      menuItem.enabled = false;
       break;
     case "disabled":
-      checkForUpdatesMenuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DISABLED;
-      checkForUpdatesMenuItem.enabled = false;
+      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DISABLED;
+      menuItem.enabled = false;
       break;
     case "error":
-      checkForUpdatesMenuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_ERROR;
-      checkForUpdatesMenuItem.enabled = false;
+      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_ERROR;
+      menuItem.enabled = false;
       break;
     case "up-to-date":
-      checkForUpdatesMenuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_UP_TO_DATE;
-      checkForUpdatesMenuItem.enabled = false;
+      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_UP_TO_DATE;
+      menuItem.enabled = false;
       break;
     case "idle":
-      checkForUpdatesMenuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_IDLE;
-      checkForUpdatesMenuItem.enabled = true;
+      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_IDLE;
+      menuItem.enabled = true;
       break;
   }
+}
+
+updateStateListeners.add((state) => {
+  updateCheckForUpdatesMenuItem(checkForUpdatesMenuItemInAppMenu, state);
+  updateCheckForUpdatesMenuItem(checkForUpdatesMenuItemInHelpMenu, state);
 });
 
 let applicationMenu: Menu | null = null;
@@ -639,7 +648,7 @@ function configureApplicationMenu(): void {
       label: app.name,
       submenu: Menu.buildFromTemplate([
         { role: "about" },
-        checkForUpdatesMenuItem,
+        checkForUpdatesMenuItemInAppMenu,
         { type: "separator" },
         {
           label: "Settings...",
@@ -694,8 +703,7 @@ function configureApplicationMenu(): void {
     { role: "windowMenu" },
     {
       role: "help",
-      // TODO: Is it safe to use the same menu item for both the root menu and the help menu?
-      submenu: Menu.buildFromTemplate([checkForUpdatesMenuItem]),
+      submenu: Menu.buildFromTemplate([checkForUpdatesMenuItemInHelpMenu]),
     },
   );
 
