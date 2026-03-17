@@ -1,4 +1,4 @@
-import { EditorId, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import { EditorId, type ResolvedKeybindingsConfig, type TerminalId } from "@t3tools/contracts";
 import { memo, useCallback, useEffect, useMemo } from "react";
 import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from "../../keybindings";
 import { usePreferredEditor } from "../../editorPreferences";
@@ -51,12 +51,14 @@ export const OpenInPicker = memo(function OpenInPicker({
   openInCwd,
   sessionProvider,
   providerSessionId,
+  preferredTerminal,
 }: {
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
   openInCwd: string | null;
   sessionProvider?: string | null;
   providerSessionId?: string | null;
+  preferredTerminal: string | undefined;
 }) {
   const [preferredEditor, setPreferredEditor] = usePreferredEditor(availableEditors);
   const options = useMemo(
@@ -133,11 +135,12 @@ export const OpenInPicker = memo(function OpenInPicker({
                 void api.shell.openInWarp({
                   cwd: openInCwd,
                   ...(providerSessionId ? { sessionId: providerSessionId } : {}),
+                  ...(preferredTerminal ? { terminal: preferredTerminal as TerminalId } : {}),
                 });
               }}
             >
               <TerminalIcon aria-hidden="true" className="text-muted-foreground" />
-              {providerSessionId ? "Resume in Warp" : "Open in Warp"}
+              {providerSessionId ? "Resume in Terminal" : "Open in Terminal"}
             </MenuItem>
           )}
         </MenuPopup>

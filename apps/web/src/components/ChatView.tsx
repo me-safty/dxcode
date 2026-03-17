@@ -3403,6 +3403,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           linkedJiraTicket={activeThread.linkedJiraTicket}
           sessionProvider={activeThread.session?.provider ?? null}
           providerSessionId={activeThread.session?.providerSessionId ?? null}
+          preferredTerminal={settings.preferredTerminal}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
           }}

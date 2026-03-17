@@ -48,6 +48,9 @@ const AppSettingsSchema = Schema.Struct({
   customCursorModels: Schema.Array(Schema.String).pipe(
     Schema.withConstructorDefault(() => Option.some([])),
   ),
+  preferredTerminal: Schema.String.pipe(
+    Schema.withConstructorDefault(() => Option.some("terminal-app")),
+  ),
 });
 export type AppSettings = typeof AppSettingsSchema.Type;
 export interface AppModelOption {

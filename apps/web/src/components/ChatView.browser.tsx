@@ -111,6 +111,7 @@ function createBaseServerConfig(): ServerConfig {
       },
     ],
     availableEditors: [],
+    availableTerminals: [],
   };
 }
 

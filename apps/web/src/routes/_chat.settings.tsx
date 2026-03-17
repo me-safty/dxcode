@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
-import { type ProviderKind } from "@t3tools/contracts";
+import { type ProviderKind, TERMINALS } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import { MAX_CUSTOM_MODEL_LENGTH, useAppSettings } from "../appSettings";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
@@ -133,6 +133,7 @@ function SettingsRouteView() {
   const claudeBinaryPath = settings.claudeBinaryPath;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
+  const availableTerminals = serverConfigQuery.data?.availableTerminals;
 
   const openKeybindingsFile = useCallback(() => {
     if (!keybindingsConfigPath) return;
@@ -657,6 +658,68 @@ function SettingsRouteView() {
                   </Button>
                 </div>
               ) : null}
+            </section>
+
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-4">
+                <h2 className="text-sm font-medium text-foreground">Terminal</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Choose which terminal emulator to use when opening or resuming sessions from the
+                  editor menu.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Preferred terminal</p>
+                    <p className="text-xs text-muted-foreground">
+                      Only terminals detected on this machine are shown.
+                    </p>
+                  </div>
+                  <Select
+                    value={settings.preferredTerminal}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      updateSettings({ preferredTerminal: value });
+                    }}
+                  >
+                    <SelectTrigger className="w-40" aria-label="Preferred terminal">
+                      <SelectValue>
+                        {TERMINALS.find((t) => t.id === settings.preferredTerminal)?.label ??
+                          settings.preferredTerminal}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup align="end">
+                      {(availableTerminals ?? []).map((terminalId) => {
+                        const terminalDef = TERMINALS.find((t) => t.id === terminalId);
+                        if (!terminalDef) return null;
+                        return (
+                          <SelectItem key={terminalDef.id} value={terminalDef.id}>
+                            {terminalDef.label}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectPopup>
+                  </Select>
+                </div>
+
+                {settings.preferredTerminal !== defaults.preferredTerminal ? (
+                  <div className="flex justify-end">
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() =>
+                        updateSettings({
+                          preferredTerminal: defaults.preferredTerminal,
+                        })
+                      }
+                    >
+                      Restore default
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
             </section>
 
             <section className="rounded-2xl border border-border bg-card p-5">

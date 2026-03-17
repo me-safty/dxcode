@@ -7,10 +7,16 @@
  * @module Open
  */
 import { spawn } from "node:child_process";
-import { accessSync, constants, statSync } from "node:fs";
+import { accessSync, constants, existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { extname, join } from "node:path";
 
-import { EDITORS, type EditorId, type OpenInWarpInput } from "@t3tools/contracts";
+import {
+  EDITORS,
+  type EditorId,
+  type OpenInTerminalInput,
+  type TerminalId,
+} from "@t3tools/contracts";
 import { ServiceMap, Schema, Effect, Layer } from "effect";
 
 // ==============================
@@ -177,6 +183,32 @@ export function resolveAvailableEditors(
   return available;
 }
 
+function isAppInstalled(appName: string): boolean {
+  return (
+    existsSync(`/Applications/${appName}.app`) ||
+    existsSync(`${homedir()}/Applications/${appName}.app`)
+  );
+}
+
+const TERMINAL_DETECTION: ReadonlyArray<{ id: TerminalId; check: () => boolean }> = [
+  { id: "terminal-app", check: () => process.platform === "darwin" },
+  { id: "iterm2", check: () => isAppInstalled("iTerm") },
+  { id: "warp", check: () => isAppInstalled("Warp") },
+  { id: "ghostty", check: () => isAppInstalled("Ghostty") },
+  { id: "kitty", check: () => isCommandAvailable("kitty") },
+  { id: "alacritty", check: () => isCommandAvailable("alacritty") },
+];
+
+export function resolveAvailableTerminals(): ReadonlyArray<TerminalId> {
+  const available: TerminalId[] = [];
+  for (const entry of TERMINAL_DETECTION) {
+    if (entry.check()) {
+      available.push(entry.id);
+    }
+  }
+  return available;
+}
+
 /**
  * OpenShape - Service API for browser and editor launch actions.
  */
@@ -194,9 +226,9 @@ export interface OpenShape {
   readonly openInEditor: (input: OpenInEditorInput) => Effect.Effect<void, OpenError>;
 
   /**
-   * Open Warp terminal, optionally resuming a Claude Code session.
+   * Open a terminal emulator, optionally resuming a Claude Code session.
    */
-  readonly openInWarp: (input: OpenInWarpInput) => Effect.Effect<void, OpenError>;
+  readonly openInWarp: (input: OpenInTerminalInput) => Effect.Effect<void, OpenError>;
 }
 
 /**
@@ -262,6 +294,102 @@ export const launchDetached = (launch: EditorLaunch) =>
     });
   });
 
+function escapeAppleScript(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+const resolveTerminalLaunch = (
+  terminal: TerminalId,
+  script: string,
+  cwd: string,
+): Effect.Effect<void, OpenError> => {
+  const shell = process.env.SHELL ?? "/bin/zsh";
+
+  switch (terminal) {
+    case "terminal-app":
+      return launchDetached({
+        command: "osascript",
+        args: [
+          "-e",
+          `tell application "Terminal"`,
+          "-e",
+          `activate`,
+          "-e",
+          `do script "${escapeAppleScript(script)}"`,
+          "-e",
+          `end tell`,
+        ],
+      });
+
+    case "iterm2":
+      return launchDetached({
+        command: "osascript",
+        args: [
+          "-e",
+          `tell application "iTerm2"`,
+          "-e",
+          `create window with default profile command "${escapeAppleScript(script)}"`,
+          "-e",
+          `end tell`,
+        ],
+      });
+
+    case "warp":
+      return launchDetached({
+        command: "osascript",
+        args: [
+          "-e",
+          `tell application "Warp" to activate`,
+          "-e",
+          `tell application "System Events" to tell process "Warp"`,
+          "-e",
+          `keystroke "t" using command down`,
+          "-e",
+          `delay 0.5`,
+          "-e",
+          `keystroke "${escapeAppleScript(script)}"`,
+          "-e",
+          `key code 36`,
+          "-e",
+          `end tell`,
+        ],
+      });
+
+    case "ghostty":
+      return launchDetached({
+        command: "osascript",
+        args: [
+          "-e",
+          `tell application "Ghostty" to activate`,
+          "-e",
+          `tell application "System Events" to tell process "Ghostty"`,
+          "-e",
+          `keystroke "t" using command down`,
+          "-e",
+          `delay 0.5`,
+          "-e",
+          `keystroke "${escapeAppleScript(script)}"`,
+          "-e",
+          `key code 36`,
+          "-e",
+          `end tell`,
+        ],
+      });
+
+    case "kitty":
+      return launchDetached({
+        command: "kitty",
+        args: ["--directory", cwd, shell, "-c", script],
+      });
+
+    case "alacritty":
+      return launchDetached({
+        command: "alacritty",
+        args: ["--working-directory", cwd, "-e", shell, "-c", script],
+      });
+  }
+};
+
 const make = Effect.gen(function* () {
   const open = yield* Effect.tryPromise({
     try: () => import("open"),
@@ -277,26 +405,12 @@ const make = Effect.gen(function* () {
     openInEditor: (input) => Effect.flatMap(resolveEditorLaunch(input), launchDetached),
     openInWarp: (input) =>
       Effect.gen(function* () {
+        const terminal: TerminalId = input.terminal ?? "terminal-app";
         const claudeArgs = input.sessionId ? ` --resume ${input.sessionId}` : "";
-        const command = `cd ${input.cwd.replace(/'/g, "'\\''")} && claude${claudeArgs}`;
-        const escapedCommand = command.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-        yield* launchDetached({
-          command: "osascript",
-          args: [
-            "-e",
-            `tell application "Warp" to activate`,
-            "-e",
-            `delay 0.5`,
-            "-e",
-            `tell application "System Events" to tell process "Warp" to keystroke "t" using command down`,
-            "-e",
-            `delay 0.5`,
-            "-e",
-            `tell application "System Events" to tell process "Warp" to keystroke "${escapedCommand}"`,
-            "-e",
-            `tell application "System Events" to tell process "Warp" to key code 36`,
-          ],
-        });
+        const escapedCwd = input.cwd.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        const script = `cd "${escapedCwd}" && claude${claudeArgs}`;
+
+        yield* resolveTerminalLaunch(terminal, script, input.cwd);
       }),
   } satisfies OpenShape;
 });

@@ -32,6 +32,7 @@ interface ChatHeaderProps {
   linkedJiraTicket: LinkedJiraTicket | null;
   sessionProvider: string | null;
   providerSessionId: string | null;
+  preferredTerminal: string | undefined;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
@@ -55,6 +56,7 @@ export const ChatHeader = memo(function ChatHeader({
   linkedJiraTicket,
   sessionProvider,
   providerSessionId,
+  preferredTerminal,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
@@ -101,6 +103,7 @@ export const ChatHeader = memo(function ChatHeader({
             openInCwd={openInCwd}
             sessionProvider={sessionProvider}
             providerSessionId={providerSessionId}
+            preferredTerminal={preferredTerminal}
           />
         )}
         {activeProjectName && <GitActionsControl gitCwd={gitCwd} activeThreadId={activeThreadId} />}

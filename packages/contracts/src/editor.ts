@@ -18,8 +18,26 @@ export const OpenInEditorInput = Schema.Struct({
 });
 export type OpenInEditorInput = typeof OpenInEditorInput.Type;
 
-export const OpenInWarpInput = Schema.Struct({
+export const TERMINALS = [
+  { id: "terminal-app", label: "Terminal.app" },
+  { id: "iterm2", label: "iTerm2" },
+  { id: "warp", label: "Warp" },
+  { id: "ghostty", label: "Ghostty" },
+  { id: "kitty", label: "Kitty" },
+  { id: "alacritty", label: "Alacritty" },
+] as const;
+
+export const TerminalId = Schema.Literals(TERMINALS.map((t) => t.id));
+export type TerminalId = typeof TerminalId.Type;
+
+export const OpenInTerminalInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   sessionId: Schema.optional(TrimmedNonEmptyString),
+  terminal: Schema.optional(TerminalId),
 });
-export type OpenInWarpInput = typeof OpenInWarpInput.Type;
+export type OpenInTerminalInput = typeof OpenInTerminalInput.Type;
+
+/** @deprecated Use `OpenInTerminalInput` instead. */
+export const OpenInWarpInput = OpenInTerminalInput;
+/** @deprecated Use `OpenInTerminalInput` instead. */
+export type OpenInWarpInput = OpenInTerminalInput;
