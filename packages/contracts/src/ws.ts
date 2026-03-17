@@ -1,10 +1,5 @@
 import { Schema, Struct } from "effect";
-import {
-  NonNegativeInt,
-  ProjectId,
-  ThreadId,
-  TrimmedNonEmptyString,
-} from "./baseSchemas";
+import { NonNegativeInt, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 
 import {
   ClientOrchestrationCommand,
@@ -96,10 +91,7 @@ export const WS_CHANNELS = {
 
 // -- Tagged Union of all request body schemas ─────────────────────────
 
-const tagRequestBody = <
-  const Tag extends string,
-  const Fields extends Schema.Struct.Fields,
->(
+const tagRequestBody = <const Tag extends string, const Fields extends Schema.Struct.Fields>(
   tag: Tag,
   schema: Schema.Struct<Fields>,
 ) =>
@@ -115,22 +107,10 @@ const WebSocketRequestBody = Schema.Union([
     ORCHESTRATION_WS_METHODS.dispatchCommand,
     Schema.Struct({ command: ClientOrchestrationCommand }),
   ),
-  tagRequestBody(
-    ORCHESTRATION_WS_METHODS.getSnapshot,
-    OrchestrationGetSnapshotInput,
-  ),
-  tagRequestBody(
-    ORCHESTRATION_WS_METHODS.getTurnDiff,
-    OrchestrationGetTurnDiffInput,
-  ),
-  tagRequestBody(
-    ORCHESTRATION_WS_METHODS.getFullThreadDiff,
-    OrchestrationGetFullThreadDiffInput,
-  ),
-  tagRequestBody(
-    ORCHESTRATION_WS_METHODS.replayEvents,
-    OrchestrationReplayEventsInput,
-  ),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.getSnapshot, OrchestrationGetSnapshotInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.getTurnDiff, OrchestrationGetTurnDiffInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.getFullThreadDiff, OrchestrationGetFullThreadDiffInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.replayEvents, OrchestrationReplayEventsInput),
 
   // Project Search
   tagRequestBody(WS_METHODS.projectsSearchEntries, ProjectSearchEntriesInput),
@@ -150,10 +130,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.gitCheckout, GitCheckoutInput),
   tagRequestBody(WS_METHODS.gitInit, GitInitInput),
   tagRequestBody(WS_METHODS.gitResolvePullRequest, GitPullRequestRefInput),
-  tagRequestBody(
-    WS_METHODS.gitPreparePullRequestThread,
-    GitPreparePullRequestThreadInput,
-  ),
+  tagRequestBody(WS_METHODS.gitPreparePullRequestThread, GitPreparePullRequestThreadInput),
 
   // Terminal methods
   tagRequestBody(WS_METHODS.terminalOpen, TerminalOpenInput),
@@ -209,10 +186,7 @@ export interface WsPushPayloadByChannel {
 export type WsPushChannel = keyof WsPushPayloadByChannel;
 export type WsPushData<C extends WsPushChannel> = WsPushPayloadByChannel[C];
 
-const makeWsPushSchema = <
-  const Channel extends string,
-  Payload extends Schema.Schema<any>,
->(
+const makeWsPushSchema = <const Channel extends string, Payload extends Schema.Schema<any>>(
   channel: Channel,
   payload: Payload,
 ) =>
@@ -223,18 +197,12 @@ const makeWsPushSchema = <
     data: payload,
   });
 
-export const WsPushServerWelcome = makeWsPushSchema(
-  WS_CHANNELS.serverWelcome,
-  WsWelcomePayload,
-);
+export const WsPushServerWelcome = makeWsPushSchema(WS_CHANNELS.serverWelcome, WsWelcomePayload);
 export const WsPushServerConfigUpdated = makeWsPushSchema(
   WS_CHANNELS.serverConfigUpdated,
   ServerConfigUpdatedPayload,
 );
-export const WsPushTerminalEvent = makeWsPushSchema(
-  WS_CHANNELS.terminalEvent,
-  TerminalEvent,
-);
+export const WsPushTerminalEvent = makeWsPushSchema(WS_CHANNELS.terminalEvent, TerminalEvent);
 export const WsPushOrchestrationDomainEvent = makeWsPushSchema(
   ORCHESTRATION_WS_CHANNELS.domainEvent,
   OrchestrationEvent,
@@ -256,10 +224,7 @@ export const WsPush = Schema.Union([
 ]);
 export type WsPush = typeof WsPush.Type;
 
-export type WsPushMessage<C extends WsPushChannel> = Extract<
-  WsPush,
-  { channel: C }
->;
+export type WsPushMessage<C extends WsPushChannel> = Extract<WsPush, { channel: C }>;
 
 export const WsPushEnvelopeBase = Schema.Struct({
   type: Schema.Literal("push"),

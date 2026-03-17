@@ -14,22 +14,17 @@ import { WsTransport } from "./wsTransport";
 
 let instance: { api: NativeApi; transport: WsTransport } | null = null;
 const welcomeListeners = new Set<(payload: WsWelcomePayload) => void>();
-const serverConfigUpdatedListeners = new Set<
-  (payload: ServerConfigUpdatedPayload) => void
->();
+const serverConfigUpdatedListeners = new Set<(payload: ServerConfigUpdatedPayload) => void>();
 
 /**
  * Subscribe to the server welcome message. If a welcome was already received
  * before this call, the listener fires synchronously with the cached payload.
  * This avoids the race between WebSocket connect and React effect registration.
  */
-export function onServerWelcome(
-  listener: (payload: WsWelcomePayload) => void,
-): () => void {
+export function onServerWelcome(listener: (payload: WsWelcomePayload) => void): () => void {
   welcomeListeners.add(listener);
 
-  const latestWelcome =
-    instance?.transport.getLatestPush(WS_CHANNELS.serverWelcome)?.data ?? null;
+  const latestWelcome = instance?.transport.getLatestPush(WS_CHANNELS.serverWelcome)?.data ?? null;
   if (latestWelcome) {
     try {
       listener(latestWelcome);
@@ -53,8 +48,7 @@ export function onServerConfigUpdated(
   serverConfigUpdatedListeners.add(listener);
 
   const latestConfig =
-    instance?.transport.getLatestPush(WS_CHANNELS.serverConfigUpdated)?.data ??
-    null;
+    instance?.transport.getLatestPush(WS_CHANNELS.serverConfigUpdated)?.data ?? null;
   if (latestConfig) {
     try {
       listener(latestConfig);
@@ -115,15 +109,11 @@ export function createWsNativeApi(): NativeApi {
       restart: (input) => transport.request(WS_METHODS.terminalRestart, input),
       close: (input) => transport.request(WS_METHODS.terminalClose, input),
       onEvent: (callback) =>
-        transport.subscribe(WS_CHANNELS.terminalEvent, (message) =>
-          callback(message.data),
-        ),
+        transport.subscribe(WS_CHANNELS.terminalEvent, (message) => callback(message.data)),
     },
     projects: {
-      searchEntries: (input) =>
-        transport.request(WS_METHODS.projectsSearchEntries, input),
-      writeFile: (input) =>
-        transport.request(WS_METHODS.projectsWriteFile, input),
+      searchEntries: (input) => transport.request(WS_METHODS.projectsSearchEntries, input),
+      writeFile: (input) => transport.request(WS_METHODS.projectsWriteFile, input),
     },
     shell: {
       openInEditor: (cwd, editor) =>
@@ -145,20 +135,14 @@ export function createWsNativeApi(): NativeApi {
     git: {
       pull: (input) => transport.request(WS_METHODS.gitPull, input),
       status: (input) => transport.request(WS_METHODS.gitStatus, input),
-      runStackedAction: (input) =>
-        transport.request(WS_METHODS.gitRunStackedAction, input),
-      listBranches: (input) =>
-        transport.request(WS_METHODS.gitListBranches, input),
-      createWorktree: (input) =>
-        transport.request(WS_METHODS.gitCreateWorktree, input),
-      removeWorktree: (input) =>
-        transport.request(WS_METHODS.gitRemoveWorktree, input),
-      createBranch: (input) =>
-        transport.request(WS_METHODS.gitCreateBranch, input),
+      runStackedAction: (input) => transport.request(WS_METHODS.gitRunStackedAction, input),
+      listBranches: (input) => transport.request(WS_METHODS.gitListBranches, input),
+      createWorktree: (input) => transport.request(WS_METHODS.gitCreateWorktree, input),
+      removeWorktree: (input) => transport.request(WS_METHODS.gitRemoveWorktree, input),
+      createBranch: (input) => transport.request(WS_METHODS.gitCreateBranch, input),
       checkout: (input) => transport.request(WS_METHODS.gitCheckout, input),
       init: (input) => transport.request(WS_METHODS.gitInit, input),
-      resolvePullRequest: (input) =>
-        transport.request(WS_METHODS.gitResolvePullRequest, input),
+      resolvePullRequest: (input) => transport.request(WS_METHODS.gitResolvePullRequest, input),
       preparePullRequestThread: (input) =>
         transport.request(WS_METHODS.gitPreparePullRequestThread, input),
     },
@@ -168,30 +152,23 @@ export function createWsNativeApi(): NativeApi {
         position?: { x: number; y: number },
       ): Promise<T | null> => {
         if (window.desktopBridge) {
-          return window.desktopBridge.showContextMenu(
-            items,
-            position,
-          ) as Promise<T | null>;
+          return window.desktopBridge.showContextMenu(items, position) as Promise<T | null>;
         }
         return showContextMenuFallback(items, position);
       },
     },
     server: {
       getConfig: () => transport.request(WS_METHODS.serverGetConfig),
-      upsertKeybinding: (input) =>
-        transport.request(WS_METHODS.serverUpsertKeybinding, input),
-      setCodexOpenAiEnv: (input) =>
-        transport.request(WS_METHODS.codexSetOpenAiEnv, input),
+      upsertKeybinding: (input) => transport.request(WS_METHODS.serverUpsertKeybinding, input),
+      setCodexOpenAiEnv: (input) => transport.request(WS_METHODS.codexSetOpenAiEnv, input),
     },
     orchestration: {
-      getSnapshot: () =>
-        transport.request(ORCHESTRATION_WS_METHODS.getSnapshot),
+      getSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot),
       dispatchCommand: (command) =>
         transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, {
           command,
         }),
-      getTurnDiff: (input) =>
-        transport.request(ORCHESTRATION_WS_METHODS.getTurnDiff, input),
+      getTurnDiff: (input) => transport.request(ORCHESTRATION_WS_METHODS.getTurnDiff, input),
       getFullThreadDiff: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.getFullThreadDiff, input),
       replayEvents: (fromSequenceExclusive) =>

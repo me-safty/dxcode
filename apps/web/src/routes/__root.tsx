@@ -12,21 +12,11 @@ import { Throttler, useDebouncedValue } from "@tanstack/react-pacer";
 
 import { APP_DISPLAY_NAME } from "../branding";
 import { Button } from "../components/ui/button";
-import {
-  AnchoredToastProvider,
-  ToastProvider,
-  toastManager,
-} from "../components/ui/toast";
+import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
-import {
-  serverConfigQueryOptions,
-  serverQueryKeys,
-} from "../lib/serverReactQuery";
+import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
-import {
-  clearPromotedDraftThreads,
-  useComposerDraftStore,
-} from "../composerDraftStore";
+import { clearPromotedDraftThreads, useComposerDraftStore } from "../composerDraftStore";
 import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
@@ -120,19 +110,13 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
         <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
           Something went wrong.
         </h1>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          {message}
-        </p>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{message}</p>
 
         <div className="mt-5 flex flex-wrap gap-2">
           <Button size="sm" onClick={() => reset()}>
             Try again
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => window.location.reload()}
-          >
+          <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
             Reload app
           </Button>
         </div>
@@ -266,10 +250,7 @@ function EventRouter() {
         return;
       }
       latestSequence = event.sequence;
-      if (
-        event.type === "thread.turn-diff-completed" ||
-        event.type === "thread.reverted"
-      ) {
+      if (event.type === "thread.turn-diff-completed" || event.type === "thread.reverted") {
         needsProviderInvalidation = true;
       }
       domainEventFlushThrottler.maybeExecute();
@@ -322,9 +303,7 @@ function EventRouter() {
         queryKey: serverQueryKeys.config(),
       });
       if (!subscribed) return;
-      const issue = payload.issues.find((entry) =>
-        entry.kind.startsWith("keybindings."),
-      );
+      const issue = payload.issues.find((entry) => entry.kind.startsWith("keybindings."));
       if (!issue) {
         toastManager.add({
           type: "success",
@@ -344,25 +323,18 @@ function EventRouter() {
             void queryClient
               .ensureQueryData(serverConfigQueryOptions())
               .then((config) => {
-                const editor = resolveAndPersistPreferredEditor(
-                  config.availableEditors,
-                );
+                const editor = resolveAndPersistPreferredEditor(config.availableEditors);
                 if (!editor) {
                   throw new Error("No available editors found.");
                 }
-                return api.shell.openInEditor(
-                  config.keybindingsConfigPath,
-                  editor,
-                );
+                return api.shell.openInEditor(config.keybindingsConfigPath, editor);
               })
               .catch((error) => {
                 toastManager.add({
                   type: "error",
                   title: "Unable to open keybindings file",
                   description:
-                    error instanceof Error
-                      ? error.message
-                      : "Unknown error opening file.",
+                    error instanceof Error ? error.message : "Unknown error opening file.",
                 });
               });
           },

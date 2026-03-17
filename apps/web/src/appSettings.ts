@@ -1,27 +1,16 @@
 import { useCallback } from "react";
 import { Option, Schema } from "effect";
 import { type ProviderKind } from "@t3tools/contracts";
-import {
-  getDefaultModel,
-  getModelOptions,
-  normalizeModelSlug,
-} from "@t3tools/shared/model";
+import { getDefaultModel, getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 
 const APP_SETTINGS_STORAGE_KEY = "t3code:app-settings:v1";
 const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
-export const TIMESTAMP_FORMAT_OPTIONS = [
-  "locale",
-  "12-hour",
-  "24-hour",
-] as const;
+export const TIMESTAMP_FORMAT_OPTIONS = ["locale", "12-hour", "24-hour"] as const;
 export type TimestampFormat = (typeof TIMESTAMP_FORMAT_OPTIONS)[number];
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
-const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<
-  ProviderKind,
-  ReadonlySet<string>
-> = {
+const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>> = {
   codex: new Set(getModelOptions("codex").map((option) => option.slug)),
 };
 
@@ -41,9 +30,7 @@ const AppSettingsSchema = Schema.Struct({
   defaultThreadEnvMode: Schema.Literals(["local", "worktree"]).pipe(
     Schema.withConstructorDefault(() => Option.some("local")),
   ),
-  confirmThreadDelete: Schema.Boolean.pipe(
-    Schema.withConstructorDefault(() => Option.some(true)),
-  ),
+  confirmThreadDelete: Schema.Boolean.pipe(Schema.withConstructorDefault(() => Option.some(true))),
   enableAssistantStreaming: Schema.Boolean.pipe(
     Schema.withConstructorDefault(() => Option.some(false)),
   ),
@@ -97,13 +84,11 @@ export function getAppModelOptions(
   customModels: readonly string[],
   selectedModel?: string | null,
 ): AppModelOption[] {
-  const options: AppModelOption[] = getModelOptions(provider).map(
-    ({ slug, name }) => ({
-      slug,
-      name,
-      isCustom: false,
-    }),
-  );
+  const options: AppModelOption[] = getModelOptions(provider).map(({ slug, name }) => ({
+    slug,
+    name,
+    isCustom: false,
+  }));
   const seen = new Set(options.map((option) => option.slug));
 
   for (const slug of normalizeCustomModelSlugs(customModels, provider)) {
@@ -139,16 +124,13 @@ export function resolveAppModelSelection(
   const options = getAppModelOptions(provider, customModels, selectedModel);
   const trimmedSelectedModel = selectedModel?.trim();
   if (trimmedSelectedModel) {
-    const direct = options.find(
-      (option) => option.slug === trimmedSelectedModel,
-    );
+    const direct = options.find((option) => option.slug === trimmedSelectedModel);
     if (direct) {
       return direct.slug;
     }
 
     const byName = options.find(
-      (option) =>
-        option.name.toLowerCase() === trimmedSelectedModel.toLowerCase(),
+      (option) => option.name.toLowerCase() === trimmedSelectedModel.toLowerCase(),
     );
     if (byName) {
       return byName.slug;

@@ -36,10 +36,7 @@ import type {
   TerminalSessionSnapshot,
   TerminalWriteInput,
 } from "./terminal";
-import type {
-  ServerUpsertKeybindingInput,
-  ServerUpsertKeybindingResult,
-} from "./server";
+import type { ServerUpsertKeybindingInput, ServerUpsertKeybindingResult } from "./server";
 import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
@@ -130,12 +127,8 @@ export interface NativeApi {
     onEvent: (callback: (event: TerminalEvent) => void) => () => void;
   };
   projects: {
-    searchEntries: (
-      input: ProjectSearchEntriesInput,
-    ) => Promise<ProjectSearchEntriesResult>;
-    writeFile: (
-      input: ProjectWriteFileInput,
-    ) => Promise<ProjectWriteFileResult>;
+    searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
+    writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
   };
   shell: {
     openInEditor: (cwd: string, editor: EditorId) => Promise<void>;
@@ -143,28 +136,20 @@ export interface NativeApi {
   };
   git: {
     // Existing branch/worktree API
-    listBranches: (
-      input: GitListBranchesInput,
-    ) => Promise<GitListBranchesResult>;
-    createWorktree: (
-      input: GitCreateWorktreeInput,
-    ) => Promise<GitCreateWorktreeResult>;
+    listBranches: (input: GitListBranchesInput) => Promise<GitListBranchesResult>;
+    createWorktree: (input: GitCreateWorktreeInput) => Promise<GitCreateWorktreeResult>;
     removeWorktree: (input: GitRemoveWorktreeInput) => Promise<void>;
     createBranch: (input: GitCreateBranchInput) => Promise<void>;
     checkout: (input: GitCheckoutInput) => Promise<void>;
     init: (input: GitInitInput) => Promise<void>;
-    resolvePullRequest: (
-      input: GitPullRequestRefInput,
-    ) => Promise<GitResolvePullRequestResult>;
+    resolvePullRequest: (input: GitPullRequestRefInput) => Promise<GitResolvePullRequestResult>;
     preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,
     ) => Promise<GitPreparePullRequestThreadResult>;
     // Stacked action API
     pull: (input: GitPullInput) => Promise<GitPullResult>;
     status: (input: GitStatusInput) => Promise<GitStatusResult>;
-    runStackedAction: (
-      input: GitRunStackedActionInput,
-    ) => Promise<GitRunStackedActionResult>;
+    runStackedAction: (input: GitRunStackedActionInput) => Promise<GitRunStackedActionResult>;
   };
   contextMenu: {
     show: <T extends string>(
@@ -174,29 +159,17 @@ export interface NativeApi {
   };
   server: {
     getConfig: () => Promise<ServerConfig>;
-    upsertKeybinding: (
-      input: ServerUpsertKeybindingInput,
-    ) => Promise<ServerUpsertKeybindingResult>;
-    setCodexOpenAiEnv: (
-      input: CodexSetOpenAiEnvInput,
-    ) => Promise<CodexSetOpenAiEnvResult>;
+    upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
+    setCodexOpenAiEnv: (input: CodexSetOpenAiEnvInput) => Promise<CodexSetOpenAiEnvResult>;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;
-    dispatchCommand: (
-      command: ClientOrchestrationCommand,
-    ) => Promise<{ sequence: number }>;
-    getTurnDiff: (
-      input: OrchestrationGetTurnDiffInput,
-    ) => Promise<OrchestrationGetTurnDiffResult>;
+    dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
+    getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;
-    replayEvents: (
-      fromSequenceExclusive: number,
-    ) => Promise<OrchestrationEvent[]>;
-    onDomainEvent: (
-      callback: (event: OrchestrationEvent) => void,
-    ) => () => void;
+    replayEvents: (fromSequenceExclusive: number) => Promise<OrchestrationEvent[]>;
+    onDomainEvent: (callback: (event: OrchestrationEvent) => void) => () => void;
   };
 }

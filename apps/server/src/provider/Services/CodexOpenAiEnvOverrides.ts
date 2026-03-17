@@ -33,9 +33,7 @@ export const CodexOpenAiEnvOverridesLive = Layer.effect(
         openaiBaseUrl: input.openaiBaseUrl,
       }).pipe(
         Effect.as({
-          openaiApiKeySet: Boolean(
-            input.openaiApiKey && input.openaiApiKey.trim().length > 0,
-          ),
+          openaiApiKeySet: Boolean(input.openaiApiKey && input.openaiApiKey.trim().length > 0),
           openaiBaseUrl: input.openaiBaseUrl,
         }),
       );
