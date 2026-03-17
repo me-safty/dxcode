@@ -1,6 +1,5 @@
 import {
   CODEX_REASONING_EFFORT_OPTIONS,
-  DEFAULT_GIT_TEXT_GENERATION_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   MODEL_OPTIONS_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
@@ -8,8 +7,6 @@ import {
   type ModelSlug,
   type ProviderKind,
 } from "@t3tools/contracts";
-
-export { DEFAULT_GIT_TEXT_GENERATION_MODEL } from "@t3tools/contracts";
 
 type CatalogProvider = keyof typeof MODEL_OPTIONS_BY_PROVIDER;
 
