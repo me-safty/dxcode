@@ -111,16 +111,15 @@ function SettingsRouteView() {
   const codexHomePath = settings.codexHomePath;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
-  const selectedGitTextGenerationModel =
-    settings.gitTextGenerationModel || DEFAULT_GIT_TEXT_GENERATION_MODEL;
+
   const gitTextGenerationModelOptions = getAppModelOptions(
     "codex",
     settings.customCodexModels,
-    selectedGitTextGenerationModel,
+    settings.textGenerationModel,
   );
   const selectedGitTextGenerationModelLabel =
-    gitTextGenerationModelOptions.find((option) => option.slug === selectedGitTextGenerationModel)
-      ?.name ?? selectedGitTextGenerationModel;
+    gitTextGenerationModelOptions.find((option) => option.slug === settings.textGenerationModel)
+      ?.name ?? settings.textGenerationModel;
 
   const openKeybindingsFile = useCallback(() => {
     if (!keybindingsConfigPath) return;
@@ -529,12 +528,17 @@ function SettingsRouteView() {
                   </p>
                 </div>
                 <Select
-                  value={selectedGitTextGenerationModel}
+                  value={settings.textGenerationModel ?? DEFAULT_GIT_TEXT_GENERATION_MODEL}
                   onValueChange={(value) => {
-                    updateSettings({
-                      gitTextGenerationModel:
-                        value === DEFAULT_GIT_TEXT_GENERATION_MODEL ? "" : (value ?? ""),
-                    });
+                    if (value && value !== DEFAULT_GIT_TEXT_GENERATION_MODEL) {
+                      updateSettings({
+                        textGenerationModel: value,
+                      });
+                    } else if (value === DEFAULT_GIT_TEXT_GENERATION_MODEL) {
+                      updateSettings({
+                        textGenerationModel: undefined,
+                      });
+                    }
                   }}
                 >
                   <SelectTrigger
@@ -553,14 +557,14 @@ function SettingsRouteView() {
                 </Select>
               </div>
 
-              {settings.gitTextGenerationModel !== defaults.gitTextGenerationModel ? (
+              {settings.textGenerationModel !== defaults.textGenerationModel ? (
                 <div className="mt-3 flex justify-end">
                   <Button
                     size="xs"
                     variant="outline"
                     onClick={() =>
                       updateSettings({
-                        gitTextGenerationModel: defaults.gitTextGenerationModel,
+                        textGenerationModel: defaults.textGenerationModel,
                       })
                     }
                   >

@@ -157,8 +157,6 @@ function GitQuickActionIcon({ quickAction }: { quickAction: GitQuickAction }) {
 
 export default function GitActionsControl({ gitCwd, activeThreadId }: GitActionsControlProps) {
   const { settings } = useAppSettings();
-  const gitTextGenerationModel =
-    settings.gitTextGenerationModel || DEFAULT_GIT_TEXT_GENERATION_MODEL;
   const threadToastData = useMemo(
     () => (activeThreadId ? { threadId: activeThreadId } : undefined),
     [activeThreadId],
@@ -196,7 +194,11 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
   const initMutation = useMutation(gitInitMutationOptions({ cwd: gitCwd, queryClient }));
 
   const runImmediateGitActionMutation = useMutation(
-    gitRunStackedActionMutationOptions({ cwd: gitCwd, queryClient, model: gitTextGenerationModel }),
+    gitRunStackedActionMutationOptions({
+      cwd: gitCwd,
+      queryClient,
+      model: settings.textGenerationModel ?? null,
+    }),
   );
   const pullMutation = useMutation(gitPullMutationOptions({ cwd: gitCwd, queryClient }));
 

@@ -1035,7 +1035,7 @@ export const makeGitManager = Effect.gen(function* () {
           initialStatus.branch,
           input.commitMessage,
           input.filePaths,
-          input.model,
+          input.textGenerationModel,
         );
         branchStep = result.branchStep;
         commitMessageForStep = result.resolvedCommitMessage;
@@ -1052,7 +1052,7 @@ export const makeGitManager = Effect.gen(function* () {
         commitMessageForStep,
         preResolvedCommitSuggestion,
         input.filePaths,
-        input.model,
+        input.textGenerationModel,
       );
 
       const push = wantsPush
@@ -1060,7 +1060,7 @@ export const makeGitManager = Effect.gen(function* () {
         : { status: "skipped_not_requested" as const };
 
       const pr = wantsPr
-        ? yield* runPrStep(input.cwd, currentBranch, input.model)
+        ? yield* runPrStep(input.cwd, currentBranch, input.textGenerationModel)
         : { status: "skipped_not_requested" as const };
 
       return {
