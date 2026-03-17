@@ -65,6 +65,7 @@ export type DesktopUpdateStatus =
 
 export type DesktopRuntimeArch = "arm64" | "x64" | "other";
 export type DesktopTheme = "light" | "dark" | "system";
+export type DesktopConnectionMode = "local" | "remote";
 
 export interface DesktopRuntimeInfo {
   hostArch: DesktopRuntimeArch;
@@ -96,6 +97,7 @@ export interface DesktopUpdateActionResult {
 
 export interface DesktopBridge {
   getWsUrl: () => string | null;
+  getConnectionMode: () => DesktopConnectionMode;
   pickFolder: () => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;

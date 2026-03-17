@@ -18,6 +18,7 @@ import {
 import type { MenuItemConstructorOptions } from "electron";
 import * as Effect from "effect/Effect";
 import type {
+  DesktopConnectionMode,
   DesktopTheme,
   DesktopUpdateActionResult,
   DesktopUpdateState,
@@ -43,6 +44,7 @@ import {
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
+import { redactTokenInWsUrl, resolveDesktopRemoteConnectionFromEnv } from "./remoteConnection";
 
 syncShellEnvironment();
 
@@ -83,6 +85,7 @@ let backendProcess: ChildProcess.ChildProcess | null = null;
 let backendPort = 0;
 let backendAuthToken = "";
 let backendWsUrl = "";
+let connectionMode: DesktopConnectionMode = "local";
 let restartAttempt = 0;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let isQuitting = false;
@@ -1313,21 +1316,41 @@ configureAppIdentity();
 
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
-  backendPort = await Effect.service(NetService).pipe(
-    Effect.flatMap((net) => net.reserveLoopbackPort()),
-    Effect.provide(NetService.layer),
-    Effect.runPromise,
-  );
-  writeDesktopLogHeader(`reserved backend port via NetService port=${backendPort}`);
-  backendAuthToken = Crypto.randomBytes(24).toString("hex");
-  backendWsUrl = `ws://127.0.0.1:${backendPort}/?token=${encodeURIComponent(backendAuthToken)}`;
+  const remoteConnection = resolveDesktopRemoteConnectionFromEnv(process.env);
+  if (remoteConnection?.disableLocalBackend) {
+    connectionMode = "remote";
+    backendWsUrl = remoteConnection.wsUrl;
+    writeDesktopLogHeader(
+      `bootstrap remote mode enabled origin=${remoteConnection.httpOrigin} websocket=${redactTokenInWsUrl(
+        backendWsUrl,
+      )}`,
+    );
+  } else {
+    connectionMode = "local";
+    backendPort = await Effect.service(NetService).pipe(
+      Effect.flatMap((net) => net.reserveLoopbackPort()),
+      Effect.provide(NetService.layer),
+      Effect.runPromise,
+    );
+    writeDesktopLogHeader(`reserved backend port via NetService port=${backendPort}`);
+    backendAuthToken = Crypto.randomBytes(24).toString("hex");
+    backendWsUrl = `ws://127.0.0.1:${backendPort}/?token=${encodeURIComponent(backendAuthToken)}`;
+  }
+
+  process.env.T3CODE_DESKTOP_CONNECTION_MODE = connectionMode;
   process.env.T3CODE_DESKTOP_WS_URL = backendWsUrl;
-  writeDesktopLogHeader(`bootstrap resolved websocket url=${backendWsUrl}`);
+  writeDesktopLogHeader(`bootstrap resolved websocket url=${redactTokenInWsUrl(backendWsUrl)}`);
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");
-  startBackend();
-  writeDesktopLogHeader("bootstrap backend start requested");
+
+  if (connectionMode === "local") {
+    startBackend();
+    writeDesktopLogHeader("bootstrap backend start requested");
+  } else {
+    writeDesktopLogHeader("bootstrap remote mode active; local backend disabled");
+  }
+
   mainWindow = createWindow();
   writeDesktopLogHeader("bootstrap main window created");
 }

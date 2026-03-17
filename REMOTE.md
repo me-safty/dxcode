@@ -63,3 +63,32 @@ Open from any device in your tailnet:
 `http://<tailnet-ip>:3773`
 
 You can also bind `--host 0.0.0.0` and connect through the Tailnet IP, but binding directly to the Tailnet IP limits exposure.
+
+## 3) Desktop app in remote/shared-history mode
+
+Use this when your phone/web UI is the source of truth and you want desktop to attach to the same backend.
+
+1. Start one server (same as above) with a persistent `--state-dir` and `--auth-token`.
+2. Launch the desktop app with these environment variables:
+
+```bash
+export T3CODE_DESKTOP_REMOTE_URL="https://your-server.example.com"
+export T3CODE_DESKTOP_REMOTE_AUTH_TOKEN="$TOKEN"
+```
+
+Then start T3 Code Desktop normally.
+
+Behavior in remote mode:
+
+- Desktop connects directly to the configured remote WebSocket/backend.
+- Desktop does **not** start its own persistent local chat backend.
+- History shown in desktop comes from that shared remote server state.
+- On auth or connectivity failure, desktop surfaces the error and does not silently fall back to local mode.
+
+### Protocol expectations
+
+- `http://...` remote URL -> desktop WebSocket uses `ws://...`
+- `https://...` remote URL -> desktop WebSocket uses `wss://...`
+- If your remote URL already uses `ws://` or `wss://`, it is used as-is.
+
+For reverse proxies/Tailscale, set `T3CODE_DESKTOP_REMOTE_URL` to the externally reachable URL your phone/browser also uses.

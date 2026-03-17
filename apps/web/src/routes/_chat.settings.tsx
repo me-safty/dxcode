@@ -1,11 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
-import { type ProviderKind } from "@t3tools/contracts";
+import { type DesktopConnectionMode, type ProviderKind } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import { MAX_CUSTOM_MODEL_LENGTH, useAppSettings } from "../appSettings";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
+import { resolveDesktopConnectionMode, resolveRuntimeHttpOrigin } from "../connection";
 import { useTheme } from "../hooks/useTheme";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { ensureNativeApi } from "../nativeApi";
@@ -62,6 +63,16 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
+function describeConnectionMode(mode: DesktopConnectionMode | null): string {
+  if (mode === "remote") {
+    return "Remote shared backend";
+  }
+  if (mode === "local") {
+    return "Local desktop backend";
+  }
+  return "Browser session";
+}
+
 function getCustomModelsForProvider(
   settings: ReturnType<typeof useAppSettings>["settings"],
   provider: ProviderKind,
@@ -111,6 +122,8 @@ function SettingsRouteView() {
   const codexHomePath = settings.codexHomePath;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
+  const desktopConnectionMode = isElectron ? resolveDesktopConnectionMode() : null;
+  const serverHttpOrigin = resolveRuntimeHttpOrigin();
 
   const openKeybindingsFile = useCallback(() => {
     if (!keybindingsConfigPath) return;
@@ -218,6 +231,47 @@ function SettingsRouteView() {
                 Configure app-level preferences for this device.
               </p>
             </header>
+
+            {isElectron ? (
+              <section className="rounded-2xl border border-border bg-card p-5">
+                <div className="mb-4">
+                  <h2 className="text-sm font-medium text-foreground">Connection</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Desktop can run in local mode or attach to a shared remote backend.
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Mode</p>
+                      <p className="text-xs text-muted-foreground">
+                        {desktopConnectionMode === "remote"
+                          ? "Shared history from your remote server."
+                          : "Desktop-local server and history."}
+                      </p>
+                    </div>
+                    <span className="rounded bg-primary/14 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
+                      {describeConnectionMode(desktopConnectionMode)}
+                    </span>
+                  </div>
+
+                  <div className="rounded-lg border border-border bg-background px-3 py-2">
+                    <p className="text-xs font-medium text-foreground">Server endpoint</p>
+                    <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
+                      {serverHttpOrigin}
+                    </p>
+                  </div>
+
+                  {desktopConnectionMode === "remote" ? (
+                    <p className="text-xs text-muted-foreground">
+                      Remote mode uses server-backed history and does not merge old desktop-local
+                      chats.
+                    </p>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
