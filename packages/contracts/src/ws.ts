@@ -66,6 +66,15 @@ import {
   ReviewRequestLinkThreadInput,
   ReviewRequestSubmitInput,
 } from "./reviewRequest";
+import {
+  MemoryCreateInput,
+  MemoryUpdateInput,
+  MemoryArchiveInput,
+  MemoryDeleteInput,
+  MemoryListInput,
+  MemorySearchInput,
+  MemoryGetForThreadInput,
+} from "./memory";
 
 // ── WebSocket RPC Method Names ───────────────────────────────────────
 
@@ -132,6 +141,15 @@ export const WS_METHODS = {
   reviewRequestDismiss: "reviewRequest.dismiss",
   reviewRequestLinkThread: "reviewRequest.linkThread",
   reviewRequestSubmit: "reviewRequest.submit",
+
+  // Memory methods
+  memoryList: "memory.list",
+  memorySearch: "memory.search",
+  memoryCreate: "memory.create",
+  memoryUpdate: "memory.update",
+  memoryArchive: "memory.archive",
+  memoryDelete: "memory.delete",
+  memoryGetForThread: "memory.getForThread",
 
   // Server meta
   serverGetConfig: "server.getConfig",
@@ -228,6 +246,15 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.reviewRequestDismiss, ReviewRequestDismissInput),
   tagRequestBody(WS_METHODS.reviewRequestLinkThread, ReviewRequestLinkThreadInput),
   tagRequestBody(WS_METHODS.reviewRequestSubmit, ReviewRequestSubmitInput),
+
+  // Memory methods
+  tagRequestBody(WS_METHODS.memoryList, MemoryListInput),
+  tagRequestBody(WS_METHODS.memorySearch, MemorySearchInput),
+  tagRequestBody(WS_METHODS.memoryCreate, MemoryCreateInput),
+  tagRequestBody(WS_METHODS.memoryUpdate, MemoryUpdateInput),
+  tagRequestBody(WS_METHODS.memoryArchive, MemoryArchiveInput),
+  tagRequestBody(WS_METHODS.memoryDelete, MemoryDeleteInput),
+  tagRequestBody(WS_METHODS.memoryGetForThread, MemoryGetForThreadInput),
 
   // Server meta
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),

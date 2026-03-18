@@ -63,6 +63,7 @@ import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore.ts";
 import { ReviewCommentRepository } from "./persistence/Services/ReviewCommentRepository.ts";
 import { ReviewRequestRepository } from "./persistence/Services/ReviewRequestRepository.ts";
+import { MemoryRepository } from "./persistence/Services/MemoryRepository.ts";
 import { GitHubCli } from "./git/Services/GitHubCli.ts";
 import { tryHandleProjectFaviconRequest } from "./projectFaviconRoute";
 import {
@@ -284,7 +285,8 @@ export type ServerRuntimeServices =
   | Open
   | AnalyticsService
   | ReviewCommentRepository
-  | ReviewRequestRepository;
+  | ReviewRequestRepository
+  | MemoryRepository;
 
 export class ServerLifecycleError extends Schema.TaggedErrorClass<ServerLifecycleError>()(
   "ServerLifecycleError",
@@ -327,6 +329,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const gitHubCli = yield* GitHubCli;
   const reviewCommentRepo = yield* ReviewCommentRepository;
   const reviewRequestRepo = yield* ReviewRequestRepository;
+  const memoryRepo = yield* MemoryRepository;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -1195,12 +1198,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const prFiles = yield* gitHubCli
           .execute({
             cwd: body.cwd,
-            args: [
-              "api",
-              `repos/${owner}/${repo}/pulls/${prNumber}/files`,
-              "--jq",
-              ".[].filename",
-            ],
+            args: ["api", `repos/${owner}/${repo}/pulls/${prNumber}/files`, "--jq", ".[].filename"],
             timeoutMs: 15_000,
           })
           .pipe(
@@ -1261,13 +1259,18 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               // Extract GitHub's error detail from the response body (stdout)
               let ghDetail = "";
               try {
-                const respBody = JSON.parse(r.stdout) as { message?: string; errors?: { message?: string }[] };
+                const respBody = JSON.parse(r.stdout) as {
+                  message?: string;
+                  errors?: { message?: string }[];
+                };
                 const messages = [
                   respBody.message,
                   ...(respBody.errors?.map((e) => e.message).filter(Boolean) ?? []),
                 ].filter(Boolean);
                 if (messages.length > 0) ghDetail = messages.join(": ");
-              } catch { /* response wasn't JSON */ }
+              } catch {
+                /* response wasn't JSON */
+              }
               if (!ghDetail) ghDetail = r.stderr.trim();
               // Add file context so the user knows which file(s) caused the issue
               const files = comments.map((c) => c.file.split("/").pop()).join(", ");
@@ -1470,6 +1473,48 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           status: body.event === "APPROVE" ? "approved" : "changes_requested",
         });
         return {};
+      }
+
+      // ── Memory methods ──────────────────────────────────────────
+      case WS_METHODS.memoryCreate: {
+        const body = stripRequestTag(request.body);
+        const memory = yield* memoryRepo.create(body);
+        return { memory };
+      }
+
+      case WS_METHODS.memoryUpdate: {
+        const body = stripRequestTag(request.body);
+        yield* memoryRepo.update(body);
+        return {};
+      }
+
+      case WS_METHODS.memoryArchive: {
+        const body = stripRequestTag(request.body);
+        yield* memoryRepo.archive(body);
+        return {};
+      }
+
+      case WS_METHODS.memoryDelete: {
+        const body = stripRequestTag(request.body);
+        yield* memoryRepo.delete(body);
+        return {};
+      }
+
+      case WS_METHODS.memoryList: {
+        const body = stripRequestTag(request.body);
+        return yield* memoryRepo.listByProject(body);
+      }
+
+      case WS_METHODS.memorySearch: {
+        const body = stripRequestTag(request.body);
+        const memories = yield* memoryRepo.search(body);
+        return { memories };
+      }
+
+      case WS_METHODS.memoryGetForThread: {
+        const body = stripRequestTag(request.body);
+        const memories = yield* memoryRepo.getRelevantForThread(body);
+        return { memories };
       }
 
       default: {

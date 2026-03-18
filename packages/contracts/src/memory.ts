@@ -1,0 +1,119 @@
+import { Schema } from "effect";
+import { NonNegativeInt, ProjectId, ThreadId, TrimmedNonEmptyString, TurnId } from "./baseSchemas";
+
+// ── Domain Enums ────────────────────────────────────────────────────
+
+export const MemoryScope = Schema.Literals(["project", "global"]);
+export type MemoryScope = typeof MemoryScope.Type;
+
+export const MemoryCategory = Schema.Literals([
+  "preference",
+  "pattern",
+  "decision",
+  "fact",
+  "convention",
+]);
+export type MemoryCategory = typeof MemoryCategory.Type;
+
+export const MemorySource = Schema.Literals(["auto", "manual"]);
+export type MemorySource = typeof MemorySource.Type;
+
+// ── Domain Entity ───────────────────────────────────────────────────
+
+export const MemoryId = TrimmedNonEmptyString.pipe(Schema.brand("MemoryId"));
+export type MemoryId = typeof MemoryId.Type;
+
+export const Memory = Schema.Struct({
+  memoryId: MemoryId,
+  projectId: Schema.optional(ProjectId),
+  scope: MemoryScope,
+  category: MemoryCategory,
+  source: MemorySource,
+  content: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  sourceThreadId: Schema.optional(ThreadId),
+  sourceTurnId: Schema.optional(TurnId),
+  relevanceScore: Schema.Number,
+  accessCount: NonNegativeInt,
+  lastAccessedAt: Schema.optional(Schema.String),
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+  archivedAt: Schema.optional(Schema.String),
+});
+export type Memory = typeof Memory.Type;
+
+// ── WS Inputs ───────────────────────────────────────────────────────
+
+export const MemoryCreateInput = Schema.Struct({
+  projectId: Schema.optional(ProjectId),
+  scope: MemoryScope,
+  category: MemoryCategory,
+  content: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  sourceThreadId: Schema.optional(ThreadId),
+  sourceTurnId: Schema.optional(TurnId),
+});
+export type MemoryCreateInput = typeof MemoryCreateInput.Type;
+
+export const MemoryUpdateInput = Schema.Struct({
+  memoryId: MemoryId,
+  content: Schema.optional(TrimmedNonEmptyString),
+  title: Schema.optional(TrimmedNonEmptyString),
+  category: Schema.optional(MemoryCategory),
+  relevanceScore: Schema.optional(Schema.Number),
+});
+export type MemoryUpdateInput = typeof MemoryUpdateInput.Type;
+
+export const MemoryArchiveInput = Schema.Struct({
+  memoryId: MemoryId,
+});
+export type MemoryArchiveInput = typeof MemoryArchiveInput.Type;
+
+export const MemoryDeleteInput = Schema.Struct({
+  memoryId: MemoryId,
+});
+export type MemoryDeleteInput = typeof MemoryDeleteInput.Type;
+
+export const MemoryListInput = Schema.Struct({
+  projectId: ProjectId,
+  includeGlobal: Schema.optional(Schema.Boolean),
+  includeArchived: Schema.optional(Schema.Boolean),
+  category: Schema.optional(MemoryCategory),
+  limit: Schema.optional(NonNegativeInt),
+  offset: Schema.optional(NonNegativeInt),
+});
+export type MemoryListInput = typeof MemoryListInput.Type;
+
+export const MemorySearchInput = Schema.Struct({
+  query: TrimmedNonEmptyString,
+  projectId: Schema.optional(ProjectId),
+  category: Schema.optional(MemoryCategory),
+  limit: Schema.optional(NonNegativeInt),
+});
+export type MemorySearchInput = typeof MemorySearchInput.Type;
+
+export const MemoryGetForThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  query: Schema.optional(TrimmedNonEmptyString),
+  limit: Schema.optional(NonNegativeInt),
+});
+export type MemoryGetForThreadInput = typeof MemoryGetForThreadInput.Type;
+
+// ── WS Results ──────────────────────────────────────────────────────
+
+export const MemoryCreateResult = Schema.Struct({
+  memory: Memory,
+});
+export type MemoryCreateResult = typeof MemoryCreateResult.Type;
+
+export const MemoryListResult = Schema.Struct({
+  memories: Schema.Array(Memory),
+  total: NonNegativeInt,
+});
+export type MemoryListResult = typeof MemoryListResult.Type;
+
+export const MemorySearchResult = Schema.Struct({
+  memories: Schema.Array(Memory),
+});
+export type MemorySearchResult = typeof MemorySearchResult.Type;

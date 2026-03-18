@@ -93,6 +93,18 @@ import type {
   ReviewRequestLinkThreadInput,
   ReviewRequestSubmitInput,
 } from "./reviewRequest";
+import type {
+  MemoryCreateInput,
+  MemoryCreateResult,
+  MemoryUpdateInput,
+  MemoryArchiveInput,
+  MemoryDeleteInput,
+  MemoryListInput,
+  MemoryListResult,
+  MemorySearchInput,
+  MemorySearchResult,
+  MemoryGetForThreadInput,
+} from "./memory";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -235,6 +247,15 @@ export interface NativeApi {
     dismiss: (input: ReviewRequestDismissInput) => Promise<void>;
     linkThread: (input: ReviewRequestLinkThreadInput) => Promise<void>;
     submit: (input: ReviewRequestSubmitInput) => Promise<void>;
+  };
+  memory: {
+    list: (input: MemoryListInput) => Promise<MemoryListResult>;
+    search: (input: MemorySearchInput) => Promise<MemorySearchResult>;
+    create: (input: MemoryCreateInput) => Promise<MemoryCreateResult>;
+    update: (input: MemoryUpdateInput) => Promise<void>;
+    archive: (input: MemoryArchiveInput) => Promise<void>;
+    delete: (input: MemoryDeleteInput) => Promise<void>;
+    getForThread: (input: MemoryGetForThreadInput) => Promise<MemorySearchResult>;
   };
   contextMenu: {
     show: <T extends string>(

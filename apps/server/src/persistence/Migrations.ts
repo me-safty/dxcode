@@ -30,6 +30,7 @@ import Migration0015 from "./Migrations/015_ProjectionThreadsJiraTicket.ts";
 import Migration0016 from "./Migrations/016_ReviewComments.ts";
 import Migration0017 from "./Migrations/017_ReviewRequests.ts";
 import Migration0018 from "./Migrations/018_ReviewRequestsPrMeta.ts";
+import Migration0019 from "./Migrations/019_Memories.ts";
 import { Effect } from "effect";
 
 /**
@@ -61,6 +62,7 @@ const loader = Migrator.fromRecord({
   "16_ReviewComments": Migration0016,
   "17_ReviewRequests": Migration0017,
   "18_ReviewRequestsPrMeta": Migration0018,
+  "19_Memories": Migration0019,
 });
 
 /**
