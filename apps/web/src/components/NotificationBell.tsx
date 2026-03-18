@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -35,6 +35,17 @@ export default function NotificationBell({
   };
   const [filter, setFilter] = useState<Filter>("reviews");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Track which ID we've already scrolled to so data refetches don't re-trigger scrollIntoView.
+  const scrolledForIdRef = useRef<string | null>(null);
+
+  const expandedRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      if (!el || !expandedId || scrolledForIdRef.current === expandedId) return;
+      scrolledForIdRef.current = expandedId;
+      el.scrollIntoView({ block: "nearest" });
+    },
+    [expandedId],
+  );
   const { isMobile, setOpenMobile } = useSidebar();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -86,7 +97,13 @@ export default function NotificationBell({
   const reviewCount = requests.filter((r) => !r.isBot).length;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) scrolledForIdRef.current = null;
+      }}
+    >
       <Tooltip>
         <TooltipTrigger
           render={
@@ -156,10 +173,7 @@ export default function NotificationBell({
                 const prevStatus = index > 0 ? filteredRequests[index - 1]!.status : null;
                 const showGroupLabel = request.status !== prevStatus;
                 return (
-                  <div
-                    key={request.id}
-                    ref={isExpanded ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
-                  >
+                  <div key={request.id} ref={isExpanded ? expandedRef : undefined}>
                     {showGroupLabel && (
                       <div className="sticky top-0 z-10 border-b border-border/30 bg-popover/95 px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50 backdrop-blur-sm">
                         {request.status === "in_review" ? "In progress" : "Awaiting review"}
