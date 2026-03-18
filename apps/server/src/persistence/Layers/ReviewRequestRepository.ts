@@ -306,10 +306,12 @@ const makeReviewRequestRepository = Effect.gen(function* () {
   const unlinkDeletedThreads: ReviewRequestRepositoryShape["unlinkDeletedThreads"] = () =>
     sql`
       UPDATE review_requests
-      SET thread_id = NULL, updated_at = ${new Date().toISOString()}
+      SET thread_id = NULL,
+          status = CASE WHEN status = 'in_review' THEN 'pending' ELSE status END,
+          updated_at = ${new Date().toISOString()}
       WHERE thread_id IS NOT NULL
-        AND thread_id NOT IN (
-          SELECT thread_id FROM projection_threads WHERE deleted_at IS NULL
+        AND thread_id IN (
+          SELECT thread_id FROM projection_threads WHERE deleted_at IS NOT NULL
         )
     `.pipe(
       Effect.mapError(toPersistenceSqlError("ReviewRequestRepository.unlinkDeletedThreads:query")),

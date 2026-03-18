@@ -121,6 +121,7 @@ export default function NotificationBell({
       onOpenChange={(next) => {
         setOpen(next);
         if (!next) scrolledForIdRef.current = null;
+        if (next) void queryClient.invalidateQueries({ queryKey: ["reviewRequest"] });
       }}
     >
       <Tooltip>
