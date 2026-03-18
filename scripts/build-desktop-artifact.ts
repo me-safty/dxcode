@@ -237,7 +237,9 @@ const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (input: B
   const target = mergeOptions(input.target, env.target, PLATFORM_CONFIG[platform].defaultTarget);
   const arch = mergeOptions(input.arch, env.arch, getDefaultArch(platform));
   const version = mergeOptions(input.buildVersion, env.version, undefined);
-  const releaseDir = input.mockUpdates ? "release-mock" : "release";
+  const releaseDir = resolveBooleanFlag(input.mockUpdates, env.mockUpdates)
+    ? "release-mock"
+    : "release";
   const outputDir = path.resolve(
     repoRoot,
     mergeOptions(input.outputDir, env.outputDir, releaseDir),
