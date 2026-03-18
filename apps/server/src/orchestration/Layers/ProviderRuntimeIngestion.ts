@@ -1126,7 +1126,7 @@ const make = Effect.gen(function* () {
 
       const assistantCompletion = yield* (() => {
         if (event.type !== "item.completed" || event.payload.itemType !== "assistant_message") {
-          return Effect.succeed(undefined);
+          return Effect.succeed(null);
         }
         const turnId = toTurnId(event.turnId);
         return Effect.gen(function* () {

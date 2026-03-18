@@ -76,6 +76,7 @@ import {
   resolveAttachmentPath,
   resolveAttachmentPathById,
 } from "./attachmentStore.ts";
+import { runProcess } from "./processRunner";
 import { parseBase64DataUrl } from "./imageMime.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { expandHomePath } from "./os-jank.ts";
@@ -1196,44 +1197,72 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           event: "COMMENT",
           comments: comments.map((c) => ({
             path: c.file,
-            line: c.startLine,
+            ...(c.endLine && c.endLine !== c.startLine
+              ? { start_line: c.startLine, line: c.endLine, start_side: "RIGHT" }
+              : { line: c.startLine }),
+            side: "RIGHT",
             body: c.body,
           })),
         });
         const prUrl = `https://github.com/${owner}/${repo}/pull/${prNumber}`;
 
-        const batchResult = yield* gitHubCli
-          .execute({
-            cwd: body.cwd,
-            args: [
+        yield* Effect.logInfo("reviewComment.publish: submitting batch review", {
+          prUrl,
+          commentCount: comments.length,
+          commitId: headSha,
+        });
+
+        const batchResult = yield* Effect.tryPromise(() =>
+          runProcess(
+            "gh",
+            [
               "api",
               `repos/${owner}/${repo}/pulls/${prNumber}/reviews`,
               "-X",
               "POST",
               "--input",
               "-",
-              // gh reads JSON from stdin when --input is "-"
             ],
-            timeoutMs: 30_000,
-            stdin: reviewPayload,
-          })
-          .pipe(
-            Effect.map((r) => {
+            { cwd: body.cwd, timeoutMs: 30_000, stdin: reviewPayload, allowNonZeroExit: true },
+          ),
+        ).pipe(
+          Effect.map((r) => {
+            if (r.code !== 0) {
+              // Extract GitHub's error detail from the response body (stdout)
+              let ghDetail = r.stderr.trim();
               try {
-                const json = JSON.parse(r.stdout) as { html_url?: string };
-                return { ok: true as const, url: json.html_url ?? prUrl };
-              } catch {
-                return { ok: true as const, url: prUrl };
-              }
+                const respBody = JSON.parse(r.stdout) as { message?: string; errors?: { message?: string }[] };
+                const messages = [
+                  respBody.message,
+                  ...(respBody.errors?.map((e) => e.message).filter(Boolean) ?? []),
+                ].filter(Boolean);
+                if (messages.length > 0) ghDetail = messages.join(": ");
+              } catch { /* response wasn't JSON, use stderr */ }
+              return { ok: false as const, url: prUrl, error: ghDetail || "GitHub API request failed" };
+            }
+            try {
+              const json = JSON.parse(r.stdout) as { html_url?: string };
+              return { ok: true as const, url: json.html_url ?? prUrl };
+            } catch {
+              return { ok: true as const, url: prUrl };
+            }
+          }),
+          Effect.tap((result) =>
+            result.ok
+              ? Effect.void
+              : Effect.logWarning("reviewComment.publish: batch publish failed", {
+                  error: result.error,
+                  payload: reviewPayload,
+                }),
+          ),
+          Effect.catch(() =>
+            Effect.succeed({
+              ok: false as const,
+              url: prUrl,
+              error: "Failed to run GitHub CLI",
             }),
-            Effect.catch((err) =>
-              Effect.succeed({
-                ok: false as const,
-                url: prUrl,
-                error: err instanceof Error ? err.message : "GitHub API request failed",
-              }),
-            ),
-          );
+          ),
+        );
 
         if (batchResult.ok) {
           const now = new Date().toISOString();
@@ -1265,9 +1294,14 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                 "-f",
                 `path=${comment.file}`,
                 "-F",
-                `line=${String(comment.startLine)}`,
+                `line=${String(comment.endLine && comment.endLine !== comment.startLine ? comment.endLine : comment.startLine)}`,
+                "-f",
+                `side=RIGHT`,
                 "-f",
                 `commit_id=${headSha}`,
+                ...(comment.endLine && comment.endLine !== comment.startLine
+                  ? ["-F", `start_line=${String(comment.startLine)}`, "-f", `start_side=RIGHT`]
+                  : []),
               ],
               timeoutMs: 15_000,
             })

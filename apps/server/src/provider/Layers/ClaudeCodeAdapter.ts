@@ -976,15 +976,14 @@ function makeClaudeCodeAdapter(options: ClaudeCodeAdapterLiveOptions) {
           // Rebuild detail and structured input from accumulated input JSON if available
           let parsedToolInput: Record<string, unknown> | undefined;
           if (tool.inputJsonChunks.length > 0) {
-            try {
-              parsedToolInput = JSON.parse(tool.inputJsonChunks.join("")) as Record<
-                string,
-                unknown
-              >;
-              const rebuilt = summarizeToolRequest(tool.toolName, parsedToolInput);
-              tool.detail = rebuilt;
-            } catch {
-              // leave detail as-is
+            const rawJson = tool.inputJsonChunks.join("");
+            // eslint-disable-next-line -- Effect.sync callback, not in generator scope
+            parsedToolInput = yield* Effect.sync((): Record<string, unknown> | undefined => {
+              try { return JSON.parse(rawJson) as Record<string, unknown>; }
+              catch { return undefined; }
+            });
+            if (parsedToolInput) {
+              tool.detail = summarizeToolRequest(tool.toolName, parsedToolInput);
             }
           }
 
