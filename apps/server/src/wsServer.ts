@@ -1190,6 +1190,36 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                 ),
               );
 
+        // Pre-flight: check which files are in the PR diff so we don't
+        // waste an API call that GitHub will reject with 422.
+        const prFiles = yield* gitHubCli
+          .execute({
+            cwd: body.cwd,
+            args: [
+              "api",
+              `repos/${owner}/${repo}/pulls/${prNumber}/files`,
+              "--jq",
+              ".[].filename",
+            ],
+            timeoutMs: 15_000,
+          })
+          .pipe(
+            Effect.map((r) => new Set(r.stdout.trim().split("\n").filter(Boolean))),
+            Effect.catch(() => Effect.succeed(null as Set<string> | null)),
+          );
+
+        if (prFiles) {
+          const outsideDiff = comments.filter((c) => !prFiles.has(c.file));
+          if (outsideDiff.length > 0) {
+            const fileNames = outsideDiff.map((c) => c.file.split("/").pop()).join(", ");
+            return {
+              published: 0,
+              failed: outsideDiff.length,
+              error: `Cannot publish to GitHub: ${fileNames} ${outsideDiff.length === 1 ? "is" : "are"} not part of the PR diff`,
+            };
+          }
+        }
+
         // Batch-submit all comments as a single pending review (1 API call
         // instead of N individual comment calls).
         const reviewPayload = JSON.stringify({
@@ -1229,7 +1259,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           Effect.map((r) => {
             if (r.code !== 0) {
               // Extract GitHub's error detail from the response body (stdout)
-              let ghDetail = r.stderr.trim();
+              let ghDetail = "";
               try {
                 const respBody = JSON.parse(r.stdout) as { message?: string; errors?: { message?: string }[] };
                 const messages = [
@@ -1237,8 +1267,14 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
                   ...(respBody.errors?.map((e) => e.message).filter(Boolean) ?? []),
                 ].filter(Boolean);
                 if (messages.length > 0) ghDetail = messages.join(": ");
-              } catch { /* response wasn't JSON, use stderr */ }
-              return { ok: false as const, url: prUrl, error: ghDetail || "GitHub API request failed" };
+              } catch { /* response wasn't JSON */ }
+              if (!ghDetail) ghDetail = r.stderr.trim();
+              // Add file context so the user knows which file(s) caused the issue
+              const files = comments.map((c) => c.file.split("/").pop()).join(", ");
+              const hint = ghDetail.toLowerCase().includes("unprocessable")
+                ? ` — the file (${files}) may not be part of the PR diff`
+                : "";
+              return { ok: false as const, url: prUrl, error: `${ghDetail}${hint}` };
             }
             try {
               const json = JSON.parse(r.stdout) as { html_url?: string };
