@@ -165,12 +165,9 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   // ── Annotations (source-agnostic) ──────────────────────────────────
   const isAgentActive = activeThread?.session?.orchestrationStatus === "running";
   const prUrl = useQuery(gitStatusQueryOptions(activeCwd ?? null)).data?.pr?.url ?? null;
-  const publishContext = useMemo(
-    () => (activeCwd && prUrl ? { cwd: activeCwd, prUrl } : undefined),
-    [activeCwd, prUrl],
-  );
-  const annotations = useDiffAnnotations(activeThreadId, isAgentActive, publishContext);
-  const hasAnnotations = annotations.length > 0;
+  // NOTE: publishContext depends on branchDiffFiles below — annotations
+  // are computed after both are available.
+  const publishContextBase = activeCwd && prUrl ? { cwd: activeCwd, prUrl } : undefined;
 
   const gitBranchesQuery = useQuery(gitBranchesQueryOptions(activeCwd ?? null));
   const isGitRepo = gitBranchesQuery.data?.isRepo ?? true;
@@ -214,6 +211,23 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     () => (branchDiffPatch?.kind === "files" ? sortFilesByPath(branchDiffPatch.files) : []),
     [branchDiffPatch],
   );
+
+  // Build publishContext with the set of files in the branch diff so the
+  // publish button is only shown for comments on files that are in the PR diff.
+  const diffFileSet = useMemo(
+    () => new Set(branchDiffFiles.map((f) => resolveFileDiffPath(f))),
+    [branchDiffFiles],
+  );
+  const publishContext = useMemo(
+    () =>
+      publishContextBase
+        ? { ...publishContextBase, ...(diffFileSet.size > 0 ? { diffFiles: diffFileSet } : {}) }
+        : undefined,
+    [publishContextBase, diffFileSet],
+  );
+  const annotations = useDiffAnnotations(activeThreadId, isAgentActive, publishContext);
+  const hasAnnotations = annotations.length > 0;
+
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
   const orderedTurnDiffSummaries = useMemo(

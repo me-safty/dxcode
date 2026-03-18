@@ -47,7 +47,7 @@ export function normalizeFilePath(path: string): string {
 /** Convert a flat list of review comments into generic DiffAnnotations. */
 export function reviewCommentsToAnnotations(
   comments: readonly ReviewComment[],
-  onPublish?: (comment: ReviewComment) => Promise<void>,
+  resolvePublish?: (comment: ReviewComment) => ((comment: ReviewComment) => Promise<void>) | undefined,
 ): DiffAnnotation[] {
   return comments.map((c) => ({
     kind: "review-comment" as const,
@@ -56,7 +56,7 @@ export function reviewCommentsToAnnotations(
     startLine: c.startLine,
     endLine: c.endLine,
     data: c,
-    onPublish,
+    onPublish: resolvePublish?.(c),
   }));
 }
 

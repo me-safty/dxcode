@@ -14,7 +14,11 @@ import type { ReviewComment, ThreadId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
-import { type DiffAnnotation, reviewCommentsToAnnotations } from "../lib/diffAnnotations";
+import {
+  type DiffAnnotation,
+  normalizeFilePath,
+  reviewCommentsToAnnotations,
+} from "../lib/diffAnnotations";
 import {
   invalidateReviewCommentQueries,
   reviewCommentListQueryOptions,
@@ -35,7 +39,7 @@ import { ensureNativeApi } from "../nativeApi";
 export function useDiffAnnotations(
   threadId: ThreadId | null,
   isAgentActive: boolean,
-  publishContext?: { cwd: string; prUrl: string } | undefined,
+  publishContext?: { cwd: string; prUrl: string; diffFiles?: Set<string> } | undefined,
 ): DiffAnnotation[] {
   const reviewCommentsQuery = useQuery(
     reviewCommentListQueryOptions(
@@ -63,10 +67,18 @@ export function useDiffAnnotations(
     [threadId, publishContext, queryClient],
   );
 
+  const diffFiles = publishContext?.diffFiles;
+
   return useMemo(() => {
     const comments = reviewCommentsQuery.data?.comments;
     if (!comments || comments.length === 0) return [];
-    return reviewCommentsToAnnotations(comments, publishContext ? onPublish : undefined);
+    // Only allow publishing for comments on files that are part of the PR diff.
+    // If diffFiles is not available (e.g. no branch diff loaded), allow all.
+    const canPublish = publishContext ? onPublish : undefined;
+    const perCommentPublish = canPublish && diffFiles
+      ? (comment: ReviewComment) => diffFiles.has(normalizeFilePath(comment.file)) ? canPublish : undefined
+      : () => canPublish;
+    return reviewCommentsToAnnotations(comments, perCommentPublish);
     // Future: concat with lint annotations, AI suggestion annotations, etc.
-  }, [reviewCommentsQuery.data?.comments, publishContext, onPublish]);
+  }, [reviewCommentsQuery.data?.comments, publishContext, onPublish, diffFiles]);
 }
