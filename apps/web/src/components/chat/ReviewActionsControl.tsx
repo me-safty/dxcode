@@ -19,12 +19,12 @@ export function ReviewActionsControl({ threadId }: ReviewActionsControlProps) {
   const { data } = useQuery(reviewRequestListQueryOptions());
   const [submitting, setSubmitting] = useState<ReviewRequestSubmitEvent | null>(null);
 
-  // Find a review request linked to this thread that is currently in review
-  const activeReview = data?.reviewRequests.find(
-    (r) => r.threadId === threadId && r.status === "in_review",
+  // Find a review request linked to this thread (any non-dismissed status)
+  const review = data?.reviewRequests.find(
+    (r) => r.threadId === threadId && r.status !== "dismissed",
   );
 
-  if (!activeReview) return null;
+  if (!review) return null;
 
   const handleSubmit = async (event: ReviewRequestSubmitEvent) => {
     const api = readNativeApi();
@@ -32,15 +32,15 @@ export function ReviewActionsControl({ threadId }: ReviewActionsControlProps) {
     setSubmitting(event);
     try {
       await api.reviewRequest.submit({
-        id: activeReview.id,
-        prUrl: activeReview.prUrl,
+        id: review.id,
+        prUrl: review.prUrl,
         event,
       });
       await queryClient.invalidateQueries({ queryKey: ["reviewRequest"] });
       toastManager.add({
         type: "success",
         title: event === "APPROVE" ? "Review approved" : "Changes requested",
-        description: `#${activeReview.prNumber} ${activeReview.prTitle}`,
+        description: `#${review.prNumber} ${review.prTitle}`,
       });
     } catch (error) {
       toastManager.add({
@@ -53,6 +53,43 @@ export function ReviewActionsControl({ threadId }: ReviewActionsControlProps) {
     }
   };
 
+  if (review.status === "approved") {
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button variant="outline" size="xs" className="pointer-events-auto">
+              <CheckIcon className="size-3 text-emerald-500" />
+              <span className="sr-only md:not-sr-only md:ml-0.5">Approved</span>
+            </Button>
+          }
+        />
+        <TooltipPopup side="bottom">
+          Approved #{review.prNumber}: {review.prTitle}
+        </TooltipPopup>
+      </Tooltip>
+    );
+  }
+
+  if (review.status === "changes_requested") {
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button variant="outline" size="xs" className="pointer-events-auto">
+              <XIcon className="size-3 text-orange-500" />
+              <span className="sr-only md:not-sr-only md:ml-0.5">Changes requested</span>
+            </Button>
+          }
+        />
+        <TooltipPopup side="bottom">
+          Requested changes on #{review.prNumber}: {review.prTitle}
+        </TooltipPopup>
+      </Tooltip>
+    );
+  }
+
+  // in_review or pending — show action buttons
   return (
     <Group aria-label="Review actions">
       <Tooltip>
@@ -65,7 +102,7 @@ export function ReviewActionsControl({ threadId }: ReviewActionsControlProps) {
           }
         />
         <TooltipPopup side="bottom">
-          Reviewing #{activeReview.prNumber}: {activeReview.prTitle}
+          Reviewing #{review.prNumber}: {review.prTitle}
         </TooltipPopup>
       </Tooltip>
       <GroupSeparator className="hidden md:block" />

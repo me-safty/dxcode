@@ -1987,16 +1987,15 @@ export default function Sidebar() {
             projects={projects}
             projectsWorkingDirectory={appSettings.projectsWorkingDirectory}
             {...(pendingReviewRequest ? { initialPrUrl: pendingReviewRequest.prUrl } : {})}
-            onThreadCreated={(threadId) => {
+            onThreadCreated={async (threadId) => {
               if (pendingReviewRequest) {
                 const api = readNativeApi();
                 if (api) {
-                  void api.reviewRequest
-                    .linkThread({
-                      id: pendingReviewRequest.requestId,
-                      threadId: threadId as ThreadId,
-                    })
-                    .then(() => queryClient.invalidateQueries({ queryKey: ["reviewRequest"] }));
+                  await api.reviewRequest.linkThread({
+                    id: pendingReviewRequest.requestId,
+                    threadId: threadId as ThreadId,
+                  });
+                  await queryClient.invalidateQueries({ queryKey: ["reviewRequest"] });
                 }
                 setPendingReviewRequest(null);
               }

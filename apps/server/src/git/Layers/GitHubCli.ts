@@ -151,7 +151,8 @@ function decodeGitHubJson<S extends Schema.Top>(
     | "listOpenPullRequests"
     | "getPullRequest"
     | "getRepositoryCloneUrls"
-    | "listReviewRequests",
+    | "listReviewRequests"
+    | "listReviewedPrs",
   invalidDetail: string,
 ): Effect.Effect<S["Type"], GitHubCliError, S["DecodingServices"]> {
   return Schema.decodeEffect(Schema.fromJsonString(schema))(raw).pipe(
@@ -374,6 +375,35 @@ const makeGitHubCli = Effect.sync(() => {
                 Schema.Array(RawGitHubReviewRequestSchema),
                 "listReviewRequests",
                 "GitHub CLI returned invalid review request JSON.",
+              ),
+        ),
+      ),
+    listReviewedPrs: (input) =>
+      execute({
+        cwd: process.cwd(),
+        args: [
+          "search",
+          "prs",
+          "--reviewed-by=@me",
+          "--state",
+          "closed",
+          "--sort",
+          "updated",
+          "--limit",
+          String(input.limit ?? 20),
+          "--json",
+          "number,title,url,repository,author,updatedAt,body,labels",
+        ],
+      }).pipe(
+        Effect.map((result) => result.stdout.trim()),
+        Effect.flatMap((raw) =>
+          raw.length === 0
+            ? Effect.succeed([] as (typeof RawGitHubReviewRequestSchema.Type)[])
+            : decodeGitHubJson(
+                raw,
+                Schema.Array(RawGitHubReviewRequestSchema),
+                "listReviewedPrs",
+                "GitHub CLI returned invalid reviewed PR JSON.",
               ),
         ),
       ),

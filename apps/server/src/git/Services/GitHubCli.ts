@@ -127,6 +127,23 @@ export interface GitHubCliShape {
   >;
 
   /**
+   * List recently merged/closed PRs where the current user has submitted a review.
+   */
+  readonly listReviewedPrs: (input: { readonly limit?: number }) => Effect.Effect<
+    ReadonlyArray<{
+      readonly number: number;
+      readonly title: string;
+      readonly url: string;
+      readonly updatedAt: string;
+      readonly body: string;
+      readonly labels: ReadonlyArray<{ readonly name: string }>;
+      readonly repository: { readonly name: string; readonly nameWithOwner: string };
+      readonly author: { readonly login: string };
+    }>,
+    GitHubCliError
+  >;
+
+  /**
    * Checkout a pull request into the current repository worktree.
    */
   readonly checkoutPullRequest: (input: {

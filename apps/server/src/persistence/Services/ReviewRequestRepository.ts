@@ -61,7 +61,7 @@ export interface ReviewRequestRepositoryShape {
   ) => Effect.Effect<void, ReviewRequestRepositoryError>;
 
   /**
-   * List all review requests that are not dismissed.
+   * List all non-dismissed review requests plus recently dismissed ones.
    *
    * Returns ordered by updatedAt descending.
    */
@@ -79,6 +79,11 @@ export interface ReviewRequestRepositoryShape {
   readonly dismissStale: (
     activeUrls: ReadonlyArray<string>,
   ) => Effect.Effect<void, ReviewRequestRepositoryError>;
+
+  /**
+   * Clear thread_id on review requests whose linked thread has been deleted.
+   */
+  readonly unlinkDeletedThreads: () => Effect.Effect<void, ReviewRequestRepositoryError>;
 }
 
 /**

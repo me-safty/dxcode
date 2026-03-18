@@ -1,7 +1,13 @@
 import { Schema } from "effect";
 import { PositiveInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 
-export const ReviewRequestStatus = Schema.Literals(["pending", "in_review", "dismissed"]);
+export const ReviewRequestStatus = Schema.Literals([
+  "pending",
+  "in_review",
+  "approved",
+  "changes_requested",
+  "dismissed",
+]);
 export type ReviewRequestStatus = typeof ReviewRequestStatus.Type;
 
 export const ReviewRequest = Schema.Struct({

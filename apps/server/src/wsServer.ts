@@ -1336,6 +1336,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           yield* reviewRequestRepo.dismissStale(ghResults.map((pr) => pr.url)).pipe(Effect.ignore);
         }
 
+        // Unlink thread references for deleted threads
+        yield* reviewRequestRepo.unlinkDeletedThreads().pipe(Effect.ignore);
+
         const reviewRequests = yield* reviewRequestRepo.listActive();
         return { reviewRequests };
       }
@@ -1384,8 +1387,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           timeoutMs: 15_000,
         });
 
-        // Dismiss the review request after successful submission
-        yield* reviewRequestRepo.updateStatus({ id: body.id, status: "dismissed" });
+        // Record the review outcome
+        yield* reviewRequestRepo.updateStatus({
+          id: body.id,
+          status: body.event === "APPROVE" ? "approved" : "changes_requested",
+        });
         return {};
       }
 

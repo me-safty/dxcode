@@ -491,6 +491,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
           args: ["pr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
         }).pipe(Effect.asVoid),
       listReviewRequests: () => Effect.succeed([]),
+      listReviewedPrs: () => Effect.succeed([]),
     },
     ghCalls,
   };

@@ -127,7 +127,7 @@ const makeReviewRequestRepository = Effect.gen(function* () {
           pr_title = ${row.prTitle},
           author_login = ${row.authorLogin},
           is_bot = ${row.isBot},
-          status = CASE WHEN review_requests.status = 'dismissed' THEN 'pending' ELSE review_requests.status END,
+          status = CASE WHEN review_requests.status IN ('dismissed', 'approved', 'changes_requested') THEN 'pending' ELSE review_requests.status END,
           pr_body = ${row.prBody},
           pr_labels = ${row.prLabels},
           updated_at = ${row.updatedAt}
@@ -174,8 +174,15 @@ const makeReviewRequestRepository = Effect.gen(function* () {
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM review_requests
-        WHERE status != 'dismissed'
-        ORDER BY updated_at DESC
+        ORDER BY
+          CASE status
+            WHEN 'in_review' THEN 0
+            WHEN 'pending' THEN 1
+            WHEN 'approved' THEN 2
+            WHEN 'changes_requested' THEN 3
+            WHEN 'dismissed' THEN 4
+          END,
+          updated_at DESC
       `,
   });
 
@@ -272,11 +279,11 @@ const makeReviewRequestRepository = Effect.gen(function* () {
 
   const dismissStale: ReviewRequestRepositoryShape["dismissStale"] = (activeUrls) => {
     if (activeUrls.length === 0) {
-      // No active URLs means dismiss all non-dismissed requests (PRs closed/merged)
+      // No active URLs means dismiss all pending requests (PRs closed/merged)
       return sql`
         UPDATE review_requests
         SET status = 'dismissed', updated_at = ${new Date().toISOString()}
-        WHERE status != 'dismissed'
+        WHERE status = 'pending'
       `.pipe(
         Effect.mapError(toPersistenceSqlError("ReviewRequestRepository.dismissStale:query")),
         Effect.asVoid,
@@ -284,11 +291,11 @@ const makeReviewRequestRepository = Effect.gen(function* () {
     }
 
     const now = new Date().toISOString();
-    // Dismiss any request no longer in GitHub results (PR merged/closed/review removed)
+    // Dismiss pending requests no longer in GitHub results (PR merged/closed/review removed)
     return sql`
       UPDATE review_requests
       SET status = 'dismissed', updated_at = ${now}
-      WHERE status != 'dismissed'
+      WHERE status = 'pending'
         AND pr_url NOT IN ${sql.in(activeUrls)}
     `.pipe(
       Effect.mapError(toPersistenceSqlError("ReviewRequestRepository.dismissStale:query")),
@@ -296,11 +303,25 @@ const makeReviewRequestRepository = Effect.gen(function* () {
     );
   };
 
+  const unlinkDeletedThreads: ReviewRequestRepositoryShape["unlinkDeletedThreads"] = () =>
+    sql`
+      UPDATE review_requests
+      SET thread_id = NULL, updated_at = ${new Date().toISOString()}
+      WHERE thread_id IS NOT NULL
+        AND thread_id NOT IN (
+          SELECT thread_id FROM projection_threads WHERE deleted_at IS NULL
+        )
+    `.pipe(
+      Effect.mapError(toPersistenceSqlError("ReviewRequestRepository.unlinkDeletedThreads:query")),
+      Effect.asVoid,
+    );
+
   return {
     upsert,
     updateStatus,
     listActive,
     dismissStale,
+    unlinkDeletedThreads,
   } satisfies ReviewRequestRepositoryShape;
 });
 

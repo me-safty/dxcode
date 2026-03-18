@@ -11,9 +11,13 @@ import { useSidebar } from "./ui/sidebar";
 import { reviewRequestListQueryOptions } from "../lib/gitReactQuery";
 import { readNativeApi } from "../nativeApi";
 
-type Filter = "reviews" | "bot" | "all";
+type Filter = "reviews" | "bot" | "done" | "all";
 
 const emptyRequests: ReviewRequest[] = [];
+
+const isActiveStatus = (s: string) => s === "pending" || s === "in_review";
+const isCompletedStatus = (s: string) =>
+  s === "approved" || s === "changes_requested" || s === "dismissed";
 
 interface NotificationBellProps {
   onStartReview: (prUrl: string, requestId: string) => void;
@@ -61,15 +65,22 @@ export default function NotificationBell({
       filter === "all"
         ? requests
         : filter === "bot"
-          ? requests.filter((r) => r.isBot)
-          : requests.filter((r) => !r.isBot);
+          ? requests.filter((r) => r.isBot && isActiveStatus(r.status))
+          : filter === "done"
+            ? requests.filter((r) => isCompletedStatus(r.status))
+            : requests.filter((r) => !r.isBot && isActiveStatus(r.status));
 
-    // Sort: in_review first (active work), then pending (needs attention).
-    // Within each group, newest PR number first for a stable predictable order.
-    const statusOrder: Record<string, number> = { in_review: 0, pending: 1 };
+    // Sort: active first, then completed. Within each group, newest first.
+    const statusOrder: Record<string, number> = {
+      in_review: 0,
+      pending: 1,
+      approved: 2,
+      changes_requested: 3,
+      dismissed: 4,
+    };
     return filtered.toSorted((a, b) => {
-      const sa = statusOrder[a.status] ?? 2;
-      const sb = statusOrder[b.status] ?? 2;
+      const sa = statusOrder[a.status] ?? 5;
+      const sb = statusOrder[b.status] ?? 5;
       if (sa !== sb) return sa - sb;
       return b.prNumber - a.prNumber;
     });
@@ -86,15 +97,16 @@ export default function NotificationBell({
   const handleClick = (request: ReviewRequest) => {
     setOpen(false);
     setOpenMobile(false);
-    if (request.status === "in_review" && request.threadId) {
+    if (request.threadId) {
       void navigate({ to: "/$threadId", params: { threadId: request.threadId } });
     } else {
       onStartReview(request.prUrl, request.id);
     }
   };
 
-  const botCount = requests.filter((r) => r.isBot).length;
-  const reviewCount = requests.filter((r) => !r.isBot).length;
+  const botCount = requests.filter((r) => r.isBot && isActiveStatus(r.status)).length;
+  const reviewCount = requests.filter((r) => !r.isBot && isActiveStatus(r.status)).length;
+  const doneCount = requests.filter((r) => isCompletedStatus(r.status)).length;
 
   return (
     <Popover
@@ -149,6 +161,13 @@ export default function NotificationBell({
                 Bot
               </FilterTab>
               <FilterTab
+                active={filter === "done"}
+                onClick={() => setFilter("done")}
+                count={doneCount}
+              >
+                Done
+              </FilterTab>
+              <FilterTab
                 active={filter === "all"}
                 onClick={() => setFilter("all")}
                 count={requests.length}
@@ -162,8 +181,8 @@ export default function NotificationBell({
             <div className="px-3 py-6 text-center text-xs text-muted-foreground/60">
               {filter === "bot"
                 ? "No bot PRs"
-                : filter === "reviews"
-                  ? "No review requests"
+                : filter === "done"
+                  ? "No completed reviews"
                   : "No review requests"}
             </div>
           ) : (
@@ -176,7 +195,15 @@ export default function NotificationBell({
                   <div key={request.id} ref={isExpanded ? expandedRef : undefined}>
                     {showGroupLabel && (
                       <div className="sticky top-0 z-10 border-b border-border/30 bg-popover/95 px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50 backdrop-blur-sm">
-                        {request.status === "in_review" ? "In progress" : "Awaiting review"}
+                        {request.status === "in_review"
+                          ? "In progress"
+                          : request.status === "approved"
+                            ? "Approved"
+                            : request.status === "changes_requested"
+                              ? "Changes requested"
+                              : request.status === "dismissed"
+                                ? "Dismissed"
+                                : "Awaiting review"}
                       </div>
                     )}
                     <div
@@ -195,7 +222,15 @@ export default function NotificationBell({
                     >
                       <GitPullRequestIcon
                         className={`mt-0.5 size-3.5 shrink-0 ${
-                          request.status === "in_review" ? "text-violet-500" : "text-emerald-500"
+                          request.status === "in_review"
+                            ? "text-violet-500"
+                            : request.status === "approved"
+                              ? "text-emerald-500"
+                              : request.status === "changes_requested"
+                                ? "text-orange-500"
+                                : request.status === "dismissed"
+                                  ? "text-muted-foreground/40"
+                                  : "text-emerald-500"
                         }`}
                       />
                       <div className="min-w-0 flex-1">
@@ -256,9 +291,7 @@ export default function NotificationBell({
                                 }}
                               >
                                 <ExternalLinkIcon className="size-3" />
-                                {request.status === "in_review" && request.threadId
-                                  ? "Go to Review"
-                                  : "Start Review"}
+                                {request.threadId ? "Go to Review" : "Start Review"}
                               </button>
                               {request.status === "in_review" && (
                                 <button

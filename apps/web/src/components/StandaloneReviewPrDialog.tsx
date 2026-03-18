@@ -47,7 +47,7 @@ interface StandaloneReviewPrDialogProps {
   /** Pre-fill the PR URL input (e.g. from a notification click). */
   initialPrUrl?: string;
   /** Called after a review thread is created, with the thread ID and PR URL. */
-  onThreadCreated?: (threadId: string, prUrl: string) => void;
+  onThreadCreated?: (threadId: string, prUrl: string) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -214,12 +214,13 @@ export default function StandaloneReviewPrDialog({
       useComposerDraftStore.getState().setPrompt(threadId, buildReviewPrompt(details));
       await invalidateGitQueries(queryClient);
 
+      await onThreadCreated?.(threadId, prUrl);
+
       await navigate({
         to: "/$threadId",
         params: { threadId },
       });
 
-      onThreadCreated?.(threadId, prUrl);
       onClose();
     } catch (err) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred.";
