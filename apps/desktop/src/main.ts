@@ -275,10 +275,12 @@ let updatePollTimer: ReturnType<typeof setInterval> | null = null;
 let updateStartupTimer: ReturnType<typeof setTimeout> | null = null;
 let updateCheckInFlight = false;
 let updateDownloadInFlight = false;
+let updateInstallInFlight = false;
 let updaterConfigured = false;
 let updateState: DesktopUpdateState = initialUpdateState();
 
 function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
+  if (updateInstallInFlight) return "install";
   if (updateDownloadInFlight) return "download";
   if (updateCheckInFlight) return "check";
   return updateState.errorContext;
@@ -795,13 +797,18 @@ async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed
   }
 
   isQuitting = true;
+  updateInstallInFlight = true;
   clearUpdatePollTimer();
   try {
     await stopBackendAndWaitForExit();
+    // `quitAndInstall()` only starts the handoff to the updater. The actual
+    // install may still fail asynchronously, so keep the action incomplete
+    // until we either quit or receive an updater error.
     autoUpdater.quitAndInstall();
-    return { accepted: true, completed: true };
+    return { accepted: true, completed: false };
   } catch (error: unknown) {
     const message = formatErrorMessage(error);
+    updateInstallInFlight = false;
     isQuitting = false;
     setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
     console.error(`[desktop-updater] Failed to install update: ${message}`);
@@ -881,6 +888,13 @@ function configureAutoUpdater(): void {
   });
   autoUpdater.on("error", (error) => {
     const message = formatErrorMessage(error);
+    if (updateInstallInFlight) {
+      updateInstallInFlight = false;
+      isQuitting = false;
+      setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
+      console.error(`[desktop-updater] Updater error: ${message}`);
+      return;
+    }
     if (!updateCheckInFlight && !updateDownloadInFlight) {
       setUpdateState({
         status: "error",
@@ -1341,6 +1355,7 @@ async function bootstrap(): Promise<void> {
 
 app.on("before-quit", () => {
   isQuitting = true;
+  updateInstallInFlight = false;
   writeDesktopLogHeader("before-quit received");
   clearUpdatePollTimer();
   stopBackend();
