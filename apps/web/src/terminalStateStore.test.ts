@@ -8,6 +8,7 @@ import {
 } from "./terminalStateStore";
 
 const THREAD_ID = ThreadId.makeUnsafe("thread-1");
+const TERMINAL_STATE_STORAGE_KEY = "t3code:terminal-state:v1";
 
 function makeTerminalEvent(
   type: TerminalEvent["type"],

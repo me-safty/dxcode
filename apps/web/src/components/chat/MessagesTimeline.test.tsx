@@ -1,46 +1,6 @@
 import { MessageId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeAll, describe, expect, it, vi } from "vitest";
-
-function matchMedia() {
-  return {
-    matches: false,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-  };
-}
-
-beforeAll(() => {
-  const classList = {
-    add: () => {},
-    remove: () => {},
-    toggle: () => {},
-    contains: () => false,
-  };
-
-  vi.stubGlobal("localStorage", {
-    getItem: () => null,
-    setItem: () => {},
-    removeItem: () => {},
-    clear: () => {},
-  });
-  vi.stubGlobal("window", {
-    matchMedia,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    desktopBridge: undefined,
-  });
-  vi.stubGlobal("document", {
-    documentElement: {
-      classList,
-      offsetHeight: 0,
-    },
-  });
-  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-    callback(0);
-    return 0;
-  });
-});
+import { describe, expect, it } from "vitest";
 
 describe("MessagesTimeline", () => {
   it("renders inline terminal labels with the composer chip UI", async () => {
