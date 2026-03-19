@@ -573,20 +573,23 @@ function SettingsRouteView() {
                   </span>
                 </label>
 
-                <div className="flex justify-end">
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    onClick={() =>
-                      updateSettings({
-                        textGenerationModel: defaults.textGenerationModel,
-                        gitCommitFlags: defaults.gitCommitFlags,
-                      })
-                    }
-                  >
-                    Restore defaults
-                  </Button>
-                </div>
+                {(settings.textGenerationModel !== defaults.textGenerationModel ||
+                  settings.gitCommitFlags !== defaults.gitCommitFlags) ? (
+                  <div className="flex justify-end">
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() =>
+                        updateSettings({
+                          textGenerationModel: defaults.textGenerationModel,
+                          gitCommitFlags: defaults.gitCommitFlags,
+                        })
+                      }
+                    >
+                      Restore defaults
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             </section>
 
