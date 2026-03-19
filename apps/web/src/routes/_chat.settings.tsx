@@ -523,13 +523,10 @@ function SettingsRouteView() {
               </div>
 
               <div className="space-y-4">
-                <div className="flex flex-col gap-4 rounded-lg border border-border bg-background px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground">Text generation model</p>
-                    <p className="text-xs text-muted-foreground">
-                      Model used for auto-generated git content.
-                    </p>
-                  </div>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">
+                    Text generation model
+                  </span>
                   <Select
                     value={settings.textGenerationModel ?? DEFAULT_GIT_TEXT_GENERATION_MODEL}
                     onValueChange={(value) => {
@@ -541,7 +538,7 @@ function SettingsRouteView() {
                     }}
                   >
                     <SelectTrigger
-                      className="w-full shrink-0 sm:w-48"
+                      className="w-full"
                       aria-label="Git text generation model"
                     >
                       <SelectValue>{selectedGitTextGenerationModelLabel}</SelectValue>
@@ -554,7 +551,10 @@ function SettingsRouteView() {
                       ))}
                     </SelectPopup>
                   </Select>
-                </div>
+                  <span className="text-xs text-muted-foreground">
+                    Model used for auto-generated git content.
+                  </span>
+                </label>
 
                 <label htmlFor="git-commit-flags" className="block space-y-1">
                   <span className="text-xs font-medium text-foreground">
