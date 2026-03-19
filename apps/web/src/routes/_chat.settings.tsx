@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { type ProviderKind, DEFAULT_GIT_TEXT_GENERATION_MODEL } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import { getAppModelOptions, MAX_CUSTOM_MODEL_LENGTH, useAppSettings } from "../appSettings";
@@ -110,6 +110,16 @@ function SettingsRouteView() {
   const codexBinaryPath = settings.codexBinaryPath;
   const codexHomePath = settings.codexHomePath;
   const gitCommitFlags = settings.gitCommitFlags;
+  const gitCommitFlagsWarning = useMemo(() => {
+    const trimmed = gitCommitFlags.trim();
+    if (!trimmed) return null;
+    const tokens = trimmed.split(/\s+/);
+    const invalidTokens = tokens.filter((t) => !t.startsWith("-"));
+    if (invalidTokens.length > 0) {
+      return `Non-flag tokens will be ignored: ${invalidTokens.join(", ")}`;
+    }
+    return null;
+  }, [gitCommitFlags]);
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
 
@@ -566,11 +576,18 @@ function SettingsRouteView() {
                     onChange={(event) => updateSettings({ gitCommitFlags: event.target.value })}
                     placeholder="--no-gpg-sign"
                     spellCheck={false}
+                    className={gitCommitFlagsWarning ? "border-yellow-500" : undefined}
                   />
-                  <span className="text-xs text-muted-foreground">
-                    Applied to app-run git commit commands only. Example:{" "}
-                    <code>--no-gpg-sign</code>. Quoted arguments are not supported yet.
-                  </span>
+                  {gitCommitFlagsWarning ? (
+                    <span className="text-xs text-yellow-600 dark:text-yellow-400">
+                      {gitCommitFlagsWarning}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      Applied to app-run git commit commands only. Example:{" "}
+                      <code>--no-gpg-sign</code>. Quoted arguments are not supported yet.
+                    </span>
+                  )}
                 </label>
 
                 {(settings.textGenerationModel !== defaults.textGenerationModel ||
