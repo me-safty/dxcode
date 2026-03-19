@@ -24,6 +24,31 @@ import type {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project";
+import type {
+  SkillsListResult,
+  SkillsToggleInput,
+  SkillsToggleResult,
+  SkillsSearchInput,
+  SkillsSearchResult,
+  SkillsInstallInput,
+  SkillsInstallResult,
+  SkillsUninstallInput,
+  SkillsUninstallResult,
+  SkillsReadContentInput,
+  SkillsReadContentResult,
+} from "./skills";
+import type {
+  McpListResult,
+  McpAddInput,
+  McpAddResult,
+  McpRemoveInput,
+  McpRemoveResult,
+  McpToggleInput,
+  McpToggleResult,
+  McpUpdateInput,
+  McpUpdateResult,
+  McpBrowseResult,
+} from "./mcp";
 import type { ServerConfig } from "./server";
 import type {
   TerminalClearInput,
@@ -155,6 +180,22 @@ export interface NativeApi {
       items: readonly ContextMenuItem<T>[],
       position?: { x: number; y: number },
     ) => Promise<T | null>;
+  };
+  skills: {
+    list: () => Promise<SkillsListResult>;
+    toggle: (input: SkillsToggleInput) => Promise<SkillsToggleResult>;
+    search: (input: SkillsSearchInput) => Promise<SkillsSearchResult>;
+    install: (input: SkillsInstallInput) => Promise<SkillsInstallResult>;
+    uninstall: (input: SkillsUninstallInput) => Promise<SkillsUninstallResult>;
+    readContent: (input: SkillsReadContentInput) => Promise<SkillsReadContentResult>;
+  };
+  mcp: {
+    list: () => Promise<McpListResult>;
+    add: (input: McpAddInput) => Promise<McpAddResult>;
+    remove: (input: McpRemoveInput) => Promise<McpRemoveResult>;
+    toggle: (input: McpToggleInput) => Promise<McpToggleResult>;
+    update: (input: McpUpdateInput) => Promise<McpUpdateResult>;
+    browse: () => Promise<McpBrowseResult>;
   };
   server: {
     getConfig: () => Promise<ServerConfig>;

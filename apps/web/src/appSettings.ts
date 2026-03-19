@@ -1,8 +1,7 @@
-import { useCallback } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { Option, Schema } from "effect";
 import { TrimmedNonEmptyString, type ProviderKind } from "@t3tools/contracts";
 import { getDefaultModel, getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
-import { useLocalStorage } from "./hooks/useLocalStorage";
 
 const APP_SETTINGS_STORAGE_KEY = "t3code:app-settings:v1";
 const MAX_CUSTOM_MODEL_COUNT = 32;
@@ -12,6 +11,7 @@ export type TimestampFormat = (typeof TIMESTAMP_FORMAT_OPTIONS)[number];
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
 const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>> = {
   codex: new Set(getModelOptions("codex").map((option) => option.slug)),
+  copilot: new Set(getModelOptions("copilot").map((option) => option.slug)),
 };
 
 const AppSettingsSchema = Schema.Struct({
@@ -19,6 +19,12 @@ const AppSettingsSchema = Schema.Struct({
     Schema.withConstructorDefault(() => Option.some("")),
   ),
   codexHomePath: Schema.String.check(Schema.isMaxLength(4096)).pipe(
+    Schema.withConstructorDefault(() => Option.some("")),
+  ),
+  copilotCliPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(
+    Schema.withConstructorDefault(() => Option.some("")),
+  ),
+  copilotConfigDir: Schema.String.check(Schema.isMaxLength(4096)).pipe(
     Schema.withConstructorDefault(() => Option.some("")),
   ),
   defaultThreadEnvMode: Schema.Literals(["local", "worktree"]).pipe(
@@ -34,6 +40,9 @@ const AppSettingsSchema = Schema.Struct({
   customCodexModels: Schema.Array(Schema.String).pipe(
     Schema.withConstructorDefault(() => Option.some([])),
   ),
+  customCopilotModels: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(() => Option.some([])),
+  ),
   textGenerationModel: Schema.optional(TrimmedNonEmptyString),
 });
 export type AppSettings = typeof AppSettingsSchema.Type;
@@ -43,15 +52,27 @@ export interface AppModelOption {
   isCustom: boolean;
 }
 
+export interface BuiltInAppModelOption {
+  slug: string;
+  name: string;
+}
 const DEFAULT_APP_SETTINGS = AppSettingsSchema.makeUnsafe({});
+
+let listeners: Array<() => void> = [];
+let cachedRawSettings: string | null | undefined;
+let cachedSnapshot: AppSettings = DEFAULT_APP_SETTINGS;
 
 export function normalizeCustomModelSlugs(
   models: Iterable<string | null | undefined>,
   provider: ProviderKind = "codex",
+  builtInOptions?: readonly BuiltInAppModelOption[],
 ): string[] {
   const normalizedModels: string[] = [];
   const seen = new Set<string>();
-  const builtInModelSlugs = BUILT_IN_MODEL_SLUGS_BY_PROVIDER[provider];
+  const builtInModelSlugs =
+    builtInOptions !== undefined
+      ? new Set(builtInOptions.map((option) => option.slug))
+      : BUILT_IN_MODEL_SLUGS_BY_PROVIDER[provider];
 
   for (const candidate of models) {
     const normalized = normalizeModelSlug(candidate, provider);
@@ -74,19 +95,29 @@ export function normalizeCustomModelSlugs(
   return normalizedModels;
 }
 
+function normalizeAppSettings(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    customCodexModels: normalizeCustomModelSlugs(settings.customCodexModels, "codex"),
+    customCopilotModels: normalizeCustomModelSlugs(settings.customCopilotModels, "copilot"),
+  };
+}
+
 export function getAppModelOptions(
   provider: ProviderKind,
   customModels: readonly string[],
   selectedModel?: string | null,
+  builtInOptions?: readonly BuiltInAppModelOption[],
 ): AppModelOption[] {
-  const options: AppModelOption[] = getModelOptions(provider).map(({ slug, name }) => ({
+  const resolvedBuiltInOptions = builtInOptions ?? getModelOptions(provider);
+  const options: AppModelOption[] = resolvedBuiltInOptions.map(({ slug, name }) => ({
     slug,
     name,
     isCustom: false,
   }));
   const seen = new Set(options.map((option) => option.slug));
 
-  for (const slug of normalizeCustomModelSlugs(customModels, provider)) {
+  for (const slug of normalizeCustomModelSlugs(customModels, provider, resolvedBuiltInOptions)) {
     if (seen.has(slug)) {
       continue;
     }
@@ -115,8 +146,9 @@ export function resolveAppModelSelection(
   provider: ProviderKind,
   customModels: readonly string[],
   selectedModel: string | null | undefined,
+  builtInOptions?: readonly BuiltInAppModelOption[],
 ): string {
-  const options = getAppModelOptions(provider, customModels, selectedModel);
+  const options = getAppModelOptions(provider, customModels, selectedModel, builtInOptions);
   const trimmedSelectedModel = selectedModel?.trim();
   if (trimmedSelectedModel) {
     const direct = options.find((option) => option.slug === trimmedSelectedModel);
@@ -134,35 +166,123 @@ export function resolveAppModelSelection(
 
   const normalizedSelectedModel = normalizeModelSlug(selectedModel, provider);
   if (!normalizedSelectedModel) {
-    return getDefaultModel(provider);
+    return builtInOptions?.[0]?.slug ?? getDefaultModel(provider);
   }
 
   return (
     options.find((option) => option.slug === normalizedSelectedModel)?.slug ??
+    builtInOptions?.[0]?.slug ??
     getDefaultModel(provider)
   );
 }
 
+export function getSlashModelOptions(
+  provider: ProviderKind,
+  customModels: readonly string[],
+  query: string,
+  selectedModel?: string | null,
+  builtInOptions?: readonly BuiltInAppModelOption[],
+): AppModelOption[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  const options = getAppModelOptions(provider, customModels, selectedModel, builtInOptions);
+  if (!normalizedQuery) {
+    return options;
+  }
+
+  return options.filter((option) => {
+    const searchSlug = option.slug.toLowerCase();
+    const searchName = option.name.toLowerCase();
+    return searchSlug.includes(normalizedQuery) || searchName.includes(normalizedQuery);
+  });
+}
+
+function emitChange(): void {
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+function parsePersistedSettings(value: string | null): AppSettings {
+  if (!value) {
+    return DEFAULT_APP_SETTINGS;
+  }
+
+  try {
+    return normalizeAppSettings(Schema.decodeSync(Schema.fromJsonString(AppSettingsSchema))(value));
+  } catch {
+    return DEFAULT_APP_SETTINGS;
+  }
+}
+
+export function getAppSettingsSnapshot(): AppSettings {
+  if (typeof window === "undefined") {
+    return DEFAULT_APP_SETTINGS;
+  }
+
+  const raw = window.localStorage.getItem(APP_SETTINGS_STORAGE_KEY);
+  if (raw === cachedRawSettings) {
+    return cachedSnapshot;
+  }
+
+  cachedRawSettings = raw;
+  cachedSnapshot = parsePersistedSettings(raw);
+  return cachedSnapshot;
+}
+
+function persistSettings(next: AppSettings): void {
+  if (typeof window === "undefined") return;
+
+  const raw = JSON.stringify(next);
+  try {
+    if (raw !== cachedRawSettings) {
+      window.localStorage.setItem(APP_SETTINGS_STORAGE_KEY, raw);
+    }
+  } catch {
+    // Best-effort persistence only.
+  }
+
+  cachedRawSettings = raw;
+  cachedSnapshot = next;
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.push(listener);
+
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === APP_SETTINGS_STORAGE_KEY) {
+      emitChange();
+    }
+  };
+
+  window.addEventListener("storage", onStorage);
+  return () => {
+    listeners = listeners.filter((entry) => entry !== listener);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
 export function useAppSettings() {
-  const [settings, setSettings] = useLocalStorage(
-    APP_SETTINGS_STORAGE_KEY,
-    DEFAULT_APP_SETTINGS,
-    AppSettingsSchema,
+  const settings = useSyncExternalStore(
+    subscribe,
+    getAppSettingsSnapshot,
+    () => DEFAULT_APP_SETTINGS,
   );
 
-  const updateSettings = useCallback(
-    (patch: Partial<AppSettings>) => {
-      setSettings((prev) => ({
-        ...prev,
+  const updateSettings = useCallback((patch: Partial<AppSettings>) => {
+    const next = normalizeAppSettings(
+      Schema.decodeSync(AppSettingsSchema)({
+        ...getAppSettingsSnapshot(),
         ...patch,
-      }));
-    },
-    [setSettings],
-  );
+      }),
+    );
+    persistSettings(next);
+    emitChange();
+  }, []);
 
   const resetSettings = useCallback(() => {
-    setSettings(DEFAULT_APP_SETTINGS);
-  }, [setSettings]);
+    persistSettings(DEFAULT_APP_SETTINGS);
+    emitChange();
+  }, []);
 
   return {
     settings,

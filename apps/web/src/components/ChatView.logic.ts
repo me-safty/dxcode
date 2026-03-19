@@ -1,14 +1,22 @@
-import { ProjectId, type ProviderKind, type ThreadId } from "@t3tools/contracts";
-import { type ChatMessage, type Thread } from "../types";
-import { randomUUID } from "~/lib/utils";
-import { getAppModelOptions } from "../appSettings";
-import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
+import {
+  ProjectId,
+  type OrchestrationThreadActivity,
+  type ProviderKind,
+  type ThreadId,
+} from "@t3tools/contracts";
+import { getModelOptions } from "@t3tools/shared/model";
 import { Schema } from "effect";
+
+import { getAppModelOptions, type BuiltInAppModelOption } from "../appSettings";
+import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import {
   filterTerminalContextsWithText,
   stripInlineTerminalContextPlaceholders,
   type TerminalContextDraft,
 } from "../lib/terminalContext";
+import { deriveWorkLogEntries, type WorkLogEntry } from "../session-logic";
+import { type ChatMessage, type Thread } from "../types";
+import { randomUUID } from "~/lib/utils";
 
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
 const WORKTREE_BRANCH_PREFIX = "t3code";
@@ -100,7 +108,6 @@ export function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 export function buildTemporaryWorktreeBranchName(): string {
-  // Keep the 8-hex suffix shape for backend temporary-branch detection.
   const token = randomUUID().slice(0, 8).toLowerCase();
   return `${WORKTREE_BRANCH_PREFIX}/${token}`;
 }
@@ -123,10 +130,59 @@ export function cloneComposerImageForRetry(
 
 export function getCustomModelOptionsByProvider(settings: {
   customCodexModels: readonly string[];
+  customCopilotModels?: readonly string[];
+  builtInCopilotOptions?: ReadonlyArray<BuiltInAppModelOption>;
 }): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
   return {
     codex: getAppModelOptions("codex", settings.customCodexModels),
+    copilot: getAppModelOptions(
+      "copilot",
+      settings.customCopilotModels ?? [],
+      undefined,
+      settings.builtInCopilotOptions,
+    ),
   };
+}
+
+export function orderCopilotBuiltInModelOptions(
+  runtimeOptions: ReadonlyArray<BuiltInAppModelOption>,
+  preferredOptions: ReadonlyArray<BuiltInAppModelOption> = getModelOptions("copilot"),
+): ReadonlyArray<BuiltInAppModelOption> {
+  const preferredIndexBySlug = new Map(
+    preferredOptions.map((option, index) => [option.slug, index] as const),
+  );
+
+  return runtimeOptions
+    .map((option, runtimeIndex) => ({ option, runtimeIndex }))
+    .toSorted((left, right) => {
+      const leftPreferredIndex = preferredIndexBySlug.get(left.option.slug);
+      const rightPreferredIndex = preferredIndexBySlug.get(right.option.slug);
+
+      if (leftPreferredIndex !== undefined && rightPreferredIndex !== undefined) {
+        return leftPreferredIndex - rightPreferredIndex;
+      }
+      if (leftPreferredIndex !== undefined) {
+        return -1;
+      }
+      if (rightPreferredIndex !== undefined) {
+        return 1;
+      }
+      return left.runtimeIndex - right.runtimeIndex;
+    })
+    .map(({ option }) => option);
+}
+
+export function resolveProviderHealthBannerProvider(input: {
+  sessionProvider: ProviderKind | null;
+  selectedProvider: ProviderKind;
+}): ProviderKind {
+  return input.sessionProvider ?? input.selectedProvider;
+}
+
+export function deriveVisibleThreadWorkLogEntries(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): WorkLogEntry[] {
+  return deriveWorkLogEntries(activities, undefined);
 }
 
 export function deriveComposerSendState(options: {

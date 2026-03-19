@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/contracts",
-  "version": "0.0.10",
+  "version": "0.1.25",
   "private": true,
   "files": [
     "dist"
@@ -19,7 +19,7 @@
   "scripts": {
     "dev": "tsdown src/index.ts --format esm,cjs --dts --watch --clean",
     "build": "tsdown src/index.ts --format esm,cjs --dts --clean",
-    "prepare": "effect-language-service patch",
+    "prepare": "node ../../scripts/run-effect-language-service-patch.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

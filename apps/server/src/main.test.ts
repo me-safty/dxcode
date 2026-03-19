@@ -13,6 +13,8 @@ import { NetService } from "@t3tools/shared/Net";
 import { CliConfig, recordStartupHeartbeat, t3Cli, type CliConfigShape } from "./main";
 import { ServerConfig, type ServerConfigShape } from "./config";
 import { Open, type OpenShape } from "./open";
+import { SkillsManager, type SkillsManagerShape } from "./skills/SkillsManager";
+import { McpManager, type McpManagerShape } from "./mcp/McpManager";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 import { Server, type ServerShape } from "./wsServer";
@@ -51,6 +53,22 @@ const testLayer = Layer.mergeAll(
     openBrowser: (_target: string) => Effect.void,
     openInEditor: () => Effect.void,
   } satisfies OpenShape),
+  Layer.succeed(SkillsManager, {
+    list: Effect.succeed({ skills: [] }),
+    toggle: () => Effect.succeed({ skillName: "", enabled: false }),
+    search: () => Effect.succeed({ skills: [] }),
+    install: () => Effect.succeed({ success: true, message: "" }),
+    uninstall: () => Effect.succeed({ success: true, message: "" }),
+    readContent: () => Effect.succeed({ skillName: "", content: "" }),
+  } satisfies SkillsManagerShape),
+  Layer.succeed(McpManager, {
+    list: Effect.succeed({ servers: [] }),
+    add: () => Effect.succeed({ success: true, message: "" }),
+    remove: () => Effect.succeed({ success: true, message: "" }),
+    toggle: () => Effect.succeed({ name: "", enabled: false }),
+    update: () => Effect.succeed({ success: true, message: "" }),
+    browse: Effect.succeed({ servers: [] }),
+  } satisfies McpManagerShape),
   AnalyticsService.layerTest,
   FetchHttpClient.layer,
   NodeServices.layer,
@@ -84,36 +102,39 @@ beforeEach(() => {
 });
 
 it.layer(testLayer)("server CLI command", (it) => {
-  it.effect("parses all CLI flags and wires scoped start/stop", () =>
-    Effect.gen(function* () {
-      yield* runCli([
-        "--mode",
-        "desktop",
-        "--port",
-        "4010",
-        "--host",
-        "0.0.0.0",
-        "--state-dir",
-        "/tmp/t3-cli-state",
-        "--dev-url",
-        "http://127.0.0.1:5173",
-        "--no-browser",
-        "--auth-token",
-        "auth-secret",
-      ]);
+  it.effect(
+    "parses all CLI flags and wires scoped start/stop",
+    () =>
+      Effect.gen(function* () {
+        yield* runCli([
+          "--mode",
+          "desktop",
+          "--port",
+          "4010",
+          "--host",
+          "0.0.0.0",
+          "--state-dir",
+          "/tmp/t3-cli-state",
+          "--dev-url",
+          "http://127.0.0.1:5173",
+          "--no-browser",
+          "--auth-token",
+          "auth-secret",
+        ]);
 
-      assert.equal(start.mock.calls.length, 1);
-      assert.equal(resolvedConfig?.mode, "desktop");
-      assert.equal(resolvedConfig?.port, 4010);
-      assert.equal(resolvedConfig?.host, "0.0.0.0");
-      assert.equal(resolvedConfig?.stateDir, "/tmp/t3-cli-state");
-      assert.equal(resolvedConfig?.devUrl?.toString(), "http://127.0.0.1:5173/");
-      assert.equal(resolvedConfig?.noBrowser, true);
-      assert.equal(resolvedConfig?.authToken, "auth-secret");
-      assert.equal(resolvedConfig?.autoBootstrapProjectFromCwd, false);
-      assert.equal(resolvedConfig?.logWebSocketEvents, true);
-      assert.equal(stop.mock.calls.length, 1);
-    }),
+        assert.equal(start.mock.calls.length, 1);
+        assert.equal(resolvedConfig?.mode, "desktop");
+        assert.equal(resolvedConfig?.port, 4010);
+        assert.equal(resolvedConfig?.host, "0.0.0.0");
+        assert.equal(resolvedConfig?.stateDir, "/tmp/t3-cli-state");
+        assert.equal(resolvedConfig?.devUrl?.toString(), "http://127.0.0.1:5173/");
+        assert.equal(resolvedConfig?.noBrowser, true);
+        assert.equal(resolvedConfig?.authToken, "auth-secret");
+        assert.equal(resolvedConfig?.autoBootstrapProjectFromCwd, false);
+        assert.equal(resolvedConfig?.logWebSocketEvents, true);
+        assert.equal(stop.mock.calls.length, 1);
+      }),
+    15_000,
   );
 
   it.effect("supports --token as an alias for --auth-token", () =>

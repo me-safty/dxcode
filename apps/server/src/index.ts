@@ -5,6 +5,8 @@ import * as Layer from "effect/Layer";
 
 import { CliConfig, t3Cli } from "./main";
 import { OpenLive } from "./open";
+import { SkillsManagerLive } from "./skills/SkillsManager";
+import { McpManagerLive } from "./mcp/McpManager";
 import { Command } from "effect/unstable/cli";
 import { version } from "../package.json" with { type: "json" };
 import { ServerLive } from "./wsServer";
@@ -15,6 +17,8 @@ const RuntimeLayer = Layer.empty.pipe(
   Layer.provideMerge(CliConfig.layer),
   Layer.provideMerge(ServerLive),
   Layer.provideMerge(OpenLive),
+  Layer.provideMerge(SkillsManagerLive),
+  Layer.provideMerge(McpManagerLive),
   Layer.provideMerge(NetService.layer),
   Layer.provideMerge(NodeServices.layer),
   Layer.provideMerge(FetchHttpClient.layer),

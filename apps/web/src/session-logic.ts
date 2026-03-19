@@ -27,6 +27,7 @@ export const PROVIDER_OPTIONS: Array<{
   available: boolean;
 }> = [
   { value: "codex", label: "Codex", available: true },
+  { value: "copilot", label: "GitHub Copilot", available: true },
   { value: "claudeCode", label: "Claude Code", available: false },
   { value: "cursor", label: "Cursor", available: false },
 ];
@@ -36,10 +37,14 @@ export interface WorkLogEntry {
   createdAt: string;
   label: string;
   detail?: string;
+  output?: string;
   command?: string;
+  exitCode?: number;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
+  activityKind: OrchestrationThreadActivity["kind"];
   toolTitle?: string;
+  toolStatus?: "inProgress" | "completed" | "failed" | "declined";
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
 }
@@ -419,10 +424,14 @@ export function hasActionableProposedPlan(
 export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
+  sinceCreatedAt?: string,
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   return ordered
-    .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
+    .filter((activity) =>
+      latestTurnId ? activity.turnId === latestTurnId || activity.turnId === null : true,
+    )
+    .filter((activity) => (sinceCreatedAt ? activity.createdAt >= sinceCreatedAt : true))
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
     .filter((activity) => activity.summary !== "Checkpoint captured")
@@ -434,11 +443,14 @@ export function deriveWorkLogEntries(
       const command = extractToolCommand(payload);
       const changedFiles = extractChangedFiles(payload);
       const title = extractToolTitle(payload);
+      const status = extractToolStatus(payload);
+      const { output, exitCode } = extractToolOutputEnvelope(payload);
       const entry: WorkLogEntry = {
         id: activity.id,
         createdAt: activity.createdAt,
         label: activity.summary,
         tone: activity.tone === "approval" ? "info" : activity.tone,
+        activityKind: activity.kind,
       };
       const itemType = extractWorkLogItemType(payload);
       const requestKind = extractWorkLogRequestKind(payload);
@@ -451,11 +463,20 @@ export function deriveWorkLogEntries(
       if (command) {
         entry.command = command;
       }
+      if (output) {
+        entry.output = output;
+      }
+      if (exitCode !== undefined) {
+        entry.exitCode = exitCode;
+      }
       if (changedFiles.length > 0) {
         entry.changedFiles = changedFiles;
       }
       if (title) {
         entry.toolTitle = title;
+      }
+      if (status) {
+        entry.toolStatus = status;
       }
       if (itemType) {
         entry.itemType = itemType;
@@ -511,6 +532,42 @@ function extractToolTitle(payload: Record<string, unknown> | null): string | nul
   return asTrimmedString(payload?.title);
 }
 
+function extractToolStatus(
+  payload: Record<string, unknown> | null,
+): WorkLogEntry["toolStatus"] | undefined {
+  switch (payload?.status) {
+    case "in_progress":
+      return "inProgress";
+    case "inProgress":
+    case "completed":
+    case "failed":
+    case "declined":
+      return payload.status;
+    default:
+      return undefined;
+  }
+}
+
+function asInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+function extractToolExitCode(payload: Record<string, unknown> | null): number | null {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const itemResult = asRecord(item?.result);
+  const dataResult = asRecord(data?.result);
+  const candidates = [
+    asInteger(itemResult?.exitCode),
+    asInteger(itemResult?.exit_code),
+    asInteger(dataResult?.exitCode),
+    asInteger(dataResult?.exit_code),
+    asInteger(data?.exitCode),
+    asInteger(data?.exit_code),
+  ];
+  return candidates.find((candidate) => candidate !== null) ?? null;
+}
+
 function stripTrailingExitCode(value: string): {
   output: string | null;
   exitCode?: number | undefined;
@@ -529,6 +586,35 @@ function stripTrailingExitCode(value: string): {
   return {
     output: normalizedOutput.length > 0 ? normalizedOutput : null,
     ...(Number.isInteger(exitCode) ? { exitCode } : {}),
+  };
+}
+
+function extractToolOutputEnvelope(payload: Record<string, unknown> | null): {
+  output?: string | undefined;
+  exitCode?: number | undefined;
+} {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const itemResult = asRecord(item?.result);
+  const dataResult = asRecord(data?.result);
+  const outputCandidates = [
+    asTrimmedString(itemResult?.content),
+    asTrimmedString(dataResult?.content),
+    asTrimmedString(data?.output),
+    asTrimmedString(data?.stdout),
+    asTrimmedString(data?.stderr),
+    asTrimmedString(payload?.detail),
+  ];
+  const rawOutput = outputCandidates.find((candidate) => candidate !== null) ?? null;
+  if (!rawOutput) {
+    const exitCode = extractToolExitCode(payload);
+    return exitCode === null ? {} : { exitCode };
+  }
+  const normalizedOutput = stripTrailingExitCode(rawOutput);
+  const exitCode = extractToolExitCode(payload) ?? normalizedOutput.exitCode;
+  return {
+    ...(normalizedOutput.output ? { output: normalizedOutput.output } : {}),
+    ...(exitCode !== undefined ? { exitCode } : {}),
   };
 }
 
@@ -641,6 +727,16 @@ export function hasToolActivityForTurn(
 ): boolean {
   if (!turnId) return false;
   return activities.some((activity) => activity.turnId === turnId && activity.tone === "tool");
+}
+
+export function hasToolActivitySince(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  sinceCreatedAt: string | undefined,
+): boolean {
+  return activities.some(
+    (activity) =>
+      activity.tone === "tool" && (sinceCreatedAt ? activity.createdAt >= sinceCreatedAt : true),
+  );
 }
 
 export function deriveTimelineEntries(

@@ -1,8 +1,8 @@
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
-export type ComposerTriggerKind = "path" | "slash-command" | "slash-model";
-export type ComposerSlashCommand = "model" | "plan" | "default";
+export type ComposerTriggerKind = "path" | "slash-command" | "slash-model" | "slash-skill";
+export type ComposerSlashCommand = "model" | "plan" | "default" | "skills";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -11,10 +11,15 @@ export interface ComposerTrigger {
   rangeEnd: number;
 }
 
-const SLASH_COMMANDS: readonly ComposerSlashCommand[] = ["model", "plan", "default"];
-const isInlineTokenSegment = (
-  segment: { type: "text"; text: string } | { type: "mention" } | { type: "terminal-context" },
-): boolean => segment.type !== "text";
+type ComposerInlineSegment =
+  | { type: "text"; text: string }
+  | { type: "mention"; path: string }
+  | { type: "skill"; name: string }
+  | { type: "terminal-context" };
+
+const SLASH_COMMANDS: readonly ComposerSlashCommand[] = ["model", "plan", "default", "skills"];
+
+const isInlineTokenSegment = (segment: ComposerInlineSegment): boolean => segment.type !== "text";
 
 function clampCursor(text: string, cursor: number): number {
   if (!Number.isFinite(cursor)) return text.length;
@@ -39,6 +44,15 @@ function tokenStartForCursor(text: string, cursor: number): number {
   return index + 1;
 }
 
+function isCursorInsideActiveTrailingInlineQuery(text: string, cursor: number): boolean {
+  if (cursor !== text.length || cursor === 0) {
+    return false;
+  }
+  const tokenStart = tokenStartForCursor(text, cursor);
+  const token = text.slice(tokenStart, cursor);
+  return token.startsWith("@") || token.startsWith("$");
+}
+
 export function expandCollapsedComposerCursor(text: string, cursorInput: number): number {
   const collapsedCursor = clampCursor(text, cursorInput);
   const segments = splitPromptIntoComposerSegments(text);
@@ -52,6 +66,15 @@ export function expandCollapsedComposerCursor(text: string, cursorInput: number)
   for (const segment of segments) {
     if (segment.type === "mention") {
       const expandedLength = segment.path.length + 1;
+      if (remaining <= 1) {
+        return expandedCursor + (remaining === 0 ? 0 : expandedLength);
+      }
+      remaining -= 1;
+      expandedCursor += expandedLength;
+      continue;
+    }
+    if (segment.type === "skill") {
+      const expandedLength = segment.name.length + 1;
       if (remaining <= 1) {
         return expandedCursor + (remaining === 0 ? 0 : expandedLength);
       }
@@ -79,19 +102,12 @@ export function expandCollapsedComposerCursor(text: string, cursorInput: number)
   return expandedCursor;
 }
 
-function collapsedSegmentLength(
-  segment: { type: "text"; text: string } | { type: "mention" } | { type: "terminal-context" },
-): number {
-  if (segment.type === "text") {
-    return segment.text.length;
-  }
-  return 1;
+function collapsedSegmentLength(segment: ComposerInlineSegment): number {
+  return segment.type === "text" ? segment.text.length : 1;
 }
 
 function clampCollapsedComposerCursorForSegments(
-  segments: ReadonlyArray<
-    { type: "text"; text: string } | { type: "mention" } | { type: "terminal-context" }
-  >,
+  segments: ReadonlyArray<ComposerInlineSegment>,
   cursorInput: number,
 ): number {
   const collapsedLength = segments.reduce(
@@ -134,6 +150,18 @@ export function collapseExpandedComposerCursor(text: string, cursorInput: number
       collapsedCursor += 1;
       continue;
     }
+    if (segment.type === "skill") {
+      const expandedLength = segment.name.length + 1;
+      if (remaining === 0) {
+        return collapsedCursor;
+      }
+      if (remaining <= expandedLength) {
+        return collapsedCursor + 1;
+      }
+      remaining -= expandedLength;
+      collapsedCursor += 1;
+      continue;
+    }
     if (segment.type === "terminal-context") {
       if (remaining <= 1) {
         return collapsedCursor + remaining;
@@ -159,15 +187,24 @@ export function isCollapsedCursorAdjacentToInlineToken(
   cursorInput: number,
   direction: "left" | "right",
 ): boolean {
+  const rawCursor = clampCursor(text, cursorInput);
+  if (isCursorInsideActiveTrailingInlineQuery(text, rawCursor)) {
+    return false;
+  }
+
+  const collapsedCursor = clampCollapsedComposerCursor(text, cursorInput);
   const segments = splitPromptIntoComposerSegments(text);
   if (!segments.some(isInlineTokenSegment)) {
     return false;
   }
 
-  const cursor = clampCollapsedComposerCursorForSegments(segments, cursorInput);
+  const cursor = clampCollapsedComposerCursorForSegments(
+    segments as ReadonlyArray<ComposerInlineSegment>,
+    collapsedCursor,
+  );
   let collapsedOffset = 0;
 
-  for (const segment of segments) {
+  for (const segment of segments as ReadonlyArray<ComposerInlineSegment>) {
     if (isInlineTokenSegment(segment)) {
       if (direction === "left" && cursor === collapsedOffset + 1) {
         return true;
@@ -201,6 +238,14 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
           rangeEnd: cursor,
         };
       }
+      if (commandQuery.toLowerCase() === "skills") {
+        return {
+          kind: "slash-skill",
+          query: "",
+          rangeStart: lineStart,
+          rangeEnd: cursor,
+        };
+      }
       if (SLASH_COMMANDS.some((command) => command.startsWith(commandQuery.toLowerCase()))) {
         return {
           kind: "slash-command",
@@ -221,25 +266,44 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
         rangeEnd: cursor,
       };
     }
+
+    const skillsMatch = /^\/skills(?:\s+(.*))?$/.exec(linePrefix);
+    if (skillsMatch) {
+      return {
+        kind: "slash-skill",
+        query: (skillsMatch[1] ?? "").trim(),
+        rangeStart: lineStart,
+        rangeEnd: cursor,
+      };
+    }
   }
 
   const tokenStart = tokenStartForCursor(text, cursor);
   const token = text.slice(tokenStart, cursor);
-  if (!token.startsWith("@")) {
-    return null;
+  if (token.startsWith("@")) {
+    return {
+      kind: "path",
+      query: token.slice(1),
+      rangeStart: tokenStart,
+      rangeEnd: cursor,
+    };
   }
 
-  return {
-    kind: "path",
-    query: token.slice(1),
-    rangeStart: tokenStart,
-    rangeEnd: cursor,
-  };
+  if (token.startsWith("/") && tokenStart > lineStart) {
+    return {
+      kind: "slash-skill",
+      query: token.slice(1),
+      rangeStart: tokenStart,
+      rangeEnd: cursor,
+    };
+  }
+
+  return null;
 }
 
 export function parseStandaloneComposerSlashCommand(
   text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
+): Exclude<ComposerSlashCommand, "model" | "skills"> | null {
   const match = /^\/(plan|default)\s*$/i.exec(text.trim());
   if (!match) {
     return null;

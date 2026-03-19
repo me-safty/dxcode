@@ -5,7 +5,7 @@ import {
   EventId,
   type OrchestrationEvent,
   type ProviderModelOptions,
-  type ProviderKind,
+  ProviderKind,
   type ProviderStartOptions,
   type OrchestrationSession,
   ThreadId,
@@ -206,8 +206,10 @@ const make = Effect.gen(function* () {
     }
 
     const desiredRuntimeMode = thread.runtimeMode;
-    const currentProvider: ProviderKind | undefined =
-      thread.session?.providerName === "codex" ? thread.session.providerName : undefined;
+    const currentProvider =
+      thread.session?.providerName && Schema.is(ProviderKind)(thread.session.providerName)
+        ? thread.session.providerName
+        : undefined;
     const preferredProvider: ProviderKind | undefined = options?.provider ?? currentProvider;
     const desiredModel = options?.model ?? thread.model;
     const effectiveCwd = resolveThreadWorkspaceCwd({

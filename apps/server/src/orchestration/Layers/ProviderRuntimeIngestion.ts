@@ -2,6 +2,7 @@ import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
   CommandId,
+  type ItemLifecyclePayload,
   MessageId,
   type OrchestrationEvent,
   type OrchestrationProposedPlanId,
@@ -80,6 +81,16 @@ function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string
     return undefined;
   }
   return trimmed;
+}
+
+function toolLifecycleActivityPayload(payload: ItemLifecyclePayload) {
+  return {
+    itemType: payload.itemType,
+    ...(payload.title ? { title: payload.title } : {}),
+    ...(payload.status ? { status: payload.status } : {}),
+    ...(payload.detail ? { detail: truncateDetail(payload.detail) } : {}),
+    ...(payload.data !== undefined ? { data: payload.data } : {}),
+  };
 }
 
 function proposedPlanIdForTurn(threadId: ThreadId, turnId: TurnId): string {
@@ -419,12 +430,7 @@ function runtimeEventToActivities(
           tone: "tool",
           kind: "tool.updated",
           summary: event.payload.title ?? "Tool updated",
-          payload: {
-            itemType: event.payload.itemType,
-            ...(event.payload.status ? { status: event.payload.status } : {}),
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
-          },
+          payload: toolLifecycleActivityPayload(event.payload),
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
         },
@@ -442,10 +448,7 @@ function runtimeEventToActivities(
           tone: "tool",
           kind: "tool.completed",
           summary: event.payload.title ?? "Tool",
-          payload: {
-            itemType: event.payload.itemType,
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-          },
+          payload: toolLifecycleActivityPayload(event.payload),
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
         },
@@ -463,10 +466,7 @@ function runtimeEventToActivities(
           tone: "tool",
           kind: "tool.started",
           summary: `${event.payload.title ?? "Tool"} started`,
-          payload: {
-            itemType: event.payload.itemType,
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-          },
+          payload: toolLifecycleActivityPayload(event.payload),
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
         },
@@ -499,6 +499,12 @@ const make = Effect.gen(function* () {
     capacity: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_CACHE_CAPACITY,
     timeToLive: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL,
     lookup: () => Effect.succeed(""),
+  });
+
+  const assistantMessageSawDeltaByMessageId = yield* Cache.make<MessageId, boolean>({
+    capacity: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_CACHE_CAPACITY,
+    timeToLive: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL,
+    lookup: () => Effect.succeed(false),
   });
 
   const bufferedProposedPlanById = yield* Cache.make<string, { text: string; createdAt: string }>({
@@ -600,6 +606,18 @@ const make = Effect.gen(function* () {
   const clearBufferedAssistantText = (messageId: MessageId) =>
     Cache.invalidate(bufferedAssistantTextByMessageId, messageId);
 
+  const markAssistantMessageSawDelta = (messageId: MessageId) =>
+    Cache.set(assistantMessageSawDeltaByMessageId, messageId, true);
+
+  const takeAssistantMessageSawDelta = (messageId: MessageId) =>
+    Cache.getOption(assistantMessageSawDeltaByMessageId, messageId).pipe(
+      Effect.flatMap((existing) =>
+        Cache.invalidate(assistantMessageSawDeltaByMessageId, messageId).pipe(
+          Effect.as(Option.getOrElse(existing, () => false)),
+        ),
+      ),
+    );
+
   const appendBufferedProposedPlan = (planId: string, delta: string, createdAt: string) =>
     Cache.getOption(bufferedProposedPlanById, planId).pipe(
       Effect.flatMap((existingEntry) => {
@@ -625,7 +643,10 @@ const make = Effect.gen(function* () {
     Cache.invalidate(bufferedProposedPlanById, planId);
 
   const clearAssistantMessageState = (messageId: MessageId) =>
-    clearBufferedAssistantText(messageId);
+    Effect.all([
+      clearBufferedAssistantText(messageId),
+      Cache.invalidate(assistantMessageSawDeltaByMessageId, messageId),
+    ]).pipe(Effect.asVoid);
 
   const finalizeAssistantMessage = (input: {
     event: ProviderRuntimeEvent;
@@ -636,15 +657,31 @@ const make = Effect.gen(function* () {
     commandTag: string;
     finalDeltaCommandTag: string;
     fallbackText?: string;
+    existingMessage?: {
+      readonly id: MessageId;
+      readonly text: string;
+      readonly streaming: boolean;
+    };
   }) =>
     Effect.gen(function* () {
+      if (input.existingMessage && !input.existingMessage.streaming) {
+        yield* clearAssistantMessageState(input.messageId);
+        return;
+      }
+
       const bufferedText = yield* takeBufferedAssistantText(input.messageId);
+      const sawDelta = yield* takeAssistantMessageSawDelta(input.messageId);
       const text =
         bufferedText.length > 0
           ? bufferedText
-          : (input.fallbackText?.trim().length ?? 0) > 0
+          : !sawDelta && (input.fallbackText?.trim().length ?? 0) > 0
             ? input.fallbackText!
             : "";
+
+      if (text.length === 0 && !sawDelta && !input.existingMessage) {
+        yield* clearAssistantMessageState(input.messageId);
+        return;
+      }
 
       if (text.length > 0) {
         yield* orchestrationEngine.dispatch({
@@ -864,6 +901,9 @@ const make = Effect.gen(function* () {
       const now = event.createdAt;
       const eventTurnId = toTurnId(event.turnId);
       const activeTurnId = thread.session?.activeTurnId ?? null;
+      const existingAssistantMessageById = new Map(
+        thread.messages.map((message) => [message.id, message] as const),
+      );
 
       const conflictsWithActiveTurn =
         activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
@@ -882,6 +922,7 @@ const make = Effect.gen(function* () {
           case "turn.started":
             return !conflictsWithActiveTurn;
           case "turn.completed":
+          case "turn.aborted":
             if (conflictsWithActiveTurn || missingTurnForActiveTurn) {
               return false;
             }
@@ -906,12 +947,15 @@ const make = Effect.gen(function* () {
         event.type === "session.exited" ||
         event.type === "thread.started" ||
         event.type === "turn.started" ||
-        event.type === "turn.completed"
+        event.type === "turn.completed" ||
+        event.type === "turn.aborted"
       ) {
         const nextActiveTurnId =
           event.type === "turn.started"
             ? (eventTurnId ?? null)
-            : event.type === "turn.completed" || event.type === "session.exited"
+            : event.type === "turn.completed" ||
+                event.type === "turn.aborted" ||
+                event.type === "session.exited"
               ? null
               : activeTurnId;
         const status = (() => {
@@ -924,6 +968,8 @@ const make = Effect.gen(function* () {
               return "stopped";
             case "turn.completed":
               return runtimeTurnState(event) === "failed" ? "error" : "ready";
+            case "turn.aborted":
+              return "interrupted";
             case "session.started":
             case "thread.started":
               // Provider thread/session start notifications can arrive during an
@@ -936,7 +982,7 @@ const make = Effect.gen(function* () {
             ? (event.payload.reason ?? thread.session?.lastError ?? "Provider session error")
             : event.type === "turn.completed" && runtimeTurnState(event) === "failed"
               ? (runtimeTurnErrorMessage(event) ?? thread.session?.lastError ?? "Turn failed")
-              : status === "ready"
+              : status === "ready" || status === "interrupted"
                 ? null
                 : (thread.session?.lastError ?? null);
 
@@ -994,6 +1040,7 @@ const make = Effect.gen(function* () {
         if (turnId) {
           yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
         }
+        yield* markAssistantMessageSawDelta(assistantMessageId);
 
         const assistantDeliveryMode = yield* Ref.get(assistantDeliveryModeRef);
         if (assistantDeliveryMode === "buffered") {
@@ -1065,6 +1112,9 @@ const make = Effect.gen(function* () {
           createdAt: now,
           commandTag: "assistant-complete",
           finalDeltaCommandTag: "assistant-delta-finalize",
+          ...(existingAssistantMessageById.has(assistantMessageId)
+            ? { existingMessage: existingAssistantMessageById.get(assistantMessageId)! }
+            : {}),
           ...(assistantCompletion.fallbackText !== undefined && shouldApplyFallbackCompletionText
             ? { fallbackText: assistantCompletion.fallbackText }
             : {}),
@@ -1087,7 +1137,10 @@ const make = Effect.gen(function* () {
         });
       }
 
-      if (event.type === "turn.completed") {
+      if (
+        (event.type === "turn.completed" || event.type === "turn.aborted") &&
+        shouldApplyThreadLifecycle
+      ) {
         const turnId = toTurnId(event.turnId);
         if (turnId) {
           const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, turnId);
@@ -1102,6 +1155,9 @@ const make = Effect.gen(function* () {
                 createdAt: now,
                 commandTag: "assistant-complete-finalize",
                 finalDeltaCommandTag: "assistant-delta-finalize-fallback",
+                ...(existingAssistantMessageById.has(assistantMessageId)
+                  ? { existingMessage: existingAssistantMessageById.get(assistantMessageId)! }
+                  : {}),
               }),
             { concurrency: 1 },
           ).pipe(Effect.asVoid);

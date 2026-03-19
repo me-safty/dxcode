@@ -36,6 +36,14 @@ import {
 import { KeybindingRule } from "./keybindings";
 import { ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
 import { OpenInEditorInput } from "./editor";
+import {
+  SkillsToggleInput,
+  SkillsSearchInput,
+  SkillsInstallInput,
+  SkillsUninstallInput,
+  SkillsReadContentInput,
+} from "./skills";
+import { McpAddInput, McpRemoveInput, McpToggleInput, McpUpdateInput } from "./mcp";
 import { ServerConfigUpdatedPayload } from "./server";
 
 // ── WebSocket RPC Method Names ───────────────────────────────────────
@@ -71,6 +79,22 @@ export const WS_METHODS = {
   terminalClear: "terminal.clear",
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
+
+  // Skills methods
+  skillsList: "skills.list",
+  skillsToggle: "skills.toggle",
+  skillsSearch: "skills.search",
+  skillsInstall: "skills.install",
+  skillsUninstall: "skills.uninstall",
+  skillsReadContent: "skills.readContent",
+
+  // MCP methods
+  mcpList: "mcp.list",
+  mcpAdd: "mcp.add",
+  mcpRemove: "mcp.remove",
+  mcpToggle: "mcp.toggle",
+  mcpUpdate: "mcp.update",
+  mcpBrowse: "mcp.browse",
 
   // Server meta
   serverGetConfig: "server.getConfig",
@@ -135,6 +159,22 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.terminalClear, TerminalClearInput),
   tagRequestBody(WS_METHODS.terminalRestart, TerminalRestartInput),
   tagRequestBody(WS_METHODS.terminalClose, TerminalCloseInput),
+
+  // Skills methods
+  tagRequestBody(WS_METHODS.skillsList, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.skillsToggle, SkillsToggleInput),
+  tagRequestBody(WS_METHODS.skillsSearch, SkillsSearchInput),
+  tagRequestBody(WS_METHODS.skillsInstall, SkillsInstallInput),
+  tagRequestBody(WS_METHODS.skillsUninstall, SkillsUninstallInput),
+  tagRequestBody(WS_METHODS.skillsReadContent, SkillsReadContentInput),
+
+  // MCP methods
+  tagRequestBody(WS_METHODS.mcpList, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.mcpAdd, McpAddInput),
+  tagRequestBody(WS_METHODS.mcpRemove, McpRemoveInput),
+  tagRequestBody(WS_METHODS.mcpToggle, McpToggleInput),
+  tagRequestBody(WS_METHODS.mcpUpdate, McpUpdateInput),
+  tagRequestBody(WS_METHODS.mcpBrowse, Schema.Struct({})),
 
   // Server meta
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),

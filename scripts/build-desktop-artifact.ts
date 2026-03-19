@@ -10,6 +10,7 @@ import serverPackageJson from "../apps/server/package.json" with { type: "json" 
 
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
+import { DEFAULT_GITHUB_REPOSITORY, parseGitHubRepository } from "@t3tools/shared/githubRepository";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -164,17 +165,37 @@ interface ResolvedBuildOptions {
   readonly verbose: boolean;
 }
 
+function resolveBundledCopilotPlatformPackages(
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+): ReadonlyArray<string> {
+  if (platform === "mac") {
+    if (arch === "universal") {
+      return ["@github/copilot-darwin-arm64", "@github/copilot-darwin-x64"];
+    }
+    return [arch === "arm64" ? "@github/copilot-darwin-arm64" : "@github/copilot-darwin-x64"];
+  }
+
+  if (platform === "linux") {
+    return [arch === "arm64" ? "@github/copilot-linux-arm64" : "@github/copilot-linux-x64"];
+  }
+
+  return [arch === "arm64" ? "@github/copilot-win32-arm64" : "@github/copilot-win32-x64"];
+}
+
 interface StagePackageJson {
   readonly name: string;
   readonly version: string;
   readonly buildVersion: string;
   readonly t3codeCommitHash: string;
+  readonly packageManager?: string;
   readonly private: true;
   readonly description: string;
   readonly author: string;
   readonly main: string;
   readonly build: Record<string, unknown>;
   readonly dependencies: Record<string, unknown>;
+  readonly patchedDependencies?: Record<string, string>;
   readonly devDependencies: {
     readonly electron: string;
   };
@@ -425,19 +446,17 @@ function resolveGitHubPublishConfig():
       readonly releaseType: "release";
     }
   | undefined {
-  const rawRepo =
+  const repository = parseGitHubRepository(
     process.env.T3CODE_DESKTOP_UPDATE_REPOSITORY?.trim() ||
-    process.env.GITHUB_REPOSITORY?.trim() ||
-    "";
-  if (!rawRepo) return undefined;
-
-  const [owner, repo, ...rest] = rawRepo.split("/");
-  if (!owner || !repo || rest.length > 0) return undefined;
+      process.env.GITHUB_REPOSITORY?.trim() ||
+      DEFAULT_GITHUB_REPOSITORY,
+  );
+  if (!repository) return undefined;
 
   return {
     provider: "github",
-    owner,
-    repo,
+    owner: repository.owner,
+    repo: repository.repo,
     releaseType: "release",
   };
 }
@@ -452,6 +471,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     appId: "com.t3tools.t3code",
     productName,
     artifactName: "T3-Code-${version}-${arch}.${ext}",
+    asarUnpack: ["node_modules/@github/copilot*/**/*"],
     directories: {
       buildResources: "apps/desktop/resources",
     },
@@ -559,6 +579,18 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         cause,
       }),
   });
+  const bundledCopilotVersion = serverDependencies["@github/copilot"];
+  if (typeof bundledCopilotVersion !== "string" || bundledCopilotVersion.trim().length === 0) {
+    return yield* new BuildScriptError({
+      message: "Could not resolve bundled @github/copilot version from apps/server/package.json.",
+    });
+  }
+  const bundledCopilotPlatformDependencies = Object.fromEntries(
+    resolveBundledCopilotPlatformPackages(options.platform, options.arch).map((dependencyName) => [
+      dependencyName,
+      bundledCopilotVersion,
+    ]),
+  );
 
   const appVersion = options.version ?? serverPackageJson.version;
   const commitHash = resolveGitCommitHash(repoRoot);
@@ -617,11 +649,22 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   // electron-builder is filtering out stageResourcesDir directory in the AppImage for production
   yield* fs.copy(stageResourcesDir, path.join(stageAppDir, "apps/desktop/prod-resources"));
 
+  const rootPatchedDependencies = rootPackageJson.patchedDependencies;
+  if (rootPatchedDependencies) {
+    for (const relativePatchPath of Object.values(rootPatchedDependencies)) {
+      const sourcePatchPath = path.join(repoRoot, relativePatchPath);
+      const targetPatchPath = path.join(stageAppDir, relativePatchPath);
+      yield* fs.makeDirectory(path.dirname(targetPatchPath), { recursive: true });
+      yield* fs.copyFile(sourcePatchPath, targetPatchPath);
+    }
+  }
+
   const stagePackageJson: StagePackageJson = {
     name: "t3-code-desktop",
     version: appVersion,
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
+    packageManager: rootPackageJson.packageManager,
     private: true,
     description: "T3 Code desktop build",
     author: "T3 Tools",
@@ -634,8 +677,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     ),
     dependencies: {
       ...resolvedServerDependencies,
+      ...bundledCopilotPlatformDependencies,
       ...resolvedDesktopRuntimeDependencies,
     },
+    patchedDependencies: rootPatchedDependencies,
     devDependencies: {
       electron: electronVersion,
     },

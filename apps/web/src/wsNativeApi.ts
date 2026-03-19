@@ -157,6 +157,22 @@ export function createWsNativeApi(): NativeApi {
         return showContextMenuFallback(items, position);
       },
     },
+    skills: {
+      list: () => transport.request(WS_METHODS.skillsList),
+      toggle: (input) => transport.request(WS_METHODS.skillsToggle, input),
+      search: (input) => transport.request(WS_METHODS.skillsSearch, input),
+      install: (input) => transport.request(WS_METHODS.skillsInstall, input),
+      uninstall: (input) => transport.request(WS_METHODS.skillsUninstall, input),
+      readContent: (input) => transport.request(WS_METHODS.skillsReadContent, input),
+    },
+    mcp: {
+      list: () => transport.request(WS_METHODS.mcpList),
+      add: (input) => transport.request(WS_METHODS.mcpAdd, input),
+      remove: (input) => transport.request(WS_METHODS.mcpRemove, input),
+      toggle: (input) => transport.request(WS_METHODS.mcpToggle, input),
+      update: (input) => transport.request(WS_METHODS.mcpUpdate, input),
+      browse: () => transport.request(WS_METHODS.mcpBrowse),
+    },
     server: {
       getConfig: () => transport.request(WS_METHODS.serverGetConfig),
       upsertKeybinding: (input) => transport.request(WS_METHODS.serverUpsertKeybinding, input),
