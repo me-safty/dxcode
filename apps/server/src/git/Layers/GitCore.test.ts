@@ -1950,6 +1950,25 @@ it.layer(TestLayer)("git integration", (it) => {
         "-S",
       ]);
     });
+
+    it("handles double-quoted values", () => {
+      expect(tokenizeCommitFlags('--author="Foo Bar"')).toEqual(['--author="Foo Bar"']);
+    });
+
+    it("handles double-quoted values with space separation", () => {
+      expect(tokenizeCommitFlags('--author "Foo Bar"')).toEqual(["--author"]);
+    });
+
+    it("handles single-quoted values", () => {
+      expect(tokenizeCommitFlags("--author='Foo Bar'")).toEqual(["--author='Foo Bar'"]);
+    });
+
+    it("handles mixed quoted and unquoted flags", () => {
+      expect(tokenizeCommitFlags('--no-gpg-sign --cleanup="strip"')).toEqual([
+        "--no-gpg-sign",
+        '--cleanup="strip"',
+      ]);
+    });
   });
 
   describe("commit with extraArgs", () => {

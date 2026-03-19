@@ -113,10 +113,12 @@ function SettingsRouteView() {
   const gitCommitFlagsWarning = useMemo(() => {
     const trimmed = gitCommitFlags.trim();
     if (!trimmed) return null;
-    if (/["']/.test(trimmed)) {
-      return "Quoted arguments are not supported. Use = syntax instead (e.g. --cleanup=verbatim).";
+    const tokens: string[] = [];
+    const pattern = /(?:[^\s"']+(?:(?:"[^"]*"|'[^']*')[^\s"']*)*)|"[^"]*"|'[^']*'/g;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(trimmed)) !== null) {
+      tokens.push(match[0]);
     }
-    const tokens = trimmed.split(/\s+/);
     const invalidTokens = tokens.filter((t) => !t.startsWith("-"));
     if (invalidTokens.length > 0) {
       return `Non-flag tokens will be ignored: ${invalidTokens.join(", ")}`;
@@ -588,7 +590,7 @@ function SettingsRouteView() {
                   ) : (
                     <span className="text-xs text-muted-foreground">
                       Applied to app-run git commit commands only. Example:{" "}
-                      <code>--no-gpg-sign</code>. Quoted arguments are not supported yet.
+                      <code>--no-gpg-sign</code>. Supports quoted values.
                     </span>
                   )}
                 </label>

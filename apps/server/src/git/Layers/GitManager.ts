@@ -210,16 +210,22 @@ interface CommitAndBranchSuggestion {
 /**
  * Tokenize and sanitise user-provided extra flags for `git commit`.
  *
- * Each token must look like a CLI flag (start with `-`).  Tokens that don't
- * start with a dash are silently dropped so that a malformed value like
- * `--author "Foo"` (which the naive split turns into `["--author", "Foo"]`)
- * cannot inject a positional argument into the git invocation.
+ * Supports quoted values: `--author="Foo Bar"` or `--author "Foo Bar"`.
+ * Each resulting token must look like a CLI flag (start with `-`) to be
+ * included — bare positional arguments are silently dropped.
  */
 export function tokenizeCommitFlags(rawFlags?: string): string[] {
-  const tokens = (rawFlags ?? "")
-    .trim()
-    .split(/\s+/g)
-    .filter((value) => value.length > 0);
+  const input = (rawFlags ?? "").trim();
+  if (!input) return [];
+
+  // Matches: unquoted runs of non-whitespace that may contain quoted segments
+  // e.g. --author="Foo Bar", --flag='val ue', --simple, -S
+  const tokens: string[] = [];
+  const pattern = /(?:[^\s"']+(?:(?:"[^"]*"|'[^']*')[^\s"']*)*)|"[^"]*"|'[^']*'/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(input)) !== null) {
+    tokens.push(match[0]);
+  }
 
   return tokens.filter((token) => token.startsWith("-"));
 }
