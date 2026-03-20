@@ -1551,35 +1551,35 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           (input.runtimeMode === "full-access" ? "bypassPermissions" : undefined);
 
         const modelOptions = input.modelOptions?.claudeCode;
-        const thinkingConfig: { thinking?: { type: "adaptive" } | { type: "disabled" } } =
-          modelOptions?.thinking === false
-            ? { thinking: { type: "disabled" } }
-            : modelOptions?.thinking === true
-              ? { thinking: { type: "adaptive" } }
-              : {};
-
-        const queryOptions: ClaudeQueryOptions = {
-          ...(input.cwd ? { cwd: input.cwd } : {}),
-          ...(input.model ? { model: input.model } : {}),
-          ...(claudeCodeExecutablePath
+        const queryOptions: ClaudeQueryOptions = Object.assign(
+          {
+            includePartialMessages: true as const,
+            canUseTool,
+            env: process.env,
+          },
+          input.cwd ? { cwd: input.cwd, additionalDirectories: [input.cwd] } : undefined,
+          input.model ? { model: input.model } : undefined,
+          claudeCodeExecutablePath
             ? { pathToClaudeCodeExecutable: claudeCodeExecutablePath }
-            : {}),
-          ...(permissionMode ? { permissionMode } : {}),
-          ...(permissionMode === "bypassPermissions"
+            : undefined,
+          permissionMode ? { permissionMode } : undefined,
+          permissionMode === "bypassPermissions"
             ? { allowDangerouslySkipPermissions: true }
-            : {}),
-          ...(providerOptions?.maxThinkingTokens !== undefined
+            : undefined,
+          providerOptions?.maxThinkingTokens !== undefined
             ? { maxThinkingTokens: providerOptions.maxThinkingTokens }
-            : {}),
-          ...thinkingConfig,
-          ...(modelOptions?.effort ? { effort: modelOptions.effort } : {}),
-          ...(resumeState?.resume ? { resume: resumeState.resume } : {}),
-          ...(resumeState?.resumeSessionAt ? { resumeSessionAt: resumeState.resumeSessionAt } : {}),
-          includePartialMessages: true,
-          canUseTool,
-          env: process.env,
-          ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
-        };
+            : undefined,
+          modelOptions?.thinking === false
+            ? { thinking: { type: "disabled" } as const }
+            : modelOptions?.thinking === true
+              ? { thinking: { type: "adaptive" } as const }
+              : undefined,
+          modelOptions?.effort ? { effort: modelOptions.effort } : undefined,
+          resumeState?.resume ? { resume: resumeState.resume } : undefined,
+          resumeState?.resumeSessionAt
+            ? { resumeSessionAt: resumeState.resumeSessionAt }
+            : undefined,
+        );
 
         const queryRuntime = yield* Effect.try({
           try: () =>

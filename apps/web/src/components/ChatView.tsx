@@ -604,6 +604,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => ({
       codex: settings.customCodexModels,
       claudeAgent: settings.customClaudeModels,
+      claudeCode: settings.customClaudeModels,
     }),
     [settings.customClaudeModels, settings.customCodexModels],
   );
@@ -3177,20 +3178,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       scheduleComposerFocus();
     },
     [scheduleComposerFocus, setPrompt],
-  );
-  const onClaudeCodeThinkingChange = useCallback(
-    (enabled: boolean) => {
-      setComposerDraftClaudeCodeThinking(threadId, enabled);
-      scheduleComposerFocus();
-    },
-    [scheduleComposerFocus, setComposerDraftClaudeCodeThinking, threadId],
-  );
-  const onClaudeCodeEffortChange = useCallback(
-    (effort: import("@t3tools/contracts").ClaudeCodeEffort) => {
-      setComposerDraftClaudeCodeEffort(threadId, effort);
-      scheduleComposerFocus();
-    },
-    [scheduleComposerFocus, setComposerDraftClaudeCodeEffort, threadId],
   );
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) => {

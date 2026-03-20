@@ -128,6 +128,7 @@ export function getCustomModelOptionsByProvider(settings: {
   return {
     codex: getAppModelOptions("codex", settings.customCodexModels),
     claudeAgent: getAppModelOptions("claudeAgent", settings.customClaudeModels),
+    claudeCode: getAppModelOptions("claudeCode", settings.customClaudeModels),
   };
 }
 

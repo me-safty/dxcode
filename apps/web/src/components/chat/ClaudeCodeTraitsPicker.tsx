@@ -17,6 +17,7 @@ const EFFORT_LABELS: Record<ClaudeCodeEffort, string> = {
   medium: "Medium",
   high: "High",
   max: "Max",
+  ultrathink: "Ultrathink",
 };
 
 const DEFAULT_EFFORT: ClaudeCodeEffort = "high";
