@@ -3,7 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { assertFailure } from "@effect/vitest/utils";
 import { Effect, FileSystem, Layer, Logger, Path, Schema } from "effect";
-import { ServerConfig, type ServerConfigShape } from "./config";
+import { ServerConfig } from "./config";
 
 import {
   DEFAULT_KEYBINDINGS,
@@ -17,21 +17,22 @@ import {
 } from "./keybindings";
 
 const KeybindingsConfigJson = Schema.fromJsonString(KeybindingsConfig);
-const makeKeybindingsLayer = () =>
-  KeybindingsLive.pipe(
-    Layer.provideMerge(
-      Layer.effect(
-        ServerConfig,
-        Effect.gen(function* () {
-          const fs = yield* FileSystem.FileSystem;
-          const { join } = yield* Path.Path;
-          const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-server-config-test-" });
-          const configPath = join(dir, "keybindings.json");
-          return { keybindingsConfigPath: configPath } as ServerConfigShape;
-        }),
-      ),
-    ),
-  );
+const makeKeybindingsLayer = () => {
+  const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
+    prefix: "t3code-keybindings-test-",
+  });
+  const bootstrappedServerConfigLayer = Layer.effect(
+    ServerConfig,
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const serverConfig = yield* ServerConfig;
+      yield* fileSystem.makeDirectory(serverConfig.stateDir, { recursive: true });
+      return serverConfig;
+    }),
+  ).pipe(Layer.provide(serverConfigLayer));
+
+  return KeybindingsLive.pipe(Layer.provideMerge(bootstrappedServerConfigLayer));
+};
 
 const toDetailResult = <A, R>(effect: Effect.Effect<A, KeybindingsConfigError, R>) =>
   effect.pipe(
@@ -42,7 +43,9 @@ const toDetailResult = <A, R>(effect: Effect.Effect<A, KeybindingsConfigError, R
 const writeKeybindingsConfig = (configPath: string, rules: readonly KeybindingRule[]) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
     const encoded = yield* Schema.encodeEffect(KeybindingsConfigJson)(rules);
+    yield* fileSystem.makeDirectory(path.dirname(configPath), { recursive: true });
     yield* fileSystem.writeFileString(configPath, encoded);
   });
 

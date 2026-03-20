@@ -11,12 +11,13 @@ import { Command, Flag } from "effect/unstable/cli";
 import { NetService } from "@t3tools/shared/Net";
 import {
   DEFAULT_PORT,
+  deriveServerPaths,
   resolveStaticDir,
   ServerConfig,
   type RuntimeMode,
   type ServerConfigShape,
 } from "./config";
-import { fixPath, resolveBaseDir, resolveStateDir } from "./os-jank";
+import { fixPath, resolveBaseDir } from "./os-jank";
 import { Open } from "./open";
 import * as SqlitePersistence from "./persistence/Layers/Sqlite";
 import { makeServerProviderLayer, makeServerRuntimeServicesLayer } from "./serverLayers";
@@ -152,7 +153,7 @@ const ServerConfigLive = (input: CliInput) =>
 
       const devUrl = Option.getOrElse(input.devUrl, () => env.devUrl);
       const baseDir = yield* resolveBaseDir(Option.getOrUndefined(input.t3Home) ?? env.t3Home);
-      const stateDir = yield* resolveStateDir(baseDir, devUrl);
+      const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
       const noBrowser = resolveBooleanFlag(input.noBrowser, env.noBrowser ?? mode === "desktop");
       const authToken = Option.getOrUndefined(input.authToken) ?? env.authToken;
       const autoBootstrapProjectFromCwd = resolveBooleanFlag(
@@ -164,8 +165,6 @@ const ServerConfigLive = (input: CliInput) =>
         env.logWebSocketEvents ?? Boolean(devUrl),
       );
       const staticDir = devUrl ? undefined : yield* cliConfig.resolveStaticDir;
-      const { join } = yield* Path.Path;
-      const keybindingsConfigPath = join(stateDir, "keybindings.json");
       const host =
         Option.getOrUndefined(input.host) ??
         env.host ??
@@ -175,10 +174,9 @@ const ServerConfigLive = (input: CliInput) =>
         mode,
         port,
         cwd: cliConfig.cwd,
-        keybindingsConfigPath,
         host,
         baseDir,
-        stateDir,
+        ...derivedPaths,
         staticDir,
         devUrl,
         noBrowser,

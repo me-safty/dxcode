@@ -39,10 +39,8 @@ const getCodexAccountId = Effect.gen(function* () {
 
 const upsertAnonymousId = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const serverConfig = yield* ServerConfig;
+  const { anonymousIdPath } = yield* ServerConfig;
 
-  const anonymousIdPath = path.join(serverConfig.stateDir, "anonymous-id");
   const anonymousId = yield* fileSystem.readFileString(anonymousIdPath).pipe(
     Effect.catch(() =>
       Effect.gen(function* () {

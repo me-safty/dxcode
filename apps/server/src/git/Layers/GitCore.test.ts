@@ -17,7 +17,7 @@ import { ServerConfig } from "../../config.ts";
 // ── Helpers ──
 
 const GitServiceTestLayer = GitServiceLive.pipe(Layer.provide(NodeServices.layer));
-const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), process.cwd(), process.cwd());
+const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), { prefix: "t3-git-core-test-" });
 const GitCoreTestLayer = GitCoreLive.pipe(
   Layer.provide(GitServiceTestLayer),
   Layer.provide(ServerConfigLayer),

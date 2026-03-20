@@ -105,7 +105,7 @@ it.layer(testLayer)("server CLI command", (it) => {
       assert.equal(resolvedConfig?.port, 4010);
       assert.equal(resolvedConfig?.host, "0.0.0.0");
       assert.equal(resolvedConfig?.baseDir, "/tmp/t3-cli-home");
-      assert.equal(resolvedConfig?.stateDir, "/tmp/t3-cli-home/userdata");
+      assert.equal(resolvedConfig?.stateDir, "/tmp/t3-cli-home/dev");
       assert.equal(resolvedConfig?.devUrl?.toString(), "http://127.0.0.1:5173/");
       assert.equal(resolvedConfig?.noBrowser, true);
       assert.equal(resolvedConfig?.authToken, "auth-secret");
@@ -141,7 +141,7 @@ it.layer(testLayer)("server CLI command", (it) => {
       assert.equal(resolvedConfig?.port, 4999);
       assert.equal(resolvedConfig?.host, "100.88.10.4");
       assert.equal(resolvedConfig?.baseDir, "/tmp/t3-env-home");
-      assert.equal(resolvedConfig?.stateDir, "/tmp/t3-env-home/userdata");
+      assert.equal(resolvedConfig?.stateDir, "/tmp/t3-env-home/dev");
       assert.equal(resolvedConfig?.devUrl?.toString(), "http://localhost:5173/");
       assert.equal(resolvedConfig?.noBrowser, true);
       assert.equal(resolvedConfig?.authToken, "env-token");

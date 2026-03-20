@@ -233,8 +233,13 @@ export const makeOrchestrationIntegrationHarness = (
       : null;
     const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-orchestration-integration-"));
     const workspaceDir = path.join(rootDir, "workspace");
-    const stateDir = path.join(rootDir, "state");
-    const dbPath = path.join(stateDir, "state.sqlite");
+    const serverConfigLayer = ServerConfig.layerTest(workspaceDir, rootDir).pipe(
+      Layer.provide(NodeServices.layer),
+    );
+    const { stateDir, dbPath } = yield* Effect.gen(function* () {
+      const serverConfigContext = yield* Layer.build(serverConfigLayer);
+      return yield* Effect.service(ServerConfig).pipe(Effect.provide(serverConfigContext));
+    }).pipe(Scope.use(yield* Scope.make("sequential")));
     fs.mkdirSync(workspaceDir, { recursive: true });
     fs.mkdirSync(stateDir, { recursive: true });
     initializeGitWorkspace(workspaceDir);
@@ -262,7 +267,7 @@ export const makeOrchestrationIntegrationHarness = (
       }),
     ).pipe(
       Layer.provide(makeCodexAdapterLive()),
-      Layer.provideMerge(ServerConfig.layerTest(workspaceDir, stateDir, rootDir)),
+      Layer.provideMerge(serverConfigLayer),
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
@@ -312,7 +317,7 @@ export const makeOrchestrationIntegrationHarness = (
     );
     const layer = orchestrationReactorLayer.pipe(
       Layer.provide(persistenceLayer),
-      Layer.provideMerge(ServerConfig.layerTest(workspaceDir, stateDir, rootDir)),
+      Layer.provideMerge(serverConfigLayer),
       Layer.provideMerge(NodeServices.layer),
     );
 

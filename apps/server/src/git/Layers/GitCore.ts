@@ -222,8 +222,7 @@ const makeGitCore = Effect.gen(function* () {
   const git = yield* GitService;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const { baseDir } = yield* ServerConfig;
-  const worktreesDir = path.join(baseDir, "worktrees");
+  const { worktreesDir } = yield* ServerConfig;
 
   const executeGit = (
     operation: string,
