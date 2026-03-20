@@ -2,7 +2,6 @@ import {
   type ApprovalRequestId,
   DEFAULT_MODEL_BY_PROVIDER,
   type ClaudeCodeEffort,
-  type CodexReasoningEffort,
   type MessageId,
   type ProjectScript,
   type ModelSlug,
@@ -246,9 +245,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const { settings } = useAppSettings();
   const setStickyComposerModel = useComposerDraftStore((store) => store.setStickyModel);
-  const setStickyComposerModelOptions = useComposerDraftStore(
-    (store) => store.setStickyModelOptions,
-  );
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
   const rawSearch = useSearch({
@@ -3179,44 +3175,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       scheduleComposerFocus();
     },
     [scheduleComposerFocus, setPrompt],
-  );
-  const onEffortSelect = useCallback(
-    (effort: CodexReasoningEffort) => {
-      setComposerDraftEffort(threadId, effort);
-      setStickyComposerModelOptions({
-        codex: {
-          reasoningEffort: effort,
-          ...(selectedCodexFastModeEnabled ? { fastMode: true } : {}),
-        },
-      });
-      scheduleComposerFocus();
-    },
-    [
-      scheduleComposerFocus,
-      selectedCodexFastModeEnabled,
-      setComposerDraftEffort,
-      setStickyComposerModelOptions,
-      threadId,
-    ],
-  );
-  const onCodexFastModeChange = useCallback(
-    (enabled: boolean) => {
-      setComposerDraftCodexFastMode(threadId, enabled);
-      setStickyComposerModelOptions({
-        codex: {
-          reasoningEffort: selectedEffort,
-          ...(enabled ? { fastMode: true } : {}),
-        },
-      });
-      scheduleComposerFocus();
-    },
-    [
-      scheduleComposerFocus,
-      selectedEffort,
-      setComposerDraftCodexFastMode,
-      setStickyComposerModelOptions,
-      threadId,
-    ],
   );
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) => {

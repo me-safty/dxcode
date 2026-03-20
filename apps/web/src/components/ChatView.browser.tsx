@@ -1385,12 +1385,20 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toMatchObject({
         model: "gpt-5.3-codex",
-        effort: "medium",
-        codexFastMode: true,
+        modelOptions: {
+          codex: {
+            fastMode: true,
+          },
+        },
       });
 
       useComposerDraftStore.getState().setModel(threadId, "gpt-5.4");
-      useComposerDraftStore.getState().setEffort(threadId, "low");
+      useComposerDraftStore.getState().setModelOptions(threadId, {
+        codex: {
+          reasoningEffort: "low",
+          fastMode: true,
+        },
+      });
 
       await newThreadButton.click();
 
@@ -1401,8 +1409,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
       expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toMatchObject({
         model: "gpt-5.4",
-        effort: "low",
-        codexFastMode: true,
+        modelOptions: {
+          codex: {
+            reasoningEffort: "low",
+            fastMode: true,
+          },
+        },
       });
     } finally {
       await mounted.cleanup();

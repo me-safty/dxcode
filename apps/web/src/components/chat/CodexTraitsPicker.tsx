@@ -48,6 +48,7 @@ function CodexTraitsMenuContentImpl(props: { threadId: ThreadId }) {
   const draft = useComposerThreadDraft(props.threadId);
   const modelOptions = draft.modelOptions?.codex;
   const setModelOptions = useComposerDraftStore((store) => store.setModelOptions);
+  const setStickyModelOptions = useComposerDraftStore((store) => store.setStickyModelOptions);
   const options = getReasoningEffortOptions("codex");
   const defaultReasoningEffort = getDefaultReasoningEffort("codex");
   const { effort, fastModeEnabled } = getSelectedCodexTraits(modelOptions);
@@ -60,6 +61,7 @@ function CodexTraitsMenuContentImpl(props: { threadId: ThreadId }) {
         ? otherProviderModelOptions
         : undefined;
     setModelOptions(props.threadId, nextProviderModelOptions);
+    setStickyModelOptions(nextProviderModelOptions);
   };
 
   return (

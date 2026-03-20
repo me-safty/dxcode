@@ -243,35 +243,6 @@ const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   interactionMode: null,
 });
 
-function normalizeProviderModelOptions(value: unknown): ProviderModelOptions {
-  if (!value || typeof value !== "object") {
-    return EMPTY_PROVIDER_MODEL_OPTIONS;
-  }
-  const candidate = value as Record<string, unknown>;
-  const rawCodex = candidate.codex;
-  if (!rawCodex || typeof rawCodex !== "object") {
-    return EMPTY_PROVIDER_MODEL_OPTIONS;
-  }
-  const codexCandidate = rawCodex as Record<string, unknown>;
-  const reasoningEffortCandidate =
-    typeof codexCandidate.reasoningEffort === "string" ? codexCandidate.reasoningEffort : null;
-  const reasoningEffort =
-    reasoningEffortCandidate &&
-    REASONING_EFFORT_VALUES.has(reasoningEffortCandidate as CodexReasoningEffort)
-      ? (reasoningEffortCandidate as CodexReasoningEffort)
-      : undefined;
-  const fastMode = codexCandidate.fastMode === true ? true : undefined;
-  if (!reasoningEffort && !fastMode) {
-    return EMPTY_PROVIDER_MODEL_OPTIONS;
-  }
-  return {
-    codex: {
-      ...(reasoningEffort ? { reasoningEffort } : {}),
-      ...(fastMode ? { fastMode: true } : {}),
-    },
-  };
-}
-
 function areProviderModelOptionsEqual(
   left: ProviderModelOptions,
   right: ProviderModelOptions,
@@ -727,7 +698,8 @@ function migratePersistedComposerDraftStoreState(
     typeof candidate.stickyModel === "string"
       ? (normalizeModelSlug(candidate.stickyModel, "codex") ?? null)
       : null;
-  const stickyModelOptions = normalizeProviderModelOptions(candidate.stickyModelOptions);
+  const stickyModelOptions =
+    normalizeProviderModelOptions(candidate.stickyModelOptions) ?? EMPTY_PROVIDER_MODEL_OPTIONS;
   const { draftThreadsByThreadId, projectDraftThreadIdByProjectId } =
     normalizePersistedDraftThreads(rawDraftThreadsByThreadId, rawProjectDraftThreadIdByProjectId);
   const draftsByThreadId = normalizePersistedDraftsByThreadId(
@@ -821,9 +793,9 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     typeof normalizedPersistedState.stickyModel === "string"
       ? (normalizeModelSlug(normalizedPersistedState.stickyModel, "codex") ?? null)
       : null;
-  const stickyModelOptions = normalizeProviderModelOptions(
-    normalizedPersistedState.stickyModelOptions,
-  );
+  const stickyModelOptions =
+    normalizeProviderModelOptions(normalizedPersistedState.stickyModelOptions) ??
+    EMPTY_PROVIDER_MODEL_OPTIONS;
   return {
     draftsByThreadId: normalizePersistedDraftsByThreadId(
       normalizedPersistedState.draftsByThreadId,
@@ -1186,7 +1158,8 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         });
       },
       setStickyModelOptions: (modelOptions) => {
-        const normalizedModelOptions = normalizeProviderModelOptions(modelOptions);
+        const normalizedModelOptions =
+          normalizeProviderModelOptions(modelOptions) ?? EMPTY_PROVIDER_MODEL_OPTIONS;
         set((state) => {
           if (areProviderModelOptionsEqual(state.stickyModelOptions, normalizedModelOptions)) {
             return state;

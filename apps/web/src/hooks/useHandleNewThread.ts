@@ -40,9 +40,8 @@ export function useHandleNewThread() {
         clearProjectDraftThreadId,
         getDraftThread,
         getDraftThreadByProjectId,
-        setCodexFastMode,
-        setEffort,
         setModel,
+        setModelOptions,
         setDraftThreadContext,
         setProjectDraftThreadId,
       } = useComposerDraftStore.getState();
@@ -104,11 +103,8 @@ export function useHandleNewThread() {
         if (stickyModel) {
           setModel(threadId, stickyModel);
         }
-        if (stickyModelOptions.codex?.reasoningEffort) {
-          setEffort(threadId, stickyModelOptions.codex.reasoningEffort);
-        }
-        if (stickyModelOptions.codex?.fastMode) {
-          setCodexFastMode(threadId, true);
+        if (stickyModelOptions.codex) {
+          setModelOptions(threadId, stickyModelOptions);
         }
 
         await navigate({
