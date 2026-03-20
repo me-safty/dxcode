@@ -195,7 +195,7 @@ describe("store read model sync", () => {
     const initialState = makeState(makeThread());
     const readModel = makeReadModel(
       makeReadModelThread({
-        model: "unknown-model-xyz",
+        model: "claude-opus-4-6",
       }),
     );
 

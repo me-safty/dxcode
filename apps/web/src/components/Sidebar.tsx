@@ -435,7 +435,7 @@ export default function Sidebar() {
           projectId,
           title,
           workspaceRoot: cwd,
-          defaultModel: DEFAULT_MODEL_BY_PROVIDER.codex,
+          defaultModel: appSettings.defaultModel ?? DEFAULT_MODEL_BY_PROVIDER.codex,
           createdAt,
         });
         await handleNewThread(projectId, {
@@ -464,6 +464,7 @@ export default function Sidebar() {
       isAddingProject,
       projects,
       shouldBrowseForProjectImmediately,
+      appSettings.defaultModel,
       appSettings.defaultThreadEnvMode,
     ],
   );
