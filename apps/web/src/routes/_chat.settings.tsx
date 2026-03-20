@@ -126,11 +126,13 @@ function SettingsRouteView() {
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
 
-  const gitTextGenerationModelOptions = getAppModelOptions(
-    "codex",
-    settings.customCodexModels,
-    settings.textGenerationModel,
-  );
+  const gitTextGenerationModelOptions = (() => {
+    const codexOptions = getAppModelOptions("codex", settings.customCodexModels, settings.textGenerationModel);
+    const seen = new Set(codexOptions.map((o) => o.slug));
+    const claudeOptions = getAppModelOptions("claudeAgent", settings.customClaudeModels, settings.textGenerationModel)
+      .filter((o) => !seen.has(o.slug));
+    return [...codexOptions, ...claudeOptions];
+  })();
   const selectedGitTextGenerationModelLabel =
     gitTextGenerationModelOptions.find(
       (option) =>
