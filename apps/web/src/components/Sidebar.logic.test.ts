@@ -6,6 +6,7 @@ import {
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  shouldHideSidebarAfterThreadAction,
   shouldClearThreadSelectionOnMouseDown,
 } from "./Sidebar.logic";
 
@@ -81,6 +82,16 @@ describe("resolveSidebarNewThreadEnvMode", () => {
         defaultEnvMode: "worktree",
       }),
     ).toBe("local");
+  });
+});
+
+describe("shouldHideSidebarAfterThreadAction", () => {
+  it("hides the sidebar after thread actions on mobile", () => {
+    expect(shouldHideSidebarAfterThreadAction(true)).toBe(true);
+  });
+
+  it("keeps the sidebar open after thread actions on desktop", () => {
+    expect(shouldHideSidebarAfterThreadAction(false)).toBe(false);
   });
 });
 

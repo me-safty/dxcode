@@ -59,6 +59,10 @@ export function resolveSidebarNewThreadEnvMode(input: {
   return input.requestedEnvMode ?? input.defaultEnvMode;
 }
 
+export function shouldHideSidebarAfterThreadAction(isMobile: boolean): boolean {
+  return isMobile;
+}
+
 export function resolveThreadRowClassName(input: {
   isActive: boolean;
   isSelected: boolean;

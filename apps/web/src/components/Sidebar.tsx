@@ -88,9 +88,11 @@ import {
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  shouldHideSidebarAfterThreadAction,
   shouldClearThreadSelectionOnMouseDown,
 } from "./Sidebar.logic";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { useSidebar } from "~/components/ui/sidebar";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_PREVIEW_LIMIT = 6;
@@ -253,6 +255,7 @@ function SortableProjectItem({
 }
 
 export default function Sidebar() {
+  const { isMobile, setOpenMobile } = useSidebar();
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
   const markThreadUnread = useStore((store) => store.markThreadUnread);
@@ -382,6 +385,13 @@ export default function Sidebar() {
       });
     });
   }, []);
+
+  const hideSidebarAfterThreadAction = useCallback(() => {
+    if (!shouldHideSidebarAfterThreadAction(isMobile)) {
+      return;
+    }
+    setOpenMobile(false);
+  }, [isMobile, setOpenMobile]);
 
   const focusMostRecentThreadForProject = useCallback(
     (projectId: ProjectId) => {
@@ -844,6 +854,7 @@ export default function Sidebar() {
         clearSelection();
       }
       setSelectionAnchor(threadId);
+      hideSidebarAfterThreadAction();
       void navigate({
         to: "/$threadId",
         params: { threadId },
@@ -855,6 +866,7 @@ export default function Sidebar() {
       rangeSelectTo,
       selectedThreadIds.size,
       setSelectionAnchor,
+      hideSidebarAfterThreadAction,
       toggleThreadSelection,
     ],
   );
@@ -1424,6 +1436,7 @@ export default function Sidebar() {
                                     onClick={(event) => {
                                       event.preventDefault();
                                       event.stopPropagation();
+                                      hideSidebarAfterThreadAction();
                                       void handleNewThread(project.id, {
                                         envMode: resolveSidebarNewThreadEnvMode({
                                           defaultEnvMode: appSettings.defaultThreadEnvMode,
@@ -1492,6 +1505,7 @@ export default function Sidebar() {
                                           clearSelection();
                                         }
                                         setSelectionAnchor(thread.id);
+                                        hideSidebarAfterThreadAction();
                                         void navigate({
                                           to: "/$threadId",
                                           params: { threadId: thread.id },
