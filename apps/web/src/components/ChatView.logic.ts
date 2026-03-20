@@ -1,4 +1,9 @@
-import { ProjectId, type ProviderKind, type ThreadId } from "@t3tools/contracts";
+import {
+  ProjectId,
+  type ProviderKind,
+  type ServerProviderStatus,
+  type ThreadId,
+} from "@t3tools/contracts";
 import { type ChatMessage, type Thread } from "../types";
 import { randomUUID } from "~/lib/utils";
 import { getAppModelOptions } from "../appSettings";
@@ -129,6 +134,13 @@ export function getCustomModelOptionsByProvider(settings: {
     codex: getAppModelOptions("codex", settings.customCodexModels),
     claudeAgent: getAppModelOptions("claudeAgent", settings.customClaudeModels),
   };
+}
+
+export function resolveProviderHealthBannerStatus(
+  status: ServerProviderStatus | null,
+  hasCodexOverrides: boolean,
+): ServerProviderStatus | null {
+  return status?.provider === "codex" && hasCodexOverrides ? null : status;
 }
 
 export function deriveComposerSendState(options: {

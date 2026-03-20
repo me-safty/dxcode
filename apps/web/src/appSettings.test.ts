@@ -5,6 +5,7 @@ import {
   AppSettingsSchema,
   DEFAULT_TIMESTAMP_FORMAT,
   getAppModelOptions,
+  getCodexProviderOverrides,
   normalizeCustomModelSlugs,
   resolveAppModelSelection,
 } from "./appSettings";
@@ -110,6 +111,29 @@ describe("AppSettingsSchema", () => {
       timestampFormat: DEFAULT_TIMESTAMP_FORMAT,
       customCodexModels: [],
       customClaudeModels: [],
+    });
+  });
+});
+
+describe("getCodexProviderOverrides", () => {
+  it("returns undefined when both overrides are blank", () => {
+    expect(
+      getCodexProviderOverrides({
+        codexBinaryPath: "   ",
+        codexHomePath: "",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("returns trimmed override values", () => {
+    expect(
+      getCodexProviderOverrides({
+        codexBinaryPath: " /usr/local/bin/codex ",
+        codexHomePath: " /Users/test/.codex ",
+      }),
+    ).toEqual({
+      binaryPath: "/usr/local/bin/codex",
+      homePath: "/Users/test/.codex",
     });
   });
 });

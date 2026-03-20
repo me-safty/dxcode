@@ -1,6 +1,10 @@
 import { useCallback } from "react";
 import { Option, Schema } from "effect";
-import { TrimmedNonEmptyString, type ProviderKind } from "@t3tools/contracts";
+import {
+  TrimmedNonEmptyString,
+  type ProviderKind,
+  type ProviderStartOptions,
+} from "@t3tools/contracts";
 import { getDefaultModel, getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { EnvMode } from "./components/BranchToolbar.logic";
@@ -87,6 +91,29 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     customClaudeModels: normalizeCustomModelSlugs(settings.customClaudeModels, "claudeAgent"),
   };
 }
+
+function trimToUndefined(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
+}
+
+export function getCodexProviderOverrides(settings: {
+  codexBinaryPath: AppSettings["codexBinaryPath"];
+  codexHomePath: AppSettings["codexHomePath"];
+}): NonNullable<ProviderStartOptions["codex"]> | undefined {
+  const binaryPath = trimToUndefined(settings.codexBinaryPath);
+  const homePath = trimToUndefined(settings.codexHomePath);
+
+  if (!binaryPath && !homePath) {
+    return undefined;
+  }
+
+  return {
+    ...(binaryPath ? { binaryPath } : {}),
+    ...(homePath ? { homePath } : {}),
+  };
+}
+
 export function getAppModelOptions(
   provider: ProviderKind,
   customModels: readonly string[],

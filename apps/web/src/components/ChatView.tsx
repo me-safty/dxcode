@@ -126,7 +126,11 @@ import {
 import { SidebarTrigger } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
-import { resolveAppModelSelection, useAppSettings } from "../appSettings";
+import {
+  getCodexProviderOverrides,
+  resolveAppModelSelection,
+  useAppSettings,
+} from "../appSettings";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
   type ComposerImageAttachment,
@@ -173,6 +177,7 @@ import {
   LastInvokedScriptByProjectSchema,
   PullRequestDialogState,
   readFileAsDataUrl,
+  resolveProviderHealthBannerStatus,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   SendPhase,
@@ -662,17 +667,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     return undefined;
   }, [draftModelOptions, selectedModel, selectedProvider]);
-  const providerOptionsForDispatch = useMemo(() => {
-    if (!settings.codexBinaryPath && !settings.codexHomePath) {
-      return undefined;
-    }
-    return {
-      codex: {
-        ...(settings.codexBinaryPath ? { binaryPath: settings.codexBinaryPath } : {}),
-        ...(settings.codexHomePath ? { homePath: settings.codexHomePath } : {}),
-      },
-    };
-  }, [settings.codexBinaryPath, settings.codexHomePath]);
+  const codexProviderOverrides = useMemo(
+    () =>
+      getCodexProviderOverrides({
+        codexBinaryPath: settings.codexBinaryPath,
+        codexHomePath: settings.codexHomePath,
+      }),
+    [settings.codexBinaryPath, settings.codexHomePath],
+  );
+  const providerOptionsForDispatch = useMemo(
+    () => (codexProviderOverrides ? { codex: codexProviderOverrides } : undefined),
+    [codexProviderOverrides],
+  );
   const selectedModelForPicker = selectedModel;
   const modelOptionsByProvider = useMemo(
     () => getCustomModelOptionsByProvider(settings),
@@ -1150,9 +1156,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const availableEditors = serverConfigQuery.data?.availableEditors ?? EMPTY_AVAILABLE_EDITORS;
   const providerStatuses = serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES;
   const activeProvider = activeThread?.session?.provider ?? "codex";
-  const activeProviderStatus = useMemo(
-    () => providerStatuses.find((status) => status.provider === activeProvider) ?? null,
-    [activeProvider, providerStatuses],
+  const hasCodexProviderOverrides = codexProviderOverrides !== undefined;
+  const activeProviderBannerStatus = useMemo(
+    () =>
+      resolveProviderHealthBannerStatus(
+        providerStatuses.find((status) => status.provider === activeProvider) ?? null,
+        hasCodexProviderOverrides,
+      ),
+    [activeProvider, hasCodexProviderOverrides, providerStatuses],
   );
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
@@ -3528,7 +3539,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       </header>
 
       {/* Error banner */}
-      <ProviderHealthBanner status={activeProviderStatus} />
+      <ProviderHealthBanner status={activeProviderBannerStatus} />
       <ThreadErrorBanner
         error={activeThread.error}
         onDismiss={() => setThreadError(activeThread.id, null)}
