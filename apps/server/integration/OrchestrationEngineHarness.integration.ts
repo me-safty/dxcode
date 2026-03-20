@@ -66,7 +66,7 @@ import {
   makeTestProviderAdapterHarness,
   type TestProviderAdapterHarness,
 } from "./TestProviderAdapter.integration.ts";
-import { ServerConfig } from "../src/config.ts";
+import { deriveServerPaths, ServerConfig } from "../src/config.ts";
 
 function runGit(cwd: string, args: ReadonlyArray<string>) {
   return execFileSync("git", args, {
@@ -236,10 +236,7 @@ export const makeOrchestrationIntegrationHarness = (
     const serverConfigLayer = ServerConfig.layerTest(workspaceDir, rootDir).pipe(
       Layer.provide(NodeServices.layer),
     );
-    const { stateDir, dbPath } = yield* Effect.gen(function* () {
-      const serverConfigContext = yield* Layer.build(serverConfigLayer);
-      return yield* Effect.service(ServerConfig).pipe(Effect.provide(serverConfigContext));
-    }).pipe(Scope.use(yield* Scope.make("sequential")));
+    const { stateDir, dbPath } = yield* deriveServerPaths(rootDir, undefined);
     fs.mkdirSync(workspaceDir, { recursive: true });
     fs.mkdirSync(stateDir, { recursive: true });
     initializeGitWorkspace(workspaceDir);
