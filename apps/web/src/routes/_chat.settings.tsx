@@ -3,7 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { type ProviderKind, DEFAULT_GIT_TEXT_GENERATION_MODEL } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
-import { getAppModelOptions, MAX_CUSTOM_MODEL_LENGTH, NotificationLevel, useAppSettings } from "../appSettings";
+import {
+  getAppModelOptions,
+  MAX_CUSTOM_MODEL_LENGTH,
+  NotificationLevel,
+  useAppSettings,
+} from "../appSettings";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";

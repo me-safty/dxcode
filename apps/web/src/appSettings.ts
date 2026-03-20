@@ -49,7 +49,7 @@ export const AppSettingsSchema = Schema.Struct({
     NotificationLevel.Important,
     NotificationLevel.Normal,
     NotificationLevel.Verbose,
-  ]).pipe(withDefaults(() => NotificationLevel.Normal),
+  ]).pipe(withDefaults(() => NotificationLevel.Normal)),
   timestampFormat: TimestampFormat.pipe(withDefaults(() => DEFAULT_TIMESTAMP_FORMAT)),
   customCodexModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customClaudeModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
