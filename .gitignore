@@ -18,3 +18,7 @@ apps/web/.playwright
 apps/web/playwright-report
 apps/web/src/components/__screenshots__
 .vitest-*
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
