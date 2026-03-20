@@ -300,7 +300,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     readonly command: ClientOrchestrationCommand;
   }) {
     const normalizeProjectWorkspaceRoot = Effect.fnUntraced(function* (workspaceRoot: string) {
-      const normalizedWorkspaceRoot = path.resolve(yield* expandHomePath(workspaceRoot.trim()));
+      const normalizedWorkspaceRoot = path.resolve(expandTilde(workspaceRoot.trim()));
       const workspaceStat = yield* fileSystem
         .stat(normalizedWorkspaceRoot)
         .pipe(Effect.catch(() => Effect.succeed(null)));
