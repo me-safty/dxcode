@@ -95,7 +95,8 @@ function sanitizePrTitle(raw: string): string {
   return "Update project changes";
 }
 
-const makeCodexTextGeneration = Effect.gen(function* () {
+/** Exported so that the router layer can create the shape without going through the Layer system. */
+export const makeCodexTextGenerationShape = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -482,4 +483,4 @@ const makeCodexTextGeneration = Effect.gen(function* () {
   } satisfies TextGenerationShape;
 });
 
-export const CodexTextGenerationLive = Layer.effect(TextGeneration, makeCodexTextGeneration);
+export const CodexTextGenerationLive = Layer.effect(TextGeneration, makeCodexTextGenerationShape);

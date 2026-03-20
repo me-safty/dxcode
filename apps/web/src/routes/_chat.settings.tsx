@@ -1,9 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
-import { type ProviderKind, DEFAULT_GIT_TEXT_GENERATION_MODEL } from "@t3tools/contracts";
+import {
+  type ProviderKind,
+  DEFAULT_GIT_TEXT_GENERATION_MODEL,
+  isClaudeModelSlug,
+} from "@t3tools/contracts";
 import { getDefaultModel, getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
-import { getAppModelOptions, MAX_CUSTOM_MODEL_LENGTH, useAppSettings } from "../appSettings";
+import {
+  getAppModelOptions,
+  getGitTextGenerationModelOptions,
+  MAX_CUSTOM_MODEL_LENGTH,
+  useAppSettings,
+} from "../appSettings";
 import { PROVIDER_OPTIONS } from "../session-logic";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
@@ -15,8 +24,11 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import {
   Select,
+  SelectGroup,
+  SelectGroupLabel,
   SelectItem,
   SelectPopup,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
@@ -145,9 +157,9 @@ function SettingsRouteView() {
 
   const availableProviderOptions = PROVIDER_OPTIONS.filter((option) => option.available);
 
-  const gitTextGenerationModelOptions = getAppModelOptions(
-    "codex",
+  const gitTextGenerationModelOptions = getGitTextGenerationModelOptions(
     settings.customCodexModels,
+    settings.customClaudeModels,
     settings.textGenerationModel,
   );
   const selectedGitTextGenerationModelLabel =
@@ -687,11 +699,27 @@ function SettingsRouteView() {
                     <SelectValue>{selectedGitTextGenerationModelLabel}</SelectValue>
                   </SelectTrigger>
                   <SelectPopup align="end">
-                    {gitTextGenerationModelOptions.map((option) => (
-                      <SelectItem key={option.slug} value={option.slug}>
-                        {option.name}
-                      </SelectItem>
-                    ))}
+                    <SelectGroup>
+                      <SelectGroupLabel>OpenAI</SelectGroupLabel>
+                      {gitTextGenerationModelOptions
+                        .filter((option) => !isClaudeModelSlug(option.slug))
+                        .map((option) => (
+                          <SelectItem key={option.slug} value={option.slug}>
+                            {option.name}
+                          </SelectItem>
+                        ))}
+                    </SelectGroup>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectGroupLabel>Claude</SelectGroupLabel>
+                      {gitTextGenerationModelOptions
+                        .filter((option) => isClaudeModelSlug(option.slug))
+                        .map((option) => (
+                          <SelectItem key={option.slug} value={option.slug}>
+                            {option.name}
+                          </SelectItem>
+                        ))}
+                    </SelectGroup>
                   </SelectPopup>
                 </Select>
               </div>

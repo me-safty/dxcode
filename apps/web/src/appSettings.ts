@@ -1,6 +1,10 @@
 import { useCallback } from "react";
 import { Option, Schema } from "effect";
-import { ProviderKind, TrimmedNonEmptyString } from "@t3tools/contracts";
+import {
+  ProviderKind,
+  TrimmedNonEmptyString,
+  GIT_TEXT_GENERATION_MODEL_OPTIONS,
+} from "@t3tools/contracts";
 import { getDefaultModel, getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { EnvMode } from "./components/BranchToolbar.logic";
@@ -122,6 +126,42 @@ export function getAppModelOptions(
       name: normalizedSelectedModel,
       isCustom: true,
     });
+  }
+
+  return options;
+}
+
+/**
+ * Returns model options for git text generation, combining both Codex (OpenAI)
+ * and Claude models. Custom models and the currently-selected model are also
+ * included so that non-built-in slugs are never silently dropped.
+ */
+export function getGitTextGenerationModelOptions(
+  customCodexModels: readonly string[],
+  customClaudeModels: readonly string[],
+  selectedModel?: string | null,
+): AppModelOption[] {
+  const options: AppModelOption[] = GIT_TEXT_GENERATION_MODEL_OPTIONS.map(({ slug, name }) => ({
+    slug,
+    name,
+    isCustom: false,
+  }));
+  const seen = new Set(options.map((option) => option.slug));
+
+  // Append custom models from both providers.
+  for (const slug of [
+    ...normalizeCustomModelSlugs(customCodexModels, "codex"),
+    ...normalizeCustomModelSlugs(customClaudeModels, "claudeCode"),
+  ]) {
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+    options.push({ slug, name: slug, isCustom: true });
+  }
+
+  // Ensure the currently selected model always appears in the list.
+  const trimmed = selectedModel?.trim();
+  if (trimmed && !seen.has(trimmed)) {
+    options.push({ slug: trimmed, name: trimmed, isCustom: true });
   }
 
   return options;

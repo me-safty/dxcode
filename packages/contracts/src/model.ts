@@ -68,6 +68,20 @@ export const MODEL_OPTIONS = MODEL_OPTIONS_BY_PROVIDER.codex;
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
 export const DEFAULT_GIT_TEXT_GENERATION_MODEL = "gpt-5.4-mini" as const;
 
+/**
+ * All models available for git text generation (commit messages, PR titles, branch names).
+ * Combines Codex (OpenAI) and Claude models into a single list with provider labels.
+ */
+export const GIT_TEXT_GENERATION_MODEL_OPTIONS = [
+  ...MODEL_OPTIONS_BY_PROVIDER.codex,
+  ...MODEL_OPTIONS_BY_PROVIDER.claudeCode,
+] as const;
+
+/** Returns true when `slug` refers to a Claude model (vs. a Codex / OpenAI model). */
+export function isClaudeModelSlug(slug: string): boolean {
+  return slug.startsWith("claude-");
+}
+
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string, ModelSlug>> = {
   codex: {
     "5.4": "gpt-5.4",
