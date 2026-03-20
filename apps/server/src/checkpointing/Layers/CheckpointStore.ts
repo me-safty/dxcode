@@ -10,6 +10,7 @@
  * @module CheckpointStoreLive
  */
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 
 import { Effect, Layer, FileSystem, Path } from "effect";
 
@@ -24,6 +25,11 @@ const makeCheckpointStore = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const git = yield* GitService;
+
+  const isHomeDirectory = (cwd: string): boolean => {
+    const home = homedir();
+    return cwd === home;
+  };
 
   const resolveHeadCommit = (cwd: string): Effect.Effect<string | null, GitCommandError> =>
     git
@@ -75,21 +81,36 @@ const makeCheckpointStore = Effect.gen(function* () {
       );
 
   const isGitRepository: CheckpointStoreShape["isGitRepository"] = (cwd) =>
-    git
-      .execute({
-        operation: "CheckpointStore.isGitRepository",
-        cwd,
-        args: ["rev-parse", "--is-inside-work-tree"],
-        allowNonZeroExit: true,
-      })
-      .pipe(
-        Effect.map((result) => result.code === 0 && result.stdout.trim() === "true"),
-        Effect.catch(() => Effect.succeed(false)),
-      );
+    Effect.gen(function* () {
+      // Never treat home directory as a valid git workspace for checkpointing
+      if (isHomeDirectory(cwd)) {
+        return false;
+      }
+      return yield* git
+        .execute({
+          operation: "CheckpointStore.isGitRepository",
+          cwd,
+          args: ["rev-parse", "--is-inside-work-tree"],
+          allowNonZeroExit: true,
+        })
+        .pipe(
+          Effect.map((result) => result.code === 0 && result.stdout.trim() === "true"),
+          Effect.catch(() => Effect.succeed(false)),
+        );
+    });
 
   const captureCheckpoint: CheckpointStoreShape["captureCheckpoint"] = (input) =>
     Effect.gen(function* () {
       const operation = "CheckpointStore.captureCheckpoint";
+
+      // Skip checkpointing from home directory - it contains too many files and will timeout
+      if (isHomeDirectory(input.cwd)) {
+        yield* Effect.logWarning("Skipping checkpoint from home directory", {
+          cwd: input.cwd,
+          reason: "Home directory contains too many files; checkpointing would timeout",
+        });
+        return;
+      }
 
       yield* Effect.acquireUseRelease(
         fs.makeTempDirectory({ prefix: "t3-fs-checkpoint-" }),
