@@ -6,7 +6,6 @@
  *
  * @module ServerConfig
  */
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, FileSystem, Layer, Path, ServiceMap } from "effect";
 
 export const DEFAULT_PORT = 3773;
