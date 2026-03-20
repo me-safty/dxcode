@@ -1,10 +1,12 @@
-import { Cache, Data, Duration, Effect, Exit, FileSystem, Layer, Path } from "effect";
+import { Cache, Data, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema, Stream } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { GitCommandError } from "../Errors.ts";
-import { GitService } from "../Services/GitService.ts";
-import { GitCore, type GitCoreShape } from "../Services/GitCore.ts";
+import { GitCore, type GitCoreShape, type ExecuteGitInput, type ExecuteGitResult } from "../Services/GitCore.ts";
 import { ServerConfig } from "../../config.ts";
 
+const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
@@ -218,11 +220,134 @@ function createGitCommandError(
   });
 }
 
-const makeGitCore = Effect.gen(function* () {
-  const git = yield* GitService;
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const { worktreesDir } = yield* ServerConfig;
+function quoteGitCommand(args: ReadonlyArray<string>): string {
+  return `git ${args.join(" ")}`;
+}
+
+function toGitCommandError(
+  input: Pick<ExecuteGitInput, "operation" | "cwd" | "args">,
+  detail: string,
+) {
+  return (cause: unknown) =>
+    Schema.is(GitCommandError)(cause)
+      ? cause
+      : new GitCommandError({
+          operation: input.operation,
+          command: quoteGitCommand(input.args),
+          cwd: input.cwd,
+          detail: `${cause instanceof Error && cause.message.length > 0 ? cause.message : "Unknown error"} - ${detail}`,
+          ...(cause !== undefined ? { cause } : {}),
+        });
+}
+
+const collectOutput = Effect.fn(function* <E>(
+  input: Pick<ExecuteGitInput, "operation" | "cwd" | "args">,
+  stream: Stream.Stream<Uint8Array, E>,
+  maxOutputBytes: number,
+): Effect.fn.Return<string, GitCommandError> {
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+
+  yield* Stream.runForEach(stream, (chunk) =>
+    Effect.gen(function* () {
+      bytes += chunk.byteLength;
+      if (bytes > maxOutputBytes) {
+        return yield* new GitCommandError({
+          operation: input.operation,
+          command: quoteGitCommand(input.args),
+          cwd: input.cwd,
+          detail: `${quoteGitCommand(input.args)} output exceeded ${maxOutputBytes} bytes and was truncated.`,
+        });
+      }
+      text += decoder.decode(chunk, { stream: true });
+    }),
+  ).pipe(Effect.mapError(toGitCommandError(input, "output stream failed.")));
+
+  text += decoder.decode();
+  return text;
+});
+
+export const makeGitCore = (options?: {
+  executeOverride?: GitCoreShape["execute"];
+}) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const { worktreesDir } = yield* ServerConfig;
+
+    let execute: GitCoreShape["execute"];
+
+    if (options?.executeOverride) {
+      execute = options.executeOverride;
+    } else {
+      const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      execute = Effect.fnUntraced(function* (input) {
+    const commandInput = {
+      ...input,
+      args: [...input.args],
+    } as const;
+    const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const maxOutputBytes = input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+
+    const commandEffect = Effect.gen(function* () {
+      const child = yield* commandSpawner
+        .spawn(
+          ChildProcess.make("git", commandInput.args, {
+            cwd: commandInput.cwd,
+            ...(input.env ? { env: input.env } : {}),
+          }),
+        )
+        .pipe(Effect.mapError(toGitCommandError(commandInput, "failed to spawn.")));
+
+      const [stdout, stderr, exitCode] = yield* Effect.all(
+        [
+          collectOutput(commandInput, child.stdout, maxOutputBytes),
+          collectOutput(commandInput, child.stderr, maxOutputBytes),
+          child.exitCode.pipe(
+            Effect.map((value) => Number(value)),
+            Effect.mapError(toGitCommandError(commandInput, "failed to report exit code.")),
+          ),
+        ],
+        { concurrency: "unbounded" },
+      );
+
+      if (!input.allowNonZeroExit && exitCode !== 0) {
+        const trimmedStderr = stderr.trim();
+        return yield* new GitCommandError({
+          operation: commandInput.operation,
+          command: quoteGitCommand(commandInput.args),
+          cwd: commandInput.cwd,
+          detail:
+            trimmedStderr.length > 0
+              ? `${quoteGitCommand(commandInput.args)} failed: ${trimmedStderr}`
+              : `${quoteGitCommand(commandInput.args)} failed with code ${exitCode}.`,
+        });
+      }
+
+      return { code: exitCode, stdout, stderr } satisfies ExecuteGitResult;
+    });
+
+    return yield* commandEffect.pipe(
+      Effect.scoped,
+      Effect.timeoutOption(timeoutMs),
+      Effect.flatMap((result) =>
+        Option.match(result, {
+          onNone: () =>
+            Effect.fail(
+              new GitCommandError({
+                operation: commandInput.operation,
+                command: quoteGitCommand(commandInput.args),
+                cwd: commandInput.cwd,
+                detail: `${quoteGitCommand(commandInput.args)} timed out.`,
+              }),
+            ),
+          onSome: Effect.succeed,
+        }),
+      ),
+    );
+  });
+    }
 
   const executeGit = (
     operation: string,
@@ -230,15 +355,13 @@ const makeGitCore = Effect.gen(function* () {
     args: readonly string[],
     options: ExecuteGitOptions = {},
   ): Effect.Effect<{ code: number; stdout: string; stderr: string }, GitCommandError> =>
-    git
-      .execute({
-        operation,
-        cwd,
-        args,
-        allowNonZeroExit: true,
-        ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-      })
-      .pipe(
+    execute({
+      operation,
+      cwd,
+      args,
+      allowNonZeroExit: true,
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    }).pipe(
         Effect.flatMap((result) => {
           if (options.allowNonZeroExit || result.code === 0) {
             return Effect.succeed(result);
@@ -1402,6 +1525,7 @@ const makeGitCore = Effect.gen(function* () {
     );
 
   return {
+    execute,
     status,
     statusDetails,
     prepareCommitContext,
@@ -1425,4 +1549,4 @@ const makeGitCore = Effect.gen(function* () {
   } satisfies GitCoreShape;
 });
 
-export const GitCoreLive = Layer.effect(GitCore, makeGitCore);
+export const GitCoreLive = Layer.effect(GitCore, makeGitCore());
