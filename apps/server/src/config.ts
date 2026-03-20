@@ -6,6 +6,7 @@
  *
  * @module ServerConfig
  */
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, FileSystem, Layer, Path, ServiceMap } from "effect";
 
 export const DEFAULT_PORT = 3773;
@@ -89,6 +90,10 @@ export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigS
             ? baseDirOrPrefix
             : yield* fs.makeTempDirectoryScoped({ prefix: baseDirOrPrefix.prefix });
         const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
+
+        yield* fs.makeDirectory(derivedPaths.stateDir, { recursive: true });
+        yield* fs.makeDirectory(derivedPaths.logsDir, { recursive: true });
+        yield* fs.makeDirectory(derivedPaths.attachmentsDir, { recursive: true });
 
         return {
           cwd,

@@ -18,20 +18,15 @@ import {
 
 const KeybindingsConfigJson = Schema.fromJsonString(KeybindingsConfig);
 const makeKeybindingsLayer = () => {
-  const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
-    prefix: "t3code-keybindings-test-",
-  });
-  const bootstrappedServerConfigLayer = Layer.effect(
-    ServerConfig,
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const serverConfig = yield* ServerConfig;
-      yield* fileSystem.makeDirectory(serverConfig.stateDir, { recursive: true });
-      return serverConfig;
-    }),
-  ).pipe(Layer.provide(serverConfigLayer));
-
-  return KeybindingsLive.pipe(Layer.provideMerge(bootstrappedServerConfigLayer));
+  return KeybindingsLive.pipe(
+    Layer.provideMerge(
+      Layer.fresh(
+        ServerConfig.layerTest(process.cwd(), {
+          prefix: "t3code-keybindings-test-",
+        }),
+      ),
+    ),
+  );
 };
 
 const toDetailResult = <A, R>(effect: Effect.Effect<A, KeybindingsConfigError, R>) =>
