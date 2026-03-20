@@ -1155,6 +1155,7 @@ const make = Effect.gen(function* () {
           commandId: providerCommandId(event, "thread-meta-update"),
           threadId: thread.id,
           title: event.payload.name,
+          titleSummaryState: "generated",
         });
       }
 

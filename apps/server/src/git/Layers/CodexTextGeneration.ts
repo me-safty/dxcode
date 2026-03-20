@@ -14,6 +14,7 @@ import {
   type BranchNameGenerationResult,
   type CommitMessageGenerationResult,
   type PrContentGenerationResult,
+  type ThreadTitleGenerationResult,
   type TextGenerationShape,
   TextGeneration,
 } from "../Services/TextGeneration.ts";
@@ -95,6 +96,18 @@ function sanitizePrTitle(raw: string): string {
   return "Update project changes";
 }
 
+function sanitizeThreadTitle(raw: string): string {
+  const singleLine = raw.trim().split(/\r?\n/g)[0]?.trim() ?? "";
+  const normalized = singleLine.replace(/^["'`]+|["'`]+$/g, "").trim();
+  if (normalized.length === 0) {
+    return "New thread";
+  }
+  if (normalized.length <= 60) {
+    return normalized;
+  }
+  return normalized.slice(0, 60).trimEnd();
+}
+
 const makeCodexTextGeneration = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -148,7 +161,11 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void));
 
   const materializeImageAttachments = (
-    _operation: "generateCommitMessage" | "generatePrContent" | "generateBranchName",
+    _operation:
+      | "generateCommitMessage"
+      | "generatePrContent"
+      | "generateBranchName"
+      | "generateThreadTitle",
     attachments: BranchNameGenerationInput["attachments"],
   ): Effect.Effect<MaterializedImageAttachments, TextGenerationError> =>
     Effect.gen(function* () {
@@ -189,7 +206,11 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     cleanupPaths = [],
     model,
   }: {
-    operation: "generateCommitMessage" | "generatePrContent" | "generateBranchName";
+    operation:
+      | "generateCommitMessage"
+      | "generatePrContent"
+      | "generateBranchName"
+      | "generateThreadTitle";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -462,10 +483,60 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     });
   };
 
+  const generateThreadTitle: TextGenerationShape["generateThreadTitle"] = (input) =>
+    Effect.gen(function* () {
+      const { imagePaths } = yield* materializeImageAttachments(
+        "generateThreadTitle",
+        input.attachments,
+      );
+      const attachmentLines = (input.attachments ?? []).map(
+        (attachment) =>
+          `- ${attachment.name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes)`,
+      );
+
+      const promptSections = [
+        "You write concise chat thread titles.",
+        "Return a JSON object with key: title.",
+        "Rules:",
+        "- Title must describe the user's request clearly.",
+        "- Keep it short and specific.",
+        "- Use sentence case or title case.",
+        "- No surrounding quotes.",
+        "- Max 60 characters.",
+        "- If images are attached, use them as primary context for visual/UI issues.",
+        "",
+        "Thread context:",
+        limitSection(input.message, 12_000),
+      ];
+      if (attachmentLines.length > 0) {
+        promptSections.push(
+          "",
+          "Attachment metadata:",
+          limitSection(attachmentLines.join("\n"), 4_000),
+        );
+      }
+
+      const generated = yield* runCodexJson({
+        operation: "generateThreadTitle",
+        cwd: input.cwd,
+        prompt: promptSections.join("\n"),
+        outputSchemaJson: Schema.Struct({
+          title: Schema.String,
+        }),
+        imagePaths,
+        ...(input.model ? { model: input.model } : {}),
+      });
+
+      return {
+        title: sanitizeThreadTitle(generated.title),
+      } satisfies ThreadTitleGenerationResult;
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
+    generateThreadTitle,
   } satisfies TextGenerationShape;
 });
 

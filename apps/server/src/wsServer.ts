@@ -60,6 +60,7 @@ import { clamp } from "effect/Number";
 import { Open, resolveAvailableEditors } from "./open";
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore.ts";
+import { TextGeneration } from "./git/Services/TextGeneration.ts";
 import { tryHandleProjectFaviconRequest } from "./projectFaviconRoute";
 import {
   ATTACHMENTS_ROUTE_PREFIX,
@@ -214,6 +215,7 @@ export type ServerRuntimeServices =
   | ServerCoreRuntimeServices
   | GitManager
   | GitCore
+  | TextGeneration
   | TerminalManager
   | Keybindings
   | Open
@@ -255,6 +257,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const keybindingsManager = yield* Keybindings;
   const providerHealth = yield* ProviderHealth;
   const git = yield* GitCore;
+  const textGeneration = yield* TextGeneration;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -664,6 +667,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           threadId,
           projectId: bootstrapProjectId,
           title: "New thread",
+          titleSummaryState: "missing",
           model: bootstrapProjectDefaultModel,
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           runtimeMode: "full-access",
@@ -688,6 +692,51 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path
   >();
   const runPromise = Effect.runPromiseWith(runtimeServices);
+
+  const generateThreadTitle = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly model?: string | undefined;
+  }) {
+    const snapshot = yield* projectionReadModelQuery.getSnapshot();
+    const thread = snapshot.threads.find((entry) => entry.id === input.threadId);
+    if (!thread || thread.deletedAt !== null) {
+      return yield* new RouteRequestError({
+        message: `Thread not found: ${input.threadId}`,
+      });
+    }
+
+    const project = snapshot.projects.find(
+      (entry) => entry.id === thread.projectId && entry.deletedAt === null,
+    );
+    if (!project) {
+      return yield* new RouteRequestError({
+        message: `Project not found for thread: ${input.threadId}`,
+      });
+    }
+
+    const userMessages = thread.messages.filter((message) => message.role === "user");
+    if (userMessages.length === 0) {
+      return yield* new RouteRequestError({
+        message: "Thread has no user messages to summarize.",
+      });
+    }
+
+    const threadContext = userMessages
+      .slice(-6)
+      .map((entry, index) => {
+        const header = userMessages.length > 1 ? `User message ${index + 1}:` : "User message:";
+        return `${header}\n${entry.text}`;
+      })
+      .join("\n\n");
+    const attachments = userMessages.flatMap((entry) => entry.attachments ?? []);
+
+    return yield* textGeneration.generateThreadTitle({
+      cwd: project.workspaceRoot,
+      message: threadContext,
+      ...(attachments.length > 0 ? { attachments } : {}),
+      ...(input.model ? { model: input.model } : {}),
+    });
+  });
 
   const unsubscribeTerminalEvents = yield* terminalManager.subscribe(
     (event) => void Effect.runPromise(pushBus.publishAll(WS_CHANNELS.terminalEvent, event)),
@@ -882,6 +931,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           providers: providerStatuses,
           availableEditors,
         };
+
+      case WS_METHODS.serverGenerateThreadTitle: {
+        const body = stripRequestTag(request.body);
+        return yield* generateThreadTitle(body);
+      }
 
       case WS_METHODS.serverUpsertKeybinding: {
         const body = stripRequestTag(request.body);

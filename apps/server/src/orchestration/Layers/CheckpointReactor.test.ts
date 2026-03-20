@@ -293,6 +293,7 @@ describe("CheckpointReactor", () => {
         threadId: ThreadId.makeUnsafe("thread-1"),
         projectId: asProjectId("project-1"),
         title: "Thread",
+        titleSummaryState: "missing",
         model: "gpt-5-codex",
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",

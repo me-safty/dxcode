@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas";
+import { IsoDateTime, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
 import { ProviderKind } from "./orchestration";
@@ -63,6 +63,17 @@ export const ServerUpsertKeybindingResult = Schema.Struct({
   issues: ServerConfigIssues,
 });
 export type ServerUpsertKeybindingResult = typeof ServerUpsertKeybindingResult.Type;
+
+export const ServerGenerateThreadTitleInput = Schema.Struct({
+  threadId: ThreadId,
+  model: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerGenerateThreadTitleInput = typeof ServerGenerateThreadTitleInput.Type;
+
+export const ServerGenerateThreadTitleResult = Schema.Struct({
+  title: TrimmedNonEmptyString,
+});
+export type ServerGenerateThreadTitleResult = typeof ServerGenerateThreadTitleResult.Type;
 
 export const ServerConfigUpdatedPayload = Schema.Struct({
   issues: ServerConfigIssues,

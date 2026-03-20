@@ -252,6 +252,7 @@ export function projectEvent(
             id: payload.threadId,
             projectId: payload.projectId,
             title: payload.title,
+            titleSummaryState: payload.titleSummaryState,
             model: payload.model,
             runtimeMode: payload.runtimeMode,
             interactionMode: payload.interactionMode,
@@ -295,6 +296,9 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             ...(payload.title !== undefined ? { title: payload.title } : {}),
+            ...(payload.titleSummaryState !== undefined
+              ? { titleSummaryState: payload.titleSummaryState }
+              : {}),
             ...(payload.model !== undefined ? { model: payload.model } : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),

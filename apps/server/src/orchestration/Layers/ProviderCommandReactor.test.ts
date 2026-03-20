@@ -253,6 +253,7 @@ describe("ProviderCommandReactor", () => {
         threadId: ThreadId.makeUnsafe("thread-1"),
         projectId: asProjectId("project-1"),
         title: "Thread",
+        titleSummaryState: "missing",
         model: threadModel,
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",

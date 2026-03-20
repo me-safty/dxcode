@@ -293,6 +293,26 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
     ),
   );
 
+  it.effect("generates and sanitizes thread titles", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          title: '  "Investigate sidebar thread naming regression"\nextra',
+        }),
+      },
+      Effect.gen(function* () {
+        const textGeneration = yield* TextGeneration;
+
+        const generated = yield* textGeneration.generateThreadTitle({
+          cwd: process.cwd(),
+          message: "Please investigate why thread names are hard to scan in the sidebar.",
+        });
+
+        expect(generated.title).toBe("Investigate sidebar thread naming regression");
+      }),
+    ),
+  );
+
   it.effect("omits attachment metadata section when no attachments are provided", () =>
     withFakeCodexEnv(
       {

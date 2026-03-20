@@ -156,6 +156,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           projectId: command.projectId,
           title: command.title,
+          titleSummaryState: command.titleSummaryState,
           model: command.model,
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
@@ -207,6 +208,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           ...(command.title !== undefined ? { title: command.title } : {}),
+          ...(command.titleSummaryState !== undefined
+            ? { titleSummaryState: command.titleSummaryState }
+            : {}),
           ...(command.model !== undefined ? { model: command.model } : {}),
           ...(command.branch !== undefined ? { branch: command.branch } : {}),
           ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
