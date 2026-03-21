@@ -238,6 +238,24 @@ function SettingsRouteView() {
 
                 <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
                   <div>
+                    <p className="text-sm font-medium text-foreground">High contrast mode</p>
+                    <p className="text-xs text-muted-foreground">
+                      Strengthen muted text and low-contrast labels across light and dark mode.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.highContrastMode}
+                    onCheckedChange={(checked) =>
+                      updateSettings({
+                        highContrastMode: Boolean(checked),
+                      })
+                    }
+                    aria-label="High contrast mode"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                  <div>
                     <p className="text-sm font-medium text-foreground">Timestamp format</p>
                     <p className="text-xs text-muted-foreground">
                       System default follows your browser or OS time format. <code>12-hour</code>{" "}
@@ -276,6 +294,22 @@ function SettingsRouteView() {
                       }
                     >
                       Restore default
+                    </Button>
+                  </div>
+                ) : null}
+
+                {settings.highContrastMode !== defaults.highContrastMode ? (
+                  <div className="flex justify-end">
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() =>
+                        updateSettings({
+                          highContrastMode: defaults.highContrastMode,
+                        })
+                      }
+                    >
+                      Restore high contrast default
                     </Button>
                   </div>
                 ) : null}
@@ -699,6 +733,7 @@ function SettingsRouteView() {
                 </div>
               ) : null}
             </section>
+
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
                 <h2 className="text-sm font-medium text-foreground">About</h2>

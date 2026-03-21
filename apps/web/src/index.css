@@ -120,6 +120,36 @@
   }
 }
 
+:root.high-contrast {
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-700) 92%, var(--color-black));
+}
+
+:root.high-contrast.dark {
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-300) 92%, var(--color-white));
+}
+
+:root.high-contrast ::placeholder {
+  color: var(--muted-foreground);
+  opacity: 1;
+}
+
+:root.high-contrast .text-muted-foreground\/30,
+:root.high-contrast .text-muted-foreground\/35,
+:root.high-contrast .text-muted-foreground\/40,
+:root.high-contrast .text-muted-foreground\/45,
+:root.high-contrast .text-muted-foreground\/50,
+:root.high-contrast .text-muted-foreground\/55,
+:root.high-contrast .text-muted-foreground\/60,
+:root.high-contrast .text-muted-foreground\/65,
+:root.high-contrast .text-muted-foreground\/70,
+:root.high-contrast .text-muted-foreground\/72,
+:root.high-contrast .text-muted-foreground\/75,
+:root.high-contrast .text-muted-foreground\/80,
+:root.high-contrast .text-muted-foreground\/85,
+:root.high-contrast .text-muted-foreground\/90 {
+  color: var(--muted-foreground) !important;
+}
+
 body {
   font-family:
     "DM Sans",

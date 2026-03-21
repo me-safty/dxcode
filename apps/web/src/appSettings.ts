@@ -7,12 +7,13 @@ import {
   normalizeModelSlug,
   resolveSelectableModel,
 } from "@t3tools/shared/model";
-import { useLocalStorage } from "./hooks/useLocalStorage";
+import { getLocalStorageItem, useLocalStorage } from "./hooks/useLocalStorage";
 import { EnvMode } from "./components/BranchToolbar.logic";
 
 const APP_SETTINGS_STORAGE_KEY = "t3code:app-settings:v1";
 const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
+export const HIGH_CONTRAST_CLASS_NAME = "high-contrast";
 
 export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"]);
 export type TimestampFormat = typeof TimestampFormat.Type;
@@ -52,6 +53,7 @@ export const AppSettingsSchema = Schema.Struct({
   defaultThreadEnvMode: EnvMode.pipe(withDefaults(() => "local" as const satisfies EnvMode)),
   confirmThreadDelete: Schema.Boolean.pipe(withDefaults(() => true)),
   enableAssistantStreaming: Schema.Boolean.pipe(withDefaults(() => false)),
+  highContrastMode: Schema.Boolean.pipe(withDefaults(() => false)),
   timestampFormat: TimestampFormat.pipe(withDefaults(() => DEFAULT_TIMESTAMP_FORMAT)),
   customCodexModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customClaudeModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
@@ -219,6 +221,25 @@ export function getCustomModelOptionsByProvider(
     codex: getAppModelOptions("codex", customModelsByProvider.codex),
     claudeAgent: getAppModelOptions("claudeAgent", customModelsByProvider.claudeAgent),
   };
+}
+
+export function applyHighContrastMode(enabled: boolean) {
+  if (typeof document === "undefined") return;
+  document.documentElement.classList.toggle(HIGH_CONTRAST_CLASS_NAME, enabled);
+}
+
+export function getStoredAppSettings(): AppSettings {
+  try {
+    return normalizeAppSettings(
+      getLocalStorageItem(APP_SETTINGS_STORAGE_KEY, AppSettingsSchema) ?? DEFAULT_APP_SETTINGS,
+    );
+  } catch {
+    return DEFAULT_APP_SETTINGS;
+  }
+}
+
+export function getStoredHighContrastMode(): boolean {
+  return getStoredAppSettings().highContrastMode;
 }
 
 export function useAppSettings() {
