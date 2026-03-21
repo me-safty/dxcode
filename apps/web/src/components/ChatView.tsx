@@ -2324,6 +2324,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       setIsRevertingCheckpoint(true);
       setThreadError(activeThread.id, null);
+      let reverted = false;
       try {
         await api.orchestration.dispatchCommand({
           type: "thread.checkpoint.revert",
@@ -2332,6 +2333,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           turnCount,
           createdAt: new Date().toISOString(),
         });
+        reverted = true;
       } catch (err) {
         setThreadError(
           activeThread.id,
@@ -2340,10 +2342,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       setIsRevertingCheckpoint(false);
 
-      // Restore the reverted user prompt into the composer after state settles.
+      // Restore the reverted user prompt into the composer only on success.
       // We use setTimeout to defer past the server state sync (throttled at ~100ms)
       // so the restored prompt is not overwritten by re-renders from the sync.
-      if (promptToRestore) {
+      if (reverted && promptToRestore) {
         setTimeout(() => {
           promptRef.current = promptToRestore;
           setPrompt(promptToRestore);
