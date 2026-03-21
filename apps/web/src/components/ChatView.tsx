@@ -1605,14 +1605,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const handleNotesChange = useCallback(
     (notes: string) => {
       if (!activeProject) return;
-      if ((activeProject.notes ?? "") === notes) return;
+      const nextNotes = notes === "" ? null : notes;
+      if ((activeProject.notes ?? null) === nextNotes) return;
       const api = readNativeApi();
       if (!api) return;
       void api.orchestration.dispatchCommand({
         type: "project.meta.update",
         commandId: newCommandId(),
         projectId: activeProject.id,
-        notes,
+        notes: nextNotes,
       });
     },
     [activeProject],

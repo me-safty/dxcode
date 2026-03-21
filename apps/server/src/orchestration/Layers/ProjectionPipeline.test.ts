@@ -1944,4 +1944,44 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
       assert.deepEqual(projectRows, [{ notes: "Remember to follow up on the migration." }]);
     }),
   );
+
+  it.effect("projects clear notes when project.meta.update sets notes to null", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const sql = yield* SqlClient.SqlClient;
+      const createdAt = new Date().toISOString();
+
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe("cmd-clear-notes-project-create"),
+        projectId: ProjectId.makeUnsafe("project-clear-notes"),
+        title: "Clear Notes Project",
+        workspaceRoot: "/tmp/project-clear-notes",
+        defaultModel: "gpt-5-codex",
+        createdAt,
+      });
+
+      yield* engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-clear-notes-project-seed"),
+        projectId: ProjectId.makeUnsafe("project-clear-notes"),
+        notes: "Temporary note",
+      });
+
+      yield* engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-clear-notes-project-update"),
+        projectId: ProjectId.makeUnsafe("project-clear-notes"),
+        notes: null,
+      });
+
+      const projectRows = yield* sql<{ readonly notes: string | null }>`
+        SELECT
+          notes
+        FROM projection_projects
+        WHERE project_id = 'project-clear-notes'
+      `;
+      assert.deepEqual(projectRows, [{ notes: null }]);
+    }),
+  );
 });

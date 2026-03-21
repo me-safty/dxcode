@@ -140,6 +140,50 @@ describe("decider project scripts", () => {
     );
   });
 
+  it("propagates null notes in project.meta.update payload", async () => {
+    const now = new Date().toISOString();
+    const initial = createEmptyReadModel(now);
+    const readModel = await Effect.runPromise(
+      projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-null-notes"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-null-notes"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-project-create-null-notes"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-project-create-null-notes"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-null-notes"),
+          title: "Notes",
+          workspaceRoot: "/tmp/notes",
+          defaultModel: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "project.meta.update",
+          commandId: CommandId.makeUnsafe("cmd-project-clear-notes"),
+          projectId: asProjectId("project-null-notes"),
+          notes: null,
+        },
+        readModel,
+      }),
+    );
+
+    const event = Array.isArray(result) ? result[0] : result;
+    expect(event.type).toBe("project.meta-updated");
+    expect((event.payload as { notes?: string | null }).notes).toBeNull();
+  });
+
   it("emits user message and turn-start-requested events for thread.turn.start", async () => {
     const now = new Date().toISOString();
     const initial = createEmptyReadModel(now);
