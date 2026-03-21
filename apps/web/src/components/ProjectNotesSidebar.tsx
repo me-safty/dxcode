@@ -5,6 +5,7 @@ import { PanelRightCloseIcon } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { resizeNotesSidebarWidth } from "./notesSidebarLayout";
+import { shouldSyncProjectNotesInput } from "./projectNotesSidebarState";
 
 interface ProjectNotesSidebarProps {
   projectId: ProjectId;
@@ -31,8 +32,30 @@ const ProjectNotesSidebar = memo(function ProjectNotesSidebar({
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingValueRef = useRef<string | null>(null);
   const resizeStateRef = useRef<{ startClientX: number; startWidth: number } | null>(null);
+  const previousProjectIdRef = useRef(projectId);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const onNotesChangeRef = useRef(onNotesChange);
 
   useEffect(() => {
+    onNotesChangeRef.current = onNotesChange;
+  }, [onNotesChange]);
+
+  useEffect(() => {
+    const projectChanged = previousProjectIdRef.current !== projectId;
+    previousProjectIdRef.current = projectId;
+    const textarea = textareaRef.current;
+    const isTextareaFocused = textarea !== null && document.activeElement === textarea;
+    const hasPendingLocalChange =
+      pendingValueRef.current !== null || debounceTimerRef.current !== null;
+    if (
+      !shouldSyncProjectNotesInput({
+        projectChanged,
+        isTextareaFocused,
+        hasPendingLocalChange,
+      })
+    ) {
+      return;
+    }
     setLocalNotes(notes);
   }, [projectId, notes]);
 
@@ -46,8 +69,8 @@ const ProjectNotesSidebar = memo(function ProjectNotesSidebar({
     }
     const nextValue = pendingValueRef.current;
     pendingValueRef.current = null;
-    onNotesChange(nextValue);
-  }, [onNotesChange]);
+    onNotesChangeRef.current(nextValue);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -160,9 +183,11 @@ const ProjectNotesSidebar = memo(function ProjectNotesSidebar({
         </div>
         <div className="flex min-h-0 flex-1 flex-col p-3">
           <textarea
+            ref={textareaRef}
             className="min-h-0 flex-1 resize-none rounded-md border border-border/40 bg-background/50 p-3 font-mono text-sm text-foreground placeholder:text-muted-foreground/40 focus:border-border focus:outline-none"
             value={localNotes}
             onChange={handleChange}
+            onBlur={flushPendingChange}
             placeholder="Jot down ideas, todos, or notes for this project..."
           />
         </div>
