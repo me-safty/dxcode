@@ -2576,6 +2576,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           includePartialMessages: true,
           canUseTool,
           env: process.env,
+          settingSources: ["user", "project"],
           ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         };
 
