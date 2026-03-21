@@ -88,6 +88,8 @@ import {
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
+  getGcMetadata,
+  countGcAgents,
 } from "./Sidebar.logic";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 
@@ -1378,6 +1380,11 @@ export default function Sidebar() {
                               <span className="flex-1 truncate text-xs font-medium text-foreground/90">
                                 {project.name}
                               </span>
+                              {countGcAgents(threads, project.id) > 0 && (
+                                <span className="rounded bg-violet-500/15 px-1 py-0 text-[8px] font-semibold uppercase tracking-wide text-violet-600 dark:bg-violet-400/15 dark:text-violet-400/80">
+                                  GC {countGcAgents(threads, project.id)}
+                                </span>
+                              )}
                             </SidebarMenuButton>
                             <Tooltip>
                               <TooltipTrigger
@@ -1420,12 +1427,14 @@ export default function Sidebar() {
                                 const isActive = routeThreadId === thread.id;
                                 const isSelected = selectedThreadIds.has(thread.id);
                                 const isHighlighted = isActive || isSelected;
+                                const gcMeta = getGcMetadata(thread.customMetadata);
                                 const threadStatus = resolveThreadStatusPill({
                                   thread,
                                   hasPendingApprovals:
                                     derivePendingApprovals(thread.activities).length > 0,
                                   hasPendingUserInput:
                                     derivePendingUserInputs(thread.activities).length > 0,
+                                  gcState: gcMeta.state,
                                 });
                                 const prStatus = prStatusIndicator(
                                   prByThreadId.get(thread.id) ?? null,
@@ -1566,6 +1575,26 @@ export default function Sidebar() {
                                           />
                                         ) : (
                                           <span className="min-w-0 flex-1 truncate text-xs">
+                                            {gcMeta.isGcManaged && (
+                                              <Tooltip>
+                                                <TooltipTrigger
+                                                  render={
+                                                    <span className="mr-1 inline-flex items-center rounded bg-violet-500/15 px-1 py-0 text-[8px] font-semibold uppercase tracking-wide text-violet-600 dark:bg-violet-400/15 dark:text-violet-400/80">
+                                                      GC
+                                                    </span>
+                                                  }
+                                                />
+                                                <TooltipPopup side="top" sideOffset={4}>
+                                                  <div className="text-xs">
+                                                    <div className="font-medium">Gas City Agent</div>
+                                                    {gcMeta.agent && <div>Agent: {gcMeta.agent}</div>}
+                                                    {gcMeta.beadTitle && <div>Task: {gcMeta.beadTitle}</div>}
+                                                    {gcMeta.bead && !gcMeta.beadTitle && <div>Bead: {gcMeta.bead}</div>}
+                                                    {gcMeta.state && <div>State: {gcMeta.state}</div>}
+                                                  </div>
+                                                </TooltipPopup>
+                                              </Tooltip>
+                                            )}
                                             {thread.title}
                                           </span>
                                         )}

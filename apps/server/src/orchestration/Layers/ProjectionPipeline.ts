@@ -429,6 +429,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
+            customMetadata: "{}",
           });
           return;
 
@@ -439,8 +440,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           if (Option.isNone(existingRow)) {
             return;
           }
-          yield* projectionThreadRepository.upsert({
-            ...existingRow.value,
+          const metaUpdate: Record<string, unknown> = {
             ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
             ...(event.payload.model !== undefined ? { model: event.payload.model } : {}),
             ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
@@ -448,6 +448,14 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               ? { worktreePath: event.payload.worktreePath }
               : {}),
             updatedAt: event.payload.updatedAt,
+          };
+          if (event.payload.customMetadata !== undefined) {
+            const existing = JSON.parse(existingRow.value.customMetadata || "{}");
+            metaUpdate.customMetadata = JSON.stringify({ ...existing, ...event.payload.customMetadata });
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            ...metaUpdate,
           });
           return;
         }

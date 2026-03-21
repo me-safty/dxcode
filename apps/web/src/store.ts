@@ -318,6 +318,9 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
           files: checkpoint.files.map((file) => ({ ...file })),
         })),
         activities: thread.activities.map((activity) => ({ ...activity })),
+        ...(thread.customMetadata && Object.keys(thread.customMetadata).length > 0
+          ? { customMetadata: thread.customMetadata as Record<string, string> }
+          : {}),
       };
     });
   return {

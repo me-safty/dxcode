@@ -42,7 +42,7 @@ export const ProviderSandboxMode = Schema.Literals([
   "danger-full-access",
 ]);
 export type ProviderSandboxMode = typeof ProviderSandboxMode.Type;
-export const DEFAULT_PROVIDER_KIND: ProviderKind = "codex";
+export const DEFAULT_PROVIDER_KIND: ProviderKind = "claudeAgent";
 
 export const CodexProviderStartOptions = Schema.Struct({
   binaryPath: Schema.optional(TrimmedNonEmptyString),
@@ -269,6 +269,10 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+/** Opaque key-value metadata for external integrations (e.g. gc.* keys from Gas City). */
+export const CustomMetadata = Schema.Record(Schema.String, Schema.String);
+export type CustomMetadata = typeof CustomMetadata.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -289,6 +293,7 @@ export const OrchestrationThread = Schema.Struct({
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
+  customMetadata: Schema.optional(CustomMetadata).pipe(Schema.withDecodingDefault(() => ({}))),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -356,6 +361,7 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   model: Schema.optional(TrimmedNonEmptyString),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  customMetadata: Schema.optional(CustomMetadata),
 });
 
 const ThreadRuntimeModeSetCommand = Schema.Struct({
@@ -656,6 +662,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   model: Schema.optional(TrimmedNonEmptyString),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  customMetadata: Schema.optional(CustomMetadata),
   updatedAt: IsoDateTime,
 });
 

@@ -32,6 +32,7 @@ export const ProjectionThread = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
+  customMetadata: Schema.String.pipe(Schema.withDecodingDefault(() => "{}")),
 });
 export type ProjectionThread = typeof ProjectionThread.Type;
 
