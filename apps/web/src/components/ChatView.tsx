@@ -142,6 +142,7 @@ import {
   type TerminalContextSelection,
 } from "../lib/terminalContext";
 import { shouldUseCompactComposerFooter } from "./composerFooterLayout";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -336,6 +337,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, boolean>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
   const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
+  const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const isMobileViewport = useMediaQuery("max-sm");
+  const isComposerCollapsedMobile = isMobileViewport && !isComposerFocused;
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
@@ -3586,8 +3590,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border",
                     composerProviderState.composerSurfaceClassName,
                   )}
+                  onFocusCapture={() => setIsComposerFocused(true)}
+                  onBlurCapture={(e) => {
+                    // Only collapse if focus leaves the composer entirely
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                      setIsComposerFocused(false);
+                    }
+                  }}
+                  onClick={() => {
+                    if (isComposerCollapsedMobile) {
+                      // First expand the composer, then focus the editor after it renders
+                      setIsComposerFocused(true);
+                      requestAnimationFrame(() => {
+                        composerEditorRef.current?.focusAtEnd();
+                      });
+                    }
+                  }}
                 >
-                  {activePendingApproval ? (
+                  {!isComposerCollapsedMobile && (activePendingApproval ? (
                     <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
                       <ComposerPendingApprovalPanel
                         approval={activePendingApproval}
@@ -3612,11 +3632,38 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
                       />
                     </div>
-                  ) : null}
+                  ) : null)}
+                  {isComposerCollapsedMobile && (
+                    <div className="flex items-center justify-between gap-2 px-3 py-2">
+                      <span className={cn(
+                        "min-w-0 truncate text-[14px]",
+                        (activePendingProgress ? activePendingProgress.customAnswer : prompt.trim())
+                          ? "text-foreground"
+                          : "text-muted-foreground/35",
+                      )}>
+                        {activePendingProgress
+                          ? (activePendingProgress.customAnswer || "Type your own answer, or leave this blank to use the selected option")
+                          : (prompt.trim() || "Ask anything...")}
+                      </span>
+                      <button
+                        type="submit"
+                        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/90 text-primary-foreground disabled:opacity-30"
+                        disabled={
+                          isSendBusy || isConnecting || !composerSendState.hasSendableContent
+                        }
+                        aria-label="Send message"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M8 3L8 13M8 3L4 7M8 3L12 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
                   <div
                     className={cn(
                       "relative px-3 pb-2 sm:px-4",
                       hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
+                      isComposerCollapsedMobile && "hidden",
                     )}
                   >
                     {composerMenuOpen && !isComposerApprovalState && (
@@ -3633,7 +3680,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       </div>
                     )}
 
-                    {!isComposerApprovalState &&
+                    {!isComposerCollapsedMobile &&
+                      !isComposerApprovalState &&
                       pendingUserInputs.length === 0 &&
                       composerImages.length > 0 && (
                         <div className="mb-3 flex flex-wrap gap-2">
@@ -3738,7 +3786,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   </div>
 
                   {/* Bottom toolbar */}
-                  {activePendingApproval ? (
+                  {isComposerCollapsedMobile ? null : activePendingApproval ? (
                     <div className="flex items-center justify-end gap-2 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
                       <ComposerPendingApprovalActions
                         requestId={activePendingApproval.requestId}
