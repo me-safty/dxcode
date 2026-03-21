@@ -1911,4 +1911,37 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
       ]);
     }),
   );
+
+  it.effect("projects persist notes from project.meta.update", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const sql = yield* SqlClient.SqlClient;
+      const createdAt = new Date().toISOString();
+
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe("cmd-notes-project-create"),
+        projectId: ProjectId.makeUnsafe("project-notes"),
+        title: "Notes Project",
+        workspaceRoot: "/tmp/project-notes",
+        defaultModel: "gpt-5-codex",
+        createdAt,
+      });
+
+      yield* engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-notes-project-update"),
+        projectId: ProjectId.makeUnsafe("project-notes"),
+        notes: "Remember to follow up on the migration.",
+      });
+
+      const projectRows = yield* sql<{ readonly notes: string | null }>`
+        SELECT
+          notes
+        FROM projection_projects
+        WHERE project_id = 'project-notes'
+      `;
+      assert.deepEqual(projectRows, [{ notes: "Remember to follow up on the migration." }]);
+    }),
+  );
 });
