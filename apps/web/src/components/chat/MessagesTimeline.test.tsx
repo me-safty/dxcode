@@ -96,4 +96,55 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("lucide-terminal");
     expect(markup).toContain("yoo what&#x27;s ");
   });
+
+  it("renders model change notices inline outside the work log", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isWorking={false}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        timelineEntries={[
+          {
+            id: "notice-1",
+            kind: "notice",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            notice: {
+              id: "notice-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              noticeType: "model-change",
+              fromModel: "gpt-5.3-codex",
+              toModel: "gpt-5.4",
+              fromModelLabel: "GPT-5.3 Codex",
+              toModelLabel: "GPT-5.4",
+              source: "provider-reroute",
+              reason: "capacity",
+            },
+          },
+        ]}
+        completionDividerBeforeEntryId={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:12:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain("Rerouted to GPT-5.4");
+    expect(markup).toContain("from GPT-5.3 Codex");
+    expect(markup).toContain("capacity");
+    expect(markup).not.toContain("Work log");
+  });
 });

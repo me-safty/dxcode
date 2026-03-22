@@ -10,6 +10,7 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
+import { inferProviderForModel, resolveModelDisplayName } from "@t3tools/shared/model";
 
 import type {
   ChatMessage,
@@ -43,6 +44,18 @@ export interface WorkLogEntry {
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
+}
+
+export interface ModelChangeNotice {
+  id: string;
+  createdAt: string;
+  noticeType: "model-change";
+  fromModel: string;
+  toModel: string;
+  fromModelLabel: string;
+  toModelLabel: string;
+  source: "user" | "provider-reroute";
+  reason?: string;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -95,6 +108,12 @@ export type TimelineEntry =
       kind: "proposed-plan";
       createdAt: string;
       proposedPlan: ProposedPlan;
+    }
+  | {
+      id: string;
+      kind: "notice";
+      createdAt: string;
+      notice: ModelChangeNotice;
     }
   | {
       id: string;
@@ -464,11 +483,46 @@ export function deriveWorkLogEntries(
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
     .filter((activity) => activity.summary !== "Checkpoint captured")
+    .filter((activity) => activity.kind !== "thread.model.changed")
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .map(toDerivedWorkLogEntry);
   return collapseDerivedWorkLogEntries(entries).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
   );
+}
+
+export function deriveModelChangeNotices(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ModelChangeNotice[] {
+  return [...activities].toSorted(compareActivitiesByOrder).flatMap((activity) => {
+    if (activity.kind !== "thread.model.changed") {
+      return [];
+    }
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    const fromModel = typeof payload?.fromModel === "string" ? payload.fromModel : null;
+    const toModel = typeof payload?.toModel === "string" ? payload.toModel : null;
+    const source =
+      payload?.source === "user" || payload?.source === "provider-reroute" ? payload.source : null;
+    if (!fromModel || !toModel || !source) {
+      return [];
+    }
+    return [
+      {
+        id: activity.id,
+        createdAt: activity.createdAt,
+        noticeType: "model-change" as const,
+        fromModel,
+        toModel,
+        fromModelLabel: resolveModelDisplayName(fromModel, inferProviderForModel(fromModel)),
+        toModelLabel: resolveModelDisplayName(toModel, inferProviderForModel(toModel)),
+        source,
+        ...(typeof payload?.reason === "string" ? { reason: payload.reason } : {}),
+      },
+    ];
+  });
 }
 
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {
@@ -826,6 +880,7 @@ export function hasToolActivityForTurn(
 export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
+  notices: ModelChangeNotice[],
   workEntries: WorkLogEntry[],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
@@ -840,13 +895,19 @@ export function deriveTimelineEntries(
     createdAt: proposedPlan.createdAt,
     proposedPlan,
   }));
+  const noticeRows: TimelineEntry[] = notices.map((notice) => ({
+    id: notice.id,
+    kind: "notice",
+    createdAt: notice.createdAt,
+    notice,
+  }));
   const workRows: TimelineEntry[] = workEntries.map((entry) => ({
     id: entry.id,
     kind: "work",
     createdAt: entry.createdAt,
     entry,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
+  return [...messageRows, ...proposedPlanRows, ...noticeRows, ...workRows].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
 }

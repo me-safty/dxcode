@@ -30,12 +30,14 @@ import {
   type ProviderServiceShape,
 } from "../../provider/Services/ProviderService.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
+import { ModelChangeReactorLive } from "./ModelChangeReactor.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { ProviderRuntimeIngestionLive } from "./ProviderRuntimeIngestion.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
+import { ModelChangeReactor } from "../Services/ModelChangeReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerConfig } from "../../config.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -129,7 +131,7 @@ type ProviderRuntimeTestCheckpoint = ProviderRuntimeTestThread["checkpoints"][nu
 
 describe("ProviderRuntimeIngestion", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderRuntimeIngestionService,
+    OrchestrationEngineService | ProviderRuntimeIngestionService | ModelChangeReactor,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -165,7 +167,7 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
       Layer.provide(SqlitePersistenceMemory),
     );
-    const layer = ProviderRuntimeIngestionLive.pipe(
+    const layer = Layer.mergeAll(ProviderRuntimeIngestionLive, ModelChangeReactorLive).pipe(
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
@@ -175,8 +177,10 @@ describe("ProviderRuntimeIngestion", () => {
     runtime = ManagedRuntime.make(layer);
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const ingestion = await runtime.runPromise(Effect.service(ProviderRuntimeIngestionService));
+    const modelChangeReactor = await runtime.runPromise(Effect.service(ModelChangeReactor));
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(ingestion.start.pipe(Scope.provide(scope)));
+    await Effect.runPromise(modelChangeReactor.start.pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(ingestion.drain);
 
     const createdAt = new Date().toISOString();
@@ -280,6 +284,45 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("turn failed");
+  });
+
+  it("routes provider model reroutes through thread.model.set and appends a notice", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "model.rerouted",
+      eventId: asEventId("evt-model-rerouted"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      payload: {
+        fromModel: "gpt-5-codex",
+        toModel: "gpt-5.4",
+        reason: "capacity",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.model === "gpt-5.4" &&
+        entry.activities.some(
+          (activity) =>
+            activity.kind === "thread.model.changed" &&
+            typeof (activity.payload as { reason?: unknown }).reason === "string",
+        ),
+    );
+
+    expect(thread.model).toBe("gpt-5.4");
+    expect(
+      thread.activities.find((activity) => activity.kind === "thread.model.changed")?.payload,
+    ).toMatchObject({
+      fromModel: "gpt-5-codex",
+      toModel: "gpt-5.4",
+      source: "provider-reroute",
+      reason: "capacity",
+    });
   });
 
   it("applies provider session.state.changed transitions directly", async () => {

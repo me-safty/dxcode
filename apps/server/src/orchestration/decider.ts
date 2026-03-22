@@ -215,6 +215,42 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.model.set": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const thread = readModel.threads.find((entry) => entry.id === command.threadId);
+      if (!thread) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' was not found in read model.`,
+        });
+      }
+      if (thread.model === command.model) {
+        return [];
+      }
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.model-set",
+        payload: {
+          threadId: command.threadId,
+          model: command.model,
+          previousModel: thread.model,
+          source: command.source,
+          ...(command.reason !== undefined ? { reason: command.reason } : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "thread.runtime-mode.set": {
       yield* requireThread({
         readModel,

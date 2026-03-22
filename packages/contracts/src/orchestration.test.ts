@@ -10,6 +10,9 @@ import {
   OrchestrationProposedPlan,
   OrchestrationSession,
   ProjectCreateCommand,
+  ThreadModelChangedActivityPayload,
+  ThreadModelSetCommand,
+  ThreadModelSetPayload,
   ThreadTurnStartCommand,
   ThreadCreatedPayload,
   ThreadTurnDiff,
@@ -22,6 +25,11 @@ const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateComma
 const decodeThreadTurnStartCommand = Schema.decodeUnknownEffect(ThreadTurnStartCommand);
 const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
   ThreadTurnStartRequestedPayload,
+);
+const decodeThreadModelSetCommand = Schema.decodeUnknownEffect(ThreadModelSetCommand);
+const decodeThreadModelSetPayload = Schema.decodeUnknownEffect(ThreadModelSetPayload);
+const decodeThreadModelChangedActivityPayload = Schema.decodeUnknownEffect(
+  ThreadModelChangedActivityPayload,
 );
 const decodeOrchestrationLatestTurn = Schema.decodeUnknownEffect(OrchestrationLatestTurn);
 const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
@@ -212,6 +220,56 @@ it.effect("accepts a source proposed plan reference in thread.turn.start", () =>
       threadId: "thread-1",
       planId: "plan-1",
     });
+  }),
+);
+
+it.effect("decodes thread.model.set with source and optional reason", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadModelSetCommand({
+      type: "thread.model.set",
+      commandId: "cmd-model-set",
+      threadId: "thread-1",
+      model: "gpt-5.4",
+      source: "client",
+      reason: "manual switch",
+    });
+    assert.strictEqual(parsed.model, "gpt-5.4");
+    assert.strictEqual(parsed.source, "client");
+    assert.strictEqual(parsed.reason, "manual switch");
+  }),
+);
+
+it.effect("decodes thread.model-set payload with previous and next model", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadModelSetPayload({
+      threadId: "thread-1",
+      model: "gpt-5.4",
+      previousModel: "gpt-5.3-codex",
+      source: "provider-reroute",
+      reason: "capacity",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.previousModel, "gpt-5.3-codex");
+    assert.strictEqual(parsed.model, "gpt-5.4");
+    assert.strictEqual(parsed.source, "provider-reroute");
+  }),
+);
+
+it.effect("decodes thread model changed activity payload for user and reroute notices", () =>
+  Effect.gen(function* () {
+    const user = yield* decodeThreadModelChangedActivityPayload({
+      fromModel: "gpt-5.3-codex",
+      toModel: "gpt-5.4",
+      source: "user",
+    });
+    const reroute = yield* decodeThreadModelChangedActivityPayload({
+      fromModel: "gpt-5.4",
+      toModel: "gpt-5.4-mini",
+      source: "provider-reroute",
+      reason: "capacity",
+    });
+    assert.strictEqual(user.source, "user");
+    assert.strictEqual(reroute.reason, "capacity");
   }),
 );
 

@@ -452,6 +452,21 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           return;
         }
 
+        case "thread.model-set": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            model: event.payload.model,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
         case "thread.runtime-mode-set": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,

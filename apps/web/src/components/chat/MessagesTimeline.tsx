@@ -175,6 +175,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         continue;
       }
 
+      if (timelineEntry.kind === "notice") {
+        nextRows.push({
+          kind: "notice",
+          id: timelineEntry.id,
+          createdAt: timelineEntry.createdAt,
+          notice: timelineEntry.notice,
+        });
+        continue;
+      }
+
       nextRows.push({
         kind: "message",
         id: timelineEntry.id,
@@ -252,6 +262,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       if (!row) return 96;
       if (row.kind === "work") return 112;
       if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
+      if (row.kind === "notice") return 52;
       if (row.kind === "working") return 40;
       return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
     },
@@ -534,6 +545,38 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         </div>
       )}
 
+      {row.kind === "notice" && (
+        <div className="py-1.5">
+          <div className="flex items-center justify-center gap-3 text-center">
+            <span className="h-px flex-1 bg-border/60" />
+            <div className="inline-flex max-w-[min(100%,34rem)] items-center gap-2 rounded-full border border-border/70 bg-muted/45 px-3 py-1.5 text-left shadow-sm shadow-black/5">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-background text-muted-foreground">
+                <BotIcon className="h-3.5 w-3.5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-[11px] font-medium text-foreground/85">
+                  {row.notice.source === "provider-reroute"
+                    ? `Rerouted to ${row.notice.toModelLabel}`
+                    : `Switched to ${row.notice.toModelLabel}`}
+                </span>
+                {(row.notice.fromModel !== row.notice.toModel || row.notice.reason) && (
+                  <span className="block truncate text-[10px] text-muted-foreground/80">
+                    {row.notice.fromModel !== row.notice.toModel
+                      ? `from ${row.notice.fromModelLabel}`
+                      : null}
+                    {row.notice.fromModel !== row.notice.toModel && row.notice.reason
+                      ? " • "
+                      : null}
+                    {row.notice.reason ? row.notice.reason : null}
+                  </span>
+                )}
+              </span>
+            </div>
+            <span className="h-px flex-1 bg-border/60" />
+          </div>
+        </div>
+      )}
+
       {row.kind === "working" && (
         <div className="py-0.5 pl-1.5">
           <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
@@ -600,6 +643,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineProposedPlan = Extract<TimelineEntry, { kind: "proposed-plan" }>["proposedPlan"];
+type TimelineNotice = Extract<TimelineEntry, { kind: "notice" }>["notice"];
 type TimelineWorkEntry = Extract<TimelineEntry, { kind: "work" }>["entry"];
 type TimelineRow =
   | {
@@ -621,6 +665,12 @@ type TimelineRow =
       id: string;
       createdAt: string;
       proposedPlan: TimelineProposedPlan;
+    }
+  | {
+      kind: "notice";
+      id: string;
+      createdAt: string;
+      notice: TimelineNotice;
     }
   | { kind: "working"; id: string; createdAt: string | null };
 

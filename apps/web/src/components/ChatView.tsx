@@ -24,6 +24,7 @@ import {
 import {
   applyClaudePromptEffortPrefix,
   getDefaultModel,
+  inferProviderForModel,
   normalizeModelSlug,
   resolveModelSlugForProvider,
 } from "@t3tools/shared/model";
@@ -49,6 +50,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   derivePhase,
+  deriveModelChangeNotices,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
@@ -583,16 +585,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   const sessionProvider = activeThread?.session?.provider ?? null;
   const selectedProviderByThreadId = composerDraft.provider;
-  const hasThreadStarted = Boolean(
-    activeThread &&
-    (activeThread.latestTurn !== null ||
-      activeThread.messages.length > 0 ||
-      activeThread.session !== null),
-  );
-  const lockedProvider: ProviderKind | null = hasThreadStarted
-    ? (sessionProvider ?? selectedProviderByThreadId ?? null)
-    : null;
-  const selectedProvider: ProviderKind = lockedProvider ?? selectedProviderByThreadId ?? "codex";
+  const inferredThreadProvider = activeThread?.model
+    ? inferProviderForModel(activeThread.model)
+    : activeProject?.model
+      ? inferProviderForModel(activeProject.model)
+      : null;
+  const lockedProvider: ProviderKind | null = null;
+  const selectedProvider: ProviderKind =
+    selectedProviderByThreadId ?? sessionProvider ?? inferredThreadProvider ?? "codex";
   const baseThreadModel = resolveModelSlugForProvider(
     selectedProvider,
     activeThread?.model ?? activeProject?.model ?? getDefaultModel(selectedProvider),
@@ -642,9 +642,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [modelOptionsByProvider, selectedModelForPicker, selectedProvider]);
   const searchableModelOptions = useMemo(
     () =>
-      AVAILABLE_PROVIDER_OPTIONS.filter(
-        (option) => lockedProvider === null || option.value === lockedProvider,
-      ).flatMap((option) =>
+      AVAILABLE_PROVIDER_OPTIONS.flatMap((option) =>
         modelOptionsByProvider[option.value].map(({ slug, name }) => ({
           provider: option.value,
           providerLabel: option.label,
@@ -655,7 +653,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           searchProvider: option.label.toLowerCase(),
         })),
       ),
-    [lockedProvider, modelOptionsByProvider],
+    [modelOptionsByProvider],
   );
   const phase = derivePhase(activeThread?.session ?? null);
   const isSendBusy = sendPhase !== "idle";
@@ -671,6 +669,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const workLogEntries = useMemo(
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
+  );
+  const modelChangeNotices = useMemo(
+    () => deriveModelChangeNotices(threadActivities),
+    [threadActivities],
   );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),
@@ -912,8 +914,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
-    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+      deriveTimelineEntries(
+        timelineMessages,
+        activeThread?.proposedPlans ?? [],
+        modelChangeNotices,
+        workLogEntries,
+      ),
+    [activeThread?.proposedPlans, modelChangeNotices, timelineMessages, workLogEntries],
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
@@ -1604,10 +1611,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       if (input.model !== undefined && input.model !== serverThread.model) {
         await api.orchestration.dispatchCommand({
-          type: "thread.meta.update",
+          type: "thread.model.set",
           commandId: newCommandId(),
           threadId: input.threadId,
           model: input.model,
+          source: "client",
         });
       }
 
@@ -3092,10 +3100,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const onProviderModelSelect = useCallback(
     (provider: ProviderKind, model: ModelSlug) => {
       if (!activeThread) return;
-      if (lockedProvider !== null && provider !== lockedProvider) {
-        scheduleComposerFocus();
-        return;
-      }
       const resolvedModel = resolveAppModelSelection(provider, customModelsByProvider, model);
       setComposerDraftProvider(activeThread.id, provider);
       setComposerDraftModel(activeThread.id, resolvedModel);
@@ -3104,7 +3108,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [
       activeThread,
-      lockedProvider,
       scheduleComposerFocus,
       setComposerDraftModel,
       setComposerDraftProvider,

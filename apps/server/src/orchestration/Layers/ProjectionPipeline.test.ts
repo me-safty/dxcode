@@ -166,6 +166,99 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
   );
 });
 
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-model-set-")))(
+  "OrchestrationProjectionPipeline",
+  (it) => {
+    it.effect("updates projection thread model rows from thread.model-set", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const createdAt = new Date().toISOString();
+        const updatedAt = new Date(Date.parse(createdAt) + 1_000).toISOString();
+
+        yield* eventStore.append({
+          type: "project.created",
+          eventId: EventId.makeUnsafe("evt-model-project"),
+          aggregateKind: "project",
+          aggregateId: ProjectId.makeUnsafe("project-model"),
+          occurredAt: createdAt,
+          commandId: CommandId.makeUnsafe("cmd-model-project"),
+          causationEventId: null,
+          correlationId: CommandId.makeUnsafe("cmd-model-project"),
+          metadata: {},
+          payload: {
+            projectId: ProjectId.makeUnsafe("project-model"),
+            title: "Project Model",
+            workspaceRoot: "/tmp/project-model",
+            defaultModel: null,
+            scripts: [],
+            createdAt,
+            updatedAt: createdAt,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.created",
+          eventId: EventId.makeUnsafe("evt-model-thread-create"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.makeUnsafe("thread-model"),
+          occurredAt: createdAt,
+          commandId: CommandId.makeUnsafe("cmd-model-thread-create"),
+          causationEventId: null,
+          correlationId: CommandId.makeUnsafe("cmd-model-thread-create"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.makeUnsafe("thread-model"),
+            projectId: ProjectId.makeUnsafe("project-model"),
+            title: "Thread Model",
+            model: "gpt-5-codex",
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.model-set",
+          eventId: EventId.makeUnsafe("evt-model-thread-set"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.makeUnsafe("thread-model"),
+          occurredAt: updatedAt,
+          commandId: CommandId.makeUnsafe("cmd-model-thread-set"),
+          causationEventId: null,
+          correlationId: CommandId.makeUnsafe("cmd-model-thread-set"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.makeUnsafe("thread-model"),
+            model: "gpt-5.4",
+            previousModel: "gpt-5-codex",
+            source: "client",
+            updatedAt,
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const rows = yield* sql<{
+          readonly model: string;
+          readonly updatedAt: string;
+        }>`
+          SELECT
+            model,
+            updated_at AS "updatedAt"
+          FROM projection_threads
+          WHERE thread_id = 'thread-model'
+        `;
+
+        assert.deepEqual(rows, [{ model: "gpt-5.4", updatedAt }]);
+      }),
+    );
+  },
+);
+
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(
   "OrchestrationProjectionPipeline",
   (it) => {

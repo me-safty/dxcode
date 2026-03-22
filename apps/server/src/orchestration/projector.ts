@@ -17,6 +17,7 @@ import {
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
+  ThreadModelSetPayload,
   ThreadMetaUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
@@ -298,6 +299,17 @@ export function projectEvent(
             ...(payload.model !== undefined ? { model: payload.model } : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.model-set":
+      return decodeForEvent(ThreadModelSetPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            model: payload.model,
             updatedAt: payload.updatedAt,
           }),
         })),

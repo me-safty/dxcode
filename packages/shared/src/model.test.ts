@@ -21,6 +21,7 @@ import {
   normalizeCodexModelOptions,
   normalizeModelSlug,
   resolveReasoningEffortForProvider,
+  resolveModelDisplayName,
   resolveSelectableModel,
   resolveModelSlug,
   resolveModelSlugForProvider,
@@ -202,6 +203,23 @@ describe("inferProviderForModel", () => {
 
   it("treats claude-prefixed custom slugs as claude", () => {
     expect(inferProviderForModel("claude-custom-internal")).toBe("claudeAgent");
+  });
+});
+
+describe("resolveModelDisplayName", () => {
+  it("returns built-in model names for known slugs and aliases", () => {
+    expect(resolveModelDisplayName("gpt-5.3-codex")).toBe("GPT-5.3 Codex");
+    expect(resolveModelDisplayName("sonnet", "claudeAgent")).toBe("Claude Sonnet 4.6");
+  });
+
+  it("humanizes unknown model slugs", () => {
+    expect(resolveModelDisplayName("claude/custom-opus")).toBe("Claude Custom Opus");
+    expect(resolveModelDisplayName("custom/internal-model")).toBe("Custom Internal Model");
+  });
+
+  it("returns an empty string for blank input", () => {
+    expect(resolveModelDisplayName("")).toBe("");
+    expect(resolveModelDisplayName(undefined)).toBe("");
   });
 });
 

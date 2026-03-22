@@ -503,7 +503,7 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
-  it("rejects a first turn when requested provider conflicts with the thread model", async () => {
+  it("allows a first turn to switch providers when the request specifies a different provider", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
 
@@ -519,40 +519,27 @@ describe("ProviderCommandReactor", () => {
           attachments: [],
         },
         provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         createdAt: now,
       }),
     );
 
-    await waitFor(async () => {
-      const readModel = await Effect.runPromise(harness.engine.getReadModel());
-      const thread = readModel.threads.find(
-        (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
-      );
-      return (
-        thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed") ??
-        false
-      );
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+      provider: "claudeAgent",
+      model: "claude-sonnet-4-6",
     });
-
-    expect(harness.startSession).not.toHaveBeenCalled();
-    expect(harness.sendTurn).not.toHaveBeenCalled();
-
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
-    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
-    expect(thread?.session).toBeNull();
-    expect(
-      thread?.activities.find((activity) => activity.kind === "provider.turn.start.failed"),
-    ).toMatchObject({
-      summary: "Provider turn start failed",
-      payload: {
-        detail: expect.stringContaining("cannot switch to 'claudeAgent'"),
-      },
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      model: "claude-sonnet-4-6",
     });
   });
 
-  it("rejects a turn when the requested model belongs to a different provider", async () => {
+  it("rejects a turn when the requested model conflicts with an explicit provider", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
 
@@ -567,6 +554,7 @@ describe("ProviderCommandReactor", () => {
           text: "hello",
           attachments: [],
         },
+        provider: "codex",
         model: "claude-sonnet-4-6",
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
@@ -800,7 +788,7 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
-  it("rejects provider changes after a thread is already bound to a session provider", async () => {
+  it("restarts the session when switching providers on an existing thread", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
 
@@ -836,38 +824,120 @@ describe("ProviderCommandReactor", () => {
           attachments: [],
         },
         provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         createdAt: now,
       }),
     );
 
-    await waitFor(async () => {
-      const readModel = await Effect.runPromise(harness.engine.getReadModel());
-      const thread = readModel.threads.find(
-        (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
-      );
-      return (
-        thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed") ??
-        false
-      );
-    });
-
-    expect(harness.startSession.mock.calls.length).toBe(1);
-    expect(harness.sendTurn.mock.calls.length).toBe(1);
+    await waitFor(() => harness.startSession.mock.calls.length === 2);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
     expect(harness.stopSession.mock.calls.length).toBe(0);
 
     const readModel = await Effect.runPromise(harness.engine.getReadModel());
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
-    expect(thread?.session?.providerName).toBe("codex");
+    expect(thread?.session?.providerName).toBe("claudeAgent");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
-    expect(
-      thread?.activities.find((activity) => activity.kind === "provider.turn.start.failed"),
-    ).toMatchObject({
-      payload: {
-        detail: expect.stringContaining("cannot switch to 'claudeAgent'"),
-      },
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      provider: "claudeAgent",
+      model: "claude-sonnet-4-6",
+    });
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      model: "claude-sonnet-4-6",
+    });
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      input: expect.stringContaining("You are continuing an existing conversation"),
+    });
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      input: expect.stringContaining("User:\nfirst"),
+    });
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      input: expect.stringContaining("Latest user message:\nsecond"),
+    });
+  });
+
+  it("preserves handoff history when switching providers after the previous session stopped", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-provider-stopped-1"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-provider-stopped-1"),
+          role: "user",
+          text: "first",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.stop",
+        commandId: CommandId.makeUnsafe("cmd-session-stop-before-provider-switch"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.stopSession.mock.calls.length === 1);
+
+    const stoppedReadModel = await Effect.runPromise(harness.engine.getReadModel());
+    const stoppedThread = stoppedReadModel.threads.find(
+      (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+    );
+    expect(stoppedThread?.session?.status).toBe("stopped");
+    expect(stoppedThread?.session?.providerName).toBe("codex");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-provider-stopped-2"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-provider-stopped-2"),
+          role: "user",
+          text: "second",
+          attachments: [],
+        },
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 2);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+
+    expect(harness.stopSession.mock.calls.length).toBe(1);
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      provider: "claudeAgent",
+      model: "claude-sonnet-4-6",
+    });
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      model: "claude-sonnet-4-6",
+    });
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      input: expect.stringContaining("You are continuing an existing conversation"),
+    });
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      input: expect.stringContaining("User:\nfirst"),
+    });
+    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+      input: expect.stringContaining("Latest user message:\nsecond"),
     });
   });
 

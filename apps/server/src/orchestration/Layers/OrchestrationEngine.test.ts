@@ -221,6 +221,70 @@ describe("OrchestrationEngine", () => {
     await system.dispose();
   });
 
+  it("emits thread.model-set when a thread model changes", async () => {
+    const system = await createOrchestrationSystem();
+    const { engine } = system;
+    const createdAt = now();
+
+    await system.run(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe("cmd-project-stream-model-create"),
+        projectId: asProjectId("project-stream-model"),
+        title: "Stream Model Project",
+        workspaceRoot: "/tmp/project-stream-model",
+        defaultModel: "gpt-5-codex",
+        createdAt,
+      }),
+    );
+
+    await system.run(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe("cmd-stream-thread-model-create"),
+        threadId: ThreadId.makeUnsafe("thread-stream-model"),
+        projectId: asProjectId("project-stream-model"),
+        title: "domain-stream-model",
+        model: "gpt-5-codex",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+
+    const event = await system.run(
+      Effect.gen(function* () {
+        const eventQueue = yield* Queue.unbounded<OrchestrationEvent>();
+        yield* Effect.forkScoped(
+          Stream.take(engine.streamDomainEvents, 1).pipe(
+            Stream.runForEach((nextEvent) =>
+              Queue.offer(eventQueue, nextEvent).pipe(Effect.asVoid),
+            ),
+          ),
+        );
+        yield* Effect.sleep("10 millis");
+        yield* engine.dispatch({
+          type: "thread.model.set",
+          commandId: CommandId.makeUnsafe("cmd-stream-thread-model-set"),
+          threadId: ThreadId.makeUnsafe("thread-stream-model"),
+          model: "gpt-5.4",
+          source: "client",
+        });
+        return yield* Queue.take(eventQueue);
+      }).pipe(Effect.scoped),
+    );
+
+    expect(event.type).toBe("thread.model-set");
+    if (event.type === "thread.model-set") {
+      expect(event.payload.previousModel).toBe("gpt-5-codex");
+      expect(event.payload.model).toBe("gpt-5.4");
+    }
+
+    await system.dispose();
+  });
+
   it("stores completed checkpoint summaries even when no files changed", async () => {
     const system = await createOrchestrationSystem();
     const { engine } = system;

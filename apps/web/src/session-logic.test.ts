@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveModelChangeNotices,
   PROVIDER_OPTIONS,
   derivePendingApprovals,
   derivePendingUserInputs,
@@ -922,7 +923,7 @@ describe("deriveWorkLogEntries", () => {
 });
 
 describe("deriveTimelineEntries", () => {
-  it("includes proposed plans alongside messages and work entries in chronological order", () => {
+  it("includes proposed plans, notices, and work entries in chronological order", () => {
     const entries = deriveTimelineEntries(
       [
         {
@@ -946,6 +947,18 @@ describe("deriveTimelineEntries", () => {
       ],
       [
         {
+          id: "notice-1",
+          createdAt: "2026-02-23T00:00:02.500Z",
+          noticeType: "model-change",
+          fromModel: "gpt-5.3-codex",
+          toModel: "gpt-5.4",
+          fromModelLabel: "GPT-5.3 Codex",
+          toModelLabel: "GPT-5.4",
+          source: "user",
+        },
+      ],
+      [
+        {
           id: "work-1",
           createdAt: "2026-02-23T00:00:03.000Z",
           label: "Ran tests",
@@ -954,7 +967,12 @@ describe("deriveTimelineEntries", () => {
       ],
     );
 
-    expect(entries.map((entry) => entry.kind)).toEqual(["message", "proposed-plan", "work"]);
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "message",
+      "proposed-plan",
+      "notice",
+      "work",
+    ]);
     expect(entries[1]).toMatchObject({
       kind: "proposed-plan",
       proposedPlan: {
@@ -963,6 +981,88 @@ describe("deriveTimelineEntries", () => {
         implementationThreadId: null,
       },
     });
+  });
+});
+
+describe("deriveModelChangeNotices", () => {
+  it("returns historical model-change notices in activity order", () => {
+    const notices = deriveModelChangeNotices([
+      makeActivity({
+        id: "notice-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "thread.model.changed",
+        summary: "Model changed",
+        tone: "info",
+        payload: {
+          fromModel: "gpt-5.3-codex",
+          toModel: "gpt-5.4",
+          source: "user",
+        },
+      }),
+      makeActivity({
+        id: "tool-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+      }),
+      makeActivity({
+        id: "notice-3",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "thread.model.changed",
+        summary: "Model changed",
+        tone: "info",
+        payload: {
+          fromModel: "gpt-5.4",
+          toModel: "gpt-5.4-mini",
+          source: "provider-reroute",
+          reason: "capacity",
+        },
+      }),
+    ]);
+
+    expect(notices).toEqual([
+      {
+        id: "notice-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        noticeType: "model-change",
+        fromModel: "gpt-5.3-codex",
+        toModel: "gpt-5.4",
+        fromModelLabel: "GPT-5.3 Codex",
+        toModelLabel: "GPT-5.4",
+        source: "user",
+      },
+      {
+        id: "notice-3",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        noticeType: "model-change",
+        fromModel: "gpt-5.4",
+        toModel: "gpt-5.4-mini",
+        fromModelLabel: "GPT-5.4",
+        toModelLabel: "GPT-5.4 Mini",
+        source: "provider-reroute",
+        reason: "capacity",
+      },
+    ]);
+  });
+
+  it("keeps model-change notices out of the work log", () => {
+    const activities = [
+      makeActivity({
+        id: "notice-4",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "thread.model.changed",
+        summary: "Model changed",
+        tone: "info",
+        payload: {
+          fromModel: "gpt-5.4",
+          toModel: "gpt-5.4-mini",
+          source: "provider-reroute",
+        },
+      }),
+    ];
+
+    expect(deriveModelChangeNotices(activities)).toHaveLength(1);
+    expect(deriveWorkLogEntries(activities, undefined)).toEqual([]);
   });
 });
 

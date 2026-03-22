@@ -1158,6 +1158,17 @@ const make = Effect.gen(function* () {
         });
       }
 
+      if (event.type === "model.rerouted" && event.payload.toModel !== thread.model) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.model.set",
+          commandId: providerCommandId(event, "thread-model-set"),
+          threadId: thread.id,
+          model: event.payload.toModel,
+          source: "provider-reroute",
+          reason: event.payload.reason,
+        });
+      }
+
       if (event.type === "turn.diff.updated") {
         const turnId = toTurnId(event.turnId);
         if (turnId && (yield* isGitRepoForThread(thread.id))) {

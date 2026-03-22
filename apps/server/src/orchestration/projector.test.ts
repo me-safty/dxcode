@@ -267,6 +267,61 @@ describe("orchestration projector", () => {
     expect(afterUpdate.threads[0]?.updatedAt).toBe(updatedAt);
   });
 
+  it("updates canonical thread model from thread.model-set", async () => {
+    const createdAt = "2026-02-23T08:00:00.000Z";
+    const updatedAt = "2026-02-23T08:00:05.000Z";
+    const model = createEmptyReadModel(createdAt);
+
+    const afterCreate = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: createdAt,
+          commandId: "cmd-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            model: "gpt-5.3-codex",
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        }),
+      ),
+    );
+
+    const next = await Effect.runPromise(
+      projectEvent(
+        afterCreate,
+        makeEvent({
+          sequence: 2,
+          type: "thread.model-set",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: updatedAt,
+          commandId: "cmd-model-set",
+          payload: {
+            threadId: "thread-1",
+            model: "gpt-5.4",
+            previousModel: "gpt-5.3-codex",
+            source: "client",
+            updatedAt,
+          },
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.model).toBe("gpt-5.4");
+    expect(next.threads[0]?.updatedAt).toBe(updatedAt);
+  });
+
   it("marks assistant messages completed with non-streaming updates", async () => {
     const createdAt = "2026-02-23T09:00:00.000Z";
     const deltaAt = "2026-02-23T09:00:01.000Z";

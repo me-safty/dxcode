@@ -250,6 +250,21 @@ export const OrchestrationThreadActivity = Schema.Struct({
 });
 export type OrchestrationThreadActivity = typeof OrchestrationThreadActivity.Type;
 
+export const ThreadModelSetSource = Schema.Literals(["client", "provider-reroute"]);
+export type ThreadModelSetSource = typeof ThreadModelSetSource.Type;
+
+export const ThreadModelChangedNoticeSource = Schema.Literals(["user", "provider-reroute"]);
+export type ThreadModelChangedNoticeSource = typeof ThreadModelChangedNoticeSource.Type;
+
+export const ThreadModelChangedActivityPayload = Schema.Struct({
+  fromModel: TrimmedNonEmptyString,
+  toModel: TrimmedNonEmptyString,
+  source: ThreadModelChangedNoticeSource,
+  provider: Schema.optional(ProviderKind),
+  reason: Schema.optional(TrimmedNonEmptyString),
+});
+export type ThreadModelChangedActivityPayload = typeof ThreadModelChangedActivityPayload.Type;
+
 const OrchestrationLatestTurnState = Schema.Literals([
   "running",
   "interrupted",
@@ -357,6 +372,16 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 });
+
+export const ThreadModelSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.model.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  model: TrimmedNonEmptyString,
+  source: ThreadModelSetSource,
+  reason: Schema.optional(TrimmedNonEmptyString),
+});
+export type ThreadModelSetCommand = typeof ThreadModelSetCommand.Type;
 
 const ThreadRuntimeModeSetCommand = Schema.Struct({
   type: Schema.Literal("thread.runtime-mode.set"),
@@ -466,6 +491,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadMetaUpdateCommand,
+  ThreadModelSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
@@ -485,6 +511,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadMetaUpdateCommand,
+  ThreadModelSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
@@ -585,6 +612,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.created",
   "thread.deleted",
   "thread.meta-updated",
+  "thread.model-set",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
@@ -658,6 +686,16 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   updatedAt: IsoDateTime,
 });
+
+export const ThreadModelSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  model: TrimmedNonEmptyString,
+  previousModel: TrimmedNonEmptyString,
+  source: ThreadModelSetSource,
+  reason: Schema.optional(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+export type ThreadModelSetPayload = typeof ThreadModelSetPayload.Type;
 
 export const ThreadRuntimeModeSetPayload = Schema.Struct({
   threadId: ThreadId,
@@ -814,6 +852,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.meta-updated"),
     payload: ThreadMetaUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.model-set"),
+    payload: ThreadModelSetPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

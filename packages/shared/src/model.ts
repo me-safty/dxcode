@@ -153,6 +153,49 @@ export function inferProviderForModel(
   return typeof model === "string" && model.trim().startsWith("claude-") ? "claudeAgent" : fallback;
 }
 
+function humanizeModelSlug(slug: string): string {
+  return slug
+    .trim()
+    .split(/[-_/]+/g)
+    .filter((part) => part.length > 0)
+    .map((part) => {
+      const upper = part.toUpperCase();
+      if (upper === "GPT") {
+        return upper;
+      }
+      if (/^\d+(\.\d+)?$/.test(part)) {
+        return part;
+      }
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(" ");
+}
+
+export function resolveModelDisplayName(
+  model: string | null | undefined,
+  provider?: ProviderKind,
+): string {
+  if (typeof model !== "string") {
+    return "";
+  }
+
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const effectiveProvider = provider ?? inferProviderForModel(trimmed);
+  const normalized = normalizeModelSlug(trimmed, effectiveProvider) ?? trimmed;
+  const builtIn = MODEL_OPTIONS_BY_PROVIDER[effectiveProvider].find(
+    (option) => option.slug === normalized,
+  );
+  if (builtIn) {
+    return builtIn.name;
+  }
+
+  return humanizeModelSlug(trimmed);
+}
+
 export function getReasoningEffortOptions(provider: "codex"): ReadonlyArray<CodexReasoningEffort>;
 export function getReasoningEffortOptions(
   provider: "claudeAgent",

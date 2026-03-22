@@ -37,6 +37,11 @@ function envCaptureEnd(name: string): string {
   return `__T3CODE_ENV_${name}_END__`;
 }
 
+function isNushell(shell: string): boolean {
+  const base = shell.split("/").pop() ?? "";
+  return base === "nu" || base.startsWith("nu.");
+}
+
 function buildEnvironmentCaptureCommand(names: ReadonlyArray<string>): string {
   return names
     .map((name) => {
@@ -49,6 +54,28 @@ function buildEnvironmentCaptureCommand(names: ReadonlyArray<string>): string {
         `printenv ${name} || true`,
         `printf '%s\\n' '${envCaptureEnd(name)}'`,
       ].join("; ");
+    })
+    .join("; ");
+}
+
+/**
+ * Build a nushell-native command that captures environment variables using
+ * the same marker protocol as the POSIX variant. Nushell stores PATH as a
+ * list, so we join it with ":" to match the expected format. For other
+ * variables we use `try { print $env.X } catch { }` because nushell
+ * throws on missing env vars.
+ */
+function buildNushellEnvironmentCaptureCommand(names: ReadonlyArray<string>): string {
+  return names
+    .map((name) => {
+      const start = envCaptureStart(name);
+      const end = envCaptureEnd(name);
+
+      if (name === "PATH") {
+        return `print "${start}"; print ($env.PATH | str join ":"); print "${end}"`;
+      }
+
+      return `print "${start}"; try { print $env.${name} } catch { }; print "${end}"`;
     })
     .join("; ");
 }
@@ -89,7 +116,15 @@ export const readEnvironmentFromLoginShell: ShellEnvironmentReader = (
     return {};
   }
 
-  const output = execFile(shell, ["-ilc", buildEnvironmentCaptureCommand(names)], {
+  // Nushell doesn't support bundled flags (-ilc) or POSIX syntax (||, printf).
+  // Use separate flags and a nu-native capture command instead.
+  const nu = isNushell(shell);
+  const command = nu
+    ? buildNushellEnvironmentCaptureCommand(names)
+    : buildEnvironmentCaptureCommand(names);
+  const args = nu ? ["-l", "-c", command] : ["-ilc", command];
+
+  const output = execFile(shell, args, {
     encoding: "utf8",
     timeout: 5000,
   });

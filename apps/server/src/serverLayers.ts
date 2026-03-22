@@ -10,6 +10,7 @@ import { OrchestrationEventStoreLive } from "./persistence/Layers/OrchestrationE
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime";
 import { OrchestrationEngineLive } from "./orchestration/Layers/OrchestrationEngine";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
+import { ModelChangeReactorLive } from "./orchestration/Layers/ModelChangeReactor";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor";
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor";
 import { OrchestrationProjectionPipelineLive } from "./orchestration/Layers/ProjectionPipeline";
@@ -102,10 +103,14 @@ export function makeServerRuntimeServicesLayer() {
   const checkpointReactorLayer = CheckpointReactorLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),
   );
+  const modelChangeReactorLayer = ModelChangeReactorLive.pipe(
+    Layer.provideMerge(runtimeServicesLayer),
+  );
   const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
     Layer.provideMerge(runtimeIngestionLayer),
     Layer.provideMerge(providerCommandReactorLayer),
     Layer.provideMerge(checkpointReactorLayer),
+    Layer.provideMerge(modelChangeReactorLayer),
   );
 
   const terminalLayer = TerminalManagerLive.pipe(

@@ -107,6 +107,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         readModel,
       });
       const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase];
+      const aggregateRef = commandToAggregateRef(envelope.command);
       const committedCommand = yield* sql
         .withTransaction(
           Effect.gen(function* () {
@@ -122,10 +123,25 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
             const lastSavedEvent = committedEvents.at(-1) ?? null;
             if (lastSavedEvent === null) {
-              return yield* new OrchestrationCommandInvariantError({
-                commandType: envelope.command.type,
-                detail: "Command produced no events.",
+              // No-op: the decider intentionally produced zero events
+              // (e.g. idempotent model set where the model is already current).
+              // Record a "skipped" receipt so the command is not retried, and
+              // return the read-model unchanged.
+              yield* commandReceiptRepository.upsert({
+                commandId: envelope.command.commandId,
+                aggregateKind: aggregateRef.aggregateKind,
+                aggregateId: aggregateRef.aggregateId,
+                acceptedAt: new Date().toISOString(),
+                resultSequence: 0,
+                status: "accepted",
+                error: null,
               });
+
+              return {
+                committedEvents: [],
+                lastSequence: 0,
+                nextReadModel,
+              } as const;
             }
 
             yield* commandReceiptRepository.upsert({
