@@ -228,18 +228,13 @@ export function applyHighContrastMode(enabled: boolean) {
   document.documentElement.classList.toggle(HIGH_CONTRAST_CLASS_NAME, enabled);
 }
 
-export function getStoredAppSettings(): AppSettings {
-  try {
-    return normalizeAppSettings(
-      getLocalStorageItem(APP_SETTINGS_STORAGE_KEY, AppSettingsSchema) ?? DEFAULT_APP_SETTINGS,
-    );
-  } catch {
-    return DEFAULT_APP_SETTINGS;
-  }
-}
-
 export function getStoredHighContrastMode(): boolean {
-  return getStoredAppSettings().highContrastMode;
+  try {
+    const stored = getLocalStorageItem(APP_SETTINGS_STORAGE_KEY, AppSettingsSchema);
+    return stored?.highContrastMode ?? false;
+  } catch {
+    return false;
+  }
 }
 
 export function useAppSettings() {
