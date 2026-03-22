@@ -79,6 +79,7 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
@@ -274,6 +275,7 @@ export default function Sidebar() {
   const isOnSettings = useLocation({ select: (loc) => loc.pathname === "/settings" });
   const { settings: appSettings } = useAppSettings();
   const { handleNewThread } = useHandleNewThread();
+  const { isMobile, setOpenMobile } = useSidebar();
   const routeThreadId = useParams({
     strict: false,
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
@@ -844,6 +846,9 @@ export default function Sidebar() {
         clearSelection();
       }
       setSelectionAnchor(threadId);
+      if (isMobile) {
+        setOpenMobile(false);
+      }
       void navigate({
         to: "/$threadId",
         params: { threadId },
@@ -851,9 +856,11 @@ export default function Sidebar() {
     },
     [
       clearSelection,
+      isMobile,
       navigate,
       rangeSelectTo,
       selectedThreadIds.size,
+      setOpenMobile,
       setSelectionAnchor,
       toggleThreadSelection,
     ],
@@ -1424,6 +1431,9 @@ export default function Sidebar() {
                                     onClick={(event) => {
                                       event.preventDefault();
                                       event.stopPropagation();
+                                      if (isMobile) {
+                                        setOpenMobile(false);
+                                      }
                                       void handleNewThread(project.id, {
                                         envMode: resolveSidebarNewThreadEnvMode({
                                           defaultEnvMode: appSettings.defaultThreadEnvMode,
@@ -1492,6 +1502,9 @@ export default function Sidebar() {
                                           clearSelection();
                                         }
                                         setSelectionAnchor(thread.id);
+                                        if (isMobile) {
+                                          setOpenMobile(false);
+                                        }
                                         void navigate({
                                           to: "/$threadId",
                                           params: { threadId: thread.id },
