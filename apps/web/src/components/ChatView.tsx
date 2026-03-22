@@ -3646,12 +3646,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           : (prompt.trim() || "Ask anything...")}
                       </span>
                       <button
-                        type="submit"
+                        type="button"
                         className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/90 text-primary-foreground disabled:opacity-30"
                         disabled={
                           isSendBusy || isConnecting || !composerSendState.hasSendableContent
                         }
                         aria-label="Send message"
+                        onPointerDown={(e) => e.preventDefault()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSend();
+                        }}
                       >
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                           <path d="M8 3L8 13M8 3L4 7M8 3L12 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
