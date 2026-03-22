@@ -379,6 +379,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const pendingInteractionAnchorFrameRef = useRef<number | null>(null);
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
+  const composerSurfaceRef = useRef<HTMLDivElement>(null);
   const composerFormHeightRef = useRef(0);
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
   const composerSelectLockRef = useRef(false);
@@ -388,6 +389,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewHandoffTimeoutByMessageIdRef = useRef<Record<string, number>>({});
   const sendInFlightRef = useRef(false);
+  const composerBlurFrameRef = useRef<number | null>(null);
   const dragDepthRef = useRef(0);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
   const setMessagesScrollContainerRef = useCallback((element: HTMLDivElement | null) => {
@@ -1197,6 +1199,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
       focusComposer();
     });
   }, [focusComposer]);
+  const scheduleComposerCollapseCheck = useCallback(() => {
+    if (composerBlurFrameRef.current !== null) {
+      window.cancelAnimationFrame(composerBlurFrameRef.current);
+    }
+    composerBlurFrameRef.current = window.requestAnimationFrame(() => {
+      composerBlurFrameRef.current = null;
+      const composerSurface = composerSurfaceRef.current;
+      const activeElement = document.activeElement;
+      if (
+        composerSurface &&
+        activeElement instanceof Node &&
+        composerSurface.contains(activeElement)
+      ) {
+        return;
+      }
+      setIsComposerFocused(false);
+    });
+  }, []);
   const addTerminalContextToDraft = useCallback(
     (selection: TerminalContextSelection) => {
       if (!activeThread) {
@@ -1857,6 +1877,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
         : (composerMenuItems[0]?.id ?? null),
     );
   }, [composerMenuItems, composerMenuOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (composerBlurFrameRef.current !== null) {
+        window.cancelAnimationFrame(composerBlurFrameRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setIsRevertingCheckpoint(false);
@@ -3585,17 +3613,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 onDrop={onComposerDrop}
               >
                 <div
+                  ref={composerSurfaceRef}
                   className={cn(
                     "rounded-[20px] border bg-card transition-colors duration-200 focus-within:border-ring/45",
                     isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border",
                     composerProviderState.composerSurfaceClassName,
                   )}
-                  onFocusCapture={() => setIsComposerFocused(true)}
-                  onBlurCapture={(e) => {
-                    // Only collapse if focus leaves the composer entirely
-                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                      setIsComposerFocused(false);
+                  onFocusCapture={() => {
+                    if (composerBlurFrameRef.current !== null) {
+                      window.cancelAnimationFrame(composerBlurFrameRef.current);
+                      composerBlurFrameRef.current = null;
                     }
+                    setIsComposerFocused(true);
+                  }}
+                  onBlurCapture={() => {
+                    scheduleComposerCollapseCheck();
                   }}
                   onClick={() => {
                     if (isComposerCollapsedMobile) {
@@ -3607,43 +3639,51 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     }
                   }}
                 >
-                  {!isComposerCollapsedMobile && (activePendingApproval ? (
-                    <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                      <ComposerPendingApprovalPanel
-                        approval={activePendingApproval}
-                        pendingCount={pendingApprovals.length}
-                      />
-                    </div>
-                  ) : pendingUserInputs.length > 0 ? (
-                    <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                      <ComposerPendingUserInputPanel
-                        pendingUserInputs={pendingUserInputs}
-                        respondingRequestIds={respondingRequestIds}
-                        answers={activePendingDraftAnswers}
-                        questionIndex={activePendingQuestionIndex}
-                        onSelectOption={onSelectActivePendingUserInputOption}
-                        onAdvance={onAdvanceActivePendingUserInput}
-                      />
-                    </div>
-                  ) : showPlanFollowUpPrompt && activeProposedPlan ? (
-                    <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                      <ComposerPlanFollowUpBanner
-                        key={activeProposedPlan.id}
-                        planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
-                      />
-                    </div>
-                  ) : null)}
+                  {!isComposerCollapsedMobile &&
+                    (activePendingApproval ? (
+                      <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+                        <ComposerPendingApprovalPanel
+                          approval={activePendingApproval}
+                          pendingCount={pendingApprovals.length}
+                        />
+                      </div>
+                    ) : pendingUserInputs.length > 0 ? (
+                      <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+                        <ComposerPendingUserInputPanel
+                          pendingUserInputs={pendingUserInputs}
+                          respondingRequestIds={respondingRequestIds}
+                          answers={activePendingDraftAnswers}
+                          questionIndex={activePendingQuestionIndex}
+                          onSelectOption={onSelectActivePendingUserInputOption}
+                          onAdvance={onAdvanceActivePendingUserInput}
+                        />
+                      </div>
+                    ) : showPlanFollowUpPrompt && activeProposedPlan ? (
+                      <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+                        <ComposerPlanFollowUpBanner
+                          key={activeProposedPlan.id}
+                          planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
+                        />
+                      </div>
+                    ) : null)}
                   {isComposerCollapsedMobile && (
                     <div className="flex items-center justify-between gap-2 px-3 py-2">
-                      <span className={cn(
-                        "min-w-0 truncate text-[14px]",
-                        (activePendingProgress ? activePendingProgress.customAnswer : prompt.trim())
-                          ? "text-foreground"
-                          : "text-muted-foreground/35",
-                      )}>
+                      <span
+                        className={cn(
+                          "min-w-0 truncate text-[14px]",
+                          (
+                            activePendingProgress
+                              ? activePendingProgress.customAnswer
+                              : prompt.trim()
+                          )
+                            ? "text-foreground"
+                            : "text-muted-foreground/35",
+                        )}
+                      >
                         {activePendingProgress
-                          ? (activePendingProgress.customAnswer || "Type your own answer, or leave this blank to use the selected option")
-                          : (prompt.trim() || "Ask anything...")}
+                          ? activePendingProgress.customAnswer ||
+                            "Type your own answer, or leave this blank to use the selected option"
+                          : prompt.trim() || "Ask anything..."}
                       </span>
                       <button
                         type="button"
@@ -3658,8 +3698,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           onSend();
                         }}
                       >
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                          <path d="M8 3L8 13M8 3L4 7M8 3L12 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M8 3L8 13M8 3L4 7M8 3L12 7"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
                         </svg>
                       </button>
                     </div>
@@ -3969,6 +4021,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               type="submit"
                               size="sm"
                               className="rounded-full px-4"
+                              onPointerDown={(e) => e.preventDefault()}
                               disabled={
                                 activePendingIsResponding ||
                                 (activePendingProgress.isLastQuestion
@@ -4007,6 +4060,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 type="submit"
                                 size="sm"
                                 className="h-9 rounded-full px-4 sm:h-8"
+                                onPointerDown={(e) => e.preventDefault()}
                                 disabled={isSendBusy || isConnecting}
                               >
                                 {isConnecting || isSendBusy ? "Sending..." : "Refine"}
@@ -4017,6 +4071,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   type="submit"
                                   size="sm"
                                   className="h-9 rounded-l-full rounded-r-none px-4 sm:h-8"
+                                  onPointerDown={(e) => e.preventDefault()}
                                   disabled={isSendBusy || isConnecting}
                                 >
                                   {isConnecting || isSendBusy ? "Sending..." : "Implement"}
@@ -4050,6 +4105,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             <button
                               type="submit"
                               className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/90 text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105 disabled:opacity-30 disabled:hover:scale-100 sm:h-8 sm:w-8"
+                              onPointerDown={(e) => e.preventDefault()}
                               disabled={
                                 isSendBusy || isConnecting || !composerSendState.hasSendableContent
                               }
