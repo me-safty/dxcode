@@ -57,7 +57,7 @@ const make = Effect.gen(function* () {
       }
       return worker.enqueue(event);
     }),
-  );
+  ).pipe(Effect.asVoid);
 
   return {
     start,
