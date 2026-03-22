@@ -7,7 +7,6 @@ import {
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { DiffIcon, TerminalSquareIcon } from "lucide-react";
-import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
@@ -72,14 +71,15 @@ export const ChatHeader = memo(function ChatHeader({
           {activeThreadTitle}
         </h2>
         {activeProjectName && (
-          <Badge variant="outline" className="min-w-0 shrink truncate">
-            {activeProjectName}
-          </Badge>
+          <>
+            <span className="shrink-0 text-muted-foreground/40">–</span>
+            <span className="min-w-0 shrink truncate text-sm text-muted-foreground">
+              {activeProjectName}
+            </span>
+          </>
         )}
         {activeProjectName && !isGitRepo && (
-          <Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
-            No Git
-          </Badge>
+          <span className="shrink-0 text-[10px] text-amber-700">No Git</span>
         )}
       </div>
       <div className="@container/header-actions flex min-w-0 flex-1 items-center justify-end gap-2 @sm/header-actions:gap-3">
