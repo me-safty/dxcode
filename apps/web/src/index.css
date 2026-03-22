@@ -122,10 +122,14 @@
 
 :root.high-contrast {
   --muted-foreground: color-mix(in srgb, var(--color-neutral-700) 92%, var(--color-black));
+  --border: --alpha(var(--color-black) / 45%);
+  --input: --alpha(var(--color-black) / 50%);
 }
 
 :root.high-contrast.dark {
   --muted-foreground: color-mix(in srgb, var(--color-neutral-300) 92%, var(--color-white));
+  --border: --alpha(var(--color-white) / 40%);
+  --input: --alpha(var(--color-white) / 45%);
 }
 
 :root.high-contrast ::placeholder {
