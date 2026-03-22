@@ -915,7 +915,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     const nextPath = this.historyPath(threadId, terminalId);
     try {
       const raw = await fs.promises.readFile(nextPath, "utf8");
-      const capped = capHistory(raw, this.historyLineLimit);
+      const capped = capHistory(stripTerminalQueryResponses(raw), this.historyLineLimit);
       if (capped !== raw) {
         await fs.promises.writeFile(nextPath, capped, "utf8");
       }
