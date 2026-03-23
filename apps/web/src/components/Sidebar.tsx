@@ -1147,8 +1147,7 @@ export default function Sidebar() {
   }, []);
 
   const wordmark = (
-    <div className="flex items-center gap-2">
-      <SidebarTrigger className="shrink-0 md:hidden" />
+    <div className="flex min-w-0 flex-1 items-center gap-2">
       <Tooltip>
         <TooltipTrigger
           render={
@@ -1167,6 +1166,7 @@ export default function Sidebar() {
           Version {APP_VERSION}
         </TooltipPopup>
       </Tooltip>
+      <SidebarTrigger className="shrink-0 ml-auto text-muted-foreground/70 hover:text-foreground" />
     </div>
   );
 

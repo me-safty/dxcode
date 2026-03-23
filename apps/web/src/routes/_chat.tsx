@@ -1,6 +1,6 @@
 import { type ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { Outlet, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Outlet, createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import ThreadSidebar from "../components/Sidebar";
@@ -10,11 +10,14 @@ import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { resolveShortcutCommand } from "../keybindings";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
-import { Sidebar, SidebarProvider } from "~/components/ui/sidebar";
+import { Sidebar, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
 import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
 import { useAppSettings } from "~/appSettings";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
+const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
+const THREAD_SIDEBAR_MIN_WIDTH = 16 * 16;
+const THREAD_SIDEBAR_MAX_WIDTH = 36 * 16;
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -92,6 +95,7 @@ function ChatRouteGlobalShortcuts() {
 
 function ChatRouteLayout() {
   const navigate = useNavigate();
+  const disableDesktopCollapse = useLocation({ select: (loc) => loc.pathname === "/settings" });
 
   useEffect(() => {
     const onMenuAction = window.desktopBridge?.onMenuAction;
@@ -110,14 +114,20 @@ function ChatRouteLayout() {
   }, [navigate]);
 
   return (
-    <SidebarProvider defaultOpen>
+    <SidebarProvider defaultOpen disableDesktopCollapse={disableDesktopCollapse}>
       <ChatRouteGlobalShortcuts />
       <Sidebar
         side="left"
         collapsible="offcanvas"
         className="border-r border-border bg-card text-foreground"
+        resizable={{
+          minWidth: THREAD_SIDEBAR_MIN_WIDTH,
+          maxWidth: THREAD_SIDEBAR_MAX_WIDTH,
+          storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
+        }}
       >
         <ThreadSidebar />
+        <SidebarRail />
       </Sidebar>
       <Outlet />
     </SidebarProvider>

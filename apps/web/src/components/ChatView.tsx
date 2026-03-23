@@ -116,7 +116,7 @@ import {
   projectScriptIdFromCommand,
   setupProjectScript,
 } from "~/projectScripts";
-import { SidebarTrigger } from "./ui/sidebar";
+import { SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import {
@@ -237,6 +237,7 @@ interface ChatViewProps {
 }
 
 export default function ChatView({ threadId }: ChatViewProps) {
+  const { isMobile: isSidebarMobile, open: isSidebarOpen } = useSidebar();
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
   const markThreadVisited = useStore((store) => store.markThreadVisited);
@@ -3433,6 +3434,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     void onRevertToTurnCount(targetTurnCount);
   };
+  const showDesktopSidebarTrigger = isElectron && !isSidebarMobile && !isSidebarOpen;
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -3448,6 +3450,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
         )}
         {isElectron && (
           <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
+            {showDesktopSidebarTrigger ? (
+              <SidebarTrigger className="mr-3 ml-[88px] shrink-0 text-muted-foreground/70 hover:text-foreground" />
+            ) : null}
             <span className="text-xs text-muted-foreground/50">No active thread</span>
           </div>
         )}
@@ -3469,6 +3474,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
           isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
         )}
       >
+        {showDesktopSidebarTrigger ? (
+          <SidebarTrigger className="mr-3 ml-[88px] shrink-0 text-muted-foreground/70 hover:text-foreground" />
+        ) : null}
         <ChatHeader
           activeThreadId={activeThread.id}
           activeThreadTitle={activeThread.title}

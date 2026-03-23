@@ -23,12 +23,14 @@ import { Schema } from "effect";
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
+const SIDEBAR_OPEN_STORAGE_KEY = "chat_sidebar_open";
 const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
 
 type SidebarContextProps = {
+  disableDesktopCollapse: boolean;
   state: "expanded" | "collapsed";
   open: boolean;
   setOpen: (open: boolean) => void;
@@ -87,6 +89,7 @@ function useSidebar() {
 
 function SidebarProvider({
   defaultOpen = true,
+  disableDesktopCollapse = false,
   open: openProp,
   onOpenChange: setOpenProp,
   className,
@@ -94,6 +97,7 @@ function SidebarProvider({
   children,
   ...props
 }: React.ComponentProps<"div"> & {
+  disableDesktopCollapse?: boolean;
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -103,16 +107,21 @@ function SidebarProvider({
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
-  const [_open, _setOpen] = React.useState(defaultOpen);
-  const open = openProp ?? _open;
+  const [leftSidebarPreferenceOpen, setLeftSidebarPreferenceOpen] = React.useState(() => {
+    if (typeof window === "undefined") return defaultOpen;
+    return getLocalStorageItem(SIDEBAR_OPEN_STORAGE_KEY, Schema.Boolean) ?? defaultOpen;
+  });
+  const open = openProp ?? leftSidebarPreferenceOpen;
+  const isLeftSidebarOpen = isMobile ? open : disableDesktopCollapse || open;
   const setOpen = React.useCallback(
     async (value: boolean | ((value: boolean) => boolean)) => {
       const openState = typeof value === "function" ? value(open) : value;
       if (setOpenProp) {
         setOpenProp(openState);
       } else {
-        _setOpen(openState);
+        setLeftSidebarPreferenceOpen(openState);
       }
+      setLocalStorageItem(SIDEBAR_OPEN_STORAGE_KEY, openState, Schema.Boolean);
 
       // This sets the cookie to keep the sidebar state.
       await cookieStore.set({
@@ -127,24 +136,39 @@ function SidebarProvider({
 
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
-    return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open);
-  }, [isMobile, setOpen]);
+    if (isMobile) {
+      return setOpenMobile((open) => !open);
+    }
+    if (disableDesktopCollapse) {
+      return;
+    }
+    void setOpen((open) => !open);
+  }, [disableDesktopCollapse, isMobile, open, setOpen]);
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.
-  const state = open ? "expanded" : "collapsed";
+  const state = isLeftSidebarOpen ? "expanded" : "collapsed";
 
   const contextValue = React.useMemo<SidebarContextProps>(
     () => ({
+      disableDesktopCollapse,
       isMobile,
-      open,
+      open: isLeftSidebarOpen,
       openMobile,
       setOpen,
       setOpenMobile,
       state,
       toggleSidebar,
     }),
-    [state, open, setOpen, isMobile, openMobile, toggleSidebar],
+    [
+      disableDesktopCollapse,
+      isLeftSidebarOpen,
+      openMobile,
+      setOpen,
+      isMobile,
+      state,
+      toggleSidebar,
+    ],
   );
 
   return (
@@ -265,7 +289,7 @@ function Sidebar({
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
-            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
+            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-150 ease-linear",
             "group-data-[collapsible=offcanvas]:w-0",
             "group-data-[side=right]:rotate-180",
             variant === "floating" || variant === "inset"
@@ -276,7 +300,7 @@ function Sidebar({
         />
         <div
           className={cn(
-            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex",
+            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-150 ease-linear md:flex",
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
               : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
@@ -303,22 +327,26 @@ function Sidebar({
 }
 
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar, openMobile } = useSidebar();
+  const { disableDesktopCollapse, isMobile, open, openMobile, toggleSidebar } = useSidebar();
+  const isSidebarOpen = isMobile ? openMobile : open;
+  const disabled = props.disabled ?? (!isMobile && disableDesktopCollapse && isSidebarOpen);
 
   return (
     <Button
       className={cn("size-7", className)}
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
+      disabled={disabled}
       onClick={(event) => {
         onClick?.(event);
+        if (event.defaultPrevented || disabled) return;
         toggleSidebar();
       }}
       size="icon"
       variant="ghost"
       {...props}
     >
-      {openMobile ? <PanelLeftCloseIcon /> : <PanelLeftIcon />}
+      {isSidebarOpen ? <PanelLeftCloseIcon /> : <PanelLeftIcon />}
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );

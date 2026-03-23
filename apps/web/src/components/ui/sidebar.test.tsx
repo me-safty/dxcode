@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  SidebarTrigger,
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuSubButton,
@@ -49,5 +50,29 @@ describe("sidebar interactive cursors", () => {
 
     expect(html).toContain('data-slot="sidebar-menu-sub-button"');
     expect(html).toContain("cursor-pointer");
+  });
+});
+
+describe("SidebarTrigger", () => {
+  it("shows the close icon when the desktop sidebar is open", () => {
+    const html = renderToStaticMarkup(
+      <SidebarProvider defaultOpen>
+        <SidebarTrigger />
+      </SidebarProvider>,
+    );
+
+    expect(html).toContain("lucide-panel-left-close");
+    expect(html).not.toContain('lucide-panel-left"');
+  });
+
+  it("shows the open icon when the desktop sidebar is closed", () => {
+    const html = renderToStaticMarkup(
+      <SidebarProvider defaultOpen={false}>
+        <SidebarTrigger />
+      </SidebarProvider>,
+    );
+
+    expect(html).toContain("lucide-panel-left");
+    expect(html).not.toContain("lucide-panel-left-close");
   });
 });
