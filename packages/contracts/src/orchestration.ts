@@ -53,6 +53,8 @@ export const ClaudeProviderStartOptions = Schema.Struct({
   binaryPath: Schema.optional(TrimmedNonEmptyString),
   permissionMode: Schema.optional(TrimmedNonEmptyString),
   maxThinkingTokens: Schema.optional(NonNegativeInt),
+  mcpServers: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+  plugins: Schema.optional(Schema.Array(Schema.Unknown)),
 });
 
 export const ProviderStartOptions = Schema.Struct({

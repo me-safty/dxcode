@@ -2578,6 +2578,12 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           env: process.env,
           ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         };
+        if (providerOptions?.mcpServers) {
+          (queryOptions as Record<string, unknown>).mcpServers = providerOptions.mcpServers;
+        }
+        if (providerOptions?.plugins) {
+          (queryOptions as Record<string, unknown>).plugins = providerOptions.plugins;
+        }
 
         const queryRuntime = yield* Effect.try({
           try: () =>
