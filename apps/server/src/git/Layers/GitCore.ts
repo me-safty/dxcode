@@ -813,7 +813,7 @@ const makeGitCore = Effect.gen(function* () {
       if (trimmedBody.length > 0) {
         args.push("-m", trimmedBody);
       }
-      yield* runGit("GitCore.commit.commit", cwd, args);
+      yield* executeGit("GitCore.commit.commit", cwd, args, { timeoutMs: 120_000 });
       const commitSha = yield* runGitStdout("GitCore.commit.revParseHead", cwd, [
         "rev-parse",
         "HEAD",
