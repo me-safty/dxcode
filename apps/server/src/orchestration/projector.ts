@@ -12,7 +12,10 @@ import {
   MessageSentPayloadSchema,
   ProjectCreatedPayload,
   ProjectDeletedPayload,
+  ProjectJiraMetadataUpdatedPayload,
   ProjectMetaUpdatedPayload,
+  ProjectNoteUpdatedPayload,
+  ProjectTouchedPayload,
   ThreadActivityAppendedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
@@ -232,6 +235,63 @@ export function projectEvent(
                   ...project,
                   deletedAt: payload.deletedAt,
                   updatedAt: payload.deletedAt,
+                }
+              : project,
+          ),
+        })),
+      );
+
+    case "project.jira-metadata-updated":
+      return decodeForEvent(ProjectJiraMetadataUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? {
+                  ...project,
+                  ...(payload.ticketKey !== undefined ? { ticketKey: payload.ticketKey } : {}),
+                  ...(payload.jiraStatus !== undefined ? { jiraStatus: payload.jiraStatus } : {}),
+                  ...(payload.priority !== undefined ? { priority: payload.priority } : {}),
+                  ...(payload.jiraUrl !== undefined ? { jiraUrl: payload.jiraUrl } : {}),
+                  ...(payload.components !== undefined ? { components: payload.components } : {}),
+                  ...(payload.labels !== undefined ? { labels: payload.labels } : {}),
+                  ...(payload.assignee !== undefined ? { assignee: payload.assignee } : {}),
+                  ...(payload.reporter !== undefined ? { reporter: payload.reporter } : {}),
+                  ...(payload.description !== undefined ? { description: payload.description } : {}),
+                  ...(payload.parentKey !== undefined ? { parentKey: payload.parentKey } : {}),
+                  ...(payload.suggestedRepo !== undefined ? { suggestedRepo: payload.suggestedRepo } : {}),
+                  updatedAt: payload.updatedAt,
+                }
+              : project,
+          ),
+        })),
+      );
+
+    case "project.note-updated":
+      return decodeForEvent(ProjectNoteUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? {
+                  ...project,
+                  note: payload.note,
+                  updatedAt: payload.updatedAt,
+                }
+              : project,
+          ),
+        })),
+      );
+
+    case "project.touched":
+      return decodeForEvent(ProjectTouchedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? {
+                  ...project,
+                  lastAccessedAt: payload.lastAccessedAt,
                 }
               : project,
           ),

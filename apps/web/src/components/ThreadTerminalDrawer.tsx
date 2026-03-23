@@ -1,5 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
-import { Plus, SquareSplitHorizontal, TerminalSquare, Trash2, XIcon } from "lucide-react";
+import { Copy, Plus, SquareSplitHorizontal, TerminalSquare, Trash2, XIcon } from "lucide-react";
 import { type ThreadId } from "@t3tools/contracts";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import {
@@ -27,6 +27,7 @@ import {
   type ThreadTerminalGroup,
 } from "../types";
 import { readNativeApi } from "~/nativeApi";
+import { toastManager } from "~/components/ui/toast";
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
@@ -638,8 +639,52 @@ function TerminalViewport({
       window.cancelAnimationFrame(frame);
     };
   }, [drawerHeight, resizeEpoch, terminalId, threadId]);
+
+  const [showCopy, setShowCopy] = useState(false);
+
+  const handleCopyTerminal = useCallback(async () => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const buffer = terminal.buffer.active;
+    const lines: string[] = [];
+    for (let i = 0; i < buffer.length; i++) {
+      const line = buffer.getLine(i);
+      if (line) lines.push(line.translateToString(true));
+    }
+    const text = lines.join("\n").trimEnd();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toastManager.add({
+        type: "success",
+        title: "Terminal output copied to clipboard",
+      });
+    } catch {
+      toastManager.add({
+        type: "error",
+        title: "Failed to copy terminal output",
+      });
+    }
+  }, []);
+
   return (
-    <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-[4px]" />
+    <div
+      className="relative h-full w-full"
+      onMouseEnter={() => setShowCopy(true)}
+      onMouseLeave={() => setShowCopy(false)}
+    >
+      <div ref={containerRef} className="h-full w-full overflow-hidden rounded-[4px]" />
+      {showCopy && (
+        <button
+          type="button"
+          onClick={() => void handleCopyTerminal()}
+          className="absolute top-2 right-2 z-10 cursor-pointer rounded bg-muted/80 p-1.5 text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground"
+          title="Copy terminal output"
+        >
+          <Copy size={14} />
+        </button>
+      )}
+    </div>
   );
 }
 

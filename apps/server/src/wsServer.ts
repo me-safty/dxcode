@@ -45,6 +45,7 @@ import {
 } from "effect";
 import { WebSocketServer, type WebSocket } from "ws";
 
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { createLogger } from "./logger";
 import { GitManager } from "./git/Services/GitManager.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
@@ -74,6 +75,9 @@ import {
 } from "./attachmentStore.ts";
 import { parseBase64DataUrl } from "./imageMime.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
+import { JiraService } from "./jira/Services/JiraService.ts";
+import { CalendarService } from "./calendar/Services/CalendarService.ts";
+import { GmailService } from "./gmail/Services/GmailService.ts";
 import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
@@ -89,7 +93,7 @@ export interface ServerShape {
   readonly start: Effect.Effect<
     http.Server,
     ServerLifecycleError,
-    Scope.Scope | ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path
+    Scope.Scope | ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path | SqlClient.SqlClient
   >;
 
   /**
@@ -217,7 +221,10 @@ export type ServerRuntimeServices =
   | TerminalManager
   | Keybindings
   | Open
-  | AnalyticsService;
+  | AnalyticsService
+  | JiraService
+  | CalendarService
+  | GmailService;
 
 export class ServerLifecycleError extends Schema.TaggedErrorClass<ServerLifecycleError>()(
   "ServerLifecycleError",
@@ -234,7 +241,7 @@ class RouteRequestError extends Schema.TaggedErrorClass<RouteRequestError>()("Ro
 export const createServer = Effect.fn(function* (): Effect.fn.Return<
   http.Server,
   ServerLifecycleError,
-  Scope.Scope | ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path
+  Scope.Scope | ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path | SqlClient.SqlClient
 > {
   const serverConfig = yield* ServerConfig;
   const {
@@ -257,6 +264,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const git = yield* GitCore;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const sql = yield* SqlClient.SqlClient;
 
   yield* keybindingsManager.syncDefaultKeybindingsOnStartup.pipe(
     Effect.catch((error) =>
@@ -603,6 +611,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
   const orchestrationReactor = yield* OrchestrationReactor;
   const { openInEditor } = yield* Open;
+  const jiraService = yield* JiraService;
+  const calendarService = yield* CalendarService;
+  const gmailService = yield* GmailService;
 
   const subscriptionsScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(subscriptionsScope, Exit.void));
@@ -881,6 +892,177 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const body = stripRequestTag(request.body);
         const keybindingsConfig = yield* keybindingsManager.upsertKeybindingRule(body);
         return { keybindings: keybindingsConfig, issues: [] };
+      }
+
+      case WS_METHODS.specGet: {
+        const body = stripRequestTag(request.body);
+        const rows = yield* sql`
+          SELECT id, project_id, content, created_at, updated_at
+          FROM specs
+          WHERE project_id = ${body.projectId}
+          LIMIT 1
+        `;
+        if (rows.length === 0) return null;
+        const r = rows[0] as any;
+        return { id: r.id, projectId: r.project_id, content: r.content, createdAt: r.created_at, updatedAt: r.updated_at };
+      }
+
+      case WS_METHODS.specUpdate: {
+        const body = stripRequestTag(request.body);
+        const id = crypto.randomUUID();
+        const now = new Date().toISOString();
+        yield* sql`
+          INSERT INTO specs (id, project_id, content, created_at, updated_at)
+          VALUES (${id}, ${body.projectId}, ${body.content}, ${now}, ${now})
+          ON CONFLICT(project_id) DO UPDATE SET
+            content = ${body.content},
+            updated_at = ${now}
+        `;
+        return { id };
+      }
+
+      case WS_METHODS.promptHistoryList: {
+        const { projectId, limit } = request.body;
+        const maxLimit = limit ?? 50;
+        const rows = yield* sql`
+          SELECT id, project_id, prompt, created_at
+          FROM prompt_history
+          WHERE project_id = ${projectId}
+          ORDER BY created_at DESC
+          LIMIT ${maxLimit}
+        `;
+        return rows.map((r: any) => ({
+          id: r.id,
+          projectId: r.project_id,
+          prompt: r.prompt,
+          createdAt: r.created_at,
+        }));
+      }
+
+      case WS_METHODS.promptHistoryAdd: {
+        const { projectId, prompt } = request.body;
+        const id = crypto.randomUUID();
+        const createdAt = new Date().toISOString();
+        yield* sql`
+          INSERT INTO prompt_history (id, project_id, prompt, created_at)
+          VALUES (${id}, ${projectId}, ${prompt}, ${createdAt})
+        `;
+        return { id };
+      }
+
+      case WS_METHODS.gmailSearch: {
+        const body = stripRequestTag(request.body);
+        return yield* gmailService.search({
+          query: body.query,
+          ...(body.maxResults !== undefined ? { maxResults: body.maxResults } : {}),
+        });
+      }
+
+      case WS_METHODS.gmailMarkRead: {
+        const body = stripRequestTag(request.body);
+        yield* gmailService.markRead({ threadId: body.threadId });
+        return {};
+      }
+
+      case WS_METHODS.gmailCreateDraft: {
+        const body = stripRequestTag(request.body);
+        return yield* gmailService.createDraft({
+          to: body.to,
+          subject: body.subject,
+          body: body.body,
+          ...(body.replyToMessageId !== undefined ? { replyToMessageId: body.replyToMessageId } : {}),
+        });
+      }
+
+      case WS_METHODS.calendarAgenda: {
+        const body = stripRequestTag(request.body);
+        return yield* calendarService.agenda({
+          ...(body.date !== undefined ? { date: body.date } : {}),
+        });
+      }
+
+      case WS_METHODS.calendarMeetingPrep: {
+        const body = stripRequestTag(request.body);
+        return yield* calendarService.meetingPrep({
+          title: body.title,
+          start: body.start,
+        });
+      }
+
+      case WS_METHODS.jiraList: {
+        const body = stripRequestTag(request.body);
+        return yield* jiraService.listTickets({
+          ...(body.assignee !== undefined ? { assignee: body.assignee } : {}),
+          ...(body.status !== undefined ? { status: body.status } : {}),
+          ...(body.maxResults !== undefined ? { maxResults: body.maxResults } : {}),
+        });
+      }
+
+      case WS_METHODS.jiraGet: {
+        const body = stripRequestTag(request.body);
+        return yield* jiraService.getTicket({ ticketKey: body.ticketKey });
+      }
+
+      case WS_METHODS.jiraSearch: {
+        const body = stripRequestTag(request.body);
+        return yield* jiraService.searchTickets({
+          jql: body.jql,
+          ...(body.maxResults !== undefined ? { maxResults: body.maxResults } : {}),
+        });
+      }
+
+      case WS_METHODS.jiraRefresh: {
+        return yield* jiraService.refreshCache();
+      }
+
+      case WS_METHODS.jiraPostComment: {
+        const body = stripRequestTag(request.body);
+        yield* jiraService.postComment({
+          ticketKey: body.ticketKey,
+          body: body.body,
+        });
+        return {};
+      }
+
+      // Gmail methods
+      case WS_METHODS.gmailSearch: {
+        const body = stripRequestTag(request.body);
+        return yield* gmailService.search({
+          query: body.query,
+          ...(body.maxResults !== undefined ? { maxResults: body.maxResults } : {}),
+        });
+      }
+
+      case WS_METHODS.gmailMarkRead: {
+        const body = stripRequestTag(request.body);
+        yield* gmailService.markRead({ threadId: body.threadId });
+        return {};
+      }
+
+      case WS_METHODS.gmailCreateDraft: {
+        const body = stripRequestTag(request.body);
+        return yield* gmailService.createDraft({
+          to: body.to,
+          subject: body.subject,
+          body: body.body,
+          ...(body.replyToMessageId !== undefined ? { replyToMessageId: body.replyToMessageId } : {}),
+        });
+      }
+
+      // Calendar methods
+      case WS_METHODS.calendarAgenda: {
+        const body = stripRequestTag(request.body);
+        return yield* calendarService.agenda({
+          ...(body.date !== undefined ? { date: body.date } : {}),
+        });
+      }
+
+      case WS_METHODS.calendarMeetingPrep: {
+        const body = stripRequestTag(request.body);
+        return yield* calendarService.meetingPrep({
+          title: body.title,
+          start: body.start,
+        });
       }
 
       default: {

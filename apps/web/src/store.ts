@@ -146,6 +146,20 @@ function mapProjectsFromReadModel(
           ? persistedExpandedProjectCwds.has(project.workspaceRoot)
           : true),
       scripts: project.scripts.map((script) => ({ ...script })),
+      ...(project.ticketKey != null ? { ticketKey: project.ticketKey } : {}),
+      ...(project.jiraStatus != null ? { jiraStatus: project.jiraStatus } : {}),
+      ...(project.priority != null ? { priority: project.priority } : {}),
+      ...(project.jiraUrl != null ? { jiraUrl: project.jiraUrl } : {}),
+      ...(project.components != null ? { components: [...project.components] } : {}),
+      ...(project.labels != null ? { labels: [...project.labels] } : {}),
+      ...(project.assignee != null ? { assignee: project.assignee } : {}),
+      ...(project.reporter != null ? { reporter: project.reporter } : {}),
+      ...(project.description != null ? { description: project.description } : {}),
+      ...(project.parentKey != null ? { parentKey: project.parentKey } : {}),
+      ...(project.suggestedRepo != null ? { suggestedRepo: project.suggestedRepo } : {}),
+      ...(project.note != null ? { note: project.note } : {}),
+      ...(project.lastAccessedAt != null ? { lastAccessedAt: project.lastAccessedAt } : {}),
+      ...(project.archivedAt !== undefined ? { archivedAt: project.archivedAt } : {}),
     } satisfies Project;
   });
 

@@ -2,6 +2,9 @@ import {
   ProjectCreatedPayload as ContractsProjectCreatedPayloadSchema,
   ProjectMetaUpdatedPayload as ContractsProjectMetaUpdatedPayloadSchema,
   ProjectDeletedPayload as ContractsProjectDeletedPayloadSchema,
+  ProjectJiraMetadataUpdatedPayload as ContractsProjectJiraMetadataUpdatedPayloadSchema,
+  ProjectNoteUpdatedPayload as ContractsProjectNoteUpdatedPayloadSchema,
+  ProjectTouchedPayload as ContractsProjectTouchedPayloadSchema,
   ThreadCreatedPayload as ContractsThreadCreatedPayloadSchema,
   ThreadMetaUpdatedPayload as ContractsThreadMetaUpdatedPayloadSchema,
   ThreadRuntimeModeSetPayload as ContractsThreadRuntimeModeSetPayloadSchema,
@@ -24,6 +27,9 @@ import {
 export const ProjectCreatedPayload = ContractsProjectCreatedPayloadSchema;
 export const ProjectMetaUpdatedPayload = ContractsProjectMetaUpdatedPayloadSchema;
 export const ProjectDeletedPayload = ContractsProjectDeletedPayloadSchema;
+export const ProjectJiraMetadataUpdatedPayload = ContractsProjectJiraMetadataUpdatedPayloadSchema;
+export const ProjectNoteUpdatedPayload = ContractsProjectNoteUpdatedPayloadSchema;
+export const ProjectTouchedPayload = ContractsProjectTouchedPayloadSchema;
 
 export const ThreadCreatedPayload = ContractsThreadCreatedPayloadSchema;
 export const ThreadMetaUpdatedPayload = ContractsThreadMetaUpdatedPayloadSchema;

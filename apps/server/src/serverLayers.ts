@@ -35,6 +35,9 @@ import { GitServiceLive } from "./git/Layers/GitService";
 import { BunPtyAdapterLive } from "./terminal/Layers/BunPTY";
 import { NodePtyAdapterLive } from "./terminal/Layers/NodePTY";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
+import { JiraServiceLive } from "./jira/Layers/JiraService";
+import { GmailServiceLive } from "./gmail/Layers/GmailService";
+import { CalendarServiceLive } from "./calendar/Layers/CalendarService";
 
 export function makeServerProviderLayer(): Layer.Layer<
   ProviderService,
@@ -128,5 +131,8 @@ export function makeServerRuntimeServicesLayer() {
     gitManagerLayer,
     terminalLayer,
     KeybindingsLive,
+    JiraServiceLive,
+    GmailServiceLive,
+    CalendarServiceLive,
   ).pipe(Layer.provideMerge(NodeServices.layer));
 }

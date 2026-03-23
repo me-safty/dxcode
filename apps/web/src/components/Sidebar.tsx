@@ -91,6 +91,7 @@ import {
   shouldClearThreadSelectionOnMouseDown,
 } from "./Sidebar.logic";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { useScratchpadStore } from "~/scratchpadStore";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_PREVIEW_LIMIT = 6;
@@ -103,6 +104,63 @@ function formatRelativeTime(iso: string): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
+}
+
+function PromptHistorySection({
+  projectId,
+  threadId,
+}: {
+  projectId: string;
+  threadId: string | undefined;
+}) {
+  const [prompts, setPrompts] = useState<
+    Array<{ id: string; prompt: string; createdAt: string }>
+  >([]);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    const api = readNativeApi();
+    if (!api) return;
+    api.promptHistory.list({ projectId, limit: 5 }).then(setPrompts).catch(() => {});
+  }, [projectId]);
+
+  if (prompts.length === 0) return null;
+
+  return (
+    <div className="px-2 pb-1">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+      >
+        <ChevronRightIcon
+          className={`size-3 transition-transform ${expanded ? "rotate-90" : ""}`}
+        />
+        Recent prompts ({prompts.length})
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-0.5">
+          {prompts.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => {
+                const api = readNativeApi();
+                if (threadId && api) {
+                  api.terminal.write({
+                    threadId,
+                    terminalId: "default",
+                    data: p.prompt + "\n",
+                  });
+                }
+              }}
+              className="w-full truncate rounded px-1 py-0.5 text-left text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              {p.prompt}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface TerminalStatusIndicator {
@@ -270,6 +328,8 @@ export default function Sidebar() {
   const clearProjectDraftThreadById = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadById,
   );
+  const scratchpadGet = useScratchpadStore((s) => s.get);
+  const scratchpadSet = useScratchpadStore((s) => s.set);
   const navigate = useNavigate();
   const isOnSettings = useLocation({ select: (loc) => loc.pathname === "/settings" });
   const { settings: appSettings } = useAppSettings();
@@ -1404,9 +1464,70 @@ export default function Sidebar() {
                                 />
                               )}
                               <ProjectFavicon cwd={project.cwd} />
-                              <span className="flex-1 truncate text-xs font-medium text-foreground/90">
-                                {project.name}
-                              </span>
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <span className="flex min-w-0 flex-1 items-center gap-0.5 truncate text-xs font-medium text-foreground/90" />
+                                  }
+                                >
+                                  <span className="truncate">{project.name}</span>
+                                  {project.ticketKey && (
+                                    <a
+                                      href={
+                                        project.jiraUrl ??
+                                        `https://mediafly.atlassian.net/browse/${project.ticketKey}`
+                                      }
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="ml-1 inline-flex shrink-0 items-center rounded bg-blue-500/10 px-1 py-0.5 text-[10px] font-medium text-blue-400 hover:bg-blue-500/20"
+                                    >
+                                      {project.ticketKey}
+                                    </a>
+                                  )}
+                                  {project.jiraStatus && (
+                                    <span
+                                      className={`ml-1 inline-flex shrink-0 items-center rounded px-1 py-0.5 text-[10px] font-medium ${
+                                        project.jiraStatus === "In Progress"
+                                          ? "bg-yellow-500/10 text-yellow-400"
+                                          : project.jiraStatus === "Done"
+                                            ? "bg-green-500/10 text-green-400"
+                                            : "bg-gray-500/10 text-gray-400"
+                                      }`}
+                                    >
+                                      {project.jiraStatus}
+                                    </span>
+                                  )}
+                                  {project.priority &&
+                                    project.priority !== "Medium" && (
+                                      <span
+                                        className={`ml-1 shrink-0 text-[10px] ${
+                                          project.priority === "Highest" ||
+                                          project.priority === "High"
+                                            ? "text-red-400"
+                                            : project.priority === "Low" ||
+                                                project.priority === "Lowest"
+                                              ? "text-gray-500"
+                                              : ""
+                                        }`}
+                                      >
+                                        {project.priority === "Highest"
+                                          ? "\u{1F534}"
+                                          : project.priority === "High"
+                                            ? "\u{1F7E0}"
+                                            : "\u{1F535}"}
+                                      </span>
+                                    )}
+                                </TooltipTrigger>
+                                <TooltipPopup side="top">
+                                  <span>{project.name}</span>
+                                  {project.lastAccessedAt && (
+                                    <span className="ml-1 text-muted-foreground">
+                                      &middot; {formatRelativeTime(project.lastAccessedAt)}
+                                    </span>
+                                  )}
+                                </TooltipPopup>
+                              </Tooltip>
                             </SidebarMenuButton>
                             <Tooltip>
                               <TooltipTrigger
@@ -1658,6 +1779,41 @@ export default function Sidebar() {
                                 </SidebarMenuSubItem>
                               )}
                             </SidebarMenuSub>
+                            {/* Per-project note */}
+                            <div className="px-2 pb-1">
+                              <textarea
+                                className="w-full resize-none rounded border border-border bg-background/50 px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                                placeholder="Project notes..."
+                                rows={2}
+                                defaultValue={project.note ?? ""}
+                                onBlur={(e) => {
+                                  const note = e.target.value;
+                                  const api = readNativeApi();
+                                  if (!api) return;
+                                  api.orchestration.dispatchCommand({
+                                    type: "project.note.update",
+                                    commandId: newCommandId(),
+                                    projectId: project.id,
+                                    note,
+                                  });
+                                }}
+                              />
+                            </div>
+                            {/* Per-project scratchpad */}
+                            <div className="px-2 pb-1">
+                              <textarea
+                                className="w-full resize-none rounded border border-border bg-background/50 px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                                placeholder="Scratchpad..."
+                                rows={2}
+                                value={scratchpadGet(project.id)}
+                                onChange={(e) => scratchpadSet(project.id, e.target.value)}
+                              />
+                            </div>
+                            {/* Prompt history */}
+                            <PromptHistorySection
+                              projectId={project.id}
+                              threadId={routeThreadId ?? undefined}
+                            />
                           </CollapsibleContent>
                         </Collapsible>
                       )}

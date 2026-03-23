@@ -83,6 +83,21 @@ export interface Project {
   model: string;
   expanded: boolean;
   scripts: ProjectScript[];
+  // Jira metadata (all optional)
+  ticketKey?: string;
+  jiraStatus?: string;
+  priority?: string;
+  jiraUrl?: string;
+  components?: string[];
+  labels?: string[];
+  assignee?: string;
+  reporter?: string;
+  description?: string;
+  parentKey?: string;
+  suggestedRepo?: string;
+  note?: string;
+  lastAccessedAt?: string;
+  archivedAt?: string | null;
 }
 
 export interface Thread {

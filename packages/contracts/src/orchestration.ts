@@ -149,6 +149,20 @@ export const OrchestrationProject = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
+  ticketKey: Schema.optional(TrimmedNonEmptyString),
+  jiraStatus: Schema.optional(TrimmedNonEmptyString),
+  priority: Schema.optional(TrimmedNonEmptyString),
+  jiraUrl: Schema.optional(TrimmedNonEmptyString),
+  components: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  labels: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  assignee: Schema.optional(TrimmedNonEmptyString),
+  reporter: Schema.optional(TrimmedNonEmptyString),
+  description: Schema.optional(Schema.String),
+  parentKey: Schema.optional(TrimmedNonEmptyString),
+  suggestedRepo: Schema.optional(TrimmedNonEmptyString),
+  note: Schema.optional(Schema.String),
+  lastAccessedAt: Schema.optional(IsoDateTime),
+  archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
 });
 export type OrchestrationProject = typeof OrchestrationProject.Type;
 
@@ -326,6 +340,37 @@ const ProjectDeleteCommand = Schema.Struct({
   projectId: ProjectId,
 });
 
+const ProjectJiraMetadataUpdateCommand = Schema.Struct({
+  type: Schema.Literal("project.jira-metadata.update"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  ticketKey: Schema.optional(TrimmedNonEmptyString),
+  jiraStatus: Schema.optional(TrimmedNonEmptyString),
+  priority: Schema.optional(TrimmedNonEmptyString),
+  jiraUrl: Schema.optional(TrimmedNonEmptyString),
+  components: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  labels: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  assignee: Schema.optional(TrimmedNonEmptyString),
+  reporter: Schema.optional(TrimmedNonEmptyString),
+  description: Schema.optional(Schema.String),
+  parentKey: Schema.optional(TrimmedNonEmptyString),
+  suggestedRepo: Schema.optional(TrimmedNonEmptyString),
+});
+
+const ProjectNoteUpdateCommand = Schema.Struct({
+  type: Schema.Literal("project.note.update"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  note: Schema.String,
+});
+
+const ProjectTouchCommand = Schema.Struct({
+  type: Schema.Literal("project.touch"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  lastAccessedAt: IsoDateTime,
+});
+
 const ThreadCreateCommand = Schema.Struct({
   type: Schema.Literal("thread.create"),
   commandId: CommandId,
@@ -463,6 +508,9 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
+  ProjectJiraMetadataUpdateCommand,
+  ProjectNoteUpdateCommand,
+  ProjectTouchCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadMetaUpdateCommand,
@@ -482,6 +530,9 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
+  ProjectJiraMetadataUpdateCommand,
+  ProjectNoteUpdateCommand,
+  ProjectTouchCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadMetaUpdateCommand,
@@ -582,6 +633,9 @@ export const OrchestrationEventType = Schema.Literals([
   "project.created",
   "project.meta-updated",
   "project.deleted",
+  "project.jira-metadata-updated",
+  "project.note-updated",
+  "project.touched",
   "thread.created",
   "thread.deleted",
   "thread.meta-updated",
@@ -628,6 +682,33 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
 export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
   deletedAt: IsoDateTime,
+});
+
+export const ProjectJiraMetadataUpdatedPayload = Schema.Struct({
+  projectId: ProjectId,
+  ticketKey: Schema.optional(TrimmedNonEmptyString),
+  jiraStatus: Schema.optional(TrimmedNonEmptyString),
+  priority: Schema.optional(TrimmedNonEmptyString),
+  jiraUrl: Schema.optional(TrimmedNonEmptyString),
+  components: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  labels: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  assignee: Schema.optional(TrimmedNonEmptyString),
+  reporter: Schema.optional(TrimmedNonEmptyString),
+  description: Schema.optional(Schema.String),
+  parentKey: Schema.optional(TrimmedNonEmptyString),
+  suggestedRepo: Schema.optional(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+
+export const ProjectNoteUpdatedPayload = Schema.Struct({
+  projectId: ProjectId,
+  note: Schema.String,
+  updatedAt: IsoDateTime,
+});
+
+export const ProjectTouchedPayload = Schema.Struct({
+  projectId: ProjectId,
+  lastAccessedAt: IsoDateTime,
 });
 
 export const ThreadCreatedPayload = Schema.Struct({
@@ -799,6 +880,21 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("project.deleted"),
     payload: ProjectDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.jira-metadata-updated"),
+    payload: ProjectJiraMetadataUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.note-updated"),
+    payload: ProjectNoteUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.touched"),
+    payload: ProjectTouchedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

@@ -11,3 +11,7 @@ export * from "./git";
 export * from "./orchestration";
 export * from "./editor";
 export * from "./project";
+export * from "./jira";
+export * from "./calendar";
+export * from "./gmail";
+export * from "./spec";

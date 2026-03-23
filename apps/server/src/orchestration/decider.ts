@@ -111,6 +111,83 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "project.jira-metadata.update": {
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "project.jira-metadata-updated",
+        payload: {
+          projectId: command.projectId,
+          ...(command.ticketKey !== undefined ? { ticketKey: command.ticketKey } : {}),
+          ...(command.jiraStatus !== undefined ? { jiraStatus: command.jiraStatus } : {}),
+          ...(command.priority !== undefined ? { priority: command.priority } : {}),
+          ...(command.jiraUrl !== undefined ? { jiraUrl: command.jiraUrl } : {}),
+          ...(command.components !== undefined ? { components: command.components } : {}),
+          ...(command.labels !== undefined ? { labels: command.labels } : {}),
+          ...(command.assignee !== undefined ? { assignee: command.assignee } : {}),
+          ...(command.reporter !== undefined ? { reporter: command.reporter } : {}),
+          ...(command.description !== undefined ? { description: command.description } : {}),
+          ...(command.parentKey !== undefined ? { parentKey: command.parentKey } : {}),
+          ...(command.suggestedRepo !== undefined ? { suggestedRepo: command.suggestedRepo } : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "project.note.update": {
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "project.note-updated",
+        payload: {
+          projectId: command.projectId,
+          note: command.note,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "project.touch": {
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.lastAccessedAt,
+          commandId: command.commandId,
+        }),
+        type: "project.touched",
+        payload: {
+          projectId: command.projectId,
+          lastAccessedAt: command.lastAccessedAt,
+        },
+      };
+    }
+
     case "project.delete": {
       yield* requireProject({
         readModel,

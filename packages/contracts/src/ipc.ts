@@ -45,6 +45,21 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
 } from "./orchestration";
+import type {
+  JiraTicket,
+  JiraListInput,
+  JiraGetInput,
+  JiraSearchInput,
+  JiraRefreshInput,
+  JiraPostCommentInput,
+} from "./jira";
+import type {
+  GmailMessage,
+  GmailSearchInput,
+  GmailMarkReadInput,
+  GmailCreateDraftInput,
+} from "./gmail";
+import type { CalendarAgendaInput, CalendarEvent, CalendarMeetingPrepInput } from "./calendar";
 import { EditorId } from "./editor";
 
 export interface ContextMenuItem<T extends string = string> {
@@ -155,6 +170,30 @@ export interface NativeApi {
       items: readonly ContextMenuItem<T>[],
       position?: { x: number; y: number },
     ) => Promise<T | null>;
+  };
+  promptHistory: {
+    list: (input: { projectId: string; limit?: number }) => Promise<Array<{ id: string; projectId: string; prompt: string; createdAt: string }>>;
+    add: (input: { projectId: string; prompt: string }) => Promise<{ id: string }>;
+  };
+  calendar: {
+    agenda: (input: CalendarAgendaInput) => Promise<CalendarEvent[]>;
+    meetingPrep: (input: CalendarMeetingPrepInput) => Promise<{ notes: string }>;
+  };
+  gmail: {
+    search: (input: GmailSearchInput) => Promise<GmailMessage[]>;
+    markRead: (input: GmailMarkReadInput) => Promise<void>;
+    createDraft: (input: GmailCreateDraftInput) => Promise<{ id: string }>;
+  };
+  jira: {
+    list: (input: JiraListInput) => Promise<JiraTicket[]>;
+    get: (input: JiraGetInput) => Promise<JiraTicket>;
+    search: (input: JiraSearchInput) => Promise<JiraTicket[]>;
+    refresh: (input: JiraRefreshInput) => Promise<{ count: number }>;
+    postComment: (input: JiraPostCommentInput) => Promise<void>;
+  };
+  spec: {
+    get: (input: { projectId: string }) => Promise<{ id: string; projectId: string; content: string; createdAt: string; updatedAt: string } | null>;
+    update: (input: { projectId: string; content: string }) => Promise<{ id: string }>;
   };
   server: {
     getConfig: () => Promise<ServerConfig>;

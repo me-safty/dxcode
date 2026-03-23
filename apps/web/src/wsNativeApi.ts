@@ -157,6 +157,30 @@ export function createWsNativeApi(): NativeApi {
         return showContextMenuFallback(items, position);
       },
     },
+    calendar: {
+      agenda: (input) => transport.request(WS_METHODS.calendarAgenda, input),
+      meetingPrep: (input) => transport.request(WS_METHODS.calendarMeetingPrep, input),
+    },
+    gmail: {
+      search: (input) => transport.request(WS_METHODS.gmailSearch, input),
+      markRead: (input) => transport.request(WS_METHODS.gmailMarkRead, input),
+      createDraft: (input) => transport.request(WS_METHODS.gmailCreateDraft, input),
+    },
+    jira: {
+      list: (input) => transport.request(WS_METHODS.jiraList, input),
+      get: (input) => transport.request(WS_METHODS.jiraGet, input),
+      search: (input) => transport.request(WS_METHODS.jiraSearch, input),
+      refresh: (input) => transport.request(WS_METHODS.jiraRefresh, input),
+      postComment: (input) => transport.request(WS_METHODS.jiraPostComment, input),
+    },
+    spec: {
+      get: (input) => transport.request(WS_METHODS.specGet, input),
+      update: (input) => transport.request(WS_METHODS.specUpdate, input),
+    },
+    promptHistory: {
+      list: (input) => transport.request(WS_METHODS.promptHistoryList, input),
+      add: (input) => transport.request(WS_METHODS.promptHistoryAdd, input),
+    },
     server: {
       getConfig: () => transport.request(WS_METHODS.serverGetConfig),
       upsertKeybinding: (input) => transport.request(WS_METHODS.serverUpsertKeybinding, input),

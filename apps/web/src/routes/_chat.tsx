@@ -1,8 +1,9 @@
-import { type ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import { type ResolvedKeybindingsConfig, ThreadId } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { Outlet, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Outlet, createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect } from "react";
 
+import CommandTray from "../components/CommandTray";
 import ThreadSidebar from "../components/Sidebar";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -10,6 +11,7 @@ import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { resolveShortcutCommand } from "../keybindings";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
+import { DEFAULT_THREAD_TERMINAL_ID } from "../types";
 import { Sidebar, SidebarProvider } from "~/components/ui/sidebar";
 import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
 import { useAppSettings } from "~/appSettings";
@@ -92,6 +94,17 @@ function ChatRouteGlobalShortcuts() {
 
 function ChatRouteLayout() {
   const navigate = useNavigate();
+  const routeThreadId = useParams({
+    strict: false,
+    select: (params) =>
+      params.threadId ? ThreadId.makeUnsafe(params.threadId) : null,
+  });
+  const activeTerminalId = useTerminalStateStore((state) =>
+    routeThreadId
+      ? selectThreadTerminalState(state.terminalStateByThreadId, routeThreadId)
+          .activeTerminalId
+      : DEFAULT_THREAD_TERMINAL_ID,
+  );
 
   useEffect(() => {
     const onMenuAction = window.desktopBridge?.onMenuAction;
@@ -119,7 +132,13 @@ function ChatRouteLayout() {
       >
         <ThreadSidebar />
       </Sidebar>
-      <Outlet />
+      <div className="flex flex-col flex-1 min-w-0">
+        <Outlet />
+        <CommandTray
+          threadId={routeThreadId}
+          terminalId={activeTerminalId}
+        />
+      </div>
     </SidebarProvider>
   );
 }

@@ -37,6 +37,17 @@ import { KeybindingRule } from "./keybindings";
 import { ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
 import { OpenInEditorInput } from "./editor";
 import { ServerConfigUpdatedPayload } from "./server";
+import {
+  JiraListInput,
+  JiraGetInput,
+  JiraSearchInput,
+  JiraRefreshInput,
+  JiraPostCommentInput,
+  JIRA_WS_CHANNELS,
+} from "./jira";
+import { CalendarAgendaInput, CalendarMeetingPrepInput, CALENDAR_WS_METHODS } from "./calendar";
+import { GmailSearchInput, GmailMarkReadInput, GmailCreateDraftInput, GMAIL_WS_METHODS } from "./gmail";
+import { SpecGetInput, SpecUpdateInput } from "./spec";
 
 // ── WebSocket RPC Method Names ───────────────────────────────────────
 
@@ -72,6 +83,30 @@ export const WS_METHODS = {
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
 
+  // Prompt history methods
+  promptHistoryList: "promptHistory.list",
+  promptHistoryAdd: "promptHistory.add",
+
+  // Calendar methods
+  calendarAgenda: "calendar.agenda",
+  calendarMeetingPrep: "calendar.meetingPrep",
+
+  // Gmail methods
+  gmailSearch: "gmail.search",
+  gmailMarkRead: "gmail.markRead",
+  gmailCreateDraft: "gmail.createDraft",
+
+  // Jira methods
+  jiraList: "jira.list",
+  jiraGet: "jira.get",
+  jiraSearch: "jira.search",
+  jiraRefresh: "jira.refresh",
+  jiraPostComment: "jira.postComment",
+
+  // Spec methods
+  specGet: "spec.get",
+  specUpdate: "spec.update",
+
   // Server meta
   serverGetConfig: "server.getConfig",
   serverUpsertKeybinding: "server.upsertKeybinding",
@@ -96,6 +131,27 @@ const tagRequestBody = <const Tag extends string, const Fields extends Schema.St
     // PreserveChecks is safe here. No existing schema should have checks depending on the tag
     { unsafePreserveChecks: true },
   );
+
+// ── Prompt History Schemas ─────────────────────────────────────────────
+
+const PromptHistoryListInput = Schema.Struct({
+  projectId: ProjectId,
+  limit: Schema.optional(Schema.Number),
+});
+
+const PromptHistoryAddInput = Schema.Struct({
+  projectId: ProjectId,
+  prompt: TrimmedNonEmptyString,
+});
+
+const PromptHistoryEntry = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  projectId: ProjectId,
+  prompt: Schema.String,
+  createdAt: Schema.String,
+});
+
+export type PromptHistoryEntry = typeof PromptHistoryEntry.Type;
 
 const WebSocketRequestBody = Schema.Union([
   // Orchestration methods
@@ -135,6 +191,30 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.terminalClear, TerminalClearInput),
   tagRequestBody(WS_METHODS.terminalRestart, TerminalRestartInput),
   tagRequestBody(WS_METHODS.terminalClose, TerminalCloseInput),
+
+  // Prompt history methods
+  tagRequestBody(WS_METHODS.promptHistoryList, PromptHistoryListInput),
+  tagRequestBody(WS_METHODS.promptHistoryAdd, PromptHistoryAddInput),
+
+  // Calendar methods
+  tagRequestBody(WS_METHODS.calendarAgenda, CalendarAgendaInput),
+  tagRequestBody(WS_METHODS.calendarMeetingPrep, CalendarMeetingPrepInput),
+
+  // Gmail methods
+  tagRequestBody(WS_METHODS.gmailSearch, GmailSearchInput),
+  tagRequestBody(WS_METHODS.gmailMarkRead, GmailMarkReadInput),
+  tagRequestBody(WS_METHODS.gmailCreateDraft, GmailCreateDraftInput),
+
+  // Jira methods
+  tagRequestBody(WS_METHODS.jiraList, JiraListInput),
+  tagRequestBody(WS_METHODS.jiraGet, JiraGetInput),
+  tagRequestBody(WS_METHODS.jiraSearch, JiraSearchInput),
+  tagRequestBody(WS_METHODS.jiraRefresh, JiraRefreshInput),
+  tagRequestBody(WS_METHODS.jiraPostComment, JiraPostCommentInput),
+
+  // Spec methods
+  tagRequestBody(WS_METHODS.specGet, SpecGetInput),
+  tagRequestBody(WS_METHODS.specUpdate, SpecUpdateInput),
 
   // Server meta
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),

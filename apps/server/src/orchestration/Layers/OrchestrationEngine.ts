@@ -37,6 +37,9 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.create":
     case "project.meta.update":
     case "project.delete":
+    case "project.jira-metadata.update":
+    case "project.note.update":
+    case "project.touch":
       return {
         aggregateKind: "project",
         aggregateId: command.projectId,
