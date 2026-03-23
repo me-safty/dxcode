@@ -52,8 +52,12 @@ const runtimePtyAdapterLoaders = {
 
 const makeRuntimePtyAdapterLayer = () =>
   Effect.gen(function* () {
-    const runtime =
-      process.versions.bun !== undefined && process.platform !== "win32" ? "bun" : "node";
+    const runtime = process.versions.bun !== undefined ? "bun" : "node";
+    if (runtime === "bun" && process.platform === "win32") {
+      return yield* Effect.die(
+        "Bun PTY terminal support is unavailable on Windows. Please use Node.js by running `npx t3` instead.",
+      );
+    }
     const loader = runtimePtyAdapterLoaders[runtime];
     const ptyAdapterModule = yield* Effect.promise(loader);
     return ptyAdapterModule.layer;
