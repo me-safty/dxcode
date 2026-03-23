@@ -86,7 +86,7 @@ class BunPtyProcess implements PtyProcess {
   }
 }
 
-export const BunPtyAdapterLive = Layer.effect(
+export const layer = Layer.effect(
   PtyAdapter,
   Effect.gen(function* () {
     if (process.platform === "win32") {

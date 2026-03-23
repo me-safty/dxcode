@@ -40,21 +40,15 @@ type RuntimePtyAdapterLoader = {
 };
 
 const runtimePtyAdapterLoaders = {
-  bun: () =>
-    import("./terminal/Layers/BunPTY").then(({ BunPtyAdapterLive }) => ({
-      layer: BunPtyAdapterLive,
-    })),
-  node: () =>
-    import("./terminal/Layers/NodePTY").then(({ NodePtyAdapterLive }) => ({
-      layer: NodePtyAdapterLive,
-    })),
+  bun: () => import("./terminal/Layers/BunPTY"),
+  node: () => import("./terminal/Layers/NodePTY"),
 } satisfies Record<string, () => Promise<RuntimePtyAdapterLoader>>;
 
 const makeRuntimePtyAdapterLayer = () =>
   Effect.gen(function* () {
     const runtime = process.versions.bun !== undefined ? "bun" : "node";
     const loader = runtimePtyAdapterLoaders[runtime];
-    const ptyAdapterModule = yield* Effect.promise(loader);
+    const ptyAdapterModule = yield* Effect.promise<RuntimePtyAdapterLoader>(loader);
     return ptyAdapterModule.layer;
   }).pipe(Layer.unwrap);
 
