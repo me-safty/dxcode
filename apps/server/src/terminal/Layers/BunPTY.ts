@@ -90,7 +90,9 @@ export const BunPtyAdapterLive = Layer.effect(
   PtyAdapter,
   Effect.gen(function* () {
     if (process.platform === "win32") {
-      return yield* Effect.die("Bun PTY terminal support is unavailable on Windows.");
+      return yield* Effect.die(
+        "Bun PTY terminal support is unavailable on Windows. Please use Node.js (e.g. by running `npx t3`) instead.",
+      );
     }
     return {
       spawn: (input) =>
