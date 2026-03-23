@@ -85,9 +85,8 @@ export function makeServerProviderLayer(): Layer.Layer<
 }
 
 export function makeServerRuntimeServicesLayer() {
-  const gitCoreLayer = GitCoreLive;
   const textGenerationLayer = CodexTextGenerationLive;
-  const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(gitCoreLayer));
+  const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(GitCoreLive));
 
   const orchestrationLayer = OrchestrationEngineLive.pipe(
     Layer.provide(OrchestrationProjectionPipelineLive),
@@ -112,7 +111,7 @@ export function makeServerRuntimeServicesLayer() {
   );
   const providerCommandReactorLayer = ProviderCommandReactorLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),
-    Layer.provideMerge(gitCoreLayer),
+    Layer.provideMerge(GitCoreLive),
     Layer.provideMerge(textGenerationLayer),
   );
   const checkpointReactorLayer = CheckpointReactorLive.pipe(
@@ -127,14 +126,14 @@ export function makeServerRuntimeServicesLayer() {
   const terminalLayer = TerminalManagerLive.pipe(Layer.provide(makeRuntimePtyAdapterLayer()));
 
   const gitManagerLayer = GitManagerLive.pipe(
-    Layer.provideMerge(gitCoreLayer),
+    Layer.provideMerge(GitCoreLive),
     Layer.provideMerge(GitHubCliLive),
     Layer.provideMerge(textGenerationLayer),
   );
 
   return Layer.mergeAll(
     orchestrationReactorLayer,
-    gitCoreLayer,
+    GitCoreLive,
     gitManagerLayer,
     terminalLayer,
     KeybindingsLive,
