@@ -10,11 +10,16 @@ import { isElectron } from "./env";
 import { getRouter } from "./router";
 import { APP_DISPLAY_NAME } from "./branding";
 
+// Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();
 
 const router = getRouter(history);
+const preferredLocale = navigator.languages.find((locale) => locale.trim().length > 0) ?? navigator.language;
 
 document.title = APP_DISPLAY_NAME;
+document.documentElement.dir = /^(ar|dv|fa|he|ku|ps|sd|ug|ur|yi)(-|_|$)/iu.test(preferredLocale)
+  ? "rtl"
+  : "ltr";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
