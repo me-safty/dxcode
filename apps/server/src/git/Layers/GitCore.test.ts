@@ -484,19 +484,19 @@ it.layer(TestLayer)("git integration", (it) => {
         const realGitCore = yield* GitCore;
         let refreshFetchAttempts = 0;
         const core = yield* makeIsolatedGitCore((input) => {
-            if (input.args[0] === "fetch") {
-              refreshFetchAttempts += 1;
-              return Effect.fail(
-                new GitCommandError({
-                  operation: "git.test.refreshFailure",
-                  command: `git ${input.args.join(" ")}`,
-                  cwd: input.cwd,
-                  detail: "simulated fetch timeout",
-                }),
-              );
-            }
-            return realGitCore.execute(input);
-          });
+          if (input.args[0] === "fetch") {
+            refreshFetchAttempts += 1;
+            return Effect.fail(
+              new GitCommandError({
+                operation: "git.test.refreshFailure",
+                command: `git ${input.args.join(" ")}`,
+                cwd: input.cwd,
+                detail: "simulated fetch timeout",
+              }),
+            );
+          }
+          return realGitCore.execute(input);
+        });
         yield* core.checkoutBranch({ cwd: source, branch: featureBranch });
         yield* Effect.promise(() =>
           vi.waitFor(() => {
@@ -531,12 +531,12 @@ it.layer(TestLayer)("git integration", (it) => {
         const realGitCore = yield* GitCore;
         let fetchArgs: readonly string[] | null = null;
         const core = yield* makeIsolatedGitCore((input) => {
-            if (input.args[0] === "fetch") {
-              fetchArgs = [...input.args];
-              return Effect.succeed({ code: 0, stdout: "", stderr: "" });
-            }
-            return realGitCore.execute(input);
-          });
+          if (input.args[0] === "fetch") {
+            fetchArgs = [...input.args];
+            return Effect.succeed({ code: 0, stdout: "", stderr: "" });
+          }
+          return realGitCore.execute(input);
+        });
         yield* core.checkoutBranch({ cwd: source, branch: featureBranch });
         yield* Effect.promise(() =>
           vi.waitFor(() => {
@@ -583,14 +583,14 @@ it.layer(TestLayer)("git integration", (it) => {
           releaseFetch = resolve;
         });
         const core = yield* makeIsolatedGitCore((input) => {
-            if (input.args[0] === "fetch") {
-              fetchStarted = true;
-              return Effect.promise(() =>
-                waitForReleasePromise.then(() => ({ code: 0, stdout: "", stderr: "" })),
-              );
-            }
-            return realGitCore.execute(input);
-          });
+          if (input.args[0] === "fetch") {
+            fetchStarted = true;
+            return Effect.promise(() =>
+              waitForReleasePromise.then(() => ({ code: 0, stdout: "", stderr: "" })),
+            );
+          }
+          return realGitCore.execute(input);
+        });
         yield* core.checkoutBranch({ cwd: source, branch: featureBranch });
         yield* Effect.promise(() =>
           vi.waitFor(() => {
@@ -606,7 +606,9 @@ it.layer(TestLayer)("git integration", (it) => {
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();
         yield* initRepoWithCommit(tmp);
-        const result = yield* Effect.result((yield* GitCore).checkoutBranch({ cwd: tmp, branch: "nonexistent" }));
+        const result = yield* Effect.result(
+          (yield* GitCore).checkoutBranch({ cwd: tmp, branch: "nonexistent" }),
+        );
         expect(result._tag).toBe("Failure");
       }),
     );
@@ -657,7 +659,10 @@ it.layer(TestLayer)("git integration", (it) => {
         yield* git(source, ["checkout", defaultBranch]);
         yield* git(source, ["branch", "-D", featureBranch]);
 
-        yield* (yield* GitCore).checkoutBranch({ cwd: source, branch: `${remoteName}/${featureBranch}` });
+        yield* (yield* GitCore).checkoutBranch({
+          cwd: source,
+          branch: `${remoteName}/${featureBranch}`,
+        });
 
         expect(yield* git(source, ["branch", "--show-current"])).toBe("upstream/feature");
       }),
@@ -672,9 +677,9 @@ it.layer(TestLayer)("git integration", (it) => {
           yield* git(remote, ["init", "--bare"]);
 
           yield* initRepoWithCommit(source);
-          const defaultBranch = (yield* (yield* GitCore).listBranches({ cwd: source })).branches.find(
-            (branch) => branch.current,
-          )!.name;
+          const defaultBranch = (yield* (yield* GitCore).listBranches({
+            cwd: source,
+          })).branches.find((branch) => branch.current)!.name;
           yield* git(source, ["remote", "add", "origin", remote]);
           yield* git(source, ["push", "-u", "origin", defaultBranch]);
 
@@ -682,7 +687,10 @@ it.layer(TestLayer)("git integration", (it) => {
           // would attempt to create an already-existing local branch.
           yield* git(source, ["branch", "--unset-upstream"]);
 
-          yield* (yield* GitCore).checkoutBranch({ cwd: source, branch: `origin/${defaultBranch}` });
+          yield* (yield* GitCore).checkoutBranch({
+            cwd: source,
+            branch: `origin/${defaultBranch}`,
+          });
 
           const core = yield* GitCore;
           const status = yield* core.statusDetails(source);
@@ -717,7 +725,9 @@ it.layer(TestLayer)("git integration", (it) => {
         yield* writeTextFile(path.join(tmp, "README.md"), "conflicting local\n");
 
         // Checkout should fail due to uncommitted changes
-        const result = yield* Effect.result((yield* GitCore).checkoutBranch({ cwd: tmp, branch: "other" }));
+        const result = yield* Effect.result(
+          (yield* GitCore).checkoutBranch({ cwd: tmp, branch: "other" }),
+        );
         expect(result._tag).toBe("Failure");
       }),
     );
@@ -742,7 +752,9 @@ it.layer(TestLayer)("git integration", (it) => {
         const tmp = yield* makeTmpDir();
         yield* initRepoWithCommit(tmp);
         yield* (yield* GitCore).createBranch({ cwd: tmp, branch: "dupe" });
-        const result = yield* Effect.result((yield* GitCore).createBranch({ cwd: tmp, branch: "dupe" }));
+        const result = yield* Effect.result(
+          (yield* GitCore).createBranch({ cwd: tmp, branch: "dupe" }),
+        );
         expect(result._tag).toBe("Failure");
       }),
     );
@@ -777,7 +789,9 @@ it.layer(TestLayer)("git integration", (it) => {
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();
         yield* initRepoWithCommit(tmp);
-        const current = (yield* (yield* GitCore).listBranches({ cwd: tmp })).branches.find((b) => b.current)!;
+        const current = (yield* (yield* GitCore).listBranches({ cwd: tmp })).branches.find(
+          (b) => b.current,
+        )!;
 
         const renamed = yield* (yield* GitCore).renameBranch({
           cwd: tmp,
@@ -845,11 +859,11 @@ it.layer(TestLayer)("git integration", (it) => {
         const realGitCore = yield* GitCore;
         let renameArgs: ReadonlyArray<string> | null = null;
         const core = yield* makeIsolatedGitCore((input) => {
-            if (input.args[0] === "branch" && input.args[1] === "-m") {
-              renameArgs = [...input.args];
-            }
-            return realGitCore.execute(input);
-          });
+          if (input.args[0] === "branch" && input.args[1] === "-m") {
+            renameArgs = [...input.args];
+          }
+          return realGitCore.execute(input);
+        });
 
         const renamed = yield* core.renameBranch({
           cwd: tmp,
@@ -1038,7 +1052,9 @@ it.layer(TestLayer)("git integration", (it) => {
 
         yield* writeTextFile(path.join(wtPath, "README.md"), "dirty change\n");
 
-        const failedRemove = yield* Effect.result((yield* GitCore).removeWorktree({ cwd: tmp, path: wtPath }));
+        const failedRemove = yield* Effect.result(
+          (yield* GitCore).removeWorktree({ cwd: tmp, path: wtPath }),
+        );
         expect(failedRemove._tag).toBe("Failure");
         expect(existsSync(wtPath)).toBe(true);
 
@@ -1288,9 +1304,9 @@ it.layer(TestLayer)("git integration", (it) => {
           yield* git(remote, ["init", "--bare"]);
 
           yield* initRepoWithCommit(source);
-          const initialBranch = (yield* (yield* GitCore).listBranches({ cwd: source })).branches.find(
-            (branch) => branch.current,
-          )!.name;
+          const initialBranch = (yield* (yield* GitCore).listBranches({
+            cwd: source,
+          })).branches.find((branch) => branch.current)!.name;
           yield* git(source, ["remote", "add", "origin", remote]);
           yield* git(source, ["push", "-u", "origin", initialBranch]);
           yield* git(source, ["checkout", "-b", "feature/remote-base-only"]);
@@ -1321,9 +1337,9 @@ it.layer(TestLayer)("git integration", (it) => {
           yield* git(remote, ["init", "--bare"]);
 
           yield* initRepoWithCommit(source);
-          const initialBranch = (yield* (yield* GitCore).listBranches({ cwd: source })).branches.find(
-            (branch) => branch.current,
-          )!.name;
+          const initialBranch = (yield* (yield* GitCore).listBranches({
+            cwd: source,
+          })).branches.find((branch) => branch.current)!.name;
           yield* git(source, ["remote", "add", remoteName, remote]);
           yield* git(source, ["push", "-u", remoteName, initialBranch]);
           yield* git(source, ["checkout", "-b", "feature/non-origin-merge-base"]);
@@ -1566,9 +1582,9 @@ it.layer(TestLayer)("git integration", (it) => {
           yield* git(remote, ["init", "--bare"]);
 
           yield* initRepoWithCommit(source);
-          const initialBranch = (yield* (yield* GitCore).listBranches({ cwd: source })).branches.find(
-            (branch) => branch.current,
-          )!.name;
+          const initialBranch = (yield* (yield* GitCore).listBranches({
+            cwd: source,
+          })).branches.find((branch) => branch.current)!.name;
           yield* git(source, ["remote", "add", "origin", remote]);
           yield* git(source, ["push", "-u", "origin", initialBranch]);
 
@@ -1731,19 +1747,19 @@ it.layer(TestLayer)("git integration", (it) => {
         const realGitCore = yield* GitCore;
         let didFailRecency = false;
         const core = yield* makeIsolatedGitCore((input) => {
-            if (!didFailRecency && input.args[0] === "for-each-ref") {
-              didFailRecency = true;
-              return Effect.fail(
-                new GitCommandError({
-                  operation: "git.test.listBranchesRecency",
-                  command: `git ${input.args.join(" ")}`,
-                  cwd: input.cwd,
-                  detail: "timeout",
-                }),
-              );
-            }
-            return realGitCore.execute(input);
-          });
+          if (!didFailRecency && input.args[0] === "for-each-ref") {
+            didFailRecency = true;
+            return Effect.fail(
+              new GitCommandError({
+                operation: "git.test.listBranchesRecency",
+                command: `git ${input.args.join(" ")}`,
+                cwd: input.cwd,
+                detail: "timeout",
+              }),
+            );
+          }
+          return realGitCore.execute(input);
+        });
 
         const result = yield* core.listBranches({ cwd: tmp });
 
@@ -1766,30 +1782,30 @@ it.layer(TestLayer)("git integration", (it) => {
         let didFailRemoteBranches = false;
         let didFailRemoteNames = false;
         const core = yield* makeIsolatedGitCore((input) => {
-            if (input.args.join(" ") === "branch --no-color --remotes") {
-              didFailRemoteBranches = true;
-              return Effect.fail(
-                new GitCommandError({
-                  operation: "git.test.listBranchesRemoteBranches",
-                  command: `git ${input.args.join(" ")}`,
-                  cwd: input.cwd,
-                  detail: "remote unavailable",
-                }),
-              );
-            }
-            if (input.args.join(" ") === "remote") {
-              didFailRemoteNames = true;
-              return Effect.fail(
-                new GitCommandError({
-                  operation: "git.test.listBranchesRemoteNames",
-                  command: `git ${input.args.join(" ")}`,
-                  cwd: input.cwd,
-                  detail: "remote unavailable",
-                }),
-              );
-            }
-            return realGitCore.execute(input);
-          });
+          if (input.args.join(" ") === "branch --no-color --remotes") {
+            didFailRemoteBranches = true;
+            return Effect.fail(
+              new GitCommandError({
+                operation: "git.test.listBranchesRemoteBranches",
+                command: `git ${input.args.join(" ")}`,
+                cwd: input.cwd,
+                detail: "remote unavailable",
+              }),
+            );
+          }
+          if (input.args.join(" ") === "remote") {
+            didFailRemoteNames = true;
+            return Effect.fail(
+              new GitCommandError({
+                operation: "git.test.listBranchesRemoteNames",
+                command: `git ${input.args.join(" ")}`,
+                cwd: input.cwd,
+                detail: "remote unavailable",
+              }),
+            );
+          }
+          return realGitCore.execute(input);
+        });
 
         const result = yield* core.listBranches({ cwd: tmp });
 
