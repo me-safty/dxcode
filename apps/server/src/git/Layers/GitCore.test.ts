@@ -86,8 +86,7 @@ function runShellCommand(input: {
 
 const makeIsolatedGitCore = (executeOverride: GitCoreShape["execute"]) =>
   makeGitCore({ executeOverride }).pipe(
-    Effect.provide(ServerConfigLayer),
-    Effect.provide(NodeServices.layer),
+    Effect.provide(Layer.provideMerge(ServerConfigLayer, NodeServices.layer)),
   );
 
 /** Create a repo with an initial commit so branches work. */
