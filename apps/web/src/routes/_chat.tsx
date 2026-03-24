@@ -16,7 +16,7 @@ import { Sidebar, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
-const THREAD_SIDEBAR_MIN_WIDTH = 16 * 16;
+const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 
 function ChatRouteGlobalShortcuts() {
