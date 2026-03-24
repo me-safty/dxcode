@@ -162,6 +162,7 @@ import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./chat/composerProviderRegistry";
+import { ConnectionStatusBanner } from "./chat/ConnectionStatusBanner";
 import { ProviderHealthBanner } from "./chat/ProviderHealthBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import {
@@ -3496,6 +3497,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       </header>
 
       {/* Error banner */}
+      <ConnectionStatusBanner />
       <ProviderHealthBanner status={activeProviderStatus} />
       <ThreadErrorBanner
         error={activeThread.error}

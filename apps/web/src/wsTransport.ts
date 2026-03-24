@@ -55,6 +55,7 @@ export class WsTransport {
   private nextId = 1;
   private readonly pending = new Map<string, PendingRequest>();
   private readonly listeners = new Map<string, Set<(message: WsPush) => void>>();
+  private readonly stateListeners = new Set<(state: TransportState) => void>();
   private readonly latestPushByChannel = new Map<string, WsPush>();
   private readonly outboundQueue: string[] = [];
   private reconnectAttempt = 0;
@@ -74,6 +75,26 @@ export class WsTransport {
           ? envUrl
           : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:${window.location.port}`);
     this.connect();
+  }
+
+  onStateChange(listener: (state: TransportState) => void): () => void {
+    this.stateListeners.add(listener);
+    listener(this.state);
+    return () => {
+      this.stateListeners.delete(listener);
+    };
+  }
+
+  private setState(next: TransportState) {
+    if (this.state === next) return;
+    this.state = next;
+    for (const listener of this.stateListeners) {
+      try {
+        listener(next);
+      } catch {
+        // Swallow listener errors
+      }
+    }
   }
 
   async request<T = unknown>(
@@ -174,12 +195,12 @@ export class WsTransport {
       return;
     }
 
-    this.state = this.reconnectAttempt > 0 ? "reconnecting" : "connecting";
+    this.setState(this.reconnectAttempt > 0 ? "reconnecting" : "connecting");
     const ws = new WebSocket(this.url);
 
     ws.addEventListener("open", () => {
       this.ws = ws;
-      this.state = "open";
+      this.setState("open");
       this.reconnectAttempt = 0;
       this.flushQueue();
     });
@@ -201,10 +222,10 @@ export class WsTransport {
         }
       }
       if (this.disposed) {
-        this.state = "disposed";
+        this.setState("disposed");
         return;
       }
-      this.state = "closed";
+      this.setState("closed");
       this.scheduleReconnect();
     });
 

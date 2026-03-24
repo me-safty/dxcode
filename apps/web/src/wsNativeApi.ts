@@ -13,6 +13,8 @@ import {
 import { showContextMenuFallback } from "./contextMenuFallback";
 import { WsTransport } from "./wsTransport";
 
+export type TransportState = "connecting" | "open" | "reconnecting" | "closed" | "disposed";
+
 let instance: { api: NativeApi; transport: WsTransport } | null = null;
 const welcomeListeners = new Set<(payload: WsWelcomePayload) => void>();
 const serverConfigUpdatedListeners = new Set<(payload: ServerConfigUpdatedPayload) => void>();
@@ -62,6 +64,17 @@ export function onServerConfigUpdated(
   return () => {
     serverConfigUpdatedListeners.delete(listener);
   };
+}
+
+/**
+ * Subscribe to WebSocket transport state changes.
+ */
+export function onTransportStateChange(listener: (state: TransportState) => void): () => void {
+  if (!instance) {
+    // Force instance creation if it doesn't exist
+    createWsNativeApi();
+  }
+  return instance!.transport.onStateChange(listener);
 }
 
 export function createWsNativeApi(): NativeApi {
