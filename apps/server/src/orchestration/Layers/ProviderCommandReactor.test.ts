@@ -176,10 +176,18 @@ describe("ProviderCommandReactor", () => {
             : "renamed-branch",
       }),
     );
-    const generateBranchName = vi.fn(() =>
+    const generateBranchName = vi.fn<TextGenerationShape["generateBranchName"]>((_) =>
       Effect.fail(
         new TextGenerationError({
           operation: "generateBranchName",
+          detail: "disabled in test harness",
+        }),
+      ),
+    );
+    const generateThreadTitle = vi.fn<TextGenerationShape["generateThreadTitle"]>((_) =>
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateThreadTitle",
           detail: "disabled in test harness",
         }),
       ),
@@ -213,7 +221,10 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
       Layer.provideMerge(Layer.succeed(GitCore, { renameBranch } as unknown as GitCoreShape)),
       Layer.provideMerge(
-        Layer.succeed(TextGeneration, { generateBranchName } as unknown as TextGenerationShape),
+        Layer.succeed(TextGeneration, {
+          generateBranchName,
+          generateThreadTitle,
+        } as unknown as TextGenerationShape),
       ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
@@ -264,6 +275,7 @@ describe("ProviderCommandReactor", () => {
       stopSession,
       renameBranch,
       generateBranchName,
+      generateThreadTitle,
       stateDir,
       drain,
     };
@@ -306,6 +318,101 @@ describe("ProviderCommandReactor", () => {
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  it("generates a thread title on the first turn using the text generation model", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    harness.generateThreadTitle.mockImplementation((input: unknown) =>
+      Effect.succeed({
+        title:
+          typeof input === "object" &&
+          input !== null &&
+          "model" in input &&
+          typeof input.model === "string"
+            ? `Title via ${input.model}`
+            : "Generated title",
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-title"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-title"),
+          role: "user",
+          text: "Please investigate reconnect failures after restarting the session.",
+          attachments: [],
+        },
+        textGenerationModel: "gpt-5.4-mini",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.generateThreadTitle.mock.calls.length === 1);
+    expect(harness.generateThreadTitle.mock.calls[0]?.[0]).toMatchObject({
+      model: "gpt-5.4-mini",
+      message: "Please investigate reconnect failures after restarting the session.",
+    });
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+    expect(thread?.title).toBe("Title via gpt-5.4-mini");
+  });
+
+  it("reuses the text generation model for automatic worktree branch naming", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-thread-branch"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        branch: "t3code/1234abcd",
+        worktreePath: "/tmp/provider-project-worktree",
+      }),
+    );
+
+    harness.generateBranchName.mockImplementation((input: unknown) =>
+      Effect.succeed({
+        branch:
+          typeof input === "object" &&
+          input !== null &&
+          "model" in input &&
+          typeof input.model === "string"
+            ? `feature/${input.model}`
+            : "feature/generated",
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-branch-model"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-branch-model"),
+          role: "user",
+          text: "Add a safer reconnect backoff.",
+          attachments: [],
+        },
+        textGenerationModel: "gpt-5.4-mini",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.generateBranchName.mock.calls.length === 1);
+    expect(harness.generateBranchName.mock.calls[0]?.[0]).toMatchObject({
+      model: "gpt-5.4-mini",
+      message: "Add a safer reconnect backoff.",
+    });
   });
 
   it("forwards codex model options through session start and turn send", async () => {

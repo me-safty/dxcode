@@ -400,9 +400,9 @@ const make = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly branch: string | null;
     readonly worktreePath: string | null;
-    readonly messageId: string;
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
+    readonly textGenerationModel?: string;
   }) {
     if (!input.branch || !input.worktreePath) {
       return;
@@ -411,28 +411,21 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const thread = yield* resolveThread(input.threadId);
-    if (!thread) {
-      return;
-    }
-
-    const userMessages = thread.messages.filter((message) => message.role === "user");
-    if (userMessages.length !== 1 || userMessages[0]?.id !== input.messageId) {
-      return;
-    }
-
     const oldBranch = input.branch;
     const cwd = input.worktreePath;
     const attachments = input.attachments ?? [];
     yield* Effect.gen(function* () {
-      const { textGenerationModelSelection: modelSelection } =
+      const { textGenerationModelSelection } =
         yield* serverSettingsService.getSettings;
 
       const generated = yield* textGeneration.generateBranchName({
         cwd,
         message: input.messageText,
         ...(attachments.length > 0 ? { attachments } : {}),
-        modelSelection,
+        modelSelection: {
+          ...textGenerationModelSelection,
+          model: input.textGenerationModel ?? textGenerationModelSelection.model,
+        },
       });
       if (!generated) return;
 
@@ -457,6 +450,50 @@ const make = Effect.gen(function* () {
         }),
       ),
     );
+  });
+
+  const maybeGenerateThreadTitleForFirstTurn = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly cwd: string;
+    readonly messageText: string;
+    readonly attachments?: ReadonlyArray<ChatAttachment>;
+    readonly textGenerationModel?: string;
+  }) {
+    const attachments = input.attachments ?? [];
+    const { textGenerationModelSelection } = yield* serverSettingsService.getSettings;
+    yield* textGeneration
+      .generateThreadTitle({
+        cwd: input.cwd,
+        message: input.messageText,
+        ...(attachments.length > 0 ? { attachments } : {}),
+        model: input.textGenerationModel ?? textGenerationModelSelection.model,
+      })
+      .pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("provider command reactor failed to generate thread title", {
+            threadId: input.threadId,
+            cwd: input.cwd,
+            reason: error.message,
+          }),
+        ),
+        Effect.flatMap((generated) => {
+          if (!generated) return Effect.void;
+
+          return orchestrationEngine.dispatch({
+            type: "thread.meta.update",
+            commandId: serverCommandId("thread-title-rename"),
+            threadId: input.threadId,
+            title: generated.title,
+          });
+        }),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("provider command reactor failed to rename thread title", {
+            threadId: input.threadId,
+            cwd: input.cwd,
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      );
   });
 
   const processTurnStartRequested = Effect.fnUntraced(function* (
@@ -485,14 +522,35 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    yield* maybeGenerateAndRenameWorktreeBranchForFirstTurn({
-      threadId: event.payload.threadId,
-      branch: thread.branch,
-      worktreePath: thread.worktreePath,
-      messageId: message.id,
-      messageText: message.text,
-      ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
-    }).pipe(Effect.forkScoped);
+    const isFirstUserMessageTurn =
+      thread.messages.filter((entry) => entry.role === "user").length === 1;
+    if (isFirstUserMessageTurn) {
+      const generationCwd =
+        resolveThreadWorkspaceCwd({
+          thread,
+          projects: (yield* orchestrationEngine.getReadModel()).projects,
+        }) ?? process.cwd();
+      const generationInput = {
+        messageText: message.text,
+        ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+        ...(event.payload.textGenerationModel !== undefined
+          ? { textGenerationModel: event.payload.textGenerationModel }
+          : {}),
+      };
+
+      yield* maybeGenerateAndRenameWorktreeBranchForFirstTurn({
+        threadId: event.payload.threadId,
+        branch: thread.branch,
+        worktreePath: thread.worktreePath,
+        ...generationInput,
+      }).pipe(Effect.forkScoped);
+
+      yield* maybeGenerateThreadTitleForFirstTurn({
+        threadId: event.payload.threadId,
+        cwd: generationCwd,
+        ...generationInput,
+      }).pipe(Effect.forkScoped);
+    }
 
     yield* sendTurnForThread({
       threadId: event.payload.threadId,

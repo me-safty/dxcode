@@ -11,6 +11,10 @@ import { ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "../Errors.ts";
 import {
   type BranchNameGenerationInput,
+  type BranchNameGenerationResult,
+  type CommitMessageGenerationResult,
+  type PrContentGenerationResult,
+  type ThreadTitleGenerationResult,
   type TextGenerationShape,
   TextGeneration,
 } from "../Services/TextGeneration.ts";
@@ -31,6 +35,22 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 const CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT = "low";
 const CODEX_TIMEOUT_MS = 180_000;
 
+function sanitizeThreadTitle(raw: string): string {
+  const normalized = raw
+    .trim()
+    .split(/\r?\n/g)[0]
+    ?.trim()
+    .replace(/^['"`]+|['"`]+$/g, "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!normalized || normalized.trim().length === 0) {
+    return "New thread";
+  }
+  if (normalized.length <= 50) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 47).trimEnd()}...`;
+}
 const makeCodexTextGeneration = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -83,7 +103,11 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void));
 
   const materializeImageAttachments = (
-    _operation: "generateCommitMessage" | "generatePrContent" | "generateBranchName",
+    _operation:
+      | "generateCommitMessage"
+      | "generatePrContent"
+      | "generateBranchName"
+      | "generateThreadTitle",
     attachments: BranchNameGenerationInput["attachments"],
   ): Effect.Effect<MaterializedImageAttachments, TextGenerationError> =>
     Effect.gen(function* () {
@@ -124,7 +148,11 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     cleanupPaths = [],
     modelSelection,
   }: {
-    operation: "generateCommitMessage" | "generatePrContent" | "generateBranchName";
+    operation:
+      | "generateCommitMessage"
+      | "generatePrContent"
+      | "generateBranchName"
+      | "generateThreadTitle";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -363,10 +391,60 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     };
   });
 
+  const generateThreadTitle: TextGenerationShape["generateThreadTitle"] = (input) => {
+    return Effect.gen(function* () {
+      const { imagePaths } = yield* materializeImageAttachments(
+        "generateThreadTitle",
+        input.attachments,
+      );
+      const attachmentLines = (input.attachments ?? []).map(
+        (attachment) =>
+          `- ${attachment.name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes)`,
+      );
+
+      const promptSections = [
+        "You write concise thread titles for coding conversations.",
+        "Return a JSON object with key: title.",
+        "Rules:",
+        "- Title should summarize the user's request, not restate it verbatim.",
+        "- Keep it short and specific (3-8 words).",
+        "- Avoid quotes, filler, prefixes, and trailing punctuation.",
+        "- If images are attached, use them as primary context for visual/UI issues.",
+        "",
+        "User message:",
+        limitSection(input.message, 8_000),
+      ];
+      if (attachmentLines.length > 0) {
+        promptSections.push(
+          "",
+          "Attachment metadata:",
+          limitSection(attachmentLines.join("\n"), 4_000),
+        );
+      }
+      const prompt = promptSections.join("\n");
+
+      const generated = yield* runCodexJson({
+        operation: "generateThreadTitle",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: Schema.Struct({
+          title: Schema.String,
+        }),
+        imagePaths,
+        ...(input.model ? { model: input.model } : {}),
+      });
+
+      return {
+        title: sanitizeThreadTitle(generated.title),
+      } satisfies ThreadTitleGenerationResult;
+    });
+  };
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
+    generateThreadTitle,
   } satisfies TextGenerationShape;
 });
 

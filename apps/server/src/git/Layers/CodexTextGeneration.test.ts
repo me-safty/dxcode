@@ -358,6 +358,27 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
     ),
   );
 
+  it.effect("generates thread titles and trims them for sidebar use", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          title:
+            '  "Investigate websocket reconnect regressions after worktree restore"  \nignored line',
+        }),
+      },
+      Effect.gen(function* () {
+        const textGeneration = yield* TextGeneration;
+
+        const generated = yield* textGeneration.generateThreadTitle({
+          cwd: process.cwd(),
+          message: "Please investigate websocket reconnect regressions after a worktree restore.",
+        });
+
+        expect(generated.title).toBe("Investigate websocket reconnect regressions aft...");
+      }),
+    ),
+  );
+
   it.effect("omits attachment metadata section when no attachments are provided", () =>
     withFakeCodexEnv(
       {
