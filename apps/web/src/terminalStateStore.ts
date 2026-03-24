@@ -14,6 +14,7 @@ import {
   MAX_TERMINALS_PER_GROUP,
   type ThreadTerminalGroup,
 } from "./types";
+import { createMemoryStorage } from "./lib/storage";
 
 interface ThreadTerminalState {
   terminalOpen: boolean;
@@ -26,6 +27,13 @@ interface ThreadTerminalState {
 }
 
 const TERMINAL_STATE_STORAGE_KEY = "t3code:terminal-state:v1";
+const terminalStateStorage =
+  typeof localStorage !== "undefined" &&
+  typeof localStorage.getItem === "function" &&
+  typeof localStorage.setItem === "function" &&
+  typeof localStorage.removeItem === "function"
+    ? localStorage
+    : createMemoryStorage();
 
 function normalizeTerminalIds(terminalIds: string[]): string[] {
   const ids = [...new Set(terminalIds.map((id) => id.trim()).filter((id) => id.length > 0))];
@@ -542,7 +550,7 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
     {
       name: TERMINAL_STATE_STORAGE_KEY,
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => terminalStateStorage),
       partialize: (state) => ({
         terminalStateByThreadId: state.terminalStateByThreadId,
       }),

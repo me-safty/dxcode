@@ -4,11 +4,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { selectThreadTerminalState, useTerminalStateStore } from "./terminalStateStore";
 
 const THREAD_ID = ThreadId.makeUnsafe("thread-1");
+const TERMINAL_STATE_STORAGE_KEY = "t3code:terminal-state:v1";
 
 describe("terminalStateStore actions", () => {
   beforeEach(() => {
-    if (typeof localStorage !== "undefined") {
-      localStorage.clear();
+    if (typeof localStorage !== "undefined" && typeof localStorage.removeItem === "function") {
+      localStorage.removeItem(TERMINAL_STATE_STORAGE_KEY);
     }
     useTerminalStateStore.setState({ terminalStateByThreadId: {} });
   });
