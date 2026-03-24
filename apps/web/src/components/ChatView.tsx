@@ -2994,6 +2994,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
             attachments: [],
           },
           modelSelection: selectedModelSelection,
+          textGenerationModel: settings.textGenerationModelSelection.model,
+          ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
+          assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
           runtimeMode,
           interactionMode: nextInteractionMode,
           ...(nextInteractionMode === "default" && activeProposedPlan
@@ -3041,8 +3044,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       selectedModelSelection,
       selectedProvider,
       selectedProviderModels,
+      providerOptionsForDispatch,
       setComposerDraftInteractionMode,
       setThreadError,
+      settings.enableAssistantStreaming,
+      settings.textGenerationModelSelection.model,
       selectedModel,
     ],
   );
@@ -3069,7 +3075,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const outgoingImplementationPrompt = formatOutgoingPrompt({
       provider: selectedProvider,
       model: selectedModel,
-      models: selectedProviderModels,
       effort: selectedPromptEffort,
       text: implementationPrompt,
     });
@@ -3109,6 +3114,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
             attachments: [],
           },
           modelSelection: selectedModelSelection,
+          textGenerationModel: settings.textGenerationModelSelection.model,
+          ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
+          assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
           runtimeMode,
           interactionMode: "default",
           createdAt,
@@ -3160,7 +3168,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedPromptEffort,
     selectedModelSelection,
     selectedProvider,
-    selectedProviderModels,
+    settings.enableAssistantStreaming,
+    providerOptionsForDispatch,
+    settings.textGenerationModelSelection.model,
     syncServerReadModel,
     selectedModel,
   ]);

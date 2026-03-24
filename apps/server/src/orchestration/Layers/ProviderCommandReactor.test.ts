@@ -359,6 +359,13 @@ describe("ProviderCommandReactor", () => {
       message: "Please investigate reconnect failures after restarting the session.",
     });
 
+    await waitFor(async () => {
+      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      return (
+        readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"))?.title ===
+        "Title via gpt-5.4-mini"
+      );
+    });
     const readModel = await Effect.runPromise(harness.engine.getReadModel());
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
     expect(thread?.title).toBe("Title via gpt-5.4-mini");
