@@ -191,14 +191,14 @@ export class WsTransport {
     ws.addEventListener("close", () => {
       if (this.ws === ws) {
         this.ws = null;
-      }
-      this.outboundQueue.length = 0;
-      for (const [id, pending] of this.pending.entries()) {
-        if (pending.timeout !== null) {
-          clearTimeout(pending.timeout);
+        this.outboundQueue.length = 0;
+        for (const [id, pending] of this.pending.entries()) {
+          if (pending.timeout !== null) {
+            clearTimeout(pending.timeout);
+          }
+          this.pending.delete(id);
+          pending.reject(new Error("WebSocket connection closed."));
         }
-        this.pending.delete(id);
-        pending.reject(new Error("WebSocket connection closed."));
       }
       if (this.disposed) {
         this.state = "disposed";

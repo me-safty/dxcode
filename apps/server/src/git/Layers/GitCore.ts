@@ -402,6 +402,7 @@ const createTrace2Monitor = Effect.fn(function* (
     Effect.gen(function* () {
       yield* readTraceDelta;
       const finalLine = lineBuffer.trim();
+      lineBuffer = "";
       if (finalLine.length > 0) {
         yield* handleTraceLine(finalLine);
       }
