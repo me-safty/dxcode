@@ -12,6 +12,20 @@
       rel="stylesheet"
     />
     <title>T3 Code (Alpha)</title>
+    <script>
+      // Apply dark class before first paint so CSS variables resolve correctly.
+      // Must run synchronously in <head> — no color literals needed here
+      // because the CSS custom properties handle the actual values.
+      (function () {
+        var t = localStorage.getItem("t3code:theme") || "system";
+        if (
+          t === "dark" ||
+          (t === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches)
+        ) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

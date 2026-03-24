@@ -27,6 +27,7 @@ import { autoUpdater } from "electron-updater";
 import type { ContextMenuItem } from "@t3tools/contracts";
 import { NetService } from "@t3tools/shared/Net";
 import { RotatingFileSink } from "@t3tools/shared/logging";
+import { THEME_BG_DARK, THEME_BG_LIGHT } from "@t3tools/shared/theme";
 import { showDesktopConfirmDialog } from "./confirmDialog";
 import { syncShellEnvironment } from "./syncShellEnvironment";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
@@ -1104,6 +1105,13 @@ function registerIpcHandlers(): void {
     }
 
     nativeTheme.themeSource = theme;
+
+    // Keep the native window background in sync so resize does not flash
+    // a stale color while the renderer catches up.
+    const bg = themeBackgroundColor();
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.setBackgroundColor(bg);
+    }
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
@@ -1220,6 +1228,10 @@ function getIconOption(): { icon: string } | Record<string, never> {
   return iconPath ? { icon: iconPath } : {};
 }
 
+function themeBackgroundColor(): string {
+  return nativeTheme.shouldUseDarkColors ? THEME_BG_DARK : THEME_BG_LIGHT;
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1100,
@@ -1228,6 +1240,7 @@ function createWindow(): BrowserWindow {
     minHeight: 620,
     show: false,
     autoHideMenuBar: true,
+    backgroundColor: themeBackgroundColor(),
     ...getIconOption(),
     title: APP_DISPLAY_NAME,
     titleBarStyle: "hiddenInset",
