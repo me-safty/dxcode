@@ -592,7 +592,7 @@ describe("sortProjectsForSidebar", () => {
     ]);
   });
 
-  it("falls back to project timestamps when a project has no threads", () => {
+  it("returns the project timestamp when no threads are present", () => {
     const timestamp = getProjectSortTimestamp(
       makeProject({ updatedAt: "2026-03-09T10:10:00.000Z" }),
       [],
