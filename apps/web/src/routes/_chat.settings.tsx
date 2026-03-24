@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRightIcon, PlusIcon, RotateCcwIcon, Undo2Icon, XIcon } from "lucide-react";
+import { ChevronDownIcon, PlusIcon, RotateCcwIcon, Undo2Icon, XIcon } from "lucide-react";
 import { type ReactNode, useCallback, useState } from "react";
 import { type ProviderKind, DEFAULT_GIT_TEXT_GENERATION_MODEL } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
@@ -745,10 +745,10 @@ function SettingsRouteView() {
                     ) : null
                   }
                   control={
-                    <ChevronRightIcon
+                    <ChevronDownIcon
                       className={cn(
                         "size-4 shrink-0 self-center text-muted-foreground transition-transform",
-                        isCodexInstallOpen && "rotate-90",
+                        isCodexInstallOpen && "rotate-180",
                       )}
                     />
                   }
