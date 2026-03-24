@@ -379,6 +379,26 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
     ),
   );
 
+  it.effect("falls back when thread title normalization becomes whitespace-only", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          title: '  """   """  ',
+        }),
+      },
+      Effect.gen(function* () {
+        const textGeneration = yield* TextGeneration;
+
+        const generated = yield* textGeneration.generateThreadTitle({
+          cwd: process.cwd(),
+          message: "Name this thread.",
+        });
+
+        expect(generated.title).toBe("New thread");
+      }),
+    ),
+  );
+
   it.effect("omits attachment metadata section when no attachments are provided", () =>
     withFakeCodexEnv(
       {
