@@ -27,6 +27,7 @@ import { Server } from "./wsServer";
 import { ServerLoggerLive } from "./serverLogger";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
+import { isProtectedWebAuthEnabled } from "./webAuth";
 
 export class StartupError extends Data.TaggedError("StartupError")<{
   readonly message: string;
@@ -264,8 +265,7 @@ const makeServerProgram = (input: CliInput) =>
       config.host && config.host.length > 0
         ? `http://${formatHostForUrl(config.host)}:${config.port}`
         : undefined;
-    const protectedWebAuthEnabled =
-      config.mode === "web" && !config.devUrl && typeof config.authToken === "string";
+    const protectedWebAuthEnabled = isProtectedWebAuthEnabled(config);
     const openBaseUrl = config.host && !isWildcardHost(config.host) ? hostUrl! : localUrl;
     const shareBaseUrl = hostUrl ?? localUrl;
     const openUrl =

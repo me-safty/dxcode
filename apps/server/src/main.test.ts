@@ -195,6 +195,28 @@ it.layer(testLayer)("server CLI command", (it) => {
     }),
   );
 
+  it.effect("does not tokenize browser auto-open when a dev server url is configured", () =>
+    Effect.gen(function* () {
+      yield* runCli(
+        [
+          "--mode",
+          "web",
+          "--port",
+          "4010",
+          "--dev-url",
+          "http://127.0.0.1:5173",
+          "--auth-token",
+          "auth-secret",
+        ],
+        {
+          T3CODE_NO_BROWSER: "false",
+        },
+      );
+
+      assert.deepStrictEqual(openBrowser.mock.calls, [["http://127.0.0.1:5173/"]]);
+    }),
+  );
+
   it.effect("keeps browser auto-open on localhost for wildcard protected web hosts", () =>
     Effect.gen(function* () {
       yield* runCli(
