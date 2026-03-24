@@ -58,6 +58,46 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
+type InstallBinarySettingsKey = "claudeBinaryPath" | "codexBinaryPath";
+type InstallProviderSettings = {
+  provider: ProviderKind;
+  title: string;
+  binaryPathKey: InstallBinarySettingsKey;
+  binaryPlaceholder: string;
+  binaryDescription: ReactNode;
+  homePathKey?: "codexHomePath";
+  homePlaceholder?: string;
+  homeDescription?: ReactNode;
+};
+
+const INSTALL_PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
+  {
+    provider: "codex",
+    title: "Codex",
+    binaryPathKey: "codexBinaryPath",
+    binaryPlaceholder: "Codex binary path",
+    binaryDescription: (
+      <>
+        Leave blank to use <code>codex</code> from your PATH.
+      </>
+    ),
+    homePathKey: "codexHomePath",
+    homePlaceholder: "CODEX_HOME",
+    homeDescription: "Optional custom Codex home and config directory.",
+  },
+  {
+    provider: "claudeAgent",
+    title: "Claude",
+    binaryPathKey: "claudeBinaryPath",
+    binaryPlaceholder: "Claude binary path",
+    binaryDescription: (
+      <>
+        Leave blank to use <code>claude</code> from your PATH.
+      </>
+    ),
+  },
+];
+
 function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="space-y-3">
@@ -151,9 +191,10 @@ function SettingsRouteView() {
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
-  const [isCodexInstallOpen, setIsCodexInstallOpen] = useState(() =>
-    Boolean(settings.codexBinaryPath || settings.codexHomePath),
-  );
+  const [openInstallProviders, setOpenInstallProviders] = useState<Record<ProviderKind, boolean>>({
+    codex: Boolean(settings.codexBinaryPath || settings.codexHomePath),
+    claudeAgent: Boolean(settings.claudeBinaryPath),
+  });
   const [selectedCustomModelProvider, setSelectedCustomModelProvider] =
     useState<ProviderKind>("codex");
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
@@ -169,6 +210,7 @@ function SettingsRouteView() {
 
   const codexBinaryPath = settings.codexBinaryPath;
   const codexHomePath = settings.codexHomePath;
+  const claudeBinaryPath = settings.claudeBinaryPath;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
 
@@ -203,6 +245,10 @@ function SettingsRouteView() {
   const visibleCustomModelRows = showAllCustomModels
     ? savedCustomModelRows
     : savedCustomModelRows.slice(0, 5);
+  const isInstallSettingsDirty =
+    settings.claudeBinaryPath !== defaults.claudeBinaryPath ||
+    settings.codexBinaryPath !== defaults.codexBinaryPath ||
+    settings.codexHomePath !== defaults.codexHomePath;
   const changedSettingLabels = [
     ...(theme !== "system" ? ["Theme"] : []),
     ...(settings.timestampFormat !== defaults.timestampFormat ? ["Time format"] : []),
@@ -217,10 +263,7 @@ function SettingsRouteView() {
     ...(settings.customCodexModels.length > 0 || settings.customClaudeModels.length > 0
       ? ["Custom models"]
       : []),
-    ...(settings.codexBinaryPath !== defaults.codexBinaryPath ||
-    settings.codexHomePath !== defaults.codexHomePath
-      ? ["Codex install"]
-      : []),
+    ...(isInstallSettingsDirty ? ["Provider installs"] : []),
   ];
 
   const openKeybindingsFile = useCallback(() => {
@@ -323,7 +366,10 @@ function SettingsRouteView() {
 
     setTheme("system");
     resetSettings();
-    setIsCodexInstallOpen(false);
+    setOpenInstallProviders({
+      codex: false,
+      claudeAgent: false,
+    });
     setSelectedCustomModelProvider("codex");
     setCustomModelInputByProvider({
       codex: "",
@@ -728,78 +774,144 @@ function SettingsRouteView() {
             </SettingsSection>
 
             <SettingsSection title="Advanced">
-              <Collapsible open={isCodexInstallOpen} onOpenChange={setIsCodexInstallOpen}>
-                <SettingsRow
-                  title="Codex install"
-                  description="Only needed if you want new sessions to use a non-default Codex install."
-                  onClick={() => setIsCodexInstallOpen((open) => !open)}
-                  resetAction={
-                    settings.codexBinaryPath !== defaults.codexBinaryPath ||
-                    settings.codexHomePath !== defaults.codexHomePath ? (
-                      <SettingResetButton
-                        label="Codex install"
-                        onClick={() => {
-                          updateSettings({
-                            codexBinaryPath: defaults.codexBinaryPath,
-                            codexHomePath: defaults.codexHomePath,
-                          });
-                          setIsCodexInstallOpen(false);
-                        }}
-                      />
-                    ) : null
-                  }
-                  control={
-                    <ChevronDownIcon
-                      className={cn(
-                        "size-4 shrink-0 self-center text-muted-foreground transition-transform",
-                        isCodexInstallOpen && "rotate-180",
-                      )}
+              <SettingsRow
+                title="Provider installs"
+                description="Override the CLI used for new sessions."
+                resetAction={
+                  isInstallSettingsDirty ? (
+                    <SettingResetButton
+                      label="provider installs"
+                      onClick={() => {
+                        updateSettings({
+                          claudeBinaryPath: defaults.claudeBinaryPath,
+                          codexBinaryPath: defaults.codexBinaryPath,
+                          codexHomePath: defaults.codexHomePath,
+                        });
+                        setOpenInstallProviders({
+                          codex: false,
+                          claudeAgent: false,
+                        });
+                      }}
                     />
-                  }
-                >
-                  <CollapsibleContent>
-                    <div className="mt-4 border-t border-border pt-4">
-                      <div className="space-y-3">
-                        <label htmlFor="codex-binary-path" className="block space-y-1">
-                          <span className="text-xs font-medium text-foreground">
-                            Codex binary path
-                          </span>
-                          <Input
-                            id="codex-binary-path"
-                            value={codexBinaryPath}
-                            onChange={(event) =>
-                              updateSettings({ codexBinaryPath: event.target.value })
-                            }
-                            placeholder="codex"
-                            spellCheck={false}
-                          />
-                          <span className="text-xs text-muted-foreground">
-                            Leave blank to use <code>codex</code> from your PATH.
-                          </span>
-                        </label>
+                  ) : null
+                }
+              >
+                <div className="mt-4">
+                  <div className="space-y-2">
+                    {INSTALL_PROVIDER_SETTINGS.map((providerSettings) => {
+                      const isOpen = openInstallProviders[providerSettings.provider];
+                      const isDirty =
+                        providerSettings.provider === "codex"
+                          ? settings.codexBinaryPath !== defaults.codexBinaryPath ||
+                            settings.codexHomePath !== defaults.codexHomePath
+                          : settings.claudeBinaryPath !== defaults.claudeBinaryPath;
+                      const binaryPathValue =
+                        providerSettings.binaryPathKey === "claudeBinaryPath"
+                          ? claudeBinaryPath
+                          : codexBinaryPath;
 
-                        <label htmlFor="codex-home-path" className="block space-y-1">
-                          <span className="text-xs font-medium text-foreground">
-                            CODEX_HOME path
-                          </span>
-                          <Input
-                            id="codex-home-path"
-                            value={codexHomePath}
-                            onChange={(event) =>
-                              updateSettings({ codexHomePath: event.target.value })
-                            }
-                            placeholder="/Users/you/.codex"
-                            spellCheck={false}
-                          />
-                          <span className="text-xs text-muted-foreground">
-                            Optional custom Codex home and config directory.
-                          </span>
-                        </label>
-                      </div>
-                    </div>
-                  </CollapsibleContent>
-                </SettingsRow>
-              </Collapsible>
+                      return (
+                        <Collapsible
+                          key={providerSettings.provider}
+                          open={isOpen}
+                          onOpenChange={(open) =>
+                            setOpenInstallProviders((existing) => ({
+                              ...existing,
+                              [providerSettings.provider]: open,
+                            }))
+                          }
+                        >
+                          <div className="overflow-hidden rounded-xl border border-border/70">
+                            <button
+                              type="button"
+                              className="flex w-full items-center gap-3 px-4 py-3 text-left"
+                              onClick={() =>
+                                setOpenInstallProviders((existing) => ({
+                                  ...existing,
+                                  [providerSettings.provider]: !existing[providerSettings.provider],
+                                }))
+                              }
+                            >
+                              <span className="min-w-0 flex-1 text-sm font-medium text-foreground">
+                                {providerSettings.title}
+                              </span>
+                              {isDirty ? (
+                                <span className="text-[11px] text-muted-foreground">Custom</span>
+                              ) : null}
+                              <ChevronDownIcon
+                                className={cn(
+                                  "size-4 shrink-0 text-muted-foreground transition-transform",
+                                  isOpen && "rotate-180",
+                                )}
+                              />
+                            </button>
+
+                            <CollapsibleContent>
+                              <div className="border-t border-border/70 px-4 py-4">
+                                <div className="space-y-3">
+                                  <label
+                                    htmlFor={`provider-install-${providerSettings.binaryPathKey}`}
+                                    className="block"
+                                  >
+                                    <span className="block text-xs font-medium text-foreground">
+                                      {providerSettings.title} binary path
+                                    </span>
+                                    <Input
+                                      id={`provider-install-${providerSettings.binaryPathKey}`}
+                                      className="mt-1"
+                                      value={binaryPathValue}
+                                      onChange={(event) =>
+                                        updateSettings(
+                                          providerSettings.binaryPathKey === "claudeBinaryPath"
+                                            ? { claudeBinaryPath: event.target.value }
+                                            : { codexBinaryPath: event.target.value },
+                                        )
+                                      }
+                                      placeholder={providerSettings.binaryPlaceholder}
+                                      spellCheck={false}
+                                    />
+                                    <span className="mt-1 block text-xs text-muted-foreground">
+                                      {providerSettings.binaryDescription}
+                                    </span>
+                                  </label>
+
+                                  {providerSettings.homePathKey ? (
+                                    <label
+                                      htmlFor={`provider-install-${providerSettings.homePathKey}`}
+                                      className="block"
+                                    >
+                                      <span className="block text-xs font-medium text-foreground">
+                                        CODEX_HOME path
+                                      </span>
+                                      <Input
+                                        id={`provider-install-${providerSettings.homePathKey}`}
+                                        className="mt-1"
+                                        value={codexHomePath}
+                                        onChange={(event) =>
+                                          updateSettings({
+                                            codexHomePath: event.target.value,
+                                          })
+                                        }
+                                        placeholder={providerSettings.homePlaceholder}
+                                        spellCheck={false}
+                                      />
+                                      {providerSettings.homeDescription ? (
+                                        <span className="mt-1 block text-xs text-muted-foreground">
+                                          {providerSettings.homeDescription}
+                                        </span>
+                                      ) : null}
+                                    </label>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </CollapsibleContent>
+                          </div>
+                        </Collapsible>
+                      );
+                    })}
+                  </div>
+                </div>
+              </SettingsRow>
 
               <SettingsRow
                 title="Keybindings"
