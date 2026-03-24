@@ -49,7 +49,7 @@ layer("GitServiceLive", (it) => {
       });
 
       assert.equal(result.code, 0);
-      assert.ok(result.stdout.length <= 16);
+      assert.ok(Buffer.byteLength(result.stdout, "utf8") <= 16);
       assert.equal(result.stdoutTruncated, true);
     }),
   );

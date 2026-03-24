@@ -802,6 +802,8 @@ const makeGitCore = Effect.gen(function* () {
         cwd,
         ["diff", "--cached", "--patch", "--minimal"],
         {
+          // Stay close to the later 50k char limit while keeping a little room for UTF-8 variance.
+          maxOutputBytes: 60_000,
           truncateOutput: true,
         },
       ).pipe(Effect.map((result) => result.stdout));
