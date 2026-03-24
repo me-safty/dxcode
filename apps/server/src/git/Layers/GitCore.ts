@@ -398,7 +398,7 @@ const createTrace2Monitor = Effect.fn(function* (
     ),
   );
   const traceFileName = path.basename(traceFilePath);
-  const watchTraceFile = Stream.runForEach(fs.watch(traceFilePath), (event) => {
+  yield* Stream.runForEach(fs.watch(traceFilePath), (event) => {
     const eventPath = event.path;
     const isTargetTraceEvent =
       eventPath === traceFilePath ||
@@ -406,9 +406,7 @@ const createTrace2Monitor = Effect.fn(function* (
       path.basename(eventPath) === traceFileName;
     if (!isTargetTraceEvent) return Effect.void;
     return readTraceDelta;
-  }).pipe(Effect.ignoreCause({ log: true }));
-
-  yield* Effect.forkScoped(watchTraceFile);
+  }).pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
 
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
