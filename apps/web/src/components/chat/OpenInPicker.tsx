@@ -38,6 +38,16 @@ export const OpenInPicker = memo(function OpenInPicker({
         value: "vscode",
       },
       {
+        label: "VS Code Insiders",
+        Icon: VisualStudioCode,
+        value: "vscode-insiders",
+      },
+      {
+        label: "VSCodium",
+        Icon: VisualStudioCode,
+        value: "vscodium",
+      },
+      {
         label: "Zed",
         Icon: Zed,
         value: "zed",
