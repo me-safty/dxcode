@@ -684,10 +684,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [threadActivities],
   );
   // phase === "running" alone isn't sufficient: the session can stay "running" even after
-  // the latest turn has completed (server status lag) or while waiting for user input.
-  // Only treat the agent as "working" if the turn has no completedAt yet and no pending questions.
-  const isActivelyRunning =
-    phase === "running" && pendingUserInputs.length === 0 && !activeLatestTurn?.completedAt;
+  // the latest turn has completed (server lifecycle guard can reject status updates while
+  // completedAt is set through a separate path) or while waiting for user input.
+  // Use completedAt on the latest turn as the reliable completion signal.
+  const turnDone = !!activeLatestTurn?.completedAt;
+  const isActivelyRunning = phase === "running" && pendingUserInputs.length === 0 && !turnDone;
   const isWorking = isActivelyRunning || isSendBusy || isConnecting || isRevertingCheckpoint;
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const activePendingDraftAnswers = useMemo(
