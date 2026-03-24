@@ -7,7 +7,9 @@
  * @module Server
  */
 import http from "node:http";
+import type net from "node:net";
 import type { Duplex } from "node:stream";
+import { Buffer } from "node:buffer";
 
 import Mime from "@effect/platform-node/Mime";
 import {
@@ -78,6 +80,19 @@ import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import {
+  appendSetCookieHeader,
+  AUTH_COOKIE_NAME,
+  createAuthCookieHeader,
+  createExpiredAuthCookieHeader,
+  isProtectedWebAuthEnabled,
+  isSecureRequest,
+  parseCookies,
+  removeTokenFromRequestUrl,
+  renderAuthPage,
+  requestPrefersHtml,
+  sanitizeNextPath,
+} from "./webAuth.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -119,6 +134,49 @@ function rejectUpgrade(socket: Duplex, statusCode: number, message: string): voi
       "\r\n" +
       message,
   );
+  const closeableSocket = socket as Duplex & {
+    destroySoon?: () => void;
+    destroy: () => void;
+  };
+  if (typeof closeableSocket.destroySoon === "function") {
+    closeableSocket.destroySoon();
+    return;
+  }
+  closeableSocket.destroy();
+}
+
+function readRequestBody(request: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    request.on("data", (chunk: Buffer | string) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buffer.length;
+      if (size > 32_768) {
+        reject(new Error("Request body too large"));
+        request.destroy();
+        return;
+      }
+      chunks.push(buffer);
+    });
+    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    request.on("error", reject);
+  });
+}
+
+function requestHostMatchesOrigin(request: http.IncomingMessage): boolean {
+  const originHeader = request.headers.origin;
+  const hostHeader = request.headers.host;
+  if (typeof originHeader !== "string" || typeof hostHeader !== "string") {
+    return false;
+  }
+
+  try {
+    const origin = new URL(originHeader);
+    return origin.host === hostHeader;
+  } catch {
+    return false;
+  }
 }
 
 function websocketRawToString(raw: unknown): string | null {
@@ -248,6 +306,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     logWebSocketEvents,
     autoBootstrapProjectFromCwd,
   } = serverConfig;
+  const protectedWebAuthEnabled = isProtectedWebAuthEnabled(serverConfig);
   const availableEditors = resolveAvailableEditors();
 
   const gitManager = yield* GitManager;
@@ -257,6 +316,48 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const git = yield* GitCore;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+
+  const getRequestAuthState = (request: http.IncomingMessage, url: URL) => {
+    if (!protectedWebAuthEnabled || !authToken) {
+      return {
+        authorized: true,
+        staleCookie: false,
+        authenticatedBy: "disabled" as const,
+      };
+    }
+
+    const queryToken = url.searchParams.get("token");
+    if (queryToken === authToken) {
+      return {
+        authorized: true,
+        staleCookie: false,
+        authenticatedBy: "query" as const,
+      };
+    }
+
+    const cookieToken = parseCookies(request.headers.cookie).get(AUTH_COOKIE_NAME);
+    if (!cookieToken) {
+      return {
+        authorized: false,
+        staleCookie: false,
+        authenticatedBy: "none" as const,
+      };
+    }
+
+    if (cookieToken === authToken) {
+      return {
+        authorized: true,
+        staleCookie: false,
+        authenticatedBy: "cookie" as const,
+      };
+    }
+
+    return {
+      authorized: false,
+      staleCookie: true,
+      authenticatedBy: "stale-cookie" as const,
+    };
+  };
 
   yield* keybindingsManager.syncDefaultKeybindingsOnStartup.pipe(
     Effect.catch((error) =>
@@ -271,6 +372,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const providerStatuses = yield* providerHealth.getStatuses;
 
   const clients = yield* Ref.make(new Set<WebSocket>());
+  const sockets = yield* Ref.make(new Set<net.Socket>());
   const logger = createLogger("ws");
   const readiness = yield* makeServerReadiness;
 
@@ -414,7 +516,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const httpServer = http.createServer((req, res) => {
     const respond = (
       statusCode: number,
-      headers: Record<string, string>,
+      headers: Record<string, string | string[]>,
       body?: string | Uint8Array,
     ) => {
       res.writeHead(statusCode, headers);
@@ -424,6 +526,84 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     void Effect.runPromise(
       Effect.gen(function* () {
         const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+        const requestAuthState = getRequestAuthState(req, url);
+        const clearStaleCookieHeader = requestAuthState.staleCookie
+          ? createExpiredAuthCookieHeader(isSecureRequest(req))
+          : null;
+
+        if (
+          protectedWebAuthEnabled &&
+          req.method === "POST" &&
+          url.pathname === "/auth/login" &&
+          authToken
+        ) {
+          const bodyText = yield* Effect.tryPromise({
+            try: () => readRequestBody(req),
+            catch: (cause) =>
+              new RouteRequestError({
+                message: `Failed to read auth request: ${String(cause)}`,
+              }),
+          });
+          const form = new URLSearchParams(bodyText);
+          const submittedToken = form.get("token");
+          const nextPath = sanitizeNextPath(form.get("next"));
+          if (submittedToken !== authToken) {
+            const headers: Record<string, string | string[]> = {
+              "Content-Type": "text/html; charset=utf-8",
+            };
+            if (clearStaleCookieHeader) {
+              appendSetCookieHeader(headers, clearStaleCookieHeader);
+            }
+            respond(
+              401,
+              headers,
+              renderAuthPage({
+                nextPath,
+                error: "Invalid auth token.",
+              }),
+            );
+            return;
+          }
+
+          const headers: Record<string, string | string[]> = {
+            Location: nextPath,
+          };
+          appendSetCookieHeader(headers, createAuthCookieHeader(authToken, isSecureRequest(req)));
+          respond(302, headers);
+          return;
+        }
+
+        if (protectedWebAuthEnabled && authToken && requestAuthState.authenticatedBy === "query") {
+          const cleanedLocation = removeTokenFromRequestUrl(url);
+          const headers: Record<string, string | string[]> = {
+            Location: cleanedLocation,
+          };
+          appendSetCookieHeader(headers, createAuthCookieHeader(authToken, isSecureRequest(req)));
+          respond(302, headers);
+          return;
+        }
+
+        if (protectedWebAuthEnabled && !requestAuthState.authorized) {
+          const headers: Record<string, string | string[]> = {};
+          if (clearStaleCookieHeader) {
+            appendSetCookieHeader(headers, clearStaleCookieHeader);
+          }
+          if (requestPrefersHtml(req, url)) {
+            headers["Content-Type"] = "text/html; charset=utf-8";
+            respond(
+              401,
+              headers,
+              renderAuthPage({
+                nextPath: sanitizeNextPath(`${url.pathname}${url.search}`),
+              }),
+            );
+            return;
+          }
+          headers["Content-Type"] = "text/plain";
+          respond(401, headers, "Unauthorized");
+          return;
+        }
+
         if (tryHandleProjectFaviconRequest(url, res)) {
           return;
         }
@@ -595,6 +775,18 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     Effect.flatMap(Effect.forEach((client) => Effect.sync(() => client.close()))),
     Effect.flatMap(() => Ref.set(clients, new Set())),
   );
+  const closeAllSockets = Ref.get(sockets).pipe(
+    Effect.flatMap(
+      Effect.forEach((socket) =>
+        Effect.sync(() => {
+          if (!socket.destroyed) {
+            socket.destroy();
+          }
+        }),
+      ),
+    ),
+    Effect.flatMap(() => Ref.set(sockets, new Set())),
+  );
 
   const listenOptions = host ? { host, port } : { port };
 
@@ -701,7 +893,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   yield* readiness.markHttpListening;
 
   yield* Effect.addFinalizer(() =>
-    Effect.all([closeAllClients, closeWebSocketServer.pipe(Effect.ignoreCause({ log: true }))]),
+    Effect.all([
+      closeAllClients,
+      closeAllSockets,
+      closeWebSocketServer.pipe(Effect.ignoreCause({ log: true })),
+    ]),
   );
 
   const routeRequest = Effect.fnUntraced(function* (ws: WebSocket, request: WebSocketRequest) {
@@ -938,7 +1134,31 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   httpServer.on("upgrade", (request, socket, head) => {
     socket.on("error", () => {}); // Prevent unhandled `EPIPE`/`ECONNRESET` from crashing the process if the client disconnects mid-handshake
 
-    if (authToken) {
+    if (protectedWebAuthEnabled && authToken) {
+      let providedToken: string | null = null;
+      let cookieToken: string | undefined;
+      try {
+        const url = new URL(request.url ?? "/", `http://localhost:${port}`);
+        providedToken = url.searchParams.get("token");
+        cookieToken = parseCookies(request.headers.cookie).get(AUTH_COOKIE_NAME);
+      } catch {
+        rejectUpgrade(socket, 400, "Invalid WebSocket URL");
+        return;
+      }
+
+      const tokenAuthorized = providedToken === authToken;
+      const cookieAuthorized = cookieToken === authToken;
+
+      if (!tokenAuthorized && cookieAuthorized && !requestHostMatchesOrigin(request)) {
+        rejectUpgrade(socket, 401, "Unauthorized WebSocket origin");
+        return;
+      }
+
+      if (!tokenAuthorized && !cookieAuthorized) {
+        rejectUpgrade(socket, 401, "Unauthorized WebSocket connection");
+        return;
+      }
+    } else if (authToken && serverConfig.mode === "desktop") {
       let providedToken: string | null = null;
       try {
         const url = new URL(request.url ?? "/", `http://localhost:${port}`);
@@ -956,6 +1176,25 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit("connection", ws, request);
+    });
+  });
+
+  httpServer.on("connection", (socket) => {
+    void runPromise(
+      Ref.update(sockets, (current) => {
+        const next = new Set(current);
+        next.add(socket);
+        return next;
+      }),
+    );
+    socket.on("close", () => {
+      void runPromise(
+        Ref.update(sockets, (current) => {
+          const next = new Set(current);
+          next.delete(socket);
+          return next;
+        }),
+      );
     });
   });
 

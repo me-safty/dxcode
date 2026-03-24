@@ -206,6 +206,13 @@ const isWildcardHost = (host: string | undefined): boolean =>
 const formatHostForUrl = (host: string): string =>
   host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 
+const tokenizedUrl = (baseUrl: string, authToken: string | undefined): string => {
+  if (!authToken) return baseUrl;
+  const url = new URL(baseUrl);
+  url.searchParams.set("token", authToken);
+  return url.toString();
+};
+
 export const recordStartupHeartbeat = Effect.gen(function* () {
   const analytics = yield* AnalyticsService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
@@ -253,23 +260,35 @@ const makeServerProgram = (input: CliInput) =>
     yield* Effect.forkChild(recordStartupHeartbeat);
 
     const localUrl = `http://localhost:${config.port}`;
-    const bindUrl =
-      config.host && !isWildcardHost(config.host)
+    const hostUrl =
+      config.host && config.host.length > 0
         ? `http://${formatHostForUrl(config.host)}:${config.port}`
-        : localUrl;
+        : undefined;
+    const protectedWebAuthEnabled =
+      config.mode === "web" && !config.devUrl && typeof config.authToken === "string";
+    const openBaseUrl = config.host && !isWildcardHost(config.host) ? hostUrl! : localUrl;
+    const shareBaseUrl = hostUrl ?? localUrl;
+    const openUrl =
+      protectedWebAuthEnabled && config.authToken
+        ? tokenizedUrl(openBaseUrl, config.authToken)
+        : (config.devUrl?.toString() ?? openBaseUrl);
+    const shareableUrl =
+      protectedWebAuthEnabled && config.authToken
+        ? tokenizedUrl(shareBaseUrl, config.authToken)
+        : undefined;
     const { authToken, devUrl, ...safeConfig } = config;
     yield* Effect.logInfo("T3 Code running", {
       ...safeConfig,
       devUrl: devUrl?.toString(),
       authEnabled: Boolean(authToken),
+      ...(shareableUrl ? { shareableUrl } : {}),
     });
 
     if (!config.noBrowser) {
-      const target = config.devUrl?.toString() ?? bindUrl;
-      yield* openDeps.openBrowser(target).pipe(
+      yield* openDeps.openBrowser(openUrl).pipe(
         Effect.catch(() =>
           Effect.logInfo("browser auto-open unavailable", {
-            hint: `Open ${target} in your browser.`,
+            hint: `Open ${openUrl} in your browser.`,
           }),
         ),
       );

@@ -280,10 +280,22 @@ function asWebSocketResponse(message: unknown): WebSocketResponse | null {
   return message as WebSocketResponse;
 }
 
-function connectWsOnce(port: number, token?: string): Promise<WebSocket> {
+function connectWsOnce(
+  port: number,
+  options: {
+    token?: string;
+    headers?: Record<string, string>;
+  } = {},
+): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const query = token ? `?token=${encodeURIComponent(token)}` : "";
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/${query}`);
+    const query = options.token ? `?token=${encodeURIComponent(options.token)}` : "";
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/${query}`, {
+      headers: options.headers,
+    });
+    const timeoutId = setTimeout(() => {
+      ws.close();
+      reject(new Error("WebSocket connection failed"));
+    }, 500);
     const channels: SocketChannels = {
       push: { queue: [], waiters: [] },
       response: { queue: [], waiters: [] },
@@ -302,17 +314,32 @@ function connectWsOnce(port: number, token?: string): Promise<WebSocket> {
       }
     });
 
-    ws.once("open", () => resolve(ws));
-    ws.once("error", () => reject(new Error("WebSocket connection failed")));
+    ws.once("open", () => {
+      clearTimeout(timeoutId);
+      resolve(ws);
+    });
+    ws.once("error", () => {
+      clearTimeout(timeoutId);
+      ws.close();
+      reject(new Error("WebSocket connection failed"));
+    });
   });
 }
 
-async function connectWs(port: number, token?: string, attempts = 5): Promise<WebSocket> {
+async function connectWs(
+  port: number,
+  options: {
+    token?: string;
+    headers?: Record<string, string>;
+    attempts?: number;
+  } = {},
+): Promise<WebSocket> {
+  const attempts = options.attempts ?? 5;
   let lastError: unknown = new Error("WebSocket connection failed");
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      return await connectWsOnce(port, token);
+      return await connectWsOnce(port, options);
     } catch (error) {
       lastError = error;
       if (attempt < attempts - 1) {
@@ -327,9 +354,12 @@ async function connectWs(port: number, token?: string, attempts = 5): Promise<We
 /** Connect and wait for the server.welcome push. Returns [ws, welcomeData]. */
 async function connectAndAwaitWelcome(
   port: number,
-  token?: string,
+  options: {
+    token?: string;
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<[WebSocket, WsPushMessage<typeof WS_CHANNELS.serverWelcome>]> {
-  const ws = await connectWs(port, token);
+  const ws = await connectWs(port, options);
   const welcome = await waitForPush(ws, WS_CHANNELS.serverWelcome);
   return [ws, welcome];
 }
@@ -401,14 +431,20 @@ async function rewriteKeybindingsAndWaitForPush(
 async function requestPath(
   port: number,
   requestPath: string,
-): Promise<{ statusCode: number; body: string }> {
+  options: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+  } = {},
+): Promise<{ statusCode: number; body: string; headers: Http.IncomingHttpHeaders }> {
   return new Promise((resolve, reject) => {
     const req = Http.request(
       {
         hostname: "127.0.0.1",
         port,
         path: requestPath,
-        method: "GET",
+        method: options.method ?? "GET",
+        headers: options.headers,
       },
       (res) => {
         const chunks: Buffer[] = [];
@@ -419,13 +455,20 @@ async function requestPath(
           resolve({
             statusCode: res.statusCode ?? 0,
             body: Buffer.concat(chunks).toString("utf8"),
+            headers: res.headers,
           });
         });
       },
     );
     req.once("error", reject);
-    req.end();
+    req.end(options.body);
   });
+}
+
+function firstSetCookie(headers: Http.IncomingHttpHeaders): string | null {
+  const header = headers["set-cookie"];
+  if (!header) return null;
+  return Array.isArray(header) ? (header[0] ?? null) : header;
 }
 
 function compileKeybindings(bindings: KeybindingsConfig): ResolvedKeybindingsConfig {
@@ -567,6 +610,8 @@ describe("WebSocket Server", () => {
 
   async function closeTestServer() {
     if (!serverScope) return;
+    server?.closeAllConnections?.();
+    server?.closeIdleConnections?.();
     const scope = serverScope;
     serverScope = null;
     await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -574,7 +619,7 @@ describe("WebSocket Server", () => {
 
   afterEach(async () => {
     for (const ws of connections) {
-      ws.close();
+      ws.terminate();
     }
     connections.length = 0;
     await closeTestServer();
@@ -583,7 +628,7 @@ describe("WebSocket Server", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
     vi.restoreAllMocks();
-  });
+  }, 30_000);
 
   it("sends welcome message on connect", async () => {
     server = await createTestServer({ cwd: "/test/project" });
@@ -659,6 +704,130 @@ describe("WebSocket Server", () => {
     const response = await fetch(`http://127.0.0.1:${port}/`);
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("static-root");
+  });
+
+  it("renders auth page for unauthorized document requests in protected web mode", async () => {
+    const staticDir = makeTempDir("t3code-static-auth-page-");
+    fs.writeFileSync(path.join(staticDir, "index.html"), "<h1>secret</h1>", "utf8");
+
+    server = await createTestServer({
+      cwd: "/test/project",
+      staticDir,
+      authToken: "secret-token",
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const response = await requestPath(port, "/");
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toContain("Open T3 Code");
+    expect(response.body).toContain('name="token"');
+  });
+
+  it("returns 401 for unauthorized protected asset requests", async () => {
+    const baseDir = makeTempDir("t3code-state-auth-attachments-");
+    const { attachmentsDir } = deriveServerPathsSync(baseDir, undefined);
+    const attachmentPath = path.join(attachmentsDir, "thread-a", "message-a", "0.png");
+    fs.mkdirSync(path.dirname(attachmentPath), { recursive: true });
+    fs.writeFileSync(attachmentPath, Buffer.from("hello-attachment"));
+
+    server = await createTestServer({
+      cwd: "/test/project",
+      baseDir,
+      authToken: "secret-token",
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const response = await requestPath(port, "/attachments/thread-a/message-a/0.png");
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toBe("Unauthorized");
+  });
+
+  it("returns 401 for unauthorized protected favicon requests", async () => {
+    server = await createTestServer({
+      cwd: "/test/project",
+      authToken: "secret-token",
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const response = await requestPath(port, "/api/project-favicon?cwd=%2Ftest%2Fproject");
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toBe("Unauthorized");
+  });
+
+  it("accepts tokenized web links, sets auth cookie, and redirects to a clean URL", async () => {
+    const staticDir = makeTempDir("t3code-static-auth-redirect-");
+    fs.writeFileSync(path.join(staticDir, "index.html"), "<h1>secret</h1>", "utf8");
+
+    server = await createTestServer({
+      cwd: "/test/project",
+      staticDir,
+      authToken: "secret-token",
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const response = await requestPath(port, "/settings?foo=bar&token=secret-token");
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("/settings?foo=bar");
+    expect(firstSetCookie(response.headers)).toContain("t3code_auth=secret-token");
+  });
+
+  it("supports form login and then serves protected content with the auth cookie", async () => {
+    const staticDir = makeTempDir("t3code-static-auth-login-");
+    fs.writeFileSync(path.join(staticDir, "index.html"), "<h1>secret</h1>", "utf8");
+
+    server = await createTestServer({
+      cwd: "/test/project",
+      staticDir,
+      authToken: "secret-token",
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const loginResponse = await requestPath(port, "/auth/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: "token=secret-token&next=%2F",
+    });
+    expect(loginResponse.statusCode).toBe(302);
+    expect(loginResponse.headers.location).toBe("/");
+    const authCookie = firstSetCookie(loginResponse.headers);
+    expect(authCookie).toContain("t3code_auth=secret-token");
+
+    const authedResponse = await requestPath(port, "/", {
+      headers: {
+        cookie: authCookie?.split(";")[0] ?? "",
+      },
+    });
+    expect(authedResponse.statusCode).toBe(200);
+    expect(authedResponse.body).toContain("secret");
+  });
+
+  it("clears stale auth cookies and re-prompts for the token", async () => {
+    const staticDir = makeTempDir("t3code-static-auth-stale-");
+    fs.writeFileSync(path.join(staticDir, "index.html"), "<h1>secret</h1>", "utf8");
+
+    server = await createTestServer({
+      cwd: "/test/project",
+      staticDir,
+      authToken: "new-token",
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const response = await requestPath(port, "/", {
+      headers: {
+        cookie: "t3code_auth=old-token",
+      },
+    });
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toContain("Open T3 Code");
+    expect(firstSetCookie(response.headers)).toContain("Max-Age=0");
   });
 
   it("rejects static path traversal attempts", async () => {
@@ -1908,7 +2077,68 @@ describe("WebSocket Server", () => {
 
     await expect(connectWs(port)).rejects.toThrow("WebSocket connection failed");
 
-    const [authorizedWs] = await connectAndAwaitWelcome(port, "secret-token");
+    const [authorizedWs] = await connectAndAwaitWelcome(port, { token: "secret-token" });
+    connections.push(authorizedWs);
+  });
+
+  it("accepts websocket connections authenticated by cookie in protected web mode", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: "secret-token" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [authorizedWs] = await connectAndAwaitWelcome(port, {
+      headers: {
+        cookie: "t3code_auth=secret-token",
+        origin: `http://127.0.0.1:${port}`,
+      },
+    });
+    connections.push(authorizedWs);
+  });
+
+  it("rejects websocket cookie auth with a mismatched origin", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: "secret-token" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    await expect(
+      connectWs(port, {
+        headers: {
+          cookie: "t3code_auth=secret-token",
+          origin: "http://example.com",
+        },
+      }),
+    ).rejects.toThrow("WebSocket connection failed");
+  });
+
+  it("does not accept stale websocket auth cookies", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: "secret-token" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    await expect(
+      connectWs(port, {
+        headers: {
+          cookie: "t3code_auth=old-token",
+          origin: `http://127.0.0.1:${port}`,
+        },
+      }),
+    ).rejects.toThrow("WebSocket connection failed");
+  });
+
+  it("does not enforce web auth in dev-url mode", async () => {
+    server = await createTestServer({
+      cwd: "/test",
+      authToken: "secret-token",
+      devUrl: "http://localhost:5173",
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const response = await requestPath(port, "/");
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("http://localhost:5173/");
+
+    const [authorizedWs] = await connectAndAwaitWelcome(port);
     connections.push(authorizedWs);
   });
 });
