@@ -9,6 +9,7 @@ import {
   Option,
   Path,
   PlatformError,
+  Ref,
   Result,
   Schema,
   Scope,
@@ -35,6 +36,11 @@ const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
+
+type TraceTailState = {
+  processedChars: number;
+  remainder: string;
+};
 
 class StatusUpstreamRefreshCacheKey extends Data.Class<{
   cwd: string;
@@ -303,8 +309,10 @@ const createTrace2Monitor = Effect.fn(function* (
     suffix: ".json",
   });
   const hookStartByChildKey = new Map<string, { hookName: string; startedAtMs: number }>();
-  let processedChars = 0;
-  let lineBuffer = "";
+  const traceTailState = yield* Ref.make<TraceTailState>({
+    processedChars: 0,
+    remainder: "",
+  });
 
   const handleTraceLine = (line: string) =>
     Effect.gen(function* () {
@@ -365,24 +373,28 @@ const createTrace2Monitor = Effect.fn(function* (
   const deltaMutex = yield* Semaphore.make(1);
   const readTraceDelta = deltaMutex.withPermit(
     fs.readFileString(traceFilePath).pipe(
-      Effect.catch(() => Effect.succeed("")),
-      Effect.flatMap((delta) =>
-        Effect.gen(function* () {
-          if (delta.length <= processedChars) {
-            return;
+      Effect.flatMap((contents) =>
+        Ref.modify(traceTailState, ({ processedChars, remainder }) => {
+          if (contents.length <= processedChars) {
+            return [[], { processedChars, remainder }];
           }
-          const appended = delta.slice(processedChars);
-          processedChars = delta.length;
-          lineBuffer += appended;
-          let newlineIndex = lineBuffer.indexOf("\n");
-          while (newlineIndex >= 0) {
-            const line = lineBuffer.slice(0, newlineIndex);
-            lineBuffer = lineBuffer.slice(newlineIndex + 1);
-            yield* handleTraceLine(line);
-            newlineIndex = lineBuffer.indexOf("\n");
-          }
+
+          const appended = contents.slice(processedChars);
+          const combined = remainder + appended;
+          const lines = combined.split("\n");
+          const nextRemainder = lines.pop() ?? "";
+
+          return [
+            lines.map((line) => line.replace(/\r$/, "")),
+            {
+              processedChars: contents.length,
+              remainder: nextRemainder,
+            },
+          ];
         }),
       ),
+      Effect.flatMap((lines) => Effect.forEach(lines, handleTraceLine, { discard: true })),
+      Effect.ignore({ log: true }),
     ),
   );
   const traceFileName = path.basename(traceFilePath);
@@ -401,8 +413,13 @@ const createTrace2Monitor = Effect.fn(function* (
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
       yield* readTraceDelta;
-      const finalLine = lineBuffer.trim();
-      lineBuffer = "";
+      const finalLine = yield* Ref.modify(traceTailState, ({ processedChars, remainder }) => [
+        remainder.trim(),
+        {
+          processedChars,
+          remainder: "",
+        },
+      ]);
       if (finalLine.length > 0) {
         yield* handleTraceLine(finalLine);
       }
