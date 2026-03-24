@@ -49,6 +49,8 @@ import { gitRemoveWorktreeMutationOptions, gitStatusQueryOptions } from "../lib/
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
+import { useStoreWithEqualityFn } from "zustand/traditional";
+import { shallow } from "zustand/shallow";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { toastManager } from "./ui/toast";
@@ -265,6 +267,27 @@ function SortableProjectItem({
   );
 }
 
+function useDraftProviderByThreadId(
+  threads: readonly { id: ThreadId }[],
+): Record<string, ProviderKind | null | undefined> {
+  const threadIds = useMemo(() => threads.map((t) => t.id), [threads]);
+
+  return useStoreWithEqualityFn(
+    useComposerDraftStore,
+    useCallback(
+      (store: { draftsByThreadId: Record<string, { provider?: ProviderKind | null } | undefined> }) => {
+        const result: Record<string, ProviderKind | null | undefined> = {};
+        for (const id of threadIds) {
+          result[id] = store.draftsByThreadId[id]?.provider;
+        }
+        return result;
+      },
+      [threadIds],
+    ),
+    shallow,
+  );
+}
+
 export default function Sidebar() {
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
@@ -275,7 +298,7 @@ export default function Sidebar() {
   const getDraftThreadByProjectId = useComposerDraftStore(
     (store) => store.getDraftThreadByProjectId,
   );
-  const draftsByThreadId = useComposerDraftStore((store) => store.draftsByThreadId);
+  const draftProviderByThreadId = useDraftProviderByThreadId(threads);
   const terminalStateByThreadId = useTerminalStateStore((state) => state.terminalStateByThreadId);
   const clearTerminalState = useTerminalStateStore((state) => state.clearTerminalState);
   const clearProjectDraftThreadId = useComposerDraftStore(
@@ -1479,7 +1502,7 @@ export default function Sidebar() {
                                 );
                                 const threadProvider = resolveThreadProvider(
                                   thread,
-                                  draftsByThreadId[thread.id]?.provider,
+                                  draftProviderByThreadId[thread.id],
                                 );
                                 const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[threadProvider];
 
