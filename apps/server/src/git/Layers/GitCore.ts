@@ -362,7 +362,7 @@ const createTrace2Monitor = Effect.fn(function* (
       }
     });
 
-  const deltaMutex = Semaphore.makeUnsafe(1);
+  const deltaMutex = yield* Semaphore.make(1);
   const readTraceDelta = deltaMutex.withPermit(
     fs.readFileString(traceFilePath).pipe(
       Effect.catch(() => Effect.succeed("")),
