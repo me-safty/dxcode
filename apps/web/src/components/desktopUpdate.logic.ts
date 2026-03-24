@@ -76,7 +76,7 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
     }
     return state.message ?? "Update failed";
   }
-  return "Update available";
+  return "Up to date";
 }
 
 export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): string | null {
