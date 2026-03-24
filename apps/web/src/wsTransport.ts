@@ -192,6 +192,7 @@ export class WsTransport {
       if (this.ws === ws) {
         this.ws = null;
       }
+      this.outboundQueue.length = 0;
       for (const [id, pending] of this.pending.entries()) {
         if (pending.timeout !== null) {
           clearTimeout(pending.timeout);
