@@ -721,6 +721,7 @@ describe("WebSocket Server", () => {
     const response = await requestPath(port, "/");
     expect(response.statusCode).toBe(401);
     expect(response.body).toContain("Open T3 Code");
+    expect(response.body).toContain('data-auth-page="t3code-sign-in"');
     expect(response.body).toContain('name="token"');
   });
 
@@ -806,6 +807,32 @@ describe("WebSocket Server", () => {
     });
     expect(authedResponse.statusCode).toBe(200);
     expect(authedResponse.body).toContain("secret");
+  });
+
+  it("re-renders the auth page with an error for invalid token submissions", async () => {
+    const staticDir = makeTempDir("t3code-static-auth-invalid-");
+    fs.writeFileSync(path.join(staticDir, "index.html"), "<h1>secret</h1>", "utf8");
+
+    server = await createTestServer({
+      cwd: "/test/project",
+      staticDir,
+      authToken: "secret-token",
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const response = await requestPath(port, "/auth/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: "token=wrong-token&next=%2Fsettings",
+    });
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toContain("Open T3 Code");
+    expect(response.body).toContain('role="alert"');
+    expect(response.body).toContain("Invalid auth token.");
+    expect(response.body).toContain('value="/settings"');
   });
 
   it("clears stale auth cookies and re-prompts for the token", async () => {
