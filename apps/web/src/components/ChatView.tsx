@@ -117,7 +117,8 @@ import {
   projectScriptIdFromCommand,
   setupProjectScript,
 } from "~/projectScripts";
-import { SidebarTrigger } from "./ui/sidebar";
+import { SidebarToggleButton } from "./SidebarToggleButton";
+import { useSidebar } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import {
@@ -241,6 +242,7 @@ interface ChatViewProps {
 }
 
 export default function ChatView({ threadId }: ChatViewProps) {
+  const { open: sidebarOpen } = useSidebar();
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
   const markThreadVisited = useStore((store) => store.markThreadVisited);
@@ -1127,6 +1129,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const isGitRepo = branchesQuery.data?.isRepo ?? true;
   const terminalToggleShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "terminal.toggle"),
+    [keybindings],
+  );
+  const sidebarToggleShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "sidebar.toggle"),
     [keybindings],
   );
   const splitTerminalShortcutLabel = useMemo(
@@ -3442,15 +3448,27 @@ export default function ChatView({ threadId }: ChatViewProps) {
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-muted-foreground/40">
         {!isElectron && (
-          <header className="border-b border-border px-3 py-2 md:hidden">
+          <header className="border-b border-border px-3 py-2">
             <div className="flex items-center gap-2">
-              <SidebarTrigger className="size-7 shrink-0" />
+              <SidebarToggleButton
+                className="size-7 shrink-0"
+                shortcutLabel={sidebarToggleShortcutLabel}
+              />
               <span className="text-sm font-medium text-foreground">Threads</span>
             </div>
           </header>
         )}
         {isElectron && (
-          <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
+          <div
+            className={cn(
+              "drag-region flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-5",
+              !sidebarOpen && "pl-[90px]",
+            )}
+          >
+            <SidebarToggleButton
+              className="size-7 shrink-0 no-drag"
+              shortcutLabel={sidebarToggleShortcutLabel}
+            />
             <span className="text-xs text-muted-foreground/50">No active thread</span>
           </div>
         )}
@@ -3468,8 +3486,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {/* Top bar */}
       <header
         className={cn(
-          "border-b border-border px-3 sm:px-5",
-          isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
+          "border-b border-border px-3",
+          isElectron
+            ? cn("drag-region flex h-[52px] items-center pr-5", sidebarOpen ? "pl-5" : "pl-[90px]")
+            : "py-2 sm:py-3",
         )}
       >
         <ChatHeader
@@ -3486,6 +3506,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           availableEditors={availableEditors}
           terminalAvailable={activeProject !== undefined}
           terminalOpen={terminalState.terminalOpen}
+          sidebarToggleShortcutLabel={sidebarToggleShortcutLabel}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
