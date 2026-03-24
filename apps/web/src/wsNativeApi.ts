@@ -11,9 +11,8 @@ import {
 } from "@t3tools/contracts";
 
 import { showContextMenuFallback } from "./contextMenuFallback";
-import { WsTransport } from "./wsTransport";
-
-export type TransportState = "connecting" | "open" | "reconnecting" | "closed" | "disposed";
+import { WsTransport, type TransportState } from "./wsTransport";
+export type { TransportState };
 
 let instance: { api: NativeApi; transport: WsTransport } | null = null;
 const welcomeListeners = new Set<(payload: WsWelcomePayload) => void>();

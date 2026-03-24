@@ -25,7 +25,7 @@ interface RequestOptions {
   readonly timeoutMs?: number | null;
 }
 
-type TransportState = "connecting" | "open" | "reconnecting" | "closed" | "disposed";
+export type TransportState = "connecting" | "open" | "reconnecting" | "closed" | "disposed";
 
 const REQUEST_TIMEOUT_MS = 60_000;
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000];
@@ -78,8 +78,8 @@ export class WsTransport {
   }
 
   onStateChange(listener: (state: TransportState) => void): () => void {
-    this.stateListeners.add(listener);
     listener(this.state);
+    this.stateListeners.add(listener);
     return () => {
       this.stateListeners.delete(listener);
     };
@@ -173,7 +173,7 @@ export class WsTransport {
 
   dispose() {
     this.disposed = true;
-    this.state = "disposed";
+    this.setState("disposed");
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
