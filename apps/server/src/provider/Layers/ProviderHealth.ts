@@ -587,14 +587,87 @@ export const checkClaudeProviderStatus: Effect.Effect<
   } satisfies ServerProviderStatus;
 });
 
+// ── Factory Droid health check ───────────────────────────────────────
+
+const FACTORY_DROID_PROVIDER = "factoryDroid" as const;
+
+export const checkFactoryDroidProviderStatus: Effect.Effect<
+  ServerProviderStatus,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner
+> = Effect.gen(function* () {
+  const checkedAt = new Date().toISOString();
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+
+  const versionProbe = yield* Effect.gen(function* () {
+    const command = ChildProcess.make("droid", ["--version"], {
+      shell: process.platform === "win32",
+    });
+    const child = yield* spawner.spawn(command);
+    const [stdout, stderr, exitCode] = yield* Effect.all(
+      [
+        collectStreamAsString(child.stdout),
+        collectStreamAsString(child.stderr),
+        child.exitCode.pipe(Effect.map(Number)),
+      ],
+      { concurrency: "unbounded" },
+    );
+    return { stdout, stderr, code: exitCode } satisfies CommandResult;
+  }).pipe(Effect.scoped, Effect.timeoutOption(DEFAULT_TIMEOUT_MS), Effect.result);
+
+  if (Result.isFailure(versionProbe)) {
+    return {
+      provider: FACTORY_DROID_PROVIDER,
+      status: "error",
+      available: false,
+      authStatus: "unknown",
+      checkedAt,
+      message: "Factory Droid CLI (`droid`) is not installed or not available on PATH.",
+    } satisfies ServerProviderStatus;
+  }
+
+  const versionOption = versionProbe.success;
+  if (Option.isNone(versionOption)) {
+    return {
+      provider: FACTORY_DROID_PROVIDER,
+      status: "error",
+      available: false,
+      authStatus: "unknown",
+      checkedAt,
+      message: "Factory Droid CLI (`droid`) version check timed out.",
+    } satisfies ServerProviderStatus;
+  }
+
+  const versionResult = versionOption.value;
+  if (versionResult.code !== 0) {
+    return {
+      provider: FACTORY_DROID_PROVIDER,
+      status: "error",
+      available: false,
+      authStatus: "unknown",
+      checkedAt,
+      message: "Factory Droid CLI (`droid`) is not installed or not available on PATH.",
+    } satisfies ServerProviderStatus;
+  }
+
+  return {
+    provider: FACTORY_DROID_PROVIDER,
+    status: "ready",
+    available: true,
+    authStatus: "authenticated",
+    checkedAt,
+  } satisfies ServerProviderStatus;
+});
+
 // ── Layer ───────────────────────────────────────────────────────────
 
 export const ProviderHealthLive = Layer.effect(
   ProviderHealth,
   Effect.gen(function* () {
-    const statusesFiber = yield* Effect.all([checkCodexProviderStatus, checkClaudeProviderStatus], {
-      concurrency: "unbounded",
-    }).pipe(Effect.forkScoped);
+    const statusesFiber = yield* Effect.all(
+      [checkCodexProviderStatus, checkClaudeProviderStatus, checkFactoryDroidProviderStatus],
+      { concurrency: "unbounded" },
+    ).pipe(Effect.forkScoped);
 
     return {
       getStatuses: Fiber.join(statusesFiber),

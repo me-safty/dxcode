@@ -1257,10 +1257,10 @@ const make = Effect.gen(function* () {
     });
 
   const processDomainEvent = (event: TurnStartRequestedDomainEvent) =>
-    Ref.set(
-      assistantDeliveryModeRef,
-      event.payload.assistantDeliveryMode ?? DEFAULT_ASSISTANT_DELIVERY_MODE,
-    );
+    Effect.gen(function* () {
+      const newMode = event.payload.assistantDeliveryMode ?? DEFAULT_ASSISTANT_DELIVERY_MODE;
+      yield* Ref.set(assistantDeliveryModeRef, newMode);
+    });
 
   const processInput = (input: RuntimeIngestionInput) =>
     input.source === "runtime" ? processRuntimeEvent(input.event) : processDomainEvent(input.event);

@@ -58,7 +58,7 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
-type InstallBinarySettingsKey = "claudeBinaryPath" | "codexBinaryPath";
+type InstallBinarySettingsKey = "claudeBinaryPath" | "codexBinaryPath" | "factoryDroidBinaryPath";
 type InstallProviderSettings = {
   provider: ProviderKind;
   title: string;
@@ -93,6 +93,17 @@ const INSTALL_PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     binaryDescription: (
       <>
         Leave blank to use <code>claude</code> from your PATH.
+      </>
+    ),
+  },
+  {
+    provider: "factoryDroid",
+    title: "Factory Droid",
+    binaryPathKey: "factoryDroidBinaryPath",
+    binaryPlaceholder: "Droid binary path",
+    binaryDescription: (
+      <>
+        Leave blank to use <code>droid</code> from your PATH.
       </>
     ),
   },
@@ -194,6 +205,7 @@ function SettingsRouteView() {
   const [openInstallProviders, setOpenInstallProviders] = useState<Record<ProviderKind, boolean>>({
     codex: Boolean(settings.codexBinaryPath || settings.codexHomePath),
     claudeAgent: Boolean(settings.claudeBinaryPath),
+    factoryDroid: Boolean(settings.factoryDroidBinaryPath),
   });
   const [selectedCustomModelProvider, setSelectedCustomModelProvider] =
     useState<ProviderKind>("codex");
@@ -202,15 +214,14 @@ function SettingsRouteView() {
   >({
     codex: "",
     claudeAgent: "",
+    factoryDroid: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
   >({});
   const [showAllCustomModels, setShowAllCustomModels] = useState(false);
 
-  const codexBinaryPath = settings.codexBinaryPath;
   const codexHomePath = settings.codexHomePath;
-  const claudeBinaryPath = settings.claudeBinaryPath;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
 
@@ -248,7 +259,8 @@ function SettingsRouteView() {
   const isInstallSettingsDirty =
     settings.claudeBinaryPath !== defaults.claudeBinaryPath ||
     settings.codexBinaryPath !== defaults.codexBinaryPath ||
-    settings.codexHomePath !== defaults.codexHomePath;
+    settings.codexHomePath !== defaults.codexHomePath ||
+    settings.factoryDroidBinaryPath !== defaults.factoryDroidBinaryPath;
   const changedSettingLabels = [
     ...(theme !== "system" ? ["Theme"] : []),
     ...(settings.timestampFormat !== defaults.timestampFormat ? ["Time format"] : []),
@@ -261,7 +273,9 @@ function SettingsRouteView() {
       ? ["Delete confirmation"]
       : []),
     ...(isGitTextGenerationModelDirty ? ["Git writing model"] : []),
-    ...(settings.customCodexModels.length > 0 || settings.customClaudeModels.length > 0
+    ...(settings.customCodexModels.length > 0 ||
+    settings.customClaudeModels.length > 0 ||
+    settings.customFactoryDroidModels.length > 0
       ? ["Custom models"]
       : []),
     ...(isInstallSettingsDirty ? ["Provider installs"] : []),
@@ -370,11 +384,13 @@ function SettingsRouteView() {
     setOpenInstallProviders({
       codex: false,
       claudeAgent: false,
+      factoryDroid: false,
     });
     setSelectedCustomModelProvider("codex");
     setCustomModelInputByProvider({
       codex: "",
       claudeAgent: "",
+      factoryDroid: "",
     });
     setCustomModelErrorByProvider({});
   }
@@ -695,7 +711,11 @@ function SettingsRouteView() {
                     <Select
                       value={selectedCustomModelProvider}
                       onValueChange={(value) => {
-                        if (value !== "codex" && value !== "claudeAgent") {
+                        if (
+                          value !== "codex" &&
+                          value !== "claudeAgent" &&
+                          value !== "factoryDroid"
+                        ) {
                           return;
                         }
                         setSelectedCustomModelProvider(value);
@@ -815,10 +835,12 @@ function SettingsRouteView() {
                           claudeBinaryPath: defaults.claudeBinaryPath,
                           codexBinaryPath: defaults.codexBinaryPath,
                           codexHomePath: defaults.codexHomePath,
+                          factoryDroidBinaryPath: defaults.factoryDroidBinaryPath,
                         });
                         setOpenInstallProviders({
                           codex: false,
                           claudeAgent: false,
+                          factoryDroid: false,
                         });
                       }}
                     />
@@ -833,11 +855,10 @@ function SettingsRouteView() {
                         providerSettings.provider === "codex"
                           ? settings.codexBinaryPath !== defaults.codexBinaryPath ||
                             settings.codexHomePath !== defaults.codexHomePath
-                          : settings.claudeBinaryPath !== defaults.claudeBinaryPath;
-                      const binaryPathValue =
-                        providerSettings.binaryPathKey === "claudeBinaryPath"
-                          ? claudeBinaryPath
-                          : codexBinaryPath;
+                          : providerSettings.provider === "factoryDroid"
+                            ? settings.factoryDroidBinaryPath !== defaults.factoryDroidBinaryPath
+                            : settings.claudeBinaryPath !== defaults.claudeBinaryPath;
+                      const binaryPathValue = settings[providerSettings.binaryPathKey];
 
                       return (
                         <Collapsible
@@ -890,11 +911,9 @@ function SettingsRouteView() {
                                       className="mt-1"
                                       value={binaryPathValue}
                                       onChange={(event) =>
-                                        updateSettings(
-                                          providerSettings.binaryPathKey === "claudeBinaryPath"
-                                            ? { claudeBinaryPath: event.target.value }
-                                            : { codexBinaryPath: event.target.value },
-                                        )
+                                        updateSettings({
+                                          [providerSettings.binaryPathKey]: event.target.value,
+                                        })
                                       }
                                       placeholder={providerSettings.binaryPlaceholder}
                                       spellCheck={false}

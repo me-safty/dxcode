@@ -78,31 +78,45 @@ describe("resolveAppModelSelection", () => {
     expect(
       resolveAppModelSelection(
         "codex",
-        { codex: ["galapagos-alpha"], claudeAgent: [] },
+        { codex: ["galapagos-alpha"], claudeAgent: [], factoryDroid: [] },
         "galapagos-alpha",
       ),
     ).toBe("galapagos-alpha");
   });
 
   it("falls back to the provider default when no model is selected", () => {
-    expect(resolveAppModelSelection("codex", { codex: [], claudeAgent: [] }, "")).toBe("gpt-5.4");
+    expect(
+      resolveAppModelSelection("codex", { codex: [], claudeAgent: [], factoryDroid: [] }, ""),
+    ).toBe("gpt-5.4");
   });
 
   it("resolves display names through the shared resolver", () => {
-    expect(resolveAppModelSelection("codex", { codex: [], claudeAgent: [] }, "GPT-5.3 Codex")).toBe(
-      "gpt-5.3-codex",
-    );
+    expect(
+      resolveAppModelSelection(
+        "codex",
+        { codex: [], claudeAgent: [], factoryDroid: [] },
+        "GPT-5.3 Codex",
+      ),
+    ).toBe("gpt-5.3-codex");
   });
 
   it("resolves aliases through the shared resolver", () => {
-    expect(resolveAppModelSelection("claudeAgent", { codex: [], claudeAgent: [] }, "sonnet")).toBe(
-      "claude-sonnet-4-6",
-    );
+    expect(
+      resolveAppModelSelection(
+        "claudeAgent",
+        { codex: [], claudeAgent: [], factoryDroid: [] },
+        "sonnet",
+      ),
+    ).toBe("claude-sonnet-4-6");
   });
 
   it("resolves transient selected custom models included in app model options", () => {
     expect(
-      resolveAppModelSelection("codex", { codex: [], claudeAgent: [] }, "custom/selected-model"),
+      resolveAppModelSelection(
+        "codex",
+        { codex: [], claudeAgent: [], factoryDroid: [] },
+        "custom/selected-model",
+      ),
     ).toBe("custom/selected-model");
   });
 });
@@ -138,6 +152,7 @@ describe("getProviderStartOptions", () => {
         claudeBinaryPath: "/usr/local/bin/claude",
         codexBinaryPath: "",
         codexHomePath: "/Users/you/.codex",
+        factoryDroidBinaryPath: "",
       }),
     ).toEqual({
       claudeAgent: {
@@ -155,6 +170,7 @@ describe("getProviderStartOptions", () => {
         claudeBinaryPath: "",
         codexBinaryPath: "",
         codexHomePath: "",
+        factoryDroidBinaryPath: "",
       }),
     ).toBeUndefined();
   });
@@ -164,12 +180,14 @@ describe("provider-indexed custom model settings", () => {
   const settings = {
     customCodexModels: ["custom/codex-model"],
     customClaudeModels: ["claude/custom-opus"],
+    customFactoryDroidModels: [],
   } as const;
 
   it("exports one provider config per provider", () => {
     expect(MODEL_PROVIDER_SETTINGS.map((config) => config.provider)).toEqual([
       "codex",
       "claudeAgent",
+      "factoryDroid",
     ]);
   });
 
@@ -182,6 +200,7 @@ describe("provider-indexed custom model settings", () => {
     const defaults = {
       customCodexModels: ["default/codex-model"],
       customClaudeModels: ["claude/default-opus"],
+      customFactoryDroidModels: [],
     } as const;
 
     expect(getDefaultCustomModelsForProvider(defaults, "codex")).toEqual(["default/codex-model"]);
@@ -206,6 +225,7 @@ describe("provider-indexed custom model settings", () => {
     expect(getCustomModelsByProvider(settings)).toEqual({
       codex: ["custom/codex-model"],
       claudeAgent: ["claude/custom-opus"],
+      factoryDroid: [],
     });
   });
 
@@ -224,6 +244,7 @@ describe("provider-indexed custom model settings", () => {
     const modelOptionsByProvider = getCustomModelOptionsByProvider({
       customCodexModels: ["  custom/codex-model ", "gpt-5.4", "custom/codex-model"],
       customClaudeModels: [" sonnet ", "claude/custom-opus", "claude/custom-opus"],
+      customFactoryDroidModels: [],
     });
 
     expect(

@@ -1135,6 +1135,7 @@ describe("PROVIDER_OPTIONS", () => {
     expect(PROVIDER_OPTIONS).toEqual([
       { value: "codex", label: "Codex", available: true },
       { value: "claudeAgent", label: "Claude", available: true },
+      { value: "factoryDroid", label: "Factory Droid", available: true },
       { value: "cursor", label: "Cursor", available: false },
     ]);
     expect(claude).toEqual({

@@ -17,7 +17,15 @@ import {
   MenuSubTrigger,
   MenuTrigger,
 } from "../ui/menu";
-import { ClaudeAI, CursorIcon, Gemini, Icon, OpenAI, OpenCodeIcon } from "../Icons";
+import {
+  ClaudeAI,
+  CursorIcon,
+  FactoryDroidIcon,
+  Gemini,
+  Icon,
+  OpenAI,
+  OpenCodeIcon,
+} from "../Icons";
 import { cn } from "~/lib/utils";
 
 function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
@@ -31,6 +39,7 @@ function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): o
 const PROVIDER_ICON_BY_PROVIDER: Record<ProviderPickerKind, Icon> = {
   codex: OpenAI,
   claudeAgent: ClaudeAI,
+  factoryDroid: FactoryDroidIcon,
   cursor: CursorIcon,
 };
 
@@ -45,7 +54,8 @@ function providerIconClassName(
   provider: ProviderKind | ProviderPickerKind,
   fallbackClassName: string,
 ): string {
-  return provider === "claudeAgent" ? "text-[#d97757]" : fallbackClassName;
+  if (provider === "claudeAgent") return "text-[#d97757]";
+  return fallbackClassName;
 }
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
@@ -119,7 +129,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
         </span>
       </MenuTrigger>
-      <MenuPopup align="start">
+      <MenuPopup align="start" className="[--available-height:min(24rem,70vh)]">
         {props.lockedProvider !== null ? (
           <MenuGroup>
             <MenuRadioGroup

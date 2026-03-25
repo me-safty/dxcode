@@ -1,11 +1,17 @@
 import { Fragment, type ReactNode, createElement, useEffect } from "react";
 import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  type OrchestrationEvent,
   type ProviderKind,
   ThreadId,
   type OrchestrationReadModel,
   type OrchestrationSessionStatus,
 } from "@t3tools/contracts";
-import { resolveModelSlugForProvider } from "@t3tools/shared/model";
+import {
+  inferProviderForModel,
+  resolveModelSlug,
+  resolveModelSlugForProvider,
+} from "@t3tools/shared/model";
 import { create } from "zustand";
 import { type ChatMessage, type Project, type Thread } from "./types";
 import { Debouncer } from "@tanstack/react-pacer";
@@ -132,17 +138,9 @@ function mapProjectsFromReadModel(
       id: project.id,
       name: project.title,
       cwd: project.workspaceRoot,
-      defaultModelSelection:
-        existing?.defaultModelSelection ??
-        (project.defaultModelSelection
-          ? {
-              ...project.defaultModelSelection,
-              model: resolveModelSlugForProvider(
-                project.defaultModelSelection.provider,
-                project.defaultModelSelection.model,
-              ),
-            }
-          : null),
+      model:
+        existing?.model ??
+        resolveModelSlug(project.defaultModel ?? DEFAULT_MODEL_BY_PROVIDER.codex),
       expanded:
         existing?.expanded ??
         (persistedExpandedProjectCwds.size > 0
@@ -193,10 +191,28 @@ function toLegacySessionStatus(
 }
 
 function toLegacyProvider(providerName: string | null): ProviderKind {
-  if (providerName === "codex" || providerName === "claudeAgent") {
+  if (
+    providerName === "codex" ||
+    providerName === "claudeAgent" ||
+    providerName === "factoryDroid"
+  ) {
     return providerName;
   }
   return "codex";
+}
+
+function inferProviderForThreadModel(input: {
+  readonly model: string;
+  readonly sessionProviderName: string | null;
+}): ProviderKind {
+  if (
+    input.sessionProviderName === "codex" ||
+    input.sessionProviderName === "claudeAgent" ||
+    input.sessionProviderName === "factoryDroid"
+  ) {
+    return input.sessionProviderName;
+  }
+  return inferProviderForModel(input.model);
 }
 
 function resolveWsHttpOrigin(): string {
@@ -248,13 +264,13 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
         codexThreadId: null,
         projectId: thread.projectId,
         title: thread.title,
-        modelSelection: {
-          ...thread.modelSelection,
-          model: resolveModelSlugForProvider(
-            thread.modelSelection.provider,
-            thread.modelSelection.model,
-          ),
-        },
+        model: resolveModelSlugForProvider(
+          inferProviderForThreadModel({
+            model: thread.model,
+            sessionProviderName: thread.session?.providerName ?? null,
+          }),
+          thread.model,
+        ),
         runtimeMode: thread.runtimeMode,
         interactionMode: thread.interactionMode,
         session: thread.session
@@ -322,6 +338,103 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
     threads,
     threadsHydrated: true,
   };
+}
+
+export function applyDomainEvent(state: AppState, event: OrchestrationEvent): AppState {
+  switch (event.type) {
+    case "thread.message-sent": {
+      const payload = event.payload;
+      const threads = updateThread(state.threads, payload.threadId, (thread) => {
+        const existingMessage = thread.messages.find((message) => message.id === payload.messageId);
+        const attachments = payload.attachments?.map((attachment) => ({
+          type: "image" as const,
+          id: attachment.id,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          previewUrl: toAttachmentPreviewUrl(attachmentPreviewRoutePath(attachment.id)),
+        }));
+        if (existingMessage) {
+          const messages = thread.messages.map((message) =>
+            message.id !== payload.messageId
+              ? message
+              : {
+                  ...message,
+                  text: payload.streaming
+                    ? `${message.text}${payload.text}`
+                    : payload.text || message.text,
+                  streaming: payload.streaming,
+                  ...(payload.streaming ? {} : { completedAt: payload.updatedAt }),
+                  ...(attachments && attachments.length > 0 ? { attachments } : {}),
+                },
+          );
+          return { ...thread, messages, updatedAt: event.occurredAt };
+        }
+        return {
+          ...thread,
+          messages: [
+            ...thread.messages,
+            {
+              id: payload.messageId,
+              role: payload.role,
+              text: payload.text,
+              createdAt: payload.createdAt,
+              streaming: payload.streaming,
+              ...(payload.streaming ? {} : { completedAt: payload.updatedAt }),
+              ...(attachments && attachments.length > 0 ? { attachments } : {}),
+            },
+          ],
+          updatedAt: event.occurredAt,
+        };
+      });
+      return threads === state.threads ? state : { ...state, threads };
+    }
+
+    case "thread.session-set": {
+      const payload = event.payload;
+      const threads = updateThread(state.threads, payload.threadId, (thread) => ({
+        ...thread,
+        session: {
+          provider: toLegacyProvider(payload.session.providerName),
+          status: toLegacySessionStatus(payload.session.status),
+          orchestrationStatus: payload.session.status,
+          activeTurnId: payload.session.activeTurnId ?? undefined,
+          createdAt: payload.session.updatedAt,
+          updatedAt: payload.session.updatedAt,
+          ...(payload.session.lastError ? { lastError: payload.session.lastError } : {}),
+        },
+        error: payload.session.lastError ?? null,
+        updatedAt: event.occurredAt,
+      }));
+      return threads === state.threads ? state : { ...state, threads };
+    }
+
+    case "thread.meta-updated": {
+      const payload = event.payload;
+      const threads = updateThread(state.threads, payload.threadId, (thread) => ({
+        ...thread,
+        ...(payload.title !== undefined ? { title: payload.title } : {}),
+        ...(payload.model !== undefined
+          ? {
+              model: resolveModelSlugForProvider(
+                inferProviderForThreadModel({
+                  model: payload.model,
+                  sessionProviderName: thread.session?.provider ?? null,
+                }),
+                payload.model,
+              ),
+            }
+          : {}),
+        ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
+        ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
+        updatedAt: event.occurredAt,
+      }));
+      return threads === state.threads ? state : { ...state, threads };
+    }
+
+    default:
+      return state;
+  }
 }
 
 export function markThreadVisited(
@@ -425,6 +538,7 @@ export function setThreadBranch(
 
 interface AppStore extends AppState {
   syncServerReadModel: (readModel: OrchestrationReadModel) => void;
+  applyDomainEvent: (event: OrchestrationEvent) => void;
   markThreadVisited: (threadId: ThreadId, visitedAt?: string) => void;
   markThreadUnread: (threadId: ThreadId) => void;
   toggleProject: (projectId: Project["id"]) => void;
@@ -437,6 +551,7 @@ interface AppStore extends AppState {
 export const useStore = create<AppStore>((set) => ({
   ...readPersistedState(),
   syncServerReadModel: (readModel) => set((state) => syncServerReadModel(state, readModel)),
+  applyDomainEvent: (event) => set((state) => applyDomainEvent(state, event)),
   markThreadVisited: (threadId, visitedAt) =>
     set((state) => markThreadVisited(state, threadId, visitedAt)),
   markThreadUnread: (threadId) => set((state) => markThreadUnread(state, threadId)),

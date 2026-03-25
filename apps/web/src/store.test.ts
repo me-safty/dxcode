@@ -1,13 +1,23 @@
 import {
+  CommandId,
   DEFAULT_MODEL_BY_PROVIDER,
+  EventId,
+  MessageId,
   ProjectId,
   ThreadId,
   TurnId,
+  type OrchestrationEvent,
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { markThreadUnread, reorderProjects, syncServerReadModel, type AppState } from "./store";
+import {
+  applyDomainEvent,
+  markThreadUnread,
+  reorderProjects,
+  syncServerReadModel,
+  type AppState,
+} from "./store";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
@@ -328,5 +338,72 @@ describe("store read model sync", () => {
     const next = syncServerReadModel(initialState, readModel);
 
     expect(next.projects.map((project) => project.id)).toEqual([project2, project1, project3]);
+  });
+});
+
+describe("store domain event application", () => {
+  it("applies streaming assistant deltas incrementally to the same message", () => {
+    const initialState = makeState(makeThread());
+
+    const firstDeltaEvent: Extract<OrchestrationEvent, { type: "thread.message-sent" }> = {
+      sequence: 1,
+      eventId: EventId.makeUnsafe("event-1"),
+      aggregateKind: "thread",
+      aggregateId: ThreadId.makeUnsafe("thread-1"),
+      occurredAt: "2026-03-25T00:00:01.000Z",
+      commandId: CommandId.makeUnsafe("cmd-1"),
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      type: "thread.message-sent",
+      payload: {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        messageId: MessageId.makeUnsafe("assistant:turn-1"),
+        role: "assistant",
+        text: "Hel",
+        turnId: TurnId.makeUnsafe("turn-1"),
+        streaming: true,
+        createdAt: "2026-03-25T00:00:01.000Z",
+        updatedAt: "2026-03-25T00:00:01.000Z",
+      },
+    };
+
+    const secondDeltaEvent: Extract<OrchestrationEvent, { type: "thread.message-sent" }> = {
+      ...firstDeltaEvent,
+      sequence: 2,
+      eventId: EventId.makeUnsafe("event-2"),
+      occurredAt: "2026-03-25T00:00:01.100Z",
+      commandId: CommandId.makeUnsafe("cmd-2"),
+      payload: {
+        ...firstDeltaEvent.payload,
+        text: "lo",
+        updatedAt: "2026-03-25T00:00:01.100Z",
+      },
+    };
+
+    const completionEvent: Extract<OrchestrationEvent, { type: "thread.message-sent" }> = {
+      ...firstDeltaEvent,
+      sequence: 3,
+      eventId: EventId.makeUnsafe("event-3"),
+      occurredAt: "2026-03-25T00:00:01.200Z",
+      commandId: CommandId.makeUnsafe("cmd-3"),
+      payload: {
+        ...firstDeltaEvent.payload,
+        text: "",
+        streaming: false,
+        updatedAt: "2026-03-25T00:00:01.200Z",
+      },
+    };
+
+    const afterFirst = applyDomainEvent(initialState, firstDeltaEvent);
+    const afterSecond = applyDomainEvent(afterFirst, secondDeltaEvent);
+    const afterComplete = applyDomainEvent(afterSecond, completionEvent);
+
+    expect(afterSecond.threads[0]?.messages).toHaveLength(1);
+    expect(afterSecond.threads[0]?.messages[0]?.text).toBe("Hello");
+    expect(afterSecond.threads[0]?.messages[0]?.streaming).toBe(true);
+    expect(afterComplete.threads[0]?.messages[0]?.text).toBe("Hello");
+    expect(afterComplete.threads[0]?.messages[0]?.streaming).toBe(false);
+    expect(afterComplete.threads[0]?.messages[0]?.completedAt).toBe("2026-03-25T00:00:01.200Z");
   });
 });

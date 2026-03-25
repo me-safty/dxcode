@@ -230,17 +230,16 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           }
         }
 
-        if (!hasResumeCursor) {
+        const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
+        const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
+        const persistedProviderOptions = readPersistedProviderOptions(input.binding.runtimePayload);
+
+        if (!hasResumeCursor && !adapter.capabilities.statelessRecovery) {
           return yield* toValidationError(
             input.operation,
             `Cannot recover thread '${input.binding.threadId}' because no provider resume state is persisted.`,
           );
         }
-
-        const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
-        const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
-        const persistedProviderOptions = readPersistedProviderOptions(input.binding.runtimePayload);
-
         const resumed = yield* adapter.startSession({
           threadId: input.binding.threadId,
           provider: input.binding.provider,

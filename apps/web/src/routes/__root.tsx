@@ -131,6 +131,7 @@ function errorDetails(error: unknown): string {
 }
 
 function EventRouter() {
+  const applyDomainEvent = useStore((store) => store.applyDomainEvent);
   const syncServerReadModel = useStore((store) => store.syncServerReadModel);
   const setProjectExpanded = useStore((store) => store.setProjectExpanded);
   const removeOrphanedTerminalStates = useTerminalStateStore(
@@ -211,6 +212,7 @@ function EventRouter() {
         return;
       }
       latestSequence = event.sequence;
+      applyDomainEvent(event);
       if (event.type === "thread.turn-diff-completed" || event.type === "thread.reverted") {
         needsProviderInvalidation = true;
       }
@@ -311,6 +313,7 @@ function EventRouter() {
       unsubServerConfigUpdated();
     };
   }, [
+    applyDomainEvent,
     navigate,
     queryClient,
     removeOrphanedTerminalStates,

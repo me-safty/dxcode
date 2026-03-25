@@ -15,6 +15,7 @@ const MODEL_OPTIONS_BY_PROVIDER = {
     { slug: "gpt-5-codex", name: "GPT-5 Codex" },
     { slug: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
   ],
+  factoryDroid: [{ slug: "claude-opus-4-6", name: "Claude Opus 4.6" }],
 } as const satisfies Record<ProviderKind, ReadonlyArray<{ slug: ModelSlug; name: string }>>;
 
 async function mountPicker(props: {
