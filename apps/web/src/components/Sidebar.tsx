@@ -5,7 +5,6 @@ import {
   FolderIcon,
   GitPullRequestIcon,
   PlusIcon,
-  RocketIcon,
   SettingsIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -45,7 +44,13 @@ import {
 } from "../appSettings";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
-import { isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
+import {
+  formatRelativeTime,
+  isLinuxPlatform,
+  isMacPlatform,
+  newCommandId,
+  newProjectId,
+} from "../lib/utils";
 import { useStore } from "../store";
 import { shortcutLabelForCommand } from "../keybindings";
 import { derivePendingApprovals, derivePendingUserInputs } from "../session-logic";
@@ -55,6 +60,7 @@ import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import { RocketUpdateIcon } from "./Icons";
 import { toastManager } from "./ui/toast";
 import {
   getArm64IntelBuildWarningDescription,
@@ -62,8 +68,8 @@ import {
   getDesktopUpdateButtonTooltip,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
+  resolveDesktopUpdateButtonVisualState,
   shouldShowArm64IntelBuildWarning,
-  shouldHighlightDesktopUpdateError,
   shouldShowDesktopUpdateButton,
   shouldToastDesktopUpdateActionResult,
 } from "./desktopUpdate.logic";
@@ -119,16 +125,6 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   easing: "ease-out",
 } as const;
 const loadedProjectFaviconSrcs = new Set<string>();
-
-function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
 
 interface TerminalStatusIndicator {
   label: "Terminal process running";
@@ -1497,7 +1493,7 @@ export default function Sidebar() {
 
   const desktopUpdateTooltip = desktopUpdateState
     ? getDesktopUpdateButtonTooltip(desktopUpdateState)
-    : "Update available";
+    : "";
 
   const desktopUpdateButtonDisabled = isDesktopUpdateButtonDisabled(desktopUpdateState);
   const desktopUpdateButtonAction = desktopUpdateState
@@ -1509,17 +1505,12 @@ export default function Sidebar() {
     desktopUpdateState && showArm64IntelBuildWarning
       ? getArm64IntelBuildWarningDescription(desktopUpdateState)
       : null;
+  const desktopUpdateVisual = desktopUpdateState
+    ? resolveDesktopUpdateButtonVisualState(desktopUpdateState)
+    : null;
   const desktopUpdateButtonInteractivityClasses = desktopUpdateButtonDisabled
     ? "cursor-not-allowed opacity-60"
-    : "hover:bg-accent hover:text-foreground";
-  const desktopUpdateButtonClasses =
-    desktopUpdateState?.status === "downloaded"
-      ? "text-emerald-500"
-      : desktopUpdateState?.status === "downloading"
-        ? "text-sky-400"
-        : shouldHighlightDesktopUpdateError(desktopUpdateState)
-          ? "text-rose-500 animate-pulse"
-          : "text-amber-500 animate-pulse";
+    : "";
   const newThreadShortcutLabel =
     shortcutLabelForCommand(keybindings, "chat.newLocal") ??
     shortcutLabelForCommand(keybindings, "chat.new");
@@ -1624,36 +1615,49 @@ export default function Sidebar() {
     </div>
   );
 
+  const downloadPercent =
+    desktopUpdateState?.status === "downloading" &&
+    typeof desktopUpdateState.downloadPercent === "number"
+      ? desktopUpdateState.downloadPercent
+      : null;
+
+  const updateButton =
+    showDesktopUpdateButton && desktopUpdateVisual ? (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label={desktopUpdateTooltip}
+              aria-disabled={desktopUpdateButtonDisabled || undefined}
+              disabled={desktopUpdateButtonDisabled}
+              className={`group/update relative inline-flex size-7 ml-auto items-center justify-center rounded-md transition-all duration-150 ${desktopUpdateButtonInteractivityClasses} ${desktopUpdateVisual.colorClass} ${desktopUpdateVisual.hoverClass}`}
+              onClick={handleDesktopUpdateButtonClick}
+            >
+              <RocketUpdateIcon
+                className={`size-3.5 ${desktopUpdateVisual.pulse ? "animate-pulse-soft group-hover/update:animate-none" : ""}`}
+                fillPercent={downloadPercent}
+              />
+            </button>
+          }
+        />
+        <TooltipPopup side="bottom">{desktopUpdateTooltip}</TooltipPopup>
+      </Tooltip>
+    ) : null;
+
   return (
     <>
       {isElectron ? (
         <>
           <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]">
             {wordmark}
-            {showDesktopUpdateButton && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label={desktopUpdateTooltip}
-                      aria-disabled={desktopUpdateButtonDisabled || undefined}
-                      disabled={desktopUpdateButtonDisabled}
-                      className={`inline-flex size-7 ml-auto mt-1.5 items-center justify-center rounded-md text-muted-foreground transition-colors ${desktopUpdateButtonInteractivityClasses} ${desktopUpdateButtonClasses}`}
-                      onClick={handleDesktopUpdateButtonClick}
-                    >
-                      <RocketIcon className="size-3.5" />
-                    </button>
-                  }
-                />
-                <TooltipPopup side="bottom">{desktopUpdateTooltip}</TooltipPopup>
-              </Tooltip>
-            )}
+            <div className="mt-1.5">{updateButton}</div>
           </SidebarHeader>
         </>
       ) : (
-        <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">
+        <SidebarHeader className="flex-row items-center gap-2 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">
           {wordmark}
+          {updateButton}
         </SidebarHeader>
       )}
 
@@ -1664,7 +1668,8 @@ export default function Sidebar() {
               <TriangleAlertIcon />
               <AlertTitle>Intel build on Apple Silicon</AlertTitle>
               <AlertDescription>{arm64IntelBuildWarningDescription}</AlertDescription>
-              {desktopUpdateButtonAction !== "none" ? (
+              {desktopUpdateButtonAction === "download" ||
+              desktopUpdateButtonAction === "install" ? (
                 <AlertAction>
                   <Button
                     size="xs"

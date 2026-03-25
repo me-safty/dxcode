@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
 
 import {
+  DEFAULT_VISUAL,
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
   getDesktopUpdateButtonTooltip,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
+  resolveDesktopUpdateButtonVisualState,
   shouldHighlightDesktopUpdateError,
   shouldShowArm64IntelBuildWarning,
   shouldShowDesktopUpdateButton,
@@ -79,6 +81,10 @@ describe("desktop update button state", () => {
     };
     expect(shouldShowDesktopUpdateButton(state)).toBe(false);
     expect(resolveDesktopUpdateButtonAction(state)).toBe("none");
+  });
+
+  it("returns none when idle", () => {
+    expect(resolveDesktopUpdateButtonAction(baseState)).toBe("none");
   });
 
   it("disables the button while downloading", () => {
@@ -205,5 +211,53 @@ describe("desktop update UI helpers", () => {
     };
 
     expect(getArm64IntelBuildWarningDescription(state)).toContain("Download the available update");
+  });
+});
+
+describe("resolveDesktopUpdateButtonVisualState", () => {
+  it("returns pulse and amber for available state", () => {
+    const visual = resolveDesktopUpdateButtonVisualState({
+      ...baseState,
+      status: "available",
+      availableVersion: "2.0.0",
+    });
+    expect(visual.pulse).toBe(true);
+    expect(visual.colorClass).toContain("amber");
+  });
+
+  it("returns no pulse for downloading state", () => {
+    const visual = resolveDesktopUpdateButtonVisualState({
+      ...baseState,
+      status: "downloading",
+      downloadPercent: 50,
+    });
+    expect(visual.pulse).toBe(false);
+    expect(visual.colorClass).toContain("sky");
+  });
+
+  it("returns pulse and emerald for downloaded state", () => {
+    const visual = resolveDesktopUpdateButtonVisualState({
+      ...baseState,
+      status: "downloaded",
+      downloadedVersion: "2.0.0",
+    });
+    expect(visual.pulse).toBe(true);
+    expect(visual.colorClass).toContain("emerald");
+  });
+
+  it("returns pulse and rose for error state", () => {
+    const visual = resolveDesktopUpdateButtonVisualState({
+      ...baseState,
+      status: "error",
+      errorContext: "download",
+      canRetry: true,
+    });
+    expect(visual.pulse).toBe(true);
+    expect(visual.colorClass).toContain("rose");
+  });
+
+  it("falls back to DEFAULT_VISUAL for unmapped statuses like idle", () => {
+    const visual = resolveDesktopUpdateButtonVisualState(baseState);
+    expect(visual).toBe(DEFAULT_VISUAL);
   });
 });

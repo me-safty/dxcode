@@ -1,25 +1,59 @@
-import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import type {
+  DesktopUpdateActionResult,
+  DesktopUpdateState,
+  DesktopUpdateStatus,
+} from "@t3tools/contracts";
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
+
+export interface DesktopUpdateButtonVisualState {
+  pulse: boolean;
+  colorClass: string;
+  hoverClass: string;
+}
+
+/** Fallback visual used for statuses without an explicit mapping (e.g. idle, checking). */
+export const DEFAULT_VISUAL: DesktopUpdateButtonVisualState = {
+  pulse: true,
+  colorClass: "text-amber-500",
+  hoverClass: "hover:text-amber-400 hover:bg-amber-500/10",
+};
+
+const VISUAL_BY_STATUS: Partial<Record<DesktopUpdateStatus, DesktopUpdateButtonVisualState>> = {
+  available: DEFAULT_VISUAL,
+  downloading: {
+    pulse: false,
+    colorClass: "text-sky-400",
+    hoverClass: "hover:text-sky-300 hover:bg-sky-400/10",
+  },
+  downloaded: {
+    pulse: true,
+    colorClass: "text-emerald-500",
+    hoverClass: "hover:text-emerald-400 hover:bg-emerald-500/10",
+  },
+  error: {
+    pulse: true,
+    colorClass: "text-rose-500",
+    hoverClass: "hover:text-rose-400 hover:bg-rose-500/10",
+  },
+};
 
 export function resolveDesktopUpdateButtonAction(
   state: DesktopUpdateState,
 ): DesktopUpdateButtonAction {
-  if (state.status === "available") {
-    return "download";
-  }
-  if (state.status === "downloaded") {
-    return "install";
-  }
+  if (state.status === "available") return "download";
+  if (state.status === "downloaded") return "install";
   if (state.status === "error") {
-    if (state.errorContext === "install" && state.downloadedVersion) {
-      return "install";
-    }
-    if (state.errorContext === "download" && state.availableVersion) {
-      return "download";
-    }
+    if (state.errorContext === "install" && state.downloadedVersion) return "install";
+    if (state.errorContext === "download" && state.availableVersion) return "download";
   }
   return "none";
+}
+
+export function resolveDesktopUpdateButtonVisualState(
+  state: DesktopUpdateState,
+): DesktopUpdateButtonVisualState {
+  return VISUAL_BY_STATUS[state.status] ?? DEFAULT_VISUAL;
 }
 
 export function shouldShowDesktopUpdateButton(state: DesktopUpdateState | null): boolean {

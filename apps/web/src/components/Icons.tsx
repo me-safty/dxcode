@@ -309,3 +309,64 @@ export const OpenCodeIcon: Icon = (props) => (
     </defs>
   </svg>
 );
+
+const ROCKET_BODY =
+  "M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09zM12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z";
+const ROCKET_FINS = "M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5";
+
+/** Rocket icon with optional bottom-to-top fill overlay for download progress (0–100). */
+export function RocketUpdateIcon({
+  fillPercent,
+  ...props
+}: SVGProps<SVGSVGElement> & { fillPercent?: number | null }) {
+  const clipId = useId();
+  const showFill = typeof fillPercent === "number";
+
+  return (
+    <svg {...props} viewBox="0 0 24 24" fill="none">
+      {showFill && (
+        <defs>
+          <clipPath id={clipId}>
+            <rect x="0" y={24 - (24 * fillPercent) / 100} width="24" height="24" />
+          </clipPath>
+        </defs>
+      )}
+      <path
+        d={ROCKET_BODY}
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={showFill ? "opacity-30" : undefined}
+      />
+      <path
+        d={ROCKET_FINS}
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={showFill ? "opacity-30" : undefined}
+      />
+      {showFill && (
+        <g clipPath={`url(#${clipId})`}>
+          <path
+            d={ROCKET_BODY}
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="currentColor"
+            fillOpacity="0.3"
+          />
+          <path
+            d={ROCKET_FINS}
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </g>
+      )}
+    </svg>
+  );
+}
