@@ -11,13 +11,13 @@ class BootstrapError extends Data.TaggedError("BootstrapError")<{
   readonly cause?: unknown;
 }> {}
 
-export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function* <T>(
-  schema: Schema.Codec<T>,
+export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function* <A, I>(
+  schema: Schema.Codec<A, I>,
   fd: number,
   options?: {
     timeoutMs?: number;
   },
-): Effect.fn.Return<Option.Option<T>, BootstrapError> {
+): Effect.fn.Return<Option.Option<A>, BootstrapError> {
   const fdReady = yield* isFdReady(fd);
   if (!fdReady) return Option.none();
 
@@ -25,7 +25,7 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
 
   const timeoutMs = options?.timeoutMs ?? 1000;
 
-  return yield* Effect.callback<Option.Option<T>, BootstrapError>((resume) => {
+  return yield* Effect.callback<Option.Option<A>, BootstrapError>((resume) => {
     const input = readline.createInterface({
       input: stream,
       crlfDelay: Infinity,
