@@ -1,6 +1,6 @@
 # T3 Code
 
-T3 Code is a minimal web GUI for coding agents (currently Codex and Claude, more coming soon).
+T3 Code is a minimal web GUI for coding agents (currently Codex, Claude, and Factory Droid - more coming soon).
 
 ## How to use
 
@@ -14,6 +14,12 @@ npx t3
 You can also just install the desktop app. It's cooler.
 
 Install the [desktop app from the Releases page](https://github.com/pingdotgg/t3code/releases)
+
+## Supported Providers
+
+- **Codex** - OpenAI's Codex agent via `codex app-server` (JSON-RPC over stdio)
+- **Claude** - Anthropic's Claude agent
+- **Factory Droid** - Factory's Droid agent, added as a first-class provider with model selection support
 
 ## Some notes
 

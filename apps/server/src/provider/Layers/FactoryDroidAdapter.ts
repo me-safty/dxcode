@@ -12,9 +12,9 @@ import { randomUUID } from "node:crypto";
 import os from "node:os";
 import readline from "node:readline";
 import {
-  EventId,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  type ProviderStartOptions,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -29,46 +29,30 @@ import {
   type FactoryDroidAdapterShape,
 } from "../Services/FactoryDroidAdapter.ts";
 import type { EventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import {
+  FACTORY_DROID_PROVIDER as PROVIDER,
+  makeFactoryDroidBaseEvent,
+  makeFactoryDroidContentDeltaEvent,
+  mapFactoryDroidCreateMessage,
+  makeFactoryDroidRuntimeErrorEvent,
+  makeFactoryDroidThreadMetadataUpdatedEvent,
+  makeFactoryDroidTokenUsageEvent,
+  makeFactoryDroidToolResultEvent,
+} from "./FactoryDroidRuntimeEvents.ts";
 
-const PROVIDER = "factoryDroid" as const;
 const FACTORY_API_VERSION = "1.0.0";
 const FACTORY_PROTOCOL_VERSION = "1.1.0";
 
-function droidToolNameToItemType(
-  toolName: string,
-): "command_execution" | "file_change" | "mcp_tool_call" | "web_search" | "dynamic_tool_call" {
-  const lower = toolName.toLowerCase();
-  if (
-    lower.includes("execute") ||
-    lower.includes("bash") ||
-    lower.includes("shell") ||
-    lower.includes("command") ||
-    lower === "run"
-  )
-    return "command_execution";
-  if (
-    lower.includes("write") ||
-    lower.includes("create") ||
-    lower.includes("edit") ||
-    lower.includes("multiedit") ||
-    lower.includes("patch") ||
-    lower.includes("delete")
-  )
-    return "file_change";
-  if (lower.includes("search") || lower.includes("web") || lower.includes("fetch"))
-    return "web_search";
-  if (lower.includes("mcp")) return "mcp_tool_call";
-  return "dynamic_tool_call";
-}
-
-function droidToolTitle(toolName: string, itemType: string): string {
-  if (itemType === "command_execution") return `Ran command: ${toolName}`;
-  if (itemType === "file_change") return `File change: ${toolName}`;
-  return toolName;
+function modelSlugFromFactorySelection(
+  selection: { readonly provider: string; readonly model: string } | undefined,
+): string | undefined {
+  return selection?.provider === PROVIDER ? selection.model : undefined;
 }
 
 interface DroidSessionContext {
   session: ProviderSession;
+  /** From `startSession` / recovery; used for custom `droid` binary path. */
+  providerOptions: ProviderStartOptions | undefined;
   child: ChildProcessWithoutNullStreams | null;
   jsonRpcInitialized: boolean;
   stopped: boolean;
@@ -76,6 +60,7 @@ interface DroidSessionContext {
   activeTurnId: TurnId | null;
   pendingResponses: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
   pendingAssistantDelta: string;
+  sawAssistantTextDelta: boolean;
   pendingReasoningDelta: string;
   deltaFlushTimer: ReturnType<typeof setTimeout> | null;
   pendingIdleCompletion: ReturnType<typeof setTimeout> | null;
@@ -85,31 +70,32 @@ export interface FactoryDroidAdapterLiveOptions {
   readonly nativeEventLogger?: EventNdjsonLogger;
 }
 
-function readDroidProviderOptions(input: { readonly providerOptions?: unknown }): {
-  readonly binaryPath?: string;
-} {
-  const options = input.providerOptions as
-    | { factoryDroid?: { binaryPath?: string } }
-    | null
-    | undefined;
-  return options?.factoryDroid ?? {};
+function resolveDroidBinaryPath(providerOptions: ProviderStartOptions | undefined): string {
+  const configured = providerOptions?.factoryDroid?.binaryPath?.trim();
+  if (configured) return configured;
+  const fromEnv = process.env.T3CODE_FACTORY_DROID_BINARY_PATH?.trim();
+  return fromEnv && fromEnv.length > 0 ? fromEnv : "droid";
 }
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function nextEventId(): EventId {
-  return EventId.makeUnsafe(randomUUID());
+function clearPendingTimers(context: DroidSessionContext) {
+  if (context.deltaFlushTimer !== null) {
+    clearTimeout(context.deltaFlushTimer);
+    context.deltaFlushTimer = null;
+  }
+  if (context.pendingIdleCompletion !== null) {
+    clearTimeout(context.pendingIdleCompletion);
+    context.pendingIdleCompletion = null;
+  }
 }
 
-function makeBaseEvent(threadId: ThreadId) {
-  return {
-    eventId: nextEventId(),
-    provider: PROVIDER,
-    threadId,
-    createdAt: nowIso(),
-  } as const;
+function resetPendingTurnBuffers(context: DroidSessionContext) {
+  context.pendingAssistantDelta = "";
+  context.sawAssistantTextDelta = false;
+  context.pendingReasoningDelta = "";
 }
 
 function makeJsonRpcRequest(method: string, params: Record<string, unknown>, id?: string) {
@@ -137,6 +123,10 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
         Effect.asVoid,
       );
 
+    const emitFromCallback = (event: ProviderRuntimeEvent) => {
+      void Effect.runPromise(emitRuntimeEvent(event));
+    };
+
     const requireSession = (threadId: ThreadId) =>
       Effect.gen(function* () {
         const context = sessions.get(threadId);
@@ -162,14 +152,7 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
       Effect.gen(function* () {
         if (context.stopped) return;
         context.stopped = true;
-        if (context.deltaFlushTimer !== null) {
-          clearTimeout(context.deltaFlushTimer);
-          context.deltaFlushTimer = null;
-        }
-        if (context.pendingIdleCompletion !== null) {
-          clearTimeout(context.pendingIdleCompletion);
-          context.pendingIdleCompletion = null;
-        }
+        clearPendingTimers(context);
         if (context.child && !context.child.killed) {
           context.child.kill();
         }
@@ -186,7 +169,7 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
         sessions.delete(context.session.threadId);
         if (opts.emitExitEvent) {
           yield* emitRuntimeEvent({
-            ...makeBaseEvent(context.session.threadId),
+            ...makeFactoryDroidBaseEvent(context.session.threadId),
             type: "session.exited",
             payload: { reason: "stopped" },
           } as unknown as ProviderRuntimeEvent);
@@ -224,27 +207,15 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
       if (context.pendingAssistantDelta.length > 0) {
         const delta = context.pendingAssistantDelta;
         context.pendingAssistantDelta = "";
-        Effect.runPromise(
-          emitRuntimeEvent({
-            ...makeBaseEvent(threadId),
-            type: "content.delta",
-            turnId,
-            payload: { streamKind: "assistant_text", delta },
-          } as unknown as ProviderRuntimeEvent),
+        emitFromCallback(
+          makeFactoryDroidContentDeltaEvent(threadId, turnId, "assistant_text", delta),
         );
       }
 
       if (context.pendingReasoningDelta.length > 0) {
         const delta = context.pendingReasoningDelta;
         context.pendingReasoningDelta = "";
-        Effect.runPromise(
-          emitRuntimeEvent({
-            ...makeBaseEvent(threadId),
-            type: "content.delta",
-            turnId,
-            payload: { streamKind: "reasoning", delta },
-          } as unknown as ProviderRuntimeEvent),
-        );
+        emitFromCallback(makeFactoryDroidContentDeltaEvent(threadId, turnId, "reasoning", delta));
       }
     }
 
@@ -273,14 +244,12 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
           activeTurnId: undefined,
           updatedAt: nowIso(),
         };
-        Effect.runPromise(
-          emitRuntimeEvent({
-            ...makeBaseEvent(threadId),
-            type: "turn.completed",
-            turnId,
-            payload: { state: "completed" },
-          } as unknown as ProviderRuntimeEvent),
-        );
+        emitFromCallback({
+          ...makeFactoryDroidBaseEvent(threadId),
+          type: "turn.completed",
+          turnId,
+          payload: { state: "completed" },
+        } as unknown as ProviderRuntimeEvent);
       }, IDLE_COMPLETION_DELAY_MS);
     }
 
@@ -323,16 +292,18 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
           const notifType = notif.type as string;
           const turnId = context.activeTurnId;
 
-          if (notifType === "assistant_text_delta" && turnId) {
+          if (
+            (notifType === "assistant_text_delta" || notifType === "thinking_text_delta") &&
+            turnId
+          ) {
             const delta = notif.textDelta as string;
             if (delta) {
-              context.pendingAssistantDelta += delta;
-              scheduleDeltaFlush(context, threadId);
-            }
-          } else if (notifType === "thinking_text_delta" && turnId) {
-            const delta = notif.textDelta as string;
-            if (delta) {
-              context.pendingReasoningDelta += delta;
+              if (notifType === "assistant_text_delta") {
+                context.sawAssistantTextDelta = true;
+                context.pendingAssistantDelta += delta;
+              } else {
+                context.pendingReasoningDelta += delta;
+              }
               scheduleDeltaFlush(context, threadId);
             }
           } else if (notifType === "droid_working_state_changed") {
@@ -341,113 +312,50 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
               scheduleIdleCompletion(context, threadId, turnId);
             }
           } else if (notifType === "create_message") {
-            const msg = notif.message as Record<string, unknown> | undefined;
-            if (!msg || !turnId) return;
-            const role = msg.role as string;
-            const content = msg.content as Array<Record<string, unknown>> | undefined;
-            if (role === "assistant" && Array.isArray(content)) {
-              for (const block of content) {
-                if (block.type === "tool_use") {
-                  const toolName = (block.name as string) ?? "tool";
-                  const toolUseId = (block.id as string) ?? randomUUID();
-                  const input = block.input as Record<string, unknown> | undefined;
-                  const itemType = droidToolNameToItemType(toolName);
-                  const detail =
-                    itemType === "file_change"
-                      ? ((input?.file_path as string) ?? (input?.path as string))
-                      : itemType === "command_execution"
-                        ? ((input?.command as string) ?? toolName)
-                        : ((input?.file_path as string) ??
-                          (input?.path as string) ??
-                          (input?.pattern as string) ??
-                          undefined);
-                  Effect.runPromise(
-                    emitRuntimeEvent({
-                      ...makeBaseEvent(threadId),
-                      type: "item.started",
-                      turnId,
-                      itemId: toolUseId,
-                      payload: {
-                        itemType,
-                        status: "inProgress",
-                        title: droidToolTitle(toolName, itemType),
-                        ...(detail ? { detail } : {}),
-                      },
-                    } as unknown as ProviderRuntimeEvent),
-                  );
-                } else if (block.type === "text") {
-                  const text = block.text as string;
-                  if (text) {
-                    context.pendingAssistantDelta += text;
-                    scheduleDeltaFlush(context, threadId);
-                  }
-                }
-              }
+            if (!turnId) return;
+            const { events, fallbackText } = mapFactoryDroidCreateMessage({
+              message: notif.message as Record<string, unknown> | undefined,
+              sawAssistantTextDelta: context.sawAssistantTextDelta,
+              threadId,
+              turnId,
+            });
+            for (const event of events) {
+              emitFromCallback(event);
+            }
+            if (fallbackText) {
+              context.pendingAssistantDelta += fallbackText;
+              scheduleDeltaFlush(context, threadId);
             }
           } else if (notifType === "tool_result") {
             if (!turnId) return;
-            const toolUseId = (notif.toolUseId as string) ?? randomUUID();
-            const content = notif.content as string | undefined;
-            Effect.runPromise(
-              emitRuntimeEvent({
-                ...makeBaseEvent(threadId),
-                type: "item.completed",
+            emitFromCallback(
+              makeFactoryDroidToolResultEvent({
+                content: notif.content as string | undefined,
+                threadId,
+                toolUseId: (notif.toolUseId as string) ?? randomUUID(),
                 turnId,
-                itemId: toolUseId,
-                payload: {
-                  itemType: "dynamic_tool_call",
-                  status: "completed",
-                  title: "Tool",
-                  ...(content ? { detail: content.slice(0, 200) } : {}),
-                },
-              } as unknown as ProviderRuntimeEvent),
+              }),
             );
           } else if (notifType === "session_title_updated") {
             const title = notif.title as string | undefined;
             if (title) {
-              Effect.runPromise(
-                emitRuntimeEvent({
-                  ...makeBaseEvent(threadId),
-                  type: "thread.metadata.updated",
-                  payload: { name: title },
-                } as unknown as ProviderRuntimeEvent),
-              );
+              emitFromCallback(makeFactoryDroidThreadMetadataUpdatedEvent(threadId, title));
             }
           } else if (notifType === "session_token_usage_changed") {
-            const tokenUsage = notif.tokenUsage as Record<string, unknown> | undefined;
-            if (tokenUsage) {
-              const inputTokens = (tokenUsage.inputTokens as number) ?? 0;
-              const outputTokens = (tokenUsage.outputTokens as number) ?? 0;
-              const cacheReadTokens = (tokenUsage.cacheReadTokens as number) ?? 0;
-              const thinkingTokens = (tokenUsage.thinkingTokens as number) ?? 0;
-              const usedTokens = inputTokens + outputTokens + cacheReadTokens + thinkingTokens;
-              if (usedTokens > 0) {
-                Effect.runPromise(
-                  emitRuntimeEvent({
-                    ...makeBaseEvent(threadId),
-                    type: "thread.token-usage.updated",
-                    payload: {
-                      usage: {
-                        usedTokens,
-                        ...(inputTokens > 0 ? { inputTokens } : {}),
-                        ...(outputTokens > 0 ? { outputTokens } : {}),
-                        ...(cacheReadTokens > 0 ? { cachedInputTokens: cacheReadTokens } : {}),
-                        ...(thinkingTokens > 0 ? { reasoningOutputTokens: thinkingTokens } : {}),
-                      },
-                    },
-                  } as unknown as ProviderRuntimeEvent),
-                );
-              }
+            const event = makeFactoryDroidTokenUsageEvent(
+              threadId,
+              notif.tokenUsage as Record<string, unknown> | undefined,
+            );
+            if (event) {
+              emitFromCallback(event);
             }
           } else if (notifType === "error") {
-            const message = (notif.message as string) ?? "Droid runtime error";
-            Effect.runPromise(
-              emitRuntimeEvent({
-                ...makeBaseEvent(threadId),
-                type: "runtime.error",
+            emitFromCallback(
+              makeFactoryDroidRuntimeErrorEvent({
+                message: (notif.message as string) ?? "Droid runtime error",
+                threadId,
                 ...(turnId ? { turnId } : {}),
-                payload: { message },
-              } as unknown as ProviderRuntimeEvent),
+              }),
             );
           }
           return;
@@ -473,13 +381,12 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
       child.stderr.on("data", (chunk: Buffer) => {
         const text = chunk.toString().trim();
         if (text && context.activeTurnId) {
-          Effect.runPromise(
-            emitRuntimeEvent({
-              ...makeBaseEvent(threadId),
-              type: "runtime.error",
+          emitFromCallback(
+            makeFactoryDroidRuntimeErrorEvent({
+              message: text,
+              threadId,
               turnId: context.activeTurnId,
-              payload: { message: text },
-            } as unknown as ProviderRuntimeEvent),
+            }),
           );
         }
       });
@@ -488,14 +395,7 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
         if (context.child !== child) {
           return;
         }
-        if (context.deltaFlushTimer !== null) {
-          clearTimeout(context.deltaFlushTimer);
-          context.deltaFlushTimer = null;
-        }
-        if (context.pendingIdleCompletion !== null) {
-          clearTimeout(context.pendingIdleCompletion);
-          context.pendingIdleCompletion = null;
-        }
+        clearPendingTimers(context);
         flushPendingDeltas(context, threadId);
         const turnId = context.activeTurnId;
         context.child = null;
@@ -509,25 +409,22 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
         };
         if (turnId) {
           context.activeTurnId = null;
-          Effect.runPromise(
-            emitRuntimeEvent({
-              ...makeBaseEvent(threadId),
-              type: "turn.completed",
-              turnId,
-              payload: { state: code === 0 ? "completed" : "failed" },
-            } as unknown as ProviderRuntimeEvent),
-          );
+          emitFromCallback({
+            ...makeFactoryDroidBaseEvent(threadId),
+            type: "turn.completed",
+            turnId,
+            payload: { state: code === 0 ? "completed" : "failed" },
+          } as unknown as ProviderRuntimeEvent);
         }
       });
     }
 
     async function ensureJsonRpcProcess(context: DroidSessionContext, threadId: ThreadId) {
-      if (context.jsonRpcInitialized && context.child && !context.child.killed) return;
+      if (context.jsonRpcInitialized && context.child && !context.child.killed) {
+        return;
+      }
 
-      const droidOptions = readDroidProviderOptions(
-        context.session as unknown as { providerOptions?: unknown },
-      );
-      const binaryPath = droidOptions.binaryPath ?? "droid";
+      const binaryPath = resolveDroidBinaryPath(context.providerOptions);
       const autoLevel = context.session.runtimeMode === "approval-required" ? "low" : "high";
 
       const child = spawn(
@@ -592,7 +489,7 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
           provider: PROVIDER,
           status: "ready",
           runtimeMode: input.runtimeMode,
-          model: input.model,
+          model: modelSlugFromFactorySelection(input.modelSelection),
           cwd: input.cwd ?? process.cwd(),
           threadId,
           createdAt: now,
@@ -601,6 +498,7 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
 
         const context: DroidSessionContext = {
           session,
+          providerOptions: input.providerOptions,
           child: null,
           jsonRpcInitialized: false,
           stopped: false,
@@ -608,6 +506,7 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
           activeTurnId: null,
           pendingResponses: new Map(),
           pendingAssistantDelta: "",
+          sawAssistantTextDelta: false,
           pendingReasoningDelta: "",
           deltaFlushTimer: null,
           pendingIdleCompletion: null,
@@ -616,7 +515,7 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
         sessions.set(threadId, context);
 
         yield* emitRuntimeEvent({
-          ...makeBaseEvent(threadId),
+          ...makeFactoryDroidBaseEvent(threadId),
           type: "session.started",
           payload: {},
         } as unknown as ProviderRuntimeEvent);
@@ -630,8 +529,9 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
         const turnId = TurnId.makeUnsafe(randomUUID());
         const promptText = input.input ?? "";
 
-        if (input.model && input.model !== context.session.model) {
-          context.session = { ...context.session, model: input.model };
+        const turnModel = modelSlugFromFactorySelection(input.modelSelection);
+        if (turnModel && turnModel !== context.session.model) {
+          context.session = { ...context.session, model: turnModel };
         }
 
         context.session = {
@@ -641,18 +541,21 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
           updatedAt: nowIso(),
         };
         context.activeTurnId = turnId;
+        resetPendingTurnBuffers(context);
         context.turns.push({ id: turnId, items: [] });
 
         yield* emitRuntimeEvent({
-          ...makeBaseEvent(input.threadId),
+          ...makeFactoryDroidBaseEvent(input.threadId),
           type: "turn.started",
           turnId,
-          payload: input.model ? { model: input.model } : {},
+          payload: turnModel ? { model: turnModel } : {},
         } as unknown as ProviderRuntimeEvent);
 
         yield* Effect.promise(async () => {
           await ensureJsonRpcProcess(context, input.threadId);
-          await sendJsonRpc(context, "droid.add_user_message", { text: promptText });
+          await sendJsonRpc(context, "droid.add_user_message", {
+            text: promptText,
+          });
         });
 
         return { threadId: input.threadId, turnId };
