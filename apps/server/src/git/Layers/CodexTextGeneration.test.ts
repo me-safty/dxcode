@@ -399,6 +399,26 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
     ),
   );
 
+  it.effect("trims whitespace exposed after quote removal in thread titles", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          title: `  "' hello world '"  `,
+        }),
+      },
+      Effect.gen(function* () {
+        const textGeneration = yield* TextGeneration;
+
+        const generated = yield* textGeneration.generateThreadTitle({
+          cwd: process.cwd(),
+          message: "Name this thread.",
+        });
+
+        expect(generated.title).toBe("hello world");
+      }),
+    ),
+  );
+
   it.effect("omits attachment metadata section when no attachments are provided", () =>
     withFakeCodexEnv(
       {
