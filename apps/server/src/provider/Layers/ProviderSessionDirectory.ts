@@ -25,6 +25,9 @@ function decodeProviderKind(
   if (providerName === "codex" || providerName === "claudeAgent") {
     return Effect.succeed(providerName);
   }
+  if (providerName === "claudeCode") {
+    return Effect.succeed("claudeAgent" as ProviderKind);
+  }
   return Effect.fail(
     new ProviderSessionDirectoryPersistenceError({
       operation,
