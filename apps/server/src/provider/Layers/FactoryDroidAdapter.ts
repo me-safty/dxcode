@@ -740,6 +740,8 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
       provider: PROVIDER,
       capabilities: {
         sessionModelSwitch: "in-session",
+        statelessRecovery: true,
+        requiresStreamingDelivery: true,
       },
       startSession,
       sendTurn,

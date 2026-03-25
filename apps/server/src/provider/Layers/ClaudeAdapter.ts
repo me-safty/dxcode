@@ -3083,6 +3083,8 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       provider: PROVIDER,
       capabilities: {
         sessionModelSwitch: "in-session",
+        statelessRecovery: false,
+        requiresStreamingDelivery: false,
       },
       startSession,
       sendTurn,

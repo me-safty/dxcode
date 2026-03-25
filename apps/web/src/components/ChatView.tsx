@@ -24,7 +24,12 @@ import {
 } from "@t3tools/contracts";
 import {
   applyClaudePromptEffortPrefix,
+<<<<<<< HEAD
   getModelCapabilities,
+=======
+  getDefaultModel,
+  getProviderCapabilities,
+>>>>>>> f7dfc362 (refactor(provider): express droid behavior via capabilities)
   normalizeModelSlug,
 } from "@t3tools/shared/model";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -611,6 +616,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
     : null;
   const selectedProvider: ProviderKind =
     lockedProvider ?? selectedProviderByThreadId ?? threadProvider ?? "codex";
+  const selectedProviderCapabilities = useMemo(
+    () => getProviderCapabilities(selectedProvider),
+    [selectedProvider],
+  );
+  const requiresStreamingDelivery = selectedProviderCapabilities.requiresStreamingDelivery;
+  const baseThreadModel = resolveModelSlugForProvider(
+    selectedProvider,
+    activeThread?.model ?? activeProject?.model ?? getDefaultModel(selectedProvider),
+  );
   const customModelsByProvider = useMemo(() => getCustomModelsByProvider(settings), [settings]);
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
     threadId,
@@ -2647,7 +2661,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
         },
         modelSelection: selectedModelSelection,
         ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
-        assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
+        provider: selectedProvider,
+        assistantDeliveryMode:
+          settings.enableAssistantStreaming || requiresStreamingDelivery ? "streaming" : "buffered",
         runtimeMode,
         interactionMode,
         createdAt: messageCreatedAt,
@@ -2929,7 +2945,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
           },
           modelSelection: selectedModelSelection,
           ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
-          assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
+          assistantDeliveryMode:
+            settings.enableAssistantStreaming || requiresStreamingDelivery
+              ? "streaming"
+              : "buffered",
           runtimeMode,
           interactionMode: nextInteractionMode,
           ...(nextInteractionMode === "default" && activeProposedPlan
@@ -2977,6 +2996,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       selectedModelSelection,
       providerOptionsForDispatch,
       selectedProvider,
+      requiresStreamingDelivery,
       setComposerDraftInteractionMode,
       setThreadError,
       settings.enableAssistantStreaming,
@@ -3046,7 +3066,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
           },
           modelSelection: selectedModelSelection,
           ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
-          assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
+          assistantDeliveryMode:
+            settings.enableAssistantStreaming || requiresStreamingDelivery
+              ? "streaming"
+              : "buffered",
           runtimeMode,
           interactionMode: "default",
           createdAt,
@@ -3099,6 +3122,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedModelSelection,
     providerOptionsForDispatch,
     selectedProvider,
+    requiresStreamingDelivery,
     settings.enableAssistantStreaming,
     syncServerReadModel,
     selectedModel,

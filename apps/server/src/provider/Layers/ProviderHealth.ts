@@ -591,16 +591,15 @@ export const checkClaudeProviderStatus: Effect.Effect<
 
 const FACTORY_DROID_PROVIDER = "factoryDroid" as const;
 
-export const checkFactoryDroidProviderStatus: Effect.Effect<
-  ServerProviderStatus,
-  never,
-  ChildProcessSpawner.ChildProcessSpawner
-> = Effect.gen(function* () {
-  const checkedAt = new Date().toISOString();
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+function resolveFactoryDroidBinaryCandidates(): ReadonlyArray<string> {
+  const configuredBinaryPath = process.env.T3CODE_FACTORY_DROID_BINARY_PATH?.trim();
+  return configuredBinaryPath ? [configuredBinaryPath, "droid"] : ["droid"];
+}
 
-  const versionProbe = yield* Effect.gen(function* () {
-    const command = ChildProcess.make("droid", ["--version"], {
+const probeFactoryDroidBinary = (binaryPath: string) =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const command = ChildProcess.make(binaryPath, ["--version"], {
       shell: process.platform === "win32",
     });
     const child = yield* spawner.spawn(command);
@@ -615,47 +614,50 @@ export const checkFactoryDroidProviderStatus: Effect.Effect<
     return { stdout, stderr, code: exitCode } satisfies CommandResult;
   }).pipe(Effect.scoped, Effect.timeoutOption(DEFAULT_TIMEOUT_MS), Effect.result);
 
-  if (Result.isFailure(versionProbe)) {
-    return {
-      provider: FACTORY_DROID_PROVIDER,
-      status: "error",
-      available: false,
-      authStatus: "unknown",
-      checkedAt,
-      message: "Factory Droid CLI (`droid`) is not installed or not available on PATH.",
-    } satisfies ServerProviderStatus;
-  }
+export const checkFactoryDroidProviderStatus: Effect.Effect<
+  ServerProviderStatus,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner
+> = Effect.gen(function* () {
+  const checkedAt = new Date().toISOString();
 
-  const versionOption = versionProbe.success;
-  if (Option.isNone(versionOption)) {
-    return {
-      provider: FACTORY_DROID_PROVIDER,
-      status: "error",
-      available: false,
-      authStatus: "unknown",
-      checkedAt,
-      message: "Factory Droid CLI (`droid`) version check timed out.",
-    } satisfies ServerProviderStatus;
-  }
+  for (const binaryPath of resolveFactoryDroidBinaryCandidates()) {
+    const versionProbe = yield* probeFactoryDroidBinary(binaryPath);
 
-  const versionResult = versionOption.value;
-  if (versionResult.code !== 0) {
-    return {
-      provider: FACTORY_DROID_PROVIDER,
-      status: "error",
-      available: false,
-      authStatus: "unknown",
-      checkedAt,
-      message: "Factory Droid CLI (`droid`) is not installed or not available on PATH.",
-    } satisfies ServerProviderStatus;
+    if (Result.isFailure(versionProbe)) {
+      continue;
+    }
+
+    const versionOption = versionProbe.success;
+    if (Option.isNone(versionOption)) {
+      return {
+        provider: FACTORY_DROID_PROVIDER,
+        status: "error",
+        available: false,
+        authStatus: "unknown",
+        checkedAt,
+        message: `Factory Droid CLI (${binaryPath}) version check timed out.`,
+      } satisfies ServerProviderStatus;
+    }
+
+    if (versionOption.value.code === 0) {
+      return {
+        provider: FACTORY_DROID_PROVIDER,
+        status: "ready",
+        available: true,
+        authStatus: "authenticated",
+        checkedAt,
+      } satisfies ServerProviderStatus;
+    }
   }
 
   return {
     provider: FACTORY_DROID_PROVIDER,
-    status: "ready",
-    available: true,
-    authStatus: "authenticated",
+    status: "error",
+    available: false,
+    authStatus: "unknown",
     checkedAt,
+    message: "Factory Droid CLI (`droid`) is not installed or not available on PATH.",
   } satisfies ServerProviderStatus;
 });
 

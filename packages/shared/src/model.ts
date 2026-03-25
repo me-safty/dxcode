@@ -33,12 +33,32 @@ export interface SelectableModelOption {
   name: string;
 }
 
+export interface ProviderCapabilities {
+  readonly requiresStreamingDelivery: boolean;
+}
+
+const PROVIDER_CAPABILITIES: Record<ProviderKind, ProviderCapabilities> = {
+  codex: {
+    requiresStreamingDelivery: false,
+  },
+  claudeAgent: {
+    requiresStreamingDelivery: false,
+  },
+  factoryDroid: {
+    requiresStreamingDelivery: true,
+  },
+};
+
 export function getModelOptions(provider: ProviderKind = "codex") {
   return MODEL_OPTIONS_BY_PROVIDER[provider];
 }
 
 export function getDefaultModel(provider: ProviderKind = "codex"): ModelSlug {
   return DEFAULT_MODEL_BY_PROVIDER[provider];
+}
+
+export function getProviderCapabilities(provider: ProviderKind): ProviderCapabilities {
+  return PROVIDER_CAPABILITIES[provider];
 }
 
 export function supportsClaudeFastMode(model: string | null | undefined): boolean {

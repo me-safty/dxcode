@@ -30,6 +30,16 @@ export interface ProviderAdapterCapabilities {
    * Declares whether changing the model on an existing session is supported.
    */
   readonly sessionModelSwitch: ProviderSessionModelSwitchMode;
+
+  /**
+   * Declares whether a session can be recovered without persisted provider resume state.
+   */
+  readonly statelessRecovery: boolean;
+
+  /**
+   * Declares whether this provider requires streaming assistant delivery for correct UX.
+   */
+  readonly requiresStreamingDelivery: boolean;
 }
 
 export interface ProviderThreadTurnSnapshot {

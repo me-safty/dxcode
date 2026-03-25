@@ -176,6 +176,8 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
     provider,
     capabilities: {
       sessionModelSwitch: "in-session",
+      statelessRecovery: false,
+      requiresStreamingDelivery: false,
     },
     startSession,
     sendTurn,
