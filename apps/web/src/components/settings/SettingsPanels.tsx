@@ -192,6 +192,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     () => [
       ...(theme !== "system" ? ["Theme"] : []),
       ...(settings.timestampFormat !== defaults.timestampFormat ? ["Time format"] : []),
+      ...(settings.diffWordWrap !== defaults.diffWordWrap ? ["Diff line wrapping"] : []),
       ...(settings.enableAssistantStreaming !== defaults.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
@@ -214,6 +215,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       defaults.confirmThreadArchive,
       defaults.confirmThreadDelete,
       defaults.defaultThreadEnvMode,
+      defaults.diffWordWrap,
       defaults.enableAssistantStreaming,
       defaults.timestampFormat,
       isGitTextGenerationModelDirty,
@@ -223,6 +225,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.customClaudeModels.length,
       settings.customCodexModels.length,
       settings.defaultThreadEnvMode,
+      settings.diffWordWrap,
       settings.enableAssistantStreaming,
       settings.timestampFormat,
       theme,

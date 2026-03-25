@@ -26,6 +26,35 @@ interface ThreadTerminalState {
 }
 
 const TERMINAL_STATE_STORAGE_KEY = "t3code:terminal-state:v1";
+const terminalStateMemoryStorage = new Map<string, string>();
+
+function createTerminalStateStorage(): Storage {
+  const storage =
+    typeof window !== "undefined" ? (window.localStorage as Partial<Storage>) : undefined;
+  if (
+    storage &&
+    typeof storage.getItem === "function" &&
+    typeof storage.setItem === "function" &&
+    typeof storage.removeItem === "function"
+  ) {
+    return storage as Storage;
+  }
+
+  return {
+    clear: () => terminalStateMemoryStorage.clear(),
+    getItem: (key) => terminalStateMemoryStorage.get(key) ?? null,
+    key: (index) => [...terminalStateMemoryStorage.keys()][index] ?? null,
+    get length() {
+      return terminalStateMemoryStorage.size;
+    },
+    removeItem: (key) => {
+      terminalStateMemoryStorage.delete(key);
+    },
+    setItem: (key, value) => {
+      terminalStateMemoryStorage.set(key, value);
+    },
+  };
+}
 
 function normalizeTerminalIds(terminalIds: string[]): string[] {
   const ids = [...new Set(terminalIds.map((id) => id.trim()).filter((id) => id.length > 0))];
@@ -542,7 +571,7 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
     {
       name: TERMINAL_STATE_STORAGE_KEY,
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(createTerminalStateStorage),
       partialize: (state) => ({
         terminalStateByThreadId: state.terminalStateByThreadId,
       }),
