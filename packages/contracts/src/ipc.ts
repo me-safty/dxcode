@@ -24,6 +24,8 @@ import type {
   ProjectSearchEntriesResult,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
+  SlashCommandListInput,
+  SlashCommandListResult,
 } from "./project";
 import type { ServerConfig } from "./server";
 import type {
@@ -129,6 +131,7 @@ export interface NativeApi {
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
+    listCommands: (input: SlashCommandListInput) => Promise<SlashCommandListResult>;
   };
   shell: {
     openInEditor: (cwd: string, editor: EditorId) => Promise<void>;

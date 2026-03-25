@@ -37,3 +37,22 @@ export const ProjectWriteFileResult = Schema.Struct({
   relativePath: TrimmedNonEmptyString,
 });
 export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type;
+
+// ── Slash Command Discovery ─────────────────────────────────────────
+
+export const SlashCommandEntry = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  source: Schema.Literals(["user", "project"]),
+  description: Schema.optional(TrimmedNonEmptyString),
+});
+export type SlashCommandEntry = typeof SlashCommandEntry.Type;
+
+export const SlashCommandListInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+});
+export type SlashCommandListInput = typeof SlashCommandListInput.Type;
+
+export const SlashCommandListResult = Schema.Struct({
+  commands: Schema.Array(SlashCommandEntry),
+});
+export type SlashCommandListResult = typeof SlashCommandListResult.Type;

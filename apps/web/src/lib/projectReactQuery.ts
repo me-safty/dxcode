@@ -1,4 +1,4 @@
-import type { ProjectSearchEntriesResult } from "@t3tools/contracts";
+import type { ProjectSearchEntriesResult, SlashCommandListResult } from "@t3tools/contracts";
 import { queryOptions } from "@tanstack/react-query";
 import { ensureNativeApi } from "~/nativeApi";
 
@@ -6,6 +6,7 @@ export const projectQueryKeys = {
   all: ["projects"] as const,
   searchEntries: (cwd: string | null, query: string, limit: number) =>
     ["projects", "search-entries", cwd, query, limit] as const,
+  slashCommands: (cwd: string | null) => ["projects", "slashCommands", cwd] as const,
 };
 
 const DEFAULT_SEARCH_ENTRIES_LIMIT = 80;
@@ -39,5 +40,23 @@ export function projectSearchEntriesQueryOptions(input: {
     enabled: (input.enabled ?? true) && input.cwd !== null && input.query.length > 0,
     staleTime: input.staleTime ?? DEFAULT_SEARCH_ENTRIES_STALE_TIME,
     placeholderData: (previous) => previous ?? EMPTY_SEARCH_ENTRIES_RESULT,
+  });
+}
+
+const EMPTY_SLASH_COMMANDS_RESULT: SlashCommandListResult = { commands: [] };
+
+export function projectSlashCommandsQueryOptions(cwd: string | null) {
+  return queryOptions({
+    queryKey: projectQueryKeys.slashCommands(cwd),
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      if (!cwd) {
+        throw new Error("Slash command listing is unavailable.");
+      }
+      return api.projects.listCommands({ cwd });
+    },
+    enabled: cwd !== null,
+    staleTime: 30_000,
+    placeholderData: (previous) => previous ?? EMPTY_SLASH_COMMANDS_RESULT,
   });
 }
