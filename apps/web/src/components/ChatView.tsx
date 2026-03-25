@@ -57,6 +57,7 @@ import {
   deriveWorkLogEntries,
   hasActionableProposedPlan,
   hasToolActivityForTurn,
+  hasSettledLatestTurnAdvanced,
   isLatestTurnSettled,
   formatElapsed,
 } from "../session-logic";
@@ -2102,17 +2103,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (sendPhase === "idle") {
       return;
     }
-    if (!latestTurnSettled) {
-      return;
-    }
-
-    const latestTurnId = activeLatestTurn?.turnId ?? null;
-    if (latestTurnId === sendBaselineTurnIdRef.current) {
+    if (
+      !hasSettledLatestTurnAdvanced(
+        activeLatestTurn,
+        activeThread?.session ?? null,
+        sendBaselineTurnIdRef.current,
+      )
+    ) {
       return;
     }
 
     resetSendPhase();
-  }, [activeLatestTurn?.turnId, latestTurnSettled, resetSendPhase, sendPhase]);
+  }, [activeLatestTurn, activeThread?.session, resetSendPhase, sendPhase]);
 
   useEffect(() => {
     if (!activeThreadId) return;

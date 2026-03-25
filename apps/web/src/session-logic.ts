@@ -139,6 +139,17 @@ export function isLatestTurnSettled(
   return true;
 }
 
+export function hasSettledLatestTurnAdvanced(
+  latestTurn: LatestTurnTiming | null,
+  session: SessionActivityState | null,
+  baselineTurnId: TurnId | null,
+): boolean {
+  if (!isLatestTurnSettled(latestTurn, session)) {
+    return false;
+  }
+  return (latestTurn?.turnId ?? null) !== baselineTurnId;
+}
+
 export function deriveActiveWorkStartedAt(
   latestTurn: LatestTurnTiming | null,
   session: SessionActivityState | null,
