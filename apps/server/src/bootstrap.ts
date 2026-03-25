@@ -3,7 +3,7 @@ import * as Net from "node:net";
 import * as readline from "node:readline";
 import type { Readable } from "node:stream";
 
-import { Data, Effect, Option, Result, Schema } from "effect";
+import { Data, Effect, Option, Predicate, Result, Schema } from "effect";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 
 class BootstrapError extends Data.TaggedError("BootstrapError")<{
@@ -11,36 +11,21 @@ class BootstrapError extends Data.TaggedError("BootstrapError")<{
   readonly cause?: unknown;
 }> {}
 
-export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function* <
-  S extends Schema.Codec<unknown, unknown, never, never>,
->(
-  schema: S,
+export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function* <T>(
+  schema: Schema.Codec<T>,
   fd: number,
   options?: {
     timeoutMs?: number;
   },
-): Effect.fn.Return<Option.Option<Schema.Schema.Type<S>>, BootstrapError> {
-  const fdReady = yield* Effect.try({
-    try: () => NFS.fstatSync(fd),
-    catch: (error) =>
-      new BootstrapError({
-        message: "Failed to stat bootstrap fd.",
-        cause: error,
-      }),
-  }).pipe(
-    Effect.as(true),
-    Effect.catchIf(
-      (error) => isUnavailableBootstrapFdError(error.cause),
-      () => Effect.succeed(false),
-    ),
-  );
+): Effect.fn.Return<Option.Option<T>, BootstrapError> {
+  const fdReady = yield* isFdReady(fd);
   if (!fdReady) return Option.none();
 
   const stream = yield* makeBootstrapInputStream(fd);
 
   const timeoutMs = options?.timeoutMs ?? 1000;
 
-  return yield* Effect.callback<Option.Option<Schema.Schema.Type<S>>, BootstrapError>((resume) => {
+  return yield* Effect.callback<Option.Option<T>, BootstrapError>((resume) => {
     const input = readline.createInterface({
       input: stream,
       crlfDelay: Infinity,
@@ -56,7 +41,7 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
 
     const handleError = (error: Error) => {
       if (isUnavailableBootstrapFdError(error)) {
-        resume(Effect.succeed(Option.none<Schema.Schema.Type<S>>()));
+        resume(Effect.succeedNone);
         return;
       }
       resume(
@@ -72,21 +57,21 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
     const handleLine = (line: string) => {
       const parsed = decodeJsonResult(schema)(line);
       if (Result.isSuccess(parsed)) {
-        resume(Effect.succeed(Option.some(parsed.success as Schema.Schema.Type<S>)));
-        return;
+        resume(Effect.succeedSome(parsed.success));
+      } else {
+        resume(
+          Effect.fail(
+            new BootstrapError({
+              message: "Failed to decode bootstrap envelope.",
+              cause: parsed.failure,
+            }),
+          ),
+        );
       }
-      resume(
-        Effect.fail(
-          new BootstrapError({
-            message: "Failed to decode bootstrap envelope.",
-            cause: parsed.failure,
-          }),
-        ),
-      );
     };
 
     const handleClose = () => {
-      resume(Effect.succeed(Option.none<Schema.Schema.Type<S>>()));
+      resume(Effect.succeedNone);
     };
 
     stream.once("error", handleError);
@@ -97,15 +82,30 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
   }).pipe(Effect.timeoutOption(timeoutMs), Effect.map(Option.flatten));
 });
 
-function isUnavailableBootstrapFdError(error: unknown): boolean {
-  return (
-    error instanceof Error && "code" in error && (error.code === "EBADF" || error.code === "ENOENT")
+const isUnavailableBootstrapFdError = Predicate.compose(
+  Predicate.hasProperty("code"),
+  (_) => _.code === "EBADF" || _.code === "ENOENT",
+);
+
+const isFdReady = (fd: number) =>
+  Effect.try({
+    try: () => NFS.fstatSync(fd),
+    catch: (error) =>
+      new BootstrapError({
+        message: "Failed to stat bootstrap fd.",
+        cause: error,
+      }),
+  }).pipe(
+    Effect.as(true),
+    Effect.catchIf(
+      (error) => isUnavailableBootstrapFdError(error.cause),
+      () => Effect.succeed(false),
+    ),
   );
-}
 
 const makeBootstrapInputStream = (fd: number) =>
-  Effect.try({
-    try: (): Readable => {
+  Effect.try<Readable, BootstrapError>({
+    try: () => {
       const fdPath = resolveFdPath(fd);
       if (fdPath === undefined) {
         const stream = new Net.Socket({
