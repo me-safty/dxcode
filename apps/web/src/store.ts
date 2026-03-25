@@ -138,9 +138,8 @@ function mapProjectsFromReadModel(
       id: project.id,
       name: project.title,
       cwd: project.workspaceRoot,
-      model:
-        existing?.model ??
-        resolveModelSlug(project.defaultModel ?? DEFAULT_MODEL_BY_PROVIDER.codex),
+      defaultModelSelection:
+        existing?.defaultModelSelection ?? project.defaultModelSelection,
       expanded:
         existing?.expanded ??
         (persistedExpandedProjectCwds.size > 0
@@ -264,13 +263,7 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
         codexThreadId: null,
         projectId: thread.projectId,
         title: thread.title,
-        model: resolveModelSlugForProvider(
-          inferProviderForThreadModel({
-            model: thread.model,
-            sessionProviderName: thread.session?.providerName ?? null,
-          }),
-          thread.model,
-        ),
+        modelSelection: thread.modelSelection,
         runtimeMode: thread.runtimeMode,
         interactionMode: thread.interactionMode,
         session: thread.session
@@ -414,16 +407,8 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
       const threads = updateThread(state.threads, payload.threadId, (thread) => ({
         ...thread,
         ...(payload.title !== undefined ? { title: payload.title } : {}),
-        ...(payload.model !== undefined
-          ? {
-              model: resolveModelSlugForProvider(
-                inferProviderForThreadModel({
-                  model: payload.model,
-                  sessionProviderName: thread.session?.provider ?? null,
-                }),
-                payload.model,
-              ),
-            }
+        ...(payload.modelSelection !== undefined
+          ? { modelSelection: payload.modelSelection }
           : {}),
         ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
         ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),

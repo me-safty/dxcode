@@ -1,5 +1,5 @@
 import { Option, Schema, SchemaIssue, Struct } from "effect";
-import { ClaudeModelOptions, CodexModelOptions } from "./model";
+import { ClaudeModelOptions, CodexModelOptions, FactoryDroidModelOptions } from "./model";
 import {
   ApprovalRequestId,
   CheckpointRef,
@@ -44,6 +44,12 @@ export const ProviderSandboxMode = Schema.Literals([
 export type ProviderSandboxMode = typeof ProviderSandboxMode.Type;
 export const DEFAULT_PROVIDER_KIND: ProviderKind = "codex";
 
+export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
+  codex: "Codex",
+  claudeAgent: "Claude",
+  factoryDroid: "Factory Droid",
+};
+
 export const CodexModelSelection = Schema.Struct({
   provider: Schema.Literal("codex"),
   model: TrimmedNonEmptyString,
@@ -58,7 +64,18 @@ export const ClaudeModelSelection = Schema.Struct({
 });
 export type ClaudeModelSelection = typeof ClaudeModelSelection.Type;
 
-export const ModelSelection = Schema.Union([CodexModelSelection, ClaudeModelSelection]);
+export const FactoryDroidModelSelection = Schema.Struct({
+  provider: Schema.Literal("factoryDroid"),
+  model: TrimmedNonEmptyString,
+  options: Schema.optional(FactoryDroidModelOptions),
+});
+export type FactoryDroidModelSelection = typeof FactoryDroidModelSelection.Type;
+
+export const ModelSelection = Schema.Union([
+  CodexModelSelection,
+  ClaudeModelSelection,
+  FactoryDroidModelSelection,
+]);
 export type ModelSelection = typeof ModelSelection.Type;
 
 export const CodexProviderStartOptions = Schema.Struct({

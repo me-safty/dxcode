@@ -233,7 +233,7 @@ const make = Effect.gen(function* () {
     )
       ? thread.session.providerName
       : undefined;
-    const threadProvider: ProviderKind = currentProvider ?? inferProviderForModel(thread.model);
+    const threadProvider: ProviderKind = currentProvider ?? thread.modelSelection.provider;
     const explicitProviderSwitch =
       options?.provider !== undefined && options.provider !== threadProvider;
     const effectiveProvider: ProviderKind = explicitProviderSwitch
@@ -252,7 +252,7 @@ const make = Effect.gen(function* () {
     const preferredProvider: ProviderKind = explicitProviderSwitch
       ? options.provider
       : (currentProvider ?? threadProvider);
-    const desiredModel = options?.model ?? thread.model;
+    const desiredModel = options?.model ?? thread.modelSelection.model;
     const effectiveCwd = resolveThreadWorkspaceCwd({
       thread,
       projects: readModel.projects,
