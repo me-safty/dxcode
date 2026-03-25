@@ -91,18 +91,14 @@ import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings"
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
-  BotIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleAlertIcon,
-  ListTodoIcon,
-  LockIcon,
-  LockOpenIcon,
+  PlusIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
-import { Separator } from "./ui/separator";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { cn, randomUUID } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -144,7 +140,6 @@ import {
   type TerminalContextSelection,
 } from "../lib/terminalContext";
 import { deriveLatestContextWindowSnapshot } from "../lib/contextWindow";
-import { shouldUseCompactComposerFooter } from "./composerFooterLayout";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -339,7 +334,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     useState<Record<string, number>>({});
   const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, boolean>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
-  const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
@@ -749,7 +743,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
     (showPlanFollowUpPrompt && activeProposedPlan !== null);
-  const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
   const lastSyncedPendingInputRef = useRef<{
     requestId: string | null;
     questionId: string | null;
@@ -1791,24 +1784,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
   useLayoutEffect(() => {
     const composerForm = composerFormRef.current;
     if (!composerForm) return;
-    const measureComposerFormWidth = () => composerForm.clientWidth;
 
     composerFormHeightRef.current = composerForm.getBoundingClientRect().height;
-    setIsComposerFooterCompact(
-      shouldUseCompactComposerFooter(measureComposerFormWidth(), {
-        hasWideActions: composerFooterHasWideActions,
-      }),
-    );
     if (typeof ResizeObserver === "undefined") return;
 
     const observer = new ResizeObserver((entries) => {
       const [entry] = entries;
       if (!entry) return;
-
-      const nextCompact = shouldUseCompactComposerFooter(measureComposerFormWidth(), {
-        hasWideActions: composerFooterHasWideActions,
-      });
-      setIsComposerFooterCompact((previous) => (previous === nextCompact ? previous : nextCompact));
 
       const nextHeight = entry.contentRect.height;
       const previousHeight = composerFormHeightRef.current;
@@ -1823,7 +1805,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     return () => {
       observer.disconnect();
     };
-  }, [activeThread?.id, composerFooterHasWideActions, scheduleStickToBottom]);
+  }, [activeThread?.id, scheduleStickToBottom]);
   useEffect(() => {
     if (!shouldAutoScrollRef.current) return;
     scheduleStickToBottom();
@@ -3570,7 +3552,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           </div>
 
           {/* Input bar */}
-          <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
+          <div className={cn("px-3 pt-1.5 sm:px-4 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
             <form
               ref={composerFormRef}
               onSubmit={onSend}
@@ -3589,8 +3571,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
               >
                 <div
                   className={cn(
-                    "rounded-[15px] border bg-card transition-colors duration-200 focus-within:border-ring/35",
-                    isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border",
+                    "rounded-[15px] border bg-secondary/50 transition-colors duration-200 focus-within:border-ring/30",
+                    isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border/60",
                     composerProviderState.composerSurfaceClassName,
                   )}
                 >
@@ -3622,8 +3604,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   ) : null}
                   <div
                     className={cn(
-                      "relative px-3 pb-2 sm:px-4",
-                      hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
+                      "relative px-3 pb-1.5 sm:px-3.5",
+                      hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3 sm:pt-3.5",
                     )}
                   >
                     {composerMenuOpen && !isComposerApprovalState && (
@@ -3737,8 +3719,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             : showPlanFollowUpPrompt && activeProposedPlan
                               ? "Add feedback to refine the plan, or leave this blank to implement it"
                               : phase === "disconnected"
-                                ? "Ask for follow-up changes or attach images"
-                                : "Ask anything, @tag files/folders, or use / to show available commands"
+                                ? "Follow-up changes, @ for context"
+                                : "Plan, Build, @ for context"
                       }
                       disabled={isConnecting || isComposerApprovalState}
                     />
@@ -3758,24 +3740,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   ) : (
                     <div
                       data-chat-composer-footer="true"
-                      className={cn(
-                        "flex items-center justify-between px-2.5 pb-2.5 sm:px-3 sm:pb-3",
-                        isComposerFooterCompact
-                          ? "gap-1.5"
-                          : "flex-wrap gap-2 sm:flex-nowrap sm:gap-0",
-                      )}
+                      className="flex items-center justify-between gap-1.5 px-2 pb-2 sm:px-2.5 sm:pb-2.5"
                     >
-                      <div
-                        className={cn(
-                          "flex min-w-0 flex-1 items-center",
-                          isComposerFooterCompact
-                            ? "gap-1 overflow-hidden"
-                            : "gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:min-w-max sm:overflow-visible",
-                        )}
-                      >
+                      <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden">
+                        {/* + attachment button */}
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="size-7 shrink-0 rounded-full text-muted-foreground/60 hover:text-foreground/80"
+                          type="button"
+                          title="Add context"
+                          onClick={() => composerEditorRef.current?.focusAtEnd()}
+                        >
+                          <PlusIcon className="size-4" />
+                        </Button>
+
                         {/* Provider/model picker */}
                         <ProviderModelPicker
-                          compact={isComposerFooterCompact}
+                          compact
                           provider={selectedProvider}
                           model={selectedModelForPickerWithCustomFallback}
                           lockedProvider={lockedProvider}
@@ -3789,111 +3771,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           onProviderModelChange={onProviderModelSelect}
                         />
 
-                        {isComposerFooterCompact ? (
-                          <CompactComposerControlsMenu
-                            activePlan={Boolean(
-                              activePlan || sidebarProposedPlan || planSidebarOpen,
-                            )}
-                            interactionMode={interactionMode}
-                            planSidebarOpen={planSidebarOpen}
-                            runtimeMode={runtimeMode}
-                            traitsMenuContent={providerTraitsMenuContent}
-                            onToggleInteractionMode={toggleInteractionMode}
-                            onTogglePlanSidebar={togglePlanSidebar}
-                            onToggleRuntimeMode={toggleRuntimeMode}
-                          />
-                        ) : (
-                          <>
-                            {providerTraitsPicker ? (
-                              <>
-                                <Separator
-                                  orientation="vertical"
-                                  className="mx-0.5 hidden h-4 sm:block"
-                                />
-                                {providerTraitsPicker}
-                              </>
-                            ) : null}
-
-                            <Separator
-                              orientation="vertical"
-                              className="mx-0.5 hidden h-4 sm:block"
-                            />
-
-                            <Button
-                              variant="ghost"
-                              className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                              size="sm"
-                              type="button"
-                              onClick={toggleInteractionMode}
-                              title={
-                                interactionMode === "plan"
-                                  ? "Plan mode — click to return to normal chat mode"
-                                  : "Default mode — click to enter plan mode"
-                              }
-                            >
-                              <BotIcon />
-                              <span className="sr-only sm:not-sr-only">
-                                {interactionMode === "plan" ? "Plan" : "Chat"}
-                              </span>
-                            </Button>
-
-                            <Separator
-                              orientation="vertical"
-                              className="mx-0.5 hidden h-4 sm:block"
-                            />
-
-                            <Button
-                              variant="ghost"
-                              className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                              size="sm"
-                              type="button"
-                              onClick={() =>
-                                void handleRuntimeModeChange(
-                                  runtimeMode === "full-access"
-                                    ? "approval-required"
-                                    : "full-access",
-                                )
-                              }
-                              title={
-                                runtimeMode === "full-access"
-                                  ? "Full access — click to require approvals"
-                                  : "Approval required — click for full access"
-                              }
-                            >
-                              {runtimeMode === "full-access" ? <LockOpenIcon /> : <LockIcon />}
-                              <span className="sr-only sm:not-sr-only">
-                                {runtimeMode === "full-access" ? "Full access" : "Supervised"}
-                              </span>
-                            </Button>
-
-                            {activePlan || sidebarProposedPlan || planSidebarOpen ? (
-                              <>
-                                <Separator
-                                  orientation="vertical"
-                                  className="mx-0.5 hidden h-4 sm:block"
-                                />
-                                <Button
-                                  variant="ghost"
-                                  className={cn(
-                                    "shrink-0 whitespace-nowrap px-2 sm:px-3",
-                                    planSidebarOpen
-                                      ? "text-blue-400 hover:text-blue-300"
-                                      : "text-muted-foreground/70 hover:text-foreground/80",
-                                  )}
-                                  size="sm"
-                                  type="button"
-                                  onClick={togglePlanSidebar}
-                                  title={
-                                    planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"
-                                  }
-                                >
-                                  <ListTodoIcon />
-                                  <span className="sr-only sm:not-sr-only">Plan</span>
-                                </Button>
-                              </>
-                            ) : null}
-                          </>
-                        )}
+                        <CompactComposerControlsMenu
+                          activePlan={Boolean(
+                            activePlan || sidebarProposedPlan || planSidebarOpen,
+                          )}
+                          interactionMode={interactionMode}
+                          planSidebarOpen={planSidebarOpen}
+                          runtimeMode={runtimeMode}
+                          traitsMenuContent={providerTraitsMenuContent}
+                          onToggleInteractionMode={toggleInteractionMode}
+                          onTogglePlanSidebar={togglePlanSidebar}
+                          onToggleRuntimeMode={toggleRuntimeMode}
+                        />
                       </div>
 
                       {/* Right side: send / stop button */}
