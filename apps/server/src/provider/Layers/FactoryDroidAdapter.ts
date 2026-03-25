@@ -33,11 +33,7 @@ import {
   FACTORY_DROID_PROVIDER as PROVIDER,
   makeFactoryDroidBaseEvent,
   makeFactoryDroidContentDeltaEvent,
-  mapFactoryDroidCreateMessage,
-  makeFactoryDroidRuntimeErrorEvent,
-  makeFactoryDroidThreadMetadataUpdatedEvent,
-  makeFactoryDroidTokenUsageEvent,
-  makeFactoryDroidToolResultEvent,
+  mapFactoryDroidNotification,
 } from "./FactoryDroidRuntimeEvents.ts";
 
 const FACTORY_API_VERSION = "1.0.0";
@@ -311,13 +307,12 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
             if (newState === "idle" && turnId) {
               scheduleIdleCompletion(context, threadId, turnId);
             }
-          } else if (notifType === "create_message") {
-            if (!turnId) return;
-            const { events, fallbackText } = mapFactoryDroidCreateMessage({
-              message: notif.message as Record<string, unknown> | undefined,
+          } else {
+            const { events, fallbackText } = mapFactoryDroidNotification({
+              notif,
               sawAssistantTextDelta: context.sawAssistantTextDelta,
               threadId,
-              turnId,
+              ...(turnId ? { turnId } : {}),
             });
             for (const event of events) {
               emitFromCallback(event);
@@ -326,37 +321,6 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
               context.pendingAssistantDelta += fallbackText;
               scheduleDeltaFlush(context, threadId);
             }
-          } else if (notifType === "tool_result") {
-            if (!turnId) return;
-            emitFromCallback(
-              makeFactoryDroidToolResultEvent({
-                content: notif.content as string | undefined,
-                threadId,
-                toolUseId: (notif.toolUseId as string) ?? randomUUID(),
-                turnId,
-              }),
-            );
-          } else if (notifType === "session_title_updated") {
-            const title = notif.title as string | undefined;
-            if (title) {
-              emitFromCallback(makeFactoryDroidThreadMetadataUpdatedEvent(threadId, title));
-            }
-          } else if (notifType === "session_token_usage_changed") {
-            const event = makeFactoryDroidTokenUsageEvent(
-              threadId,
-              notif.tokenUsage as Record<string, unknown> | undefined,
-            );
-            if (event) {
-              emitFromCallback(event);
-            }
-          } else if (notifType === "error") {
-            emitFromCallback(
-              makeFactoryDroidRuntimeErrorEvent({
-                message: (notif.message as string) ?? "Droid runtime error",
-                threadId,
-                ...(turnId ? { turnId } : {}),
-              }),
-            );
           }
           return;
         }
@@ -381,13 +345,12 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
       child.stderr.on("data", (chunk: Buffer) => {
         const text = chunk.toString().trim();
         if (text && context.activeTurnId) {
-          emitFromCallback(
-            makeFactoryDroidRuntimeErrorEvent({
-              message: text,
-              threadId,
-              turnId: context.activeTurnId,
-            }),
-          );
+          emitFromCallback({
+            ...makeFactoryDroidBaseEvent(threadId),
+            type: "runtime.error",
+            turnId: context.activeTurnId,
+            payload: { message: text },
+          } as unknown as ProviderRuntimeEvent);
         }
       });
 

@@ -1,24 +1,27 @@
 import { assert, it } from "@effect/vitest";
 import { ThreadId, TurnId } from "@t3tools/contracts";
 
-import { mapFactoryDroidCreateMessage } from "./FactoryDroidRuntimeEvents.ts";
+import { mapFactoryDroidNotification } from "./FactoryDroidRuntimeEvents.ts";
 
 const threadId = ThreadId.makeUnsafe("thread-1");
 const turnId = TurnId.makeUnsafe("turn-1");
 
 it("uses create_message text blocks as a fallback when no assistant delta was streamed", () => {
-  const result = mapFactoryDroidCreateMessage({
-    message: {
-      role: "assistant",
-      content: [
-        { type: "text", text: "Draft answer" },
-        {
-          type: "tool_use",
-          id: "tool-1",
-          name: "Write",
-          input: { path: "src/example.ts" },
-        },
-      ],
+  const result = mapFactoryDroidNotification({
+    notif: {
+      type: "create_message",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Draft answer" },
+          {
+            type: "tool_use",
+            id: "tool-1",
+            name: "Write",
+            input: { path: "src/example.ts" },
+          },
+        ],
+      },
     },
     sawAssistantTextDelta: false,
     threadId,
@@ -34,6 +37,26 @@ it("uses create_message text blocks as a fallback when no assistant delta was st
   assert.equal(event.type, "item.started");
   assert.equal(event.turnId, turnId);
   assert.equal(event.itemId, "tool-1");
+  assert.deepEqual(event.providerRefs, {
+    providerTurnId: turnId,
+    providerItemId: "tool-1",
+  });
+  assert.deepEqual(event.raw, {
+    source: "factorydroid.jsonrpc.notification",
+    method: "create_message",
+    payload: {
+      role: "assistant",
+      content: [
+        { type: "text", text: "Draft answer" },
+        {
+          type: "tool_use",
+          id: "tool-1",
+          name: "Write",
+          input: { path: "src/example.ts" },
+        },
+      ],
+    },
+  });
   assert.deepEqual(event.payload, {
     itemType: "file_change",
     status: "inProgress",
@@ -43,12 +66,59 @@ it("uses create_message text blocks as a fallback when no assistant delta was st
 });
 
 it("does not duplicate create_message text when assistant deltas were already streamed", () => {
-  const result = mapFactoryDroidCreateMessage({
-    message: {
-      role: "assistant",
-      content: [{ type: "text", text: "Draft answer" }],
+  const result = mapFactoryDroidNotification({
+    notif: {
+      type: "create_message",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Draft answer" }],
+      },
     },
     sawAssistantTextDelta: true,
+    threadId,
+    turnId,
+  });
+
+  assert.equal(result.fallbackText, "");
+  assert.deepEqual(result.events, []);
+});
+
+it("preserves raw payload and provider refs for tool results", () => {
+  const result = mapFactoryDroidNotification({
+    notif: {
+      type: "tool_result",
+      toolUseId: "tool-2",
+      content: "done",
+    },
+    sawAssistantTextDelta: false,
+    threadId,
+    turnId,
+  });
+
+  const event = result.events[0]!;
+
+  assert.equal(result.fallbackText, "");
+  assert.equal(event.type, "item.completed");
+  assert.equal(event.itemId, "tool-2");
+  assert.deepEqual(event.providerRefs, {
+    providerTurnId: turnId,
+    providerItemId: "tool-2",
+  });
+  assert.deepEqual(event.raw, {
+    source: "factorydroid.jsonrpc.notification",
+    method: "tool_result",
+    payload: {
+      type: "tool_result",
+      toolUseId: "tool-2",
+      content: "done",
+    },
+  });
+});
+
+it("returns empty output for malformed notifications", () => {
+  const result = mapFactoryDroidNotification({
+    notif: { type: 123 },
+    sawAssistantTextDelta: false,
     threadId,
     turnId,
   });

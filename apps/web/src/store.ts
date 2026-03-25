@@ -138,8 +138,7 @@ function mapProjectsFromReadModel(
       id: project.id,
       name: project.title,
       cwd: project.workspaceRoot,
-      defaultModelSelection:
-        existing?.defaultModelSelection ?? project.defaultModelSelection,
+      defaultModelSelection: existing?.defaultModelSelection ?? project.defaultModelSelection,
       expanded:
         existing?.expanded ??
         (persistedExpandedProjectCwds.size > 0
@@ -407,9 +406,7 @@ export function applyDomainEvent(state: AppState, event: OrchestrationEvent): Ap
       const threads = updateThread(state.threads, payload.threadId, (thread) => ({
         ...thread,
         ...(payload.title !== undefined ? { title: payload.title } : {}),
-        ...(payload.modelSelection !== undefined
-          ? { modelSelection: payload.modelSelection }
-          : {}),
+        ...(payload.modelSelection !== undefined ? { modelSelection: payload.modelSelection } : {}),
         ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
         ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
         updatedAt: event.occurredAt,

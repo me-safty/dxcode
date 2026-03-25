@@ -602,7 +602,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const sessionProvider = activeThread?.session?.provider ?? null;
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
   const threadProvider =
-    activeThread?.modelSelection?.provider ?? activeProject?.defaultModelSelection?.provider ?? null;
+    activeThread?.modelSelection?.provider ??
+    activeProject?.defaultModelSelection?.provider ??
+    null;
   const hasThreadStarted = Boolean(
     activeThread &&
     (activeThread.latestTurn !== null ||
@@ -621,7 +623,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const requiresStreamingDelivery = selectedProviderCapabilities.requiresStreamingDelivery;
   const baseThreadModel = resolveModelSlugForProvider(
     selectedProvider,
-    activeThread?.modelSelection?.model ?? activeProject?.defaultModelSelection?.model ?? getDefaultModel(selectedProvider),
+    activeThread?.modelSelection?.model ??
+      activeProject?.defaultModelSelection?.model ??
+      getDefaultModel(selectedProvider),
   );
   const customModelsByProvider = useMemo(() => getCustomModelsByProvider(settings), [settings]);
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
