@@ -69,7 +69,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
             <SidebarMenuButton
               size="sm"
               className="gap-2 px-2 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-              onClick={() => void navigate({ to: "/", replace: true })}
+              onClick={() => window.history.back()}
             >
               <ArrowLeftIcon className="size-4" />
               <span>Back</span>
