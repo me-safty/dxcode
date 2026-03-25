@@ -58,14 +58,14 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
-type InstallBinarySettingsKey = "claudeBinaryPath" | "codexBinaryPath";
+type InstallBinarySettingsKey = "claudeBinaryPath" | "copilotCliPath" | "codexBinaryPath";
 type InstallProviderSettings = {
   provider: ProviderKind;
   title: string;
   binaryPathKey: InstallBinarySettingsKey;
   binaryPlaceholder: string;
   binaryDescription: ReactNode;
-  homePathKey?: "codexHomePath";
+  homePathKey?: "codexHomePath" | "copilotConfigDir";
   homePlaceholder?: string;
   homeDescription?: ReactNode;
 };
@@ -95,6 +95,16 @@ const INSTALL_PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
         Leave blank to use <code>claude</code> from your PATH.
       </>
     ),
+  },
+  {
+    provider: "copilot",
+    title: "GitHub Copilot",
+    binaryPathKey: "copilotCliPath",
+    binaryPlaceholder: "Copilot CLI path",
+    binaryDescription: <>Leave blank to use the bundled GitHub Copilot CLI when available.</>,
+    homePathKey: "copilotConfigDir",
+    homePlaceholder: "Copilot config directory",
+    homeDescription: "Optional custom GitHub Copilot config directory.",
   },
 ];
 
@@ -194,6 +204,7 @@ function SettingsRouteView() {
   const [openInstallProviders, setOpenInstallProviders] = useState<Record<ProviderKind, boolean>>({
     codex: Boolean(settings.codexBinaryPath || settings.codexHomePath),
     claudeAgent: Boolean(settings.claudeBinaryPath),
+    copilot: Boolean(settings.copilotCliPath || settings.copilotConfigDir),
   });
   const [selectedCustomModelProvider, setSelectedCustomModelProvider] =
     useState<ProviderKind>("codex");
@@ -202,6 +213,7 @@ function SettingsRouteView() {
   >({
     codex: "",
     claudeAgent: "",
+    copilot: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -211,6 +223,8 @@ function SettingsRouteView() {
   const codexBinaryPath = settings.codexBinaryPath;
   const codexHomePath = settings.codexHomePath;
   const claudeBinaryPath = settings.claudeBinaryPath;
+  const copilotCliPath = settings.copilotCliPath;
+  const copilotConfigDir = settings.copilotConfigDir;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
 
@@ -233,7 +247,10 @@ function SettingsRouteView() {
   )!;
   const selectedCustomModelInput = customModelInputByProvider[selectedCustomModelProvider];
   const selectedCustomModelError = customModelErrorByProvider[selectedCustomModelProvider] ?? null;
-  const totalCustomModels = settings.customCodexModels.length + settings.customClaudeModels.length;
+  const totalCustomModels =
+    settings.customCodexModels.length +
+    settings.customClaudeModels.length +
+    settings.customCopilotModels.length;
   const savedCustomModelRows = MODEL_PROVIDER_SETTINGS.flatMap((providerSettings) =>
     getCustomModelsForProvider(settings, providerSettings.provider).map((slug) => ({
       key: `${providerSettings.provider}:${slug}`,
@@ -247,6 +264,8 @@ function SettingsRouteView() {
     : savedCustomModelRows.slice(0, 5);
   const isInstallSettingsDirty =
     settings.claudeBinaryPath !== defaults.claudeBinaryPath ||
+    settings.copilotCliPath !== defaults.copilotCliPath ||
+    settings.copilotConfigDir !== defaults.copilotConfigDir ||
     settings.codexBinaryPath !== defaults.codexBinaryPath ||
     settings.codexHomePath !== defaults.codexHomePath;
   const changedSettingLabels = [
@@ -261,7 +280,9 @@ function SettingsRouteView() {
       ? ["Delete confirmation"]
       : []),
     ...(isGitTextGenerationModelDirty ? ["Git writing model"] : []),
-    ...(settings.customCodexModels.length > 0 || settings.customClaudeModels.length > 0
+    ...(settings.customCodexModels.length > 0 ||
+    settings.customClaudeModels.length > 0 ||
+    settings.customCopilotModels.length > 0
       ? ["Custom models"]
       : []),
     ...(isInstallSettingsDirty ? ["Provider installs"] : []),
@@ -370,11 +391,13 @@ function SettingsRouteView() {
     setOpenInstallProviders({
       codex: false,
       claudeAgent: false,
+      copilot: false,
     });
     setSelectedCustomModelProvider("codex");
     setCustomModelInputByProvider({
       codex: "",
       claudeAgent: "",
+      copilot: "",
     });
     setCustomModelErrorByProvider({});
   }
@@ -682,6 +705,7 @@ function SettingsRouteView() {
                         updateSettings({
                           customCodexModels: defaults.customCodexModels,
                           customClaudeModels: defaults.customClaudeModels,
+                          customCopilotModels: defaults.customCopilotModels,
                         });
                         setCustomModelErrorByProvider({});
                         setShowAllCustomModels(false);
@@ -695,10 +719,14 @@ function SettingsRouteView() {
                     <Select
                       value={selectedCustomModelProvider}
                       onValueChange={(value) => {
-                        if (value !== "codex" && value !== "claudeAgent") {
+                        if (
+                          !MODEL_PROVIDER_SETTINGS.some(
+                            (providerSettings) => providerSettings.provider === value,
+                          )
+                        ) {
                           return;
                         }
-                        setSelectedCustomModelProvider(value);
+                        setSelectedCustomModelProvider(value as ProviderKind);
                       }}
                     >
                       <SelectTrigger
@@ -813,12 +841,15 @@ function SettingsRouteView() {
                       onClick={() => {
                         updateSettings({
                           claudeBinaryPath: defaults.claudeBinaryPath,
+                          copilotCliPath: defaults.copilotCliPath,
+                          copilotConfigDir: defaults.copilotConfigDir,
                           codexBinaryPath: defaults.codexBinaryPath,
                           codexHomePath: defaults.codexHomePath,
                         });
                         setOpenInstallProviders({
                           codex: false,
                           claudeAgent: false,
+                          copilot: false,
                         });
                       }}
                     />
@@ -833,11 +864,16 @@ function SettingsRouteView() {
                         providerSettings.provider === "codex"
                           ? settings.codexBinaryPath !== defaults.codexBinaryPath ||
                             settings.codexHomePath !== defaults.codexHomePath
-                          : settings.claudeBinaryPath !== defaults.claudeBinaryPath;
+                          : providerSettings.provider === "claudeAgent"
+                            ? settings.claudeBinaryPath !== defaults.claudeBinaryPath
+                            : settings.copilotCliPath !== defaults.copilotCliPath ||
+                              settings.copilotConfigDir !== defaults.copilotConfigDir;
                       const binaryPathValue =
                         providerSettings.binaryPathKey === "claudeBinaryPath"
                           ? claudeBinaryPath
-                          : codexBinaryPath;
+                          : providerSettings.binaryPathKey === "copilotCliPath"
+                            ? copilotCliPath
+                            : codexBinaryPath;
 
                       return (
                         <Collapsible
@@ -893,7 +929,9 @@ function SettingsRouteView() {
                                         updateSettings(
                                           providerSettings.binaryPathKey === "claudeBinaryPath"
                                             ? { claudeBinaryPath: event.target.value }
-                                            : { codexBinaryPath: event.target.value },
+                                            : providerSettings.binaryPathKey === "copilotCliPath"
+                                              ? { copilotCliPath: event.target.value }
+                                              : { codexBinaryPath: event.target.value },
                                         )
                                       }
                                       placeholder={providerSettings.binaryPlaceholder}
@@ -910,17 +948,23 @@ function SettingsRouteView() {
                                       className="block"
                                     >
                                       <span className="block text-xs font-medium text-foreground">
-                                        CODEX_HOME path
+                                        {providerSettings.homePlaceholder}
                                       </span>
                                       <Input
                                         id={`provider-install-${providerSettings.homePathKey}`}
                                         className="mt-1"
-                                        value={codexHomePath}
-                                        onChange={(event) =>
-                                          updateSettings({
-                                            codexHomePath: event.target.value,
-                                          })
+                                        value={
+                                          providerSettings.homePathKey === "codexHomePath"
+                                            ? codexHomePath
+                                            : copilotConfigDir
                                         }
+                                        onChange={(event) => {
+                                          if (providerSettings.homePathKey === "codexHomePath") {
+                                            updateSettings({ codexHomePath: event.target.value });
+                                            return;
+                                          }
+                                          updateSettings({ copilotConfigDir: event.target.value });
+                                        }}
                                         placeholder={providerSettings.homePlaceholder}
                                         spellCheck={false}
                                       />

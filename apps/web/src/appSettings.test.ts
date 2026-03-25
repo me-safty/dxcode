@@ -78,31 +78,45 @@ describe("resolveAppModelSelection", () => {
     expect(
       resolveAppModelSelection(
         "codex",
-        { codex: ["galapagos-alpha"], claudeAgent: [] },
+        { codex: ["galapagos-alpha"], claudeAgent: [], copilot: [] },
         "galapagos-alpha",
       ),
     ).toBe("galapagos-alpha");
   });
 
   it("falls back to the provider default when no model is selected", () => {
-    expect(resolveAppModelSelection("codex", { codex: [], claudeAgent: [] }, "")).toBe("gpt-5.4");
+    expect(resolveAppModelSelection("codex", { codex: [], claudeAgent: [], copilot: [] }, "")).toBe(
+      "gpt-5.4",
+    );
   });
 
   it("resolves display names through the shared resolver", () => {
-    expect(resolveAppModelSelection("codex", { codex: [], claudeAgent: [] }, "GPT-5.3 Codex")).toBe(
-      "gpt-5.3-codex",
-    );
+    expect(
+      resolveAppModelSelection(
+        "codex",
+        { codex: [], claudeAgent: [], copilot: [] },
+        "GPT-5.3 Codex",
+      ),
+    ).toBe("gpt-5.3-codex");
   });
 
   it("resolves aliases through the shared resolver", () => {
-    expect(resolveAppModelSelection("claudeAgent", { codex: [], claudeAgent: [] }, "sonnet")).toBe(
-      "claude-sonnet-4-6",
-    );
+    expect(
+      resolveAppModelSelection(
+        "claudeAgent",
+        { codex: [], claudeAgent: [], copilot: [] },
+        "sonnet",
+      ),
+    ).toBe("claude-sonnet-4-6");
   });
 
   it("resolves transient selected custom models included in app model options", () => {
     expect(
-      resolveAppModelSelection("codex", { codex: [], claudeAgent: [] }, "custom/selected-model"),
+      resolveAppModelSelection(
+        "codex",
+        { codex: [], claudeAgent: [], copilot: [] },
+        "custom/selected-model",
+      ),
     ).toBe("custom/selected-model");
   });
 });
@@ -136,12 +150,18 @@ describe("getProviderStartOptions", () => {
     expect(
       getProviderStartOptions({
         claudeBinaryPath: "/usr/local/bin/claude",
+        copilotCliPath: "/Applications/Copilot.app",
+        copilotConfigDir: "/Users/you/.config/copilot",
         codexBinaryPath: "",
         codexHomePath: "/Users/you/.codex",
       }),
     ).toEqual({
       claudeAgent: {
         binaryPath: "/usr/local/bin/claude",
+      },
+      copilot: {
+        cliPath: "/Applications/Copilot.app",
+        configDir: "/Users/you/.config/copilot",
       },
       codex: {
         homePath: "/Users/you/.codex",
@@ -153,6 +173,8 @@ describe("getProviderStartOptions", () => {
     expect(
       getProviderStartOptions({
         claudeBinaryPath: "",
+        copilotCliPath: "",
+        copilotConfigDir: "",
         codexBinaryPath: "",
         codexHomePath: "",
       }),
@@ -164,29 +186,36 @@ describe("provider-indexed custom model settings", () => {
   const settings = {
     customCodexModels: ["custom/codex-model"],
     customClaudeModels: ["claude/custom-opus"],
+    customCopilotModels: ["copilot/custom-model"],
   } as const;
 
   it("exports one provider config per provider", () => {
     expect(MODEL_PROVIDER_SETTINGS.map((config) => config.provider)).toEqual([
       "codex",
       "claudeAgent",
+      "copilot",
     ]);
   });
 
   it("reads custom models for each provider", () => {
     expect(getCustomModelsForProvider(settings, "codex")).toEqual(["custom/codex-model"]);
     expect(getCustomModelsForProvider(settings, "claudeAgent")).toEqual(["claude/custom-opus"]);
+    expect(getCustomModelsForProvider(settings, "copilot")).toEqual(["copilot/custom-model"]);
   });
 
   it("reads default custom models for each provider", () => {
     const defaults = {
       customCodexModels: ["default/codex-model"],
       customClaudeModels: ["claude/default-opus"],
+      customCopilotModels: ["copilot/default-model"],
     } as const;
 
     expect(getDefaultCustomModelsForProvider(defaults, "codex")).toEqual(["default/codex-model"]);
     expect(getDefaultCustomModelsForProvider(defaults, "claudeAgent")).toEqual([
       "claude/default-opus",
+    ]);
+    expect(getDefaultCustomModelsForProvider(defaults, "copilot")).toEqual([
+      "copilot/default-model",
     ]);
   });
 
@@ -202,10 +231,17 @@ describe("provider-indexed custom model settings", () => {
     });
   });
 
+  it("patches custom models for copilot", () => {
+    expect(patchCustomModels("copilot", ["copilot/custom-model"])).toEqual({
+      customCopilotModels: ["copilot/custom-model"],
+    });
+  });
+
   it("builds a complete provider-indexed custom model record", () => {
     expect(getCustomModelsByProvider(settings)).toEqual({
       codex: ["custom/codex-model"],
       claudeAgent: ["claude/custom-opus"],
+      copilot: ["copilot/custom-model"],
     });
   });
 
@@ -218,12 +254,16 @@ describe("provider-indexed custom model settings", () => {
     expect(
       modelOptionsByProvider.claudeAgent.some((option) => option.slug === "claude/custom-opus"),
     ).toBe(true);
+    expect(
+      modelOptionsByProvider.copilot.some((option) => option.slug === "copilot/custom-model"),
+    ).toBe(true);
   });
 
   it("normalizes and deduplicates custom model options per provider", () => {
     const modelOptionsByProvider = getCustomModelOptionsByProvider({
       customCodexModels: ["  custom/codex-model ", "gpt-5.4", "custom/codex-model"],
       customClaudeModels: [" sonnet ", "claude/custom-opus", "claude/custom-opus"],
+      customCopilotModels: [" gpt-5.4 ", "copilot/custom-model", "copilot/custom-model"],
     });
 
     expect(

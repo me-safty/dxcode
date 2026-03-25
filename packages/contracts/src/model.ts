@@ -20,9 +20,15 @@ export const ClaudeModelOptions = Schema.Struct({
 });
 export type ClaudeModelOptions = typeof ClaudeModelOptions.Type;
 
+export const CopilotModelOptions = Schema.Struct({
+  reasoningEffort: Schema.optional(Schema.Literals(CODEX_REASONING_EFFORT_OPTIONS)),
+});
+export type CopilotModelOptions = typeof CopilotModelOptions.Type;
+
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
+  copilot: Schema.optional(CopilotModelOptions),
 });
 export type ProviderModelOptions = typeof ProviderModelOptions.Type;
 
@@ -185,6 +191,103 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
       },
     },
   ],
+  copilot: [
+    {
+      slug: "gpt-5.4",
+      name: "GPT-5.4",
+      capabilities: {
+        reasoningEffortLevels: [
+          { value: "xhigh", label: "Extra High" },
+          { value: "high", label: "High", isDefault: true },
+          { value: "medium", label: "Medium" },
+          { value: "low", label: "Low" },
+        ],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+      },
+    },
+    {
+      slug: "gpt-5.4-mini",
+      name: "GPT-5.4 Mini",
+      capabilities: {
+        reasoningEffortLevels: [
+          { value: "xhigh", label: "Extra High" },
+          { value: "high", label: "High", isDefault: true },
+          { value: "medium", label: "Medium" },
+          { value: "low", label: "Low" },
+        ],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+      },
+    },
+    {
+      slug: "gpt-5.3-codex",
+      name: "GPT-5.3 Codex",
+      capabilities: {
+        reasoningEffortLevels: [
+          { value: "xhigh", label: "Extra High" },
+          { value: "high", label: "High", isDefault: true },
+          { value: "medium", label: "Medium" },
+          { value: "low", label: "Low" },
+        ],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+      },
+    },
+    {
+      slug: "claude-sonnet-4.6",
+      name: "Claude Sonnet 4.6",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+      },
+    },
+    {
+      slug: "claude-haiku-4.5",
+      name: "Claude Haiku 4.5",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+      },
+    },
+    {
+      slug: "claude-opus-4.6",
+      name: "Claude Opus 4.6",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+      },
+    },
+    {
+      slug: "claude-opus-4.6-fast",
+      name: "Claude Opus 4.6 (Fast Mode)",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+      },
+    },
+    {
+      slug: "gemini-3.0",
+      name: "Gemini 3.0 Pro",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+      },
+    },
+  ],
 } as const satisfies Record<ProviderKind, readonly ModelDefinition[]>;
 export type ModelOptionsByProvider = typeof MODEL_OPTIONS_BY_PROVIDER;
 
@@ -194,6 +297,7 @@ export type ModelSlug = BuiltInModelSlug | (string & {});
 export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, ModelSlug> = {
   codex: "gpt-5.4",
   claudeAgent: "claude-sonnet-4-6",
+  copilot: "gpt-5.4",
 };
 
 // Backward compatibility for existing Codex-only call sites.
@@ -223,6 +327,20 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "claude-haiku-4.5": "claude-haiku-4-5",
     "claude-haiku-4-5-20251001": "claude-haiku-4-5",
   },
+  copilot: {
+    "5.4": "gpt-5.4",
+    "5.4-mini": "gpt-5.4-mini",
+    "5.3": "gpt-5.3-codex",
+    "gpt-5.3": "gpt-5.3-codex",
+    gemini: "gemini-3.0",
+    "gemini-3": "gemini-3.0",
+    "gemini-3.0": "gemini-3.0",
+    haiku: "claude-haiku-4.5",
+    opus: "claude-opus-4.6",
+    "opus-4.6": "claude-opus-4.6",
+    "opus-4.6-fast": "claude-opus-4.6-fast",
+    sonnet: "claude-sonnet-4.6",
+  },
 };
 
 // ── Model capabilities index ──────────────────────────────────────────
@@ -239,4 +357,5 @@ export const MODEL_CAPABILITIES_INDEX = Object.fromEntries(
 export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
   codex: "Codex",
   claudeAgent: "Claude",
+  copilot: "Copilot",
 };

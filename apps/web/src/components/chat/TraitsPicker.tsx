@@ -1,5 +1,6 @@
 import {
   type ClaudeModelOptions,
+  type CopilotModelOptions,
   type CodexModelOptions,
   type ProviderKind,
   type ProviderModelOptions,
@@ -35,7 +36,7 @@ function getRawEffort(
   provider: ProviderKind,
   modelOptions: ProviderOptions | null | undefined,
 ): string | null {
-  if (provider === "codex") {
+  if (provider === "codex" || provider === "copilot") {
     return trimOrNull((modelOptions as CodexModelOptions | undefined)?.reasoningEffort);
   }
   return trimOrNull((modelOptions as ClaudeModelOptions | undefined)?.effort);
@@ -48,6 +49,12 @@ function buildNextOptions(
 ): ProviderOptions {
   if (provider === "codex") {
     return { ...(modelOptions as CodexModelOptions | undefined), ...patch } as CodexModelOptions;
+  }
+  if (provider === "copilot") {
+    return {
+      ...(modelOptions as CopilotModelOptions | undefined),
+      ...patch,
+    } as CopilotModelOptions;
   }
   return { ...(modelOptions as ClaudeModelOptions | undefined), ...patch } as ClaudeModelOptions;
 }
@@ -142,7 +149,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
         onPromptChange(nextPrompt);
         return;
       }
-      const effortKey = provider === "codex" ? "reasoningEffort" : "effort";
+      const effortKey = provider === "claudeAgent" ? "effort" : "reasoningEffort";
       setProviderModelOptions(
         threadId,
         provider,

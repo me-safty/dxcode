@@ -4,6 +4,7 @@ import {
   MODEL_OPTIONS_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   type ClaudeModelOptions,
+  type CopilotModelOptions,
   type ClaudeCodeEffort,
   type CodexModelOptions,
   type ModelCapabilities,
@@ -15,6 +16,7 @@ import {
 const MODEL_SLUG_SET_BY_PROVIDER: Record<ProviderKind, ReadonlySet<ModelSlug>> = {
   claudeAgent: new Set(MODEL_OPTIONS_BY_PROVIDER.claudeAgent.map((option) => option.slug)),
   codex: new Set(MODEL_OPTIONS_BY_PROVIDER.codex.map((option) => option.slug)),
+  copilot: new Set(MODEL_OPTIONS_BY_PROVIDER.copilot.map((option) => option.slug)),
 };
 
 export interface SelectableModelOption {
@@ -184,6 +186,22 @@ export function normalizeClaudeModelOptions(
     ...(fastMode ? { fastMode: true } : {}),
   };
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
+
+export function normalizeCopilotModelOptions(
+  model: string | null | undefined,
+  modelOptions: CopilotModelOptions | null | undefined,
+): CopilotModelOptions | undefined {
+  const caps = getModelCapabilities("copilot", model);
+  const defaultReasoningEffort = getDefaultEffort(caps) as CodexReasoningEffort | null;
+  const resolvedReasoningEffort = trimOrNull(modelOptions?.reasoningEffort);
+  const reasoningEffort =
+    resolvedReasoningEffort &&
+    hasEffortLevel(caps, resolvedReasoningEffort) &&
+    resolvedReasoningEffort !== defaultReasoningEffort
+      ? resolvedReasoningEffort
+      : undefined;
+  return reasoningEffort ? { reasoningEffort } : undefined;
 }
 
 export function applyClaudePromptEffortPrefix(
