@@ -2093,6 +2093,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   ]);
 
   useEffect(() => {
+    if (sendPhase === "idle") {
+      return;
+    }
+    if (!latestTurnSettled) {
+      return;
+    }
+    resetSendPhase();
+  }, [latestTurnSettled, resetSendPhase, sendPhase]);
+
+  useEffect(() => {
     if (!activeThreadId) return;
     const previous = terminalOpenByThreadRef.current[activeThreadId] ?? false;
     const current = Boolean(terminalState.terminalOpen);
