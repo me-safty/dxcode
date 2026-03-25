@@ -3,18 +3,23 @@ import { describe, expect, it } from "vitest";
 
 import {
   AppSettingsSchema,
+  DEFAULT_SIDEBAR_PROJECT_SORT_ORDER,
+  DEFAULT_SIDEBAR_THREAD_SORT_ORDER,
   DEFAULT_TIMESTAMP_FORMAT,
+  getProviderStartOptions,
+} from "./appSettings";
+import {
   getAppModelOptions,
   getCustomModelOptionsByProvider,
   getCustomModelsByProvider,
   getCustomModelsForProvider,
   getDefaultCustomModelsForProvider,
-  getProviderStartOptions,
   MODEL_PROVIDER_SETTINGS,
   normalizeCustomModelSlugs,
   patchCustomModels,
+  resolveAppModelSelectionState,
   resolveAppModelSelection,
-} from "./appSettings";
+} from "./modelSelection";
 
 describe("normalizeCustomModelSlugs", () => {
   it("normalizes aliases, removes built-ins, and deduplicates values", () => {
@@ -108,6 +113,16 @@ describe("resolveAppModelSelection", () => {
 describe("timestamp format defaults", () => {
   it("defaults timestamp format to locale", () => {
     expect(DEFAULT_TIMESTAMP_FORMAT).toBe("locale");
+  });
+});
+
+describe("sidebar sort defaults", () => {
+  it("defaults project sorting to updated_at", () => {
+    expect(DEFAULT_SIDEBAR_PROJECT_SORT_ORDER).toBe("updated_at");
+  });
+
+  it("defaults thread sorting to updated_at", () => {
+    expect(DEFAULT_SIDEBAR_THREAD_SORT_ORDER).toBe("updated_at");
   });
 });
 
@@ -245,9 +260,66 @@ describe("AppSettingsSchema", () => {
       defaultThreadEnvMode: "local",
       confirmThreadDelete: false,
       enableAssistantStreaming: false,
+      sidebarProjectSortOrder: DEFAULT_SIDEBAR_PROJECT_SORT_ORDER,
+      sidebarThreadSortOrder: DEFAULT_SIDEBAR_THREAD_SORT_ORDER,
       timestampFormat: DEFAULT_TIMESTAMP_FORMAT,
       customCodexModels: [],
       customClaudeModels: [],
+    });
+  });
+});
+
+describe("resolveAppModelSelectionState", () => {
+  it("falls back to the default git-writing codex selection", () => {
+    expect(
+      resolveAppModelSelectionState({
+        customCodexModels: [],
+        customClaudeModels: [],
+        textGenerationModelSelection: undefined,
+      }),
+    ).toEqual({
+      provider: "codex",
+      model: "gpt-5.4-mini",
+    });
+  });
+
+  it("preserves the selected provider and resolves saved custom models", () => {
+    expect(
+      resolveAppModelSelectionState({
+        customCodexModels: [],
+        customClaudeModels: ["claude/custom-haiku"],
+        textGenerationModelSelection: {
+          provider: "claudeAgent",
+          model: "claude/custom-haiku",
+        },
+      }),
+    ).toEqual({
+      provider: "claudeAgent",
+      model: "claude/custom-haiku",
+    });
+  });
+
+  it("normalizes provider options against the resolved model capabilities", () => {
+    expect(
+      resolveAppModelSelectionState({
+        customCodexModels: [],
+        customClaudeModels: [],
+        textGenerationModelSelection: {
+          provider: "claudeAgent",
+          model: "claude-haiku-4-5",
+          options: {
+            effort: "max",
+            thinking: false,
+            fastMode: true,
+          },
+        },
+      }),
+    ).toEqual({
+      provider: "claudeAgent",
+      model: "claude-haiku-4-5",
+      options: {
+        thinking: false,
+      },
     });
   });
 });
