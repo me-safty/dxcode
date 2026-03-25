@@ -8,7 +8,6 @@
 import type { ThreadId } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { createMemoryStorage, type StateStorage } from "./lib/storage";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
   DEFAULT_THREAD_TERMINAL_ID,
@@ -27,27 +26,6 @@ interface ThreadTerminalState {
 }
 
 const TERMINAL_STATE_STORAGE_KEY = "t3code:terminal-state:v1";
-
-function createTerminalStateStorage(): StateStorage {
-  if (typeof localStorage === "undefined") {
-    return createMemoryStorage();
-  }
-
-  const storage = localStorage as Partial<Storage>;
-  if (
-    typeof storage.getItem === "function" &&
-    typeof storage.setItem === "function" &&
-    typeof storage.removeItem === "function"
-  ) {
-    return {
-      getItem: (name) => storage.getItem!(name),
-      setItem: (name, value) => storage.setItem!(name, value),
-      removeItem: (name) => storage.removeItem!(name),
-    };
-  }
-
-  return createMemoryStorage();
-}
 
 function normalizeTerminalIds(terminalIds: string[]): string[] {
   const ids = [...new Set(terminalIds.map((id) => id.trim()).filter((id) => id.length > 0))];
@@ -564,7 +542,7 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
     {
       name: TERMINAL_STATE_STORAGE_KEY,
       version: 1,
-      storage: createJSONStorage(createTerminalStateStorage),
+      storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         terminalStateByThreadId: state.terminalStateByThreadId,
       }),

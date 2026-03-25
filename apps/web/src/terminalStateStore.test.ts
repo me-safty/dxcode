@@ -1,9 +1,10 @@
 import { ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { selectThreadTerminalState, useTerminalStateStore } from "./terminalStateStore";
-
 const THREAD_ID = ThreadId.makeUnsafe("thread-1");
+
+let selectThreadTerminalState: typeof import("./terminalStateStore").selectThreadTerminalState;
+let useTerminalStateStore: typeof import("./terminalStateStore").useTerminalStateStore;
 
 function createLocalStorageMock(): Storage {
   const values = new Map<string, string>();
@@ -30,8 +31,10 @@ function createLocalStorageMock(): Storage {
 }
 
 describe("terminalStateStore actions", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
     vi.stubGlobal("localStorage", createLocalStorageMock());
+    ({ selectThreadTerminalState, useTerminalStateStore } = await import("./terminalStateStore"));
     useTerminalStateStore.setState({ terminalStateByThreadId: {} });
   });
 
