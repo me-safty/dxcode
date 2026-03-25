@@ -2093,14 +2093,28 @@ export default function ChatView({ threadId }: ChatViewProps) {
   ]);
 
   useEffect(() => {
-    if (sendPhase === "idle") {
-      return;
-    }
-    if (!latestTurnSettled) {
-      return;
-    }
-    resetSendPhase();
-  }, [latestTurnSettled, resetSendPhase, sendPhase]);
+  if (sendPhase === "idle") {
+    return;
+  }
+  if (!latestTurnSettled) {
+    return;
+  }
+  if (!sendStartedAt || !activeLatestTurn?.completedAt) {
+    return;
+  }
+
+  const sendStartedAtMs = Date.parse(sendStartedAt);
+  const turnCompletedAtMs = Date.parse(activeLatestTurn.completedAt);
+  if (Number.isNaN(sendStartedAtMs) || Number.isNaN(turnCompletedAtMs)) {
+    return;
+  }
+  if (turnCompletedAtMs < sendStartedAtMs) {
+    return;
+  }
+
+  resetSendPhase();
+}, [activeLatestTurn?.completedAt, latestTurnSettled, resetSendPhase, sendPhase, sendStartedAt]);
+
 
   useEffect(() => {
     if (!activeThreadId) return;
