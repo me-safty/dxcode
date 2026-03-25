@@ -388,6 +388,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewHandoffTimeoutByMessageIdRef = useRef<Record<string, number>>({});
   const sendInFlightRef = useRef(false);
+  const sendBaselineTurnIdRef = useRef<TurnId | null>(null);
   const dragDepthRef = useRef(0);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
   const setMessagesScrollContainerRef = useCallback((element: HTMLDivElement | null) => {
@@ -2061,12 +2062,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
     };
   }, [phase]);
 
-  const beginSendPhase = useCallback((nextPhase: Exclude<SendPhase, "idle">) => {
-    setSendStartedAt((current) => current ?? new Date().toISOString());
-    setSendPhase(nextPhase);
-  }, []);
+  const beginSendPhase = useCallback(
+    (nextPhase: Exclude<SendPhase, "idle">) => {
+      sendBaselineTurnIdRef.current = activeLatestTurn?.turnId ?? null;
+      setSendStartedAt((current) => current ?? new Date().toISOString());
+      setSendPhase(nextPhase);
+    },
+    [activeLatestTurn?.turnId],
+  );
 
   const resetSendPhase = useCallback(() => {
+    sendBaselineTurnIdRef.current = null;
     setSendPhase("idle");
     setSendStartedAt(null);
   }, []);
@@ -2099,8 +2105,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!latestTurnSettled) {
       return;
     }
+
+    const latestTurnId = activeLatestTurn?.turnId ?? null;
+    if (latestTurnId === sendBaselineTurnIdRef.current) {
+      return;
+    }
+
     resetSendPhase();
-  }, [latestTurnSettled, resetSendPhase, sendPhase]);
+  }, [activeLatestTurn?.turnId, latestTurnSettled, resetSendPhase, sendPhase]);
 
   useEffect(() => {
     if (!activeThreadId) return;
