@@ -1,4 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("./TraitsPicker", () => ({
+  TraitsMenuContent: () => null,
+  TraitsPicker: () => null,
+}));
+
 import { getComposerProviderState } from "./composerProviderRegistry";
 
 describe("getComposerProviderState", () => {
@@ -34,8 +40,10 @@ describe("getComposerProviderState", () => {
       provider: "codex",
       promptEffort: "low",
       modelOptionsForDispatch: {
-        reasoningEffort: "low",
-        fastMode: true,
+        codex: {
+          reasoningEffort: "low",
+          fastMode: true,
+        },
       },
     });
   });
@@ -56,7 +64,9 @@ describe("getComposerProviderState", () => {
       provider: "codex",
       promptEffort: "high",
       modelOptionsForDispatch: {
-        fastMode: true,
+        codex: {
+          fastMode: true,
+        },
       },
     });
   });
@@ -112,7 +122,9 @@ describe("getComposerProviderState", () => {
       provider: "claudeAgent",
       promptEffort: "medium",
       modelOptionsForDispatch: {
-        effort: "medium",
+        claudeAgent: {
+          effort: "medium",
+        },
       },
       composerFrameClassName: "ultrathink-frame",
       composerSurfaceClassName: "shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset]",
@@ -137,7 +149,9 @@ describe("getComposerProviderState", () => {
       provider: "claudeAgent",
       promptEffort: null,
       modelOptionsForDispatch: {
-        thinking: false,
+        claudeAgent: {
+          thinking: false,
+        },
       },
     });
   });
@@ -158,7 +172,9 @@ describe("getComposerProviderState", () => {
       provider: "claudeAgent",
       promptEffort: "high",
       modelOptionsForDispatch: {
-        fastMode: true,
+        claudeAgent: {
+          fastMode: true,
+        },
       },
     });
   });

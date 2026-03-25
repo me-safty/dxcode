@@ -24,12 +24,9 @@ import {
 } from "@t3tools/contracts";
 import {
   applyClaudePromptEffortPrefix,
-<<<<<<< HEAD
-  getModelCapabilities,
-=======
   getDefaultModel,
+  getModelCapabilities,
   getProviderCapabilities,
->>>>>>> f7dfc362 (refactor(provider): express droid behavior via capabilities)
   normalizeModelSlug,
 } from "@t3tools/shared/model";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";

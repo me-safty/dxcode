@@ -61,6 +61,109 @@ export function getProviderCapabilities(provider: ProviderKind): ProviderCapabil
   return PROVIDER_CAPABILITIES[provider];
 }
 
+export interface EffortLevel {
+  readonly value: string;
+  readonly label: string;
+  readonly isDefault?: boolean;
+}
+
+export interface ModelCapabilities {
+  readonly reasoningEffortLevels: ReadonlyArray<EffortLevel>;
+  readonly promptInjectedEffortLevels: ReadonlyArray<string>;
+  readonly supportsFastMode: boolean;
+  readonly supportsThinkingToggle: boolean;
+}
+
+const EFFORT_LABELS: Record<string, string> = {
+  xhigh: "Extra High",
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+  max: "Max",
+  ultrathink: "Ultrathink",
+};
+
+function buildEffortLevels(
+  values: ReadonlyArray<string>,
+  defaultValue: string,
+): ReadonlyArray<EffortLevel> {
+  return values.map((value) => {
+    const level: EffortLevel = {
+      value,
+      label: EFFORT_LABELS[value] ?? value,
+      ...(value === defaultValue ? { isDefault: true } : {}),
+    };
+    return level;
+  });
+}
+
+const EMPTY_CAPABILITIES: ModelCapabilities = {
+  reasoningEffortLevels: [],
+  promptInjectedEffortLevels: [],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+};
+
+export function getModelCapabilities(
+  provider: ProviderKind,
+  model: string | null | undefined,
+): ModelCapabilities {
+  if (provider === "codex") {
+    return {
+      reasoningEffortLevels: buildEffortLevels([...CODEX_REASONING_EFFORT_OPTIONS], "high"),
+      promptInjectedEffortLevels: [],
+      supportsFastMode: false,
+      supportsThinkingToggle: false,
+    };
+  }
+
+  if (provider === "claudeAgent") {
+    const normalized = normalizeModelSlug(model, "claudeAgent");
+    if (!normalized) return EMPTY_CAPABILITIES;
+
+    const effortValues = supportsClaudeMaxEffort(normalized)
+      ? (["low", "medium", "high", "max", "ultrathink"] as const)
+      : supportsClaudeAdaptiveReasoning(normalized)
+        ? (["low", "medium", "high", "ultrathink"] as const)
+        : [];
+
+    return {
+      reasoningEffortLevels: buildEffortLevels(effortValues, "high"),
+      promptInjectedEffortLevels: effortValues.includes("ultrathink" as never)
+        ? ["ultrathink"]
+        : [],
+      supportsFastMode: supportsClaudeFastMode(normalized),
+      supportsThinkingToggle: supportsClaudeThinkingToggle(normalized),
+    };
+  }
+
+  if (provider === "factoryDroid") {
+    return {
+      reasoningEffortLevels: buildEffortLevels([...FACTORY_DROID_EFFORT_OPTIONS], "high"),
+      promptInjectedEffortLevels: [],
+      supportsFastMode: false,
+      supportsThinkingToggle: false,
+    };
+  }
+
+  return EMPTY_CAPABILITIES;
+}
+
+export function getDefaultEffort(capabilities: ModelCapabilities): string | null {
+  const def = capabilities.reasoningEffortLevels.find((l) => l.isDefault === true);
+  return def ? def.value : null;
+}
+
+export function hasEffortLevel(capabilities: ModelCapabilities, effort: string): boolean {
+  return capabilities.reasoningEffortLevels.some((l) => l.value === effort);
+}
+
+export function trimOrNull(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export function supportsClaudeFastMode(model: string | null | undefined): boolean {
   return normalizeModelSlug(model, "claudeAgent") === CLAUDE_OPUS_4_6_MODEL;
 }
@@ -264,6 +367,7 @@ export function getEffectiveClaudeCodeEffort(
 }
 
 export function normalizeCodexModelOptions(
+  model: string | null | undefined,
   modelOptions: CodexModelOptions | null | undefined,
 ): CodexModelOptions | undefined {
   const defaultReasoningEffort = getDefaultReasoningEffort("codex");
