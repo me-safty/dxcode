@@ -1,5 +1,7 @@
 import * as NFS from "node:fs";
+import * as Net from "node:net";
 import * as readline from "node:readline";
+import type { Readable } from "node:stream";
 
 import { Data, Effect, Option, Result, Schema } from "effect";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
@@ -34,20 +36,7 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
   );
   if (!fdReady) return Option.none();
 
-  const streamFd = yield* Effect.try({
-    try: () => NFS.openSync(resolveFdPath(fd), "r"),
-    catch: (error) =>
-      new BootstrapError({
-        message: "Failed to duplicate bootstrap fd.",
-        cause: error,
-      }),
-  });
-
-  const stream = NFS.createReadStream("", {
-    fd: streamFd,
-    encoding: "utf8",
-    autoClose: true,
-  });
+  const stream = yield* makeBootstrapInputStream(fd);
 
   const timeoutMs = options?.timeoutMs ?? 1000;
 
@@ -62,6 +51,7 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
       input.removeListener("line", handleLine);
       input.removeListener("close", handleClose);
       input.close();
+      stream.destroy();
     };
 
     const handleError = (error: Error) => {
@@ -113,9 +103,43 @@ function isUnavailableBootstrapFdError(error: unknown): boolean {
   );
 }
 
-function resolveFdPath(fd: number): string {
-  if (process.platform === "linux") {
+const makeBootstrapInputStream = (fd: number) =>
+  Effect.try({
+    try: (): Readable => {
+      const fdPath = resolveFdPath(fd);
+      if (fdPath === undefined) {
+        const stream = new Net.Socket({
+          fd,
+          readable: true,
+          writable: false,
+        });
+        stream.setEncoding("utf8");
+        return stream;
+      }
+
+      const streamFd = NFS.openSync(fdPath, "r");
+      return NFS.createReadStream("", {
+        fd: streamFd,
+        encoding: "utf8",
+        autoClose: true,
+      });
+    },
+    catch: (error) =>
+      new BootstrapError({
+        message: "Failed to duplicate bootstrap fd.",
+        cause: error,
+      }),
+  });
+
+export function resolveFdPath(
+  fd: number,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  if (platform === "linux") {
     return `/proc/self/fd/${fd}`;
+  }
+  if (platform === "win32") {
+    return undefined;
   }
   return `/dev/fd/${fd}`;
 }
