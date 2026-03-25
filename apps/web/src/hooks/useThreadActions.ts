@@ -1,9 +1,10 @@
 import { ThreadId } from "@t3tools/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback } from "react";
 
 import { useAppSettings } from "../appSettings";
+import { getFallbackThreadIdAfterDelete } from "../components/Sidebar.logic";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread } from "./useHandleNewThread";
 import { gitRemoveWorktreeMutationOptions } from "../lib/gitReactQuery";
@@ -27,6 +28,7 @@ export function useThreadActions() {
     strict: false,
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
   });
+  const navigate = useNavigate();
   const { handleNewThread } = useHandleNewThread();
   const queryClient = useQueryClient();
   const removeWorktreeMutation = useMutation(gitRemoveWorktreeMutationOptions({ queryClient }));
@@ -109,7 +111,14 @@ export function useThreadActions() {
         // Terminal may already be closed.
       }
 
-      const shouldOpenNewThread = routeThreadId === threadId;
+      const deletedThreadIds = opts.deletedThreadIds ?? new Set<ThreadId>();
+      const shouldNavigateToFallback = routeThreadId === threadId;
+      const fallbackThreadId = getFallbackThreadIdAfterDelete({
+        threads,
+        deletedThreadId: threadId,
+        deletedThreadIds,
+        sortOrder: appSettings.sidebarThreadSortOrder,
+      });
       await api.orchestration.dispatchCommand({
         type: "thread.delete",
         commandId: newCommandId(),
@@ -119,8 +128,16 @@ export function useThreadActions() {
       clearProjectDraftThreadById(thread.projectId, thread.id);
       clearTerminalState(threadId);
 
-      if (shouldOpenNewThread) {
-        await handleNewThread(thread.projectId);
+      if (shouldNavigateToFallback) {
+        if (fallbackThreadId) {
+          await navigate({
+            to: "/$threadId",
+            params: { threadId: fallbackThreadId },
+            replace: true,
+          });
+        } else {
+          await navigate({ to: "/", replace: true });
+        }
       }
 
       if (!shouldDeleteWorktree || !orphanedWorktreePath || !threadProject) {
@@ -152,7 +169,8 @@ export function useThreadActions() {
       clearComposerDraftForThread,
       clearProjectDraftThreadById,
       clearTerminalState,
-      handleNewThread,
+      appSettings.sidebarThreadSortOrder,
+      navigate,
       projects,
       removeWorktreeMutation,
       routeThreadId,

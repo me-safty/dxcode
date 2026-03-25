@@ -66,7 +66,7 @@ function SettingsLayout() {
 export const Route = createFileRoute("/_chat/settings")({
   beforeLoad: ({ location }) => {
     if (location.pathname === "/settings") {
-      throw redirect({ to: "/settings/general" });
+      throw redirect({ to: "/settings/general", replace: true });
     }
   },
   component: SettingsLayout,
