@@ -15,7 +15,7 @@ import {
   isClaudeUltrathinkPrompt,
   normalizeClaudeModelOptions,
   normalizeModelSlug,
-  resolveClaudeApiModelId,
+  resolveApiModelId,
   resolveModelSlug,
   resolveModelSlugForProvider,
   resolveSelectableModel,
@@ -121,9 +121,9 @@ describe("contextWindowOptions capability", () => {
   it("offers context window options for Opus 4.6 and Sonnet 4.6", () => {
     const opusOpts = getModelCapabilities("claudeAgent", "claude-opus-4-6").contextWindowOptions;
     expect(opusOpts.length).toBeGreaterThan(1);
-    expect(opusOpts.find((o) => o.isDefault)?.value).toBe("");
+    expect(opusOpts.find((o) => o.isDefault)?.value).toBe("200k");
     expect(
-      hasContextWindowOption(getModelCapabilities("claudeAgent", "claude-opus-4-6"), "[1m]"),
+      hasContextWindowOption(getModelCapabilities("claudeAgent", "claude-opus-4-6"), "1m"),
     ).toBe(true);
 
     const sonnetOpts = getModelCapabilities(
@@ -132,7 +132,7 @@ describe("contextWindowOptions capability", () => {
     ).contextWindowOptions;
     expect(sonnetOpts.length).toBeGreaterThan(1);
     expect(
-      hasContextWindowOption(getModelCapabilities("claudeAgent", "claude-sonnet-4-6"), "[1m]"),
+      hasContextWindowOption(getModelCapabilities("claudeAgent", "claude-sonnet-4-6"), "1m"),
     ).toBe(true);
   });
 
@@ -146,71 +146,100 @@ describe("contextWindowOptions capability", () => {
 });
 
 describe("getDefaultContextWindow", () => {
-  it("returns empty string (default suffix) for models with context window options", () => {
+  it("returns the default option value for models with context window options", () => {
     expect(getDefaultContextWindow(getModelCapabilities("claudeAgent", "claude-opus-4-6"))).toBe(
-      "",
+      "200k",
     );
   });
 
-  it("returns empty string for models without context window options", () => {
-    expect(getDefaultContextWindow(getModelCapabilities("claudeAgent", "claude-haiku-4-5"))).toBe(
-      "",
-    );
+  it("returns null for models without context window options", () => {
+    expect(
+      getDefaultContextWindow(getModelCapabilities("claudeAgent", "claude-haiku-4-5")),
+    ).toBeNull();
   });
 });
 
-describe("resolveClaudeApiModelId", () => {
-  it("appends context window suffix when set on a supported model", () => {
-    expect(resolveClaudeApiModelId("claude-opus-4-6", { contextWindow: "[1m]" })).toBe(
-      "claude-opus-4-6[1m]",
-    );
-    expect(resolveClaudeApiModelId("claude-sonnet-4-6", { contextWindow: "[1m]" })).toBe(
-      "claude-sonnet-4-6[1m]",
-    );
+describe("resolveApiModelId", () => {
+  it("appends provider-specific suffix for Claude context window", () => {
+    expect(
+      resolveApiModelId({
+        provider: "claudeAgent",
+        model: "claude-opus-4-6",
+        options: { contextWindow: "1m" },
+      }),
+    ).toBe("claude-opus-4-6[1m]");
+    expect(
+      resolveApiModelId({
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+        options: { contextWindow: "1m" },
+      }),
+    ).toBe("claude-sonnet-4-6[1m]");
   });
 
   it("returns the model as-is when contextWindow is not set", () => {
-    expect(resolveClaudeApiModelId("claude-opus-4-6", {})).toBe("claude-opus-4-6");
-    expect(resolveClaudeApiModelId("claude-opus-4-6", null)).toBe("claude-opus-4-6");
-    expect(resolveClaudeApiModelId("claude-opus-4-6", undefined)).toBe("claude-opus-4-6");
+    expect(resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6" })).toBe(
+      "claude-opus-4-6",
+    );
+    expect(
+      resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6", options: {} }),
+    ).toBe("claude-opus-4-6");
   });
 
   it("returns the model as-is for the default context window value", () => {
-    expect(resolveClaudeApiModelId("claude-opus-4-6", { contextWindow: "" })).toBe(
-      "claude-opus-4-6",
-    );
+    expect(
+      resolveApiModelId({
+        provider: "claudeAgent",
+        model: "claude-opus-4-6",
+        options: { contextWindow: "200k" },
+      }),
+    ).toBe("claude-opus-4-6");
   });
 
   it("ignores unsupported context window values", () => {
-    expect(resolveClaudeApiModelId("claude-haiku-4-5", { contextWindow: "[1m]" })).toBe(
-      "claude-haiku-4-5",
-    );
-    expect(resolveClaudeApiModelId("claude-opus-4-6", { contextWindow: "[bogus]" })).toBe(
-      "claude-opus-4-6",
-    );
+    expect(
+      resolveApiModelId({
+        provider: "claudeAgent",
+        model: "claude-haiku-4-5",
+        options: { contextWindow: "1m" },
+      }),
+    ).toBe("claude-haiku-4-5");
+    expect(
+      resolveApiModelId({
+        provider: "claudeAgent",
+        model: "claude-opus-4-6",
+        options: { contextWindow: "bogus" },
+      }),
+    ).toBe("claude-opus-4-6");
+  });
+
+  it("returns the model as-is for Codex selections", () => {
+    expect(resolveApiModelId({ provider: "codex", model: "gpt-5.4" })).toBe("gpt-5.4");
   });
 });
 
 describe("normalizeClaudeModelOptions with contextWindow", () => {
   it("preserves non-default contextWindow for supported models", () => {
-    expect(normalizeClaudeModelOptions("claude-opus-4-6", { contextWindow: "[1m]" })).toEqual({
-      contextWindow: "[1m]",
+    expect(normalizeClaudeModelOptions("claude-opus-4-6", { contextWindow: "1m" })).toEqual({
+      contextWindow: "1m",
     });
   });
 
   it("strips contextWindow for unsupported models", () => {
     expect(
-      normalizeClaudeModelOptions("claude-haiku-4-5", { contextWindow: "[1m]" }),
+      normalizeClaudeModelOptions("claude-haiku-4-5", { contextWindow: "1m" }),
     ).toBeUndefined();
   });
 
   it("strips contextWindow when it is the default value", () => {
-    expect(normalizeClaudeModelOptions("claude-opus-4-6", { contextWindow: "" })).toBeUndefined();
+    expect(
+      normalizeClaudeModelOptions("claude-opus-4-6", { contextWindow: "200k" }),
+    ).toBeUndefined();
   });
 
   it("strips unknown contextWindow values", () => {
     expect(
-      normalizeClaudeModelOptions("claude-opus-4-6", { contextWindow: "[bogus]" }),
+      normalizeClaudeModelOptions("claude-opus-4-6", { contextWindow: "bogus" }),
     ).toBeUndefined();
   });
 });

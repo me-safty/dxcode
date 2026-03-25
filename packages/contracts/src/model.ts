@@ -37,7 +37,7 @@ export const EffortOption = Schema.Struct({
 export type EffortOption = typeof EffortOption.Type;
 
 export const ContextWindowOption = Schema.Struct({
-  /** API suffix appended to the model slug (e.g. `""` for default, `"[1m]"` for 1M). */
+  /** Semantic identifier stored in model options (e.g. `"200k"`, `"1m"`). */
   value: Schema.String,
   label: TrimmedNonEmptyString,
   isDefault: Schema.optional(Schema.Boolean),
@@ -177,8 +177,8 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
         supportsFastMode: true,
         supportsThinkingToggle: false,
         contextWindowOptions: [
-          { value: "", label: "200k", isDefault: true },
-          { value: "[1m]", label: "1M" },
+          { value: "200k", label: "200k", isDefault: true },
+          { value: "1m", label: "1M" },
         ],
         promptInjectedEffortLevels: ["ultrathink"],
       },
@@ -196,8 +196,8 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
         supportsFastMode: false,
         supportsThinkingToggle: false,
         contextWindowOptions: [
-          { value: "", label: "200k", isDefault: true },
-          { value: "[1m]", label: "1M" },
+          { value: "200k", label: "200k", isDefault: true },
+          { value: "1m", label: "1M" },
         ],
         promptInjectedEffortLevels: ["ultrathink"],
       },

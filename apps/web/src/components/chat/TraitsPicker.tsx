@@ -55,6 +55,16 @@ function getRawEffort(
   return trimOrNull((modelOptions as ClaudeModelOptions | undefined)?.effort);
 }
 
+function getRawContextWindow(
+  provider: ProviderKind,
+  modelOptions: ProviderOptions | null | undefined,
+): string | null {
+  if (provider === "claudeAgent") {
+    return trimOrNull((modelOptions as ClaudeModelOptions | undefined)?.contextWindow);
+  }
+  return null;
+}
+
 function buildNextOptions(
   provider: ProviderKind,
   modelOptions: ProviderOptions | null | undefined,
@@ -108,7 +118,7 @@ function getSelectedTraits(
 
   // Context window
   const contextWindowOptions = caps.contextWindowOptions;
-  const rawContextWindow = (modelOptions as ClaudeModelOptions | undefined)?.contextWindow ?? "";
+  const rawContextWindow = getRawContextWindow(provider, modelOptions);
   const defaultContextWindow = getDefaultContextWindow(caps);
   const contextWindow =
     rawContextWindow && hasContextWindowOption(caps, rawContextWindow)
@@ -283,11 +293,11 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
               Context Window
             </div>
             <MenuRadioGroup
-              value={contextWindow}
+              value={contextWindow ?? defaultContextWindow ?? ""}
               onValueChange={(value) => {
                 updateModelOptions(
                   buildNextOptions(provider, modelOptions, {
-                    contextWindow: value || undefined,
+                    contextWindow: value === defaultContextWindow ? undefined : value,
                   }),
                 );
               }}

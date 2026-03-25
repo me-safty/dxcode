@@ -7,6 +7,7 @@ import {
   type CodexModelOptions,
   type CodexReasoningEffort,
   type ModelCapabilities,
+  type ModelSelection,
   type ModelSlug,
   type ProviderKind,
 } from "@t3tools/contracts";
@@ -39,9 +40,9 @@ export function hasContextWindowOption(caps: ModelCapabilities, value: string): 
   return caps.contextWindowOptions.some((o) => o.value === value);
 }
 
-/** Return the default context window value, or `""` if none is defined. */
-export function getDefaultContextWindow(caps: ModelCapabilities): string {
-  return caps.contextWindowOptions.find((o) => o.isDefault)?.value ?? "";
+/** Return the default context window value, or `null` if none is defined. */
+export function getDefaultContextWindow(caps: ModelCapabilities): string | null {
+  return caps.contextWindowOptions.find((o) => o.isDefault)?.value ?? null;
 }
 
 /**
@@ -216,21 +217,33 @@ export function normalizeClaudeModelOptions(
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
 
+// ── Claude context-window → API model-id mapping ────────────────────
+
+/** Maps a context-window option value to the Claude API model suffix. */
+const CLAUDE_CONTEXT_WINDOW_MODEL_SUFFIX: Record<string, string> = {
+  "1m": "[1m]",
+};
+
 /**
- * Resolve the actual API model identifier for a Claude model selection.
+ * Resolve the actual API model identifier from a full model selection.
  *
- * The `contextWindow` option stores an API suffix (e.g. `"[1m]"`) that gets
- * appended to the canonical model slug.  The slug itself stays unchanged in
- * model selections so the capabilities system keeps working.
+ * Provider-aware: each provider can map `contextWindow` (or other options)
+ * to whatever the API requires — a model-id suffix, a separate parameter, etc.
+ * The canonical slug stored in the selection stays unchanged so the
+ * capabilities system keeps working.
  */
-export function resolveClaudeApiModelId(
-  model: string,
-  options: ClaudeModelOptions | null | undefined,
-): string {
-  const suffix = options?.contextWindow;
-  if (!suffix) return model;
-  const caps = getModelCapabilities("claudeAgent", model);
-  return hasContextWindowOption(caps, suffix) ? `${model}${suffix}` : model;
+export function resolveApiModelId(modelSelection: ModelSelection): string {
+  if (modelSelection.provider === "claudeAgent") {
+    const contextWindow = modelSelection.options?.contextWindow;
+    if (contextWindow) {
+      const caps = getModelCapabilities("claudeAgent", modelSelection.model);
+      if (hasContextWindowOption(caps, contextWindow)) {
+        const suffix = CLAUDE_CONTEXT_WINDOW_MODEL_SUFFIX[contextWindow];
+        if (suffix) return `${modelSelection.model}${suffix}`;
+      }
+    }
+  }
+  return modelSelection.model;
 }
 
 
