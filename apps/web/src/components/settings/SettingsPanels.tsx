@@ -36,6 +36,7 @@ import { cn } from "../../lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { toastManager } from "../ui/toast";
+import { formatRelativeTime } from "../../formatRelativeTime";
 
 const THEME_OPTIONS = [
   { value: "system", label: "System" },
@@ -94,16 +95,6 @@ const EMPTY_CUSTOM_MODEL_INPUT_BY_PROVIDER = {
   codex: "",
   claudeAgent: "",
 } satisfies Record<ProviderKind, string>;
-
-function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
 
 function SettingsSection({ children }: { children: ReactNode }) {
   return (
@@ -1078,7 +1069,7 @@ export function ArchivedThreadsPanel() {
                               })
                             }
                           >
-                            <ArchiveX size="3.5" />
+                            <ArchiveX className="size-3.5" />
                             <span>Unarchive</span>
                           </Button>
                         ) : (

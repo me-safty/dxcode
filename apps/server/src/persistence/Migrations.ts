@@ -29,7 +29,7 @@ import Migration0013 from "./Migrations/013_ProjectionThreadProposedPlans.ts";
 import Migration0014 from "./Migrations/014_ProjectionThreadProposedPlanImplementation.ts";
 import Migration0015 from "./Migrations/015_ProjectionTurnsSourceProposedPlan.ts";
 import Migration0016 from "./Migrations/016_CanonicalizeModelSelections.ts";
-import Migration0017 from "./Migrations/016_ProjectionThreadsArchivedAt.ts";
+import Migration0017 from "./Migrations/017_ProjectionThreadsArchivedAt.ts";
 
 /**
  * Migration loader with all migrations defined inline.

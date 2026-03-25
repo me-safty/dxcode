@@ -301,7 +301,6 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
         createdAt: thread.createdAt,
         archivedAt: thread.archivedAt,
         updatedAt: thread.updatedAt,
-        archivedAt: thread.archivedAt,
         latestTurn: thread.latestTurn,
         lastVisitedAt: existing?.lastVisitedAt ?? thread.updatedAt,
         branch: thread.branch,

@@ -14,7 +14,7 @@ import {
 
 export type SettingsSectionPath = "/settings/general" | "/settings/archived";
 
-const SETTINGS_NAV_ITEMS: ReadonlyArray<{
+export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   label: string;
   to: SettingsSectionPath;
   icon: ComponentType<{ className?: string }>;

@@ -132,7 +132,10 @@ describe("OrchestrationEngine", () => {
         projectId: asProjectId("project-archive"),
         title: "Project Archive",
         workspaceRoot: "/tmp/project-archive",
-        defaultModel: "gpt-5-codex",
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
         createdAt,
       }),
     );
@@ -143,7 +146,10 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.makeUnsafe("thread-archive"),
         projectId: asProjectId("project-archive"),
         title: "Archive me",
-        model: "gpt-5-codex",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "full-access",
         branch: null,

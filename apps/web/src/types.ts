@@ -103,8 +103,6 @@ export interface Thread {
   createdAt: string;
   archivedAt: string | null;
   updatedAt?: string | undefined;
-  updatedAt?: string | undefined;
-  archivedAt: string | null;
   latestTurn: OrchestrationLatestTurn | null;
   lastVisitedAt?: string | undefined;
   branch: string | null;
