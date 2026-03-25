@@ -23,7 +23,7 @@ export function createMemoryStorage(): StateStorage {
   };
 }
 
-function isStateStorage(
+export function isStateStorage(
   storage: Partial<StateStorage> | null | undefined,
 ): storage is StateStorage {
   return (
@@ -35,11 +35,15 @@ function isStateStorage(
   );
 }
 
+export function resolveStorage(storage: Partial<StateStorage> | null | undefined): StateStorage {
+  return isStateStorage(storage) ? storage : createMemoryStorage();
+}
+
 export function createDebouncedStorage(
   baseStorage: Partial<StateStorage> | null | undefined,
   debounceMs: number = 300,
 ): DebouncedStorage {
-  const resolvedStorage = isStateStorage(baseStorage) ? baseStorage : createMemoryStorage();
+  const resolvedStorage = resolveStorage(baseStorage);
   const debouncedSetItem = new Debouncer(
     (name: string, value: string) => {
       resolvedStorage.setItem(name, value);
