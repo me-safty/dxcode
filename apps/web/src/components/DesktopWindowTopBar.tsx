@@ -28,10 +28,8 @@ function DesktopWindowTopBar() {
       return;
     }
 
-    if (nextState?.isFullScreen !== true) {
-      setIsHovered(false);
-      setIsVisible(true);
-    }
+    setIsHovered(false);
+    setIsVisible(nextState?.isFullScreen !== true);
   });
 
   const updateVisibility = useEffectEvent((pointerY: number | null) => {
