@@ -4,10 +4,11 @@ import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas";
 import {
   ClaudeModelOptions,
+  CopilotModelOptions,
   CodexModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
 } from "./model";
-import { ClaudeModelSelection, CodexModelSelection } from "./orchestration";
+import { ClaudeModelSelection, CodexModelSelection, CopilotModelSelection } from "./orchestration";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -81,6 +82,7 @@ export type CopilotSettings = typeof CopilotSettings.Type;
 export const GitTextGenerationModelSelection = Schema.Union([
   CodexModelSelection,
   ClaudeModelSelection,
+  CopilotModelSelection,
 ]);
 export type GitTextGenerationModelSelection = typeof GitTextGenerationModelSelection.Type;
 
@@ -128,6 +130,10 @@ const ClaudeModelOptionsPatch = Schema.Struct({
   fastMode: Schema.optionalKey(ClaudeModelOptions.fields.fastMode),
 });
 
+const CopilotModelOptionsPatch = Schema.Struct({
+  reasoningEffort: Schema.optionalKey(CopilotModelOptions.fields.reasoningEffort),
+});
+
 const GitTextGenerationModelSelectionPatch = Schema.Union([
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("codex")),
@@ -138,6 +144,11 @@ const GitTextGenerationModelSelectionPatch = Schema.Union([
     provider: Schema.optionalKey(Schema.Literal("claudeAgent")),
     model: Schema.optionalKey(TrimmedNonEmptyString),
     options: Schema.optionalKey(ClaudeModelOptionsPatch),
+  }),
+  Schema.Struct({
+    provider: Schema.optionalKey(Schema.Literal("copilot")),
+    model: Schema.optionalKey(TrimmedNonEmptyString),
+    options: Schema.optionalKey(CopilotModelOptionsPatch),
   }),
 ]);
 

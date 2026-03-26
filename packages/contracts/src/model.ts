@@ -49,7 +49,7 @@ export const ModelCapabilities = Schema.Struct({
 export type ModelCapabilities = typeof ModelCapabilities.Type;
 
 export type ModelSlug = string & {};
-export type GitTextGenerationProviderKind = Extract<ProviderKind, "codex" | "claudeAgent">;
+export type GitTextGenerationProviderKind = ProviderKind;
 
 export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, ModelSlug> = {
   codex: "gpt-5.4",
@@ -66,6 +66,7 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<
 > = {
   codex: "gpt-5.4-mini",
   claudeAgent: "claude-haiku-4-5",
+  copilot: "gpt-5.4-mini",
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string, ModelSlug>> = {

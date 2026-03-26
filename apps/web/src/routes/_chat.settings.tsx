@@ -861,14 +861,10 @@ function SettingsRouteView() {
                       model={textGenModel}
                       lockedProvider={null}
                       providers={serverProviders}
-                      allowedProviders={["codex", "claudeAgent"]}
                       modelOptionsByProvider={gitModelOptionsByProvider}
                       triggerVariant="outline"
                       triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
                       onProviderModelChange={(provider, model) => {
-                        if (provider === "copilot") {
-                          return;
-                        }
                         updateSettings({
                           textGenerationModelSelection: resolveAppModelSelectionState(
                             {
@@ -905,15 +901,25 @@ function SettingsRouteView() {
                                   >,
                                 }
                               : { provider: "codex" as const, model: textGenModel }
-                            : nextOptions
-                              ? {
-                                  provider: "claudeAgent" as const,
-                                  model: textGenModel,
-                                  options: nextOptions as NonNullable<
-                                    ProviderModelOptions["claudeAgent"]
-                                  >,
-                                }
-                              : { provider: "claudeAgent" as const, model: textGenModel };
+                            : textGenProvider === "copilot"
+                              ? nextOptions
+                                ? {
+                                    provider: "copilot" as const,
+                                    model: textGenModel,
+                                    options: nextOptions as NonNullable<
+                                      ProviderModelOptions["copilot"]
+                                    >,
+                                  }
+                                : { provider: "copilot" as const, model: textGenModel }
+                              : nextOptions
+                                ? {
+                                    provider: "claudeAgent" as const,
+                                    model: textGenModel,
+                                    options: nextOptions as NonNullable<
+                                      ProviderModelOptions["claudeAgent"]
+                                    >,
+                                  }
+                                : { provider: "claudeAgent" as const, model: textGenModel };
                         updateSettings({
                           textGenerationModelSelection: resolveAppModelSelectionState(
                             {
@@ -1068,9 +1074,7 @@ function SettingsRouteView() {
                               // text generation, clear the selection so it falls back to
                               // the next available provider's default model.
                               const shouldClearModelSelection =
-                                providerCard.provider !== "copilot" &&
-                                isDisabling &&
-                                resolvedProvider === providerCard.provider;
+                                isDisabling && resolvedProvider === providerCard.provider;
                               updateSettings({
                                 providers: {
                                   ...settings.providers,

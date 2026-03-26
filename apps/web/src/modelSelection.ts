@@ -182,7 +182,7 @@ export function getCustomModelOptionsByProvider(
   };
 }
 
-const TEXT_GENERATION_PROVIDERS = ["codex", "claudeAgent"] as const;
+const TEXT_GENERATION_PROVIDERS = ["codex", "claudeAgent", "copilot"] as const;
 
 function resolveTextGenerationProvider(
   settings: UnifiedSettings,
@@ -230,6 +230,13 @@ export function resolveAppModelSelectionState(
       | NonNullable<ProviderModelOptions["codex"]>
       | undefined;
     return options ? { provider: "codex", model, options } : { provider: "codex", model };
+  }
+
+  if (provider === "copilot") {
+    const options = modelOptionsForDispatch as
+      | NonNullable<ProviderModelOptions["copilot"]>
+      | undefined;
+    return options ? { provider: "copilot", model, options } : { provider: "copilot", model };
   }
 
   const options = modelOptionsForDispatch as
