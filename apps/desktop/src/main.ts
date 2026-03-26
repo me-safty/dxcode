@@ -32,6 +32,7 @@ import type { ContextMenuItem } from "@t3tools/contracts";
 import { NetService } from "@t3tools/shared/Net";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { showDesktopConfirmDialog } from "./confirmDialog";
+import { applyDesktopTitleBarModeSetting, readDesktopSettingsFromDisk } from "./desktopSettings";
 import { syncShellEnvironment } from "./syncShellEnvironment";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
 import {
@@ -149,27 +150,11 @@ function parseDesktopTitleBarMode(rawMode: unknown): DesktopTitleBarMode | null 
   return rawMode === "t3code" || rawMode === "system" ? rawMode : null;
 }
 
-function readDesktopSettingsFromDisk(): Record<string, unknown> {
-  if (!FS.existsSync(SETTINGS_FILE_PATH)) {
-    return {};
-  }
-
-  try {
-    const raw = FS.readFileSync(SETTINGS_FILE_PATH, "utf8");
-    const parsed = JSON.parse(raw) as unknown;
-
-    if (parsed !== null && !Array.isArray(parsed) && typeof parsed === "object") {
-      return parsed as Record<string, unknown>;
-    }
-  } catch (error) {
-    console.error("[desktop] failed to read desktop settings", error);
-  }
-
-  return {};
-}
-
 function readDesktopTitleBarModeFromDisk(): DesktopTitleBarMode {
-  return getDesktopTitleBarMode(readDesktopSettingsFromDisk().desktopTitleBarMode);
+  const parsed = readDesktopSettingsFromDisk(SETTINGS_FILE_PATH) as {
+    desktopTitleBarMode?: unknown;
+  };
+  return getDesktopTitleBarMode(parsed.desktopTitleBarMode);
 }
 
 function shouldUseT3CodeTitleBar(mode: DesktopTitleBarMode): boolean {
@@ -179,12 +164,12 @@ function shouldUseT3CodeTitleBar(mode: DesktopTitleBarMode): boolean {
 function persistDesktopTitleBarModeToDisk(mode: DesktopTitleBarMode): void {
   FS.mkdirSync(SETTINGS_STATE_DIR, { recursive: true });
 
-  const nextSettings = readDesktopSettingsFromDisk();
-  if (mode === DEFAULT_DESKTOP_TITLE_BAR_MODE) {
-    delete nextSettings.desktopTitleBarMode;
-  } else {
-    nextSettings.desktopTitleBarMode = mode;
-  }
+  const currentSettings = readDesktopSettingsFromDisk(SETTINGS_FILE_PATH);
+  const nextSettings = applyDesktopTitleBarModeSetting(
+    currentSettings,
+    mode,
+    DEFAULT_DESKTOP_TITLE_BAR_MODE,
+  );
 
   FS.writeFileSync(SETTINGS_FILE_PATH, `${JSON.stringify(nextSettings, null, 2)}\n`, "utf8");
 }
