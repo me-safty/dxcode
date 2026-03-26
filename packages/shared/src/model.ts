@@ -12,10 +12,6 @@ export interface SelectableModelOption {
   name: string;
 }
 
-export function getDefaultModel(provider: ProviderKind = "codex"): string {
-  return DEFAULT_MODEL_BY_PROVIDER[provider];
-}
-
 // ── Effort helpers ────────────────────────────────────────────────────
 
 /** Check whether a capabilities object includes a given effort value. */
@@ -112,10 +108,7 @@ export function resolveSelectableModel(
   return resolved ? resolved.slug : null;
 }
 
-export function resolveModelSlug(
-  model: string | null | undefined,
-  provider: ProviderKind = "codex",
-): string {
+export function resolveModelSlug(model: string | null | undefined, provider: ProviderKind): string {
   const normalized = normalizeModelSlug(model, provider);
   if (!normalized) {
     return DEFAULT_MODEL_BY_PROVIDER[provider];

@@ -62,14 +62,15 @@ describe("normalizeModelSlug", () => {
 
 describe("resolveModelSlug", () => {
   it("returns defaults when the model is missing", () => {
-    expect(resolveModelSlug(undefined)).toBe(DEFAULT_MODEL);
+    expect(resolveModelSlug(undefined, "codex")).toBe(DEFAULT_MODEL_BY_PROVIDER.codex);
+
     expect(resolveModelSlugForProvider("claudeAgent", undefined)).toBe(
       DEFAULT_MODEL_BY_PROVIDER.claudeAgent,
     );
   });
 
   it("preserves normalized unknown models", () => {
-    expect(resolveModelSlug("custom/internal-model")).toBe("custom/internal-model");
+    expect(resolveModelSlug("custom/internal-model", "codex")).toBe("custom/internal-model");
   });
 });
 
