@@ -390,9 +390,12 @@ describe("ProviderCommandReactor", () => {
         branch:
           typeof input === "object" &&
           input !== null &&
-          "model" in input &&
-          typeof input.model === "string"
-            ? `feature/${input.model}`
+          "modelSelection" in input &&
+          typeof input.modelSelection === "object" &&
+          input.modelSelection !== null &&
+          "model" in input.modelSelection &&
+          typeof input.modelSelection.model === "string"
+            ? `feature/${input.modelSelection.model}`
             : "feature/generated",
       }),
     );
@@ -417,7 +420,9 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.generateBranchName.mock.calls.length === 1);
     expect(harness.generateBranchName.mock.calls[0]?.[0]).toMatchObject({
-      model: "gpt-5.4-mini",
+      modelSelection: {
+        model: "gpt-5.4-mini",
+      },
       message: "Add a safer reconnect backoff.",
     });
   });
