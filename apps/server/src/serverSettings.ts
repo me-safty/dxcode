@@ -226,6 +226,7 @@ const makeServerSettings = Effect.gen(function* () {
       Effect.tap(() => fs.makeDirectory(pathService.dirname(settingsPath), { recursive: true })),
       Effect.tap((encoded) => fs.writeFileString(tempPath, encoded)),
       Effect.flatMap(() => fs.rename(tempPath, settingsPath)),
+      Effect.ensuring(fs.remove(tempPath, { force: true }).pipe(Effect.ignore({ log: true }))),
       Effect.mapError(
         (cause) =>
           new ServerSettingsError({
