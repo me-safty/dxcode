@@ -52,6 +52,7 @@ import { gitRemoveWorktreeMutationOptions, gitStatusQueryOptions } from "../lib/
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
+import { useDesktopWindowState } from "../hooks/useDesktopWindowState";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useShouldUseDesktopHeaderDragRegion } from "~/hooks/useWindowDecorationMode";
@@ -417,8 +418,14 @@ export default function Sidebar() {
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
+  const desktopWindowState = useDesktopWindowState();
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const shouldUseDesktopHeaderDragRegion = useShouldUseDesktopHeaderDragRegion();
+  const shouldUseMacSystemTrafficLightInset =
+    isElectron &&
+    (desktopWindowState
+      ? desktopWindowState.platform === "darwin" && desktopWindowState.titleBarMode === "system"
+      : isMacPlatform(navigator.platform) && appSettings.desktopTitleBarMode === "system");
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
   const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
   const projectCwdById = useMemo(
@@ -1651,7 +1658,13 @@ export default function Sidebar() {
     <>
       {shouldUseDesktopHeaderDragRegion ? (
         <>
-          <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]">
+          <SidebarHeader
+            className={
+              shouldUseMacSystemTrafficLightInset
+                ? "drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]"
+                : "drag-region h-[52px] flex-row items-center gap-2 px-4 py-0"
+            }
+          >
             {wordmark}
             {desktopUpdateButton}
           </SidebarHeader>
