@@ -32,6 +32,7 @@ import { Effect, Exit, Layer, Queue, Scope, Stream } from "effect";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -852,6 +853,7 @@ function createSessionRecord(input: {
 const makeCopilotAdapter = (options?: CopilotAdapterLiveOptions) =>
   Effect.gen(function* () {
     const serverConfig = yield* ServerConfig;
+    const serverSettings = yield* ServerSettingsService;
     const nativeEventLogger = options?.nativeEventLogger;
     const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ThreadId, ActiveCopilotSession>();
@@ -1705,10 +1707,22 @@ const makeCopilotAdapter = (options?: CopilotAdapterLiveOptions) =>
           } satisfies ProviderSession;
         }
 
+        const copilotSettings = yield* serverSettings.getSettings.pipe(
+          Effect.map((settings) => settings.providers.copilot),
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterProcessError({
+                provider: PROVIDER,
+                threadId: input.threadId,
+                detail: toMessage(cause, "Failed to read GitHub Copilot server settings."),
+                cause,
+              }),
+          ),
+        );
         const cliPath =
-          normalizeCopilotCliPathOverride(input.providerOptions?.copilot?.cliPath) ??
+          normalizeCopilotCliPathOverride(copilotSettings.binaryPath) ??
           resolveBundledCopilotCliPath();
-        const configDir = trimToUndefined(input.providerOptions?.copilot?.configDir);
+        const configDir = trimToUndefined(copilotSettings.configDir);
         const resumeSessionId = extractResumeSessionId(input.resumeCursor);
         const clientOptions: CopilotClientOptions = {
           ...(cliPath ? { cliPath } : {}),

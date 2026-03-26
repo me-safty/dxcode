@@ -9,19 +9,16 @@ import {
   ProviderKind,
   ProviderModelOptions,
   RuntimeMode,
+  type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as Equal from "effect/Equal";
 import { DeepMutable } from "effect/Types";
-import {
-  getDefaultModel,
-  normalizeModelSlug,
-  resolveModelSlugForProvider,
-} from "@t3tools/shared/model";
+import { getDefaultModel, normalizeModelSlug } from "@t3tools/shared/model";
 import { useMemo } from "react";
 import { getLocalStorageItem } from "./hooks/useLocalStorage";
-import { resolveAppModelSelection } from "./appSettings";
+import { resolveAppModelSelection } from "./modelSelection";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type ChatImageAttachment } from "./types";
 import {
   type TerminalContextDraft,
@@ -31,6 +28,8 @@ import {
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { createDebouncedStorage, createMemoryStorage } from "./lib/storage";
+import { getDefaultServerModel } from "./providerModels";
+import { UnifiedSettings } from "@t3tools/contracts/settings";
 
 export const COMPOSER_DRAFT_STORAGE_KEY = "t3code:composer-drafts:v1";
 const COMPOSER_DRAFT_STORAGE_VERSION = 3;
@@ -519,24 +518,24 @@ function buildModelSelectionForProvider(
   options?: ProviderModelOptions[ProviderKind],
 ): ModelSelection {
   switch (provider) {
-    case "codex":
-      return {
-        provider,
-        model,
-        ...(options ? { options: options as ProviderModelOptions["codex"] } : {}),
-      };
-    case "claudeAgent":
-      return {
-        provider,
-        model,
-        ...(options ? { options: options as ProviderModelOptions["claudeAgent"] } : {}),
-      };
-    case "copilot":
-      return {
-        provider,
-        model,
-        ...(options ? { options: options as ProviderModelOptions["copilot"] } : {}),
-      };
+    case "codex": {
+      const codexOptions = options as ProviderModelOptions["codex"] | undefined;
+      return codexOptions
+        ? { provider: "codex", model, options: codexOptions }
+        : { provider: "codex", model };
+    }
+    case "claudeAgent": {
+      const claudeOptions = options as ProviderModelOptions["claudeAgent"] | undefined;
+      return claudeOptions
+        ? { provider: "claudeAgent", model, options: claudeOptions }
+        : { provider: "claudeAgent", model };
+    }
+    case "copilot": {
+      const copilotOptions = options as ProviderModelOptions["copilot"] | undefined;
+      return copilotOptions
+        ? { provider: "copilot", model, options: copilotOptions }
+        : { provider: "copilot", model };
+    }
   }
 }
 
@@ -653,22 +652,23 @@ export function deriveEffectiveComposerModelState(input: {
     | Pick<ComposerThreadDraftState, "modelSelectionByProvider" | "activeProvider">
     | null
     | undefined;
+  providers: ReadonlyArray<ServerProvider>;
   selectedProvider: ProviderKind;
   threadModelSelection: ModelSelection | null | undefined;
   projectModelSelection: ModelSelection | null | undefined;
-  customModelsByProvider: Record<ProviderKind, readonly string[]>;
+  settings: UnifiedSettings;
 }): EffectiveComposerModelState {
-  const baseModel = resolveModelSlugForProvider(
-    input.selectedProvider,
-    input.threadModelSelection?.model ??
-      input.projectModelSelection?.model ??
-      getDefaultModel(input.selectedProvider),
-  );
+  const baseModel =
+    normalizeModelSlug(
+      input.threadModelSelection?.model ?? input.projectModelSelection?.model,
+      input.selectedProvider,
+    ) ?? getDefaultServerModel(input.providers, input.selectedProvider);
   const activeSelection = input.draft?.modelSelectionByProvider?.[input.selectedProvider];
   const selectedModel = activeSelection?.model
     ? resolveAppModelSelection(
         input.selectedProvider,
-        input.customModelsByProvider,
+        input.settings,
+        input.providers,
         activeSelection.model,
       )
     : baseModel;
@@ -2199,10 +2199,11 @@ export function useComposerThreadDraft(threadId: ThreadId): ComposerThreadDraftS
 
 export function useEffectiveComposerModelState(input: {
   threadId: ThreadId;
+  providers: ReadonlyArray<ServerProvider>;
   selectedProvider: ProviderKind;
   threadModelSelection: ModelSelection | null | undefined;
   projectModelSelection: ModelSelection | null | undefined;
-  customModelsByProvider: Record<ProviderKind, readonly string[]>;
+  settings: UnifiedSettings;
 }): EffectiveComposerModelState {
   const draft = useComposerThreadDraft(input.threadId);
 
@@ -2210,14 +2211,16 @@ export function useEffectiveComposerModelState(input: {
     () =>
       deriveEffectiveComposerModelState({
         draft,
+        providers: input.providers,
         selectedProvider: input.selectedProvider,
         threadModelSelection: input.threadModelSelection,
         projectModelSelection: input.projectModelSelection,
-        customModelsByProvider: input.customModelsByProvider,
+        settings: input.settings,
       }),
     [
       draft,
-      input.customModelsByProvider,
+      input.providers,
+      input.settings,
       input.projectModelSelection,
       input.selectedProvider,
       input.threadModelSelection,

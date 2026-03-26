@@ -2,24 +2,28 @@ import {
   type ModelSlug,
   type ProviderKind,
   type ProviderModelOptions,
+  type ServerProviderModel,
   type ThreadId,
 } from "@t3tools/contracts";
 import {
-  getModelCapabilities,
   isClaudeUltrathinkPrompt,
-  normalizeClaudeModelOptions,
-  normalizeCopilotModelOptions,
-  normalizeCodexModelOptions,
   trimOrNull,
   getDefaultEffort,
   hasEffortLevel,
 } from "@t3tools/shared/model";
 import type { ReactNode } from "react";
+import {
+  getProviderModelCapabilities,
+  normalizeClaudeModelOptionsWithCapabilities,
+  normalizeCopilotModelOptionsWithCapabilities,
+  normalizeCodexModelOptionsWithCapabilities,
+} from "../../providerModels";
 import { TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
 
 export type ComposerProviderStateInput = {
   provider: ProviderKind;
   model: ModelSlug;
+  models: ReadonlyArray<ServerProviderModel>;
   prompt: string;
   modelOptions: ProviderModelOptions | null | undefined;
 };
@@ -38,6 +42,7 @@ type ProviderRegistryEntry = {
   renderTraitsMenuContent: (input: {
     threadId: ThreadId;
     model: ModelSlug;
+    models: ReadonlyArray<ServerProviderModel>;
     modelOptions: ProviderModelOptions[ProviderKind] | undefined;
     prompt: string;
     onPromptChange: (prompt: string) => void;
@@ -45,6 +50,7 @@ type ProviderRegistryEntry = {
   renderTraitsPicker: (input: {
     threadId: ThreadId;
     model: ModelSlug;
+    models: ReadonlyArray<ServerProviderModel>;
     modelOptions: ProviderModelOptions[ProviderKind] | undefined;
     prompt: string;
     onPromptChange: (prompt: string) => void;
@@ -54,8 +60,8 @@ type ProviderRegistryEntry = {
 function getProviderStateFromCapabilities(
   input: ComposerProviderStateInput,
 ): ComposerProviderState {
-  const { provider, model, prompt, modelOptions } = input;
-  const caps = getModelCapabilities(provider, model);
+  const { provider, model, models, prompt, modelOptions } = input;
+  const caps = getProviderModelCapabilities(models, model, provider);
   const providerOptions = modelOptions?.[provider];
 
   // Resolve effort
@@ -82,10 +88,10 @@ function getProviderStateFromCapabilities(
   // Normalize options for dispatch
   const normalizedOptions =
     provider === "codex"
-      ? normalizeCodexModelOptions(model, modelOptions?.codex)
-      : provider === "copilot"
-        ? normalizeCopilotModelOptions(model, modelOptions?.copilot)
-        : normalizeClaudeModelOptions(model, modelOptions?.claudeAgent);
+      ? normalizeCodexModelOptionsWithCapabilities(caps, modelOptions?.codex)
+      : provider === "claudeAgent"
+        ? normalizeClaudeModelOptionsWithCapabilities(caps, modelOptions?.claudeAgent)
+        : normalizeCopilotModelOptionsWithCapabilities(caps, modelOptions?.copilot);
 
   // Ultrathink styling (driven by capabilities data, not provider identity)
   const ultrathinkActive =
@@ -106,9 +112,17 @@ function getProviderStateFromCapabilities(
 const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
   codex: {
     getState: (input) => getProviderStateFromCapabilities(input),
-    renderTraitsMenuContent: ({ threadId, model, modelOptions, prompt, onPromptChange }) => (
+    renderTraitsMenuContent: ({
+      threadId,
+      model,
+      models,
+      modelOptions,
+      prompt,
+      onPromptChange,
+    }) => (
       <TraitsMenuContent
         provider="codex"
+        models={models}
         threadId={threadId}
         model={model}
         modelOptions={modelOptions}
@@ -116,9 +130,10 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
         onPromptChange={onPromptChange}
       />
     ),
-    renderTraitsPicker: ({ threadId, model, modelOptions, prompt, onPromptChange }) => (
+    renderTraitsPicker: ({ threadId, model, models, modelOptions, prompt, onPromptChange }) => (
       <TraitsPicker
         provider="codex"
+        models={models}
         threadId={threadId}
         model={model}
         modelOptions={modelOptions}
@@ -129,9 +144,17 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
   },
   claudeAgent: {
     getState: (input) => getProviderStateFromCapabilities(input),
-    renderTraitsMenuContent: ({ threadId, model, modelOptions, prompt, onPromptChange }) => (
+    renderTraitsMenuContent: ({
+      threadId,
+      model,
+      models,
+      modelOptions,
+      prompt,
+      onPromptChange,
+    }) => (
       <TraitsMenuContent
         provider="claudeAgent"
+        models={models}
         threadId={threadId}
         model={model}
         modelOptions={modelOptions}
@@ -139,9 +162,10 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
         onPromptChange={onPromptChange}
       />
     ),
-    renderTraitsPicker: ({ threadId, model, modelOptions, prompt, onPromptChange }) => (
+    renderTraitsPicker: ({ threadId, model, models, modelOptions, prompt, onPromptChange }) => (
       <TraitsPicker
         provider="claudeAgent"
+        models={models}
         threadId={threadId}
         model={model}
         modelOptions={modelOptions}
@@ -152,9 +176,17 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
   },
   copilot: {
     getState: (input) => getProviderStateFromCapabilities(input),
-    renderTraitsMenuContent: ({ threadId, model, modelOptions, prompt, onPromptChange }) => (
+    renderTraitsMenuContent: ({
+      threadId,
+      model,
+      models,
+      modelOptions,
+      prompt,
+      onPromptChange,
+    }) => (
       <TraitsMenuContent
         provider="copilot"
+        models={models}
         threadId={threadId}
         model={model}
         modelOptions={modelOptions}
@@ -162,9 +194,10 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
         onPromptChange={onPromptChange}
       />
     ),
-    renderTraitsPicker: ({ threadId, model, modelOptions, prompt, onPromptChange }) => (
+    renderTraitsPicker: ({ threadId, model, models, modelOptions, prompt, onPromptChange }) => (
       <TraitsPicker
         provider="copilot"
+        models={models}
         threadId={threadId}
         model={model}
         modelOptions={modelOptions}
@@ -183,6 +216,7 @@ export function renderProviderTraitsMenuContent(input: {
   provider: ProviderKind;
   threadId: ThreadId;
   model: ModelSlug;
+  models: ReadonlyArray<ServerProviderModel>;
   modelOptions: ProviderModelOptions[ProviderKind] | undefined;
   prompt: string;
   onPromptChange: (prompt: string) => void;
@@ -190,6 +224,7 @@ export function renderProviderTraitsMenuContent(input: {
   return composerProviderRegistry[input.provider].renderTraitsMenuContent({
     threadId: input.threadId,
     model: input.model,
+    models: input.models,
     modelOptions: input.modelOptions,
     prompt: input.prompt,
     onPromptChange: input.onPromptChange,
@@ -200,6 +235,7 @@ export function renderProviderTraitsPicker(input: {
   provider: ProviderKind;
   threadId: ThreadId;
   model: ModelSlug;
+  models: ReadonlyArray<ServerProviderModel>;
   modelOptions: ProviderModelOptions[ProviderKind] | undefined;
   prompt: string;
   onPromptChange: (prompt: string) => void;
@@ -207,6 +243,7 @@ export function renderProviderTraitsPicker(input: {
   return composerProviderRegistry[input.provider].renderTraitsPicker({
     threadId: input.threadId,
     model: input.model,
+    models: input.models,
     modelOptions: input.modelOptions,
     prompt: input.prompt,
     onPromptChange: input.onPromptChange,

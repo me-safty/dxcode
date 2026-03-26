@@ -1,31 +1,19 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
-  MODEL_CAPABILITIES_INDEX,
-  MODEL_OPTIONS_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
+  type ClaudeCodeEffort,
   type ClaudeModelOptions,
   type CopilotModelOptions,
-  type ClaudeCodeEffort,
   type CodexModelOptions,
+  type CodexReasoningEffort,
   type ModelCapabilities,
   type ModelSlug,
   type ProviderKind,
-  CodexReasoningEffort,
 } from "@t3tools/contracts";
-
-const MODEL_SLUG_SET_BY_PROVIDER: Record<ProviderKind, ReadonlySet<ModelSlug>> = {
-  claudeAgent: new Set(MODEL_OPTIONS_BY_PROVIDER.claudeAgent.map((option) => option.slug)),
-  codex: new Set(MODEL_OPTIONS_BY_PROVIDER.codex.map((option) => option.slug)),
-  copilot: new Set(MODEL_OPTIONS_BY_PROVIDER.copilot.map((option) => option.slug)),
-};
 
 export interface SelectableModelOption {
   slug: string;
   name: string;
-}
-
-export function getModelOptions(provider: ProviderKind = "codex") {
-  return MODEL_OPTIONS_BY_PROVIDER[provider];
 }
 
 export function getDefaultModel(provider: ProviderKind = "codex"): ModelSlug {
@@ -42,24 +30,6 @@ export function hasEffortLevel(caps: ModelCapabilities, value: string): boolean 
 /** Return the default effort value for a capabilities object, or null if none. */
 export function getDefaultEffort(caps: ModelCapabilities): string | null {
   return caps.reasoningEffortLevels.find((l) => l.isDefault)?.value ?? null;
-}
-
-// ── Data-driven capability resolver ───────────────────────────────────
-
-export function getModelCapabilities(
-  provider: ProviderKind,
-  model: string | null | undefined,
-): ModelCapabilities {
-  const slug = normalizeModelSlug(model, provider);
-  if (slug && MODEL_CAPABILITIES_INDEX[provider]?.[slug]) {
-    return MODEL_CAPABILITIES_INDEX[provider][slug];
-  }
-  return {
-    reasoningEffortLevels: [],
-    supportsFastMode: false,
-    supportsThinkingToggle: false,
-    promptInjectedEffortLevels: [],
-  };
 }
 
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {
@@ -127,10 +97,7 @@ export function resolveModelSlug(
   if (!normalized) {
     return DEFAULT_MODEL_BY_PROVIDER[provider];
   }
-
-  return MODEL_SLUG_SET_BY_PROVIDER[provider].has(normalized)
-    ? normalized
-    : DEFAULT_MODEL_BY_PROVIDER[provider];
+  return normalized;
 }
 
 export function resolveModelSlugForProvider(
@@ -148,25 +115,25 @@ export function trimOrNull<T extends string>(value: T | null | undefined): T | n
 }
 
 export function normalizeCodexModelOptions(
-  model: string | null | undefined,
+  caps: ModelCapabilities,
   modelOptions: CodexModelOptions | null | undefined,
 ): CodexModelOptions | undefined {
-  const caps = getModelCapabilities("codex", model);
-  const defaultReasoningEffort = getDefaultEffort(caps) as CodexReasoningEffort;
+  const defaultReasoningEffort = getDefaultEffort(caps);
   const reasoningEffort = trimOrNull(modelOptions?.reasoningEffort) ?? defaultReasoningEffort;
   const fastModeEnabled = modelOptions?.fastMode === true;
   const nextOptions: CodexModelOptions = {
-    ...(reasoningEffort !== defaultReasoningEffort ? { reasoningEffort } : {}),
+    ...(reasoningEffort && reasoningEffort !== defaultReasoningEffort
+      ? { reasoningEffort: reasoningEffort as CodexModelOptions["reasoningEffort"] }
+      : {}),
     ...(fastModeEnabled ? { fastMode: true } : {}),
   };
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
 
 export function normalizeClaudeModelOptions(
-  model: string | null | undefined,
+  caps: ModelCapabilities,
   modelOptions: ClaudeModelOptions | null | undefined,
 ): ClaudeModelOptions | undefined {
-  const caps = getModelCapabilities("claudeAgent", model);
   const defaultReasoningEffort = getDefaultEffort(caps);
   const resolvedEffort = trimOrNull(modelOptions?.effort);
   const isPromptInjected = caps.promptInjectedEffortLevels.includes(resolvedEffort ?? "");
@@ -189,10 +156,9 @@ export function normalizeClaudeModelOptions(
 }
 
 export function normalizeCopilotModelOptions(
-  model: string | null | undefined,
+  caps: ModelCapabilities,
   modelOptions: CopilotModelOptions | null | undefined,
 ): CopilotModelOptions | undefined {
-  const caps = getModelCapabilities("copilot", model);
   const defaultReasoningEffort = getDefaultEffort(caps) as CodexReasoningEffort | null;
   const resolvedReasoningEffort = trimOrNull(modelOptions?.reasoningEffort);
   const reasoningEffort =
