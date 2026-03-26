@@ -216,13 +216,6 @@ export function normalizeClaudeModelOptions(
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
 
-// ── Claude context-window → API model-id mapping ────────────────────
-
-/** Maps a context-window option value to the Claude API model suffix. */
-const CLAUDE_CONTEXT_WINDOW_MODEL_SUFFIX: Record<string, string> = {
-  "1m": "[1m]",
-};
-
 /**
  * Resolve the actual API model identifier from a full model selection.
  *
@@ -232,17 +225,25 @@ const CLAUDE_CONTEXT_WINDOW_MODEL_SUFFIX: Record<string, string> = {
  * capabilities system keeps working.
  */
 export function resolveApiModelId(modelSelection: ModelSelection): string {
-  if (modelSelection.provider === "claudeAgent") {
-    const contextWindow = modelSelection.options?.contextWindow;
-    if (contextWindow) {
-      const caps = getModelCapabilities("claudeAgent", modelSelection.model);
-      if (hasContextWindowOption(caps, contextWindow)) {
-        const suffix = CLAUDE_CONTEXT_WINDOW_MODEL_SUFFIX[contextWindow];
-        if (suffix) return `${modelSelection.model}${suffix}`;
+  const caps = getModelCapabilities(modelSelection.provider, modelSelection.model);
+  switch (modelSelection.provider) {
+    case "claudeAgent": {
+      const contextWindow = modelSelection.options?.contextWindow;
+      if (contextWindow) {
+        if (hasContextWindowOption(caps, contextWindow)) {
+          switch (contextWindow) {
+            case "1m":
+              return `${modelSelection.model}[1m]`;
+            default:
+              return modelSelection.model;
+          }
+        }
       }
     }
+    default: {
+      return modelSelection.model;
+    }
   }
-  return modelSelection.model;
 }
 
 export function applyClaudePromptEffortPrefix(

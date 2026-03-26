@@ -18,7 +18,6 @@ export const ClaudeModelOptions = Schema.Struct({
   thinking: Schema.optional(Schema.Boolean),
   effort: Schema.optional(Schema.Literals(CLAUDE_CODE_EFFORT_OPTIONS)),
   fastMode: Schema.optional(Schema.Boolean),
-  /** API suffix for context window selection (e.g. `"[1m]"`). Omit for default. */
   contextWindow: Schema.optional(Schema.String),
 });
 export type ClaudeModelOptions = typeof ClaudeModelOptions.Type;
@@ -177,8 +176,8 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
         supportsFastMode: true,
         supportsThinkingToggle: false,
         contextWindowOptions: [
-          { value: "200k", label: "200k", isDefault: true },
-          { value: "1m", label: "1M" },
+          { value: "200k", label: "200k" },
+          { value: "1m", label: "1M", isDefault: true },
         ],
         promptInjectedEffortLevels: ["ultrathink"],
       },
@@ -196,8 +195,8 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
         supportsFastMode: false,
         supportsThinkingToggle: false,
         contextWindowOptions: [
-          { value: "200k", label: "200k", isDefault: true },
-          { value: "1m", label: "1M" },
+          { value: "200k", label: "200k" },
+          { value: "1m", label: "1M", isDefault: true },
         ],
         promptInjectedEffortLevels: ["ultrathink"],
       },
