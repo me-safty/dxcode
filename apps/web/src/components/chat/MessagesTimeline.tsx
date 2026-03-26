@@ -541,9 +541,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               <span className="h-0.5 w-3 rounded-full bg-muted-foreground/25 animate-pulse" />
             </span>
             <span className="tabular-nums">
-              {row.createdAt
-                ? formatWorkingTimer(row.createdAt, nowIso) ?? "0s"
-                : "..."}
+              {row.createdAt ? (formatWorkingTimer(row.createdAt, nowIso) ?? "0s") : "..."}
             </span>
           </div>
         </div>
@@ -554,9 +552,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   if (!hasMessages && !isWorking) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-[13px] text-muted-foreground/25">
-          What are you working on?
-        </p>
+        <p className="text-[13px] text-muted-foreground/25">What are you working on?</p>
       </div>
     );
   }
@@ -799,8 +795,12 @@ function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
 }
 
 function workEntryPreview(
-  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
+  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "collapsedCommands" | "changedFiles">,
 ) {
+  if ((workEntry.collapsedCommands?.length ?? 0) > 0) {
+    const count = workEntry.collapsedCommands?.length ?? 0;
+    return count === 1 ? "1 review inspection command" : `${count} review inspection commands`;
+  }
   if (workEntry.command) return workEntry.command;
   if (workEntry.detail) return workEntry.detail;
   if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
@@ -855,6 +855,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
 }) {
   const { workEntry } = props;
+  const [inspectionCommandsExpanded, setInspectionCommandsExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
@@ -862,6 +863,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
+  const hasCollapsedCommands = (workEntry.collapsedCommands?.length ?? 0) > 0;
 
   return (
     <div className="rounded-lg px-1 py-1">
@@ -872,21 +874,45 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           <EntryIcon className="size-3" />
         </span>
         <div className="min-w-0 flex-1 overflow-hidden">
-          <p
-            className={cn(
-              "truncate text-[11px] leading-5",
-              workToneClass(workEntry.tone),
-              preview ? "text-muted-foreground/70" : "",
+          <div className="flex items-center justify-between gap-2">
+            <p
+              className={cn(
+                "min-w-0 flex-1 truncate text-[11px] leading-5",
+                workToneClass(workEntry.tone),
+                preview ? "text-muted-foreground/70" : "",
+              )}
+              title={displayText}
+            >
+              <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
+                {heading}
+              </span>
+              {preview && <span className="text-muted-foreground/55"> - {preview}</span>}
+            </p>
+            {hasCollapsedCommands && (
+              <button
+                type="button"
+                className="shrink-0 text-[10px] text-muted-foreground/45 transition-colors duration-150 hover:text-foreground/60"
+                onClick={() => setInspectionCommandsExpanded((current) => !current)}
+              >
+                {inspectionCommandsExpanded ? "Hide" : "Show"}
+              </button>
             )}
-            title={displayText}
-          >
-            <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
-              {heading}
-            </span>
-            {preview && <span className="text-muted-foreground/55"> - {preview}</span>}
-          </p>
+          </div>
         </div>
       </div>
+      {hasCollapsedCommands && inspectionCommandsExpanded && (
+        <div className="mt-1.5 space-y-1 pl-6">
+          {workEntry.collapsedCommands?.map((command) => (
+            <div
+              key={`${workEntry.id}:inspection-command:${command}`}
+              className="rounded-md border border-border/55 bg-background/75 px-2 py-1 font-mono text-[10px] text-muted-foreground/75"
+              title={command}
+            >
+              {command}
+            </div>
+          ))}
+        </div>
+      )}
       {hasChangedFiles && !previewIsChangedFiles && (
         <div className="mt-1 flex flex-wrap gap-1 pl-6">
           {workEntry.changedFiles?.slice(0, 4).map((filePath) => (

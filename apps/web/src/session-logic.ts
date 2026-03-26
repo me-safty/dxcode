@@ -1,6 +1,7 @@
 import {
   ApprovalRequestId,
   isToolLifecycleItemType,
+  type CanonicalItemType,
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
@@ -38,6 +39,7 @@ export interface WorkLogEntry {
   label: string;
   detail?: string;
   command?: string;
+  collapsedCommands?: ReadonlyArray<string>;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
@@ -47,6 +49,7 @@ export interface WorkLogEntry {
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
+  canonicalItemType?: CanonicalItemType;
   collapseKey?: string;
 }
 
@@ -467,7 +470,7 @@ export function deriveWorkLogEntries(
     .filter((activity) => activity.summary !== "Checkpoint captured")
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .map(toDerivedWorkLogEntry);
-  return collapseDerivedWorkLogEntries(entries).map(
+  return collapseReviewInspectionWorkLogEntries(collapseDerivedWorkLogEntries(entries)).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
   );
 }
@@ -500,6 +503,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     activityKind: activity.kind,
   };
   const itemType = extractWorkLogItemType(payload);
+  const canonicalItemType = extractCanonicalItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
   if (payload && typeof payload.detail === "string" && payload.detail.length > 0) {
     const detail = stripTrailingExitCode(payload.detail).output;
@@ -518,6 +522,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (itemType) {
     entry.itemType = itemType;
+  }
+  if (canonicalItemType) {
+    entry.canonicalItemType = canonicalItemType;
   }
   if (requestKind) {
     entry.requestKind = requestKind;
@@ -639,15 +646,46 @@ function asTrimmedString(value: unknown): string | null {
 function normalizeCommandValue(value: unknown): string | null {
   const direct = asTrimmedString(value);
   if (direct) {
-    return direct;
+    return unwrapShellCommand(direct);
   }
   if (!Array.isArray(value)) {
     return null;
   }
+  if (
+    value.length >= 3 &&
+    typeof value[0] === "string" &&
+    typeof value[1] === "string" &&
+    typeof value[2] === "string" &&
+    isShellWrapperCommand(value[0]) &&
+    value[1] === "-lc"
+  ) {
+    return unwrapShellCommand(value[2]);
+  }
   const parts = value
     .map((entry) => asTrimmedString(entry))
     .filter((entry): entry is string => entry !== null);
-  return parts.length > 0 ? parts.join(" ") : null;
+  return parts.length > 0 ? unwrapShellCommand(parts.join(" ")) : null;
+}
+
+function isShellWrapperCommand(value: string): boolean {
+  return /(?:^|\/)(?:zsh|bash|sh)$/.test(value.trim());
+}
+
+function unwrapShellCommand(value: string): string {
+  const trimmed = value.trim();
+  const quotedShellWrapper =
+    /^(?:(?:\/bin\/)?(?:zsh|bash|sh))\s+-lc\s+(?:"([\s\S]*)"|'([\s\S]*)')$/i.exec(trimmed);
+  if (quotedShellWrapper) {
+    const inner = quotedShellWrapper[1] ?? quotedShellWrapper[2];
+    return inner?.trim() || trimmed;
+  }
+
+  const shellWrapper = /^(?:(?:\/bin\/)?(?:zsh|bash|sh))\s+-lc\s+([\s\S]+)$/i.exec(trimmed);
+  if (shellWrapper?.[1]) {
+    return shellWrapper[1].trim();
+  }
+
+  return trimmed;
 }
 
 function extractToolCommand(payload: Record<string, unknown> | null): string | null {
@@ -698,6 +736,21 @@ function extractWorkLogItemType(
   return undefined;
 }
 
+function extractCanonicalItemType(
+  payload: Record<string, unknown> | null,
+): CanonicalItemType | undefined {
+  if (typeof payload?.itemType !== "string") {
+    return undefined;
+  }
+  if (payload.itemType === "review_entered" || payload.itemType === "review_exited") {
+    return payload.itemType;
+  }
+  if (isToolLifecycleItemType(payload.itemType)) {
+    return payload.itemType;
+  }
+  return undefined;
+}
+
 function extractWorkLogRequestKind(
   payload: Record<string, unknown> | null,
 ): WorkLogEntry["requestKind"] | undefined {
@@ -709,6 +762,91 @@ function extractWorkLogRequestKind(
     return payload.requestKind;
   }
   return requestKindFromRequestType(payload?.requestType) ?? undefined;
+}
+
+function isReadOnlyInspectionCommand(command: string): boolean {
+  const normalized = command.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return false;
+  }
+
+  return (
+    /^(rg|sed|cat|nl|find|ls|fd|head|tail|wc|awk|grep)\b/.test(normalized) ||
+    /^git\s+(status|diff|show|log|branch|rev-parse)\b/.test(normalized)
+  );
+}
+
+function isReviewInspectionWorkLogEntry(entry: DerivedWorkLogEntry): boolean {
+  return (
+    entry.itemType === "command_execution" &&
+    typeof entry.command === "string" &&
+    isReadOnlyInspectionCommand(entry.command)
+  );
+}
+
+function collapseReviewInspectionWorkLogEntries(
+  entries: ReadonlyArray<DerivedWorkLogEntry>,
+): DerivedWorkLogEntry[] {
+  const collapsed: DerivedWorkLogEntry[] = [];
+  let pendingInspectionEntries: DerivedWorkLogEntry[] = [];
+  let inReviewMode = false;
+
+  const flushPendingInspectionEntries = () => {
+    if (pendingInspectionEntries.length === 0) {
+      return;
+    }
+
+    if (pendingInspectionEntries.length === 1) {
+      collapsed.push(pendingInspectionEntries[0]!);
+      pendingInspectionEntries = [];
+      return;
+    }
+
+    const latestEntry = pendingInspectionEntries[pendingInspectionEntries.length - 1]!;
+    const collapsedCommands = pendingInspectionEntries.flatMap((entry) =>
+      entry.command ? [entry.command] : [],
+    );
+    const {
+      command: _command,
+      detail: _detail,
+      toolTitle: _toolTitle,
+      collapseKey: _collapseKey,
+      ...collapsedEntryBase
+    } = latestEntry;
+    collapsed.push({
+      ...collapsedEntryBase,
+      label: "Inspected repository",
+      collapsedCommands,
+    });
+    pendingInspectionEntries = [];
+  };
+
+  for (const entry of entries) {
+    if (entry.canonicalItemType === "review_entered") {
+      flushPendingInspectionEntries();
+      inReviewMode = true;
+      collapsed.push(entry);
+      continue;
+    }
+
+    if (entry.canonicalItemType === "review_exited") {
+      flushPendingInspectionEntries();
+      inReviewMode = false;
+      collapsed.push(entry);
+      continue;
+    }
+
+    if (inReviewMode && isReviewInspectionWorkLogEntry(entry)) {
+      pendingInspectionEntries.push(entry);
+      continue;
+    }
+
+    flushPendingInspectionEntries();
+    collapsed.push(entry);
+  }
+
+  flushPendingInspectionEntries();
+  return collapsed;
 }
 
 function pushChangedFile(target: string[], seen: Set<string>, value: unknown) {
