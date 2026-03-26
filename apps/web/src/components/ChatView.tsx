@@ -164,7 +164,6 @@ import { ComposerPlanFollowUpBanner } from "./chat/ComposerPlanFollowUpBanner";
 import {
   getComposerProviderState,
   renderProviderTraitsMenuContent,
-  renderProviderTraitsPicker,
 } from "./chat/composerProviderRegistry";
 import { ProviderHealthBanner } from "./chat/ProviderHealthBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
@@ -3296,14 +3295,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     prompt,
     onPromptChange: setPromptFromTraits,
   });
-  const providerTraitsPicker = renderProviderTraitsPicker({
-    provider: selectedProvider,
-    threadId,
-    model: selectedModel,
-    modelOptions: composerModelOptions?.[selectedProvider],
-    prompt,
-    onPromptChange: setPromptFromTraits,
-  });
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) => {
       if (isLocalDraftThread) {
@@ -3961,9 +3952,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         />
 
                         <CompactComposerControlsMenu
-                          activePlan={Boolean(
-                            activePlan || sidebarProposedPlan || planSidebarOpen,
-                          )}
+                          activePlan={Boolean(activePlan || sidebarProposedPlan || planSidebarOpen)}
                           interactionMode={interactionMode}
                           planSidebarOpen={planSidebarOpen}
                           runtimeMode={runtimeMode}
