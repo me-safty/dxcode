@@ -8,7 +8,7 @@ import {
   CodexModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
 } from "./model";
-import { ClaudeModelSelection, CodexModelSelection, CopilotModelSelection } from "./orchestration";
+import { ModelSelection } from "./orchestration";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -79,19 +79,12 @@ export const CopilotSettings = Schema.Struct({
 });
 export type CopilotSettings = typeof CopilotSettings.Type;
 
-export const GitTextGenerationModelSelection = Schema.Union([
-  CodexModelSelection,
-  ClaudeModelSelection,
-  CopilotModelSelection,
-]);
-export type GitTextGenerationModelSelection = typeof GitTextGenerationModelSelection.Type;
-
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvMode),
   ),
-  textGenerationModelSelection: GitTextGenerationModelSelection.pipe(
+  textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(() => ({
       provider: "codex" as const,
       model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
@@ -134,7 +127,7 @@ const CopilotModelOptionsPatch = Schema.Struct({
   reasoningEffort: Schema.optionalKey(CopilotModelOptions.fields.reasoningEffort),
 });
 
-const GitTextGenerationModelSelectionPatch = Schema.Union([
+const ModelSelectionPatch = Schema.Union([
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("codex")),
     model: Schema.optionalKey(TrimmedNonEmptyString),
@@ -175,7 +168,7 @@ const CopilotSettingsPatch = Schema.Struct({
 export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
-  textGenerationModelSelection: Schema.optionalKey(GitTextGenerationModelSelectionPatch),
+  textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   providers: Schema.optionalKey(
     Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),

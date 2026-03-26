@@ -15,7 +15,7 @@ import {
   ServerSettings,
   ServerSettingsPatch,
   ServerConfig,
-  GitTextGenerationModelSelection,
+  ModelSelection,
   ThreadEnvMode,
 } from "@t3tools/contracts";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
@@ -152,7 +152,7 @@ export function buildLegacyServerSettingsMigrationPatch(legacySettings: Record<s
     patch.defaultThreadEnvMode = legacySettings.defaultThreadEnvMode;
   }
 
-  if (Schema.is(GitTextGenerationModelSelection)(legacySettings.textGenerationModelSelection)) {
+  if (Schema.is(ModelSelection)(legacySettings.textGenerationModelSelection)) {
     patch.textGenerationModelSelection = legacySettings.textGenerationModelSelection;
   }
 

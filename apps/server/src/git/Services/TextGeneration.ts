@@ -8,7 +8,7 @@
  */
 import { ServiceMap } from "effect";
 import type { Effect } from "effect";
-import type { ChatAttachment, GitTextGenerationModelSelection } from "@t3tools/contracts";
+import type { ChatAttachment, ModelSelection } from "@t3tools/contracts";
 
 import type { TextGenerationError } from "../Errors.ts";
 
@@ -23,7 +23,7 @@ export interface CommitMessageGenerationInput {
   /** When true, the model also returns a semantic branch name for the change. */
   includeBranch?: boolean;
   /** What model and provider to use for generation. */
-  modelSelection: GitTextGenerationModelSelection;
+  modelSelection: ModelSelection;
 }
 
 export interface CommitMessageGenerationResult {
@@ -41,7 +41,7 @@ export interface PrContentGenerationInput {
   diffSummary: string;
   diffPatch: string;
   /** What model and provider to use for generation. */
-  modelSelection: GitTextGenerationModelSelection;
+  modelSelection: ModelSelection;
 }
 
 export interface PrContentGenerationResult {
@@ -54,7 +54,7 @@ export interface BranchNameGenerationInput {
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
   /** What model and provider to use for generation. */
-  modelSelection: GitTextGenerationModelSelection;
+  modelSelection: ModelSelection;
 }
 
 export interface BranchNameGenerationResult {

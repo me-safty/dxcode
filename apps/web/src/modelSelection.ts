@@ -1,6 +1,6 @@
 import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-  type GitTextGenerationModelSelection,
+  type ModelSelection,
   type ProviderModelOptions,
   type ProviderKind,
   type ServerProvider,
@@ -204,7 +204,7 @@ function resolveTextGenerationProvider(
 export function resolveAppModelSelectionState(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
-): GitTextGenerationModelSelection {
+): ModelSelection {
   const selection = settings.textGenerationModelSelection ?? {
     provider: "codex" as const,
     model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
