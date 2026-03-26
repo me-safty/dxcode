@@ -9,7 +9,7 @@ import { beforeEach } from "vitest";
 import { Effect, Fiber, Layer, Stream } from "effect";
 
 import { ServerConfig } from "../../config.ts";
-import { ProviderAdapterValidationError } from "../Errors.ts";
+import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../Errors.ts";
 import { CopilotAdapter } from "../Services/CopilotAdapter.ts";
 import { makeCopilotAdapterLive } from "./CopilotAdapter.ts";
 
@@ -369,6 +369,7 @@ reasoningLayer("CopilotAdapterLive reasoning", (it) => {
       reasoningClient.startImpl.mockClear();
       reasoningClient.listModelsImpl.mockReset();
       reasoningClient.createSessionImpl.mockClear();
+      reasoningClient.stopImpl.mockClear();
       reasoningClient.listModelsImpl.mockResolvedValue([
         makeModelInfo({
           id: "gpt-5.4",
@@ -397,6 +398,37 @@ reasoningLayer("CopilotAdapterLive reasoning", (it) => {
         }),
       );
       assert.equal(reasoningClient.createSessionImpl.mock.calls.length, 0);
+      assert.equal(reasoningClient.stopImpl.mock.calls.length, 1);
+    }),
+  );
+
+  it.effect("stops the Copilot client when session creation throws", () =>
+    Effect.gen(function* () {
+      reasoningClient.startImpl.mockClear();
+      reasoningClient.listModelsImpl.mockReset();
+      reasoningClient.createSessionImpl.mockClear();
+      reasoningClient.stopImpl.mockClear();
+      reasoningClient.createSessionImpl.mockImplementationOnce(async () => {
+        throw new Error("session creation failed");
+      });
+
+      const adapter = yield* CopilotAdapter;
+      const result = yield* adapter
+        .startSession({
+          provider: "copilot",
+          threadId: asThreadId("thread-reasoning-session-create-failure"),
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.result);
+
+      assert.equal(result._tag, "Failure");
+      assert.equal(result.failure._tag, "ProviderAdapterProcessError");
+      assert.equal(
+        (result.failure as ProviderAdapterProcessError).detail,
+        "session creation failed",
+      );
+      assert.equal(reasoningClient.createSessionImpl.mock.calls.length, 1);
+      assert.equal(reasoningClient.stopImpl.mock.calls.length, 1);
     }),
   );
 

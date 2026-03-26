@@ -28,7 +28,7 @@ import {
   type PermissionRequestResult,
   type SessionEvent,
 } from "@github/copilot-sdk";
-import { Effect, Layer, Queue, Stream } from "effect";
+import { Effect, Exit, Layer, Queue, Scope, Stream } from "effect";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -95,6 +95,7 @@ interface PendingUserInputRequest {
 
 interface ActiveCopilotSession extends CopilotTurnTrackingState {
   readonly client: CopilotClientHandle;
+  readonly sessionScope: Scope.Closeable;
   session: CopilotSessionHandle;
   readonly threadId: ThreadId;
   readonly createdAt: string;
@@ -217,6 +218,16 @@ async function closeCopilotSession(session: CopilotSessionHandle): Promise<void>
     return;
   }
   await session.destroy();
+}
+
+function stopCopilotClient(client: CopilotClientHandle): Effect.Effect<void> {
+  return Effect.tryPromise({
+    try: () => client.stop(),
+    catch: () => undefined,
+  }).pipe(
+    Effect.catch(() => Effect.void),
+    Effect.asVoid,
+  );
 }
 
 function mapSupportedModelsById(models: ReadonlyArray<ModelInfo>) {
@@ -799,6 +810,7 @@ function resolveUserInputAnswer(
 function createSessionRecord(input: {
   readonly threadId: ThreadId;
   readonly client: CopilotClientHandle;
+  readonly sessionScope: Scope.Closeable;
   readonly session: CopilotSessionHandle;
   readonly runtimeMode: ProviderSession["runtimeMode"];
   readonly pendingApprovalResolvers: Map<string, PendingApprovalRequest>;
@@ -810,6 +822,7 @@ function createSessionRecord(input: {
 }): ActiveCopilotSession {
   return {
     client: input.client,
+    sessionScope: input.sessionScope,
     session: input.session,
     threadId: input.threadId,
     createdAt: new Date().toISOString(),
@@ -1644,7 +1657,7 @@ const makeCopilotAdapter = (options?: CopilotAdapterLiveOptions) =>
         // best effort
       }
       try {
-        await record.client.stop();
+        await Effect.runPromise(Scope.close(record.sessionScope, Exit.void));
       } catch {
         // best effort
       }
@@ -1702,7 +1715,6 @@ const makeCopilotAdapter = (options?: CopilotAdapterLiveOptions) =>
           ...(input.cwd ? { cwd: input.cwd } : {}),
           logLevel: "error",
         };
-        const client = options?.clientFactory?.(clientOptions) ?? new CopilotClient(clientOptions);
         const pendingApprovalResolvers = new Map<string, PendingApprovalRequest>();
         const pendingUserInputResolvers = new Map<string, PendingUserInputRequest>();
         const modelSelection = getCopilotModelSelection(input);
@@ -1716,51 +1728,68 @@ const makeCopilotAdapter = (options?: CopilotAdapterLiveOptions) =>
           pendingApprovalResolvers,
           pendingUserInputResolvers,
         );
+        const { client, session, sessionScope } = yield* Effect.acquireUseRelease(
+          Scope.make("sequential"),
+          (sessionScope) =>
+            Effect.gen(function* () {
+              const client = yield* Effect.acquireRelease(
+                Effect.sync(
+                  () => options?.clientFactory?.(clientOptions) ?? new CopilotClient(clientOptions),
+                ),
+                (client) => stopCopilotClient(client),
+              ).pipe(Scope.provide(sessionScope));
 
-        yield* validateSessionConfiguration({
-          client,
-          threadId: input.threadId,
-          model: selectedModel,
-          reasoningEffort,
-        });
-
-        const session = yield* Effect.tryPromise({
-          try: async () => {
-            if (resumeSessionId) {
-              return client.resumeSession(resumeSessionId, {
-                ...handlers,
-                ...(selectedModel ? { model: selectedModel } : {}),
-                ...(reasoningEffort ? { reasoningEffort } : {}),
-                ...(input.cwd ? { workingDirectory: input.cwd } : {}),
-                ...(configDir ? { configDir } : {}),
-                streaming: true,
+              yield* validateSessionConfiguration({
+                client,
+                threadId: input.threadId,
+                model: selectedModel,
+                reasoningEffort,
               });
-            }
-            const sessionConfig: Parameters<CopilotClient["createSession"]>[0] & {
-              sessionId?: string;
-            } = {
-              ...handlers,
-              sessionId: makeCopilotSessionId(input.threadId),
-              ...(selectedModel ? { model: selectedModel } : {}),
-              ...(reasoningEffort ? { reasoningEffort } : {}),
-              ...(input.cwd ? { workingDirectory: input.cwd } : {}),
-              ...(configDir ? { configDir } : {}),
-              streaming: true,
-            };
-            return client.createSession(sessionConfig);
-          },
-          catch: (cause) =>
-            new ProviderAdapterProcessError({
-              provider: PROVIDER,
-              threadId: input.threadId,
-              detail: toMessage(cause, "Failed to start GitHub Copilot session."),
-              cause,
+
+              const session = yield* Effect.tryPromise({
+                try: async () => {
+                  if (resumeSessionId) {
+                    return client.resumeSession(resumeSessionId, {
+                      ...handlers,
+                      ...(selectedModel ? { model: selectedModel } : {}),
+                      ...(reasoningEffort ? { reasoningEffort } : {}),
+                      ...(input.cwd ? { workingDirectory: input.cwd } : {}),
+                      ...(configDir ? { configDir } : {}),
+                      streaming: true,
+                    });
+                  }
+                  const sessionConfig: Parameters<CopilotClient["createSession"]>[0] & {
+                    sessionId?: string;
+                  } = {
+                    ...handlers,
+                    sessionId: makeCopilotSessionId(input.threadId),
+                    ...(selectedModel ? { model: selectedModel } : {}),
+                    ...(reasoningEffort ? { reasoningEffort } : {}),
+                    ...(input.cwd ? { workingDirectory: input.cwd } : {}),
+                    ...(configDir ? { configDir } : {}),
+                    streaming: true,
+                  };
+                  return client.createSession(sessionConfig);
+                },
+                catch: (cause) =>
+                  new ProviderAdapterProcessError({
+                    provider: PROVIDER,
+                    threadId: input.threadId,
+                    detail: toMessage(cause, "Failed to start GitHub Copilot session."),
+                    cause,
+                  }),
+              });
+
+              return { client, session, sessionScope } as const;
             }),
-        });
+          (sessionScope, exit) =>
+            Exit.isFailure(exit) ? Scope.close(sessionScope, exit) : Effect.void,
+        );
 
         const record = createSessionRecord({
           threadId: input.threadId,
           client,
+          sessionScope,
           session,
           runtimeMode: input.runtimeMode,
           pendingApprovalResolvers,
