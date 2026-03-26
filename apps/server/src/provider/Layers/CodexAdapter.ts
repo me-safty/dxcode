@@ -6,7 +6,10 @@
  *
  * @module CodexAdapterLive
  */
+import { resolve } from "node:path";
+
 import {
+  type ProviderCommandDefinition,
   type CanonicalItemType,
   type CanonicalRequestType,
   type ProviderEvent,
@@ -38,9 +41,50 @@ import {
 } from "../../codexAppServerManager.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { extractSkillReferencesFromText } from "../../skills.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "codex" as const;
+const CODEX_INIT_PROMPT = `Generate a file named AGENTS.md that serves as a contributor guide for this repository.
+Your goal is to produce a clear, concise, and well-structured document with descriptive headings and actionable explanations for each section.
+Follow the outline below, but adapt as needed - add sections if relevant, and omit those that do not apply to this project.
+
+Document Requirements
+
+- Title the document "Repository Guidelines".
+- Use Markdown headings (#, ##, etc.) for structure.
+- Keep the document concise. 200-400 words is optimal.
+- Keep explanations short, direct, and specific to this repository.
+- Provide examples where helpful (commands, directory paths, naming patterns).
+- Maintain a professional, instructional tone.
+
+Recommended Sections
+
+Project Structure & Module Organization
+
+- Outline the project structure, including where the source code, tests, and assets are located.
+
+Build, Test, and Development Commands
+
+- List key commands for building, testing, and running locally (e.g., npm test, make build).
+- Briefly explain what each command does.
+
+Coding Style & Naming Conventions
+
+- Specify indentation rules, language-specific style preferences, and naming patterns.
+- Include any formatting or linting tools used.
+
+Testing Guidelines
+
+- Identify testing frameworks and coverage requirements.
+- State test naming conventions and how to run tests.
+
+Commit & Pull Request Guidelines
+
+- Summarize commit message conventions found in the project's Git history.
+- Outline pull request requirements (descriptions, linked issues, screenshots, etc.).
+
+(Optional) Add other sections if relevant, such as Security & Configuration Tips, Architecture Overview, or Agent-Specific Instructions.`;
 
 export interface CodexAdapterLiveOptions {
   readonly manager?: CodexAppServerManager;
@@ -226,6 +270,10 @@ function itemTitle(itemType: CanonicalItemType): string | undefined {
       return "Web search";
     case "image_view":
       return "Image view";
+    case "review_entered":
+      return "Started review";
+    case "review_exited":
+      return "Review complete";
     case "error":
       return "Error";
     default:
@@ -243,12 +291,14 @@ function itemDetail(
     asString(item.title),
     asString(item.summary),
     asString(item.text),
+    asString(item.review),
     asString(item.path),
     asString(item.prompt),
     asString(nestedResult?.command),
     asString(payload.command),
     asString(payload.message),
     asString(payload.prompt),
+    asString(payload.review),
   ];
   for (const candidate of candidates) {
     if (!candidate) continue;
@@ -886,6 +936,21 @@ function mapToRuntimeEvents(
         },
       ];
     }
+    if (itemType === "review_exited") {
+      const completed = mapItemLifecycle(event, canonicalThreadId, "item.completed");
+      const events: ProviderRuntimeEvent[] = [];
+      if (completed) {
+        events.push(completed);
+      }
+      events.push({
+        ...runtimeEventBase(event, canonicalThreadId),
+        type: "turn.completed",
+        payload: {
+          state: "completed",
+        },
+      });
+      return events;
+    }
     const completed = mapItemLifecycle(event, canonicalThreadId, "item.completed");
     return completed ? [completed] : [];
   }
@@ -1361,8 +1426,12 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         ...(input.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
         ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
         runtimeMode: input.runtimeMode,
-        ...(input.model !== undefined ? { model: input.model } : {}),
-        ...(input.modelOptions?.codex?.fastMode ? { serviceTier: "fast" } : {}),
+        ...(input.modelSelection?.provider === "codex"
+          ? { model: input.modelSelection.model }
+          : {}),
+        ...(input.modelSelection?.provider === "codex" && input.modelSelection.options?.fastMode
+          ? { serviceTier: "fast" }
+          : {}),
       };
 
       return Effect.tryPromise({
@@ -1412,17 +1481,50 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             }),
           { concurrency: 1 },
         );
+        const skillReferences = input.input ? extractSkillReferencesFromText(input.input) : [];
+        const resolvedSkills =
+          skillReferences.length === 0
+            ? []
+            : yield* Effect.tryPromise({
+                try: async () => {
+                  const availableSkills = await manager.listSkills(input.threadId, {
+                    forceReload: false,
+                  });
+                  const firstEnabledSkillByName = new Map<string, { name: string; path: string }>();
+                  for (const skill of availableSkills) {
+                    if (!skill.enabled || firstEnabledSkillByName.has(skill.name)) {
+                      continue;
+                    }
+                    firstEnabledSkillByName.set(skill.name, {
+                      name: skill.name,
+                      path: skill.path,
+                    });
+                  }
+                  return skillReferences.flatMap((skillName) => {
+                    const resolved = firstEnabledSkillByName.get(skillName);
+                    return resolved ? [resolved] : [];
+                  });
+                },
+                catch: (cause) => toRequestError(input.threadId, "skills/list", cause),
+              });
 
         return yield* Effect.tryPromise({
           try: () => {
             const managerInput = {
               threadId: input.threadId,
               ...(input.input !== undefined ? { input: input.input } : {}),
-              ...(input.model !== undefined ? { model: input.model } : {}),
-              ...(input.modelOptions?.codex?.reasoningEffort !== undefined
-                ? { effort: input.modelOptions.codex.reasoningEffort }
+              ...(resolvedSkills.length > 0 ? { skills: resolvedSkills } : {}),
+              ...(input.modelSelection?.provider === "codex"
+                ? { model: input.modelSelection.model }
                 : {}),
-              ...(input.modelOptions?.codex?.fastMode ? { serviceTier: "fast" } : {}),
+              ...(input.modelSelection?.provider === "codex" &&
+              input.modelSelection.options?.reasoningEffort !== undefined
+                ? { effort: input.modelSelection.options.reasoningEffort }
+                : {}),
+              ...(input.modelSelection?.provider === "codex" &&
+              input.modelSelection.options?.fastMode
+                ? { serviceTier: "fast" }
+                : {}),
               ...(input.interactionMode !== undefined
                 ? { interactionMode: input.interactionMode }
                 : {}),
@@ -1477,6 +1579,122 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         })),
       );
     };
+
+    const listProviderCommands: CodexAdapterShape["listProviderCommands"] = () =>
+      Effect.succeed<ReadonlyArray<ProviderCommandDefinition>>([
+        {
+          provider: PROVIDER,
+          name: "review",
+          description: "review my current changes and find issues",
+          supportsInlineArgs: true,
+          availableDuringTask: false,
+          execution: {
+            kind: "provider",
+            operation: "review",
+          },
+        },
+        {
+          provider: PROVIDER,
+          name: "init",
+          description: "create an AGENTS.md file with instructions for Codex",
+          supportsInlineArgs: false,
+          availableDuringTask: false,
+          execution: {
+            kind: "submit-prompt",
+            prompt: CODEX_INIT_PROMPT,
+            guardFilePath: "AGENTS.md",
+            guardMessage: "AGENTS.md already exists here. Skipping /init to avoid overwriting it.",
+          },
+        },
+        {
+          provider: PROVIDER,
+          name: "compact",
+          description: "summarize conversation to prevent hitting the context limit",
+          supportsInlineArgs: false,
+          availableDuringTask: false,
+          execution: {
+            kind: "provider",
+            operation: "compact",
+          },
+        },
+        {
+          provider: PROVIDER,
+          name: "plan",
+          description: "switch to Plan mode",
+          supportsInlineArgs: false,
+          availableDuringTask: false,
+          execution: {
+            kind: "interaction-mode",
+            interactionMode: "plan",
+          },
+        },
+        {
+          provider: PROVIDER,
+          name: "default",
+          description: "switch to default mode",
+          supportsInlineArgs: false,
+          availableDuringTask: false,
+          execution: {
+            kind: "interaction-mode",
+            interactionMode: "default",
+          },
+        },
+      ]);
+
+    const executeProviderCommand: CodexAdapterShape["executeProviderCommand"] = (input) =>
+      Effect.gen(function* () {
+        switch (input.commandName) {
+          case "review":
+            yield* Effect.tryPromise({
+              try: () =>
+                manager.startReview({
+                  threadId: input.threadId,
+                  ...(input.args?.trim() ? { instructions: input.args.trim() } : {}),
+                }),
+              catch: (cause) => toRequestError(input.threadId, "review/start", cause),
+            });
+            return;
+          case "compact":
+            yield* Effect.tryPromise({
+              try: () => manager.startCompaction(input.threadId),
+              catch: (cause) => toRequestError(input.threadId, "thread/compact/start", cause),
+            });
+            return;
+          case "init": {
+            const session = manager
+              .listSessions()
+              .find((entry) => entry.threadId === input.threadId);
+            const guardPath = session?.cwd ? resolve(session.cwd, "AGENTS.md") : null;
+            if (guardPath) {
+              const exists = yield* fileSystem
+                .exists(guardPath)
+                .pipe(Effect.mapError((cause) => toRequestError(input.threadId, "init", cause)));
+              if (exists) {
+                return yield* new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "init",
+                  detail: "AGENTS.md already exists here. Skipping /init to avoid overwriting it.",
+                });
+              }
+            }
+            yield* Effect.tryPromise({
+              try: () =>
+                manager.sendTurn({
+                  threadId: input.threadId,
+                  input: CODEX_INIT_PROMPT,
+                }),
+              catch: (cause) => toRequestError(input.threadId, "turn/start", cause),
+            });
+            return;
+          }
+          default:
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "executeProviderCommand",
+              issue: `Unsupported Codex command '${input.commandName}'.`,
+            });
+        }
+      });
 
     const respondToRequest: CodexAdapterShape["respondToRequest"] = (
       threadId,
@@ -1564,6 +1782,8 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       interruptTurn,
       readThread,
       rollbackThread,
+      listProviderCommands,
+      executeProviderCommand,
       respondToRequest,
       respondToUserInput,
       stopSession,

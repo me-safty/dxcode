@@ -703,13 +703,19 @@ describe("WebSocket Server", () => {
         id: string;
         workspaceRoot: string;
         title: string;
-        defaultModel: string | null;
+        defaultModelSelection: {
+          provider: string;
+          model: string;
+        } | null;
       }>;
       threads: Array<{
         id: string;
         projectId: string;
         title: string;
-        model: string;
+        modelSelection: {
+          provider: string;
+          model: string;
+        };
         branch: string | null;
         worktreePath: string | null;
       }>;
@@ -725,7 +731,10 @@ describe("WebSocket Server", () => {
           id: bootstrapProjectId,
           workspaceRoot: "/test/bootstrap-workspace",
           title: "bootstrap-workspace",
-          defaultModel: "gpt-5-codex",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
         }),
       ]),
     );
@@ -735,7 +744,10 @@ describe("WebSocket Server", () => {
           id: bootstrapThreadId,
           projectId: bootstrapProjectId,
           title: "New thread",
-          model: "gpt-5-codex",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
           branch: null,
           worktreePath: null,
         }),
@@ -1192,7 +1204,10 @@ describe("WebSocket Server", () => {
       projectId: "project-diff",
       title: "Diff Project",
       workspaceRoot,
-      defaultModel: "gpt-5-codex",
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
       createdAt,
     });
     expect(createProjectResponse.error).toBeUndefined();
@@ -1202,7 +1217,10 @@ describe("WebSocket Server", () => {
       threadId: "thread-diff",
       projectId: "project-diff",
       title: "Diff Thread",
-      model: "gpt-5-codex",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
       runtimeMode: "full-access",
       interactionMode: "default",
       branch: null,
@@ -1246,6 +1264,8 @@ describe("WebSocket Server", () => {
       respondToUserInput: () => unsupported(),
       stopSession: () => unsupported(),
       listSessions: () => Effect.succeed([]),
+      listProviderCommands: () => Effect.succeed([]),
+      executeProviderCommand: () => unsupported(),
       getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
       rollbackConversation: () => unsupported(),
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),
@@ -1270,7 +1290,10 @@ describe("WebSocket Server", () => {
       projectId: "project-1",
       title: "WS Project",
       workspaceRoot,
-      defaultModel: "gpt-5-codex",
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
       createdAt,
     });
     expect(createProjectResponse.error).toBeUndefined();
@@ -1280,7 +1303,10 @@ describe("WebSocket Server", () => {
       threadId: "thread-1",
       projectId: "project-1",
       title: "Thread 1",
-      model: "gpt-5-codex",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
       runtimeMode: "full-access",
       interactionMode: "default",
       branch: null,
@@ -1339,6 +1365,109 @@ describe("WebSocket Server", () => {
     expect(domainEvent.type).toBe("thread.message-sent");
     expect(domainEvent.payload.messageId).toBe("assistant:item-1");
     expect(domainEvent.payload.text).toBe("hello from runtime");
+  });
+
+  it("bootstraps a provider session before executing a provider command", async () => {
+    const startSession = vi.fn((threadId: ThreadId) =>
+      Effect.succeed({
+        provider: "codex" as const,
+        status: "ready" as const,
+        runtimeMode: "full-access" as const,
+        threadId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+    const executeProviderCommand = vi.fn(() => Effect.void);
+    const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
+    const providerService: ProviderServiceShape = {
+      startSession: startSession as ProviderServiceShape["startSession"],
+      sendTurn: () => unsupported(),
+      interruptTurn: () => unsupported(),
+      respondToRequest: () => unsupported(),
+      respondToUserInput: () => unsupported(),
+      stopSession: () => unsupported(),
+      listSessions: () => Effect.succeed([]),
+      listProviderCommands: () => Effect.succeed([]),
+      executeProviderCommand:
+        executeProviderCommand as ProviderServiceShape["executeProviderCommand"],
+      getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+      rollbackConversation: () => unsupported(),
+      streamEvents: Stream.empty,
+    };
+
+    server = await createTestServer({
+      cwd: "/test",
+      providerLayer: Layer.succeed(ProviderService, providerService),
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-provider-command-");
+    const createdAt = new Date().toISOString();
+    const createProjectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: "cmd-provider-command-project-create",
+      projectId: "project-provider-command",
+      title: "Provider Command Project",
+      workspaceRoot,
+      defaultModel: "gpt-5-codex",
+      createdAt,
+    });
+    expect(createProjectResponse.error).toBeUndefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-provider-command-thread-create",
+      threadId: "thread-provider-command",
+      projectId: "project-provider-command",
+      title: "Provider Command Thread",
+      model: "gpt-5-codex",
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt,
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const response = await sendRequest(ws, WS_METHODS.serverExecuteProviderCommand, {
+      threadId: "thread-provider-command",
+      provider: "codex",
+      commandName: "review",
+      providerOptions: {
+        codex: {
+          binaryPath: "/custom/bin/codex",
+          homePath: "/custom/.codex",
+        },
+      },
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({ accepted: true });
+    expect(startSession).toHaveBeenCalledWith(
+      asThreadId("thread-provider-command"),
+      expect.objectContaining({
+        provider: "codex",
+        model: "gpt-5-codex",
+        runtimeMode: "full-access",
+        cwd: workspaceRoot,
+        providerOptions: {
+          codex: {
+            binaryPath: "/custom/bin/codex",
+            homePath: "/custom/.codex",
+          },
+        },
+      }),
+    );
+    expect(executeProviderCommand).toHaveBeenCalledWith({
+      threadId: asThreadId("thread-provider-command"),
+      provider: "codex",
+      commandName: "review",
+    });
   });
 
   it("routes terminal RPC methods and broadcasts terminal events", async () => {
@@ -1814,6 +1943,10 @@ describe("WebSocket Server", () => {
       actionId: "client-action-1",
       cwd: "/test",
       action: "commit_push",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+      },
     });
     expect(response.result).toBeUndefined();
     expect(response.error?.message).toContain("detached HEAD");
@@ -1822,6 +1955,10 @@ describe("WebSocket Server", () => {
         actionId: "client-action-1",
         cwd: "/test",
         action: "commit_push",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5.4-mini",
+        },
       },
       expect.objectContaining({
         actionId: "client-action-1",
@@ -1877,6 +2014,10 @@ describe("WebSocket Server", () => {
       actionId: "client-action-2",
       cwd: "/test",
       action: "commit",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+      },
     });
     const progressPush = await waitForPush(initiatingWs, WS_CHANNELS.gitActionProgress);
 

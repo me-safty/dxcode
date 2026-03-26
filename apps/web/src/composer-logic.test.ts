@@ -24,6 +24,23 @@ describe("detectComposerTrigger", () => {
     });
   });
 
+  it("detects $skill trigger at cursor", () => {
+    const text = "Use $skill-ins";
+    const trigger = detectComposerTrigger(text, text.length);
+
+    expect(trigger).toEqual({
+      kind: "skill",
+      query: "skill-ins",
+      rangeStart: "Use ".length,
+      rangeEnd: text.length,
+    });
+  });
+
+  it("does not treat dollar amounts as skill triggers", () => {
+    const text = "Budget is $100";
+    expect(detectComposerTrigger(text, text.length)).toBeNull();
+  });
+
   it("detects slash command token while typing command name", () => {
     const text = "/mo";
     const trigger = detectComposerTrigger(text, text.length);
@@ -237,14 +254,23 @@ describe("isCollapsedCursorAdjacentToInlineToken", () => {
 
 describe("parseStandaloneComposerSlashCommand", () => {
   it("parses standalone /plan command", () => {
-    expect(parseStandaloneComposerSlashCommand(" /plan ")).toBe("plan");
+    expect(parseStandaloneComposerSlashCommand(" /plan ")).toEqual({
+      name: "plan",
+      args: "",
+    });
   });
 
   it("parses standalone /default command", () => {
-    expect(parseStandaloneComposerSlashCommand("/default")).toBe("default");
+    expect(parseStandaloneComposerSlashCommand("/default")).toEqual({
+      name: "default",
+      args: "",
+    });
   });
 
-  it("ignores slash commands with extra message text", () => {
-    expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+  it("parses slash commands with inline args", () => {
+    expect(parseStandaloneComposerSlashCommand("/review focus on auth")).toEqual({
+      name: "review",
+      args: "focus on auth",
+    });
   });
 });

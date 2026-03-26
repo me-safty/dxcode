@@ -708,6 +708,27 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.command).toBe("bun run lint");
   });
 
+  it("strips shell wrapper commands down to the invoked inspection command", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "wrapped-command-tool",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          data: {
+            item: {
+              command: ["/bin/zsh", "-lc", "sed -n '1,40p' apps/web/src/components/ChatView.tsx"],
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.command).toBe("sed -n '1,40p' apps/web/src/components/ChatView.tsx");
+  });
+
   it("keeps compact Codex tool metadata used for icons and labels", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -739,6 +760,133 @@ describe("deriveWorkLogEntries", () => {
       itemType: "command_execution",
       toolTitle: "bash",
     });
+  });
+
+  it("collapses contiguous review inspection commands into one expandable work entry", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "review-started",
+        createdAt: "2026-02-23T00:00:00.000Z",
+        kind: "tool.completed",
+        summary: "Started review",
+        payload: {
+          itemType: "review_entered",
+        },
+      }),
+      makeActivity({
+        id: "review-command-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          data: {
+            item: {
+              command: ["/bin/zsh", "-lc", "sed -n '1,40p' apps/web/src/components/ChatView.tsx"],
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "review-command-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          data: {
+            item: {
+              command: ["/bin/zsh", "-lc", 'rg -n "providerOptions" apps/server/src apps/web/src'],
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "review-finished",
+        createdAt: "2026-02-23T00:00:02.500Z",
+        kind: "tool.completed",
+        summary: "Review complete",
+        payload: {
+          itemType: "review_exited",
+        },
+      }),
+      makeActivity({
+        id: "real-command",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          data: {
+            item: {
+              command: ["bun", "run", "lint"],
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+
+    expect(entries).toHaveLength(4);
+    expect(entries[0]).toMatchObject({
+      id: "review-started",
+      label: "Started review",
+    });
+    expect(entries[1]).toMatchObject({
+      id: "review-command-2",
+      label: "Inspected repository",
+      itemType: "command_execution",
+      collapsedCommands: [
+        "sed -n '1,40p' apps/web/src/components/ChatView.tsx",
+        'rg -n "providerOptions" apps/server/src apps/web/src',
+      ],
+    });
+    expect(entries[1]?.command).toBeUndefined();
+    expect(entries[2]).toMatchObject({
+      id: "review-finished",
+      label: "Review complete",
+    });
+    expect(entries[3]?.command).toBe("bun run lint");
+  });
+
+  it("does not collapse read-only inspection commands outside review mode", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "inspection-command-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          data: {
+            item: {
+              command: ["/bin/zsh", "-lc", "sed -n '1,40p' apps/web/src/components/ChatView.tsx"],
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "inspection-command-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          data: {
+            item: {
+              command: ["/bin/zsh", "-lc", 'rg -n "providerOptions" apps/server/src apps/web/src'],
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+
+    expect(entries).toHaveLength(2);
+    expect(entries[0]?.command).toBe("sed -n '1,40p' apps/web/src/components/ChatView.tsx");
+    expect(entries[1]?.command).toBe('rg -n "providerOptions" apps/server/src apps/web/src');
   });
 
   it("extracts changed file paths for file-change tool activities", () => {

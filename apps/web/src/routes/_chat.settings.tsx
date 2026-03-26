@@ -1,17 +1,25 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDownIcon, PlusIcon, RotateCcwIcon, Undo2Icon, XIcon } from "lucide-react";
-import { type ReactNode, useCallback, useState } from "react";
-import { type ProviderKind, DEFAULT_GIT_TEXT_GENERATION_MODEL } from "@t3tools/contracts";
-import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import {
-  getAppModelOptions,
+  ChevronDownIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  RotateCcwIcon,
+  Undo2Icon,
+  XIcon,
+} from "lucide-react";
+import { type ReactNode, useCallback, useState } from "react";
+import { type ProviderKind } from "@t3tools/contracts";
+import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
+import { useAppSettings } from "../appSettings";
+import {
+  getCustomModelOptionsByProvider,
   getCustomModelsForProvider,
   MAX_CUSTOM_MODEL_LENGTH,
   MODEL_PROVIDER_SETTINGS,
   patchCustomModels,
-  useAppSettings,
-} from "../appSettings";
+  resolveAppModelSelectionState,
+} from "../modelSelection";
 import { APP_VERSION } from "../branding";
 import { Button } from "../components/ui/button";
 import { Collapsible, CollapsibleContent } from "../components/ui/collapsible";
@@ -25,12 +33,14 @@ import {
 } from "../components/ui/select";
 import { SidebarTrigger } from "../components/ui/sidebar";
 import { Switch } from "../components/ui/switch";
+import { ProviderModelPicker } from "../components/chat/ProviderModelPicker";
+import { TraitsPicker } from "../components/chat/TraitsPicker";
 import { SidebarInset } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";
-import { serverConfigQueryOptions } from "../lib/serverReactQuery";
+import { serverConfigQueryOptions, serverSkillsQueryOptions } from "../lib/serverReactQuery";
 import { cn } from "../lib/utils";
 import { ensureNativeApi, readNativeApi } from "../nativeApi";
 
@@ -189,8 +199,13 @@ function SettingsRouteView() {
   const { theme, setTheme } = useTheme();
   const { settings, defaults, updateSettings, resetSettings } = useAppSettings();
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
+  const skillsQuery = useQuery(
+    serverSkillsQueryOptions(settings.codexBinaryPath, settings.codexHomePath),
+  );
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
+  const [openingSkillPath, setOpeningSkillPath] = useState<string | null>(null);
+  const [openSkillError, setOpenSkillError] = useState<string | null>(null);
   const [openInstallProviders, setOpenInstallProviders] = useState<Record<ProviderKind, boolean>>({
     codex: Boolean(settings.codexBinaryPath || settings.codexHomePath),
     claudeAgent: Boolean(settings.claudeBinaryPath),
@@ -213,21 +228,17 @@ function SettingsRouteView() {
   const claudeBinaryPath = settings.claudeBinaryPath;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
+  const skills = skillsQuery.data?.skills ?? [];
 
-  const gitTextGenerationModelOptions = getAppModelOptions(
-    "codex",
-    settings.customCodexModels,
-    settings.textGenerationModel,
+  const textGenerationModelSelection = resolveAppModelSelectionState(settings);
+  const textGenProvider = textGenerationModelSelection.provider;
+  const textGenModel = textGenerationModelSelection.model;
+  const textGenModelOptions = textGenerationModelSelection.options;
+  const gitModelOptionsByProvider = getCustomModelOptionsByProvider(
+    settings,
+    textGenProvider,
+    textGenModel,
   );
-  const currentGitTextGenerationModel =
-    settings.textGenerationModel ?? DEFAULT_GIT_TEXT_GENERATION_MODEL;
-  const defaultGitTextGenerationModel =
-    defaults.textGenerationModel ?? DEFAULT_GIT_TEXT_GENERATION_MODEL;
-  const isGitTextGenerationModelDirty =
-    currentGitTextGenerationModel !== defaultGitTextGenerationModel;
-  const selectedGitTextGenerationModelLabel =
-    gitTextGenerationModelOptions.find((option) => option.slug === currentGitTextGenerationModel)
-      ?.name ?? currentGitTextGenerationModel;
   const selectedCustomModelProviderSettings = MODEL_PROVIDER_SETTINGS.find(
     (providerSettings) => providerSettings.provider === selectedCustomModelProvider,
   )!;
@@ -260,7 +271,10 @@ function SettingsRouteView() {
     ...(settings.confirmThreadDelete !== defaults.confirmThreadDelete
       ? ["Delete confirmation"]
       : []),
-    ...(isGitTextGenerationModelDirty ? ["Git writing model"] : []),
+    ...(JSON.stringify(settings.textGenerationModelSelection ?? null) !==
+    JSON.stringify(defaults.textGenerationModelSelection ?? null)
+      ? ["Git writing model"]
+      : []),
     ...(settings.customCodexModels.length > 0 || settings.customClaudeModels.length > 0
       ? ["Custom models"]
       : []),
@@ -289,6 +303,29 @@ function SettingsRouteView() {
         setIsOpeningKeybindings(false);
       });
   }, [availableEditors, keybindingsConfigPath]);
+
+  const openSkillFile = useCallback(
+    (targetPath: string) => {
+      setOpenSkillError(null);
+      setOpeningSkillPath(targetPath);
+      const api = ensureNativeApi();
+      const editor = resolveAndPersistPreferredEditor(availableEditors ?? []);
+      if (!editor) {
+        setOpenSkillError("No available editors found.");
+        setOpeningSkillPath(null);
+        return;
+      }
+      void api.shell
+        .openInEditor(targetPath, editor)
+        .catch((error) => {
+          setOpenSkillError(error instanceof Error ? error.message : "Unable to open skill file.");
+        })
+        .finally(() => {
+          setOpeningSkillPath((current) => (current === targetPath ? null : current));
+        });
+    },
+    [availableEditors],
+  );
 
   const addCustomModel = useCallback(
     (provider: ProviderKind) => {
@@ -631,43 +668,61 @@ function SettingsRouteView() {
             <SettingsSection title="Models">
               <SettingsRow
                 title="Git writing model"
-                description="Used for generated commit messages, PR titles, and branch names."
+                description="Provider and model used for auto-generated git content."
                 resetAction={
-                  isGitTextGenerationModelDirty ? (
+                  JSON.stringify(settings.textGenerationModelSelection ?? null) !==
+                  JSON.stringify(defaults.textGenerationModelSelection ?? null) ? (
                     <SettingResetButton
                       label="git writing model"
-                      onClick={() =>
+                      onClick={() => {
                         updateSettings({
-                          textGenerationModel: defaults.textGenerationModel,
-                        })
-                      }
+                          textGenerationModelSelection: defaults.textGenerationModelSelection,
+                        });
+                      }}
                     />
                   ) : null
                 }
                 control={
-                  <Select
-                    value={currentGitTextGenerationModel}
-                    onValueChange={(value) => {
-                      if (!value) return;
-                      updateSettings({
-                        textGenerationModel: value,
-                      });
-                    }}
-                  >
-                    <SelectTrigger
-                      className="w-full sm:w-52"
-                      aria-label="Git text generation model"
-                    >
-                      <SelectValue>{selectedGitTextGenerationModelLabel}</SelectValue>
-                    </SelectTrigger>
-                    <SelectPopup align="end" alignItemWithTrigger={false}>
-                      {gitTextGenerationModelOptions.map((option) => (
-                        <SelectItem hideIndicator key={option.slug} value={option.slug}>
-                          {option.name}
-                        </SelectItem>
-                      ))}
-                    </SelectPopup>
-                  </Select>
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    <ProviderModelPicker
+                      provider={textGenProvider}
+                      model={textGenModel}
+                      lockedProvider={null}
+                      modelOptionsByProvider={gitModelOptionsByProvider}
+                      triggerVariant="outline"
+                      triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                      onProviderModelChange={(provider, model) => {
+                        updateSettings({
+                          textGenerationModelSelection: resolveAppModelSelectionState({
+                            ...settings,
+                            textGenerationModelSelection: { provider, model },
+                          }),
+                        });
+                      }}
+                    />
+                    <TraitsPicker
+                      provider={textGenProvider}
+                      model={textGenModel}
+                      prompt=""
+                      onPromptChange={() => {}}
+                      modelOptions={textGenModelOptions}
+                      allowPromptInjectedEffort={false}
+                      triggerVariant="outline"
+                      triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                      onModelOptionsChange={(nextOptions) => {
+                        updateSettings({
+                          textGenerationModelSelection: resolveAppModelSelectionState({
+                            ...settings,
+                            textGenerationModelSelection: {
+                              provider: textGenProvider,
+                              model: textGenModel,
+                              ...(nextOptions ? { options: nextOptions } : {}),
+                            },
+                          }),
+                        });
+                      }}
+                    />
+                  </div>
                 }
               />
 
@@ -939,6 +994,114 @@ function SettingsRouteView() {
                       );
                     })}
                   </div>
+                </div>
+              </SettingsRow>
+
+              <SettingsRow
+                title="Skills"
+                description="Browse the Codex skills discovered for this app, open the backing files to edit them, and invoke enabled ones from the composer with `$skill-name`."
+                status={
+                  <>
+                    <span className="block break-all font-mono text-[11px] text-foreground">
+                      {(codexHomePath.trim().length > 0 ? codexHomePath : "~/.codex") + "/skills"}
+                    </span>
+                    {openSkillError ? (
+                      <span className="mt-1 block text-destructive">{openSkillError}</span>
+                    ) : skillsQuery.isError ? (
+                      <span className="mt-1 block text-destructive">
+                        {skillsQuery.error instanceof Error
+                          ? skillsQuery.error.message
+                          : "Unable to load skills."}
+                      </span>
+                    ) : (
+                      <span className="mt-1 block">
+                        {skills.length === 0
+                          ? "No skills discovered."
+                          : `${skills.length} skill${skills.length === 1 ? "" : "s"} discovered.`}
+                      </span>
+                    )}
+                  </>
+                }
+                control={
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={skillsQuery.isFetching}
+                    onClick={() => {
+                      setOpenSkillError(null);
+                      void skillsQuery.refetch();
+                    }}
+                  >
+                    <RefreshCwIcon
+                      className={cn("size-3.5", skillsQuery.isFetching && "animate-spin")}
+                    />
+                    {skillsQuery.isFetching ? "Refreshing..." : "Refresh"}
+                  </Button>
+                }
+              >
+                <div className="mt-4">
+                  {skills.length > 0 ? (
+                    <div className="overflow-hidden rounded-xl border border-border/70">
+                      {skills.map((skill) => (
+                        <div
+                          key={`${skill.scope}:${skill.name}`}
+                          className="grid gap-3 border-t border-border/70 px-4 py-3 first:border-t-0 sm:grid-cols-[minmax(0,1fr)_auto]"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <code className="truncate text-sm text-foreground">
+                                ${skill.name}
+                              </code>
+                              <span className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+                                {skill.scope}
+                              </span>
+                              {!skill.enabled ? (
+                                <span className="text-[11px] uppercase tracking-[0.12em] text-amber-600">
+                                  disabled
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {skill.shortDescription ?? skill.description}
+                            </p>
+                            {skill.displayName ? (
+                              <p className="mt-1 text-[11px] text-muted-foreground">
+                                {skill.displayName}
+                              </p>
+                            ) : null}
+                          </div>
+                          <div className="flex items-center gap-2 sm:justify-end">
+                            {skill.agentsDefinitionPath ? (
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                disabled={openingSkillPath === skill.agentsDefinitionPath}
+                                onClick={() => openSkillFile(skill.agentsDefinitionPath!)}
+                              >
+                                {openingSkillPath === skill.agentsDefinitionPath
+                                  ? "Opening..."
+                                  : "Open UI metadata"}
+                              </Button>
+                            ) : null}
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              disabled={openingSkillPath === skill.skillFilePath}
+                              onClick={() => openSkillFile(skill.skillFilePath)}
+                            >
+                              {openingSkillPath === skill.skillFilePath
+                                ? "Opening..."
+                                : "Open SKILL.md"}
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : skillsQuery.isLoading ? (
+                    <div className="rounded-xl border border-border/70 px-4 py-3 text-xs text-muted-foreground">
+                      Loading skills...
+                    </div>
+                  ) : null}
                 </div>
               </SettingsRow>
 
