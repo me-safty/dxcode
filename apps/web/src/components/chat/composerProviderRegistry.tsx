@@ -1,5 +1,4 @@
 import {
-  type ModelSlug,
   type ProviderKind,
   type ProviderModelOptions,
   type ServerProviderModel,
@@ -21,7 +20,7 @@ import { TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
 
 export type ComposerProviderStateInput = {
   provider: ProviderKind;
-  model: ModelSlug;
+  model: string;
   models: ReadonlyArray<ServerProviderModel>;
   prompt: string;
   modelOptions: ProviderModelOptions | null | undefined;
@@ -40,7 +39,7 @@ type ProviderRegistryEntry = {
   getState: (input: ComposerProviderStateInput) => ComposerProviderState;
   renderTraitsMenuContent: (input: {
     threadId: ThreadId;
-    model: ModelSlug;
+    model: string;
     models: ReadonlyArray<ServerProviderModel>;
     modelOptions: ProviderModelOptions[ProviderKind] | undefined;
     prompt: string;
@@ -48,7 +47,7 @@ type ProviderRegistryEntry = {
   }) => ReactNode;
   renderTraitsPicker: (input: {
     threadId: ThreadId;
-    model: ModelSlug;
+    model: string;
     models: ReadonlyArray<ServerProviderModel>;
     modelOptions: ProviderModelOptions[ProviderKind] | undefined;
     prompt: string;
@@ -180,7 +179,7 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
 export function renderProviderTraitsMenuContent(input: {
   provider: ProviderKind;
   threadId: ThreadId;
-  model: ModelSlug;
+  model: string;
   models: ReadonlyArray<ServerProviderModel>;
   modelOptions: ProviderModelOptions[ProviderKind] | undefined;
   prompt: string;
@@ -199,7 +198,7 @@ export function renderProviderTraitsMenuContent(input: {
 export function renderProviderTraitsPicker(input: {
   provider: ProviderKind;
   threadId: ThreadId;
-  model: ModelSlug;
+  model: string;
   models: ReadonlyArray<ServerProviderModel>;
   modelOptions: ProviderModelOptions[ProviderKind] | undefined;
   prompt: string;

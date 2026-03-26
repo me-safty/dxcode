@@ -11,6 +11,7 @@ import {
   getDefaultEffort,
   hasEffortLevel,
   normalizeModelSlug,
+  resolveContextWindow,
   trimOrNull,
 } from "@t3tools/shared/model";
 
@@ -108,10 +109,12 @@ export function normalizeClaudeModelOptionsWithCapabilities(
   const thinking =
     caps.supportsThinkingToggle && modelOptions?.thinking === false ? false : undefined;
   const fastMode = caps.supportsFastMode && modelOptions?.fastMode === true ? true : undefined;
+  const contextWindow = resolveContextWindow(caps, modelOptions?.contextWindow);
   const nextOptions: ClaudeModelOptions = {
     ...(thinking === false ? { thinking: false } : {}),
     ...(effort ? { effort } : {}),
     ...(fastMode ? { fastMode: true } : {}),
+    ...(contextWindow ? { contextWindow } : {}),
   };
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }

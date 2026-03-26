@@ -2,7 +2,6 @@ import {
   CODEX_REASONING_EFFORT_OPTIONS,
   type ClaudeCodeEffort,
   type CodexReasoningEffort,
-  type ModelSlug,
   ModelSelection,
   ProjectId,
   ProviderInteractionMode,
@@ -263,7 +262,7 @@ interface ComposerDraftStoreState {
 }
 
 export interface EffectiveComposerModelState {
-  selectedModel: ModelSlug;
+  selectedModel: string;
   modelOptions: ProviderModelOptions | null;
 }
 

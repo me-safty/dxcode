@@ -9,7 +9,12 @@ import type {
 } from "@t3tools/contracts";
 import { Effect, Equal, Layer, Option, Result, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { getDefaultEffort, hasEffortLevel, trimOrNull } from "@t3tools/shared/model";
+import {
+  getDefaultEffort,
+  hasEffortLevel,
+  resolveContextWindow,
+  trimOrNull,
+} from "@t3tools/shared/model";
 
 import {
   buildServerProvider,
@@ -114,10 +119,12 @@ export function normalizeClaudeModelOptions(
   const thinking =
     caps.supportsThinkingToggle && modelOptions?.thinking === false ? false : undefined;
   const fastMode = caps.supportsFastMode && modelOptions?.fastMode === true ? true : undefined;
+  const contextWindow = resolveContextWindow(caps, modelOptions?.contextWindow);
   const nextOptions: ClaudeModelOptions = {
     ...(thinking === false ? { thinking: false } : {}),
     ...(effort ? { effort } : {}),
     ...(fastMode ? { fastMode: true } : {}),
+    ...(contextWindow ? { contextWindow } : {}),
   };
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }

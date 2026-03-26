@@ -1,14 +1,9 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
-  MODEL_OPTIONS_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   type ClaudeCodeEffort,
-  type ClaudeModelOptions,
-  type CodexModelOptions,
-  type CodexReasoningEffort,
   type ModelCapabilities,
   type ModelSelection,
-  type ModelSlug,
   type ProviderKind,
 } from "@t3tools/contracts";
 
@@ -17,7 +12,7 @@ export interface SelectableModelOption {
   name: string;
 }
 
-export function getDefaultModel(provider: ProviderKind = "codex"): ModelSlug {
+export function getDefaultModel(provider: ProviderKind = "codex"): string {
   return DEFAULT_MODEL_BY_PROVIDER[provider];
 }
 
@@ -50,7 +45,7 @@ export function getDefaultContextWindow(caps: ModelCapabilities): string | null 
  * Returns the validated non-default value, or `undefined` when it should be
  * omitted (default or unsupported).
  */
-function resolveContextWindow(
+export function resolveContextWindow(
   caps: ModelCapabilities,
   raw: string | null | undefined,
 ): string | undefined {
@@ -60,37 +55,6 @@ function resolveContextWindow(
   return hasContextWindowOption(caps, raw) ? raw : undefined;
 }
 
-// ── Data-driven capability resolver ───────────────────────────────────
-
-const MODEL_CAPABILITIES_INDEX: Record<ProviderKind, Record<string, ModelCapabilities>> = (() => {
-  const index: Record<string, Record<string, ModelCapabilities>> = {};
-  for (const [provider, models] of Object.entries(MODEL_OPTIONS_BY_PROVIDER)) {
-    const map: Record<string, ModelCapabilities> = {};
-    for (const m of models) {
-      map[m.slug] = m.capabilities as ModelCapabilities;
-    }
-    index[provider] = map;
-  }
-  return index as Record<ProviderKind, Record<string, ModelCapabilities>>;
-})();
-
-export function getModelCapabilities(
-  provider: ProviderKind,
-  model: string | null | undefined,
-): ModelCapabilities {
-  const slug = normalizeModelSlug(model, provider);
-  if (slug && MODEL_CAPABILITIES_INDEX[provider]?.[slug]) {
-    return MODEL_CAPABILITIES_INDEX[provider][slug];
-  }
-  return {
-    reasoningEffortLevels: [],
-    supportsFastMode: false,
-    supportsThinkingToggle: false,
-    contextWindowOptions: [],
-    promptInjectedEffortLevels: [],
-  };
-}
-
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {
   return typeof text === "string" && /\bultrathink\b/i.test(text);
 }
@@ -98,7 +62,7 @@ export function isClaudeUltrathinkPrompt(text: string | null | undefined): boole
 export function normalizeModelSlug(
   model: string | null | undefined,
   provider: ProviderKind = "codex",
-): ModelSlug | null {
+): string | null {
   if (typeof model !== "string") {
     return null;
   }
@@ -108,18 +72,18 @@ export function normalizeModelSlug(
     return null;
   }
 
-  const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, ModelSlug>;
+  const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, string>;
   const aliased = Object.prototype.hasOwnProperty.call(aliases, trimmed)
     ? aliases[trimmed]
     : undefined;
-  return typeof aliased === "string" ? aliased : (trimmed as ModelSlug);
+  return typeof aliased === "string" ? aliased : trimmed;
 }
 
 export function resolveSelectableModel(
   provider: ProviderKind,
   value: string | null | undefined,
   options: ReadonlyArray<SelectableModelOption>,
-): ModelSlug | null {
+): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -151,7 +115,7 @@ export function resolveSelectableModel(
 export function resolveModelSlug(
   model: string | null | undefined,
   provider: ProviderKind = "codex",
-): ModelSlug {
+): string {
   const normalized = normalizeModelSlug(model, provider);
   if (!normalized) {
     return DEFAULT_MODEL_BY_PROVIDER[provider];
@@ -162,7 +126,7 @@ export function resolveModelSlug(
 export function resolveModelSlugForProvider(
   provider: ProviderKind,
   model: string | null | undefined,
-): ModelSlug {
+): string {
   return resolveModelSlug(model, provider);
 }
 
@@ -173,72 +137,26 @@ export function trimOrNull<T extends string>(value: T | null | undefined): T | n
   return trimmed || null;
 }
 
-export function normalizeCodexModelOptions(
-  model: string | null | undefined,
-  modelOptions: CodexModelOptions | null | undefined,
-): CodexModelOptions | undefined {
-  const caps = getModelCapabilities("codex", model);
-  const defaultReasoningEffort = getDefaultEffort(caps) as CodexReasoningEffort;
-  const reasoningEffort = trimOrNull(modelOptions?.reasoningEffort) ?? defaultReasoningEffort;
-  const fastModeEnabled = modelOptions?.fastMode === true;
-  const nextOptions: CodexModelOptions = {
-    ...(reasoningEffort !== defaultReasoningEffort ? { reasoningEffort } : {}),
-    ...(fastModeEnabled ? { fastMode: true } : {}),
-  };
-  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
-}
-
-export function normalizeClaudeModelOptions(
-  model: string | null | undefined,
-  modelOptions: ClaudeModelOptions | null | undefined,
-): ClaudeModelOptions | undefined {
-  const caps = getModelCapabilities("claudeAgent", model);
-  const defaultReasoningEffort = getDefaultEffort(caps);
-  const resolvedEffort = trimOrNull(modelOptions?.effort);
-  const isPromptInjected = caps.promptInjectedEffortLevels.includes(resolvedEffort ?? "");
-  const effort =
-    resolvedEffort &&
-    !isPromptInjected &&
-    hasEffortLevel(caps, resolvedEffort) &&
-    resolvedEffort !== defaultReasoningEffort
-      ? resolvedEffort
-      : undefined;
-  const thinking =
-    caps.supportsThinkingToggle && modelOptions?.thinking === false ? false : undefined;
-  const fastMode = caps.supportsFastMode && modelOptions?.fastMode === true ? true : undefined;
-  const contextWindow = resolveContextWindow(caps, modelOptions?.contextWindow);
-  const nextOptions: ClaudeModelOptions = {
-    ...(thinking === false ? { thinking: false } : {}),
-    ...(effort ? { effort } : {}),
-    ...(fastMode ? { fastMode: true } : {}),
-    ...(contextWindow ? { contextWindow } : {}),
-  };
-  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
-}
-
 /**
- * Resolve the actual API model identifier from a full model selection.
- *
- * Provider-aware: each provider can map `contextWindow` (or other options)
- * to whatever the API requires — a model-id suffix, a separate parameter, etc.
- * The canonical slug stored in the selection stays unchanged so the
- * capabilities system keeps working.
+ * Known context-window value → API model-id suffix for the Claude provider.
+ * Only values that require a suffix are listed; the default context window
+ * needs no suffix and is therefore absent.
  */
+const CLAUDE_CONTEXT_WINDOW_SUFFIX: Record<string, string> = {
+  "1m": "[1m]",
+};
+
 export function resolveApiModelId(modelSelection: ModelSelection): string {
-  const caps = getModelCapabilities(modelSelection.provider, modelSelection.model);
   switch (modelSelection.provider) {
     case "claudeAgent": {
       const contextWindow = modelSelection.options?.contextWindow;
       if (contextWindow) {
-        if (hasContextWindowOption(caps, contextWindow)) {
-          switch (contextWindow) {
-            case "1m":
-              return `${modelSelection.model}[1m]`;
-            default:
-              return modelSelection.model;
-          }
+        const suffix = CLAUDE_CONTEXT_WINDOW_SUFFIX[contextWindow];
+        if (suffix) {
+          return `${modelSelection.model}${suffix}`;
         }
       }
+      return modelSelection.model;
     }
     default: {
       return modelSelection.model;

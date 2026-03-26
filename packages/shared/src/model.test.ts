@@ -9,11 +9,9 @@ import {
   applyClaudePromptEffortPrefix,
   getDefaultContextWindow,
   getDefaultEffort,
-  getModelCapabilities,
   hasContextWindowOption,
   hasEffortLevel,
   isClaudeUltrathinkPrompt,
-  normalizeClaudeModelOptions,
   normalizeModelSlug,
   resolveApiModelId,
   resolveModelSlug,
@@ -41,7 +39,10 @@ const claudeCaps: ModelCapabilities = {
   ],
   supportsFastMode: false,
   supportsThinkingToggle: false,
-  contextWindowOptions: [],
+  contextWindowOptions: [
+    { value: "200k", label: "200k", isDefault: true },
+    { value: "1m", label: "1M" },
+  ],
   promptInjectedEffortLevels: ["ultrathink"],
 };
 
@@ -117,45 +118,20 @@ describe("misc helpers", () => {
   });
 });
 
-describe("contextWindowOptions capability", () => {
-  it("offers context window options for Opus 4.6 and Sonnet 4.6", () => {
-    const opusOpts = getModelCapabilities("claudeAgent", "claude-opus-4-6").contextWindowOptions;
-    expect(opusOpts.length).toBeGreaterThan(1);
-    expect(opusOpts.find((o) => o.isDefault)?.value).toBe("200k");
-    expect(
-      hasContextWindowOption(getModelCapabilities("claudeAgent", "claude-opus-4-6"), "1m"),
-    ).toBe(true);
-
-    const sonnetOpts = getModelCapabilities(
-      "claudeAgent",
-      "claude-sonnet-4-6",
-    ).contextWindowOptions;
-    expect(sonnetOpts.length).toBeGreaterThan(1);
-    expect(
-      hasContextWindowOption(getModelCapabilities("claudeAgent", "claude-sonnet-4-6"), "1m"),
-    ).toBe(true);
-  });
-
-  it("has no context window options for Haiku 4.5, unknown models, and Codex", () => {
-    expect(getModelCapabilities("claudeAgent", "claude-haiku-4-5").contextWindowOptions).toEqual(
-      [],
-    );
-    expect(getModelCapabilities("claudeAgent", undefined).contextWindowOptions).toEqual([]);
-    expect(getModelCapabilities("codex", "gpt-5.4").contextWindowOptions).toEqual([]);
-  });
-});
-
-describe("getDefaultContextWindow", () => {
-  it("returns the default option value for models with context window options", () => {
-    expect(getDefaultContextWindow(getModelCapabilities("claudeAgent", "claude-opus-4-6"))).toBe(
-      "200k",
-    );
+describe("context window helpers", () => {
+  it("reads default context window", () => {
+    expect(getDefaultContextWindow(claudeCaps)).toBe("200k");
   });
 
   it("returns null for models without context window options", () => {
-    expect(
-      getDefaultContextWindow(getModelCapabilities("claudeAgent", "claude-haiku-4-5")),
-    ).toBeNull();
+    expect(getDefaultContextWindow(codexCaps)).toBeNull();
+  });
+
+  it("checks context window support", () => {
+    expect(hasContextWindowOption(claudeCaps, "1m")).toBe(true);
+    expect(hasContextWindowOption(claudeCaps, "200k")).toBe(true);
+    expect(hasContextWindowOption(claudeCaps, "bogus")).toBe(false);
+    expect(hasContextWindowOption(codexCaps, "1m")).toBe(false);
   });
 });
 
@@ -196,14 +172,7 @@ describe("resolveApiModelId", () => {
     ).toBe("claude-opus-4-6");
   });
 
-  it("ignores unsupported context window values", () => {
-    expect(
-      resolveApiModelId({
-        provider: "claudeAgent",
-        model: "claude-haiku-4-5",
-        options: { contextWindow: "1m" },
-      }),
-    ).toBe("claude-haiku-4-5");
+  it("returns the model as-is for unknown context window values", () => {
     expect(
       resolveApiModelId({
         provider: "claudeAgent",
@@ -215,31 +184,5 @@ describe("resolveApiModelId", () => {
 
   it("returns the model as-is for Codex selections", () => {
     expect(resolveApiModelId({ provider: "codex", model: "gpt-5.4" })).toBe("gpt-5.4");
-  });
-});
-
-describe("normalizeClaudeModelOptions with contextWindow", () => {
-  it("preserves non-default contextWindow for supported models", () => {
-    expect(normalizeClaudeModelOptions("claude-opus-4-6", { contextWindow: "1m" })).toEqual({
-      contextWindow: "1m",
-    });
-  });
-
-  it("strips contextWindow for unsupported models", () => {
-    expect(
-      normalizeClaudeModelOptions("claude-haiku-4-5", { contextWindow: "1m" }),
-    ).toBeUndefined();
-  });
-
-  it("strips contextWindow when it is the default value", () => {
-    expect(
-      normalizeClaudeModelOptions("claude-opus-4-6", { contextWindow: "200k" }),
-    ).toBeUndefined();
-  });
-
-  it("strips unknown contextWindow values", () => {
-    expect(
-      normalizeClaudeModelOptions("claude-opus-4-6", { contextWindow: "bogus" }),
-    ).toBeUndefined();
   });
 });
