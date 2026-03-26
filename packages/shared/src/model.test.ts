@@ -10,6 +10,8 @@ import {
   isClaudeUltrathinkPrompt,
   normalizeModelSlug,
   resolveApiModelId,
+  resolveContextWindow,
+  resolveEffort,
   resolveModelSlug,
   resolveModelSlugForProvider,
   resolveSelectableModel,
@@ -94,6 +96,42 @@ describe("capability helpers", () => {
   });
 });
 
+describe("resolveEffort", () => {
+  it("returns the explicit value when supported and not prompt-injected", () => {
+    expect(resolveEffort(codexCaps, "xhigh")).toBe("xhigh");
+    expect(resolveEffort(codexCaps, "high")).toBe("high");
+    expect(resolveEffort(claudeCaps, "medium")).toBe("medium");
+  });
+
+  it("falls back to default when value is unsupported", () => {
+    expect(resolveEffort(codexCaps, "bogus")).toBe("high");
+    expect(resolveEffort(claudeCaps, "bogus")).toBe("high");
+  });
+
+  it("returns the default when no value is provided", () => {
+    expect(resolveEffort(codexCaps, undefined)).toBe("high");
+    expect(resolveEffort(codexCaps, null)).toBe("high");
+    expect(resolveEffort(codexCaps, "")).toBe("high");
+    expect(resolveEffort(codexCaps, "  ")).toBe("high");
+  });
+
+  it("excludes prompt-injected efforts and falls back to default", () => {
+    expect(resolveEffort(claudeCaps, "ultrathink")).toBe("high");
+  });
+
+  it("returns undefined for models with no effort levels", () => {
+    const noCaps: ModelCapabilities = {
+      reasoningEffortLevels: [],
+      supportsFastMode: false,
+      supportsThinkingToggle: false,
+      contextWindowOptions: [],
+      promptInjectedEffortLevels: [],
+    };
+    expect(resolveEffort(noCaps, undefined)).toBeUndefined();
+    expect(resolveEffort(noCaps, "high")).toBeUndefined();
+  });
+});
+
 describe("misc helpers", () => {
   it("detects ultrathink prompts", () => {
     expect(isClaudeUltrathinkPrompt("Ultrathink:\nInvestigate")).toBe(true);
@@ -132,65 +170,59 @@ describe("context window helpers", () => {
   });
 });
 
+describe("resolveContextWindow", () => {
+  it("returns the explicit value when supported", () => {
+    expect(resolveContextWindow(claudeCaps, "200k")).toBe("200k");
+    expect(resolveContextWindow(claudeCaps, "1m")).toBe("1m");
+  });
+
+  it("falls back to default when value is unsupported", () => {
+    expect(resolveContextWindow(claudeCaps, "bogus")).toBe("1m");
+  });
+
+  it("returns the default when no value is provided", () => {
+    expect(resolveContextWindow(claudeCaps, undefined)).toBe("1m");
+    expect(resolveContextWindow(claudeCaps, null)).toBe("1m");
+    expect(resolveContextWindow(claudeCaps, "")).toBe("1m");
+  });
+
+  it("returns undefined for models with no context window options", () => {
+    expect(resolveContextWindow(codexCaps, undefined)).toBeUndefined();
+    expect(resolveContextWindow(codexCaps, "1m")).toBeUndefined();
+  });
+});
+
 describe("resolveApiModelId", () => {
-  it("appends [1m] suffix for explicit 1m context window", () => {
+  it("appends [1m] suffix for 1m context window", () => {
     expect(
-      resolveApiModelId(
-        { provider: "claudeAgent", model: "claude-opus-4-6", options: { contextWindow: "1m" } },
-        claudeCaps,
-      ),
+      resolveApiModelId({
+        provider: "claudeAgent",
+        model: "claude-opus-4-6",
+        options: { contextWindow: "1m" },
+      }),
     ).toBe("claude-opus-4-6[1m]");
   });
 
-  it("applies default context window suffix when contextWindow is not set", () => {
-    // 1m is the default for claudeCaps, so [1m] suffix should be applied
+  it("returns the model as-is for 200k context window", () => {
     expect(
-      resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6" }, claudeCaps),
-    ).toBe("claude-opus-4-6[1m]");
-    expect(
-      resolveApiModelId(
-        { provider: "claudeAgent", model: "claude-opus-4-6", options: {} },
-        claudeCaps,
-      ),
-    ).toBe("claude-opus-4-6[1m]");
-  });
-
-  it("returns the model as-is for explicit 200k (no suffix needed)", () => {
-    expect(
-      resolveApiModelId(
-        { provider: "claudeAgent", model: "claude-opus-4-6", options: { contextWindow: "200k" } },
-        claudeCaps,
-      ),
+      resolveApiModelId({
+        provider: "claudeAgent",
+        model: "claude-opus-4-6",
+        options: { contextWindow: "200k" },
+      }),
     ).toBe("claude-opus-4-6");
   });
 
-  it("falls back to default when context window value is unsupported", () => {
-    // bogus is not in contextWindowOptions, so falls back to default (1m)
+  it("returns the model as-is when no context window is set", () => {
+    expect(resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6" })).toBe(
+      "claude-opus-4-6",
+    );
     expect(
-      resolveApiModelId(
-        { provider: "claudeAgent", model: "claude-opus-4-6", options: { contextWindow: "bogus" } },
-        claudeCaps,
-      ),
-    ).toBe("claude-opus-4-6[1m]");
-  });
-
-  it("returns the model as-is when model has no context window options", () => {
-    const haikuCaps: ModelCapabilities = {
-      reasoningEffortLevels: [],
-      supportsFastMode: false,
-      supportsThinkingToggle: true,
-      contextWindowOptions: [],
-      promptInjectedEffortLevels: [],
-    };
-    expect(
-      resolveApiModelId(
-        { provider: "claudeAgent", model: "claude-haiku-4-5", options: { contextWindow: "1m" } },
-        haikuCaps,
-      ),
-    ).toBe("claude-haiku-4-5");
+      resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6", options: {} }),
+    ).toBe("claude-opus-4-6");
   });
 
   it("returns the model as-is for Codex selections", () => {
-    expect(resolveApiModelId({ provider: "codex", model: "gpt-5.4" }, codexCaps)).toBe("gpt-5.4");
+    expect(resolveApiModelId({ provider: "codex", model: "gpt-5.4" })).toBe("gpt-5.4");
   });
 });

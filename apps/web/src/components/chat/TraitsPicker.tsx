@@ -12,8 +12,8 @@ import {
   trimOrNull,
   getDefaultEffort,
   getDefaultContextWindow,
-  hasEffortLevel,
   hasContextWindowOption,
+  resolveEffort,
 } from "@t3tools/shared/model";
 import { memo, useCallback, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
@@ -90,21 +90,10 @@ function getSelectedTraits(
     : caps.reasoningEffortLevels.filter(
         (option) => !caps.promptInjectedEffortLevels.includes(option.value),
       );
-  const defaultEffort = getDefaultEffort(caps);
 
   // Resolve effort from options (provider-specific key)
-  const resolvedEffort = getRawEffort(provider, modelOptions);
-
-  // Filter out prompt-injected efforts from the "current effort" display
-  const isPromptInjected = resolvedEffort
-    ? caps.promptInjectedEffortLevels.includes(resolvedEffort)
-    : false;
-  const effort =
-    resolvedEffort && !isPromptInjected && hasEffortLevel(caps, resolvedEffort)
-      ? resolvedEffort
-      : defaultEffort && hasEffortLevel(caps, defaultEffort)
-        ? defaultEffort
-        : null;
+  const rawEffort = getRawEffort(provider, modelOptions);
+  const effort = resolveEffort(caps, rawEffort) ?? null;
 
   // Thinking toggle (only for models that support it)
   const thinkingEnabled = caps.supportsThinkingToggle
@@ -297,7 +286,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
               onValueChange={(value) => {
                 updateModelOptions(
                   buildNextOptions(provider, modelOptions, {
-                    contextWindow: value === defaultContextWindow ? undefined : value,
+                    contextWindow: value,
                   }),
                 );
               }}

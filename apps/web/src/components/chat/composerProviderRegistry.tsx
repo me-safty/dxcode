@@ -4,12 +4,7 @@ import {
   type ServerProviderModel,
   type ThreadId,
 } from "@t3tools/contracts";
-import {
-  isClaudeUltrathinkPrompt,
-  trimOrNull,
-  getDefaultEffort,
-  hasEffortLevel,
-} from "@t3tools/shared/model";
+import { isClaudeUltrathinkPrompt, resolveEffort } from "@t3tools/shared/model";
 import type { ReactNode } from "react";
 import {
   getProviderModelCapabilities,
@@ -71,17 +66,7 @@ function getProviderStateFromCapabilities(
         : null
     : null;
 
-  const draftEffort = trimOrNull(rawEffort);
-  const defaultEffort = getDefaultEffort(caps);
-  const isPromptInjected = draftEffort
-    ? caps.promptInjectedEffortLevels.includes(draftEffort)
-    : false;
-  const promptEffort =
-    draftEffort && !isPromptInjected && hasEffortLevel(caps, draftEffort)
-      ? draftEffort
-      : defaultEffort && hasEffortLevel(caps, defaultEffort)
-        ? defaultEffort
-        : null;
+  const promptEffort = resolveEffort(caps, rawEffort) ?? null;
 
   // Normalize options for dispatch
   const normalizedOptions =

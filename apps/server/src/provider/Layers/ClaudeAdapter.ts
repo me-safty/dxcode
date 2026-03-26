@@ -41,9 +41,9 @@ import {
   ClaudeCodeEffort,
 } from "@t3tools/contracts";
 import {
-  hasEffortLevel,
   applyClaudePromptEffortPrefix,
   resolveApiModelId,
+  resolveEffort,
   trimOrNull,
 } from "@t3tools/shared/model";
 import {
@@ -511,16 +511,15 @@ const CLAUDE_SETTING_SOURCES = [
 function buildPromptText(input: ProviderSendTurnInput): string {
   const rawEffort =
     input.modelSelection?.provider === "claudeAgent" ? input.modelSelection.options?.effort : null;
-  const requestedEffort = trimOrNull(rawEffort);
   const claudeModel =
     input.modelSelection?.provider === "claudeAgent" ? input.modelSelection.model : undefined;
   const caps = getClaudeModelCapabilities(claudeModel);
+
+  // For prompt injection, we check if the raw effort is a prompt-injected level (e.g. "ultrathink").
+  // resolveEffort strips prompt-injected values (returning the default instead), so we check the raw value directly.
+  const trimmedEffort = trimOrNull(rawEffort);
   const promptEffort =
-    requestedEffort === "ultrathink" && caps.reasoningEffortLevels.length > 0
-      ? "ultrathink"
-      : requestedEffort && hasEffortLevel(caps, requestedEffort)
-        ? requestedEffort
-        : null;
+    trimmedEffort && caps.promptInjectedEffortLevels.includes(trimmedEffort) ? trimmedEffort : null;
   return applyClaudePromptEffortPrefix(input.input?.trim() ?? "", promptEffort);
 }
 
@@ -2733,10 +2732,9 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         const modelSelection =
           input.modelSelection?.provider === "claudeAgent" ? input.modelSelection : undefined;
         const caps = getClaudeModelCapabilities(modelSelection?.model);
-        const apiModelId = modelSelection ? resolveApiModelId(modelSelection, caps) : undefined;
-        const requestedEffort = trimOrNull(modelSelection?.options?.effort ?? null);
-        const effort =
-          requestedEffort && hasEffortLevel(caps, requestedEffort) ? requestedEffort : null;
+        const apiModelId = modelSelection ? resolveApiModelId(modelSelection) : undefined;
+        const effort = (resolveEffort(caps, modelSelection?.options?.effort) ??
+          null) as ClaudeCodeEffort | null;
         const fastMode = modelSelection?.options?.fastMode === true && caps.supportsFastMode;
         const thinking =
           typeof modelSelection?.options?.thinking === "boolean" && caps.supportsThinkingToggle
@@ -2899,8 +2897,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }
 
         if (modelSelection?.model) {
-          const caps = getClaudeModelCapabilities(modelSelection.model);
-          const apiModelId = resolveApiModelId(modelSelection, caps);
+          const apiModelId = resolveApiModelId(modelSelection);
           yield* Effect.tryPromise({
             try: () => context.query.setModel(apiModelId),
             catch: (cause) => toRequestError(input.threadId, "turn/setModel", cause),

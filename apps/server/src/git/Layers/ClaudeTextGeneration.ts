@@ -27,10 +27,7 @@ import {
   sanitizePrTitle,
   toJsonSchemaObject,
 } from "../Utils.ts";
-import {
-  getClaudeModelCapabilities,
-  normalizeClaudeModelOptions,
-} from "../../provider/Layers/ClaudeProvider.ts";
+import { normalizeClaudeModelOptions } from "../../provider/Layers/ClaudeProvider.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 
 const CLAUDE_TIMEOUT_MS = 180_000;
@@ -107,7 +104,7 @@ const makeClaudeTextGeneration = Effect.gen(function* () {
             "--json-schema",
             jsonSchemaStr,
             "--model",
-            resolveApiModelId(modelSelection, getClaudeModelCapabilities(modelSelection.model)),
+            resolveApiModelId(modelSelection),
             ...(normalizedOptions?.effort ? ["--effort", normalizedOptions.effort] : []),
             ...(Object.keys(settings).length > 0 ? ["--settings", JSON.stringify(settings)] : []),
             "--dangerously-skip-permissions",
