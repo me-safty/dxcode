@@ -666,7 +666,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const selectedTextGenerationModel = settings.textGenerationModelSelection.model;
   const providerOptionsForDispatch = useMemo(() => {
     const providerOptions = {
-      ...(settings.providers.codex.binaryPath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.binaryPath ||
+      ...(settings.providers.codex.binaryPath !==
+        DEFAULT_UNIFIED_SETTINGS.providers.codex.binaryPath ||
       settings.providers.codex.homePath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.homePath
         ? {
             codex: {
