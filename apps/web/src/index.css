@@ -5,6 +5,8 @@
 @custom-variant dark (&:is(.dark, .dark *));
 
 @theme inline {
+  --font-mono: "Geist Mono", "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo,
+    monospace;
   --animate-skeleton: skeleton 2s -1s infinite linear;
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
