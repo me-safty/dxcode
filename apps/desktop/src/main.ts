@@ -3,6 +3,7 @@ import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
+import type { Writable } from "node:stream";
 
 import {
   app,
@@ -943,6 +944,40 @@ function scheduleBackendRestart(reason: string): void {
   }, delayMs);
 }
 
+function isWritableBootstrapStream(stream: unknown): stream is Writable {
+  return (
+    stream !== null &&
+    typeof stream === "object" &&
+    "write" in stream &&
+    typeof stream.write === "function" &&
+    "end" in stream &&
+    typeof stream.end === "function" &&
+    "once" in stream &&
+    typeof stream.once === "function"
+  );
+}
+
+function writeBackendBootstrapEnvelope(stream: unknown): boolean {
+  if (!isWritableBootstrapStream(stream)) {
+    return false;
+  }
+
+  stream.once("error", (error: Error) => {
+    console.error("[desktop] backend bootstrap pipe error", error);
+  });
+  stream.write(
+    `${JSON.stringify({
+      mode: "desktop",
+      noBrowser: true,
+      port: backendPort,
+      t3Home: BASE_DIR,
+      authToken: backendAuthToken,
+    })}\n`,
+  );
+  stream.end();
+  return true;
+}
+
 function startBackend(): void {
   if (isQuitting || backendProcess) return;
 
@@ -966,18 +1001,7 @@ function startBackend(): void {
       : ["ignore", "inherit", "inherit", "pipe"],
   });
   const bootstrapStream = child.stdio[3];
-  if (bootstrapStream && "write" in bootstrapStream) {
-    bootstrapStream.write(
-      `${JSON.stringify({
-        mode: "desktop",
-        noBrowser: true,
-        port: backendPort,
-        t3Home: BASE_DIR,
-        authToken: backendAuthToken,
-      })}\n`,
-    );
-    bootstrapStream.end();
-  } else {
+  if (!writeBackendBootstrapEnvelope(bootstrapStream)) {
     child.kill("SIGTERM");
     scheduleBackendRestart("missing desktop bootstrap pipe");
     return;

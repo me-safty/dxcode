@@ -11,6 +11,11 @@ class BootstrapError extends Data.TaggedError("BootstrapError")<{
   readonly cause?: unknown;
 }> {}
 
+interface OpenBootstrapInputStreamOptions {
+  readonly platform?: NodeJS.Platform;
+  readonly duplicateFd?: (fdPath: string) => number;
+}
+
 export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function* <A, I>(
   schema: Schema.Codec<A, I>,
   fd: number,
@@ -87,6 +92,11 @@ const isUnavailableBootstrapFdError = Predicate.compose(
   (_) => _.code === "EBADF" || _.code === "ENOENT",
 );
 
+const isUnduplicatableBootstrapFdError = Predicate.compose(
+  Predicate.hasProperty("code"),
+  (_) => _.code === "ENXIO",
+);
+
 const isFdReady = (fd: number) =>
   Effect.try({
     try: () => NFS.fstatSync(fd),
@@ -105,31 +115,50 @@ const isFdReady = (fd: number) =>
 
 const makeBootstrapInputStream = (fd: number) =>
   Effect.try<Readable, BootstrapError>({
-    try: () => {
-      const fdPath = resolveFdPath(fd);
-      if (fdPath === undefined) {
-        const stream = new Net.Socket({
-          fd,
-          readable: true,
-          writable: false,
-        });
-        stream.setEncoding("utf8");
-        return stream;
-      }
-
-      const streamFd = NFS.openSync(fdPath, "r");
-      return NFS.createReadStream("", {
-        fd: streamFd,
-        encoding: "utf8",
-        autoClose: true,
-      });
-    },
+    try: () => openBootstrapInputStream(fd),
     catch: (error) =>
       new BootstrapError({
         message: "Failed to duplicate bootstrap fd.",
         cause: error,
       }),
   });
+
+export function openBootstrapInputStream(
+  fd: number,
+  options?: OpenBootstrapInputStreamOptions,
+): Readable {
+  const fdPath = resolveFdPath(fd, options?.platform);
+  if (fdPath === undefined) {
+    const stream = new Net.Socket({
+      fd,
+      readable: true,
+      writable: false,
+    });
+    stream.setEncoding("utf8");
+    return stream;
+  }
+
+  const duplicateFd = options?.duplicateFd ?? ((path: string) => NFS.openSync(path, "r"));
+
+  try {
+    const streamFd = duplicateFd(fdPath);
+    return NFS.createReadStream("", {
+      fd: streamFd,
+      encoding: "utf8",
+      autoClose: true,
+    });
+  } catch (error) {
+    if (!isUnduplicatableBootstrapFdError(error)) {
+      throw error;
+    }
+
+    return NFS.createReadStream("", {
+      fd,
+      encoding: "utf8",
+      autoClose: true,
+    });
+  }
+}
 
 export function resolveFdPath(
   fd: number,

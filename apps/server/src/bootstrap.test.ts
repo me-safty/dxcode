@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import { TestClock } from "effect/testing";
 
-import { readBootstrapEnvelope, resolveFdPath } from "./bootstrap";
+import { openBootstrapInputStream, readBootstrapEnvelope, resolveFdPath } from "./bootstrap";
 import { assertNone, assertSome } from "@effect/vitest/utils";
 
 const TestEnvelopeSchema = Schema.Struct({ mode: Schema.String });
@@ -55,6 +55,53 @@ it.layer(NodeServices.layer)("readBootstrapEnvelope", (it) => {
       const payload = yield* readBootstrapEnvelope(TestEnvelopeSchema, fd, { timeoutMs: 100 });
       assertNone(payload);
     }),
+  );
+
+  it.effect(
+    "falls back to directly reading the inherited fd when fd duplication is unavailable",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const filePath = yield* fs.makeTempFileScoped({
+          prefix: "t3-bootstrap-",
+          suffix: ".ndjson",
+        });
+        yield* fs.writeFileString(filePath, '{"mode":"desktop"}\n');
+
+        const fd = yield* Effect.acquireRelease(
+          Effect.sync(() => NFS.openSync(filePath, "r")),
+          (openedFd) => Effect.sync(() => NFS.closeSync(openedFd)),
+        );
+        const fdPath = resolveFdPath(fd);
+        assert.isDefined(fdPath);
+
+        const stream = openBootstrapInputStream(fd, {
+          platform: process.platform,
+          duplicateFd: (path) => {
+            if (path === fdPath) {
+              const error = new Error(
+                `ENXIO: no such device or address, open '${fdPath}'`,
+              ) as NodeJS.ErrnoException;
+              error.code = "ENXIO";
+              throw error;
+            }
+
+            return NFS.openSync(path, "r");
+          },
+        });
+
+        const content = yield* Effect.promise<string>(
+          () =>
+            new Promise((resolve, reject) => {
+              stream.once("data", (chunk) => resolve(String(chunk)));
+              stream.once("error", reject);
+              stream.once("close", () => reject(new Error("bootstrap stream closed before data")));
+            }),
+        );
+        stream.destroy();
+
+        assert.equal(content, '{"mode":"desktop"}\n');
+      }),
   );
 
   it.effect("returns none when the bootstrap read times out before any value arrives", () =>
