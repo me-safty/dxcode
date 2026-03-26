@@ -11,6 +11,7 @@ import {
   type CanonicalRequestType,
   type ProviderEvent,
   type ProviderRuntimeEvent,
+  type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
   RuntimeItemId,
   RuntimeRequestId,
@@ -37,6 +38,7 @@ import {
 } from "../../codexAppServerManager.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "codex" as const;
@@ -107,6 +109,56 @@ function asArray(value: unknown): unknown[] | undefined {
 
 function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeCodexTokenUsage(value: unknown): ThreadTokenUsageSnapshot | undefined {
+  const usage = asObject(value);
+  const totalUsage = asObject(usage?.total_token_usage ?? usage?.total);
+  const lastUsage = asObject(usage?.last_token_usage ?? usage?.last);
+
+  const totalProcessedTokens =
+    asNumber(totalUsage?.total_tokens) ?? asNumber(totalUsage?.totalTokens);
+  const usedTokens =
+    asNumber(lastUsage?.total_tokens) ?? asNumber(lastUsage?.totalTokens) ?? totalProcessedTokens;
+  if (usedTokens === undefined || usedTokens <= 0) {
+    return undefined;
+  }
+
+  const maxTokens = asNumber(usage?.model_context_window) ?? asNumber(usage?.modelContextWindow);
+  const inputTokens = asNumber(lastUsage?.input_tokens) ?? asNumber(lastUsage?.inputTokens);
+  const cachedInputTokens =
+    asNumber(lastUsage?.cached_input_tokens) ?? asNumber(lastUsage?.cachedInputTokens);
+  const outputTokens = asNumber(lastUsage?.output_tokens) ?? asNumber(lastUsage?.outputTokens);
+  const reasoningOutputTokens =
+    asNumber(lastUsage?.reasoning_output_tokens) ?? asNumber(lastUsage?.reasoningOutputTokens);
+
+  return {
+    usedTokens,
+    ...(totalProcessedTokens !== undefined && totalProcessedTokens > usedTokens
+      ? { totalProcessedTokens }
+      : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
+    ...(usedTokens !== undefined ? { lastUsedTokens: usedTokens } : {}),
+    ...(inputTokens !== undefined ? { lastInputTokens: inputTokens } : {}),
+    ...(cachedInputTokens !== undefined ? { lastCachedInputTokens: cachedInputTokens } : {}),
+    ...(outputTokens !== undefined ? { lastOutputTokens: outputTokens } : {}),
+    ...(reasoningOutputTokens !== undefined
+      ? { lastReasoningOutputTokens: reasoningOutputTokens }
+      : {}),
+    compactsAutomatically: true,
+  };
+}
+
+function toTurnId(value: string | undefined): TurnId | undefined {
+  return value?.trim() ? TurnId.makeUnsafe(value) : undefined;
+}
+
+function toProviderItemId(value: string | undefined): ProviderItemId | undefined {
+  return value?.trim() ? ProviderItemId.makeUnsafe(value) : undefined;
 }
 
 function toTurnStatus(value: unknown): "completed" | "failed" | "cancelled" | "interrupted" {
@@ -415,27 +467,27 @@ function codexEventBase(
 ): Omit<ProviderRuntimeEvent, "type" | "payload"> {
   const payload = asObject(event.payload);
   const msg = codexEventMessage(payload);
-  const turnId = asString(msg?.turn_id) ?? asString(msg?.turnId);
-  const itemId = asString(msg?.item_id) ?? asString(msg?.itemId);
+  const turnId = event.turnId ?? toTurnId(asString(msg?.turn_id) ?? asString(msg?.turnId));
+  const itemId = event.itemId ?? toProviderItemId(asString(msg?.item_id) ?? asString(msg?.itemId));
   const requestId = asString(msg?.request_id) ?? asString(msg?.requestId);
   const base = runtimeEventBase(event, canonicalThreadId);
   const providerRefs = base.providerRefs
     ? {
         ...base.providerRefs,
         ...(turnId ? { providerTurnId: turnId } : {}),
-        ...(itemId ? { providerItemId: ProviderItemId.makeUnsafe(itemId) } : {}),
+        ...(itemId ? { providerItemId: itemId } : {}),
         ...(requestId ? { providerRequestId: requestId } : {}),
       }
     : {
         ...(turnId ? { providerTurnId: turnId } : {}),
-        ...(itemId ? { providerItemId: ProviderItemId.makeUnsafe(itemId) } : {}),
+        ...(itemId ? { providerItemId: itemId } : {}),
         ...(requestId ? { providerRequestId: requestId } : {}),
       };
 
   return {
     ...base,
-    ...(turnId ? { turnId: TurnId.makeUnsafe(turnId) } : {}),
-    ...(itemId ? { itemId: asRuntimeItemId(ProviderItemId.makeUnsafe(itemId)) } : {}),
+    ...(turnId ? { turnId } : {}),
+    ...(itemId ? { itemId: asRuntimeItemId(itemId) } : {}),
     ...(requestId ? { requestId: asRuntimeRequestId(requestId) } : {}),
     ...(Object.keys(providerRefs).length > 0 ? { providerRefs } : {}),
   };
@@ -700,12 +752,17 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "thread/tokenUsage/updated") {
+    const tokenUsage = asObject(payload?.tokenUsage);
+    const normalizedUsage = normalizeCodexTokenUsage(tokenUsage ?? event.payload);
+    if (!normalizedUsage) {
+      return [];
+    }
     return [
       {
         type: "thread.token-usage.updated",
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
-          usage: event.payload ?? {},
+          usage: normalizedUsage,
         },
       },
     ];
@@ -1286,30 +1343,48 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           }
         }),
     );
+    const serverSettingsService = yield* ServerSettingsService;
 
-    const startSession: CodexAdapterShape["startSession"] = (input) => {
+    const startSession: CodexAdapterShape["startSession"] = Effect.fn(function* (input) {
       if (input.provider !== undefined && input.provider !== PROVIDER) {
-        return Effect.fail(
-          new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "startSession",
-            issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
-          }),
-        );
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "startSession",
+          issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
+        });
       }
 
+      const codexSettings = yield* serverSettingsService.getSettings.pipe(
+        Effect.map((settings) => settings.providers.codex),
+        Effect.mapError(
+          (error) =>
+            new ProviderAdapterProcessError({
+              provider: PROVIDER,
+              threadId: input.threadId,
+              detail: error.message,
+              cause: error,
+            }),
+        ),
+      );
+      const binaryPath = codexSettings.binaryPath;
+      const homePath = codexSettings.homePath;
       const managerInput: CodexAppServerStartSessionInput = {
         threadId: input.threadId,
         provider: "codex",
         ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
         ...(input.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
-        ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
         runtimeMode: input.runtimeMode,
-        ...(input.model !== undefined ? { model: input.model } : {}),
-        ...(input.modelOptions?.codex?.fastMode ? { serviceTier: "fast" } : {}),
+        binaryPath,
+        ...(homePath ? { homePath } : {}),
+        ...(input.modelSelection?.provider === "codex"
+          ? { model: input.modelSelection.model }
+          : {}),
+        ...(input.modelSelection?.provider === "codex" && input.modelSelection.options?.fastMode
+          ? { serviceTier: "fast" }
+          : {}),
       };
 
-      return Effect.tryPromise({
+      return yield* Effect.tryPromise({
         try: () => manager.startSession(managerInput),
         catch: (cause) =>
           new ProviderAdapterProcessError({
@@ -1318,8 +1393,8 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             detail: toMessage(cause, "Failed to start Codex adapter session."),
             cause,
           }),
-      }).pipe(Effect.map((session) => session));
-    };
+      });
+    });
 
     const sendTurn: CodexAdapterShape["sendTurn"] = (input) =>
       Effect.gen(function* () {
@@ -1328,7 +1403,7 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           (attachment) =>
             Effect.gen(function* () {
               const attachmentPath = resolveAttachmentPath({
-                stateDir: serverConfig.stateDir,
+                attachmentsDir: serverConfig.attachmentsDir,
                 attachment,
               });
               if (!attachmentPath) {
@@ -1362,11 +1437,17 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             const managerInput = {
               threadId: input.threadId,
               ...(input.input !== undefined ? { input: input.input } : {}),
-              ...(input.model !== undefined ? { model: input.model } : {}),
-              ...(input.modelOptions?.codex?.reasoningEffort !== undefined
-                ? { effort: input.modelOptions.codex.reasoningEffort }
+              ...(input.modelSelection?.provider === "codex"
+                ? { model: input.modelSelection.model }
                 : {}),
-              ...(input.modelOptions?.codex?.fastMode ? { serviceTier: "fast" } : {}),
+              ...(input.modelSelection?.provider === "codex" &&
+              input.modelSelection.options?.reasoningEffort !== undefined
+                ? { effort: input.modelSelection.options.reasoningEffort }
+                : {}),
+              ...(input.modelSelection?.provider === "codex" &&
+              input.modelSelection.options?.fastMode
+                ? { serviceTier: "fast" }
+                : {}),
               ...(input.interactionMode !== undefined
                 ? { interactionMode: input.interactionMode }
                 : {}),

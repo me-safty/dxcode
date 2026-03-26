@@ -4,8 +4,10 @@ import {
   MessageId,
   NonNegativeInt,
   OrchestrationCheckpointFile,
+  OrchestrationProposedPlanId,
   OrchestrationReadModel,
   ProjectScript,
+  ThreadId,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -15,6 +17,7 @@ import {
   type OrchestrationSession,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
+  ModelSelection,
 } from "@t3tools/contracts";
 import { Effect, Layer, Schema, Struct } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -43,6 +46,7 @@ import {
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
+    defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
   }),
 );
@@ -53,7 +57,11 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
-const ProjectionThreadDbRowSchema = ProjectionThread;
+const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
+  Struct.assign({
+    modelSelection: Schema.fromJsonString(ModelSelection),
+  }),
+);
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   Struct.assign({
     payload: Schema.fromJsonString(Schema.Unknown),
@@ -74,6 +82,8 @@ const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
   assistantMessageId: Schema.NullOr(MessageId),
+  sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
+  sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
 });
 const ProjectionStateDbRowSchema = ProjectionState;
 
@@ -137,7 +147,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           workspace_root AS "workspaceRoot",
-          default_model AS "defaultModel",
+          default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -156,7 +166,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           thread_id AS "threadId",
           project_id AS "projectId",
           title,
-          model,
+          model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,
@@ -200,6 +210,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           thread_id AS "threadId",
           turn_id AS "turnId",
           plan_markdown AS "planMarkdown",
+          implemented_at AS "implementedAt",
+          implementation_thread_id AS "implementationThreadId",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_proposed_plans
@@ -284,7 +296,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           requested_at AS "requestedAt",
           started_at AS "startedAt",
           completed_at AS "completedAt",
-          assistant_message_id AS "assistantMessageId"
+          assistant_message_id AS "assistantMessageId",
+          source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
+          source_proposed_plan_id AS "sourceProposedPlanId"
         FROM projection_turns
         WHERE turn_id IS NOT NULL
         ORDER BY thread_id ASC, requested_at DESC, turn_id DESC
@@ -435,6 +449,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               id: row.planId,
               turnId: row.turnId,
               planMarkdown: row.planMarkdown,
+              implementedAt: row.implementedAt,
+              implementationThreadId: row.implementationThreadId,
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,
             });
@@ -497,6 +513,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               startedAt: row.startedAt,
               completedAt: row.completedAt,
               assistantMessageId: row.assistantMessageId,
+              ...(row.sourceProposedPlanThreadId !== null && row.sourceProposedPlanId !== null
+                ? {
+                    sourceProposedPlan: {
+                      threadId: row.sourceProposedPlanThreadId,
+                      planId: row.sourceProposedPlanId,
+                    },
+                  }
+                : {}),
             });
           }
 
@@ -513,22 +537,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             });
           }
 
-          const projects: Array<OrchestrationProject> = projectRows.map((row) => ({
+          const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) => ({
             id: row.projectId,
             title: row.title,
             workspaceRoot: row.workspaceRoot,
-            defaultModel: row.defaultModel,
+            defaultModelSelection: row.defaultModelSelection,
             scripts: row.scripts,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
             deletedAt: row.deletedAt,
           }));
 
-          const threads: Array<OrchestrationThread> = threadRows.map((row) => ({
+          const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) => ({
             id: row.threadId,
             projectId: row.projectId,
             title: row.title,
-            model: row.model,
+            modelSelection: row.modelSelection,
             runtimeMode: row.runtimeMode,
             interactionMode: row.interactionMode,
             branch: row.branch,

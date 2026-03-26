@@ -1,7 +1,5 @@
-import path from "node:path";
-
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Effect, FileSystem, Layer } from "effect";
+import { Effect, FileSystem, Layer, Path } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
@@ -19,33 +17,52 @@ import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus";
 import { ProviderUnsupportedError } from "./provider/Errors";
+import { makeClaudeAdapterLive } from "./provider/Layers/ClaudeAdapter";
 import { makeCodexAdapterLive } from "./provider/Layers/CodexAdapter";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry";
 import { makeProviderServiceLive } from "./provider/Layers/ProviderService";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory";
 import { ProviderService } from "./provider/Services/ProviderService";
 import { makeEventNdjsonLogger } from "./provider/Layers/EventNdjsonLogger";
+import { ServerSettingsService } from "./serverSettings";
 
 import { TerminalManagerLive } from "./terminal/Layers/Manager";
 import { KeybindingsLive } from "./keybindings";
 import { GitManagerLive } from "./git/Layers/GitManager";
 import { GitCoreLive } from "./git/Layers/GitCore";
 import { GitHubCliLive } from "./git/Layers/GitHubCli";
-import { CodexTextGenerationLive } from "./git/Layers/CodexTextGeneration";
-import { GitServiceLive } from "./git/Layers/GitService";
-import { BunPtyAdapterLive } from "./terminal/Layers/BunPTY";
-import { NodePtyAdapterLive } from "./terminal/Layers/NodePTY";
+import { RoutingTextGenerationLive } from "./git/Layers/RoutingTextGeneration";
+import { PtyAdapter } from "./terminal/Services/PTY";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
+
+type RuntimePtyAdapterLoader = {
+  layer: Layer.Layer<PtyAdapter, never, FileSystem.FileSystem | Path.Path>;
+};
+
+const runtimePtyAdapterLoaders = {
+  bun: () => import("./terminal/Layers/BunPTY"),
+  node: () => import("./terminal/Layers/NodePTY"),
+} satisfies Record<string, () => Promise<RuntimePtyAdapterLoader>>;
+
+const makeRuntimePtyAdapterLayer = () =>
+  Effect.gen(function* () {
+    const runtime = process.versions.bun !== undefined ? "bun" : "node";
+    const loader = runtimePtyAdapterLoaders[runtime];
+    const ptyAdapterModule = yield* Effect.promise<RuntimePtyAdapterLoader>(loader);
+    return ptyAdapterModule.layer;
+  }).pipe(Layer.unwrap);
 
 export function makeServerProviderLayer(): Layer.Layer<
   ProviderService,
   ProviderUnsupportedError,
-  SqlClient.SqlClient | ServerConfig | FileSystem.FileSystem | AnalyticsService
+  | SqlClient.SqlClient
+  | ServerConfig
+  | ServerSettingsService
+  | FileSystem.FileSystem
+  | AnalyticsService
 > {
   return Effect.gen(function* () {
-    const { stateDir } = yield* ServerConfig;
-    const providerLogsDir = path.join(stateDir, "logs", "provider");
-    const providerEventLogPath = path.join(providerLogsDir, "events.log");
+    const { providerEventLogPath } = yield* ServerConfig;
     const nativeEventLogger = yield* makeEventNdjsonLogger(providerEventLogPath, {
       stream: "native",
     });
@@ -58,8 +75,12 @@ export function makeServerProviderLayer(): Layer.Layer<
     const codexAdapterLayer = makeCodexAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     );
+    const claudeAdapterLayer = makeClaudeAdapterLive(
+      nativeEventLogger ? { nativeEventLogger } : undefined,
+    );
     const adapterRegistryLayer = ProviderAdapterRegistryLive.pipe(
       Layer.provide(codexAdapterLayer),
+      Layer.provide(claudeAdapterLayer),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
     return makeProviderServiceLive(
@@ -69,8 +90,8 @@ export function makeServerProviderLayer(): Layer.Layer<
 }
 
 export function makeServerRuntimeServicesLayer() {
-  const gitCoreLayer = GitCoreLive.pipe(Layer.provideMerge(GitServiceLive));
-  const textGenerationLayer = CodexTextGenerationLive;
+  const textGenerationLayer = RoutingTextGenerationLive;
+  const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(GitCoreLive));
 
   const orchestrationLayer = OrchestrationEngineLive.pipe(
     Layer.provide(OrchestrationProjectionPipelineLive),
@@ -80,13 +101,13 @@ export function makeServerRuntimeServicesLayer() {
 
   const checkpointDiffQueryLayer = CheckpointDiffQueryLive.pipe(
     Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
-    Layer.provideMerge(CheckpointStoreLive),
+    Layer.provideMerge(checkpointStoreLayer),
   );
 
   const runtimeServicesLayer = Layer.mergeAll(
     orchestrationLayer,
     OrchestrationProjectionSnapshotQueryLive,
-    CheckpointStoreLive,
+    checkpointStoreLayer,
     checkpointDiffQueryLayer,
     RuntimeReceiptBusLive,
   );
@@ -95,7 +116,7 @@ export function makeServerRuntimeServicesLayer() {
   );
   const providerCommandReactorLayer = ProviderCommandReactorLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),
-    Layer.provideMerge(gitCoreLayer),
+    Layer.provideMerge(GitCoreLive),
     Layer.provideMerge(textGenerationLayer),
   );
   const checkpointReactorLayer = CheckpointReactorLive.pipe(
@@ -107,23 +128,17 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provideMerge(checkpointReactorLayer),
   );
 
-  const terminalLayer = TerminalManagerLive.pipe(
-    Layer.provide(
-      typeof Bun !== "undefined" && process.platform !== "win32"
-        ? BunPtyAdapterLive
-        : NodePtyAdapterLive,
-    ),
-  );
+  const terminalLayer = TerminalManagerLive.pipe(Layer.provide(makeRuntimePtyAdapterLayer()));
 
   const gitManagerLayer = GitManagerLive.pipe(
-    Layer.provideMerge(gitCoreLayer),
+    Layer.provideMerge(GitCoreLive),
     Layer.provideMerge(GitHubCliLive),
     Layer.provideMerge(textGenerationLayer),
   );
 
   return Layer.mergeAll(
     orchestrationReactorLayer,
-    gitCoreLayer,
+    GitCoreLive,
     gitManagerLayer,
     terminalLayer,
     KeybindingsLive,
