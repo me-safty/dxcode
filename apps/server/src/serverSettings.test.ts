@@ -27,6 +27,15 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       assert.deepEqual(
         decodePatch({
+          desktopTitleBarMode: "system",
+        }),
+        {
+          desktopTitleBarMode: "system",
+        },
+      );
+
+      assert.deepEqual(
+        decodePatch({
           textGenerationModelSelection: {
             options: {
               fastMode: false,
@@ -160,6 +169,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const serverConfig = yield* ServerConfig;
       const fileSystem = yield* FileSystem.FileSystem;
       const next = yield* serverSettings.updateSettings({
+        desktopTitleBarMode: "system",
         providers: {
           codex: {
             binaryPath: "/opt/homebrew/bin/codex",
@@ -171,6 +181,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
       assert.deepEqual(JSON.parse(raw), {
+        desktopTitleBarMode: "system",
         providers: {
           codex: {
             binaryPath: "/opt/homebrew/bin/codex",

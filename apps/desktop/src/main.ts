@@ -3,6 +3,7 @@ import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
+import type { Writable } from "node:stream";
 
 import {
   app,
@@ -17,10 +18,14 @@ import {
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
 import * as Effect from "effect/Effect";
+import { DEFAULT_DESKTOP_TITLE_BAR_MODE, type DesktopTitleBarMode } from "@t3tools/contracts";
 import type {
   DesktopTheme,
   DesktopUpdateActionResult,
   DesktopUpdateState,
+  DesktopWindowAction,
+  DesktopWindowPlatform,
+  DesktopWindowState,
 } from "@t3tools/contracts";
 import { autoUpdater } from "electron-updater";
 
@@ -49,9 +54,13 @@ syncShellEnvironment();
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
+const SET_TITLE_BAR_MODE_CHANNEL = "desktop:set-title-bar-mode";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
+const WINDOW_STATE_CHANNEL = "desktop:window-state";
+const WINDOW_GET_STATE_CHANNEL = "desktop:window-get-state";
+const WINDOW_ACTION_CHANNEL = "desktop:window-action";
 const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
@@ -62,6 +71,8 @@ const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
+const SETTINGS_STATE_DIR = Path.join(BASE_DIR, isDevelopment ? "dev" : "userdata");
+const SETTINGS_FILE_PATH = Path.join(SETTINGS_STATE_DIR, "settings.json");
 const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
 const APP_USER_MODEL_ID = "com.t3tools.t3code";
 const USER_DATA_DIR_NAME = isDevelopment ? "t3code-dev" : "t3code";
@@ -76,6 +87,9 @@ const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
+const DESKTOP_ZOOM_LEVEL_STEP = 0.5;
+const DESKTOP_ZOOM_LEVEL_MIN = -8;
+const DESKTOP_ZOOM_LEVEL_MAX = 9;
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 
@@ -92,6 +106,12 @@ let aboutCommitHashCache: string | null | undefined;
 let desktopLogSink: RotatingFileSink | null = null;
 let backendLogSink: RotatingFileSink | null = null;
 let restoreStdIoCapture: (() => void) | null = null;
+let desktopSettingsWatcher: FS.FSWatcher | null = null;
+let desktopSettingsSyncTimer: ReturnType<typeof setTimeout> | null = null;
+let currentDesktopTitleBarMode: DesktopTitleBarMode = DEFAULT_DESKTOP_TITLE_BAR_MODE;
+let pendingDesktopTitleBarMode: DesktopTitleBarMode | null = null;
+let isRebuildingMainWindow = false;
+const desktopTitleBarModeByWindow = new WeakMap<BrowserWindow, DesktopTitleBarMode>();
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
 const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
@@ -112,6 +132,90 @@ function logScope(scope: string): string {
 
 function sanitizeLogValue(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function resolveDesktopWindowPlatform(platform: NodeJS.Platform): DesktopWindowPlatform {
+  if (platform === "darwin" || platform === "linux" || platform === "win32") {
+    return platform;
+  }
+
+  return "other";
+}
+
+function getDesktopTitleBarMode(rawMode: unknown): DesktopTitleBarMode {
+  return rawMode === "system" ? "system" : "t3code";
+}
+
+function parseDesktopTitleBarMode(rawMode: unknown): DesktopTitleBarMode | null {
+  return rawMode === "t3code" || rawMode === "system" ? rawMode : null;
+}
+
+function readDesktopTitleBarModeFromDisk(): DesktopTitleBarMode {
+  if (!FS.existsSync(SETTINGS_FILE_PATH)) {
+    return DEFAULT_DESKTOP_TITLE_BAR_MODE;
+  }
+
+  try {
+    const raw = FS.readFileSync(SETTINGS_FILE_PATH, "utf8");
+    const parsed = JSON.parse(raw) as { desktopTitleBarMode?: unknown };
+    return getDesktopTitleBarMode(parsed.desktopTitleBarMode);
+  } catch (error) {
+    console.error("[desktop] failed to read desktop title bar mode", error);
+    return DEFAULT_DESKTOP_TITLE_BAR_MODE;
+  }
+}
+
+function shouldUseT3CodeTitleBar(mode: DesktopTitleBarMode): boolean {
+  return resolveDesktopWindowPlatform(process.platform) !== "other" && mode === "t3code";
+}
+
+function persistDesktopTitleBarModeToDisk(mode: DesktopTitleBarMode): void {
+  FS.mkdirSync(SETTINGS_STATE_DIR, { recursive: true });
+
+  const currentSettings = FS.existsSync(SETTINGS_FILE_PATH)
+    ? JSON.parse(FS.readFileSync(SETTINGS_FILE_PATH, "utf8"))
+    : {};
+
+  if (
+    currentSettings === null ||
+    Array.isArray(currentSettings) ||
+    typeof currentSettings !== "object"
+  ) {
+    throw new Error("settings.json must contain a JSON object");
+  }
+
+  const nextSettings = { ...currentSettings } as Record<string, unknown>;
+  if (mode === DEFAULT_DESKTOP_TITLE_BAR_MODE) {
+    delete nextSettings.desktopTitleBarMode;
+  } else {
+    nextSettings.desktopTitleBarMode = mode;
+  }
+
+  FS.writeFileSync(SETTINGS_FILE_PATH, `${JSON.stringify(nextSettings, null, 2)}\n`, "utf8");
+}
+
+function resolveDesktopWindowState(window: BrowserWindow | null): DesktopWindowState {
+  return {
+    isFullScreen: window?.isFullScreen() ?? false,
+    isMaximized: window?.isMaximized() ?? false,
+    platform: resolveDesktopWindowPlatform(process.platform),
+    titleBarMode:
+      (window ? desktopTitleBarModeByWindow.get(window) : undefined) ?? currentDesktopTitleBarMode,
+    zoomFactor: window?.webContents.getZoomFactor() ?? 1,
+  };
+}
+
+function getDesktopWindowAction(rawAction: unknown): DesktopWindowAction | null {
+  if (
+    rawAction === "minimize" ||
+    rawAction === "toggle-maximize" ||
+    rawAction === "exit-full-screen" ||
+    rawAction === "close"
+  ) {
+    return rawAction;
+  }
+
+  return null;
 }
 
 function backendChildEnv(): NodeJS.ProcessEnv {
@@ -524,6 +628,42 @@ function dispatchMenuAction(action: string): void {
   send();
 }
 
+function resolveActiveDesktopWindow(): BrowserWindow | null {
+  return BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+}
+
+function setDesktopZoomLevel(nextZoomLevel: number): void {
+  const targetWindow = resolveActiveDesktopWindow();
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+
+  const clampedZoomLevel = Math.min(
+    DESKTOP_ZOOM_LEVEL_MAX,
+    Math.max(DESKTOP_ZOOM_LEVEL_MIN, nextZoomLevel),
+  );
+  targetWindow.webContents.setZoomLevel(clampedZoomLevel);
+  emitDesktopWindowState(targetWindow);
+}
+
+function resetDesktopZoom(): void {
+  setDesktopZoomLevel(0);
+}
+
+function stepDesktopZoom(direction: "in" | "out"): void {
+  const targetWindow = resolveActiveDesktopWindow();
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+
+  const currentZoomLevel = targetWindow.webContents.getZoomLevel();
+  const nextZoomLevel =
+    direction === "in"
+      ? currentZoomLevel + DESKTOP_ZOOM_LEVEL_STEP
+      : currentZoomLevel - DESKTOP_ZOOM_LEVEL_STEP;
+  setDesktopZoomLevel(nextZoomLevel);
+}
+
 function handleCheckForUpdatesMenuClick(): void {
   const disabledReason = getAutoUpdateDisabledReason({
     isDevelopment,
@@ -626,10 +766,27 @@ function configureApplicationMenu(): void {
         { role: "forceReload" },
         { role: "toggleDevTools" },
         { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn", accelerator: "CmdOrCtrl+=" },
-        { role: "zoomIn", accelerator: "CmdOrCtrl+Plus", visible: false },
-        { role: "zoomOut" },
+        {
+          label: "Actual Size",
+          accelerator: "CmdOrCtrl+0",
+          click: () => resetDesktopZoom(),
+        },
+        {
+          label: "Zoom In",
+          accelerator: "CmdOrCtrl+=",
+          click: () => stepDesktopZoom("in"),
+        },
+        {
+          label: "Zoom In",
+          accelerator: "CmdOrCtrl+Plus",
+          visible: false,
+          click: () => stepDesktopZoom("in"),
+        },
+        {
+          label: "Zoom Out",
+          accelerator: "CmdOrCtrl+-",
+          click: () => stepDesktopZoom("out"),
+        },
         { type: "separator" },
         { role: "togglefullscreen" },
       ],
@@ -734,6 +891,15 @@ function emitUpdateState(): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (window.isDestroyed()) continue;
     window.webContents.send(UPDATE_STATE_CHANNEL, updateState);
+  }
+}
+
+function emitDesktopWindowState(targetWindow?: BrowserWindow | null): void {
+  const windows = targetWindow ? [targetWindow] : BrowserWindow.getAllWindows();
+
+  for (const window of windows) {
+    if (!window || window.isDestroyed()) continue;
+    window.webContents.send(WINDOW_STATE_CHANNEL, resolveDesktopWindowState(window));
   }
 }
 
@@ -943,6 +1109,40 @@ function scheduleBackendRestart(reason: string): void {
   }, delayMs);
 }
 
+function isWritableBootstrapStream(stream: unknown): stream is Writable {
+  return (
+    stream !== null &&
+    typeof stream === "object" &&
+    "write" in stream &&
+    typeof stream.write === "function" &&
+    "end" in stream &&
+    typeof stream.end === "function" &&
+    "once" in stream &&
+    typeof stream.once === "function"
+  );
+}
+
+function writeBackendBootstrapEnvelope(stream: unknown): boolean {
+  if (!isWritableBootstrapStream(stream)) {
+    return false;
+  }
+
+  stream.once("error", (error: Error) => {
+    console.error("[desktop] backend bootstrap pipe error", error);
+  });
+  stream.write(
+    `${JSON.stringify({
+      mode: "desktop",
+      noBrowser: true,
+      port: backendPort,
+      t3Home: BASE_DIR,
+      authToken: backendAuthToken,
+    })}\n`,
+  );
+  stream.end();
+  return true;
+}
+
 function startBackend(): void {
   if (isQuitting || backendProcess) return;
 
@@ -966,18 +1166,7 @@ function startBackend(): void {
       : ["ignore", "inherit", "inherit", "pipe"],
   });
   const bootstrapStream = child.stdio[3];
-  if (bootstrapStream && "write" in bootstrapStream) {
-    bootstrapStream.write(
-      `${JSON.stringify({
-        mode: "desktop",
-        noBrowser: true,
-        port: backendPort,
-        t3Home: BASE_DIR,
-        authToken: backendAuthToken,
-      })}\n`,
-    );
-    bootstrapStream.end();
-  } else {
+  if (!writeBackendBootstrapEnvelope(bootstrapStream)) {
     child.kill("SIGTERM");
     scheduleBackendRestart("missing desktop bootstrap pipe");
     return;
@@ -1131,6 +1320,29 @@ function registerIpcHandlers(): void {
     nativeTheme.themeSource = theme;
   });
 
+  ipcMain.removeHandler(SET_TITLE_BAR_MODE_CHANNEL);
+  ipcMain.handle(SET_TITLE_BAR_MODE_CHANNEL, async (_event, rawMode: unknown) => {
+    const mode = parseDesktopTitleBarMode(rawMode);
+    if (!mode) {
+      return resolveDesktopWindowState(mainWindow);
+    }
+
+    const previousMode = currentDesktopTitleBarMode;
+    persistDesktopTitleBarModeToDisk(mode);
+
+    if (mode !== currentDesktopTitleBarMode) {
+      const nextState = await rebuildMainWindow(mode);
+      if (nextState.titleBarMode !== mode) {
+        persistDesktopTitleBarModeToDisk(previousMode);
+      }
+      return nextState;
+    }
+
+    currentDesktopTitleBarMode = mode;
+    emitDesktopWindowState(mainWindow);
+    return resolveDesktopWindowState(mainWindow);
+  });
+
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
   ipcMain.handle(
     CONTEXT_MENU_CHANNEL,
@@ -1207,6 +1419,40 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.removeHandler(WINDOW_GET_STATE_CHANNEL);
+  ipcMain.handle(WINDOW_GET_STATE_CHANNEL, async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    return resolveDesktopWindowState(owner);
+  });
+
+  ipcMain.removeHandler(WINDOW_ACTION_CHANNEL);
+  ipcMain.handle(WINDOW_ACTION_CHANNEL, async (event, rawAction: unknown) => {
+    const action = getDesktopWindowAction(rawAction);
+    const owner =
+      BrowserWindow.fromWebContents(event.sender) ?? BrowserWindow.getFocusedWindow() ?? mainWindow;
+
+    if (!action || !owner) {
+      return resolveDesktopWindowState(owner ?? null);
+    }
+
+    if (action === "minimize") {
+      owner.minimize();
+    } else if (action === "toggle-maximize") {
+      if (owner.isMaximized()) {
+        owner.unmaximize();
+      } else {
+        owner.maximize();
+      }
+    } else if (action === "exit-full-screen") {
+      owner.setFullScreen(false);
+    } else if (action === "close") {
+      owner.close();
+    }
+
+    emitDesktopWindowState(owner);
+    return resolveDesktopWindowState(owner);
+  });
+
   ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);
   ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async () => updateState);
 
@@ -1245,18 +1491,75 @@ function getIconOption(): { icon: string } | Record<string, never> {
   return iconPath ? { icon: iconPath } : {};
 }
 
-function createWindow(): BrowserWindow {
+type CreateWindowOptions = {
+  bounds?: Electron.Rectangle;
+  loadUrl?: string | null;
+  showOnReady?: boolean;
+  titleBarMode?: DesktopTitleBarMode;
+};
+
+type WindowSnapshot = {
+  bounds: Electron.Rectangle;
+  isFullScreen: boolean;
+  isMaximized: boolean;
+  url: string | null;
+};
+
+function snapshotWindow(window: BrowserWindow): WindowSnapshot {
+  return {
+    bounds: window.getBounds(),
+    isFullScreen: window.isFullScreen(),
+    isMaximized: window.isMaximized(),
+    url: window.webContents.getURL() || null,
+  };
+}
+
+function resolveWindowLoadUrl(loadUrl: string | null | undefined): string {
+  if (loadUrl) {
+    return loadUrl;
+  }
+
+  if (isDevelopment) {
+    return process.env.VITE_DEV_SERVER_URL as string;
+  }
+
+  return `${DESKTOP_SCHEME}://app/index.html`;
+}
+
+function clearDesktopSettingsSyncTimer(): void {
+  if (!desktopSettingsSyncTimer) {
+    return;
+  }
+
+  clearTimeout(desktopSettingsSyncTimer);
+  desktopSettingsSyncTimer = null;
+}
+
+function createWindow(options: CreateWindowOptions = {}): BrowserWindow {
+  const titleBarMode = options.titleBarMode ?? currentDesktopTitleBarMode;
+  const useT3CodeTitleBar = shouldUseT3CodeTitleBar(titleBarMode);
   const window = new BrowserWindow({
-    width: 1100,
-    height: 780,
+    width: options.bounds?.width ?? 1100,
+    height: options.bounds?.height ?? 780,
     minWidth: 840,
     minHeight: 620,
+    ...(options.bounds
+      ? {
+          x: options.bounds.x,
+          y: options.bounds.y,
+        }
+      : {}),
     show: false,
     autoHideMenuBar: true,
     ...getIconOption(),
+    ...(useT3CodeTitleBar ? { frame: false } : {}),
     title: APP_DISPLAY_NAME,
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 18 },
+    ...(process.platform === "darwin" && !useT3CodeTitleBar
+      ? {
+          titleBarStyle: "hiddenInset" as const,
+          trafficLightPosition: { x: 16, y: 18 },
+        }
+      : {}),
     webPreferences: {
       preload: Path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -1264,6 +1567,7 @@ function createWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+  desktopTitleBarModeByWindow.set(window, titleBarMode);
 
   window.webContents.on("context-menu", (event, params) => {
     event.preventDefault();
@@ -1308,16 +1612,33 @@ function createWindow(): BrowserWindow {
   window.webContents.on("did-finish-load", () => {
     window.setTitle(APP_DISPLAY_NAME);
     emitUpdateState();
+    emitDesktopWindowState(window);
   });
-  window.once("ready-to-show", () => {
-    window.show();
+  if (options.showOnReady !== false) {
+    window.once("ready-to-show", () => {
+      window.show();
+    });
+  }
+  window.on("enter-full-screen", () => {
+    emitDesktopWindowState(window);
+  });
+  window.on("leave-full-screen", () => {
+    emitDesktopWindowState(window);
+  });
+  window.on("maximize", () => {
+    emitDesktopWindowState(window);
+  });
+  window.on("unmaximize", () => {
+    emitDesktopWindowState(window);
+  });
+  window.webContents.on("zoom-changed", () => {
+    emitDesktopWindowState(window);
   });
 
+  void window.loadURL(resolveWindowLoadUrl(options.loadUrl));
+
   if (isDevelopment) {
-    void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
     window.webContents.openDevTools({ mode: "detach" });
-  } else {
-    void window.loadURL(`${DESKTOP_SCHEME}://app/index.html`);
   }
 
   window.on("closed", () => {
@@ -1329,6 +1650,144 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
+function rebuildMainWindow(nextTitleBarMode: DesktopTitleBarMode): Promise<DesktopWindowState> {
+  if (isRebuildingMainWindow) {
+    pendingDesktopTitleBarMode = nextTitleBarMode;
+    return Promise.resolve(resolveDesktopWindowState(mainWindow));
+  }
+
+  const previousWindow = mainWindow;
+  if (!previousWindow || previousWindow.isDestroyed()) {
+    currentDesktopTitleBarMode = nextTitleBarMode;
+    mainWindow = createWindow({ titleBarMode: nextTitleBarMode });
+    return Promise.resolve(resolveDesktopWindowState(mainWindow));
+  }
+
+  if (desktopTitleBarModeByWindow.get(previousWindow) === nextTitleBarMode) {
+    currentDesktopTitleBarMode = nextTitleBarMode;
+    emitDesktopWindowState(previousWindow);
+    return Promise.resolve(resolveDesktopWindowState(previousWindow));
+  }
+
+  isRebuildingMainWindow = true;
+  pendingDesktopTitleBarMode = null;
+
+  const snapshot = snapshotWindow(previousWindow);
+  const replacementWindow = createWindow({
+    bounds: snapshot.bounds,
+    loadUrl: snapshot.url,
+    showOnReady: false,
+    titleBarMode: nextTitleBarMode,
+  });
+  mainWindow = replacementWindow;
+
+  return new Promise<DesktopWindowState>((resolve) => {
+    let settled = false;
+
+    const settle = (applied: boolean, state: DesktopWindowState) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      isRebuildingMainWindow = false;
+
+      if (!applied && mainWindow === replacementWindow) {
+        mainWindow = previousWindow.isDestroyed() ? null : previousWindow;
+      }
+
+      const pendingMode = pendingDesktopTitleBarMode;
+      pendingDesktopTitleBarMode = null;
+
+      if (pendingMode && pendingMode !== currentDesktopTitleBarMode) {
+        void rebuildMainWindow(pendingMode);
+      }
+
+      resolve(state);
+    };
+
+    replacementWindow.webContents.once("did-finish-load", () => {
+      currentDesktopTitleBarMode = nextTitleBarMode;
+
+      if (snapshot.isMaximized) {
+        replacementWindow.maximize();
+      }
+      if (snapshot.isFullScreen) {
+        replacementWindow.setFullScreen(true);
+      }
+      if (!replacementWindow.isVisible()) {
+        replacementWindow.show();
+      }
+
+      if (!previousWindow.isDestroyed()) {
+        previousWindow.close();
+      }
+
+      const nextState = resolveDesktopWindowState(replacementWindow);
+      emitDesktopWindowState(replacementWindow);
+      settle(true, nextState);
+    });
+
+    replacementWindow.webContents.once("did-fail-load", () => {
+      if (!replacementWindow.isDestroyed()) {
+        replacementWindow.destroy();
+      }
+      const fallbackState = resolveDesktopWindowState(
+        previousWindow.isDestroyed() ? null : previousWindow,
+      );
+      emitDesktopWindowState(previousWindow.isDestroyed() ? null : previousWindow);
+      settle(false, fallbackState);
+    });
+  });
+}
+
+function syncDesktopTitleBarModeFromDisk(): void {
+  const nextTitleBarMode = readDesktopTitleBarModeFromDisk();
+  if (nextTitleBarMode === currentDesktopTitleBarMode) {
+    return;
+  }
+
+  void rebuildMainWindow(nextTitleBarMode);
+}
+
+function scheduleDesktopTitleBarModeSync(): void {
+  clearDesktopSettingsSyncTimer();
+  desktopSettingsSyncTimer = setTimeout(() => {
+    desktopSettingsSyncTimer = null;
+    syncDesktopTitleBarModeFromDisk();
+  }, 100);
+}
+
+function stopDesktopSettingsWatcher(): void {
+  clearDesktopSettingsSyncTimer();
+
+  if (!desktopSettingsWatcher) {
+    return;
+  }
+
+  desktopSettingsWatcher.close();
+  desktopSettingsWatcher = null;
+}
+
+function startDesktopSettingsWatcher(): void {
+  stopDesktopSettingsWatcher();
+
+  FS.mkdirSync(SETTINGS_STATE_DIR, { recursive: true });
+
+  desktopSettingsWatcher = FS.watch(SETTINGS_STATE_DIR, (_eventType, fileName) => {
+    const normalizedFileName = typeof fileName === "string" ? fileName : null;
+
+    if (normalizedFileName !== null && normalizedFileName !== "settings.json") {
+      return;
+    }
+
+    scheduleDesktopTitleBarModeSync();
+  });
+  desktopSettingsWatcher.on("error", (error) => {
+    console.error("[desktop] settings watcher failed", error);
+  });
+}
+
 // Override Electron's userData path before the `ready` event so that
 // Chromium session data uses a filesystem-friendly directory name.
 // Must be called synchronously at the top level — before `app.whenReady()`.
@@ -1338,6 +1797,7 @@ configureAppIdentity();
 
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
+  currentDesktopTitleBarMode = readDesktopTitleBarModeFromDisk();
   backendPort = await Effect.service(NetService).pipe(
     Effect.flatMap((net) => net.reserveLoopbackPort()),
     Effect.provide(NetService.layer),
@@ -1351,6 +1811,8 @@ async function bootstrap(): Promise<void> {
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");
+  startDesktopSettingsWatcher();
+  writeDesktopLogHeader("bootstrap desktop settings watcher started");
   startBackend();
   writeDesktopLogHeader("bootstrap backend start requested");
   mainWindow = createWindow();
@@ -1361,6 +1823,7 @@ app.on("before-quit", () => {
   isQuitting = true;
   writeDesktopLogHeader("before-quit received");
   clearUpdatePollTimer();
+  stopDesktopSettingsWatcher();
   stopBackend();
   restoreStdIoCapture?.();
 });
@@ -1379,7 +1842,7 @@ app
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        mainWindow = createWindow();
+        mainWindow = createWindow({ titleBarMode: currentDesktopTitleBarMode });
       }
     });
   })
@@ -1399,6 +1862,7 @@ if (process.platform !== "win32") {
     isQuitting = true;
     writeDesktopLogHeader("SIGINT received");
     clearUpdatePollTimer();
+    stopDesktopSettingsWatcher();
     stopBackend();
     restoreStdIoCapture?.();
     app.quit();
@@ -1409,6 +1873,7 @@ if (process.platform !== "win32") {
     isQuitting = true;
     writeDesktopLogHeader("SIGTERM received");
     clearUpdatePollTimer();
+    stopDesktopSettingsWatcher();
     stopBackend();
     restoreStdIoCapture?.();
     app.quit();
