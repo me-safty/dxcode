@@ -130,16 +130,30 @@ export function trimOrNull<T extends string>(value: T | null | undefined): T | n
   return trimmed || null;
 }
 
-export function resolveApiModelId(modelSelection: ModelSelection): string {
+/**
+ * Resolve the actual API model identifier from a model selection.
+ *
+ * Provider-aware: each provider can map `contextWindow` (or other options)
+ * to whatever the API requires — a model-id suffix, a separate parameter, etc.
+ * The canonical slug stored in the selection stays unchanged so the
+ * capabilities system keeps working.
+ *
+ * @param caps - The model's capabilities, used to validate that the requested
+ *   context window is actually supported before applying any suffix.
+ */
+export function resolveApiModelId(modelSelection: ModelSelection, caps: ModelCapabilities): string {
   switch (modelSelection.provider) {
     case "claudeAgent": {
       const contextWindow = modelSelection.options?.contextWindow;
-      switch (contextWindow) {
-        case "1m":
-          return `${modelSelection.model}[1m]`;
-        default:
-          return modelSelection.model;
+      if (contextWindow && hasContextWindowOption(caps, contextWindow)) {
+        switch (contextWindow) {
+          case "1m":
+            return `${modelSelection.model}[1m]`;
+          default:
+            return modelSelection.model;
+        }
       }
+      return modelSelection.model;
     }
     default: {
       return modelSelection.model;

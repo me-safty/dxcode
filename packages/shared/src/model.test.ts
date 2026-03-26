@@ -135,51 +135,66 @@ describe("context window helpers", () => {
 describe("resolveApiModelId", () => {
   it("appends provider-specific suffix for Claude context window", () => {
     expect(
-      resolveApiModelId({
-        provider: "claudeAgent",
-        model: "claude-opus-4-6",
-        options: { contextWindow: "1m" },
-      }),
+      resolveApiModelId(
+        { provider: "claudeAgent", model: "claude-opus-4-6", options: { contextWindow: "1m" } },
+        claudeCaps,
+      ),
     ).toBe("claude-opus-4-6[1m]");
     expect(
-      resolveApiModelId({
-        provider: "claudeAgent",
-        model: "claude-sonnet-4-6",
-        options: { contextWindow: "1m" },
-      }),
+      resolveApiModelId(
+        { provider: "claudeAgent", model: "claude-sonnet-4-6", options: { contextWindow: "1m" } },
+        claudeCaps,
+      ),
     ).toBe("claude-sonnet-4-6[1m]");
   });
 
   it("returns the model as-is when contextWindow is not set", () => {
-    expect(resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6" })).toBe(
-      "claude-opus-4-6",
-    );
     expect(
-      resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6", options: {} }),
+      resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6" }, claudeCaps),
+    ).toBe("claude-opus-4-6");
+    expect(
+      resolveApiModelId(
+        { provider: "claudeAgent", model: "claude-opus-4-6", options: {} },
+        claudeCaps,
+      ),
     ).toBe("claude-opus-4-6");
   });
 
   it("returns the model as-is for the default context window value", () => {
     expect(
-      resolveApiModelId({
-        provider: "claudeAgent",
-        model: "claude-opus-4-6",
-        options: { contextWindow: "200k" },
-      }),
+      resolveApiModelId(
+        { provider: "claudeAgent", model: "claude-opus-4-6", options: { contextWindow: "200k" } },
+        claudeCaps,
+      ),
     ).toBe("claude-opus-4-6");
   });
 
   it("returns the model as-is for unknown context window values", () => {
     expect(
-      resolveApiModelId({
-        provider: "claudeAgent",
-        model: "claude-opus-4-6",
-        options: { contextWindow: "bogus" },
-      }),
+      resolveApiModelId(
+        { provider: "claudeAgent", model: "claude-opus-4-6", options: { contextWindow: "bogus" } },
+        claudeCaps,
+      ),
     ).toBe("claude-opus-4-6");
   });
 
+  it("ignores contextWindow when model capabilities don't support it", () => {
+    const haikuCaps: ModelCapabilities = {
+      reasoningEffortLevels: [],
+      supportsFastMode: false,
+      supportsThinkingToggle: true,
+      contextWindowOptions: [],
+      promptInjectedEffortLevels: [],
+    };
+    expect(
+      resolveApiModelId(
+        { provider: "claudeAgent", model: "claude-haiku-4-5", options: { contextWindow: "1m" } },
+        haikuCaps,
+      ),
+    ).toBe("claude-haiku-4-5");
+  });
+
   it("returns the model as-is for Codex selections", () => {
-    expect(resolveApiModelId({ provider: "codex", model: "gpt-5.4" })).toBe("gpt-5.4");
+    expect(resolveApiModelId({ provider: "codex", model: "gpt-5.4" }, codexCaps)).toBe("gpt-5.4");
   });
 });
