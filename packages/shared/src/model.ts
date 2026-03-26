@@ -144,16 +144,20 @@ export function trimOrNull<T extends string>(value: T | null | undefined): T | n
 export function resolveApiModelId(modelSelection: ModelSelection, caps: ModelCapabilities): string {
   switch (modelSelection.provider) {
     case "claudeAgent": {
-      const contextWindow = modelSelection.options?.contextWindow;
-      if (contextWindow && hasContextWindowOption(caps, contextWindow)) {
-        switch (contextWindow) {
-          case "1m":
-            return `${modelSelection.model}[1m]`;
-          default:
-            return modelSelection.model;
-        }
+      // Use the explicit context window if supported, otherwise fall back to the
+      // model's default. This ensures the correct API suffix is applied even when
+      // the user hasn't explicitly chosen a context window (i.e. using the default).
+      const explicit = modelSelection.options?.contextWindow;
+      const effectiveContextWindow =
+        explicit && hasContextWindowOption(caps, explicit)
+          ? explicit
+          : getDefaultContextWindow(caps);
+      switch (effectiveContextWindow) {
+        case "1m":
+          return `${modelSelection.model}[1m]`;
+        default:
+          return modelSelection.model;
       }
-      return modelSelection.model;
     }
     default: {
       return modelSelection.model;

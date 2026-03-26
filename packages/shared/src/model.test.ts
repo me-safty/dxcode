@@ -36,8 +36,8 @@ const claudeCaps: ModelCapabilities = {
   supportsFastMode: false,
   supportsThinkingToggle: false,
   contextWindowOptions: [
-    { value: "200k", label: "200k", isDefault: true },
-    { value: "1m", label: "1M" },
+    { value: "200k", label: "200k" },
+    { value: "1m", label: "1M", isDefault: true },
   ],
   promptInjectedEffortLevels: ["ultrathink"],
 };
@@ -117,7 +117,7 @@ describe("misc helpers", () => {
 
 describe("context window helpers", () => {
   it("reads default context window", () => {
-    expect(getDefaultContextWindow(claudeCaps)).toBe("200k");
+    expect(getDefaultContextWindow(claudeCaps)).toBe("1m");
   });
 
   it("returns null for models without context window options", () => {
@@ -133,34 +133,29 @@ describe("context window helpers", () => {
 });
 
 describe("resolveApiModelId", () => {
-  it("appends provider-specific suffix for Claude context window", () => {
+  it("appends [1m] suffix for explicit 1m context window", () => {
     expect(
       resolveApiModelId(
         { provider: "claudeAgent", model: "claude-opus-4-6", options: { contextWindow: "1m" } },
         claudeCaps,
       ),
     ).toBe("claude-opus-4-6[1m]");
-    expect(
-      resolveApiModelId(
-        { provider: "claudeAgent", model: "claude-sonnet-4-6", options: { contextWindow: "1m" } },
-        claudeCaps,
-      ),
-    ).toBe("claude-sonnet-4-6[1m]");
   });
 
-  it("returns the model as-is when contextWindow is not set", () => {
+  it("applies default context window suffix when contextWindow is not set", () => {
+    // 1m is the default for claudeCaps, so [1m] suffix should be applied
     expect(
       resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6" }, claudeCaps),
-    ).toBe("claude-opus-4-6");
+    ).toBe("claude-opus-4-6[1m]");
     expect(
       resolveApiModelId(
         { provider: "claudeAgent", model: "claude-opus-4-6", options: {} },
         claudeCaps,
       ),
-    ).toBe("claude-opus-4-6");
+    ).toBe("claude-opus-4-6[1m]");
   });
 
-  it("returns the model as-is for the default context window value", () => {
+  it("returns the model as-is for explicit 200k (no suffix needed)", () => {
     expect(
       resolveApiModelId(
         { provider: "claudeAgent", model: "claude-opus-4-6", options: { contextWindow: "200k" } },
@@ -169,16 +164,17 @@ describe("resolveApiModelId", () => {
     ).toBe("claude-opus-4-6");
   });
 
-  it("returns the model as-is for unknown context window values", () => {
+  it("falls back to default when context window value is unsupported", () => {
+    // bogus is not in contextWindowOptions, so falls back to default (1m)
     expect(
       resolveApiModelId(
         { provider: "claudeAgent", model: "claude-opus-4-6", options: { contextWindow: "bogus" } },
         claudeCaps,
       ),
-    ).toBe("claude-opus-4-6");
+    ).toBe("claude-opus-4-6[1m]");
   });
 
-  it("ignores contextWindow when model capabilities don't support it", () => {
+  it("returns the model as-is when model has no context window options", () => {
     const haikuCaps: ModelCapabilities = {
       reasoningEffortLevels: [],
       supportsFastMode: false,

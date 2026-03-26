@@ -48,8 +48,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
       supportsFastMode: true,
       supportsThinkingToggle: false,
       contextWindowOptions: [
-        { value: "200k", label: "200k", isDefault: true },
-        { value: "1m", label: "1M" },
+        { value: "200k", label: "200k" },
+        { value: "1m", label: "1M", isDefault: true },
       ],
       promptInjectedEffortLevels: ["ultrathink"],
     } satisfies ModelCapabilities,
@@ -68,8 +68,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
       supportsFastMode: false,
       supportsThinkingToggle: false,
       contextWindowOptions: [
-        { value: "200k", label: "200k", isDefault: true },
-        { value: "1m", label: "1M" },
+        { value: "200k", label: "200k" },
+        { value: "1m", label: "1M", isDefault: true },
       ],
       promptInjectedEffortLevels: ["ultrathink"],
     } satisfies ModelCapabilities,
