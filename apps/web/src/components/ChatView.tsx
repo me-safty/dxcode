@@ -3916,7 +3916,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   }
                                 >
                                   <ListTodoIcon />
-                                  <span className="sr-only sm:not-sr-only">Plan</span>
+                                  <span className="sr-only sm:not-sr-only">
+                                    {planSidebarOpen ? "Hide Plan" : "Show Plan"}
+                                  </span>
                                 </Button>
                               </>
                             ) : null}
