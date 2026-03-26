@@ -12,6 +12,7 @@
  * @module ProviderService
  */
 import type {
+  ProviderCommandDefinition,
   ProviderInterruptTurnInput,
   ProviderKind,
   ProviderRespondToRequestInput,
@@ -90,6 +91,23 @@ export interface ProviderServiceShape {
   readonly getCapabilities: (
     provider: ProviderKind,
   ) => Effect.Effect<ProviderAdapterCapabilities, ProviderServiceError>;
+
+  /**
+   * List provider-native commands for the given provider.
+   */
+  readonly listProviderCommands: (
+    provider: ProviderKind,
+  ) => Effect.Effect<ReadonlyArray<ProviderCommandDefinition>, ProviderServiceError>;
+
+  /**
+   * Execute a provider-native command against a thread.
+   */
+  readonly executeProviderCommand: (input: {
+    readonly threadId: ThreadId;
+    readonly provider: ProviderKind;
+    readonly commandName: string;
+    readonly args?: string;
+  }) => Effect.Effect<void, ProviderServiceError>;
 
   /**
    * Roll back provider conversation state by a number of turns.

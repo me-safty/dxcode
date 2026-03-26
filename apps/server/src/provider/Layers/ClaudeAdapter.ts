@@ -3013,6 +3013,18 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         yield* Deferred.succeed(pending.answers, answers);
       });
 
+    const listProviderCommands: ClaudeAdapterShape["listProviderCommands"] = () =>
+      Effect.succeed([]);
+
+    const executeProviderCommand: ClaudeAdapterShape["executeProviderCommand"] = (input) =>
+      Effect.fail(
+        new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "executeProviderCommand",
+          issue: `Provider-native slash commands are not available for '${input.commandName}' on Claude in the current integration.`,
+        }),
+      );
+
     const stopSession: ClaudeAdapterShape["stopSession"] = (threadId) =>
       Effect.gen(function* () {
         const context = yield* requireSession(threadId);
@@ -3061,6 +3073,8 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       interruptTurn,
       readThread,
       rollbackThread,
+      listProviderCommands,
+      executeProviderCommand,
       respondToRequest,
       respondToUserInput,
       stopSession,

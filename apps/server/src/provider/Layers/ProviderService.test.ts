@@ -171,6 +171,8 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
         sessions.clear();
       }),
   );
+  const listProviderCommands = vi.fn(() => Effect.succeed([] as const));
+  const executeProviderCommand = vi.fn(() => Effect.void);
 
   const adapter: ProviderAdapterShape<ProviderAdapterError> = {
     provider,
@@ -187,6 +189,8 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
     hasSession,
     readThread,
     rollbackThread,
+    listProviderCommands,
+    executeProviderCommand,
     stopAll,
     streamEvents: Stream.fromPubSub(runtimeEventPubSub),
   };
@@ -220,6 +224,8 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
     hasSession,
     readThread,
     rollbackThread,
+    listProviderCommands,
+    executeProviderCommand,
     stopAll,
   };
 }

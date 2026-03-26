@@ -17,6 +17,8 @@ import {
   type OrchestrationCommand,
   ORCHESTRATION_WS_CHANNELS,
   ORCHESTRATION_WS_METHODS,
+  ProviderKind,
+  type ProviderStartOptions,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ProjectId,
   ThreadId,
@@ -78,6 +80,9 @@ import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import { inferProviderForModel } from "@t3tools/shared/model";
+import { listSkills } from "./skills.ts";
+import { resolveThreadWorkspaceCwd } from "./checkpointing/Utils.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -602,6 +607,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
   const orchestrationReactor = yield* OrchestrationReactor;
+  const providerService = yield* ProviderService;
   const { openInEditor } = yield* Open;
 
   const subscriptionsScope = yield* Scope.make("sequential");
@@ -703,6 +709,53 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   yield* Effect.addFinalizer(() =>
     Effect.all([closeAllClients, closeWebSocketServer.pipe(Effect.ignoreCause({ log: true }))]),
   );
+
+  const ensureProviderSessionForCommand = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly provider: "codex" | "claudeAgent";
+    readonly providerOptions?: ProviderStartOptions;
+  }) {
+    const activeSession = yield* providerService
+      .listSessions()
+      .pipe(
+        Effect.map((sessions) => sessions.find((session) => session.threadId === input.threadId)),
+      );
+    if (activeSession) {
+      return;
+    }
+
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const thread = readModel.threads.find(
+      (entry) => entry.id === input.threadId && entry.deletedAt === null,
+    );
+    if (!thread) {
+      return yield* new RouteRequestError({
+        message: `Cannot execute provider command for unknown thread '${input.threadId}'.`,
+      });
+    }
+
+    const inferredProvider = Schema.is(ProviderKind)(thread.session?.providerName)
+      ? thread.session.providerName
+      : inferProviderForModel(thread.model);
+    if (inferredProvider !== input.provider) {
+      return yield* new RouteRequestError({
+        message: `Thread '${input.threadId}' is configured for provider '${inferredProvider}', not '${input.provider}'.`,
+      });
+    }
+
+    const cwd = resolveThreadWorkspaceCwd({
+      thread,
+      projects: readModel.projects,
+    });
+    yield* providerService.startSession(input.threadId, {
+      threadId: input.threadId,
+      provider: input.provider,
+      ...(cwd ? { cwd } : {}),
+      model: thread.model,
+      runtimeMode: thread.runtimeMode,
+      ...(input.providerOptions ? { providerOptions: input.providerOptions } : {}),
+    });
+  });
 
   const routeRequest = Effect.fnUntraced(function* (ws: WebSocket, request: WebSocketRequest) {
     switch (request.body._tag) {
@@ -882,6 +935,47 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           providers: providerStatuses,
           availableEditors,
         };
+
+      case WS_METHODS.serverListSkills: {
+        const body = stripRequestTag(request.body);
+        return yield* Effect.tryPromise({
+          try: () =>
+            listSkills({
+              ...(body.binaryPath ? { binaryPath: body.binaryPath } : {}),
+              ...(body.homePath ? { homePath: body.homePath } : {}),
+              ...(body.cwd ? { cwd: body.cwd } : {}),
+            }),
+          catch: (cause) =>
+            new RouteRequestError({
+              message: `Failed to list skills: ${String(cause)}`,
+            }),
+        }).pipe(Effect.map((skills) => ({ skills })));
+      }
+
+      case WS_METHODS.serverListProviderCommands: {
+        const body = stripRequestTag(request.body);
+        return yield* providerService
+          .listProviderCommands(body.provider)
+          .pipe(Effect.map((commands) => ({ commands })));
+      }
+
+      case WS_METHODS.serverExecuteProviderCommand: {
+        const body = stripRequestTag(request.body);
+        yield* ensureProviderSessionForCommand({
+          threadId: body.threadId,
+          provider: body.provider,
+          ...(body.providerOptions ? { providerOptions: body.providerOptions } : {}),
+        });
+        yield* providerService.executeProviderCommand({
+          threadId: body.threadId,
+          provider: body.provider,
+          commandName: body.commandName,
+          ...(body.args !== undefined ? { args: body.args } : {}),
+        });
+        return {
+          accepted: true,
+        };
+      }
 
       case WS_METHODS.serverUpsertKeybinding: {
         const body = stripRequestTag(request.body);

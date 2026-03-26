@@ -203,6 +203,8 @@ describe("ProviderCommandReactor", () => {
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
       stopSession: stopSession as ProviderServiceShape["stopSession"],
       listSessions: () => Effect.succeed(runtimeSessions),
+      listProviderCommands: () => Effect.succeed([]),
+      executeProviderCommand: () => unsupported(),
       getCapabilities: (provider) =>
         Effect.succeed({
           sessionModelSwitch: provider === "codex" ? "in-session" : "in-session",

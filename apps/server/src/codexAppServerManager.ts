@@ -118,10 +118,16 @@ export interface CodexAppServerSendTurnInput {
   readonly threadId: ThreadId;
   readonly input?: string;
   readonly attachments?: ReadonlyArray<{ type: "image"; url: string }>;
+  readonly skills?: ReadonlyArray<{ name: string; path: string }>;
   readonly model?: string;
   readonly serviceTier?: string | null;
   readonly effort?: string;
   readonly interactionMode?: ProviderInteractionMode;
+}
+
+export interface CodexAppServerReviewInput {
+  readonly threadId: ThreadId;
+  readonly instructions?: string;
 }
 
 export interface CodexAppServerStartSessionInput {
@@ -737,13 +743,22 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     context.collabReceiverTurns.clear();
 
     const turnInput: Array<
-      { type: "text"; text: string; text_elements: [] } | { type: "image"; url: string }
+      | { type: "text"; text: string; text_elements: [] }
+      | { type: "skill"; name: string; path: string }
+      | { type: "image"; url: string }
     > = [];
     if (input.input) {
       turnInput.push({
         type: "text",
         text: input.input,
         text_elements: [],
+      });
+    }
+    for (const skill of input.skills ?? []) {
+      turnInput.push({
+        type: "skill",
+        name: skill.name,
+        path: skill.path,
       });
     }
     for (const attachment of input.attachments ?? []) {
@@ -769,7 +784,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const turnStartParams: {
       threadId: string;
       input: Array<
-        { type: "text"; text: string; text_elements: [] } | { type: "image"; url: string }
+        | { type: "text"; text: string; text_elements: [] }
+        | { type: "skill"; name: string; path: string }
+        | { type: "image"; url: string }
       >;
       model?: string;
       serviceTier?: string | null;
@@ -837,6 +854,19 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     };
   }
 
+  async listSkills(
+    threadId: ThreadId,
+    options?: { readonly forceReload?: boolean },
+  ): Promise<Array<{ name: string; path: string; enabled: boolean }>> {
+    const context = this.requireSession(threadId);
+    const response = await this.sendRequest(
+      context,
+      "skills/list",
+      options?.forceReload ? { forceReload: true } : {},
+    );
+    return this.parseSkillsListResponse(response);
+  }
+
   async interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void> {
     const context = this.requireSession(threadId);
     const effectiveTurnId = turnId ?? context.session.activeTurnId;
@@ -897,6 +927,63 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       activeTurnId: undefined,
     });
     return this.parseThreadSnapshot("thread/rollback", response);
+  }
+
+  async startReview(input: CodexAppServerReviewInput): Promise<ProviderTurnStartResult> {
+    const context = this.requireSession(input.threadId);
+    const providerThreadId = readResumeThreadId({
+      threadId: context.session.threadId,
+      runtimeMode: context.session.runtimeMode,
+      resumeCursor: context.session.resumeCursor,
+    });
+    if (!providerThreadId) {
+      throw new Error("Session is missing provider resume thread id.");
+    }
+
+    const response = await this.sendRequest(context, "review/start", {
+      threadId: providerThreadId,
+      delivery: "inline",
+      target: input.instructions?.trim()
+        ? { type: "custom", instructions: input.instructions.trim() }
+        : { type: "uncommittedChanges" },
+    });
+    const turn = this.readObject(this.readObject(response), "turn");
+    const turnIdRaw = this.readString(turn, "id");
+    if (!turnIdRaw) {
+      throw new Error("review/start response did not include a turn id.");
+    }
+    const turnId = TurnId.makeUnsafe(turnIdRaw);
+
+    this.updateSession(context, {
+      status: "running",
+      activeTurnId: turnId,
+      ...(context.session.resumeCursor !== undefined
+        ? { resumeCursor: context.session.resumeCursor }
+        : {}),
+    });
+
+    return {
+      threadId: context.session.threadId,
+      turnId,
+      ...(context.session.resumeCursor !== undefined
+        ? { resumeCursor: context.session.resumeCursor }
+        : {}),
+    };
+  }
+
+  async startCompaction(threadId: ThreadId): Promise<void> {
+    const context = this.requireSession(threadId);
+    const providerThreadId = readResumeThreadId({
+      threadId: context.session.threadId,
+      runtimeMode: context.session.runtimeMode,
+      resumeCursor: context.session.resumeCursor,
+    });
+    if (!providerThreadId) {
+      throw new Error("Session is missing provider resume thread id.");
+    }
+    await this.sendRequest(context, "thread/compact/start", {
+      threadId: providerThreadId,
+    });
   }
 
   async respondToRequest(
@@ -1138,6 +1225,15 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       notification.method === "item/agentMessage/delta"
         ? this.readString(notification.params, "delta")
         : undefined;
+    const routedTurnId =
+      childParentTurnId ??
+      (notification.method === "turn/started" &&
+      context.session.status === "running" &&
+      context.session.activeTurnId &&
+      rawRoute.turnId &&
+      context.session.activeTurnId !== rawRoute.turnId
+        ? context.session.activeTurnId
+        : rawRoute.turnId);
 
     this.emitEvent({
       id: EventId.makeUnsafe(randomUUID()),
@@ -1146,9 +1242,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       threadId: context.session.threadId,
       createdAt: new Date().toISOString(),
       method: notification.method,
-      ...((childParentTurnId ?? rawRoute.turnId)
-        ? { turnId: childParentTurnId ?? rawRoute.turnId }
-        : {}),
+      ...(routedTurnId ? { turnId: routedTurnId } : {}),
       ...(rawRoute.itemId ? { itemId: rawRoute.itemId } : {}),
       textDelta,
       payload: notification.params,
@@ -1169,9 +1263,16 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         return;
       }
       const turnId = toTurnId(this.readString(this.readObject(notification.params)?.turn, "id"));
+      const activeTurnId =
+        context.session.status === "running" && context.session.activeTurnId
+          ? context.session.activeTurnId
+          : undefined;
       this.updateSession(context, {
         status: "running",
-        activeTurnId: turnId,
+        activeTurnId:
+          activeTurnId && turnId && activeTurnId !== turnId
+            ? activeTurnId
+            : (routedTurnId ?? turnId),
       });
       return;
     }
@@ -1389,6 +1490,27 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
 
     return undefined;
+  }
+
+  private parseSkillsListResponse(
+    response: unknown,
+  ): Array<{ name: string; path: string; enabled: boolean }> {
+    const record = this.readObject(response);
+    const entries = this.readArray(record, "data") ?? [];
+    return entries.flatMap((entryValue) => {
+      const entry = this.readObject(entryValue);
+      const skills = this.readArray(entry, "skills") ?? [];
+      return skills.flatMap((skillValue) => {
+        const skill = this.readObject(skillValue);
+        const name = this.readString(skill, "name");
+        const skillPath = this.readString(skill, "path");
+        const enabled = this.readBoolean(skill, "enabled");
+        if (!name || !skillPath || enabled === undefined) {
+          return [];
+        }
+        return [{ name, path: skillPath, enabled }];
+      });
+    });
   }
 
   private parseThreadSnapshot(method: string, response: unknown): CodexThreadSnapshot {

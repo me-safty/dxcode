@@ -412,13 +412,19 @@ describe("startSession", () => {
 });
 
 describe("sendTurn", () => {
-  it("sends text and image user input items to turn/start", async () => {
+  it("sends text, skill, and image user input items to turn/start", async () => {
     const { manager, context, requireSession, sendRequest, updateSession } =
       createSendTurnHarness();
 
     const result = await manager.sendTurn({
       threadId: asThreadId("thread_1"),
       input: "Inspect this image",
+      skills: [
+        {
+          name: "skill-creator",
+          path: "/tmp/skills/skill-creator/SKILL.md",
+        },
+      ],
       attachments: [
         {
           type: "image",
@@ -443,6 +449,11 @@ describe("sendTurn", () => {
           type: "text",
           text: "Inspect this image",
           text_elements: [],
+        },
+        {
+          type: "skill",
+          name: "skill-creator",
+          path: "/tmp/skills/skill-creator/SKILL.md",
         },
         {
           type: "image",
@@ -881,6 +892,38 @@ describe("collab child conversation routing", () => {
 
     expect(emitEvent).not.toHaveBeenCalled();
     expect(updateSession).not.toHaveBeenCalled();
+  });
+
+  it("preserves an already-running turn id when review emits an internal turn/started id", () => {
+    const { manager, context, emitEvent, updateSession } = createCollabNotificationHarness();
+    emitEvent.mockClear();
+    updateSession.mockClear();
+
+    (
+      manager as unknown as {
+        handleServerNotification: (context: unknown, notification: Record<string, unknown>) => void;
+      }
+    ).handleServerNotification(context, {
+      method: "turn/started",
+      params: {
+        threadId: "provider_parent",
+        turn: { id: "turn_review_internal" },
+      },
+    });
+
+    expect(updateSession).toHaveBeenCalledWith(
+      context,
+      expect.objectContaining({
+        status: "running",
+        activeTurnId: "turn_parent",
+      }),
+    );
+    expect(emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "turn/started",
+        turnId: "turn_parent",
+      }),
+    );
   });
 
   it("rewrites child approval requests onto the parent turn", () => {

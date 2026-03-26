@@ -9,6 +9,7 @@
  */
 import type {
   ApprovalRequestId,
+  ProviderCommandDefinition,
   ProviderApprovalDecision,
   ProviderKind,
   ProviderUserInputAnswers,
@@ -113,6 +114,23 @@ export interface ProviderAdapterShape<TError> {
     threadId: ThreadId,
     numTurns: number,
   ) => Effect.Effect<ProviderThreadSnapshot, TError>;
+
+  /**
+   * List provider-native commands supported by this adapter/runtime.
+   */
+  readonly listProviderCommands: () => Effect.Effect<
+    ReadonlyArray<ProviderCommandDefinition>,
+    TError
+  >;
+
+  /**
+   * Execute one provider-native command against a thread.
+   */
+  readonly executeProviderCommand: (input: {
+    readonly threadId: ThreadId;
+    readonly commandName: string;
+    readonly args?: string;
+  }) => Effect.Effect<void, TError>;
 
   /**
    * Stop all sessions owned by this adapter.

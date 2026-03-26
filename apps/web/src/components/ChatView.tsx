@@ -13,11 +13,13 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type ResolvedKeybindingsConfig,
   type ServerProviderStatus,
+  type SkillDefinition,
   type ThreadId,
   type TurnId,
   type EditorId,
   type KeybindingCommand,
   OrchestrationThreadActivity,
+  type ProviderCommandDefinition,
   ProviderInteractionMode,
   RuntimeMode,
 } from "@t3tools/contracts";
@@ -33,7 +35,12 @@ import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
-import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
+import {
+  serverConfigQueryOptions,
+  serverProviderCommandsQueryOptions,
+  serverQueryKeys,
+  serverSkillsQueryOptions,
+} from "~/lib/serverReactQuery";
 import { isElectron } from "../env";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
@@ -190,9 +197,25 @@ const IMAGE_ONLY_BOOTSTRAP_PROMPT =
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
+const EMPTY_SKILLS: SkillDefinition[] = [];
+const EMPTY_PROVIDER_COMMANDS: readonly ProviderCommandDefinition[] = [];
 const EMPTY_AVAILABLE_EDITORS: EditorId[] = [];
 const EMPTY_PROVIDER_STATUSES: ServerProviderStatus[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+
+function skillScopeDescription(scope: SkillDefinition["scope"]): string {
+  switch (scope) {
+    case "system":
+      return "System skill";
+    case "repo":
+      return "Repo skill";
+    case "admin":
+      return "Admin skill";
+    case "user":
+    default:
+      return "User skill";
+  }
+}
 
 function formatOutgoingPrompt(params: {
   provider: ProviderKind;
@@ -1009,6 +1032,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     : null;
   const composerTriggerKind = composerTrigger?.kind ?? null;
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
+  const skillTriggerQuery = composerTrigger?.kind === "skill" ? composerTrigger.query : "";
   const isPathTrigger = composerTriggerKind === "path";
   const [debouncedPathQuery, composerPathQueryDebouncer] = useDebouncedValue(
     pathTriggerQuery,
@@ -1018,6 +1042,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const effectivePathQuery = pathTriggerQuery.length > 0 ? debouncedPathQuery : "";
   const branchesQuery = useQuery(gitBranchesQueryOptions(gitCwd));
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
+  const providerCommandsQuery = useQuery(serverProviderCommandsQueryOptions(selectedProvider));
+  const skillsQuery = useQuery(
+    serverSkillsQueryOptions(
+      settings.codexBinaryPath,
+      settings.codexHomePath,
+      activeThread?.worktreePath ?? activeProject?.cwd ?? null,
+    ),
+  );
   const workspaceEntriesQuery = useQuery(
     projectSearchEntriesQueryOptions({
       cwd: gitCwd,
@@ -1027,6 +1059,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }),
   );
   const workspaceEntries = workspaceEntriesQuery.data?.entries ?? EMPTY_PROJECT_ENTRIES;
+  const skills = skillsQuery.data?.skills ?? EMPTY_SKILLS;
+  const providerCommands = providerCommandsQuery.data?.commands ?? EMPTY_PROVIDER_COMMANDS;
+  const providerCommandByName = useMemo(
+    () =>
+      new Map(providerCommands.map((command) => [command.name.toLowerCase(), command] as const)),
+    [providerCommands],
+  );
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
@@ -1040,6 +1079,29 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }));
     }
 
+    if (composerTrigger.kind === "skill") {
+      const query = composerTrigger.query.trim().toLowerCase();
+      return skills
+        .filter((skill) => skill.enabled)
+        .filter((skill) => {
+          if (!query) return true;
+          return (
+            skill.name.toLowerCase().includes(query) ||
+            skill.description.toLowerCase().includes(query) ||
+            skill.displayName?.toLowerCase().includes(query) === true ||
+            skill.shortDescription?.toLowerCase().includes(query) === true
+          );
+        })
+        .map((skill) => ({
+          id: `skill:${skill.scope}:${skill.name}`,
+          type: "skill",
+          skill,
+          label: `$${skill.name}`,
+          description:
+            skill.shortDescription ?? skill.displayName ?? skillScopeDescription(skill.scope),
+        }));
+    }
+
     if (composerTrigger.kind === "slash-command") {
       const slashCommandItems = [
         {
@@ -1049,20 +1111,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
           label: "/model",
           description: "Switch response model for this thread",
         },
-        {
-          id: "slash:plan",
-          type: "slash-command",
-          command: "plan",
-          label: "/plan",
-          description: "Switch this thread into plan mode",
-        },
-        {
-          id: "slash:default",
-          type: "slash-command",
-          command: "default",
-          label: "/default",
-          description: "Switch this thread back to normal chat mode",
-        },
+        ...providerCommands
+          .filter(
+            (command) => activeThread?.session?.status !== "running" || command.availableDuringTask,
+          )
+          .map((command) => ({
+            id: `slash:${command.provider}:${command.name}`,
+            type: "slash-command" as const,
+            command: command.name,
+            providerCommand: command,
+            label: `/${command.name}`,
+            description: command.description,
+          })),
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
       if (!query) {
@@ -1089,7 +1149,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
         label: name,
         description: `${providerLabel} · ${slug}`,
       }));
-  }, [composerTrigger, searchableModelOptions, workspaceEntries]);
+  }, [
+    activeThread?.session?.status,
+    composerTrigger,
+    providerCommands,
+    searchableModelOptions,
+    skills,
+    workspaceEntries,
+  ]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -1310,32 +1377,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [activeThreadId, storeCloseTerminal, terminalState.terminalIds.length],
   );
-  const runProjectScript = useCallback(
-    async (
-      script: ProjectScript,
-      options?: {
-        cwd?: string;
-        env?: Record<string, string>;
-        worktreePath?: string | null;
-        preferNewTerminal?: boolean;
-        rememberAsLastInvoked?: boolean;
-      },
-    ) => {
+  const runTerminalCommand = useCallback(
+    async (input: {
+      command: string;
+      cwd?: string;
+      env?: Record<string, string>;
+      worktreePath?: string | null;
+      preferNewTerminal?: boolean;
+      errorMessage: string;
+    }) => {
       const api = readNativeApi();
       if (!api || !activeThreadId || !activeProject || !activeThread) return;
-      if (options?.rememberAsLastInvoked !== false) {
-        setLastInvokedScriptByProjectId((current) => {
-          if (current[activeProject.id] === script.id) return current;
-          return { ...current, [activeProject.id]: script.id };
-        });
-      }
-      const targetCwd = options?.cwd ?? gitCwd ?? activeProject.cwd;
+
+      const targetCwd = input.cwd ?? gitCwd ?? activeProject.cwd;
       const baseTerminalId =
         terminalState.activeTerminalId ||
         terminalState.terminalIds[0] ||
         DEFAULT_THREAD_TERMINAL_ID;
       const isBaseTerminalBusy = terminalState.runningTerminalIds.includes(baseTerminalId);
-      const wantsNewTerminal = Boolean(options?.preferNewTerminal) || isBaseTerminalBusy;
+      const wantsNewTerminal = Boolean(input.preferNewTerminal) || isBaseTerminalBusy;
       const shouldCreateNewTerminal = wantsNewTerminal;
       const targetTerminalId = shouldCreateNewTerminal
         ? `terminal-${randomUUID()}`
@@ -1353,8 +1413,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         project: {
           cwd: activeProject.cwd,
         },
-        worktreePath: options?.worktreePath ?? activeThread.worktreePath ?? null,
-        ...(options?.env ? { extraEnv: options.env } : {}),
+        worktreePath: input.worktreePath ?? activeThread.worktreePath ?? null,
+        ...(input.env ? { extraEnv: input.env } : {}),
       });
       const openTerminalInput: Parameters<typeof api.terminal.open>[0] = shouldCreateNewTerminal
         ? {
@@ -1377,13 +1437,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
         await api.terminal.write({
           threadId: activeThreadId,
           terminalId: targetTerminalId,
-          data: `${script.command}\r`,
+          data: `${input.command}\r`,
         });
       } catch (error) {
-        setThreadError(
-          activeThreadId,
-          error instanceof Error ? error.message : `Failed to run script "${script.name}".`,
-        );
+        setThreadError(activeThreadId, error instanceof Error ? error.message : input.errorMessage);
       }
     },
     [
@@ -1395,11 +1452,39 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setThreadError,
       storeNewTerminal,
       storeSetActiveTerminal,
-      setLastInvokedScriptByProjectId,
       terminalState.activeTerminalId,
       terminalState.runningTerminalIds,
       terminalState.terminalIds,
     ],
+  );
+  const runProjectScript = useCallback(
+    async (
+      script: ProjectScript,
+      options?: {
+        cwd?: string;
+        env?: Record<string, string>;
+        worktreePath?: string | null;
+        preferNewTerminal?: boolean;
+        rememberAsLastInvoked?: boolean;
+      },
+    ) => {
+      if (!activeProject) return;
+      if (options?.rememberAsLastInvoked !== false) {
+        setLastInvokedScriptByProjectId((current) => {
+          if (current[activeProject.id] === script.id) return current;
+          return { ...current, [activeProject.id]: script.id };
+        });
+      }
+      await runTerminalCommand({
+        command: script.command,
+        errorMessage: `Failed to run script "${script.name}".`,
+        ...(options?.cwd ? { cwd: options.cwd } : {}),
+        ...(options?.env ? { env: options.env } : {}),
+        ...(options?.worktreePath !== undefined ? { worktreePath: options.worktreePath } : {}),
+        ...(options?.preferNewTerminal ? { preferNewTerminal: true } : {}),
+      });
+    },
+    [activeProject, runTerminalCommand, setLastInvokedScriptByProjectId],
   );
   const persistProjectScripts = useCallback(
     async (input: {
@@ -1566,6 +1651,78 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerDraftInteractionMode,
       setDraftThreadContext,
       threadId,
+    ],
+  );
+  const executeStandaloneSlashCommand = useCallback(
+    async (commandName: string, args: string) => {
+      const normalizedCommandName = commandName.trim().toLowerCase();
+      if (!normalizedCommandName) {
+        return false;
+      }
+
+      const command = providerCommandByName.get(normalizedCommandName);
+      if (!command) {
+        toastManager.add({
+          type: "error",
+          title: `/${normalizedCommandName} is not available`,
+          description: `This ${selectedProvider} command is not supported in the app yet.`,
+        });
+        return false;
+      }
+
+      if (command.execution.kind === "interaction-mode") {
+        handleInteractionModeChange(command.execution.interactionMode);
+        return true;
+      }
+
+      if (!isServerThread) {
+        toastManager.add({
+          type: "error",
+          title: `/${command.name} requires an active thread`,
+          description: "Start the conversation first, then run provider-native slash commands.",
+        });
+        return false;
+      }
+
+      if (!activeThreadId) {
+        return false;
+      }
+
+      const api = readNativeApi();
+      if (!api) {
+        toastManager.add({
+          type: "error",
+          title: `/${command.name} could not run`,
+          description: "Native API not available.",
+        });
+        return false;
+      }
+
+      try {
+        await api.server.executeProviderCommand({
+          threadId: activeThreadId,
+          provider: selectedProvider,
+          commandName: command.name,
+          ...(args.trim().length > 0 ? { args: args.trim() } : {}),
+          ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
+        });
+        return true;
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: `/${command.name} failed`,
+          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        });
+        return false;
+      }
+    },
+    [
+      activeThreadId,
+      handleInteractionModeChange,
+      isServerThread,
+      providerCommandByName,
+      providerOptionsForDispatch,
+      selectedProvider,
     ],
   );
   const toggleInteractionMode = useCallback(() => {
@@ -2386,13 +2543,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
-      handleInteractionModeChange(standaloneSlashCommand);
-      promptRef.current = "";
-      clearComposerDraftContent(activeThread.id);
-      setComposerHighlightedItemId(null);
-      setComposerCursor(0);
-      setComposerTrigger(null);
-      return;
+      const handled = await executeStandaloneSlashCommand(
+        standaloneSlashCommand.name,
+        standaloneSlashCommand.args,
+      );
+      if (handled) {
+        promptRef.current = "";
+        clearComposerDraftContent(activeThread.id);
+        setComposerHighlightedItemId(null);
+        setComposerCursor(0);
+        setComposerTrigger(null);
+        return;
+      }
     }
     if (!hasSendableContent) {
       if (expiredTerminalContextCount > 0) {
@@ -3256,28 +3418,39 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
       if (item.type === "slash-command") {
-        if (item.command === "model") {
-          const replacement = "/model ";
-          const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
-            snapshot.value,
-            trigger.rangeEnd,
-            replacement,
-          );
-          const applied = applyPromptReplacement(
-            trigger.rangeStart,
-            replacementRangeEnd,
-            replacement,
-            { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
-          );
-          if (applied) {
-            setComposerHighlightedItemId(null);
-          }
-          return;
+        const replacement =
+          item.command === "model" || item.providerCommand?.supportsInlineArgs
+            ? `/${item.command} `
+            : `/${item.command}`;
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
         }
-        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
-        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
-          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
-        });
+        return;
+      }
+      if (item.type === "skill") {
+        const replacement = `$${item.skill.name} `;
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
         if (applied) {
           setComposerHighlightedItemId(null);
         }
@@ -3291,12 +3464,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         setComposerHighlightedItemId(null);
       }
     },
-    [
-      applyPromptReplacement,
-      handleInteractionModeChange,
-      onProviderModelSelect,
-      resolveActiveComposerTrigger,
-    ],
+    [applyPromptReplacement, onProviderModelSelect, resolveActiveComposerTrigger],
   );
   const onComposerMenuItemHighlighted = useCallback((itemId: string | null) => {
     setComposerHighlightedItemId(itemId);
@@ -3320,10 +3488,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [composerHighlightedItemId, composerMenuItems],
   );
   const isComposerMenuLoading =
-    composerTriggerKind === "path" &&
-    ((pathTriggerQuery.length > 0 && composerPathQueryDebouncer.state.isPending) ||
-      workspaceEntriesQuery.isLoading ||
-      workspaceEntriesQuery.isFetching);
+    (composerTriggerKind === "path" &&
+      ((pathTriggerQuery.length > 0 && composerPathQueryDebouncer.state.isPending) ||
+        workspaceEntriesQuery.isLoading ||
+        workspaceEntriesQuery.isFetching)) ||
+    (composerTriggerKind === "slash-command" &&
+      (providerCommandsQuery.isLoading || providerCommandsQuery.isFetching)) ||
+    (composerTriggerKind === "skill" &&
+      ((skillTriggerQuery.length > 0 && skillsQuery.isLoading) || skillsQuery.isFetching));
 
   const onPromptChange = useCallback(
     (
