@@ -9,7 +9,6 @@ import {
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
   resolveDesktopUpdateButtonVisualState,
-  shouldHighlightDesktopUpdateError,
   shouldShowArm64IntelBuildWarning,
   shouldShowDesktopUpdateButton,
   shouldToastDesktopUpdateActionResult,
@@ -164,25 +163,6 @@ describe("desktop update UI helpers", () => {
         accepted: true,
         completed: true,
         state: baseState,
-      }),
-    ).toBe(false);
-  });
-
-  it("highlights only actionable updater errors", () => {
-    expect(
-      shouldHighlightDesktopUpdateError({
-        ...baseState,
-        status: "error",
-        errorContext: "download",
-        canRetry: true,
-      }),
-    ).toBe(true);
-    expect(
-      shouldHighlightDesktopUpdateError({
-        ...baseState,
-        status: "error",
-        errorContext: "check",
-        canRetry: true,
       }),
     ).toBe(false);
   });

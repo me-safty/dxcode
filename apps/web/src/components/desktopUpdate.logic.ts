@@ -123,8 +123,3 @@ export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): 
 export function shouldToastDesktopUpdateActionResult(result: DesktopUpdateActionResult): boolean {
   return result.accepted && !result.completed;
 }
-
-export function shouldHighlightDesktopUpdateError(state: DesktopUpdateState | null): boolean {
-  if (!state || state.status !== "error") return false;
-  return state.errorContext === "download" || state.errorContext === "install";
-}
