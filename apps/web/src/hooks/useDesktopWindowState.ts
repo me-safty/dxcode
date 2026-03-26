@@ -12,15 +12,17 @@ export function useDesktopWindowState(): DesktopWindowState | null {
     }
 
     let cancelled = false;
+    let receivedSubscriptionState = false;
 
-    void bridge.getWindowState().then((nextState) => {
+    const unsubscribe = bridge.onWindowState((nextState) => {
       if (!cancelled) {
+        receivedSubscriptionState = true;
         setWindowState(nextState);
       }
     });
 
-    const unsubscribe = bridge.onWindowState((nextState) => {
-      if (!cancelled) {
+    void bridge.getWindowState().then((nextState) => {
+      if (!cancelled && !receivedSubscriptionState) {
         setWindowState(nextState);
       }
     });

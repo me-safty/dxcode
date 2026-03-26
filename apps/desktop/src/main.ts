@@ -149,19 +149,27 @@ function parseDesktopTitleBarMode(rawMode: unknown): DesktopTitleBarMode | null 
   return rawMode === "t3code" || rawMode === "system" ? rawMode : null;
 }
 
-function readDesktopTitleBarModeFromDisk(): DesktopTitleBarMode {
+function readDesktopSettingsFromDisk(): Record<string, unknown> {
   if (!FS.existsSync(SETTINGS_FILE_PATH)) {
-    return DEFAULT_DESKTOP_TITLE_BAR_MODE;
+    return {};
   }
 
   try {
     const raw = FS.readFileSync(SETTINGS_FILE_PATH, "utf8");
-    const parsed = JSON.parse(raw) as { desktopTitleBarMode?: unknown };
-    return getDesktopTitleBarMode(parsed.desktopTitleBarMode);
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (parsed !== null && !Array.isArray(parsed) && typeof parsed === "object") {
+      return parsed as Record<string, unknown>;
+    }
   } catch (error) {
-    console.error("[desktop] failed to read desktop title bar mode", error);
-    return DEFAULT_DESKTOP_TITLE_BAR_MODE;
+    console.error("[desktop] failed to read desktop settings", error);
   }
+
+  return {};
+}
+
+function readDesktopTitleBarModeFromDisk(): DesktopTitleBarMode {
+  return getDesktopTitleBarMode(readDesktopSettingsFromDisk().desktopTitleBarMode);
 }
 
 function shouldUseT3CodeTitleBar(mode: DesktopTitleBarMode): boolean {
@@ -171,19 +179,7 @@ function shouldUseT3CodeTitleBar(mode: DesktopTitleBarMode): boolean {
 function persistDesktopTitleBarModeToDisk(mode: DesktopTitleBarMode): void {
   FS.mkdirSync(SETTINGS_STATE_DIR, { recursive: true });
 
-  const currentSettings = FS.existsSync(SETTINGS_FILE_PATH)
-    ? JSON.parse(FS.readFileSync(SETTINGS_FILE_PATH, "utf8"))
-    : {};
-
-  if (
-    currentSettings === null ||
-    Array.isArray(currentSettings) ||
-    typeof currentSettings !== "object"
-  ) {
-    throw new Error("settings.json must contain a JSON object");
-  }
-
-  const nextSettings = { ...currentSettings } as Record<string, unknown>;
+  const nextSettings = readDesktopSettingsFromDisk();
   if (mode === DEFAULT_DESKTOP_TITLE_BAR_MODE) {
     delete nextSettings.desktopTitleBarMode;
   } else {
@@ -1659,6 +1655,8 @@ function rebuildMainWindow(nextTitleBarMode: DesktopTitleBarMode): Promise<Deskt
 
   return new Promise<DesktopWindowState>((resolve) => {
     let settled = false;
+    const resolveFallbackState = () =>
+      resolveDesktopWindowState(previousWindow.isDestroyed() ? null : previousWindow);
 
     const settle = (applied: boolean, state: DesktopWindowState) => {
       if (settled) {
@@ -1681,6 +1679,16 @@ function rebuildMainWindow(nextTitleBarMode: DesktopTitleBarMode): Promise<Deskt
 
       resolve(state);
     };
+
+    replacementWindow.once("closed", () => {
+      if (settled) {
+        return;
+      }
+
+      const fallbackState = resolveFallbackState();
+      emitDesktopWindowState(previousWindow.isDestroyed() ? null : previousWindow);
+      settle(false, fallbackState);
+    });
 
     replacementWindow.webContents.once("did-finish-load", () => {
       currentDesktopTitleBarMode = nextTitleBarMode;
@@ -1708,9 +1716,7 @@ function rebuildMainWindow(nextTitleBarMode: DesktopTitleBarMode): Promise<Deskt
       if (!replacementWindow.isDestroyed()) {
         replacementWindow.destroy();
       }
-      const fallbackState = resolveDesktopWindowState(
-        previousWindow.isDestroyed() ? null : previousWindow,
-      );
+      const fallbackState = resolveFallbackState();
       emitDesktopWindowState(previousWindow.isDestroyed() ? null : previousWindow);
       settle(false, fallbackState);
     });
