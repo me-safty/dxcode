@@ -1,9 +1,8 @@
 /**
- * FactoryDroidAdapterLive - Scoped live implementation for the Factory Droid provider adapter.
+ * FactoryDroidAdapterLive - Factory Droid provider adapter.
  *
- * Uses the `droid exec --output-format stream-jsonrpc --input-format stream-jsonrpc`
- * JSON-RPC protocol to achieve real token-level streaming via `assistant_text_delta`
- * notifications.
+ * Wraps `droid exec` JSON-RPC protocol behind the shared provider adapter
+ * contract. Streams token-level deltas via coalesced `content.delta` events.
  *
  * @module FactoryDroidAdapterLive
  */
@@ -36,375 +35,338 @@ import {
   mapFactoryDroidNotification,
 } from "./FactoryDroidRuntimeEvents.ts";
 
-const FACTORY_API_VERSION = "1.0.0";
-const FACTORY_PROTOCOL_VERSION = "1.1.0";
+// ── Constants ─────────────────────────────────────────────────────────
 
-function modelSlugFromFactorySelection(
-  selection: { readonly provider: string; readonly model: string } | undefined,
-): string | undefined {
-  return selection?.provider === PROVIDER ? selection.model : undefined;
+const API_VERSION = "1.0.0";
+const PROTOCOL_VERSION = "1.1.0";
+const DELTA_COALESCE_MS = 50;
+const IDLE_COMPLETION_MS = 200;
+
+// ── Helpers ───────────────────────────────────────────────────────────
+
+const now = () => new Date().toISOString();
+const asObj = (v: unknown): Record<string, unknown> | undefined =>
+  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+
+function resolveBinaryPath(opts: ProviderStartOptions | undefined): string {
+  return (
+    opts?.factoryDroid?.binaryPath?.trim() ||
+    process.env.T3CODE_FACTORY_DROID_BINARY_PATH?.trim() ||
+    "droid"
+  );
 }
 
-interface DroidSessionContext {
+function modelFromSelection(
+  sel: { readonly provider: string; readonly model: string } | undefined,
+): string | undefined {
+  return sel?.provider === PROVIDER ? sel.model : undefined;
+}
+
+// ── Session context ───────────────────────────────────────────────────
+
+interface Ctx {
   session: ProviderSession;
-  /** From `startSession` / recovery; used for custom `droid` binary path. */
   providerOptions: ProviderStartOptions | undefined;
   child: ChildProcessWithoutNullStreams | null;
-  jsonRpcInitialized: boolean;
+  initialized: boolean;
   stopped: boolean;
   turns: Array<{ id: TurnId; items: unknown[] }>;
   activeTurnId: TurnId | null;
-  pendingResponses: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
-  pendingAssistantDelta: string;
-  sawAssistantTextDelta: boolean;
-  pendingReasoningDelta: string;
-  assistantTextSegment: number;
-  deltaFlushTimer: ReturnType<typeof setTimeout> | null;
-  pendingIdleCompletion: ReturnType<typeof setTimeout> | null;
+  rpc: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
+  assistantBuf: string;
+  reasoningBuf: string;
+  sawDelta: boolean;
+  segment: number;
+  flushTimer: ReturnType<typeof setTimeout> | null;
+  idleTimer: ReturnType<typeof setTimeout> | null;
 }
+
+function clearTimers(c: Ctx) {
+  if (c.flushTimer !== null) {
+    clearTimeout(c.flushTimer);
+    c.flushTimer = null;
+  }
+  if (c.idleTimer !== null) {
+    clearTimeout(c.idleTimer);
+    c.idleTimer = null;
+  }
+}
+
+function resetBuffers(c: Ctx) {
+  c.assistantBuf = "";
+  c.reasoningBuf = "";
+  c.sawDelta = false;
+  c.segment = 0;
+}
+
+function makeCtx(session: ProviderSession, providerOptions?: ProviderStartOptions): Ctx {
+  return {
+    session,
+    providerOptions,
+    child: null,
+    initialized: false,
+    stopped: false,
+    turns: [],
+    activeTurnId: null,
+    rpc: new Map(),
+    assistantBuf: "",
+    reasoningBuf: "",
+    sawDelta: false,
+    segment: 0,
+    flushTimer: null,
+    idleTimer: null,
+  };
+}
+
+// ── JSON-RPC helpers ──────────────────────────────────────────────────
+
+function rpcMsg(type: string, extra: Record<string, unknown>) {
+  return JSON.stringify({
+    factoryApiVersion: API_VERSION,
+    factoryProtocolVersion: PROTOCOL_VERSION,
+    type,
+    jsonrpc: "2.0",
+    ...extra,
+  });
+}
+
+// ── Adapter factory ───────────────────────────────────────────────────
+
+const turnsSnapshot = (c: Ctx) =>
+  c.turns.map((t) => ({ id: t.id, items: t.items as ReadonlyArray<unknown> }));
 
 export interface FactoryDroidAdapterLiveOptions {
   readonly nativeEventLogger?: EventNdjsonLogger;
 }
 
-function resolveDroidBinaryPath(providerOptions: ProviderStartOptions | undefined): string {
-  const configured = providerOptions?.factoryDroid?.binaryPath?.trim();
-  if (configured) return configured;
-  const fromEnv = process.env.T3CODE_FACTORY_DROID_BINARY_PATH?.trim();
-  return fromEnv && fromEnv.length > 0 ? fromEnv : "droid";
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function notifContainsToolUse(notif: Record<string, unknown>): boolean {
-  const message = notif.message;
-  if (!message || typeof message !== "object" || Array.isArray(message)) return false;
-  const content = (message as Record<string, unknown>).content;
-  if (!Array.isArray(content)) return false;
-  return content.some(
-    (block) =>
-      block && typeof block === "object" && (block as Record<string, unknown>).type === "tool_use",
-  );
-}
-
-function clearPendingTimers(context: DroidSessionContext) {
-  if (context.deltaFlushTimer !== null) {
-    clearTimeout(context.deltaFlushTimer);
-    context.deltaFlushTimer = null;
-  }
-  if (context.pendingIdleCompletion !== null) {
-    clearTimeout(context.pendingIdleCompletion);
-    context.pendingIdleCompletion = null;
-  }
-}
-
-function resetPendingTurnBuffers(context: DroidSessionContext) {
-  context.pendingAssistantDelta = "";
-  context.sawAssistantTextDelta = false;
-  context.pendingReasoningDelta = "";
-  context.assistantTextSegment = 0;
-}
-
-function makeJsonRpcRequest(method: string, params: Record<string, unknown>, id?: string) {
-  return JSON.stringify({
-    factoryApiVersion: FACTORY_API_VERSION,
-    factoryProtocolVersion: FACTORY_PROTOCOL_VERSION,
-    type: "request",
-    jsonrpc: "2.0",
-    id: id ?? randomUUID(),
-    method,
-    params,
-  });
-}
-
-const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
+const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
   Effect.gen(function* () {
-    const sessions = new Map<ThreadId, DroidSessionContext>();
-    const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const sessions = new Map<ThreadId, Ctx>();
+    const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
 
-    const emitRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-      Queue.offer(runtimeEventQueue, event).pipe(
+    const emit = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
+      Queue.offer(queue, event).pipe(
         Effect.tap(() =>
           options?.nativeEventLogger ? options.nativeEventLogger.write(event, null) : Effect.void,
         ),
         Effect.asVoid,
       );
 
-    const emitFromCallback = (event: ProviderRuntimeEvent) => {
-      void Effect.runPromise(emitRuntimeEvent(event));
+    const emitSync = (event: ProviderRuntimeEvent) => {
+      void Effect.runPromise(emit(event));
     };
 
-    const requireSession = (threadId: ThreadId) =>
+    const requireCtx = (threadId: ThreadId) =>
       Effect.gen(function* () {
-        const context = sessions.get(threadId);
-        if (!context) {
-          return yield* new ProviderAdapterSessionNotFoundError({
-            provider: PROVIDER,
-            threadId,
-          });
-        }
-        if (context.stopped) {
-          return yield* new ProviderAdapterSessionClosedError({
-            provider: PROVIDER,
-            threadId,
-          });
-        }
-        return context;
+        const c = sessions.get(threadId);
+        if (!c)
+          return yield* new ProviderAdapterSessionNotFoundError({ provider: PROVIDER, threadId });
+        if (c.stopped)
+          return yield* new ProviderAdapterSessionClosedError({ provider: PROVIDER, threadId });
+        return c;
       });
 
-    const stopSessionInternal = (
-      context: DroidSessionContext,
-      opts: { emitExitEvent: boolean },
-    ): Effect.Effect<void> =>
+    function flushDeltas(c: Ctx, threadId: ThreadId) {
+      if (c.flushTimer !== null) {
+        clearTimeout(c.flushTimer);
+        c.flushTimer = null;
+      }
+      const turnId = c.activeTurnId;
+      if (!turnId) return;
+      if (c.assistantBuf.length > 0) {
+        const d = c.assistantBuf;
+        c.assistantBuf = "";
+        emitSync(
+          makeFactoryDroidContentDeltaEvent(
+            threadId,
+            turnId,
+            "assistant_text",
+            d,
+            `seg-${c.segment}-${turnId}`,
+          ),
+        );
+      }
+      if (c.reasoningBuf.length > 0) {
+        const d = c.reasoningBuf;
+        c.reasoningBuf = "";
+        emitSync(makeFactoryDroidContentDeltaEvent(threadId, turnId, "reasoning", d));
+      }
+    }
+
+    function scheduleFlush(c: Ctx, threadId: ThreadId) {
+      if (c.flushTimer !== null) return;
+      c.flushTimer = setTimeout(() => {
+        c.flushTimer = null;
+        flushDeltas(c, threadId);
+      }, DELTA_COALESCE_MS);
+    }
+
+    function scheduleIdle(c: Ctx, threadId: ThreadId, turnId: TurnId) {
+      if (c.idleTimer !== null) return;
+      c.idleTimer = setTimeout(() => {
+        c.idleTimer = null;
+        flushDeltas(c, threadId);
+        c.activeTurnId = null;
+        c.session = { ...c.session, status: "ready", activeTurnId: undefined, updatedAt: now() };
+        emitSync({
+          ...makeFactoryDroidBaseEvent(threadId),
+          type: "turn.completed",
+          turnId,
+          payload: { state: "completed" },
+        } as unknown as ProviderRuntimeEvent);
+      }, IDLE_COMPLETION_MS);
+    }
+
+    const stopInternal = (c: Ctx, emitExit: boolean): Effect.Effect<void> =>
       Effect.gen(function* () {
-        if (context.stopped) return;
-        context.stopped = true;
-        clearPendingTimers(context);
-        if (context.child && !context.child.killed) {
-          context.child.kill();
-        }
-        context.session = {
-          ...context.session,
-          status: "closed",
-          activeTurnId: undefined,
-          updatedAt: nowIso(),
-        };
-        for (const [, pending] of context.pendingResponses) {
-          pending.reject(new Error("Session stopped"));
-        }
-        context.pendingResponses.clear();
-        sessions.delete(context.session.threadId);
-        if (opts.emitExitEvent) {
-          yield* emitRuntimeEvent({
-            ...makeFactoryDroidBaseEvent(context.session.threadId),
+        if (c.stopped) return;
+        c.stopped = true;
+        clearTimers(c);
+        if (c.child && !c.child.killed) c.child.kill();
+        c.session = { ...c.session, status: "closed", activeTurnId: undefined, updatedAt: now() };
+        for (const [, p] of c.rpc) p.reject(new Error("Session stopped"));
+        c.rpc.clear();
+        sessions.delete(c.session.threadId);
+        if (emitExit) {
+          yield* emit({
+            ...makeFactoryDroidBaseEvent(c.session.threadId),
             type: "session.exited",
             payload: { reason: "stopped" },
           } as unknown as ProviderRuntimeEvent);
         }
       });
 
-    function sendJsonRpc(
-      context: DroidSessionContext,
-      method: string,
-      params: Record<string, unknown>,
-    ): Promise<unknown> {
+    function sendRpc(c: Ctx, method: string, params: Record<string, unknown>): Promise<unknown> {
       return new Promise((resolve, reject) => {
-        if (!context.child || context.child.killed || context.stopped) {
+        if (!c.child || c.child.killed || c.stopped) {
           reject(new Error("Child process not available"));
           return;
         }
         const id = randomUUID();
-        context.pendingResponses.set(id, { resolve, reject });
-        const msg = makeJsonRpcRequest(method, params, id);
-        context.child.stdin.write(msg + "\n");
+        c.rpc.set(id, { resolve, reject });
+        c.child.stdin.write(rpcMsg("request", { id, method, params }) + "\n");
       });
     }
 
-    const DELTA_COALESCE_MS = 50;
-    const IDLE_COMPLETION_DELAY_MS = 200;
-
-    function flushPendingDeltas(context: DroidSessionContext, threadId: ThreadId) {
-      if (context.deltaFlushTimer !== null) {
-        clearTimeout(context.deltaFlushTimer);
-        context.deltaFlushTimer = null;
-      }
-      const turnId = context.activeTurnId;
-      if (!turnId) return;
-
-      if (context.pendingAssistantDelta.length > 0) {
-        const delta = context.pendingAssistantDelta;
-        const segmentItemId = `seg-${context.assistantTextSegment}-${turnId}`;
-        context.pendingAssistantDelta = "";
-        emitFromCallback(
-          makeFactoryDroidContentDeltaEvent(
-            threadId,
-            turnId,
-            "assistant_text",
-            delta,
-            segmentItemId,
-          ),
-        );
-      }
-
-      if (context.pendingReasoningDelta.length > 0) {
-        const delta = context.pendingReasoningDelta;
-        context.pendingReasoningDelta = "";
-        emitFromCallback(makeFactoryDroidContentDeltaEvent(threadId, turnId, "reasoning", delta));
-      }
+    function hasToolUse(notif: Record<string, unknown>): boolean {
+      const msg = asObj(notif.message);
+      const content = msg && Array.isArray(msg.content) ? msg.content : undefined;
+      return content?.some((b: unknown) => asObj(b)?.type === "tool_use") ?? false;
     }
 
-    function scheduleDeltaFlush(context: DroidSessionContext, threadId: ThreadId) {
-      if (context.deltaFlushTimer !== null) return;
-      context.deltaFlushTimer = setTimeout(() => {
-        context.deltaFlushTimer = null;
-        flushPendingDeltas(context, threadId);
-      }, DELTA_COALESCE_MS);
-    }
-
-    function scheduleIdleCompletion(
-      context: DroidSessionContext,
-      threadId: ThreadId,
-      turnId: TurnId,
-    ) {
-      if (context.pendingIdleCompletion !== null) return;
-      context.pendingIdleCompletion = setTimeout(() => {
-        context.pendingIdleCompletion = null;
-        flushPendingDeltas(context, threadId);
-
-        context.activeTurnId = null;
-        context.session = {
-          ...context.session,
-          status: "ready",
-          activeTurnId: undefined,
-          updatedAt: nowIso(),
-        };
-        emitFromCallback({
-          ...makeFactoryDroidBaseEvent(threadId),
-          type: "turn.completed",
-          turnId,
-          payload: { state: "completed" },
-        } as unknown as ProviderRuntimeEvent);
-      }, IDLE_COMPLETION_DELAY_MS);
-    }
-
-    function setupJsonRpcListener(context: DroidSessionContext, threadId: ThreadId) {
-      if (!context.child) return;
-
-      const rl = readline.createInterface({ input: context.child.stdout });
-      const child = context.child;
+    function setupListener(c: Ctx, threadId: ThreadId) {
+      if (!c.child) return;
+      const child = c.child;
+      const rl = readline.createInterface({ input: child.stdout });
 
       rl.on("line", (line) => {
-        let parsed: Record<string, unknown>;
+        let msg: Record<string, unknown>;
         try {
-          parsed = JSON.parse(line);
+          msg = JSON.parse(line);
         } catch {
           return;
         }
+        const t = msg.type as string | undefined;
 
-        const msgType = parsed.type as string | undefined;
-
-        if (msgType === "response") {
-          const id = parsed.id as string | null;
-          if (id && context.pendingResponses.has(id)) {
-            const pending = context.pendingResponses.get(id)!;
-            context.pendingResponses.delete(id);
-            if (parsed.error) {
+        if (t === "response") {
+          const id = msg.id as string | null;
+          const pending = id ? c.rpc.get(id) : undefined;
+          if (pending) {
+            c.rpc.delete(id!);
+            if (msg.error) {
               pending.reject(
-                new Error((parsed.error as { message?: string }).message ?? "JSON-RPC error"),
+                new Error((msg.error as { message?: string }).message ?? "JSON-RPC error"),
               );
             } else {
-              pending.resolve(parsed.result);
+              pending.resolve(msg.result);
             }
           }
           return;
         }
 
-        if (msgType === "notification") {
-          const notif = (parsed.params as { notification?: Record<string, unknown> })?.notification;
+        if (t === "notification") {
+          const notif = (msg.params as { notification?: Record<string, unknown> })?.notification;
           if (!notif) return;
+          const nt = notif.type as string;
+          const turnId = c.activeTurnId;
 
-          const notifType = notif.type as string;
-          const turnId = context.activeTurnId;
-
-          if (
-            (notifType === "assistant_text_delta" || notifType === "thinking_text_delta") &&
-            turnId
-          ) {
+          if ((nt === "assistant_text_delta" || nt === "thinking_text_delta") && turnId) {
             const delta = notif.textDelta as string;
             if (delta) {
-              if (notifType === "assistant_text_delta") {
-                context.sawAssistantTextDelta = true;
-                context.pendingAssistantDelta += delta;
-              } else {
-                context.pendingReasoningDelta += delta;
-              }
-              scheduleDeltaFlush(context, threadId);
+              if (nt === "assistant_text_delta") {
+                c.sawDelta = true;
+                c.assistantBuf += delta;
+              } else c.reasoningBuf += delta;
+              scheduleFlush(c, threadId);
             }
-          } else if (notifType === "droid_working_state_changed") {
-            const newState = notif.newState as string;
-            if (newState === "idle" && turnId) {
-              scheduleIdleCompletion(context, threadId, turnId);
-            } else if (newState !== "idle" && context.pendingIdleCompletion !== null) {
-              clearTimeout(context.pendingIdleCompletion);
-              context.pendingIdleCompletion = null;
+          } else if (nt === "droid_working_state_changed") {
+            const st = notif.newState as string;
+            if (st === "idle" && turnId) scheduleIdle(c, threadId, turnId);
+            else if (st !== "idle" && c.idleTimer !== null) {
+              clearTimeout(c.idleTimer);
+              c.idleTimer = null;
             }
           } else {
-            const hasToolUse = notifType === "create_message" && notifContainsToolUse(notif);
-
-            if (hasToolUse) {
-              flushPendingDeltas(context, threadId);
-              context.assistantTextSegment += 1;
-              context.sawAssistantTextDelta = false;
+            if (nt === "create_message" && hasToolUse(notif)) {
+              flushDeltas(c, threadId);
+              c.segment += 1;
+              c.sawDelta = false;
             }
-
             const { events, fallbackText } = mapFactoryDroidNotification({
               notif,
-              sawAssistantTextDelta: context.sawAssistantTextDelta,
+              sawAssistantTextDelta: c.sawDelta,
               threadId,
               ...(turnId ? { turnId } : {}),
             });
-            for (const event of events) {
-              emitFromCallback(event);
-            }
+            for (const e of events) emitSync(e);
             if (fallbackText) {
-              context.sawAssistantTextDelta = true;
-              context.pendingAssistantDelta += fallbackText;
-              scheduleDeltaFlush(context, threadId);
+              c.sawDelta = true;
+              c.assistantBuf += fallbackText;
+              scheduleFlush(c, threadId);
             }
           }
           return;
         }
 
-        if (msgType === "request") {
-          const method = parsed.method as string;
-          const reqId = parsed.id as string;
+        if (t === "request") {
+          const method = msg.method as string;
           if (method === "droid.request_permission" || method === "droid.ask_user") {
-            const response = JSON.stringify({
-              factoryApiVersion: FACTORY_API_VERSION,
-              factoryProtocolVersion: FACTORY_PROTOCOL_VERSION,
-              type: "response",
-              jsonrpc: "2.0",
-              id: reqId,
-              result: { selectedOption: "always_allow" },
-            });
-            child?.stdin.write(response + "\n");
+            child.stdin.write(
+              rpcMsg("response", { id: msg.id, result: { selectedOption: "always_allow" } }) + "\n",
+            );
           }
         }
       });
 
       child.stderr.on("data", (chunk: Buffer) => {
         const text = chunk.toString().trim();
-        if (text && context.activeTurnId) {
-          emitFromCallback({
+        if (text && c.activeTurnId) {
+          emitSync({
             ...makeFactoryDroidBaseEvent(threadId),
             type: "runtime.error",
-            turnId: context.activeTurnId,
+            turnId: c.activeTurnId,
             payload: { message: text },
           } as unknown as ProviderRuntimeEvent);
         }
       });
 
       child.on("exit", (code) => {
-        if (context.child !== child) {
-          return;
-        }
-        clearPendingTimers(context);
-        flushPendingDeltas(context, threadId);
-        const turnId = context.activeTurnId;
-        context.child = null;
-        context.jsonRpcInitialized = false;
-        context.session = {
-          ...context.session,
+        if (c.child !== child) return;
+        clearTimers(c);
+        flushDeltas(c, threadId);
+        const turnId = c.activeTurnId;
+        c.child = null;
+        c.initialized = false;
+        c.session = {
+          ...c.session,
           status: code === 0 ? "ready" : "error",
           activeTurnId: undefined,
           ...(code !== 0 ? { lastError: `droid exec exited with code ${code}` } : {}),
-          updatedAt: nowIso(),
+          updatedAt: now(),
         };
         if (turnId) {
-          context.activeTurnId = null;
-          emitFromCallback({
+          c.activeTurnId = null;
+          emitSync({
             ...makeFactoryDroidBaseEvent(threadId),
             type: "turn.completed",
             turnId,
@@ -414,16 +376,12 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
       });
     }
 
-    async function ensureJsonRpcProcess(context: DroidSessionContext, threadId: ThreadId) {
-      if (context.jsonRpcInitialized && context.child && !context.child.killed) {
-        return;
-      }
-
-      const binaryPath = resolveDroidBinaryPath(context.providerOptions);
-      const autoLevel = context.session.runtimeMode === "approval-required" ? "low" : "high";
-
+    async function ensureProcess(c: Ctx, threadId: ThreadId) {
+      if (c.initialized && c.child && !c.child.killed) return;
+      const bin = resolveBinaryPath(c.providerOptions);
+      const auto = c.session.runtimeMode === "approval-required" ? "low" : "high";
       const child = spawn(
-        binaryPath,
+        bin,
         [
           "exec",
           "--output-format",
@@ -431,208 +389,82 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
           "--input-format",
           "stream-jsonrpc",
           "--auto",
-          autoLevel,
+          auto,
         ],
         {
-          cwd: context.session.cwd,
+          cwd: c.session.cwd,
           env: { ...process.env },
           stdio: ["pipe", "pipe", "pipe"],
         },
       );
-
-      context.child = child;
-      setupJsonRpcListener(context, threadId);
-
-      child.once("spawn", () => {
-        context.session = {
-          ...context.session,
-          status: "ready",
-          updatedAt: nowIso(),
-        };
+      c.child = child;
+      setupListener(c, threadId);
+      await new Promise<void>((resolve, reject) => {
+        child.once("spawn", resolve);
+        child.once("error", reject);
       });
-
-      child.once("error", (error) => {
-        context.session = {
-          ...context.session,
-          status: "error",
-          activeTurnId: undefined,
-          lastError: error.message,
-          updatedAt: nowIso(),
-        };
-      });
-
-      await new Promise<void>((resolve) => setTimeout(resolve, 1500));
-
-      await sendJsonRpc(context, "droid.initialize_session", {
+      c.session = { ...c.session, status: "ready", updatedAt: now() };
+      await sendRpc(c, "droid.initialize_session", {
         machineId: os.hostname(),
         sessionId: randomUUID(),
-        cwd: context.session.cwd,
-        modelId: context.session.model,
-        autonomyLevel: autoLevel,
+        cwd: c.session.cwd,
+        modelId: c.session.model,
+        autonomyLevel: auto,
         interactionMode: "default",
       });
-
-      context.jsonRpcInitialized = true;
+      c.initialized = true;
     }
 
     const startSession: FactoryDroidAdapterShape["startSession"] = (input) =>
       Effect.gen(function* () {
-        const threadId = input.threadId;
-        const now = nowIso();
-
+        const t = now();
         const session: ProviderSession = {
           provider: PROVIDER,
           status: "ready",
           runtimeMode: input.runtimeMode,
-          model: modelSlugFromFactorySelection(input.modelSelection),
+          model: modelFromSelection(input.modelSelection),
           cwd: input.cwd ?? process.cwd(),
-          threadId,
-          createdAt: now,
-          updatedAt: now,
+          threadId: input.threadId,
+          createdAt: t,
+          updatedAt: t,
         };
-
-        const context: DroidSessionContext = {
-          session,
-          providerOptions: input.providerOptions,
-          child: null,
-          jsonRpcInitialized: false,
-          stopped: false,
-          turns: [],
-          activeTurnId: null,
-          pendingResponses: new Map(),
-          pendingAssistantDelta: "",
-          sawAssistantTextDelta: false,
-          pendingReasoningDelta: "",
-          assistantTextSegment: 0,
-          deltaFlushTimer: null,
-          pendingIdleCompletion: null,
-        };
-
-        sessions.set(threadId, context);
-
-        yield* emitRuntimeEvent({
-          ...makeFactoryDroidBaseEvent(threadId),
+        sessions.set(input.threadId, makeCtx(session, input.providerOptions));
+        yield* emit({
+          ...makeFactoryDroidBaseEvent(input.threadId),
           type: "session.started",
           payload: {},
         } as unknown as ProviderRuntimeEvent);
-
         return { ...session };
       });
 
     const sendTurn: FactoryDroidAdapterShape["sendTurn"] = (input) =>
       Effect.gen(function* () {
-        const context = yield* requireSession(input.threadId);
+        const c = yield* requireCtx(input.threadId);
         const turnId = TurnId.makeUnsafe(randomUUID());
-        const promptText = input.input ?? "";
-
-        const turnModel = modelSlugFromFactorySelection(input.modelSelection);
-        if (turnModel && turnModel !== context.session.model) {
-          context.session = { ...context.session, model: turnModel };
-        }
-
-        context.session = {
-          ...context.session,
-          status: "running",
-          activeTurnId: turnId,
-          updatedAt: nowIso(),
-        };
-        context.activeTurnId = turnId;
-        resetPendingTurnBuffers(context);
-        context.turns.push({ id: turnId, items: [] });
-
-        yield* emitRuntimeEvent({
+        const turnModel = modelFromSelection(input.modelSelection);
+        if (turnModel && turnModel !== c.session.model)
+          c.session = { ...c.session, model: turnModel };
+        c.session = { ...c.session, status: "running", activeTurnId: turnId, updatedAt: now() };
+        c.activeTurnId = turnId;
+        resetBuffers(c);
+        c.turns.push({ id: turnId, items: [] });
+        yield* emit({
           ...makeFactoryDroidBaseEvent(input.threadId),
           type: "turn.started",
           turnId,
           payload: turnModel ? { model: turnModel } : {},
         } as unknown as ProviderRuntimeEvent);
-
         yield* Effect.promise(async () => {
-          await ensureJsonRpcProcess(context, input.threadId);
-          await sendJsonRpc(context, "droid.add_user_message", {
-            text: promptText,
-          });
+          await ensureProcess(c, input.threadId);
+          await sendRpc(c, "droid.add_user_message", { text: input.input ?? "" });
         });
-
         return { threadId: input.threadId, turnId };
       });
 
-    const interruptTurn: FactoryDroidAdapterShape["interruptTurn"] = (threadId) =>
-      Effect.gen(function* () {
-        const context = yield* requireSession(threadId);
-        if (context.jsonRpcInitialized && context.child && !context.child.killed) {
-          yield* Effect.promise(() =>
-            sendJsonRpc(context, "droid.interrupt_session", {}).catch(() => {
-              context.child?.kill();
-            }),
-          );
-        } else if (context.child && !context.child.killed) {
-          context.child.kill();
-        }
-      });
-
-    const readThread: FactoryDroidAdapterShape["readThread"] = (threadId) =>
-      Effect.gen(function* () {
-        const context = yield* requireSession(threadId);
-        return {
-          threadId,
-          turns: context.turns.map((turn) => ({
-            id: turn.id,
-            items: turn.items as ReadonlyArray<unknown>,
-          })),
-        };
-      });
-
-    const rollbackThread: FactoryDroidAdapterShape["rollbackThread"] = (threadId, numTurns) =>
-      Effect.gen(function* () {
-        const context = yield* requireSession(threadId);
-        const nextLength = Math.max(0, context.turns.length - numTurns);
-        context.turns.splice(nextLength);
-        return {
-          threadId,
-          turns: context.turns.map((turn) => ({
-            id: turn.id,
-            items: turn.items as ReadonlyArray<unknown>,
-          })),
-        };
-      });
-
-    const respondToRequest: FactoryDroidAdapterShape["respondToRequest"] = (threadId, _requestId) =>
-      requireSession(threadId).pipe(Effect.asVoid);
-
-    const respondToUserInput: FactoryDroidAdapterShape["respondToUserInput"] = (
-      threadId,
-      _requestId,
-    ) => requireSession(threadId).pipe(Effect.asVoid);
-
-    const stopSession: FactoryDroidAdapterShape["stopSession"] = (threadId) =>
-      Effect.gen(function* () {
-        const context = yield* requireSession(threadId);
-        yield* stopSessionInternal(context, { emitExitEvent: true });
-      });
-
-    const listSessions: FactoryDroidAdapterShape["listSessions"] = () =>
-      Effect.sync(() => Array.from(sessions.values(), ({ session }) => ({ ...session })));
-
-    const hasSession: FactoryDroidAdapterShape["hasSession"] = (threadId) =>
-      Effect.sync(() => {
-        const context = sessions.get(threadId);
-        return context !== undefined && !context.stopped;
-      });
-
-    const stopAll: FactoryDroidAdapterShape["stopAll"] = () =>
-      Effect.forEach(
-        sessions,
-        ([, context]) => stopSessionInternal(context, { emitExitEvent: true }),
-        { discard: true },
-      );
-
     yield* Effect.addFinalizer(() =>
-      Effect.forEach(
-        sessions,
-        ([, context]) => stopSessionInternal(context, { emitExitEvent: false }),
-        { discard: true },
-      ).pipe(Effect.tap(() => Queue.shutdown(runtimeEventQueue))),
+      Effect.forEach(sessions, ([, c]) => stopInternal(c, false), { discard: true }).pipe(
+        Effect.tap(() => Queue.shutdown(queue)),
+      ),
     );
 
     return {
@@ -644,21 +476,44 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
       },
       startSession,
       sendTurn,
-      interruptTurn,
-      readThread,
-      rollbackThread,
-      respondToRequest,
-      respondToUserInput,
-      stopSession,
-      listSessions,
-      hasSession,
-      stopAll,
-      streamEvents: Stream.fromQueue(runtimeEventQueue),
+      interruptTurn: (threadId) =>
+        Effect.gen(function* () {
+          const c = yield* requireCtx(threadId);
+          if (c.initialized && c.child && !c.child.killed) {
+            yield* Effect.promise(() =>
+              sendRpc(c, "droid.interrupt_session", {}).catch(() => {
+                c.child?.kill();
+              }),
+            );
+          } else if (c.child && !c.child.killed) c.child.kill();
+        }),
+      readThread: (threadId) =>
+        requireCtx(threadId).pipe(Effect.map((c) => ({ threadId, turns: turnsSnapshot(c) }))),
+      rollbackThread: (threadId, n) =>
+        requireCtx(threadId).pipe(
+          Effect.map((c) => {
+            c.turns.splice(Math.max(0, c.turns.length - n));
+            return { threadId, turns: turnsSnapshot(c) };
+          }),
+        ),
+      respondToRequest: (threadId) => requireCtx(threadId).pipe(Effect.asVoid),
+      respondToUserInput: (threadId) => requireCtx(threadId).pipe(Effect.asVoid),
+      stopSession: (threadId) =>
+        requireCtx(threadId).pipe(Effect.flatMap((c) => stopInternal(c, true))),
+      listSessions: () =>
+        Effect.sync(() => Array.from(sessions.values(), ({ session }) => ({ ...session }))),
+      hasSession: (threadId) =>
+        Effect.sync(() => {
+          const c = sessions.get(threadId);
+          return c !== undefined && !c.stopped;
+        }),
+      stopAll: () => Effect.forEach(sessions, ([, c]) => stopInternal(c, true), { discard: true }),
+      streamEvents: Stream.fromQueue(queue),
     } satisfies FactoryDroidAdapterShape;
   });
 
-export const FactoryDroidAdapterLive = Layer.effect(FactoryDroidAdapter, makeFactoryDroidAdapter());
+export const FactoryDroidAdapterLive = Layer.effect(FactoryDroidAdapter, makeAdapter());
 
 export function makeFactoryDroidAdapterLive(options?: FactoryDroidAdapterLiveOptions) {
-  return Layer.effect(FactoryDroidAdapter, makeFactoryDroidAdapter(options));
+  return Layer.effect(FactoryDroidAdapter, makeAdapter(options));
 }
