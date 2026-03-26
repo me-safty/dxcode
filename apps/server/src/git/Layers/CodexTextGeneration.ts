@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import { Effect, FileSystem, Layer, Option, Path, Schema, Scope, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { CodexModelSelection } from "@t3tools/contracts";
+import {
+  CodexModelSelection,
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+} from "@t3tools/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -11,9 +14,6 @@ import { ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "../Errors.ts";
 import {
   type BranchNameGenerationInput,
-  type BranchNameGenerationResult,
-  type CommitMessageGenerationResult,
-  type PrContentGenerationResult,
   type ThreadTitleGenerationResult,
   type TextGenerationShape,
   TextGeneration,
@@ -24,6 +24,7 @@ import {
   buildPrContentPrompt,
 } from "../Prompts.ts";
 import {
+  limitSection,
   normalizeCliError,
   sanitizeCommitSubject,
   sanitizePrTitle,
@@ -431,7 +432,10 @@ const makeCodexTextGeneration = Effect.gen(function* () {
           title: Schema.String,
         }),
         imagePaths,
-        ...(input.model ? { model: input.model } : {}),
+        modelSelection: {
+          provider: "codex",
+          model: input.model ?? DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
+        },
       });
 
       return {

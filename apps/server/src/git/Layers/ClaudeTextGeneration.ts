@@ -299,10 +299,20 @@ const makeClaudeTextGeneration = Effect.gen(function* () {
     };
   });
 
+  const generateThreadTitle: TextGenerationShape["generateThreadTitle"] = Effect.fn(
+    "ClaudeTextGeneration.generateThreadTitle",
+  )(function* () {
+    return yield* new TextGenerationError({
+      operation: "generateThreadTitle",
+      detail: "Thread title generation is only supported through Codex.",
+    });
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
+    generateThreadTitle,
   } satisfies TextGenerationShape;
 });
 
