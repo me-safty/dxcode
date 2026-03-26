@@ -79,7 +79,14 @@ const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0
 const sameModelOptions = (
   left: ProviderModelOptions | undefined,
   right: ProviderModelOptions | undefined,
-): boolean => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+): boolean => {
+  if (left === right) return true;
+  if (left == null && right == null) return true;
+  if (left == null || right == null) return false;
+  const sortedStringify = (obj: unknown): string =>
+    JSON.stringify(obj, Object.keys(obj as Record<string, unknown>).sort());
+  return sortedStringify(left) === sortedStringify(right);
+};
 
 function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
   const error = Cause.squash(cause);

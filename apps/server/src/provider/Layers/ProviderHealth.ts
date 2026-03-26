@@ -720,6 +720,8 @@ export const checkFactoryDroidProviderStatus: Effect.Effect<
 export const ProviderHealthLive = Layer.effect(
   ProviderHealth,
   Effect.gen(function* () {
+    // Run all health probes once at startup and cache the result in a Fiber.
+    // Subsequent `getStatuses` calls return the cached snapshot via Fiber.join.
     const statusesFiber = yield* Effect.all(
       [checkCodexProviderStatus, checkClaudeProviderStatus, checkFactoryDroidProviderStatus],
       { concurrency: "unbounded" },

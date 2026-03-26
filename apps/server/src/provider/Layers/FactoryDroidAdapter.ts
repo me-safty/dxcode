@@ -12,6 +12,8 @@ import os from "node:os";
 import readline from "node:readline";
 import {
   ApprovalRequestId,
+  type CanonicalRequestType,
+  type ProviderApprovalDecision,
   type ProviderRuntimeEvent,
   type ProviderSession,
   type ProviderStartOptions,
@@ -52,6 +54,49 @@ const IDLE_COMPLETION_MS = 200;
 
 const now = () => new Date().toISOString();
 
+function classifyDroidPermissionRequestType(details: Record<string, unknown> | undefined): {
+  requestType: CanonicalRequestType;
+  detail?: string;
+} {
+  const type = details?.type as string | undefined;
+  switch (type) {
+    case "exec":
+      return {
+        requestType: "command_execution_approval",
+        detail: (details?.fullCommand as string) ?? (details?.command as string),
+      };
+    case "edit":
+    case "create":
+    case "apply_patch":
+      return {
+        requestType: "file_change_approval",
+        detail: (details?.filePath as string) ?? (details?.fileName as string),
+      };
+    case "mcp_tool":
+      return {
+        requestType: "dynamic_tool_call",
+        detail: details?.toolName as string,
+      };
+    default:
+      return { requestType: "unknown" };
+  }
+}
+
+function mapDecisionToSelectedOption(
+  decision: ProviderApprovalDecision,
+  options: ReadonlyArray<string>,
+): string {
+  const lower = options.map((o) => o.toLowerCase());
+  if (decision === "accept" || decision === "acceptForSession") {
+    if (lower.includes("always_allow")) return "always_allow";
+    if (lower.includes("allow_once")) return "allow_once";
+    return options[0] ?? "always_allow";
+  }
+  if (lower.includes("deny")) return "deny";
+  if (lower.includes("reject")) return "reject";
+  return options[options.length - 1] ?? "deny";
+}
+
 function resolveBinaryPath(opts: ProviderStartOptions | undefined): string {
   return (
     opts?.factoryDroid?.binaryPath?.trim() ||
@@ -77,6 +122,15 @@ interface Ctx {
   turns: Array<{ id: TurnId; items: unknown[] }>;
   activeTurnId: TurnId | null;
   rpc: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
+  pendingApprovals: Map<
+    string,
+    {
+      readonly requestType: CanonicalRequestType;
+      readonly rpcId: string;
+      readonly resolve: (decision: ProviderApprovalDecision) => void;
+      readonly reject: (e: Error) => void;
+    }
+  >;
   pendingUserInputs: Map<
     string,
     {
@@ -121,6 +175,7 @@ function makeCtx(session: ProviderSession, providerOptions?: ProviderStartOption
     turns: [],
     activeTurnId: null,
     rpc: new Map(),
+    pendingApprovals: new Map(),
     pendingUserInputs: new Map(),
     toolUseRegistry: new Map(),
     assistantBuf: "",
@@ -240,6 +295,8 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
         c.session = { ...c.session, status: "closed", activeTurnId: undefined, updatedAt: now() };
         for (const [, p] of c.rpc) p.reject(new Error("Session stopped"));
         c.rpc.clear();
+        for (const [, p] of c.pendingApprovals) p.reject(new Error("Session stopped"));
+        c.pendingApprovals.clear();
         for (const [, p] of c.pendingUserInputs) p.reject(new Error("Session stopped"));
         c.pendingUserInputs.clear();
         c.toolUseRegistry.clear();
@@ -334,10 +391,17 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
               c.idleTimer = null;
             }
           } else {
-            if (nt === "create_message" && hasToolUse(notif)) {
-              flushDeltas(c, threadId);
-              c.segment += 1;
-              c.sawDelta = false;
+            if (nt === "create_message") {
+              if (hasToolUse(notif)) {
+                flushDeltas(c, threadId);
+                c.segment += 1;
+                c.sawDelta = false;
+              }
+              // Hydrate turn items from create_message notifications.
+              const activeTurn = turnId ? c.turns.find((t) => t.id === turnId) : undefined;
+              if (activeTurn) {
+                activeTurn.items.push(notif.message ?? notif);
+              }
             }
             const { events, fallbackText } = mapFactoryDroidNotification({
               notif,
@@ -359,8 +423,77 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
         if (t === "request") {
           const method = msg.method as string;
           if (method === "droid.request_permission") {
-            child.stdin.write(
-              rpcMsg("response", { id: msg.id, result: { selectedOption: "always_allow" } }) + "\n",
+            if (c.session.runtimeMode === "full-access") {
+              child.stdin.write(
+                rpcMsg("response", { id: msg.id, result: { selectedOption: "always_allow" } }) +
+                  "\n",
+              );
+              return;
+            }
+            const requestId = ApprovalRequestId.makeUnsafe(randomUUID());
+            const params = asObj(msg.params as Record<string, unknown>);
+            const toolUses = Array.isArray(params?.toolUses) ? params.toolUses : [];
+            const options = Array.isArray(params?.options)
+              ? (params.options as string[])
+              : ["always_allow", "deny"];
+
+            const firstToolUse = asObj(toolUses[0] as Record<string, unknown>);
+            const details = asObj(firstToolUse?.details as Record<string, unknown>);
+            const { requestType, detail } = classifyDroidPermissionRequestType(details);
+            const turnId = c.activeTurnId;
+
+            const promise = new Promise<ProviderApprovalDecision>((resolve, reject) => {
+              c.pendingApprovals.set(requestId, {
+                requestType,
+                rpcId: msg.id as string,
+                resolve,
+                reject,
+              });
+            });
+
+            emitSync({
+              ...makeFactoryDroidBaseEvent(threadId),
+              ...(turnId ? { turnId } : {}),
+              type: "request.opened",
+              requestId,
+              payload: {
+                requestType,
+                ...(detail ? { detail } : {}),
+              },
+            } as unknown as ProviderRuntimeEvent);
+
+            void promise.then(
+              (decision) => {
+                emitSync({
+                  ...makeFactoryDroidBaseEvent(threadId),
+                  ...(turnId ? { turnId } : {}),
+                  type: "request.resolved",
+                  requestId,
+                  payload: { requestType, decision },
+                } as unknown as ProviderRuntimeEvent);
+
+                child.stdin.write(
+                  rpcMsg("response", {
+                    id: msg.id,
+                    result: { selectedOption: mapDecisionToSelectedOption(decision, options) },
+                  }) + "\n",
+                );
+              },
+              () => {
+                emitSync({
+                  ...makeFactoryDroidBaseEvent(threadId),
+                  ...(turnId ? { turnId } : {}),
+                  type: "request.resolved",
+                  requestId,
+                  payload: { requestType, decision: "cancel" },
+                } as unknown as ProviderRuntimeEvent);
+                child.stdin.write(
+                  rpcMsg("response", {
+                    id: msg.id,
+                    result: { selectedOption: mapDecisionToSelectedOption("cancel", options) },
+                  }) + "\n",
+                );
+              },
             );
           } else if (method === "droid.ask_user") {
             const requestId = ApprovalRequestId.makeUnsafe(randomUUID());
@@ -629,7 +762,23 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
             return { threadId, turns: turnsSnapshot(c) };
           }),
         ),
-      respondToRequest: (threadId) => requireCtx(threadId).pipe(Effect.asVoid),
+      respondToRequest: (threadId, requestId, decision) =>
+        requireCtx(threadId).pipe(
+          Effect.flatMap((c) =>
+            Effect.sync(() => {
+              const pending = c.pendingApprovals.get(requestId);
+              if (!pending) {
+                throw new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "item/requestApproval/decision",
+                  detail: `Unknown pending approval request: ${requestId}`,
+                });
+              }
+              c.pendingApprovals.delete(requestId);
+              pending.resolve(decision);
+            }),
+          ),
+        ),
       respondToUserInput: (threadId, requestId, answers) =>
         requireCtx(threadId).pipe(
           Effect.flatMap((c) =>
