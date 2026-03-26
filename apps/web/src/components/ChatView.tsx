@@ -124,7 +124,7 @@ import { SidebarTrigger } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import {
-  getCustomModelOptionsByProvider,
+  getModelOptionsByProviderWithDiscovery,
   getCustomModelsByProvider,
   getProviderStartOptions,
   resolveAppModelSelection,
@@ -660,9 +660,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const providerOptionsForDispatch = useMemo(() => getProviderStartOptions(settings), [settings]);
   const selectedModelForPicker = selectedModel;
+  const serverProviderStatuses = useQuery(serverConfigQueryOptions()).data?.providers;
   const modelOptionsByProvider = useMemo(
-    () => getCustomModelOptionsByProvider(settings),
-    [settings],
+    () =>
+      getModelOptionsByProviderWithDiscovery(
+        settings,
+        serverProviderStatuses ?? EMPTY_PROVIDER_STATUSES,
+      ),
+    [settings, serverProviderStatuses],
   );
   const selectedModelForPickerWithCustomFallback = useMemo(() => {
     const currentOptions = modelOptionsByProvider[selectedProvider];

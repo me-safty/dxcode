@@ -20,6 +20,8 @@ import {
 import { Effect, Layer, Queue, Stream } from "effect";
 
 import {
+  ProviderAdapterProcessError,
+  ProviderAdapterRequestError,
   ProviderAdapterSessionClosedError,
   ProviderAdapterSessionNotFoundError,
 } from "../Errors.ts";
@@ -30,6 +32,7 @@ import {
 import type { EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
   FACTORY_DROID_PROVIDER as PROVIDER,
+  asObj,
   makeFactoryDroidBaseEvent,
   makeFactoryDroidContentDeltaEvent,
   mapFactoryDroidNotification,
@@ -45,8 +48,6 @@ const IDLE_COMPLETION_MS = 200;
 // ── Helpers ───────────────────────────────────────────────────────────
 
 const now = () => new Date().toISOString();
-const asObj = (v: unknown): Record<string, unknown> | undefined =>
-  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
 
 function resolveBinaryPath(opts: ProviderStartOptions | undefined): string {
   return (
@@ -189,7 +190,7 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
       if (c.reasoningBuf.length > 0) {
         const d = c.reasoningBuf;
         c.reasoningBuf = "";
-        emitSync(makeFactoryDroidContentDeltaEvent(threadId, turnId, "reasoning", d));
+        emitSync(makeFactoryDroidContentDeltaEvent(threadId, turnId, "reasoning_text", d));
       }
     }
 
@@ -239,7 +240,13 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
     function sendRpc(c: Ctx, method: string, params: Record<string, unknown>): Promise<unknown> {
       return new Promise((resolve, reject) => {
         if (!c.child || c.child.killed || c.stopped) {
-          reject(new Error("Child process not available"));
+          reject(
+            new ProviderAdapterProcessError({
+              provider: PROVIDER,
+              threadId: c.session.threadId,
+              detail: "Child process not available",
+            }),
+          );
           return;
         }
         const id = randomUUID();
@@ -275,7 +282,11 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
             c.rpc.delete(id!);
             if (msg.error) {
               pending.reject(
-                new Error((msg.error as { message?: string }).message ?? "JSON-RPC error"),
+                new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "jsonrpc",
+                  detail: (msg.error as { message?: string }).message ?? "JSON-RPC error",
+                }),
               );
             } else {
               pending.resolve(msg.result);

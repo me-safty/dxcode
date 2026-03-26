@@ -4,6 +4,7 @@ import {
   TrimmedNonEmptyString,
   type ProviderKind,
   type ProviderStartOptions,
+  type ServerProviderStatus,
 } from "@t3tools/contracts";
 import {
   getDefaultModel,
@@ -261,6 +262,24 @@ export function getCustomModelOptionsByProvider(
     claudeAgent: getAppModelOptions("claudeAgent", customModelsByProvider.claudeAgent),
     factoryDroid: getAppModelOptions("factoryDroid", customModelsByProvider.factoryDroid),
   };
+}
+
+export function getModelOptionsByProviderWithDiscovery(
+  settings: Pick<AppSettings, CustomModelSettingsKey>,
+  providerStatuses: ReadonlyArray<ServerProviderStatus>,
+): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
+  const base = getCustomModelOptionsByProvider(settings);
+  const droidStatus = providerStatuses.find((s) => s.provider === "factoryDroid");
+  if (!droidStatus?.models?.length) return base;
+  const seen = new Set(base.factoryDroid.map((o) => o.slug));
+  const merged = [...base.factoryDroid];
+  for (const m of droidStatus.models) {
+    if (!seen.has(m.slug)) {
+      seen.add(m.slug);
+      merged.push(m);
+    }
+  }
+  return { ...base, factoryDroid: merged };
 }
 
 export function getProviderStartOptions(

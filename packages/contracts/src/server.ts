@@ -33,6 +33,11 @@ export const ServerProviderAuthStatus = Schema.Literals([
 ]);
 export type ServerProviderAuthStatus = typeof ServerProviderAuthStatus.Type;
 
+const ServerProviderModelOption = Schema.Struct({
+  slug: Schema.String,
+  name: Schema.String,
+});
+
 export const ServerProviderStatus = Schema.Struct({
   provider: ProviderKind,
   status: ServerProviderStatusState,
@@ -40,6 +45,7 @@ export const ServerProviderStatus = Schema.Struct({
   authStatus: ServerProviderAuthStatus,
   checkedAt: IsoDateTime,
   message: Schema.optional(TrimmedNonEmptyString),
+  models: Schema.optional(Schema.Array(ServerProviderModelOption)),
 });
 export type ServerProviderStatus = typeof ServerProviderStatus.Type;
 

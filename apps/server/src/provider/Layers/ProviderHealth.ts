@@ -589,17 +589,17 @@ export const checkClaudeProviderStatus: Effect.Effect<
 
 // ── Factory Droid health check ───────────────────────────────────────
 
-const FACTORY_DROID_PROVIDER = "factoryDroid" as const;
+import { FACTORY_DROID_PROVIDER } from "./FactoryDroidRuntimeEvents.ts";
 
 function resolveFactoryDroidBinaryCandidates(): ReadonlyArray<string> {
   const configuredBinaryPath = process.env.T3CODE_FACTORY_DROID_BINARY_PATH?.trim();
   return configuredBinaryPath ? [configuredBinaryPath, "droid"] : ["droid"];
 }
 
-const probeFactoryDroidBinary = (binaryPath: string) =>
+const probeFactoryDroidCommand = (binaryPath: string, args: string[]) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const command = ChildProcess.make(binaryPath, ["--version"], {
+    const command = ChildProcess.make(binaryPath, args, {
       shell: process.platform === "win32",
     });
     const child = yield* spawner.spawn(command);
@@ -614,6 +614,37 @@ const probeFactoryDroidBinary = (binaryPath: string) =>
     return { stdout, stderr, code: exitCode } satisfies CommandResult;
   }).pipe(Effect.scoped, Effect.timeoutOption(DEFAULT_TIMEOUT_MS), Effect.result);
 
+const MODEL_LINE_RE = /^\s{2}(\S+)\s{2,}(.+)$/;
+
+function parseModelsFromExecHelp(helpText: string): ReadonlyArray<{ slug: string; name: string }> {
+  const models: { slug: string; name: string }[] = [];
+  let inModels = false;
+  for (const line of helpText.split("\n")) {
+    if (line.startsWith("Available Models:")) {
+      inModels = true;
+      continue;
+    }
+    if (line.startsWith("Custom Models:")) {
+      inModels = true;
+      continue;
+    }
+    if (inModels && line.length > 0 && !line.startsWith("  ")) {
+      inModels = false;
+      continue;
+    }
+    if (!inModels) continue;
+    const match = MODEL_LINE_RE.exec(line);
+    if (match) {
+      const slug = match[1].trim();
+      const name = match[2].trim().replace(/\s*\[Deprecated\]\s*$/, "");
+      if (!slug.includes("[") && !name.toLowerCase().includes("deprecated")) {
+        models.push({ slug, name });
+      }
+    }
+  }
+  return models;
+}
+
 export const checkFactoryDroidProviderStatus: Effect.Effect<
   ServerProviderStatus,
   never,
@@ -622,11 +653,9 @@ export const checkFactoryDroidProviderStatus: Effect.Effect<
   const checkedAt = new Date().toISOString();
 
   for (const binaryPath of resolveFactoryDroidBinaryCandidates()) {
-    const versionProbe = yield* probeFactoryDroidBinary(binaryPath);
+    const versionProbe = yield* probeFactoryDroidCommand(binaryPath, ["--version"]);
 
-    if (Result.isFailure(versionProbe)) {
-      continue;
-    }
+    if (Result.isFailure(versionProbe)) continue;
 
     const versionOption = versionProbe.success;
     if (Option.isNone(versionOption)) {
@@ -640,15 +669,27 @@ export const checkFactoryDroidProviderStatus: Effect.Effect<
       } satisfies ServerProviderStatus;
     }
 
-    if (versionOption.value.code === 0) {
-      return {
-        provider: FACTORY_DROID_PROVIDER,
-        status: "ready",
-        available: true,
-        authStatus: "authenticated",
-        checkedAt,
-      } satisfies ServerProviderStatus;
+    if (versionOption.value.code !== 0) continue;
+
+    let models: ReadonlyArray<{ slug: string; name: string }> | undefined;
+    const helpProbe = yield* probeFactoryDroidCommand(binaryPath, ["exec", "--help"]);
+    if (
+      Result.isSuccess(helpProbe) &&
+      Option.isSome(helpProbe.success) &&
+      helpProbe.success.value.code === 0
+    ) {
+      const parsed = parseModelsFromExecHelp(helpProbe.success.value.stdout);
+      if (parsed.length > 0) models = parsed;
     }
+
+    return {
+      provider: FACTORY_DROID_PROVIDER,
+      status: "ready",
+      available: true,
+      authStatus: "unknown",
+      checkedAt,
+      ...(models ? { models } : {}),
+    } satisfies ServerProviderStatus;
   }
 
   return {

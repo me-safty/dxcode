@@ -18,7 +18,7 @@ const RAW_SOURCE = "factorydroid.jsonrpc.notification";
 const now = () => new Date().toISOString();
 const nextEventId = () => EventId.makeUnsafe(randomUUID());
 const asStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
-const asObj = (v: unknown): Record<string, unknown> | undefined =>
+/** @internal */ export const asObj = (v: unknown): Record<string, unknown> | undefined =>
   v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
 const asNum = (v: unknown): number | undefined =>
   typeof v === "number" && Number.isFinite(v) ? v : undefined;
@@ -35,7 +35,7 @@ export function makeFactoryDroidBaseEvent(threadId: ThreadId) {
 export function makeFactoryDroidContentDeltaEvent(
   threadId: ThreadId,
   turnId: TurnId,
-  streamKind: "assistant_text" | "reasoning",
+  streamKind: "assistant_text" | "reasoning_text",
   delta: string,
   itemId?: string,
 ): ProviderRuntimeEvent {
