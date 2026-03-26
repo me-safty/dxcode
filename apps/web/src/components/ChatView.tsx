@@ -3741,7 +3741,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             >
               <div
                 className={cn(
-                  "group rounded-2xl p-px transition-colors duration-200",
+                  "group rounded-xl p-px transition-colors duration-200",
                   composerProviderState.composerFrameClassName,
                 )}
                 onDragEnter={onComposerDragEnter}
@@ -3751,20 +3751,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
               >
                 <div
                   className={cn(
-                    "rounded-[15px] border bg-secondary/50 transition-colors duration-200 focus-within:border-ring/30",
-                    isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border/60",
+                    "rounded-[11px] border bg-secondary/40 transition-colors duration-200 focus-within:border-ring/25",
+                    isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border/40",
                     composerProviderState.composerSurfaceClassName,
                   )}
                 >
                   {activePendingApproval ? (
-                    <div className="rounded-t-[14px] border-b border-border/65 bg-muted/20">
+                    <div className="rounded-t-[10px] border-b border-border/65 bg-muted/20">
                       <ComposerPendingApprovalPanel
                         approval={activePendingApproval}
                         pendingCount={pendingApprovals.length}
                       />
                     </div>
                   ) : pendingUserInputs.length > 0 ? (
-                    <div className="rounded-t-[14px] border-b border-border/65 bg-muted/20">
+                    <div className="rounded-t-[10px] border-b border-border/65 bg-muted/20">
                       <ComposerPendingUserInputPanel
                         pendingUserInputs={pendingUserInputs}
                         respondingRequestIds={respondingRequestIds}
@@ -3775,7 +3775,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       />
                     </div>
                   ) : showPlanFollowUpPrompt && activeProposedPlan ? (
-                    <div className="rounded-t-[14px] border-b border-border/65 bg-muted/20">
+                    <div className="rounded-t-[10px] border-b border-border/65 bg-muted/20">
                       <ComposerPlanFollowUpBanner
                         key={activeProposedPlan.id}
                         planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
@@ -4010,7 +4010,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         ) : phase === "running" ? (
                           <button
                             type="button"
-                            className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
+                            className="flex size-8 cursor-pointer items-center justify-center rounded-lg bg-rose-500/85 text-white transition-all duration-150 hover:bg-rose-500 sm:h-7 sm:w-7"
                             onClick={() => void onInterrupt()}
                             aria-label="Stop generation"
                           >
@@ -4073,7 +4073,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           ) : (
                             <button
                               type="submit"
-                              className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/90 text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105 disabled:opacity-30 disabled:hover:scale-100 sm:h-8 sm:w-8"
+                              className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/85 text-primary-foreground transition-all duration-150 hover:bg-primary disabled:opacity-30 sm:h-7 sm:w-7"
                               disabled={
                                 isSendBusy || isConnecting || !composerSendState.hasSendableContent
                               }

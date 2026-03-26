@@ -15,10 +15,11 @@ import {
   useVirtualizer,
 } from "@tanstack/react-virtual";
 import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
-import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX } from "../../chat-scroll";
+import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX, isScrollContainerNearBottom } from "../../chat-scroll";
 import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
+import { useStreamingText } from "../../hooks/useStreamingText";
 import {
   BotIcon,
   CheckIcon,
@@ -58,6 +59,34 @@ import {
 
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
+
+/**
+ * Wrapper that uses the streaming text buffer to smoothly reveal assistant
+ * message text between server snapshot updates. Also keeps the scroll
+ * container pinned to the bottom while new text is being revealed.
+ */
+function StreamingAssistantMessage({
+  text,
+  cwd,
+  scrollContainer,
+}: {
+  text: string;
+  cwd: string | undefined;
+  scrollContainer: HTMLDivElement | null;
+}) {
+  const displayedText = useStreamingText(text, true);
+
+  // Keep the scroll container pinned to the bottom as text is progressively
+  // revealed (the element grows between store-driven scroll adjustments).
+  useEffect(() => {
+    if (!scrollContainer) return;
+    if (isScrollContainerNearBottom(scrollContainer)) {
+      scrollContainer.scrollTo({ top: scrollContainer.scrollHeight });
+    }
+  });
+
+  return <ChatMarkdown text={displayedText} cwd={cwd} isStreaming />;
+}
 
 interface MessagesTimelineProps {
   hasMessages: boolean;
@@ -361,7 +390,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
           return (
             <div className="flex justify-end">
-              <div className="group relative max-w-[85%] rounded-2xl bg-secondary px-4 py-2.5">
+              <div className="group relative max-w-[80%] overflow-hidden rounded-xl border border-border/20 bg-secondary/50 px-4 py-3">
+                <div
+                  className="pointer-events-none absolute inset-y-0 right-0 w-[2px] bg-primary/15"
+                  aria-hidden="true"
+                />
                 {userImages.length > 0 && (
                   <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                     {userImages.map(
@@ -406,7 +439,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     terminalContexts={terminalContexts}
                   />
                 )}
-                <div className="mt-1.5 flex items-center justify-end gap-2">
+                <div className="mt-2 flex items-center justify-end gap-2">
                   <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
                     {displayedUserMessage.copyText && (
                       <MessageCopyButton text={displayedUserMessage.copyText} />
@@ -424,7 +457,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                       </Button>
                     )}
                   </div>
-                  <p className="text-right text-[10px] text-muted-foreground/30">
+                  <p className="text-right text-[10px] tracking-wide text-muted-foreground/25">
                     {formatTimestamp(row.message.createdAt, timestampFormat)}
                   </p>
                 </div>
@@ -449,11 +482,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 </div>
               )}
               <div className="min-w-0 px-1 py-0.5">
-                <ChatMarkdown
-                  text={messageText}
-                  cwd={markdownCwd}
-                  isStreaming={Boolean(row.message.streaming)}
-                />
+                {row.message.streaming ? (
+                  <StreamingAssistantMessage
+                    text={messageText}
+                    cwd={markdownCwd}
+                    scrollContainer={scrollContainer}
+                  />
+                ) : (
+                  <ChatMarkdown text={messageText} cwd={markdownCwd} isStreaming={false} />
+                )}
                 {(() => {
                   const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
                   if (!turnSummary) return null;
@@ -714,7 +751,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         }
 
         return (
-          <div className="wrap-break-word whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+          <div className="wrap-break-word whitespace-pre-wrap text-[13.5px] leading-relaxed text-foreground/90">
             {inlineNodes}
           </div>
         );
@@ -742,7 +779,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     }
 
     return (
-      <div className="wrap-break-word whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+      <div className="wrap-break-word whitespace-pre-wrap text-[13.5px] leading-relaxed text-foreground/90">
         {inlineNodes}
       </div>
     );
@@ -753,7 +790,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   }
 
   return (
-    <pre className="whitespace-pre-wrap wrap-break-word font-sans text-sm leading-relaxed text-foreground">
+    <pre className="whitespace-pre-wrap wrap-break-word font-sans text-[13.5px] leading-relaxed text-foreground/90">
       {props.text}
     </pre>
   );
