@@ -193,6 +193,9 @@ export function resolveModelSlug(
   const normalized = normalizeModelSlug(model, provider);
   if (!normalized) return DEFAULT_MODEL_BY_PROVIDER[provider];
 
+  // Factory Droid accepts any model ID -- the CLI validates it server-side.
+  if (provider === "factoryDroid") return normalized;
+
   return MODEL_SLUG_SET_BY_PROVIDER[provider].has(normalized)
     ? normalized
     : DEFAULT_MODEL_BY_PROVIDER[provider];
