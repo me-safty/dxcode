@@ -221,7 +221,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     ],
   );
 
-  if (effort === null && thinkingEnabled === null) {
+  if (effort === null && thinkingEnabled === null && contextWindowOptions.length <= 1) {
     return null;
   }
 
