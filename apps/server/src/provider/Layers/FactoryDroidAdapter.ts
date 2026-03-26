@@ -58,6 +58,7 @@ interface DroidSessionContext {
   pendingAssistantDelta: string;
   sawAssistantTextDelta: boolean;
   pendingReasoningDelta: string;
+  assistantTextSegment: number;
   deltaFlushTimer: ReturnType<typeof setTimeout> | null;
   pendingIdleCompletion: ReturnType<typeof setTimeout> | null;
 }
@@ -77,6 +78,17 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function notifContainsToolUse(notif: Record<string, unknown>): boolean {
+  const message = notif.message;
+  if (!message || typeof message !== "object" || Array.isArray(message)) return false;
+  const content = (message as Record<string, unknown>).content;
+  if (!Array.isArray(content)) return false;
+  return content.some(
+    (block) =>
+      block && typeof block === "object" && (block as Record<string, unknown>).type === "tool_use",
+  );
+}
+
 function clearPendingTimers(context: DroidSessionContext) {
   if (context.deltaFlushTimer !== null) {
     clearTimeout(context.deltaFlushTimer);
@@ -92,6 +104,7 @@ function resetPendingTurnBuffers(context: DroidSessionContext) {
   context.pendingAssistantDelta = "";
   context.sawAssistantTextDelta = false;
   context.pendingReasoningDelta = "";
+  context.assistantTextSegment = 0;
 }
 
 function makeJsonRpcRequest(method: string, params: Record<string, unknown>, id?: string) {
@@ -202,9 +215,16 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
 
       if (context.pendingAssistantDelta.length > 0) {
         const delta = context.pendingAssistantDelta;
+        const segmentItemId = `seg-${context.assistantTextSegment}-${turnId}`;
         context.pendingAssistantDelta = "";
         emitFromCallback(
-          makeFactoryDroidContentDeltaEvent(threadId, turnId, "assistant_text", delta),
+          makeFactoryDroidContentDeltaEvent(
+            threadId,
+            turnId,
+            "assistant_text",
+            delta,
+            segmentItemId,
+          ),
         );
       }
 
@@ -306,8 +326,19 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
             const newState = notif.newState as string;
             if (newState === "idle" && turnId) {
               scheduleIdleCompletion(context, threadId, turnId);
+            } else if (newState !== "idle" && context.pendingIdleCompletion !== null) {
+              clearTimeout(context.pendingIdleCompletion);
+              context.pendingIdleCompletion = null;
             }
           } else {
+            const hasToolUse = notifType === "create_message" && notifContainsToolUse(notif);
+
+            if (hasToolUse) {
+              flushPendingDeltas(context, threadId);
+              context.assistantTextSegment += 1;
+              context.sawAssistantTextDelta = false;
+            }
+
             const { events, fallbackText } = mapFactoryDroidNotification({
               notif,
               sawAssistantTextDelta: context.sawAssistantTextDelta,
@@ -318,6 +349,7 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
               emitFromCallback(event);
             }
             if (fallbackText) {
+              context.sawAssistantTextDelta = true;
               context.pendingAssistantDelta += fallbackText;
               scheduleDeltaFlush(context, threadId);
             }
@@ -471,6 +503,7 @@ const makeFactoryDroidAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
           pendingAssistantDelta: "",
           sawAssistantTextDelta: false,
           pendingReasoningDelta: "",
+          assistantTextSegment: 0,
           deltaFlushTimer: null,
           pendingIdleCompletion: null,
         };

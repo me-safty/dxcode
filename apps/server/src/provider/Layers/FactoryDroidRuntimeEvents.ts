@@ -50,11 +50,13 @@ export function makeFactoryDroidContentDeltaEvent(
   turnId: TurnId,
   streamKind: "assistant_text" | "reasoning",
   delta: string,
+  itemId?: string,
 ): ProviderRuntimeEvent {
   return {
     ...makeFactoryDroidBaseEvent(threadId),
     type: "content.delta",
     turnId,
+    ...(itemId ? { itemId } : {}),
     payload: { streamKind, delta },
   } as unknown as ProviderRuntimeEvent;
 }

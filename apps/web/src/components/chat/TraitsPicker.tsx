@@ -7,11 +7,15 @@ import {
 } from "@t3tools/contracts";
 import {
   applyClaudePromptEffortPrefix,
-  getModelCapabilities,
+  EFFORT_LABELS,
+  getDefaultReasoningEffort,
+  getReasoningEffortOptions,
   isClaudeUltrathinkPrompt,
+  resolveReasoningEffortForProvider,
+  supportsClaudeAdaptiveReasoning,
+  supportsClaudeFastMode,
+  supportsClaudeThinkingToggle,
   trimOrNull,
-  getDefaultEffort,
-  hasEffortLevel,
 } from "@t3tools/shared/model";
 import { memo, useCallback, useState } from "react";
 import { ChevronDownIcon } from "lucide-react";
@@ -58,43 +62,43 @@ function getSelectedTraits(
   prompt: string,
   modelOptions: ProviderOptions | null | undefined,
 ) {
-  const caps = getModelCapabilities(provider, model);
-  const effortLevels = caps.reasoningEffortLevels;
-  const defaultEffort = getDefaultEffort(caps);
+  const effortOptions = getReasoningEffortOptions(provider, model);
+  const defaultEffort = effortOptions.length > 0 ? getDefaultReasoningEffort(provider) : null;
+  const isUltrathinkSupported =
+    provider === "claudeAgent" && supportsClaudeAdaptiveReasoning(model);
+  const promptInjectedEfforts = isUltrathinkSupported ? ["ultrathink"] : [];
 
-  // Resolve effort from options (provider-specific key)
   const resolvedEffort = getRawEffort(provider, modelOptions);
-
-  // Filter out prompt-injected efforts from the "current effort" display
-  const isPromptInjected = resolvedEffort
-    ? caps.promptInjectedEffortLevels.includes(resolvedEffort)
-    : false;
+  const isPromptInjected = resolvedEffort ? promptInjectedEfforts.includes(resolvedEffort) : false;
   const effort =
-    resolvedEffort && !isPromptInjected && hasEffortLevel(caps, resolvedEffort)
+    resolvedEffort &&
+    !isPromptInjected &&
+    (effortOptions as ReadonlyArray<string>).includes(resolvedEffort)
       ? resolvedEffort
-      : defaultEffort && hasEffortLevel(caps, defaultEffort)
+      : defaultEffort && (effortOptions as ReadonlyArray<string>).includes(defaultEffort)
         ? defaultEffort
         : null;
 
-  // Thinking toggle (only for models that support it)
-  const thinkingEnabled = caps.supportsThinkingToggle
+  const supportsThinking = provider === "claudeAgent" && supportsClaudeThinkingToggle(model);
+  const thinkingEnabled = supportsThinking
     ? ((modelOptions as ClaudeModelOptions | undefined)?.thinking ?? true)
     : null;
 
-  // Fast mode
+  const supportsFastMode =
+    provider === "codex" || (provider === "claudeAgent" && supportsClaudeFastMode(model));
   const fastModeEnabled =
-    caps.supportsFastMode &&
-    (modelOptions as { fastMode?: boolean } | undefined)?.fastMode === true;
+    supportsFastMode && (modelOptions as { fastMode?: boolean } | undefined)?.fastMode === true;
 
-  // Prompt-controlled effort (e.g. ultrathink in prompt text)
   const ultrathinkPromptControlled =
-    caps.promptInjectedEffortLevels.length > 0 && isClaudeUltrathinkPrompt(prompt);
+    promptInjectedEfforts.length > 0 && isClaudeUltrathinkPrompt(prompt);
 
   return {
-    caps,
     effort,
-    effortLevels,
+    effortOptions,
+    defaultEffort,
+    promptInjectedEfforts,
     thinkingEnabled,
+    supportsFastMode,
     fastModeEnabled,
     ultrathinkPromptControlled,
   };
@@ -119,22 +123,22 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
 }: TraitsMenuContentProps) {
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
   const {
-    caps,
     effort,
-    effortLevels,
+    effortOptions,
+    defaultEffort,
+    promptInjectedEfforts,
     thinkingEnabled,
+    supportsFastMode,
     fastModeEnabled,
     ultrathinkPromptControlled,
   } = getSelectedTraits(provider, model, prompt, modelOptions);
-  const defaultEffort = getDefaultEffort(caps);
 
   const handleEffortChange = useCallback(
     (value: string) => {
       if (ultrathinkPromptControlled) return;
       if (!value) return;
-      const nextOption = effortLevels.find((option) => option.value === value);
-      if (!nextOption) return;
-      if (caps.promptInjectedEffortLevels.includes(nextOption.value)) {
+      if (!(effortOptions as ReadonlyArray<string>).includes(value)) return;
+      if (promptInjectedEfforts.includes(value)) {
         const nextPrompt =
           prompt.trim().length === 0
             ? ULTRATHINK_PROMPT_PREFIX
@@ -146,7 +150,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       setProviderModelOptions(
         threadId,
         provider,
-        buildNextOptions(provider, modelOptions, { [effortKey]: nextOption.value }),
+        buildNextOptions(provider, modelOptions, { [effortKey]: value }),
         { persistSticky: true },
       );
     },
@@ -156,9 +160,9 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       onPromptChange,
       threadId,
       setProviderModelOptions,
-      effortLevels,
+      effortOptions,
       prompt,
-      caps.promptInjectedEffortLevels,
+      promptInjectedEfforts,
       provider,
     ],
   );
@@ -179,14 +183,10 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
               </div>
             ) : null}
             <MenuRadioGroup value={effort} onValueChange={handleEffortChange}>
-              {effortLevels.map((option) => (
-                <MenuRadioItem
-                  key={option.value}
-                  value={option.value}
-                  disabled={ultrathinkPromptControlled}
-                >
-                  {option.label}
-                  {option.value === defaultEffort ? " (default)" : ""}
+              {effortOptions.map((value) => (
+                <MenuRadioItem key={value} value={value} disabled={ultrathinkPromptControlled}>
+                  {EFFORT_LABELS[value] ?? value}
+                  {value === defaultEffort ? " (default)" : ""}
                 </MenuRadioItem>
               ))}
             </MenuRadioGroup>
@@ -211,7 +211,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
           </MenuRadioGroup>
         </MenuGroup>
       ) : null}
-      {caps.supportsFastMode ? (
+      {supportsFastMode ? (
         <>
           <MenuDivider />
           <MenuGroup>
@@ -247,17 +247,15 @@ export const TraitsPicker = memo(function TraitsPicker({
 }: TraitsMenuContentProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const {
-    caps,
     effort,
-    effortLevels,
+    effortOptions,
     thinkingEnabled,
+    supportsFastMode,
     fastModeEnabled,
     ultrathinkPromptControlled,
   } = getSelectedTraits(provider, model, prompt, modelOptions);
 
-  const effortLabel = effort
-    ? (effortLevels.find((l) => l.value === effort)?.label ?? effort)
-    : null;
+  const effortLabel = effort ? (EFFORT_LABELS[effort] ?? effort) : null;
   const triggerLabel = [
     ultrathinkPromptControlled
       ? "Ultrathink"
@@ -266,7 +264,7 @@ export const TraitsPicker = memo(function TraitsPicker({
         : thinkingEnabled === null
           ? null
           : `Thinking ${thinkingEnabled ? "On" : "Off"}`,
-    ...(caps.supportsFastMode && fastModeEnabled ? ["Fast"] : []),
+    ...(supportsFastMode && fastModeEnabled ? ["Fast"] : []),
   ]
     .filter(Boolean)
     .join(" · ");

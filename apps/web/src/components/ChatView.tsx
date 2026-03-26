@@ -25,10 +25,10 @@ import {
 import {
   applyClaudePromptEffortPrefix,
   getDefaultModel,
-  getModelCapabilities,
   getProviderCapabilities,
   normalizeModelSlug,
   resolveModelSlugForProvider,
+  supportsClaudeAdaptiveReasoning,
 } from "@t3tools/shared/model";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -204,8 +204,11 @@ function formatOutgoingPrompt(params: {
   effort: string | null;
   text: string;
 }): string {
-  const caps = getModelCapabilities(params.provider, params.model);
-  if (params.effort && caps.promptInjectedEffortLevels.includes(params.effort)) {
+  if (
+    params.effort === "ultrathink" &&
+    params.provider === "claudeAgent" &&
+    supportsClaudeAdaptiveReasoning(params.model)
+  ) {
     return applyClaudePromptEffortPrefix(params.text, params.effort as ClaudeCodeEffort | null);
   }
   return params.text;

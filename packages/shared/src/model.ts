@@ -1,7 +1,4 @@
 import {
-  CLAUDE_CODE_EFFORT_OPTIONS,
-  CODEX_REASONING_EFFORT_OPTIONS,
-  FACTORY_DROID_EFFORT_OPTIONS,
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_REASONING_EFFORT_BY_PROVIDER,
   MODEL_OPTIONS_BY_PROVIDER,
@@ -134,7 +131,7 @@ export interface ModelCapabilities {
   readonly supportsThinkingToggle: boolean;
 }
 
-const EFFORT_LABELS: Record<string, string> = {
+export const EFFORT_LABELS: Record<string, string> = {
   xhigh: "Extra High",
   high: "High",
   medium: "Medium",
@@ -206,13 +203,9 @@ export function supportsClaudeAdaptiveReasoning(model: string | null | undefined
   return normalized === "claude-opus-4-6" || normalized === "claude-sonnet-4-6";
 }
 
-export function supportsClaudeMaxEffort(model: string | null | undefined): boolean {
-  return normalizeModelSlug(model, "claudeAgent") === "claude-opus-4-6";
-}
+export const supportsClaudeMaxEffort = supportsClaudeFastMode;
 
-export function supportsClaudeUltrathinkKeyword(model: string | null | undefined): boolean {
-  return supportsClaudeAdaptiveReasoning(model);
-}
+export const supportsClaudeUltrathinkKeyword = supportsClaudeAdaptiveReasoning;
 
 export function supportsClaudeThinkingToggle(model: string | null | undefined): boolean {
   return normalizeModelSlug(model, "claudeAgent") === "claude-haiku-4-5";

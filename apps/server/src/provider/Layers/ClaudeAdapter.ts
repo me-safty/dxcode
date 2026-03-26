@@ -41,9 +41,11 @@ import {
   ClaudeCodeEffort,
 } from "@t3tools/contracts";
 import {
-  hasEffortLevel,
   applyClaudePromptEffortPrefix,
-  getModelCapabilities,
+  getReasoningEffortOptions,
+  resolveReasoningEffortForProvider,
+  supportsClaudeFastMode,
+  supportsClaudeThinkingToggle,
   trimOrNull,
 } from "@t3tools/shared/model";
 import {
@@ -525,12 +527,13 @@ function buildPromptText(input: ProviderSendTurnInput): string {
   const requestedEffort = trimOrNull(rawEffort);
   const claudeModel =
     input.modelSelection?.provider === "claudeAgent" ? input.modelSelection.model : undefined;
-  const caps = getModelCapabilities("claudeAgent", claudeModel);
+  const effortOptions = getReasoningEffortOptions("claudeAgent", claudeModel);
+  const resolved = resolveReasoningEffortForProvider("claudeAgent", requestedEffort);
   const promptEffort =
-    requestedEffort === "ultrathink" && caps.reasoningEffortLevels.length > 0
+    resolved === "ultrathink" && effortOptions.length > 0
       ? "ultrathink"
-      : requestedEffort && hasEffortLevel(caps, requestedEffort)
-        ? requestedEffort
+      : resolved && (effortOptions as ReadonlyArray<string>).includes(resolved)
+        ? resolved
         : null;
   return applyClaudePromptEffortPrefix(input.input?.trim() ?? "", promptEffort);
 }
@@ -2730,13 +2733,21 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         const providerOptions = input.providerOptions?.claudeAgent;
         const modelSelection =
           input.modelSelection?.provider === "claudeAgent" ? input.modelSelection : undefined;
-        const requestedEffort = trimOrNull(modelSelection?.options?.effort ?? null);
-        const caps = getModelCapabilities("claudeAgent", modelSelection?.model);
+        const requestedEffort = resolveReasoningEffortForProvider(
+          "claudeAgent",
+          modelSelection?.options?.effort,
+        );
+        const effortOptions = getReasoningEffortOptions("claudeAgent", modelSelection?.model);
         const effort =
-          requestedEffort && hasEffortLevel(caps, requestedEffort) ? requestedEffort : null;
-        const fastMode = modelSelection?.options?.fastMode === true && caps.supportsFastMode;
+          requestedEffort && (effortOptions as ReadonlyArray<string>).includes(requestedEffort)
+            ? requestedEffort
+            : null;
+        const fastMode =
+          modelSelection?.options?.fastMode === true &&
+          supportsClaudeFastMode(modelSelection?.model);
         const thinking =
-          typeof modelSelection?.options?.thinking === "boolean" && caps.supportsThinkingToggle
+          typeof modelSelection?.options?.thinking === "boolean" &&
+          supportsClaudeThinkingToggle(modelSelection?.model)
             ? modelSelection.options.thinking
             : undefined;
         const effectiveEffort = getEffectiveClaudeCodeEffort(effort);

@@ -5,6 +5,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import {
+  EFFORT_LABELS,
   getDefaultReasoningEffort,
   getReasoningEffortOptions,
   normalizeFactoryDroidModelOptions,
@@ -17,12 +18,6 @@ import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../ui/menu";
 
 const PROVIDER = "factoryDroid" as const satisfies ProviderKind;
-
-const DROID_EFFORT_LABELS: Record<FactoryDroidEffort, string> = {
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-};
 
 function getSelectedDroidTraits(modelOptions: FactoryDroidModelOptions | null | undefined): {
   effort: FactoryDroidEffort;
@@ -63,7 +58,7 @@ function FactoryDroidTraitsMenuContentImpl(props: { threadId: ThreadId }) {
       >
         {options.map((option) => (
           <MenuRadioItem key={option} value={option}>
-            {DROID_EFFORT_LABELS[option]}
+            {EFFORT_LABELS[option] ?? option}
           </MenuRadioItem>
         ))}
       </MenuRadioGroup>
@@ -81,7 +76,7 @@ function FactoryDroidTraitsPickerImpl(props: { threadId: ThreadId }) {
   const defaultEffort = getDefaultReasoningEffort(PROVIDER) as FactoryDroidEffort;
   const { effort } = getSelectedDroidTraits(modelOptions);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const effortLabel = DROID_EFFORT_LABELS[effort];
+  const effortLabel = EFFORT_LABELS[effort] ?? effort;
 
   return (
     <Menu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
@@ -119,7 +114,7 @@ function FactoryDroidTraitsPickerImpl(props: { threadId: ThreadId }) {
           >
             {options.map((option) => (
               <MenuRadioItem key={option} value={option}>
-                {DROID_EFFORT_LABELS[option]}
+                {EFFORT_LABELS[option] ?? option}
                 {option === defaultEffort ? (
                   <span className="ms-auto text-[10px] text-muted-foreground/80">default</span>
                 ) : null}
