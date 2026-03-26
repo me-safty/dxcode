@@ -25,7 +25,14 @@ import type {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project";
+import type { ServerListSkillsInput, ServerListSkillsResult } from "./skill";
 import type { ServerConfig } from "./server";
+import type {
+  ServerExecuteProviderCommandInput,
+  ServerExecuteProviderCommandResult,
+  ServerListProviderCommandsInput,
+  ServerListProviderCommandsResult,
+} from "./providerCommand";
 import type {
   TerminalClearInput,
   TerminalCloseInput,
@@ -160,6 +167,13 @@ export interface NativeApi {
   };
   server: {
     getConfig: () => Promise<ServerConfig>;
+    listSkills: (input?: ServerListSkillsInput) => Promise<ServerListSkillsResult>;
+    listProviderCommands: (
+      input: ServerListProviderCommandsInput,
+    ) => Promise<ServerListProviderCommandsResult>;
+    executeProviderCommand: (
+      input: ServerExecuteProviderCommandInput,
+    ) => Promise<ServerExecuteProviderCommandResult>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
   };
   orchestration: {

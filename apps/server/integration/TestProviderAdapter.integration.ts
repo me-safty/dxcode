@@ -471,6 +471,10 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       Effect.sync(() => {
         sessions.clear();
       });
+    const listProviderCommands: ProviderAdapterShape<ProviderAdapterError>["listProviderCommands"] =
+      () => Effect.succeed([]);
+    const executeProviderCommand: ProviderAdapterShape<ProviderAdapterError>["executeProviderCommand"] =
+      () => Effect.void;
 
     const adapter: ProviderAdapterShape<ProviderAdapterError> = {
       provider,
@@ -487,6 +491,8 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       hasSession,
       readThread,
       rollbackThread,
+      listProviderCommands,
+      executeProviderCommand,
       stopAll,
       streamEvents: Stream.fromQueue(runtimeEvents),
     };

@@ -513,6 +513,26 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
     const getCapabilities: ProviderServiceShape["getCapabilities"] = (provider) =>
       registry.getByProvider(provider).pipe(Effect.map((adapter) => adapter.capabilities));
 
+    const listProviderCommands: ProviderServiceShape["listProviderCommands"] = (provider) =>
+      registry
+        .getByProvider(provider)
+        .pipe(Effect.flatMap((adapter) => adapter.listProviderCommands()));
+
+    const executeProviderCommand: ProviderServiceShape["executeProviderCommand"] = (input) =>
+      Effect.gen(function* () {
+        const adapter = yield* registry.getByProvider(input.provider);
+        yield* adapter.executeProviderCommand({
+          threadId: input.threadId,
+          commandName: input.commandName,
+          ...(input.args !== undefined ? { args: input.args } : {}),
+        });
+        yield* analytics.record("provider.command.executed", {
+          provider: input.provider,
+          commandName: input.commandName,
+          hasArgs: typeof input.args === "string" && input.args.trim().length > 0,
+        });
+      });
+
     const rollbackConversation: ProviderServiceShape["rollbackConversation"] = (rawInput) =>
       Effect.gen(function* () {
         const input = yield* decodeInputOrValidationError({
@@ -587,6 +607,8 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       stopSession,
       listSessions,
       getCapabilities,
+      listProviderCommands,
+      executeProviderCommand,
       rollbackConversation,
       // Each access creates a fresh PubSub subscription so that multiple
       // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each

@@ -55,6 +55,12 @@ class FakeCodexManager extends CodexAppServerManager {
     }),
   );
 
+  public listSkillsImpl = vi.fn(
+    async (
+      _threadId: ThreadId,
+    ): Promise<Array<{ name: string; path: string; enabled: boolean }>> => [],
+  );
+
   public interruptTurnImpl = vi.fn(
     async (_threadId: ThreadId, _turnId?: TurnId): Promise<void> => undefined,
   );
@@ -93,6 +99,12 @@ class FakeCodexManager extends CodexAppServerManager {
 
   override sendTurn(input: CodexAppServerSendTurnInput): Promise<ProviderTurnStartResult> {
     return this.sendTurnImpl(input);
+  }
+
+  override listSkills(
+    threadId: ThreadId,
+  ): Promise<Array<{ name: string; path: string; enabled: boolean }>> {
+    return this.listSkillsImpl(threadId);
   }
 
   override interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void> {
@@ -251,6 +263,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
   it.effect("maps codex model options before sending a turn", () =>
     Effect.gen(function* () {
       sessionErrorManager.sendTurnImpl.mockClear();
+      sessionErrorManager.listSkillsImpl.mockClear();
       const adapter = yield* CodexAdapter;
 
       yield* Effect.ignore(
@@ -275,6 +288,46 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         model: "gpt-5.3-codex",
         effort: "high",
         serviceTier: "fast",
+      });
+      assert.equal(sessionErrorManager.listSkillsImpl.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("adds explicit skill input items for referenced enabled skills", () =>
+    Effect.gen(function* () {
+      sessionErrorManager.sendTurnImpl.mockClear();
+      sessionErrorManager.listSkillsImpl.mockReset();
+      sessionErrorManager.listSkillsImpl.mockResolvedValue([
+        {
+          name: "skill-creator",
+          path: "/tmp/skills/skill-creator/SKILL.md",
+          enabled: true,
+        },
+        {
+          name: "disabled-skill",
+          path: "/tmp/skills/disabled-skill/SKILL.md",
+          enabled: false,
+        },
+      ]);
+      const adapter = yield* CodexAdapter;
+
+      yield* Effect.ignore(
+        adapter.sendTurn({
+          threadId: asThreadId("sess-missing"),
+          input: "$skill-creator use the installed skill and ignore $disabled-skill",
+          attachments: [],
+        }),
+      );
+
+      assert.deepStrictEqual(sessionErrorManager.sendTurnImpl.mock.calls[0]?.[0], {
+        threadId: asThreadId("sess-missing"),
+        input: "$skill-creator use the installed skill and ignore $disabled-skill",
+        skills: [
+          {
+            name: "skill-creator",
+            path: "/tmp/skills/skill-creator/SKILL.md",
+          },
+        ],
       });
     }),
   );
@@ -365,6 +418,50 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       }
       assert.equal(firstEvent.value.turnId, "turn-1");
       assert.equal(firstEvent.value.payload.planMarkdown, "## Final plan\n\n- one\n- two");
+    }),
+  );
+
+  it.effect("maps completed review items to review output and turn completion events", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+        Effect.forkChild,
+      );
+
+      lifecycleManager.emit("event", {
+        id: asEventId("evt-review-complete"),
+        kind: "notification",
+        provider: "codex",
+        createdAt: new Date().toISOString(),
+        method: "item/completed",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-review-1"),
+        itemId: asItemId("review_1"),
+        payload: {
+          item: {
+            type: "ExitedReviewMode",
+            id: "review_1",
+            review: "## Findings\n- Prefer Stylize helpers\n- /tmp/file.rs:10-20 should use dim()",
+          },
+        },
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      assert.equal(events.length, 2);
+      assert.equal(events[0]?.type, "item.completed");
+      if (events[0]?.type === "item.completed") {
+        assert.equal(events[0].payload.itemType, "review_exited");
+        assert.equal(events[0].payload.title, "Review complete");
+        assert.equal(
+          events[0].payload.detail,
+          "## Findings\n- Prefer Stylize helpers\n- /tmp/file.rs:10-20 should use dim()",
+        );
+      }
+      assert.equal(events[1]?.type, "turn.completed");
+      if (events[1]?.type === "turn.completed") {
+        assert.equal(events[1].turnId, "turn-review-1");
+        assert.equal(events[1].payload.state, "completed");
+      }
     }),
   );
 

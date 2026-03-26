@@ -1264,6 +1264,8 @@ describe("WebSocket Server", () => {
       respondToUserInput: () => unsupported(),
       stopSession: () => unsupported(),
       listSessions: () => Effect.succeed([]),
+      listProviderCommands: () => Effect.succeed([]),
+      executeProviderCommand: () => unsupported(),
       getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
       rollbackConversation: () => unsupported(),
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),
@@ -1363,6 +1365,109 @@ describe("WebSocket Server", () => {
     expect(domainEvent.type).toBe("thread.message-sent");
     expect(domainEvent.payload.messageId).toBe("assistant:item-1");
     expect(domainEvent.payload.text).toBe("hello from runtime");
+  });
+
+  it("bootstraps a provider session before executing a provider command", async () => {
+    const startSession = vi.fn((threadId: ThreadId) =>
+      Effect.succeed({
+        provider: "codex" as const,
+        status: "ready" as const,
+        runtimeMode: "full-access" as const,
+        threadId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+    const executeProviderCommand = vi.fn(() => Effect.void);
+    const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
+    const providerService: ProviderServiceShape = {
+      startSession: startSession as ProviderServiceShape["startSession"],
+      sendTurn: () => unsupported(),
+      interruptTurn: () => unsupported(),
+      respondToRequest: () => unsupported(),
+      respondToUserInput: () => unsupported(),
+      stopSession: () => unsupported(),
+      listSessions: () => Effect.succeed([]),
+      listProviderCommands: () => Effect.succeed([]),
+      executeProviderCommand:
+        executeProviderCommand as ProviderServiceShape["executeProviderCommand"],
+      getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+      rollbackConversation: () => unsupported(),
+      streamEvents: Stream.empty,
+    };
+
+    server = await createTestServer({
+      cwd: "/test",
+      providerLayer: Layer.succeed(ProviderService, providerService),
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-provider-command-");
+    const createdAt = new Date().toISOString();
+    const createProjectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: "cmd-provider-command-project-create",
+      projectId: "project-provider-command",
+      title: "Provider Command Project",
+      workspaceRoot,
+      defaultModel: "gpt-5-codex",
+      createdAt,
+    });
+    expect(createProjectResponse.error).toBeUndefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-provider-command-thread-create",
+      threadId: "thread-provider-command",
+      projectId: "project-provider-command",
+      title: "Provider Command Thread",
+      model: "gpt-5-codex",
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt,
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const response = await sendRequest(ws, WS_METHODS.serverExecuteProviderCommand, {
+      threadId: "thread-provider-command",
+      provider: "codex",
+      commandName: "review",
+      providerOptions: {
+        codex: {
+          binaryPath: "/custom/bin/codex",
+          homePath: "/custom/.codex",
+        },
+      },
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({ accepted: true });
+    expect(startSession).toHaveBeenCalledWith(
+      asThreadId("thread-provider-command"),
+      expect.objectContaining({
+        provider: "codex",
+        model: "gpt-5-codex",
+        runtimeMode: "full-access",
+        cwd: workspaceRoot,
+        providerOptions: {
+          codex: {
+            binaryPath: "/custom/bin/codex",
+            homePath: "/custom/.codex",
+          },
+        },
+      }),
+    );
+    expect(executeProviderCommand).toHaveBeenCalledWith({
+      threadId: asThreadId("thread-provider-command"),
+      provider: "codex",
+      commandName: "review",
+    });
   });
 
   it("routes terminal RPC methods and broadcasts terminal events", async () => {

@@ -195,6 +195,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.T3CODE_NO_BROWSER, undefined);
         assert.equal(env.T3CODE_HOST, undefined);
         assert.equal(env.VITE_WS_URL, undefined);
+        assert.equal(env.T3CODE_DESKTOP_SERVER_BUILD_ONLY, "1");
       }),
     );
   });

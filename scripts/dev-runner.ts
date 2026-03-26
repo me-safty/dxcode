@@ -30,7 +30,14 @@ const MODE_ARGS = {
   ],
   "dev:server": ["run", "dev", "--filter=t3"],
   "dev:web": ["run", "dev", "--filter=@t3tools/web"],
-  "dev:desktop": ["run", "dev", "--filter=@t3tools/desktop", "--filter=@t3tools/web", "--parallel"],
+  "dev:desktop": [
+    "run",
+    "dev",
+    "--filter=@t3tools/desktop",
+    "--filter=@t3tools/web",
+    "--filter=t3",
+    "--parallel",
+  ],
 } as const satisfies Record<string, ReadonlyArray<string>>;
 
 type DevMode = keyof typeof MODE_ARGS;
@@ -167,6 +174,7 @@ export function createDevRunnerEnv({
       delete output.T3CODE_MODE;
       delete output.T3CODE_NO_BROWSER;
       delete output.T3CODE_HOST;
+      output.T3CODE_DESKTOP_SERVER_BUILD_ONLY = "1";
     }
 
     if (!isDesktopMode && host !== undefined) {
@@ -209,6 +217,8 @@ export function createDevRunnerEnv({
 
     if (isDesktopMode) {
       delete output.T3CODE_DESKTOP_WS_URL;
+    } else {
+      delete output.T3CODE_DESKTOP_SERVER_BUILD_ONLY;
     }
 
     return output;
