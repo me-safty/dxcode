@@ -3,7 +3,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback } from "react";
 
-import { useAppSettings } from "../appSettings";
 import { getFallbackThreadIdAfterDelete } from "../components/Sidebar.logic";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread } from "./useHandleNewThread";
@@ -14,11 +13,12 @@ import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { toastManager } from "../components/ui/toast";
+import { useSettings } from "./useSettings";
 
 export function useThreadActions() {
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
-  const { settings: appSettings } = useAppSettings();
+  const appSettings = useSettings();
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
   const clearProjectDraftThreadById = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadById,

@@ -20,7 +20,7 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   icon: ComponentType<{ className?: string }>;
 }> = [
   { label: "General", to: "/settings/general", icon: Settings2Icon },
-  { label: "Archived Threads", to: "/settings/archived", icon: ArchiveIcon },
+  { label: "Archived threads", to: "/settings/archived", icon: ArchiveIcon },
 ];
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
