@@ -113,23 +113,7 @@ export function resolveReasoningEffortForProvider(
   return options.includes(trimmed) ? (trimmed as ProviderReasoningEffort) : null;
 }
 
-// ── ModelCapabilities (backward-compat facade) ────────────────────────
-//
-// Used by TraitsPicker, ClaudeAdapter, and ChatView. Delegates to
-// the typed effort API above so the logic is defined in one place.
-
-export interface EffortLevel {
-  readonly value: string;
-  readonly label: string;
-  readonly isDefault?: boolean;
-}
-
-export interface ModelCapabilities {
-  readonly reasoningEffortLevels: ReadonlyArray<EffortLevel>;
-  readonly promptInjectedEffortLevels: ReadonlyArray<string>;
-  readonly supportsFastMode: boolean;
-  readonly supportsThinkingToggle: boolean;
-}
+// ── Effort labels ─────────────────────────────────────────────────────
 
 export const EFFORT_LABELS: Record<string, string> = {
   xhigh: "Extra High",
@@ -139,58 +123,6 @@ export const EFFORT_LABELS: Record<string, string> = {
   max: "Max",
   ultrathink: "Ultrathink",
 };
-
-const EMPTY_CAPABILITIES: ModelCapabilities = {
-  reasoningEffortLevels: [],
-  promptInjectedEffortLevels: [],
-  supportsFastMode: false,
-  supportsThinkingToggle: false,
-};
-
-export function getModelCapabilities(
-  provider: ProviderKind,
-  model: string | null | undefined,
-): ModelCapabilities {
-  const effortValues = getReasoningEffortOptions(provider, model);
-  if (effortValues.length === 0 && provider === "claudeAgent") {
-    const normalized = normalizeModelSlug(model, "claudeAgent");
-    if (!normalized) return EMPTY_CAPABILITIES;
-    return {
-      reasoningEffortLevels: [],
-      promptInjectedEffortLevels: [],
-      supportsFastMode: false,
-      supportsThinkingToggle: supportsClaudeThinkingToggle(normalized),
-    };
-  }
-
-  const defaultEffort = getDefaultReasoningEffort(provider);
-  const reasoningEffortLevels: EffortLevel[] = effortValues.map((value) => ({
-    value,
-    label: EFFORT_LABELS[value] ?? value,
-    ...(value === defaultEffort ? { isDefault: true as const } : {}),
-  }));
-
-  const promptInjectedEffortLevels =
-    provider === "claudeAgent" && effortValues.includes("ultrathink" as never)
-      ? ["ultrathink"]
-      : [];
-
-  return {
-    reasoningEffortLevels,
-    promptInjectedEffortLevels,
-    supportsFastMode: provider === "claudeAgent" ? supportsClaudeFastMode(model) : false,
-    supportsThinkingToggle:
-      provider === "claudeAgent" ? supportsClaudeThinkingToggle(model) : false,
-  };
-}
-
-export function getDefaultEffort(caps: ModelCapabilities): string | null {
-  return caps.reasoningEffortLevels.find((l) => l.isDefault)?.value ?? null;
-}
-
-export function hasEffortLevel(caps: ModelCapabilities, effort: string): boolean {
-  return caps.reasoningEffortLevels.some((l) => l.value === effort);
-}
 
 // ── Claude model-specific checks ──────────────────────────────────────
 

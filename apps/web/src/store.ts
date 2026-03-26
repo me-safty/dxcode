@@ -1,17 +1,11 @@
 import { Fragment, type ReactNode, createElement, useEffect } from "react";
 import {
-  DEFAULT_MODEL_BY_PROVIDER,
   type OrchestrationEvent,
   type ProviderKind,
   ThreadId,
   type OrchestrationReadModel,
   type OrchestrationSessionStatus,
 } from "@t3tools/contracts";
-import {
-  inferProviderForModel,
-  resolveModelSlug,
-  resolveModelSlugForProvider,
-} from "@t3tools/shared/model";
 import { create } from "zustand";
 import { type ChatMessage, type Project, type Thread } from "./types";
 import { Debouncer } from "@tanstack/react-pacer";
@@ -197,20 +191,6 @@ function toLegacyProvider(providerName: string | null): ProviderKind {
     return providerName;
   }
   return "codex";
-}
-
-function inferProviderForThreadModel(input: {
-  readonly model: string;
-  readonly sessionProviderName: string | null;
-}): ProviderKind {
-  if (
-    input.sessionProviderName === "codex" ||
-    input.sessionProviderName === "claudeAgent" ||
-    input.sessionProviderName === "factoryDroid"
-  ) {
-    return input.sessionProviderName;
-  }
-  return inferProviderForModel(input.model);
 }
 
 function resolveWsHttpOrigin(): string {
