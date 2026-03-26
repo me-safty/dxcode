@@ -137,26 +137,16 @@ export function trimOrNull<T extends string>(value: T | null | undefined): T | n
   return trimmed || null;
 }
 
-/**
- * Known context-window value → API model-id suffix for the Claude provider.
- * Only values that require a suffix are listed; the default context window
- * needs no suffix and is therefore absent.
- */
-const CLAUDE_CONTEXT_WINDOW_SUFFIX: Record<string, string> = {
-  "1m": "[1m]",
-};
-
 export function resolveApiModelId(modelSelection: ModelSelection): string {
   switch (modelSelection.provider) {
     case "claudeAgent": {
       const contextWindow = modelSelection.options?.contextWindow;
-      if (contextWindow) {
-        const suffix = CLAUDE_CONTEXT_WINDOW_SUFFIX[contextWindow];
-        if (suffix) {
-          return `${modelSelection.model}${suffix}`;
-        }
+      switch (contextWindow) {
+        case "1m":
+          return `${modelSelection.model}[1m]`;
+        default:
+          return modelSelection.model;
       }
-      return modelSelection.model;
     }
     default: {
       return modelSelection.model;
