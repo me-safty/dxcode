@@ -11,6 +11,7 @@ import {
   ProjectId,
   ProviderItemId,
   ThreadId,
+  TrimmedString,
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas";
@@ -42,6 +43,21 @@ export const ProviderSandboxMode = Schema.Literals([
   "danger-full-access",
 ]);
 export type ProviderSandboxMode = typeof ProviderSandboxMode.Type;
+
+export const ProviderStartOptions = Schema.Struct({
+  codex: Schema.optional(
+    Schema.Struct({
+      binaryPath: TrimmedString,
+      homePath: TrimmedString,
+    }),
+  ),
+  claudeAgent: Schema.optional(
+    Schema.Struct({
+      binaryPath: TrimmedString,
+    }),
+  ),
+});
+export type ProviderStartOptions = typeof ProviderStartOptions.Type;
 export const DEFAULT_PROVIDER_KIND: ProviderKind = "codex";
 
 export const CodexModelSelection = Schema.Struct({

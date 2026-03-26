@@ -663,7 +663,27 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [selectedModel, selectedModelOptionsForDispatch, selectedProvider],
   );
   const selectedTextGenerationModel = settings.textGenerationModelSelection.model;
-  const providerOptionsForDispatch = useMemo(() => getProviderStartOptions(settings), [settings]);
+  const providerOptionsForDispatch = useMemo(() => {
+    const providerOptions = {
+      ...(settings.providers.codex.binaryPath || settings.providers.codex.homePath
+        ? {
+            codex: {
+              binaryPath: settings.providers.codex.binaryPath,
+              homePath: settings.providers.codex.homePath,
+            },
+          }
+        : {}),
+      ...(settings.providers.claudeAgent.binaryPath
+        ? {
+            claudeAgent: {
+              binaryPath: settings.providers.claudeAgent.binaryPath,
+            },
+          }
+        : {}),
+    };
+
+    return Object.keys(providerOptions).length > 0 ? providerOptions : undefined;
+  }, [settings]);
   const selectedModelForPicker = selectedModel;
   const phase = derivePhase(activeThread?.session ?? null);
   const isSendBusy = sendPhase !== "idle";
@@ -3077,6 +3097,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const outgoingImplementationPrompt = formatOutgoingPrompt({
       provider: selectedProvider,
       model: selectedModel,
+      models: selectedProviderModels,
       effort: selectedPromptEffort,
       text: implementationPrompt,
     });
@@ -3170,6 +3191,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedPromptEffort,
     selectedModelSelection,
     selectedProvider,
+    selectedProviderModels,
     settings.enableAssistantStreaming,
     providerOptionsForDispatch,
     selectedTextGenerationModel,
