@@ -1693,12 +1693,18 @@ function rebuildMainWindow(nextTitleBarMode: DesktopTitleBarMode): Promise<Deskt
       }
 
       if (!previousWindow.isDestroyed()) {
-        previousWindow.close();
+        previousWindow.hide();
       }
 
       const nextState = resolveDesktopWindowState(replacementWindow);
       emitDesktopWindowState(replacementWindow);
       settle(true, nextState);
+
+      setTimeout(() => {
+        if (!previousWindow.isDestroyed()) {
+          previousWindow.close();
+        }
+      }, 0);
     });
 
     replacementWindow.webContents.once("did-fail-load", () => {
