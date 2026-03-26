@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import {
   EventId,
   type ProviderRuntimeEvent,
+  RuntimeTaskId,
   type ThreadTokenUsageSnapshot,
   ThreadId,
   TurnId,
@@ -83,6 +84,7 @@ const EMPTY: NotifResult = { events: [], fallbackText: "" };
 
 function toolNameToItemType(name: string) {
   const l = name.toLowerCase();
+  if (/task|subagent|sub.agent|agent|dispatch|delegate/.test(l)) return "collab_agent_tool_call";
   if (/execute|bash|shell|command|^run$/.test(l)) return "command_execution";
   if (/write|create|edit|multiedit|patch|delete/.test(l)) return "file_change";
   if (/search|web|fetch/.test(l)) return "web_search";
@@ -110,13 +112,15 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
         const toolInput = asObj(block.input);
         const itemId = asStr(block.id) ?? randomUUID();
         const detail =
-          itemType === "file_change"
-            ? (asStr(toolInput?.file_path) ?? asStr(toolInput?.path))
-            : itemType === "command_execution"
-              ? (asStr(toolInput?.command) ?? toolName)
-              : (asStr(toolInput?.file_path) ??
-                asStr(toolInput?.path) ??
-                asStr(toolInput?.pattern));
+          itemType === "collab_agent_tool_call"
+            ? (asStr(toolInput?.description) ?? asStr(toolInput?.prompt) ?? toolName)
+            : itemType === "file_change"
+              ? (asStr(toolInput?.file_path) ?? asStr(toolInput?.path))
+              : itemType === "command_execution"
+                ? (asStr(toolInput?.command) ?? toolName)
+                : (asStr(toolInput?.file_path) ??
+                  asStr(toolInput?.path) ??
+                  asStr(toolInput?.pattern));
         events.push({
           ...runtimeEventWithRaw(input.threadId, "create_message", msg!, {
             turnId: input.turnId,
@@ -127,11 +131,13 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
             itemType,
             status: "inProgress",
             title:
-              itemType === "command_execution"
-                ? `Ran command: ${toolName}`
-                : itemType === "file_change"
-                  ? `File change: ${toolName}`
-                  : toolName,
+              itemType === "collab_agent_tool_call"
+                ? "Subagent task"
+                : itemType === "command_execution"
+                  ? `Ran command: ${toolName}`
+                  : itemType === "file_change"
+                    ? `File change: ${toolName}`
+                    : toolName,
             ...(detail ? { detail } : {}),
           },
         } as unknown as ProviderRuntimeEvent);
@@ -203,6 +209,72 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
           ...runtimeEventWithRaw(input.threadId, type, input.notif),
           type: "thread.token-usage.updated",
           payload: { usage },
+        } as unknown as ProviderRuntimeEvent,
+      ],
+      fallbackText: "",
+    };
+  }
+
+  if (type === "task_started" && input.turnId) {
+    const taskId = asStr(input.notif.taskId) ?? asStr(input.notif.task_id) ?? randomUUID();
+    return {
+      events: [
+        {
+          ...runtimeEventWithRaw(input.threadId, type, input.notif, { turnId: input.turnId }),
+          type: "task.started",
+          payload: {
+            taskId: RuntimeTaskId.makeUnsafe(taskId),
+            ...(asStr(input.notif.description)
+              ? { description: asStr(input.notif.description) }
+              : {}),
+            ...((asStr(input.notif.taskType) ?? asStr(input.notif.task_type))
+              ? { taskType: asStr(input.notif.taskType) ?? asStr(input.notif.task_type) }
+              : {}),
+          },
+        } as unknown as ProviderRuntimeEvent,
+      ],
+      fallbackText: "",
+    };
+  }
+
+  if (type === "task_progress" && input.turnId) {
+    const taskId = asStr(input.notif.taskId) ?? asStr(input.notif.task_id) ?? randomUUID();
+    const desc = asStr(input.notif.description) ?? asStr(input.notif.summary) ?? "Working...";
+    return {
+      events: [
+        {
+          ...runtimeEventWithRaw(input.threadId, type, input.notif, { turnId: input.turnId }),
+          type: "task.progress",
+          payload: {
+            taskId: RuntimeTaskId.makeUnsafe(taskId),
+            description: desc,
+            ...(asStr(input.notif.summary) ? { summary: asStr(input.notif.summary) } : {}),
+            ...((asStr(input.notif.lastToolName) ?? asStr(input.notif.last_tool_name))
+              ? {
+                  lastToolName:
+                    asStr(input.notif.lastToolName) ?? asStr(input.notif.last_tool_name),
+                }
+              : {}),
+          },
+        } as unknown as ProviderRuntimeEvent,
+      ],
+      fallbackText: "",
+    };
+  }
+
+  if ((type === "task_completed" || type === "task_notification") && input.turnId) {
+    const taskId = asStr(input.notif.taskId) ?? asStr(input.notif.task_id) ?? randomUUID();
+    const status = asStr(input.notif.status) === "failed" ? "failed" : "completed";
+    return {
+      events: [
+        {
+          ...runtimeEventWithRaw(input.threadId, type, input.notif, { turnId: input.turnId }),
+          type: "task.completed",
+          payload: {
+            taskId: RuntimeTaskId.makeUnsafe(taskId),
+            status,
+            ...(asStr(input.notif.summary) ? { summary: asStr(input.notif.summary) } : {}),
+          },
         } as unknown as ProviderRuntimeEvent,
       ],
       fallbackText: "",
