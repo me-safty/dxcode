@@ -36,7 +36,7 @@ export const EffortOption = Schema.Struct({
 export type EffortOption = typeof EffortOption.Type;
 
 export const ContextWindowOption = Schema.Struct({
-  value: Schema.String,
+  value: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
   isDefault: Schema.optional(Schema.Boolean),
 });
