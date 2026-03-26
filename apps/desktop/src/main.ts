@@ -174,6 +174,23 @@ function persistDesktopTitleBarModeToDisk(mode: DesktopTitleBarMode): void {
   writeDesktopSettingsToDisk(DESKTOP_SETTINGS_FILE_PATH, nextSettings);
 }
 
+async function applyDesktopTitleBarMode(mode: DesktopTitleBarMode): Promise<DesktopWindowState> {
+  const previousMode = currentDesktopTitleBarMode;
+  persistDesktopTitleBarModeToDisk(mode);
+
+  if (mode !== currentDesktopTitleBarMode) {
+    const nextState = await rebuildMainWindow(mode);
+    if (nextState.titleBarMode !== mode) {
+      persistDesktopTitleBarModeToDisk(previousMode);
+    }
+    return nextState;
+  }
+
+  currentDesktopTitleBarMode = mode;
+  emitDesktopWindowState(mainWindow);
+  return resolveDesktopWindowState(mainWindow);
+}
+
 function resolveDesktopWindowState(window: BrowserWindow | null): DesktopWindowState {
   const activeWindow = window && !window.isDestroyed() ? window : null;
 
@@ -1290,20 +1307,7 @@ function registerIpcHandlers(): void {
       return resolveDesktopWindowState(mainWindow);
     }
 
-    const previousMode = currentDesktopTitleBarMode;
-    persistDesktopTitleBarModeToDisk(mode);
-
-    if (mode !== currentDesktopTitleBarMode) {
-      const nextState = await rebuildMainWindow(mode);
-      if (nextState.titleBarMode !== mode) {
-        persistDesktopTitleBarModeToDisk(previousMode);
-      }
-      return nextState;
-    }
-
-    currentDesktopTitleBarMode = mode;
-    emitDesktopWindowState(mainWindow);
-    return resolveDesktopWindowState(mainWindow);
+    return applyDesktopTitleBarMode(mode);
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
@@ -1657,7 +1661,9 @@ function rebuildMainWindow(nextTitleBarMode: DesktopTitleBarMode): Promise<Deskt
       pendingDesktopTitleBarMode = null;
 
       if (pendingMode && pendingMode !== currentDesktopTitleBarMode) {
-        void rebuildMainWindow(pendingMode);
+        void applyDesktopTitleBarMode(pendingMode).catch((error) => {
+          console.error("[desktop] failed to apply pending title bar mode", error);
+        });
       }
 
       resolve(state);
