@@ -254,7 +254,7 @@ export function ChangelogDialog({ open, onOpenChange, highlightVersion }: Change
 
         {error && (
           <div className="py-12 text-center text-sm text-muted-foreground">
-            Failed to load releases. Check your internet connection.
+            {error.message || "Failed to load releases. Check your internet connection."}
           </div>
         )}
 
