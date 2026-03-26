@@ -52,7 +52,7 @@ import { ensureNativeApi, readNativeApi } from "../nativeApi";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { Equal } from "effect";
 import { useDesktopWindowState } from "~/hooks/useDesktopWindowState";
-import { useShouldUseDesktopHeaderDragRegion } from "~/hooks/useWindowDecorationMode";
+import { resolveShouldUseDesktopHeaderDragRegion } from "~/hooks/useWindowDecorationMode";
 
 const THEME_OPTIONS = [
   {
@@ -295,7 +295,10 @@ function SettingsRouteView() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const desktopWindowState = useDesktopWindowState();
-  const shouldUseDesktopHeaderDragRegion = useShouldUseDesktopHeaderDragRegion();
+  const shouldUseDesktopHeaderDragRegion = resolveShouldUseDesktopHeaderDragRegion({
+    windowState: desktopWindowState,
+    desktopTitleBarMode: settings.desktopTitleBarMode,
+  });
   const { updateSettings, resetSettings } = useUpdateSettings();
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);

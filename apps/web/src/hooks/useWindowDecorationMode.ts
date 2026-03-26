@@ -1,15 +1,19 @@
+import type { DesktopTitleBarMode, DesktopWindowState } from "@t3tools/contracts";
+
 import { isElectron } from "~/env";
 import { useDesktopWindowState } from "~/hooks/useDesktopWindowState";
 import { useSettings } from "~/hooks/useSettings";
 import { isMacPlatform } from "~/lib/utils";
 
-function shouldUseDesktopHeaderDragRegion(
-  windowState: ReturnType<typeof useDesktopWindowState>,
-  desktopTitleBarMode: ReturnType<typeof useSettings>["desktopTitleBarMode"],
-): boolean {
+export function resolveShouldUseDesktopHeaderDragRegion(input: {
+  windowState: DesktopWindowState | null;
+  desktopTitleBarMode: DesktopTitleBarMode;
+}): boolean {
   if (!isElectron) {
     return false;
   }
+
+  const { windowState, desktopTitleBarMode } = input;
 
   if (!windowState) {
     return desktopTitleBarMode === "t3code" || isMacPlatform(navigator.platform);
@@ -26,5 +30,8 @@ export function useShouldUseDesktopHeaderDragRegion(): boolean {
   const windowState = useDesktopWindowState();
   const desktopTitleBarMode = useSettings().desktopTitleBarMode;
 
-  return shouldUseDesktopHeaderDragRegion(windowState, desktopTitleBarMode);
+  return resolveShouldUseDesktopHeaderDragRegion({
+    windowState,
+    desktopTitleBarMode,
+  });
 }

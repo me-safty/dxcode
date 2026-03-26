@@ -55,7 +55,7 @@ import { useComposerDraftStore } from "../composerDraftStore";
 import { useDesktopWindowState } from "../hooks/useDesktopWindowState";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
-import { useShouldUseDesktopHeaderDragRegion } from "~/hooks/useWindowDecorationMode";
+import { resolveShouldUseDesktopHeaderDragRegion } from "~/hooks/useWindowDecorationMode";
 import { toastManager } from "./ui/toast";
 import {
   getArm64IntelBuildWarningDescription,
@@ -420,7 +420,10 @@ export default function Sidebar() {
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const desktopWindowState = useDesktopWindowState();
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
-  const shouldUseDesktopHeaderDragRegion = useShouldUseDesktopHeaderDragRegion();
+  const shouldUseDesktopHeaderDragRegion = resolveShouldUseDesktopHeaderDragRegion({
+    windowState: desktopWindowState,
+    desktopTitleBarMode: appSettings.desktopTitleBarMode,
+  });
   const shouldUseMacSystemTrafficLightInset =
     isElectron &&
     (desktopWindowState
