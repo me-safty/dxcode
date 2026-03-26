@@ -1631,7 +1631,7 @@ export default function Sidebar() {
               aria-label={desktopUpdateTooltip}
               aria-disabled={desktopUpdateButtonDisabled || undefined}
               disabled={desktopUpdateButtonDisabled}
-              className={`group/update relative inline-flex size-7 ml-auto items-center justify-center rounded-md transition-all duration-150 ${desktopUpdateButtonInteractivityClasses} ${desktopUpdateVisual.colorClass} ${desktopUpdateVisual.hoverClass}`}
+              className={`group/update relative inline-flex size-7 ml-auto items-center justify-center rounded-md transition-all duration-150 ${desktopUpdateButtonInteractivityClasses} ${desktopUpdateVisual.colorClass} ${desktopUpdateButtonDisabled ? "" : desktopUpdateVisual.hoverClass}`}
               onClick={handleDesktopUpdateButtonClick}
             >
               <RocketUpdateIcon
@@ -1651,7 +1651,7 @@ export default function Sidebar() {
         <>
           <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]">
             {wordmark}
-            <div className="mt-1.5">{updateButton}</div>
+            <div className="mt-1.5 ml-auto">{updateButton}</div>
           </SidebarHeader>
         </>
       ) : (
