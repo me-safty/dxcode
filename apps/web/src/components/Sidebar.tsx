@@ -54,7 +54,7 @@ import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
-import { useShouldUseT3CodeWindowDecoration } from "~/hooks/useWindowDecorationMode";
+import { useShouldUseDesktopHeaderDragRegion } from "~/hooks/useWindowDecorationMode";
 import { toastManager } from "./ui/toast";
 import {
   getArm64IntelBuildWarningDescription,
@@ -418,7 +418,7 @@ export default function Sidebar() {
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
-  const shouldUseT3CodeWindowDecoration = useShouldUseT3CodeWindowDecoration();
+  const shouldUseDesktopHeaderDragRegion = useShouldUseDesktopHeaderDragRegion();
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
   const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
   const projectCwdById = useMemo(
@@ -1636,7 +1636,7 @@ export default function Sidebar() {
             aria-label={desktopUpdateTooltip}
             aria-disabled={desktopUpdateButtonDisabled || undefined}
             disabled={desktopUpdateButtonDisabled}
-            className={`inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors ${desktopUpdateButtonInteractivityClasses} ${desktopUpdateButtonClasses} ${shouldUseT3CodeWindowDecoration ? "ml-auto mt-1.5" : "ms-auto"}`}
+            className={`inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors ${desktopUpdateButtonInteractivityClasses} ${desktopUpdateButtonClasses} ${shouldUseDesktopHeaderDragRegion ? "ml-auto mt-1.5" : "ms-auto"}`}
             onClick={handleDesktopUpdateButtonClick}
           >
             <RocketIcon className="size-3.5" />
@@ -1649,7 +1649,7 @@ export default function Sidebar() {
 
   return (
     <>
-      {shouldUseT3CodeWindowDecoration ? (
+      {shouldUseDesktopHeaderDragRegion ? (
         <>
           <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]">
             {wordmark}

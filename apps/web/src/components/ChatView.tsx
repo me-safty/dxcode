@@ -30,7 +30,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
-import { useShouldUseT3CodeWindowDecoration } from "~/hooks/useWindowDecorationMode";
+import { useShouldUseDesktopHeaderDragRegion } from "~/hooks/useWindowDecorationMode";
 import { isElectron } from "../env";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
@@ -242,7 +242,7 @@ interface ChatViewProps {
 }
 
 export default function ChatView({ threadId }: ChatViewProps) {
-  const shouldUseT3CodeWindowDecoration = useShouldUseT3CodeWindowDecoration();
+  const shouldUseDesktopHeaderDragRegion = useShouldUseDesktopHeaderDragRegion();
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
   const markThreadVisited = useStore((store) => store.markThreadVisited);
@@ -3478,7 +3478,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             </div>
           </header>
         )}
-        {shouldUseT3CodeWindowDecoration && (
+        {shouldUseDesktopHeaderDragRegion && (
           <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
             <span className="text-xs text-muted-foreground/50">No active thread</span>
           </div>
@@ -3498,7 +3498,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       <header
         className={cn(
           "border-b border-border px-3 sm:px-5",
-          shouldUseT3CodeWindowDecoration
+          shouldUseDesktopHeaderDragRegion
             ? "drag-region flex h-[52px] items-center"
             : "py-2 sm:py-3",
         )}

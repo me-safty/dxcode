@@ -52,7 +52,7 @@ import { ensureNativeApi, readNativeApi } from "../nativeApi";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { Equal } from "effect";
 import { useDesktopWindowState } from "~/hooks/useDesktopWindowState";
-import { useShouldUseT3CodeWindowDecoration } from "~/hooks/useWindowDecorationMode";
+import { useShouldUseDesktopHeaderDragRegion } from "~/hooks/useWindowDecorationMode";
 
 const THEME_OPTIONS = [
   {
@@ -295,7 +295,7 @@ function SettingsRouteView() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const desktopWindowState = useDesktopWindowState();
-  const shouldUseT3CodeWindowDecoration = useShouldUseT3CodeWindowDecoration();
+  const shouldUseDesktopHeaderDragRegion = useShouldUseDesktopHeaderDragRegion();
   const { updateSettings, resetSettings } = useUpdateSettings();
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
@@ -605,7 +605,10 @@ function SettingsRouteView() {
 
     setTheme("system");
     resetSettings();
-    if (effectiveDesktopTitleBarMode !== DEFAULT_UNIFIED_SETTINGS.desktopTitleBarMode) {
+    if (
+      window.desktopBridge &&
+      effectiveDesktopTitleBarMode !== DEFAULT_UNIFIED_SETTINGS.desktopTitleBarMode
+    ) {
       setDesktopTitleBarModeSelection(DEFAULT_UNIFIED_SETTINGS.desktopTitleBarMode);
       await setDesktopTitleBarMode(DEFAULT_UNIFIED_SETTINGS.desktopTitleBarMode);
     }
@@ -623,7 +626,7 @@ function SettingsRouteView() {
   return (
     <SidebarInset className="h-full min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        {!shouldUseT3CodeWindowDecoration && (
+        {!shouldUseDesktopHeaderDragRegion && (
           <header className="border-b border-border px-3 py-2 sm:px-5">
             <div className="flex items-center gap-2">
               <SidebarTrigger className="size-7 shrink-0 md:hidden" />
@@ -643,7 +646,7 @@ function SettingsRouteView() {
           </header>
         )}
 
-        {shouldUseT3CodeWindowDecoration && (
+        {shouldUseDesktopHeaderDragRegion && (
           <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
               Settings
