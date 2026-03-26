@@ -101,6 +101,40 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("yoo what&#x27;s ");
   });
 
+  it("renders context compaction entries inside collapsible work log groups", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const timelineEntries = [
+      {
+        id: "entry-1",
+        kind: "work" as const,
+        createdAt: "2026-03-17T19:12:28.000Z",
+        entry: {
+          id: "work-1",
+          createdAt: "2026-03-17T19:12:28.000Z",
+          label: "Context compacted",
+          tone: "info" as const,
+        },
+      },
+    ];
+    const collapsedMarkup = renderToStaticMarkup(
+      <MessagesTimeline {...baseProps} timelineEntries={timelineEntries} />,
+    );
+    const expandedMarkup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...baseProps}
+        expandedWorkGroups={{ "entry-1": true }}
+        timelineEntries={timelineEntries}
+      />,
+    );
+
+    expect(collapsedMarkup).toContain("Work log (1)");
+    expect(collapsedMarkup).toContain("lucide-chevron-down");
+    expect(collapsedMarkup).not.toContain("Context compacted");
+
+    expect(expandedMarkup).toContain("Work log (1)");
+    expect(expandedMarkup).toContain("Context compacted");
+  });
+
   it("renders tool call groups collapsed by default", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
