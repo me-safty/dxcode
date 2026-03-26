@@ -1,7 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronDownIcon, InfoIcon, PlusIcon, RotateCcwIcon, Undo2Icon, XIcon } from "lucide-react";
-import { type ReactNode, useCallback, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ChevronDownIcon,
+  InfoIcon,
+  LoaderIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  RotateCcwIcon,
+  Undo2Icon,
+  XIcon,
+} from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
   PROVIDER_DISPLAY_NAMES,
   type ProviderKind,
@@ -35,8 +44,9 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip"
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";
-import { serverConfigQueryOptions } from "../lib/serverReactQuery";
+import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import { cn } from "../lib/utils";
+import { formatRelativeTime } from "../timestampFormat";
 import { ensureNativeApi, readNativeApi } from "../nativeApi";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { Equal } from "effect";
@@ -173,12 +183,33 @@ function getProviderVersionLabel(version: string | null | undefined): string | n
   return version.startsWith("v") ? version : `v${version}`;
 }
 
-function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
+/** Returns a timestamp that updates on an interval, forcing re-renders to keep relative times fresh. */
+function useRelativeTimeTick(intervalMs = 1_000): number {
+  const [tick, setTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setTick(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return tick;
+}
+
+function SettingsSection({
+  title,
+  headerAction,
+  children,
+}: {
+  title: string;
+  headerAction?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <section className="space-y-3">
-      <h2 className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-        {title}
-      </h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          {title}
+        </h2>
+        {headerAction}
+      </div>
       <div className="relative overflow-hidden rounded-2xl border bg-card not-dark:bg-clip-padding text-card-foreground shadow-xs/5 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]">
         {children}
       </div>
@@ -280,6 +311,27 @@ function SettingsRouteView() {
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
   >({});
+  const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
+  const refreshingRef = useRef(false);
+  const queryClient = useQueryClient();
+  useRelativeTimeTick();
+
+  const refreshProviders = useCallback(() => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setIsRefreshingProviders(true);
+    const api = ensureNativeApi();
+    api.server
+      .refreshProviders()
+      .then(() => queryClient.invalidateQueries({ queryKey: serverQueryKeys.config() }))
+      .catch((error: unknown) => {
+        console.warn("Failed to refresh providers", error);
+      })
+      .finally(() => {
+        refreshingRef.current = false;
+        setIsRefreshingProviders(false);
+      });
+  }, [queryClient]);
 
   const modelListRefs = useRef<Partial<Record<ProviderKind, HTMLDivElement | null>>>({});
 
@@ -832,7 +884,55 @@ function SettingsRouteView() {
               />
             </SettingsSection>
 
-            <SettingsSection title="Providers">
+            <SettingsSection
+              title="Providers"
+              headerAction={
+                <div className="flex items-center gap-1.5">
+                  {serverProviders.length > 0 ? (
+                    <span className="text-[11px] text-muted-foreground/60">
+                      {(() => {
+                        const rel = formatRelativeTime(
+                          serverProviders.reduce(
+                            (latest, provider) =>
+                              provider.checkedAt > latest ? provider.checkedAt : latest,
+                            serverProviders[0]!.checkedAt,
+                          ),
+                        );
+                        return rel.suffix ? (
+                          <>
+                            Checked <span className="font-mono tabular-nums">{rel.value}</span>{" "}
+                            {rel.suffix}
+                          </>
+                        ) : (
+                          <>Checked {rel.value}</>
+                        );
+                      })()}
+                    </span>
+                  ) : null}
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          size="icon-xs"
+                          variant="ghost"
+                          className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
+                          disabled={isRefreshingProviders}
+                          onClick={() => void refreshProviders()}
+                          aria-label="Refresh provider status"
+                        >
+                          {isRefreshingProviders ? (
+                            <LoaderIcon className="size-3 animate-spin" />
+                          ) : (
+                            <RefreshCwIcon className="size-3" />
+                          )}
+                        </Button>
+                      }
+                    />
+                    <TooltipPopup side="top">Refresh provider status</TooltipPopup>
+                  </Tooltip>
+                </div>
+              }
+            >
               {providerCards.map((providerCard) => {
                 const customModelInput = customModelInputByProvider[providerCard.provider];
                 const customModelError = customModelErrorByProvider[providerCard.provider] ?? null;

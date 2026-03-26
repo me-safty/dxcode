@@ -916,6 +916,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         };
       }
 
+      case WS_METHODS.serverRefreshProviders: {
+        const providers = yield* providerRegistry.refresh();
+        yield* Ref.set(providersRef, providers);
+        return { providers };
+      }
+
       case WS_METHODS.serverUpsertKeybinding: {
         const body = stripRequestTag(request.body);
         const keybindingsConfig = yield* keybindingsManager.upsertKeybindingRule(body);
