@@ -361,7 +361,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
           return (
             <div className="flex justify-end">
-              <div className="group relative max-w-[85%] rounded-xl bg-secondary/60 px-3.5 py-2.5">
+              <div className="group relative max-w-[85%] rounded-2xl bg-secondary px-4 py-2.5">
                 {userImages.length > 0 && (
                   <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                     {userImages.map(
@@ -714,7 +714,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         }
 
         return (
-          <div className="wrap-break-word whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground">
+          <div className="wrap-break-word whitespace-pre-wrap text-sm leading-relaxed text-foreground">
             {inlineNodes}
           </div>
         );
@@ -742,7 +742,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     }
 
     return (
-      <div className="wrap-break-word whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground">
+      <div className="wrap-break-word whitespace-pre-wrap text-sm leading-relaxed text-foreground">
         {inlineNodes}
       </div>
     );
@@ -753,7 +753,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   }
 
   return (
-    <pre className="whitespace-pre-wrap wrap-break-word font-mono text-sm leading-relaxed text-foreground">
+    <pre className="whitespace-pre-wrap wrap-break-word font-sans text-sm leading-relaxed text-foreground">
       {props.text}
     </pre>
   );
