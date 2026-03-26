@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getFallbackThreadIdAfterDelete,
   getVisibleThreadsForProject,
   getProjectSortTimestamp,
   hasUnseenCompletion,
@@ -343,16 +344,21 @@ describe("getVisibleThreadsForProject", () => {
 });
 
 function makeProject(overrides: Partial<Project> = {}): Project {
+  const { defaultModelSelection, ...rest } = overrides;
   return {
     id: ProjectId.makeUnsafe("project-1"),
     name: "Project",
     cwd: "/tmp/project",
-    model: "gpt-5.4",
+    defaultModelSelection: {
+      provider: "codex",
+      model: "gpt-5.4",
+      ...defaultModelSelection,
+    },
     expanded: true,
     createdAt: "2026-03-09T10:00:00.000Z",
     updatedAt: "2026-03-09T10:00:00.000Z",
     scripts: [],
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -362,7 +368,11 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     codexThreadId: null,
     projectId: ProjectId.makeUnsafe("project-1"),
     title: "Thread",
-    model: "gpt-5.4",
+    modelSelection: {
+      provider: "codex",
+      model: "gpt-5.4",
+      ...overrides?.modelSelection,
+    },
     runtimeMode: DEFAULT_RUNTIME_MODE,
     interactionMode: DEFAULT_INTERACTION_MODE,
     session: null,
@@ -504,6 +514,76 @@ describe("sortThreadsForSidebar", () => {
       ThreadId.makeUnsafe("thread-1"),
       ThreadId.makeUnsafe("thread-2"),
     ]);
+  });
+});
+
+describe("getFallbackThreadIdAfterDelete", () => {
+  it("returns the top remaining thread in the deleted thread's project sidebar order", () => {
+    const fallbackThreadId = getFallbackThreadIdAfterDelete({
+      threads: [
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-oldest"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          createdAt: "2026-03-09T10:00:00.000Z",
+          messages: [],
+        }),
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-active"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          createdAt: "2026-03-09T10:05:00.000Z",
+          messages: [],
+        }),
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-newest"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          createdAt: "2026-03-09T10:10:00.000Z",
+          messages: [],
+        }),
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-other-project"),
+          projectId: ProjectId.makeUnsafe("project-2"),
+          createdAt: "2026-03-09T10:20:00.000Z",
+          messages: [],
+        }),
+      ],
+      deletedThreadId: ThreadId.makeUnsafe("thread-active"),
+      sortOrder: "created_at",
+    });
+
+    expect(fallbackThreadId).toBe(ThreadId.makeUnsafe("thread-newest"));
+  });
+
+  it("skips other threads being deleted in the same action", () => {
+    const fallbackThreadId = getFallbackThreadIdAfterDelete({
+      threads: [
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-active"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          createdAt: "2026-03-09T10:05:00.000Z",
+          messages: [],
+        }),
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-newest"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          createdAt: "2026-03-09T10:10:00.000Z",
+          messages: [],
+        }),
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-next"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          createdAt: "2026-03-09T10:07:00.000Z",
+          messages: [],
+        }),
+      ],
+      deletedThreadId: ThreadId.makeUnsafe("thread-active"),
+      deletedThreadIds: new Set([
+        ThreadId.makeUnsafe("thread-active"),
+        ThreadId.makeUnsafe("thread-newest"),
+      ]),
+      sortOrder: "created_at",
+    });
+
+    expect(fallbackThreadId).toBe(ThreadId.makeUnsafe("thread-next"));
   });
 });
 
