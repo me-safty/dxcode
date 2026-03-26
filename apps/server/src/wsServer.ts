@@ -80,7 +80,6 @@ import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
-import { inferProviderForModel } from "@t3tools/shared/model";
 import { listSkills } from "./skills.ts";
 import { resolveThreadWorkspaceCwd } from "./checkpointing/Utils.ts";
 
@@ -742,7 +741,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
     const inferredProvider = Schema.is(ProviderKind)(thread.session?.providerName)
       ? thread.session.providerName
-      : inferProviderForModel(thread.model);
+      : thread.modelSelection.provider;
     if (inferredProvider !== input.provider) {
       return yield* new RouteRequestError({
         message: `Thread '${input.threadId}' is configured for provider '${inferredProvider}', not '${input.provider}'.`,
@@ -757,7 +756,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       threadId: input.threadId,
       provider: input.provider,
       ...(cwd ? { cwd } : {}),
-      model: thread.model,
+      modelSelection: thread.modelSelection,
       runtimeMode: thread.runtimeMode,
       ...(input.providerOptions ? { providerOptions: input.providerOptions } : {}),
     });
