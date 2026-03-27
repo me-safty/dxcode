@@ -337,7 +337,7 @@ export function BranchToolbarBranchSelector({
     resolvedActiveBranch,
   });
   const branchSelectorHighlightClassName =
-    "hover:bg-accent/50 hover:text-foreground data-selected:bg-accent/50 data-selected:text-foreground data-highlighted:bg-accent/50 data-highlighted:text-foreground";
+    "hover:bg-accent hover:text-accent-foreground data-selected:bg-accent data-selected:text-accent-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground";
 
   function renderPickerItem(itemValue: string, index: number, style?: CSSProperties) {
     if (checkoutPullRequestItemValue && itemValue === checkoutPullRequestItemValue) {
