@@ -6,6 +6,8 @@ export const projectQueryKeys = {
   all: ["projects"] as const,
   searchEntries: (cwd: string | null, query: string, limit: number) =>
     ["projects", "search-entries", cwd, query, limit] as const,
+  readFile: (cwd: string | null, relativePath: string) =>
+    ["projects", "read-file", cwd, relativePath] as const,
 };
 
 const DEFAULT_SEARCH_ENTRIES_LIMIT = 80;
@@ -14,6 +16,29 @@ const EMPTY_SEARCH_ENTRIES_RESULT: ProjectSearchEntriesResult = {
   entries: [],
   truncated: false,
 };
+
+export function projectReadFileQueryOptions(input: {
+  cwd: string | null;
+  relativePath: string | null;
+  enabled?: boolean;
+}) {
+  return queryOptions({
+    queryKey: projectQueryKeys.readFile(input.cwd, input.relativePath ?? ""),
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      if (!input.cwd || !input.relativePath) {
+        throw new Error("No file path specified.");
+      }
+      return api.projects.readFile({
+        cwd: input.cwd,
+        relativePath: input.relativePath,
+      });
+    },
+    enabled:
+      (input.enabled ?? true) && input.cwd !== null && input.relativePath !== null,
+    staleTime: 30_000,
+  });
+}
 
 export function projectSearchEntriesQueryOptions(input: {
   cwd: string | null;

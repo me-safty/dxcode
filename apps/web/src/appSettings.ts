@@ -17,6 +17,9 @@ export const MAX_CUSTOM_MODEL_LENGTH = 256;
 export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"]);
 export type TimestampFormat = typeof TimestampFormat.Type;
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
+
+export const SidebarSide = Schema.Literals(["left", "right"]);
+export type SidebarSide = typeof SidebarSide.Type;
 type CustomModelSettingsKey = "customCodexModels" | "customClaudeModels";
 export type ProviderCustomModelConfig = {
   provider: ProviderKind;
@@ -56,6 +59,7 @@ export const AppSettingsSchema = Schema.Struct({
   customCodexModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customClaudeModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   textGenerationModel: Schema.optional(TrimmedNonEmptyString),
+  sidebarSide: SidebarSide.pipe(withDefaults(() => "left" as const satisfies SidebarSide)),
 });
 export type AppSettings = typeof AppSettingsSchema.Type;
 export interface AppModelOption {

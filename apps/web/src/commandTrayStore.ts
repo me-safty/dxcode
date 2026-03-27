@@ -6,6 +6,8 @@ export interface CommandTrayButton {
   label: string;
   command: string;
   icon?: string;
+  /** Where to send the command: "chat" (default) submits as a chat message, "terminal" writes directly to the active terminal. */
+  target?: "chat" | "terminal";
 }
 
 interface CommandTrayState {
@@ -21,6 +23,7 @@ const DEFAULT_BUTTONS: CommandTrayButton[] = [
   { id: "update", label: "/update", command: "/update\n" },
   { id: "triage", label: "/triage", command: "/triage\n" },
   { id: "commit", label: "/commit", command: "/commit\n" },
+  { id: "aws-sso", label: "AWS SSO", command: "aws sso login --profile default\n", target: "terminal" },
   { id: "shell", label: "Shell", command: "" },
   { id: "claude", label: "Claude", command: "" },
 ];

@@ -1,12 +1,11 @@
 import type { ThreadId } from "@t3tools/contracts";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useCallback, useState } from "react";
 
 import {
   type CommandTrayButton,
   useCommandTrayStore,
 } from "~/commandTrayStore";
-import { readNativeApi } from "~/nativeApi";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import {
@@ -30,22 +29,34 @@ function CommandTray({ threadId, terminalId }: CommandTrayProps) {
   const [editOpen, setEditOpen] = useState(false);
 
   const sendCommand = useCallback(
-    (command: string) => {
-      if (!command || !threadId) return;
-      const api = readNativeApi();
-      if (!api) return;
-      void api.terminal.write({ threadId, terminalId, data: command });
+    (btn: CommandTrayButton) => {
+      if (!btn.command || !threadId) return;
+      if (btn.target === "terminal") {
+        // Write directly to the active terminal
+        window.dispatchEvent(
+          new CustomEvent("commandTrayTerminalSubmit", {
+            detail: { command: btn.command, threadId, terminalId },
+          }),
+        );
+      } else {
+        // Default: submit as a chat message
+        const text = btn.command.replace(/\n$/, "");
+        if (!text) return;
+        window.dispatchEvent(
+          new CustomEvent("commandTraySubmit", { detail: { command: text } }),
+        );
+      }
     },
     [threadId, terminalId],
   );
 
   return (
-    <div className="flex items-center gap-1 px-2 py-1 border-t border-border bg-card">
+    <div className="flex shrink-0 items-center gap-1 px-2 py-1 border-t border-border bg-card">
       {buttons.map((btn) => (
         <button
           key={btn.id}
           type="button"
-          onClick={() => sendCommand(btn.command)}
+          onClick={() => void sendCommand(btn)}
           disabled={!btn.command || !threadId}
           className="px-2 py-0.5 text-xs rounded bg-muted hover:bg-accent text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >

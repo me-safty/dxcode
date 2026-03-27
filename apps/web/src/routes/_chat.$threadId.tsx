@@ -17,6 +17,8 @@ import {
   stripDiffSearchParams,
 } from "../diffRouteSearch";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useAppSettings } from "../appSettings";
+import { cn } from "~/lib/utils";
 import { useStore } from "../store";
 import { Sheet, SheetPopup } from "../components/ui/sheet";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
@@ -77,8 +79,10 @@ const DiffPanelInlineSidebar = (props: {
   onCloseDiff: () => void;
   onOpenDiff: () => void;
   renderDiffContent: boolean;
+  navSide: "left" | "right";
 }) => {
-  const { diffOpen, onCloseDiff, onOpenDiff, renderDiffContent } = props;
+  const { diffOpen, onCloseDiff, onOpenDiff, renderDiffContent, navSide } = props;
+  const diffSide = navSide === "right" ? "left" : "right";
   const onOpenChange = useCallback(
     (open: boolean) => {
       if (open) {
@@ -144,9 +148,12 @@ const DiffPanelInlineSidebar = (props: {
       style={{ "--sidebar-width": DIFF_INLINE_DEFAULT_WIDTH } as React.CSSProperties}
     >
       <Sidebar
-        side="right"
+        side={diffSide}
         collapsible="offcanvas"
-        className="border-l border-border bg-card text-foreground"
+        className={cn(
+          "bg-card text-foreground",
+          diffSide === "right" ? "border-l border-border" : "border-r border-border",
+        )}
         resizable={{
           minWidth: DIFF_INLINE_SIDEBAR_MIN_WIDTH,
           shouldAcceptWidth: shouldAcceptInlineSidebarWidth,
@@ -212,31 +219,39 @@ function ChatThreadRouteView() {
     }
   }, [navigate, routeThreadExists, threadsHydrated, threadId]);
 
+  const { settings: appSettings } = useAppSettings();
+  const navSide = appSettings.sidebarSide ?? "left";
+
   if (!threadsHydrated || !routeThreadExists) {
     return null;
   }
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
+  const diffPanel = (
+    <DiffPanelInlineSidebar
+      diffOpen={diffOpen}
+      onCloseDiff={closeDiff}
+      onOpenDiff={openDiff}
+      renderDiffContent={shouldRenderDiffContent}
+      navSide={navSide}
+    />
+  );
 
   if (!shouldUseDiffSheet) {
     return (
       <>
-        <SidebarInset className="h-dvh  min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+        {navSide === "right" && diffPanel}
+        <SidebarInset className="h-full min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
           <ChatView key={threadId} threadId={threadId} />
         </SidebarInset>
-        <DiffPanelInlineSidebar
-          diffOpen={diffOpen}
-          onCloseDiff={closeDiff}
-          onOpenDiff={openDiff}
-          renderDiffContent={shouldRenderDiffContent}
-        />
+        {navSide === "left" && diffPanel}
       </>
     );
   }
 
   return (
     <>
-      <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <SidebarInset className="h-full min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
         <ChatView key={threadId} threadId={threadId} />
       </SidebarInset>
       <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>

@@ -37,7 +37,8 @@ type ProviderIntentEvent = Extract<
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
-      | "thread.session-stop-requested";
+      | "thread.session-stop-requested"
+      | "thread.deleted";
   }
 >;
 
@@ -157,6 +158,11 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  // These Maps are safe without Ref synchronization because all access (reads
+  // in `ensureSessionForThread` and `processDomainEvent`, writes in
+  // `sendTurnForThread`) flows exclusively through the serial DrainableWorker
+  // queue, which processes one event at a time. No concurrent fibers access
+  // these Maps simultaneously.
   const threadProviderOptions = new Map<string, ProviderStartOptions>();
   const threadModelOptions = new Map<string, ProviderModelOptions>();
 
@@ -671,7 +677,14 @@ const make = Effect.gen(function* () {
 
     const now = event.payload.createdAt;
     if (thread.session && thread.session.status !== "stopped") {
-      yield* providerService.stopSession({ threadId: thread.id });
+      yield* providerService.stopSession({ threadId: thread.id }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to stop provider session during session-stop-requested", {
+            threadId: thread.id,
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      );
     }
 
     yield* setThreadSession({
@@ -722,6 +735,19 @@ const make = Effect.gen(function* () {
         case "thread.session-stop-requested":
           yield* processSessionStopRequested(event);
           return;
+        case "thread.deleted": {
+          const threadId = event.payload.threadId;
+          yield* Effect.logInfo("thread deleted, stopping provider session", { threadId });
+          yield* providerService.stopSession({ threadId }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("failed to stop provider session during thread deletion", {
+                threadId,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          );
+          return;
+        }
       }
     });
 
@@ -748,7 +774,8 @@ const make = Effect.gen(function* () {
         event.type !== "thread.turn-interrupt-requested" &&
         event.type !== "thread.approval-response-requested" &&
         event.type !== "thread.user-input-response-requested" &&
-        event.type !== "thread.session-stop-requested"
+        event.type !== "thread.session-stop-requested" &&
+        event.type !== "thread.deleted"
       ) {
         return Effect.void;
       }

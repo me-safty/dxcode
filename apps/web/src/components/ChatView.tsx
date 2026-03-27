@@ -31,7 +31,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
+import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions, gitInitMutationOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 import { isElectron } from "../env";
@@ -117,6 +117,7 @@ import {
   setupProjectScript,
 } from "~/projectScripts";
 import { SidebarTrigger } from "./ui/sidebar";
+import WorkflowDropdowns from "./chat/WorkflowDropdowns";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import {
@@ -160,7 +161,6 @@ import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./chat/composerProviderRegistry";
-import { ProviderHealthBanner } from "./chat/ProviderHealthBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import {
   buildExpiredTerminalContextToastCopy,
@@ -1122,6 +1122,23 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [activeProjectCwd, activeThreadWorktreePath]);
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = branchesQuery.data?.isRepo ?? true;
+
+  // Auto-init git for project directories that aren't git repos (e.g. Jira-imported projects)
+  const gitInitMutation = useMutation(gitInitMutationOptions({ cwd: gitCwd, queryClient }));
+  const gitInitAttemptedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      gitCwd &&
+      branchesQuery.data &&
+      !branchesQuery.data.isRepo &&
+      !gitInitMutation.isPending &&
+      gitInitAttemptedRef.current !== gitCwd
+    ) {
+      gitInitAttemptedRef.current = gitCwd;
+      gitInitMutation.mutate();
+    }
+  }, [gitCwd, branchesQuery.data, gitInitMutation.isPending]);
+
   const splitTerminalShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "terminal.split"),
     [keybindings],
@@ -2670,6 +2687,62 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
   };
 
+  // Listen for command tray injections
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const onSendRef = useRef(onSend);
+  onSendRef.current = onSend;
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ command: string }>).detail;
+      if (!detail?.command) return;
+      promptRef.current = detail.command;
+      setPrompt(detail.command);
+      // Use ref to always get latest onSend
+      setTimeout(() => {
+        void onSendRef.current();
+      }, 0);
+    };
+    window.addEventListener("commandTraySubmit", handler);
+    return () => window.removeEventListener("commandTraySubmit", handler);
+  }, [setPrompt]);
+
+  // Listen for command tray terminal-targeted commands
+  useEffect(() => {
+    const handler = async (event: Event) => {
+      const detail = (event as CustomEvent<{ command: string; threadId: string; terminalId: string }>).detail;
+      if (!detail?.command || !detail.threadId || !detail.terminalId) return;
+      const api = readNativeApi();
+      if (!api) return;
+      try {
+        await api.terminal.write({
+          threadId: detail.threadId,
+          terminalId: detail.terminalId,
+          data: detail.command,
+        });
+      } catch {
+        // Terminal might not be open yet — open it first, then write
+        try {
+          const cwd = activeProject?.cwd;
+          if (!cwd) return;
+          await api.terminal.open({
+            threadId: detail.threadId,
+            terminalId: detail.terminalId,
+            cwd,
+          });
+          await api.terminal.write({
+            threadId: detail.threadId,
+            terminalId: detail.terminalId,
+            data: detail.command,
+          });
+        } catch {
+          // Silently fail — terminal may not be available
+        }
+      }
+    };
+    window.addEventListener("commandTrayTerminalSubmit", handler);
+    return () => window.removeEventListener("commandTrayTerminalSubmit", handler);
+  }, [activeProject?.cwd]);
+
   const onInterrupt = async () => {
     const api = readNativeApi();
     if (!api || !activeThread) return;
@@ -3495,7 +3568,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       </header>
 
       {/* Error banner */}
-      <ProviderHealthBanner status={activeProviderStatus} />
       <ThreadErrorBanner
         error={activeThread.error}
         onDismiss={() => setThreadError(activeThread.id, null)}
@@ -3858,6 +3930,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 {runtimeMode === "full-access" ? "Full access" : "Supervised"}
                               </span>
                             </Button>
+
+                            <Separator
+                              orientation="vertical"
+                              className="mx-0.5 hidden h-4 sm:block"
+                            />
+                            <WorkflowDropdowns threadId={threadId} getChatText={() => prompt} />
 
                             {activePlan || sidebarProposedPlan || planSidebarOpen ? (
                               <>

@@ -45,12 +45,28 @@ export type ServerProviderStatus = typeof ServerProviderStatus.Type;
 
 const ServerProviderStatuses = Schema.Array(ServerProviderStatus);
 
+export const ServiceKind = Schema.Literals(["gmail", "jira", "calendar"]);
+export type ServiceKind = typeof ServiceKind.Type;
+
+export const ServiceAuthStatus = Schema.Struct({
+  service: ServiceKind,
+  available: Schema.Boolean,
+  authenticated: Schema.Boolean,
+  checkedAt: IsoDateTime,
+  message: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServiceAuthStatus = typeof ServiceAuthStatus.Type;
+
+const ServiceAuthStatuses = Schema.Array(ServiceAuthStatus);
+
 export const ServerConfig = Schema.Struct({
   cwd: TrimmedNonEmptyString,
+  baseDir: TrimmedNonEmptyString,
   keybindingsConfigPath: TrimmedNonEmptyString,
   keybindings: ResolvedKeybindingsConfig,
   issues: ServerConfigIssues,
   providers: ServerProviderStatuses,
+  services: ServiceAuthStatuses,
   availableEditors: Schema.Array(EditorId),
 });
 export type ServerConfig = typeof ServerConfig.Type;
@@ -67,5 +83,12 @@ export type ServerUpsertKeybindingResult = typeof ServerUpsertKeybindingResult.T
 export const ServerConfigUpdatedPayload = Schema.Struct({
   issues: ServerConfigIssues,
   providers: ServerProviderStatuses,
+  services: ServiceAuthStatuses,
 });
 export type ServerConfigUpdatedPayload = typeof ServerConfigUpdatedPayload.Type;
+
+export const ProviderLoginResult = Schema.Struct({
+  success: Schema.Boolean,
+  message: Schema.optional(TrimmedNonEmptyString),
+});
+export type ProviderLoginResult = typeof ProviderLoginResult.Type;

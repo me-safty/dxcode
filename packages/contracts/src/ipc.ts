@@ -21,10 +21,12 @@ import type {
 import type {
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectReadFileInput,
+  ProjectReadFileResult,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project";
-import type { ServerConfig } from "./server";
+import type { ServerConfig, ServerProviderStatus, ServiceAuthStatus } from "./server";
 import type {
   TerminalClearInput,
   TerminalCloseInput,
@@ -52,6 +54,10 @@ import type {
   JiraSearchInput,
   JiraRefreshInput,
   JiraPostCommentInput,
+  JiraTransitionInput,
+  JiraCreateSecDeskRequestInput,
+  JiraCreateSecDeskRequestResult,
+  SecDeskRequestType,
 } from "./jira";
 import type {
   GmailMessage,
@@ -142,6 +148,7 @@ export interface NativeApi {
   };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
+    readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
   };
   shell: {
@@ -190,6 +197,9 @@ export interface NativeApi {
     search: (input: JiraSearchInput) => Promise<JiraTicket[]>;
     refresh: (input: JiraRefreshInput) => Promise<{ count: number }>;
     postComment: (input: JiraPostCommentInput) => Promise<void>;
+    transition: (input: JiraTransitionInput) => Promise<void>;
+    listSecDeskRequestTypes: () => Promise<SecDeskRequestType[]>;
+    createSecDeskRequest: (input: JiraCreateSecDeskRequestInput) => Promise<JiraCreateSecDeskRequestResult>;
   };
   spec: {
     get: (input: { projectId: string }) => Promise<{ id: string; projectId: string; content: string; createdAt: string; updatedAt: string } | null>;
@@ -198,6 +208,13 @@ export interface NativeApi {
   server: {
     getConfig: () => Promise<ServerConfig>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
+  };
+  provider: {
+    refreshStatus: () => Promise<ServerProviderStatus[]>;
+    login: (input: { provider: "codex" | "claudeAgent" }) => Promise<{ success: boolean; message?: string }>;
+  };
+  service: {
+    refreshStatus: () => Promise<ServiceAuthStatus[]>;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;

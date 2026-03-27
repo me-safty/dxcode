@@ -113,6 +113,7 @@ export function createWsNativeApi(): NativeApi {
     },
     projects: {
       searchEntries: (input) => transport.request(WS_METHODS.projectsSearchEntries, input),
+      readFile: (input) => transport.request(WS_METHODS.projectsReadFile, input),
       writeFile: (input) => transport.request(WS_METHODS.projectsWriteFile, input),
     },
     shell: {
@@ -172,6 +173,9 @@ export function createWsNativeApi(): NativeApi {
       search: (input) => transport.request(WS_METHODS.jiraSearch, input),
       refresh: (input) => transport.request(WS_METHODS.jiraRefresh, input),
       postComment: (input) => transport.request(WS_METHODS.jiraPostComment, input),
+      transition: (input) => transport.request(WS_METHODS.jiraTransition, input),
+      listSecDeskRequestTypes: () => transport.request(WS_METHODS.jiraListSecDeskRequestTypes, {}),
+      createSecDeskRequest: (input) => transport.request(WS_METHODS.jiraCreateSecDeskRequest, input),
     },
     spec: {
       get: (input) => transport.request(WS_METHODS.specGet, input),
@@ -184,6 +188,13 @@ export function createWsNativeApi(): NativeApi {
     server: {
       getConfig: () => transport.request(WS_METHODS.serverGetConfig),
       upsertKeybinding: (input) => transport.request(WS_METHODS.serverUpsertKeybinding, input),
+    },
+    provider: {
+      refreshStatus: () => transport.request(WS_METHODS.providerRefreshStatus),
+      login: (input) => transport.request(WS_METHODS.providerLogin, input),
+    },
+    service: {
+      refreshStatus: () => transport.request(WS_METHODS.serviceRefreshStatus),
     },
     orchestration: {
       getSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot),

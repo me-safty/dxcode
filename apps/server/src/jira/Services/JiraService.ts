@@ -24,6 +24,22 @@ export interface JiraServiceShape {
   }) => Effect.Effect<void, JiraApiError | JiraConfigError>;
 
   readonly refreshCache: () => Effect.Effect<{ count: number }, JiraApiError | JiraConfigError>;
+
+  readonly transitionTicket: (input: {
+    readonly ticketKey: string;
+    readonly transitionName: string;
+  }) => Effect.Effect<void, JiraApiError | JiraConfigError>;
+
+  readonly listServiceDeskRequestTypes: () => Effect.Effect<
+    ReadonlyArray<{ id: string; name: string; description?: string }>,
+    JiraApiError | JiraConfigError
+  >;
+
+  readonly createServiceDeskRequest: (input: {
+    readonly requestTypeId: string;
+    readonly summary: string;
+    readonly description?: string;
+  }) => Effect.Effect<{ issueKey: string; url: string }, JiraApiError | JiraConfigError>;
 }
 
 export class JiraService extends ServiceMap.Service<JiraService, JiraServiceShape>()(

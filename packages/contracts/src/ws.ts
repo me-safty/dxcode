@@ -34,7 +34,7 @@ import {
   TerminalWriteInput,
 } from "./terminal";
 import { KeybindingRule } from "./keybindings";
-import { ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
+import { ProjectSearchEntriesInput, ProjectReadFileInput, ProjectWriteFileInput } from "./project";
 import { OpenInEditorInput } from "./editor";
 import { ServerConfigUpdatedPayload } from "./server";
 import {
@@ -43,6 +43,9 @@ import {
   JiraSearchInput,
   JiraRefreshInput,
   JiraPostCommentInput,
+  JiraTransitionInput,
+  JiraListSecDeskRequestTypesInput,
+  JiraCreateSecDeskRequestInput,
   JIRA_WS_CHANNELS,
 } from "./jira";
 import { CalendarAgendaInput, CalendarMeetingPrepInput, CALENDAR_WS_METHODS } from "./calendar";
@@ -57,6 +60,7 @@ export const WS_METHODS = {
   projectsAdd: "projects.add",
   projectsRemove: "projects.remove",
   projectsSearchEntries: "projects.searchEntries",
+  projectsReadFile: "projects.readFile",
   projectsWriteFile: "projects.writeFile",
 
   // Shell methods
@@ -102,6 +106,9 @@ export const WS_METHODS = {
   jiraSearch: "jira.search",
   jiraRefresh: "jira.refresh",
   jiraPostComment: "jira.postComment",
+  jiraTransition: "jira.transition",
+  jiraListSecDeskRequestTypes: "jira.listSecDeskRequestTypes",
+  jiraCreateSecDeskRequest: "jira.createSecDeskRequest",
 
   // Spec methods
   specGet: "spec.get",
@@ -110,6 +117,13 @@ export const WS_METHODS = {
   // Server meta
   serverGetConfig: "server.getConfig",
   serverUpsertKeybinding: "server.upsertKeybinding",
+
+  // Provider health methods
+  providerRefreshStatus: "provider.refreshStatus",
+  providerLogin: "provider.login",
+
+  // Service health methods
+  serviceRefreshStatus: "service.refreshStatus",
 } as const;
 
 // ── Push Event Channels ──────────────────────────────────────────────
@@ -153,6 +167,13 @@ const PromptHistoryEntry = Schema.Struct({
 
 export type PromptHistoryEntry = typeof PromptHistoryEntry.Type;
 
+// ── Provider Health Schemas ──────────────────────────────────────────────
+
+export const ProviderLoginInput = Schema.Struct({
+  provider: Schema.Literals(["codex", "claudeAgent"]),
+});
+export type ProviderLoginInput = typeof ProviderLoginInput.Type;
+
 const WebSocketRequestBody = Schema.Union([
   // Orchestration methods
   tagRequestBody(
@@ -166,6 +187,7 @@ const WebSocketRequestBody = Schema.Union([
 
   // Project Search
   tagRequestBody(WS_METHODS.projectsSearchEntries, ProjectSearchEntriesInput),
+  tagRequestBody(WS_METHODS.projectsReadFile, ProjectReadFileInput),
   tagRequestBody(WS_METHODS.projectsWriteFile, ProjectWriteFileInput),
 
   // Shell methods
@@ -211,6 +233,9 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.jiraSearch, JiraSearchInput),
   tagRequestBody(WS_METHODS.jiraRefresh, JiraRefreshInput),
   tagRequestBody(WS_METHODS.jiraPostComment, JiraPostCommentInput),
+  tagRequestBody(WS_METHODS.jiraTransition, JiraTransitionInput),
+  tagRequestBody(WS_METHODS.jiraListSecDeskRequestTypes, JiraListSecDeskRequestTypesInput),
+  tagRequestBody(WS_METHODS.jiraCreateSecDeskRequest, JiraCreateSecDeskRequestInput),
 
   // Spec methods
   tagRequestBody(WS_METHODS.specGet, SpecGetInput),
@@ -219,6 +244,13 @@ const WebSocketRequestBody = Schema.Union([
   // Server meta
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverUpsertKeybinding, KeybindingRule),
+
+  // Provider health methods
+  tagRequestBody(WS_METHODS.providerRefreshStatus, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.providerLogin, ProviderLoginInput),
+
+  // Service health methods
+  tagRequestBody(WS_METHODS.serviceRefreshStatus, Schema.Struct({})),
 ]);
 
 export const WebSocketRequest = Schema.Struct({

@@ -46,6 +46,7 @@ import {
 import { WebSocketServer, type WebSocket } from "ws";
 
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { createLogger } from "./logger";
 import { GitManager } from "./git/Services/GitManager.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
@@ -56,6 +57,7 @@ import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnap
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
 import { ProviderService } from "./provider/Services/ProviderService";
 import { ProviderHealth } from "./provider/Services/ProviderHealth";
+import { checkAllServiceStatuses } from "./provider/Layers/ServiceHealth";
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery";
 import { clamp } from "effect/Number";
 import { Open, resolveAvailableEditors } from "./open";
@@ -93,7 +95,7 @@ export interface ServerShape {
   readonly start: Effect.Effect<
     http.Server,
     ServerLifecycleError,
-    Scope.Scope | ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path | SqlClient.SqlClient
+    Scope.Scope | ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path | SqlClient.SqlClient | ChildProcessSpawner.ChildProcessSpawner
   >;
 
   /**
@@ -241,7 +243,7 @@ class RouteRequestError extends Schema.TaggedErrorClass<RouteRequestError>()("Ro
 export const createServer = Effect.fn(function* (): Effect.fn.Return<
   http.Server,
   ServerLifecycleError,
-  Scope.Scope | ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path | SqlClient.SqlClient
+  Scope.Scope | ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path | SqlClient.SqlClient | ChildProcessSpawner.ChildProcessSpawner
 > {
   const serverConfig = yield* ServerConfig;
   const {
@@ -265,6 +267,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const sql = yield* SqlClient.SqlClient;
+
+  // Service health checks (Gmail, Jira, Calendar) — run at startup.
+  let serviceStatuses: ReadonlyArray<import("@t3tools/contracts").ServiceAuthStatus> = yield* checkAllServiceStatuses;
 
   yield* keybindingsManager.syncDefaultKeybindingsOnStartup.pipe(
     Effect.catch((error) =>
@@ -626,6 +631,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     pushBus.publishAll(WS_CHANNELS.serverConfigUpdated, {
       issues: event.issues,
       providers: providerStatuses,
+      services: serviceStatuses,
     }),
   ).pipe(Effect.forkIn(subscriptionsScope));
 
@@ -696,7 +702,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   }
 
   const runtimeServices = yield* Effect.services<
-    ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path
+    ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
   >();
   const runPromise = Effect.runPromiseWith(runtimeServices);
 
@@ -757,6 +763,24 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               message: `Failed to search workspace entries: ${String(cause)}`,
             }),
         });
+      }
+
+      case WS_METHODS.projectsReadFile: {
+        const body = stripRequestTag(request.body);
+        const target = yield* resolveWorkspaceWritePath({
+          workspaceRoot: body.cwd,
+          relativePath: body.relativePath,
+          path,
+        });
+        const contents = yield* fileSystem.readFileString(target.absolutePath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new RouteRequestError({
+                message: `Failed to read workspace file: ${String(cause)}`,
+              }),
+          ),
+        );
+        return { contents };
       }
 
       case WS_METHODS.projectsWriteFile: {
@@ -881,10 +905,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const keybindingsConfig = yield* keybindingsManager.loadConfigState;
         return {
           cwd,
+          baseDir: serverConfig.baseDir,
           keybindingsConfigPath,
           keybindings: keybindingsConfig.keybindings,
           issues: keybindingsConfig.issues,
           providers: providerStatuses,
+          services: serviceStatuses,
           availableEditors,
         };
 
@@ -892,6 +918,22 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const body = stripRequestTag(request.body);
         const keybindingsConfig = yield* keybindingsManager.upsertKeybindingRule(body);
         return { keybindings: keybindingsConfig, issues: [] };
+      }
+
+      case WS_METHODS.providerRefreshStatus: {
+        const fresh = yield* providerHealth.refreshStatuses;
+        return fresh;
+      }
+
+      case WS_METHODS.providerLogin: {
+        const body = stripRequestTag(request.body);
+        return yield* providerHealth.login(body.provider);
+      }
+
+      case WS_METHODS.serviceRefreshStatus: {
+        const fresh = yield* checkAllServiceStatuses;
+        serviceStatuses = fresh;
+        return fresh;
       }
 
       case WS_METHODS.specGet: {
@@ -1022,6 +1064,28 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           body: body.body,
         });
         return {};
+      }
+
+      case WS_METHODS.jiraTransition: {
+        const body = stripRequestTag(request.body);
+        yield* jiraService.transitionTicket({
+          ticketKey: body.ticketKey,
+          transitionName: body.transitionName,
+        });
+        return {};
+      }
+
+      case WS_METHODS.jiraListSecDeskRequestTypes: {
+        return yield* jiraService.listServiceDeskRequestTypes();
+      }
+
+      case WS_METHODS.jiraCreateSecDeskRequest: {
+        const body = stripRequestTag(request.body);
+        return yield* jiraService.createServiceDeskRequest({
+          requestTypeId: body.requestTypeId,
+          summary: body.summary,
+          ...(body.description ? { description: body.description } : {}),
+        });
       }
 
       // Gmail methods

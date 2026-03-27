@@ -1234,6 +1234,15 @@ const make = Effect.gen(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(providerService.streamEvents, (event) =>
         worker.enqueue({ source: "runtime", event }),
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning(
+            "provider runtime event stream failed",
+            {
+              cause: Cause.pretty(cause),
+            },
+          ),
+        ),
       ),
     );
     yield* Effect.forkScoped(
@@ -1242,7 +1251,16 @@ const make = Effect.gen(function* () {
           return Effect.void;
         }
         return worker.enqueue({ source: "domain", event });
-      }),
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning(
+            "provider runtime domain event stream failed",
+            {
+              cause: Cause.pretty(cause),
+            },
+          ),
+        ),
+      ),
     );
   });
 

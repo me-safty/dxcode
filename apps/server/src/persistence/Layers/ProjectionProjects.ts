@@ -13,9 +13,13 @@ import {
 } from "../Services/ProjectionProjects.ts";
 import { ProjectScript } from "@t3tools/contracts";
 
-// Makes sure that the scripts are parsed from the JSON string the DB returns
+// Makes sure that JSON columns are parsed from the JSON strings the DB returns
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
-  Struct.assign({ scripts: Schema.fromJsonString(Schema.Array(ProjectScript)) }),
+  Struct.assign({
+    scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
+    components: Schema.NullOr(Schema.fromJsonString(Schema.Array(Schema.String))),
+    labels: Schema.NullOr(Schema.fromJsonString(Schema.Array(Schema.String))),
+  }),
 );
 
 function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
@@ -40,7 +44,21 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
               scripts_json,
               created_at,
               updated_at,
-              deleted_at
+              deleted_at,
+              ticket_key,
+              jira_status,
+              priority,
+              jira_url,
+              components_json,
+              labels_json,
+              assignee,
+              reporter,
+              description,
+              parent_key,
+              suggested_repo,
+              note,
+              last_accessed_at,
+              archived_at
             )
             VALUES (
               ${row.projectId},
@@ -50,7 +68,21 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
               ${row.scripts},
               ${row.createdAt},
               ${row.updatedAt},
-              ${row.deletedAt}
+              ${row.deletedAt},
+              ${row.ticketKey},
+              ${row.jiraStatus},
+              ${row.priority},
+              ${row.jiraUrl},
+              ${row.components},
+              ${row.labels},
+              ${row.assignee},
+              ${row.reporter},
+              ${row.description},
+              ${row.parentKey},
+              ${row.suggestedRepo},
+              ${row.note},
+              ${row.lastAccessedAt},
+              ${row.archivedAt}
             )
             ON CONFLICT (project_id)
             DO UPDATE SET
@@ -60,7 +92,21 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
               scripts_json = excluded.scripts_json,
               created_at = excluded.created_at,
               updated_at = excluded.updated_at,
-              deleted_at = excluded.deleted_at
+              deleted_at = excluded.deleted_at,
+              ticket_key = excluded.ticket_key,
+              jira_status = excluded.jira_status,
+              priority = excluded.priority,
+              jira_url = excluded.jira_url,
+              components_json = excluded.components_json,
+              labels_json = excluded.labels_json,
+              assignee = excluded.assignee,
+              reporter = excluded.reporter,
+              description = excluded.description,
+              parent_key = excluded.parent_key,
+              suggested_repo = excluded.suggested_repo,
+              note = excluded.note,
+              last_accessed_at = excluded.last_accessed_at,
+              archived_at = excluded.archived_at
           `,
   });
 
@@ -77,7 +123,21 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           scripts_json AS "scripts",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
-          deleted_at AS "deletedAt"
+          deleted_at AS "deletedAt",
+          ticket_key AS "ticketKey",
+          jira_status AS "jiraStatus",
+          priority,
+          jira_url AS "jiraUrl",
+          components_json AS "components",
+          labels_json AS "labels",
+          assignee,
+          reporter,
+          description,
+          parent_key AS "parentKey",
+          suggested_repo AS "suggestedRepo",
+          note,
+          last_accessed_at AS "lastAccessedAt",
+          archived_at AS "archivedAt"
         FROM projection_projects
         WHERE project_id = ${projectId}
       `,
@@ -96,7 +156,21 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           scripts_json AS "scripts",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
-          deleted_at AS "deletedAt"
+          deleted_at AS "deletedAt",
+          ticket_key AS "ticketKey",
+          jira_status AS "jiraStatus",
+          priority,
+          jira_url AS "jiraUrl",
+          components_json AS "components",
+          labels_json AS "labels",
+          assignee,
+          reporter,
+          description,
+          parent_key AS "parentKey",
+          suggested_repo AS "suggestedRepo",
+          note,
+          last_accessed_at AS "lastAccessedAt",
+          archived_at AS "archivedAt"
         FROM projection_projects
         ORDER BY created_at ASC, project_id ASC
       `,

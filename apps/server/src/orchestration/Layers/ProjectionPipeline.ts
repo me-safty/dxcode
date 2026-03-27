@@ -367,6 +367,20 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
+            ticketKey: null,
+            jiraStatus: null,
+            priority: null,
+            jiraUrl: null,
+            components: null,
+            labels: null,
+            assignee: null,
+            reporter: null,
+            description: null,
+            parentKey: null,
+            suggestedRepo: null,
+            note: null,
+            lastAccessedAt: null,
+            archivedAt: null,
           });
           return;
 
@@ -403,6 +417,61 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             ...existingRow.value,
             deletedAt: event.payload.deletedAt,
             updatedAt: event.payload.deletedAt,
+          });
+          return;
+        }
+
+        case "project.jira-metadata-updated": {
+          const existingRow = yield* projectionProjectRepository.getById({
+            projectId: event.payload.projectId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProjectRepository.upsert({
+            ...existingRow.value,
+            ...(event.payload.ticketKey !== undefined ? { ticketKey: event.payload.ticketKey } : {}),
+            ...(event.payload.jiraStatus !== undefined ? { jiraStatus: event.payload.jiraStatus } : {}),
+            ...(event.payload.priority !== undefined ? { priority: event.payload.priority } : {}),
+            ...(event.payload.jiraUrl !== undefined ? { jiraUrl: event.payload.jiraUrl } : {}),
+            ...(event.payload.components !== undefined ? { components: event.payload.components } : {}),
+            ...(event.payload.labels !== undefined ? { labels: event.payload.labels } : {}),
+            ...(event.payload.assignee !== undefined ? { assignee: event.payload.assignee } : {}),
+            ...(event.payload.reporter !== undefined ? { reporter: event.payload.reporter } : {}),
+            ...(event.payload.description !== undefined ? { description: event.payload.description } : {}),
+            ...(event.payload.parentKey !== undefined ? { parentKey: event.payload.parentKey } : {}),
+            ...(event.payload.suggestedRepo !== undefined ? { suggestedRepo: event.payload.suggestedRepo } : {}),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "project.note-updated": {
+          const existingRow = yield* projectionProjectRepository.getById({
+            projectId: event.payload.projectId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProjectRepository.upsert({
+            ...existingRow.value,
+            note: event.payload.note,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "project.touched": {
+          const existingRow = yield* projectionProjectRepository.getById({
+            projectId: event.payload.projectId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProjectRepository.upsert({
+            ...existingRow.value,
+            lastAccessedAt: event.payload.lastAccessedAt,
+            updatedAt: event.payload.lastAccessedAt,
           });
           return;
         }

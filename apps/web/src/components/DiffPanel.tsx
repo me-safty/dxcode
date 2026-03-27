@@ -3,7 +3,7 @@ import { FileDiff, type FileDiffMetadata, Virtualizer } from "@pierre/diffs/reac
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { ThreadId, type TurnId } from "@t3tools/contracts";
-import { ChevronLeftIcon, ChevronRightIcon, Columns2Icon, Rows3Icon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, Columns2Icon, Rows3Icon, XIcon } from "lucide-react";
 import {
   type WheelEvent as ReactWheelEvent,
   useCallback,
@@ -326,6 +326,18 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       },
     });
   };
+  const closeDiffPanel = useCallback(() => {
+    if (!activeThread) return;
+    void navigate({
+      to: "/$threadId",
+      params: { threadId: activeThread.id },
+      search: (previous) => {
+        const rest = stripDiffSearchParams(previous);
+        return { ...rest, diff: undefined };
+      },
+    });
+  }, [activeThread, navigate]);
+
   const selectWholeConversation = () => {
     if (!activeThread) return;
     void navigate({
@@ -509,6 +521,14 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
           <Columns2Icon className="size-3" />
         </Toggle>
       </ToggleGroup>
+      <button
+        type="button"
+        className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [-webkit-app-region:no-drag]"
+        onClick={closeDiffPanel}
+        aria-label="Close diff panel"
+      >
+        <XIcon className="size-3.5" />
+      </button>
     </>
   );
 

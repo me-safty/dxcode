@@ -21,6 +21,21 @@ export const ProjectionProject = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
+  // Jira metadata
+  ticketKey: Schema.NullOr(Schema.String),
+  jiraStatus: Schema.NullOr(Schema.String),
+  priority: Schema.NullOr(Schema.String),
+  jiraUrl: Schema.NullOr(Schema.String),
+  components: Schema.NullOr(Schema.Array(Schema.String)),
+  labels: Schema.NullOr(Schema.Array(Schema.String)),
+  assignee: Schema.NullOr(Schema.String),
+  reporter: Schema.NullOr(Schema.String),
+  description: Schema.NullOr(Schema.String),
+  parentKey: Schema.NullOr(Schema.String),
+  suggestedRepo: Schema.NullOr(Schema.String),
+  note: Schema.NullOr(Schema.String),
+  lastAccessedAt: Schema.NullOr(IsoDateTime),
+  archivedAt: Schema.NullOr(IsoDateTime),
 });
 export type ProjectionProject = typeof ProjectionProject.Type;
 

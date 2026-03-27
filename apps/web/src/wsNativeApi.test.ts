@@ -198,6 +198,7 @@ describe("wsNativeApi", () => {
         },
       ],
       providers: defaultProviders,
+      services: [],
     } as const;
     emitPush(WS_CHANNELS.serverConfigUpdated, payload);
 
@@ -220,16 +221,19 @@ describe("wsNativeApi", () => {
     emitPush(WS_CHANNELS.serverConfigUpdated, {
       issues: [{ kind: "keybindings.malformed-config", message: "bad json" }],
       providers: defaultProviders,
+      services: [],
     });
     emitPush(WS_CHANNELS.serverConfigUpdated, {
       issues: [],
       providers: defaultProviders,
+      services: [],
     });
 
     expect(listener).toHaveBeenCalledTimes(2);
     expect(listener).toHaveBeenLastCalledWith({
       issues: [],
       providers: defaultProviders,
+      services: [],
     });
   });
 

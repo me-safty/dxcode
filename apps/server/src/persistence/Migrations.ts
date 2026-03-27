@@ -31,6 +31,7 @@ import Migration0016 from "./Migrations/016_ProjectionProjectsJiraMetadata.ts";
 import Migration0017 from "./Migrations/017_PromptHistory.ts";
 import Migration0018 from "./Migrations/018_JiraCache.ts";
 import Migration0019 from "./Migrations/019_Specs.ts";
+import Migration0020 from "./Migrations/020_BackfillProjectTicketKeys.ts";
 import { Effect } from "effect";
 
 /**
@@ -63,6 +64,7 @@ const loader = Migrator.fromRecord({
   "17_PromptHistory": Migration0017,
   "18_JiraCache": Migration0018,
   "19_Specs": Migration0019,
+  "20_BackfillProjectTicketKeys": Migration0020,
 });
 
 /**

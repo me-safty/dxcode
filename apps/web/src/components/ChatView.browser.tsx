@@ -102,6 +102,7 @@ function isoAt(offsetSeconds: number): string {
 function createBaseServerConfig(): ServerConfig {
   return {
     cwd: "/repo/project",
+    baseDir: "/repo",
     keybindingsConfigPath: "/repo/project/.t3code-keybindings.json",
     keybindings: [],
     issues: [],
@@ -114,6 +115,7 @@ function createBaseServerConfig(): ServerConfig {
         checkedAt: NOW_ISO,
       },
     ],
+    services: [],
     availableEditors: [],
   };
 }

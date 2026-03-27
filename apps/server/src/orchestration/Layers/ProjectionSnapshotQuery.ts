@@ -46,6 +46,8 @@ const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
+    components: Schema.NullOr(Schema.fromJsonString(Schema.Array(Schema.String))),
+    labels: Schema.NullOr(Schema.fromJsonString(Schema.Array(Schema.String))),
   }),
 );
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
@@ -145,7 +147,21 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           scripts_json AS "scripts",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
-          deleted_at AS "deletedAt"
+          deleted_at AS "deletedAt",
+          ticket_key AS "ticketKey",
+          jira_status AS "jiraStatus",
+          priority,
+          jira_url AS "jiraUrl",
+          components_json AS "components",
+          labels_json AS "labels",
+          assignee,
+          reporter,
+          description,
+          parent_key AS "parentKey",
+          suggested_repo AS "suggestedRepo",
+          note,
+          last_accessed_at AS "lastAccessedAt",
+          archived_at AS "archivedAt"
         FROM projection_projects
         ORDER BY created_at ASC, project_id ASC
       `,
@@ -540,6 +556,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
             deletedAt: row.deletedAt,
+            ...(row.ticketKey != null ? { ticketKey: row.ticketKey } : {}),
+            ...(row.jiraStatus != null ? { jiraStatus: row.jiraStatus } : {}),
+            ...(row.priority != null ? { priority: row.priority } : {}),
+            ...(row.jiraUrl != null ? { jiraUrl: row.jiraUrl } : {}),
+            ...(row.components != null ? { components: row.components } : {}),
+            ...(row.labels != null ? { labels: row.labels } : {}),
+            ...(row.assignee != null ? { assignee: row.assignee } : {}),
+            ...(row.reporter != null ? { reporter: row.reporter } : {}),
+            ...(row.description != null ? { description: row.description } : {}),
+            ...(row.parentKey != null ? { parentKey: row.parentKey } : {}),
+            ...(row.suggestedRepo != null ? { suggestedRepo: row.suggestedRepo } : {}),
+            ...(row.note != null ? { note: row.note } : {}),
+            ...(row.lastAccessedAt != null ? { lastAccessedAt: row.lastAccessedAt } : {}),
+            ...(row.archivedAt !== undefined ? { archivedAt: row.archivedAt } : {}),
           }));
 
           const threads: Array<OrchestrationThread> = threadRows.map((row) => ({

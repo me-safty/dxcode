@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  @page {
+    size: letter;
+    margin: 0.75in 0.75in 1in 0.75in;
+    @bottom-center { content: counter(page); font-size: 9pt; color: #888; }
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #1a1a2e;
+    line-height: 1.55;
+    font-size: 11pt;
+  }
+  h1 {
+    font-size: 28pt;
+    color: #0f172a;
+    border-bottom: 3px solid #3b82f6;
+    padding-bottom: 8px;
+    margin-top: 0;
+  }
+  h2 {
+    font-size: 18pt;
+    color: #1e40af;
+    margin-top: 30px;
+    border-bottom: 1px solid #dbeafe;
+    padding-bottom: 4px;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 13pt;
+    color: #334155;
+    margin-top: 16px;
+    page-break-after: avoid;
+  }
+  p, li { font-size: 11pt; }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 4px; }
+  .subtitle { font-size: 14pt; color: #64748b; margin-top: -8px; margin-bottom: 24px; }
+  .date { font-size: 10pt; color: #94a3b8; }
+  .screenshot {
+    width: 100%;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin: 12px 0 20px 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  }
+  .screenshot-half {
+    width: 48%;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin: 8px 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  }
+  .caption {
+    font-size: 9pt;
+    color: #94a3b8;
+    font-style: italic;
+    text-align: center;
+    margin-top: -14px;
+    margin-bottom: 16px;
+  }
+  .feature-box {
+    background: #f8fafc;
+    border-left: 4px solid #3b82f6;
+    padding: 10px 14px;
+    margin: 10px 0;
+    border-radius: 0 6px 6px 0;
+  }
+  .tag {
+    display: inline-block;
+    background: #dbeafe;
+    color: #1e40af;
+    font-size: 8pt;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-right: 4px;
+    font-weight: 600;
+  }
+  .tag-green { background: #dcfce7; color: #166534; }
+  .tag-purple { background: #f3e8ff; color: #6b21a8; }
+  .tag-orange { background: #ffedd5; color: #9a3412; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 10pt;
+  }
+  th { background: #f1f5f9; text-align: left; padding: 6px 10px; border: 1px solid #e2e8f0; }
+  td { padding: 6px 10px; border: 1px solid #e2e8f0; }
+  .page-break { page-break-before: always; }
+</style>
+</head>
+<body>
+
+<h1>Fly Code</h1>
+<p class="subtitle">AI-Powered DevOps Workstation &mdash; Feature Overview</p>
+<p class="date">March 2026</p>
+
+<p>
+Fly Code is a customized AI coding assistant built for infrastructure and DevOps workflows.
+It integrates directly with Jira, Jira Service Management (SECDESK), AWS, and Git to provide
+a unified workspace where AI agents have full context on every ticket they work on.
+</p>
+
+<img src="screenshots/01-sidebar-overview.png" class="screenshot" />
+<p class="caption">Fly Code main interface &mdash; sidebar with active projects, chat view, and command tray</p>
+
+<!-- ============================================================ -->
+<h2>1. Jira Ticket Import</h2>
+
+<p>
+Import Jira tickets directly into Fly Code as projects. Each imported ticket automatically:
+</p>
+<ul>
+  <li>Creates a dedicated project workspace</li>
+  <li>Generates <strong>summary.md</strong> with full ticket metadata (status, priority, components, labels, assignee)</li>
+  <li>Generates <strong>CLAUDE.md</strong> with ticket context, workflow rules (IaC, PRs only), and tool documentation</li>
+  <li>Auto-sends the ticket context to the AI agent so it immediately knows what to work on</li>
+  <li>Transitions the ticket to <strong>"In Progress"</strong> on Jira</li>
+  <li>Filters out tickets that already have active projects</li>
+</ul>
+
+<img src="screenshots/02-jira-import.png" class="screenshot" />
+<p class="caption">Jira import dropdown &mdash; shows unresolved tickets assigned to you, filtered to exclude active projects</p>
+
+<div class="feature-box">
+  <span class="tag">Jira REST API</span>
+  <span class="tag">Auto-context</span>
+  <span class="tag">IaC Workflow</span>
+  <br/>
+  On import, the agent receives a pre-built message with the ticket key, summary, description,
+  and Jira URL &mdash; plus instructions to read CLAUDE.md and summary.md for full context.
+</div>
+
+<!-- ============================================================ -->
+<h2 class="page-break">2. Project Management</h2>
+
+<h3>Active &amp; Waiting Status</h3>
+<p>
+Right-click any project to toggle between <strong>Active</strong> and <strong>Waiting</strong> status.
+Waiting projects are visually dimmed and grouped separately in the sidebar. This status feeds into
+the daily standup generator.
+</p>
+
+<img src="screenshots/03-context-menu.png" class="screenshot" />
+<p class="caption">Project context menu &mdash; toggle waiting status or remove projects</p>
+
+<h3>Sidebar Project Cards</h3>
+<p>
+Each project in the sidebar shows:
+</p>
+<ul>
+  <li><strong>Ticket key and title</strong> from Jira</li>
+  <li><strong>summary.md</strong> button &mdash; quick view of ticket metadata</li>
+  <li><strong>SECDESK</strong> button &mdash; create or view SECDESK tickets</li>
+  <li><strong>Jira</strong> link &mdash; opens the ticket directly in Jira</li>
+  <li>Thread history with last message preview and timestamps</li>
+</ul>
+
+<img src="screenshots/05-sidebar-links.png" class="screenshot-half" />
+<p class="caption">Sidebar detail &mdash; SECDESK links (blue when filed), Jira links, summary.md buttons on every project</p>
+
+<!-- ============================================================ -->
+<h2 class="page-break">3. SECDESK Integration</h2>
+
+<p>
+Create Jira Service Management (JSM) tickets directly from any project. Used for
+AWS account closures, access requests, and security operations.
+</p>
+
+<ul>
+  <li>Pre-populates summary from the parent ticket</li>
+  <li>Selects from available JSM request types</li>
+  <li>After creation: appends link to <strong>summary.md</strong>, posts comment back to original Jira ticket</li>
+  <li>Persists SECDESK link locally &mdash; sidebar shows clickable link when a ticket exists</li>
+  <li>Auto-detects existing SECDESK links by scanning summary.md files</li>
+</ul>
+
+<div class="feature-box">
+  <span class="tag-green tag">JSM API</span>
+  <span class="tag-green tag">Auto-link</span>
+  <span class="tag-green tag">Bi-directional</span>
+  <br/>
+  When a SECDESK ticket is filed, the sidebar button changes from "SECDESK" to a clickable
+  blue link showing the ticket key (e.g., SECDESK-1711), alongside the original Jira ticket link.
+</div>
+
+<!-- ============================================================ -->
+<h2>4. Daily Standup Generator</h2>
+
+<p>
+Interactive two-step standup message builder:
+</p>
+<ol>
+  <li><strong>Select &amp; annotate</strong> &mdash; choose which projects to include, add notes per project</li>
+  <li><strong>Edit &amp; copy</strong> &mdash; review the generated Slack-formatted message, edit if needed, copy to clipboard</li>
+</ol>
+
+<p>
+Projects are automatically grouped by Active vs Waiting/Blocked status.
+The generated message follows the standard format:
+<strong>Yesterday</strong> / <strong>Today</strong> / <strong>Blockers</strong>.
+</p>
+
+<img src="screenshots/06-standup-modal.png" class="screenshot" />
+<p class="caption">Standup modal &mdash; select projects, add notes, generate Slack-ready message</p>
+
+<!-- ============================================================ -->
+<h2 class="page-break">5. Command Tray</h2>
+
+<p>
+Quick-action button bar at the bottom of the chat. Each button sends a command to either
+the <strong>chat</strong> (for AI slash commands) or the <strong>terminal</strong> (for shell commands).
+</p>
+
+<img src="screenshots/04-chat-command-tray.png" class="screenshot" />
+<p class="caption">Chat view with command tray &mdash; /update, /triage, /commit, AWS SSO, Shell, Claude buttons</p>
+
+<div class="feature-box">
+  <span class="tag-purple tag">Customizable</span>
+  <span class="tag-purple tag">Chat + Terminal targets</span>
+  <br/>
+  <strong>Default buttons:</strong>
+  <code>/update</code>, <code>/triage</code>, <code>/commit</code> (chat),
+  <code>AWS SSO</code> (terminal &mdash; runs <code>aws sso login</code>),
+  <code>Shell</code>, <code>Claude</code>.
+  Fully editable &mdash; add, remove, or reorder buttons via the edit dialog.
+</div>
+
+<!-- ============================================================ -->
+<h2>6. AI Agent Context System</h2>
+
+<h3>CLAUDE.md &mdash; Agent Instructions</h3>
+<p>Auto-generated per project with:</p>
+<ul>
+  <li>Ticket metadata (key, status, priority, type, assignee)</li>
+  <li>Full ticket description</li>
+  <li>Workflow rules: always use IaC, introduce changes through PRs</li>
+  <li>Tools &amp; Environment reference documenting all available integrations</li>
+</ul>
+
+<h3>summary.md &mdash; Structured Ticket Data</h3>
+<p>Machine-readable metadata file with all Jira fields. Updated when SECDESK tickets are filed.</p>
+
+<img src="screenshots/07-summary-view.png" class="screenshot" />
+<p class="caption">summary.md viewer &mdash; quick access to ticket metadata without leaving the app</p>
+
+<h3>Tools &amp; Environment Reference</h3>
+<p>Embedded in every CLAUDE.md, documents:</p>
+<ul>
+  <li>Jira REST API endpoints with curl examples</li>
+  <li>AWS SSO profile configuration</li>
+  <li>GitHub CLI setup</li>
+  <li>SECDESK / Jira Service Management API</li>
+  <li>Shell, Git, Node.js, and mise environment details</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 class="page-break">7. Security &amp; Stability</h2>
+
+<p>Recent hardening pass addressed 12 findings across the codebase:</p>
+
+<table>
+  <tr><th>Category</th><th>Fix</th><th>Severity</th></tr>
+  <tr><td>Security</td><td>Auth token removed from terminal process environments</td><td>Critical</td></tr>
+  <tr><td>Security</td><td>Centralized credential handling (eliminated 3 inline .netrc readers)</td><td>High</td></tr>
+  <tr><td>Stability</td><td>Thread deletion no longer crashes the server</td><td>Critical</td></tr>
+  <tr><td>Stability</td><td>SQLite busy_timeout prevents write contention</td><td>High</td></tr>
+  <tr><td>Stability</td><td>Jira import rolls back on partial failure</td><td>High</td></tr>
+  <tr><td>Stability</td><td>Forked event streams log errors instead of dying silently</td><td>High</td></tr>
+  <tr><td>Usability</td><td>Checkpoint revert failures now surface to user</td><td>High</td></tr>
+  <tr><td>Usability</td><td>SECDESK follow-up failures show warning toasts</td><td>Medium</td></tr>
+  <tr><td>Stability</td><td>WebSocket listener errors are now logged</td><td>Medium</td></tr>
+  <tr><td>Data</td><td>Backfill migration for pre-existing project ticket keys</td><td>Medium</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>8. Architecture Overview</h2>
+
+<table>
+  <tr><th>Layer</th><th>Technology</th></tr>
+  <tr><td>Frontend</td><td>React, TypeScript, Vite, TanStack Router/Query, Tailwind CSS</td></tr>
+  <tr><td>Backend</td><td>Effect-TS, WebSocket API, SQLite (WAL mode), Event Sourcing</td></tr>
+  <tr><td>Desktop</td><td>Electron (sandboxed, context-isolated)</td></tr>
+  <tr><td>Integrations</td><td>Jira REST API, JSM API, GitHub CLI, AWS SSO</td></tr>
+  <tr><td>AI Providers</td><td>Claude (Anthropic), configurable model selection</td></tr>
+  <tr><td>Auth</td><td>~/.netrc (Jira/Bitbucket), local WebSocket token</td></tr>
+</table>
+
+<p style="text-align: center; color: #94a3b8; font-size: 9pt; margin-top: 40px;">
+  Fly Code &mdash; Built with Claude Code
+</p>
+
+</body>
+</html>

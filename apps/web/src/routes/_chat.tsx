@@ -122,23 +122,36 @@ function ChatRouteLayout() {
     };
   }, [navigate]);
 
+  const { settings: appSettings } = useAppSettings();
+  const sidebarSide = appSettings.sidebarSide ?? "left";
+
   return (
     <SidebarProvider defaultOpen>
       <ChatRouteGlobalShortcuts />
-      <Sidebar
-        side="left"
-        collapsible="offcanvas"
-        className="border-r border-border bg-card text-foreground"
-      >
-        <ThreadSidebar />
-      </Sidebar>
-      <div className="flex flex-col flex-1 min-w-0">
-        <Outlet />
-        <CommandTray
-          threadId={routeThreadId}
-          terminalId={activeTerminalId}
-        />
+      {sidebarSide === "left" && (
+        <Sidebar
+          side="left"
+          collapsible="offcanvas"
+          className="border-r border-border bg-card text-foreground"
+        >
+          <ThreadSidebar />
+        </Sidebar>
+      )}
+      <div className="flex flex-col flex-1 min-w-0 h-dvh max-h-dvh overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <Outlet />
+        </div>
+        <CommandTray threadId={routeThreadId} terminalId={activeTerminalId} />
       </div>
+      {sidebarSide === "right" && (
+        <Sidebar
+          side="right"
+          collapsible="offcanvas"
+          className="border-l border-border bg-card text-foreground"
+        >
+          <ThreadSidebar />
+        </Sidebar>
+      )}
     </SidebarProvider>
   );
 }

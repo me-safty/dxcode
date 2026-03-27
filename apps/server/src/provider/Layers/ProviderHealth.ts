@@ -491,10 +491,41 @@ export function parseClaudeAuthStatusFromOutput(result: CommandResult): {
   };
 }
 
+/**
+ * Check `~/.claude/.credentials.json` for a valid OAuth token as a
+ * fallback when `claude auth status` hangs or fails. The file contains
+ * `{ claudeAiOauth: { accessToken, expiresAt, ... } }`.
+ */
+const checkClaudeCredentialsFile: Effect.Effect<
+  boolean,
+  never,
+  FileSystem.FileSystem | Path.Path
+> = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const credentialsPath = path.join(OS.homedir(), ".claude", ".credentials.json");
+  const content = yield* fileSystem
+    .readFileString(credentialsPath)
+    .pipe(Effect.orElseSucceed(() => undefined));
+  if (!content) return false;
+  try {
+    const parsed = JSON.parse(content);
+    const oauth = parsed?.claudeAiOauth;
+    if (!oauth?.accessToken) return false;
+    // Check if token is not expired (with 5 min buffer).
+    if (typeof oauth.expiresAt === "number" && oauth.expiresAt < Date.now() + 300_000) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+});
+
 export const checkClaudeProviderStatus: Effect.Effect<
   ServerProviderStatus,
   never,
-  ChildProcessSpawner.ChildProcessSpawner
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > = Effect.gen(function* () {
   const checkedAt = new Date().toISOString();
 
@@ -550,40 +581,41 @@ export const checkClaudeProviderStatus: Effect.Effect<
     Effect.result,
   );
 
-  if (Result.isFailure(authProbe)) {
-    const error = authProbe.failure;
-    return {
-      provider: CLAUDE_AGENT_PROVIDER,
-      status: "warning" as const,
-      available: true,
-      authStatus: "unknown" as const,
-      checkedAt,
-      message:
-        error instanceof Error
-          ? `Could not verify Claude authentication status: ${error.message}.`
-          : "Could not verify Claude authentication status.",
-    };
+  // If auth probe succeeded, try to parse it.
+  if (Result.isSuccess(authProbe) && Option.isSome(authProbe.success)) {
+    const parsed = parseClaudeAuthStatusFromOutput(authProbe.success.value);
+    if (parsed.authStatus !== "unknown") {
+      return {
+        provider: CLAUDE_AGENT_PROVIDER,
+        status: parsed.status,
+        available: true,
+        authStatus: parsed.authStatus,
+        checkedAt,
+        ...(parsed.message ? { message: parsed.message } : {}),
+      } satisfies ServerProviderStatus;
+    }
   }
 
-  if (Option.isNone(authProbe.success)) {
+  // Fallback: check ~/.claude/.credentials.json when `claude auth status`
+  // times out (common in Claude Code v2.x) or returns unparseable output.
+  const hasCredentials = yield* checkClaudeCredentialsFile;
+  if (hasCredentials) {
     return {
       provider: CLAUDE_AGENT_PROVIDER,
-      status: "warning" as const,
+      status: "ready" as const,
       available: true,
-      authStatus: "unknown" as const,
+      authStatus: "authenticated" as const,
       checkedAt,
-      message: "Could not verify Claude authentication status. Timed out while running command.",
-    };
+    } satisfies ServerProviderStatus;
   }
 
-  const parsed = parseClaudeAuthStatusFromOutput(authProbe.success.value);
   return {
     provider: CLAUDE_AGENT_PROVIDER,
-    status: parsed.status,
+    status: "error" as const,
     available: true,
-    authStatus: parsed.authStatus,
+    authStatus: "unauthenticated" as const,
     checkedAt,
-    ...(parsed.message ? { message: parsed.message } : {}),
+    message: "Claude is not authenticated. Run `claude auth login` and try again.",
   } satisfies ServerProviderStatus;
 });
 
@@ -592,12 +624,103 @@ export const checkClaudeProviderStatus: Effect.Effect<
 export const ProviderHealthLive = Layer.effect(
   ProviderHealth,
   Effect.gen(function* () {
-    const statusesFiber = yield* Effect.all([checkCodexProviderStatus, checkClaudeProviderStatus], {
-      concurrency: "unbounded",
-    }).pipe(Effect.forkScoped);
+    // Capture services during layer construction so methods can use them later.
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
 
-    return {
-      getStatuses: Fiber.join(statusesFiber),
-    } satisfies ProviderHealthShape;
+    const provideServices = <A, E>(effect: Effect.Effect<A, E, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path>) =>
+      Effect.provideService(
+        Effect.provideService(
+          Effect.provideService(effect, ChildProcessSpawner.ChildProcessSpawner, spawner),
+          FileSystem.FileSystem,
+          fileSystem,
+        ),
+        Path.Path,
+        path,
+      );
+
+    // Mutable ref to hold the latest statuses.
+    let cachedStatuses: ReadonlyArray<ServerProviderStatus> = [];
+
+    const runChecks = provideServices(
+      Effect.all(
+        [checkCodexProviderStatus, checkClaudeProviderStatus],
+        { concurrency: "unbounded" },
+      ),
+    );
+
+    // Initial startup check (forked so it doesn't block layer construction).
+    const initialFiber = yield* runChecks.pipe(Effect.forkScoped);
+
+    const getStatuses: ProviderHealthShape["getStatuses"] = Effect.gen(function* () {
+      if (cachedStatuses.length === 0) {
+        cachedStatuses = yield* Fiber.join(initialFiber);
+      }
+      return cachedStatuses;
+    });
+
+    const refreshStatuses: ProviderHealthShape["refreshStatuses"] = Effect.gen(function* () {
+      const fresh = yield* runChecks;
+      cachedStatuses = fresh;
+      return fresh;
+    });
+
+    const login: ProviderHealthShape["login"] = (provider) => {
+      const command =
+        provider === "codex"
+          ? ChildProcess.make("codex", ["login"], {
+              shell: process.platform === "win32",
+            })
+          : ChildProcess.make("claude", ["auth", "login"], {
+              shell: process.platform === "win32",
+            });
+
+      return provideServices(
+        Effect.gen(function* () {
+          const s = yield* ChildProcessSpawner.ChildProcessSpawner;
+          const child = yield* s.spawn(command);
+          const [stdout, stderr, exitCode] = yield* Effect.all(
+            [
+              collectStreamAsString(child.stdout),
+              collectStreamAsString(child.stderr),
+              child.exitCode.pipe(Effect.map(Number)),
+            ],
+            { concurrency: "unbounded" },
+          );
+
+          if (exitCode === 0) {
+            return { success: true } as { success: boolean; message?: string };
+          }
+
+          const detail = nonEmptyTrimmed(stderr) ?? nonEmptyTrimmed(stdout);
+          return {
+            success: false,
+            message: detail ?? `Login command exited with code ${exitCode}.`,
+          } as { success: boolean; message?: string };
+        }).pipe(Effect.scoped),
+      ).pipe(
+        Effect.flatMap((result) => {
+          if (result.success) {
+            return runChecks.pipe(
+              Effect.map((fresh) => {
+                cachedStatuses = fresh;
+                return result;
+              }),
+            );
+          }
+          return Effect.succeed(result);
+        }),
+        Effect.timeout(30_000),
+        Effect.catch(() =>
+          Effect.succeed({
+            success: false,
+            message: "Login timed out or failed. Try running the command manually in your terminal.",
+          } as { success: boolean; message?: string }),
+        ),
+      );
+    };
+
+    return { getStatuses, refreshStatuses, login } satisfies ProviderHealthShape;
   }),
 );

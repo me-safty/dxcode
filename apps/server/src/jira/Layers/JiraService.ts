@@ -68,6 +68,7 @@ function extractTextFromAdf(adf: any): string | null {
   return null;
 }
 
+
 export const JiraServiceLive = Layer.effect(
   JiraService,
   Effect.gen(function* () {
@@ -82,13 +83,12 @@ export const JiraServiceLive = Layer.effect(
           ]
             .filter(Boolean)
             .join(" AND ");
-          const params = new URLSearchParams({
-            jql,
-            maxResults: String(maxResults ?? 50),
-          });
+          const jqlEncoded = encodeURIComponent(jql);
+          const limit = maxResults ?? 50;
+          const url = `${JIRA_BASE_URL}/rest/api/3/search/jql?jql=${jqlEncoded}&maxResults=${limit}&fields=*all`;
           const response = yield* Effect.tryPromise({
             try: () =>
-              fetch(`${JIRA_BASE_URL}/rest/api/3/search/jql?${params}`, {
+              fetch(url, {
                 headers: { Authorization: auth, Accept: "application/json" },
               }),
             catch: (e) => new JiraApiError({ message: `Fetch failed: ${e}` }),
@@ -133,13 +133,12 @@ export const JiraServiceLive = Layer.effect(
       searchTickets: ({ jql, maxResults }) =>
         Effect.gen(function* () {
           const auth = yield* getAuthHeader();
-          const params = new URLSearchParams({
-            jql,
-            maxResults: String(maxResults ?? 50),
-          });
+          const jqlEncoded = encodeURIComponent(jql);
+          const limit = maxResults ?? 50;
+          const url = `${JIRA_BASE_URL}/rest/api/3/search/jql?jql=${jqlEncoded}&maxResults=${limit}&fields=*all`;
           const response = yield* Effect.tryPromise({
             try: () =>
-              fetch(`${JIRA_BASE_URL}/rest/api/3/search/jql?${params}`, {
+              fetch(url, {
                 headers: { Authorization: auth, Accept: "application/json" },
               }),
             catch: (e) => new JiraApiError({ message: `Fetch failed: ${e}` }),
@@ -191,6 +190,139 @@ export const JiraServiceLive = Layer.effect(
         }),
 
       refreshCache: () => Effect.succeed({ count: 0 }),
+
+      transitionTicket: ({ ticketKey, transitionName }) =>
+        Effect.gen(function* () {
+          const auth = yield* getAuthHeader();
+          const transitionsResponse = yield* Effect.tryPromise({
+            try: () =>
+              fetch(`${JIRA_BASE_URL}/rest/api/3/issue/${ticketKey}/transitions`, {
+                headers: { Authorization: auth, Accept: "application/json" },
+              }),
+            catch: (e) => new JiraApiError({ message: `Fetch failed: ${e}`, ticketKey }),
+          });
+          if (!transitionsResponse.ok) {
+            return yield* new JiraApiError({
+              message: `Jira API error: ${transitionsResponse.status}`,
+              statusCode: transitionsResponse.status,
+              ticketKey,
+            });
+          }
+          const transitionsData = yield* Effect.tryPromise({
+            try: () =>
+              transitionsResponse.json() as Promise<{
+                transitions?: Array<{ id: string; name: string }>;
+              }>,
+            catch: (e) => new JiraApiError({ message: `JSON parse failed: ${e}`, ticketKey }),
+          });
+          const target = (transitionsData.transitions ?? []).find(
+            (t) => t.name.toLowerCase() === transitionName.toLowerCase(),
+          );
+          if (!target) {
+            return yield* new JiraApiError({
+              message: `Transition "${transitionName}" not available for ${ticketKey}`,
+              ticketKey,
+            });
+          }
+          const response = yield* Effect.tryPromise({
+            try: () =>
+              fetch(`${JIRA_BASE_URL}/rest/api/3/issue/${ticketKey}/transitions`, {
+                method: "POST",
+                headers: {
+                  Authorization: auth,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ transition: { id: target.id } }),
+              }),
+            catch: (e) => new JiraApiError({ message: `Fetch failed: ${e}`, ticketKey }),
+          });
+          if (!response.ok) {
+            return yield* new JiraApiError({
+              message: `Transition failed: ${response.status}`,
+              statusCode: response.status,
+              ticketKey,
+            });
+          }
+        }),
+
+      listServiceDeskRequestTypes: () =>
+        Effect.gen(function* () {
+          const auth = yield* getAuthHeader();
+          const response = yield* Effect.tryPromise({
+            try: () =>
+              fetch(`${JIRA_BASE_URL}/rest/servicedeskapi/servicedesk/1/requesttype`, {
+                headers: { Authorization: auth, Accept: "application/json" },
+              }),
+            catch: (e) => new JiraApiError({ message: `Fetch failed: ${e}` }),
+          });
+          if (!response.ok) {
+            return yield* new JiraApiError({
+              message: `JSM API error: ${response.status}`,
+              statusCode: response.status,
+            });
+          }
+          const data = yield* Effect.tryPromise({
+            try: () => response.json() as Promise<{ values?: any[] }>,
+            catch: (e) => new JiraApiError({ message: `JSON parse failed: ${e}` }),
+          });
+          return (data.values ?? [])
+            .filter((v: any) => v.canCreateRequest)
+            .map((v: any) => {
+              const entry: { id: string; name: string; description?: string } = {
+                id: v.id as string,
+                name: v.name as string,
+              };
+              if (v.description) entry.description = v.description as string;
+              return entry;
+            });
+        }),
+
+      createServiceDeskRequest: ({ requestTypeId, summary, description }) =>
+        Effect.gen(function* () {
+          const auth = yield* getAuthHeader();
+          const response = yield* Effect.tryPromise({
+            try: () =>
+              fetch(`${JIRA_BASE_URL}/rest/servicedeskapi/request`, {
+                method: "POST",
+                headers: {
+                  Authorization: auth,
+                  "Content-Type": "application/json",
+                  Accept: "application/json",
+                },
+                body: JSON.stringify({
+                  serviceDeskId: "1",
+                  requestTypeId,
+                  requestFieldValues: {
+                    summary,
+                    ...(description ? { description } : {}),
+                  },
+                }),
+              }),
+            catch: (e) => new JiraApiError({ message: `Fetch failed: ${e}` }),
+          });
+          if (!response.ok) {
+            const text = yield* Effect.tryPromise({
+              try: () => response.text(),
+              catch: (e) => new JiraApiError({ message: `Failed to read error response: ${e}` }),
+            });
+            return yield* new JiraApiError({
+              message: `JSM API error ${response.status}: ${text}`,
+              statusCode: response.status,
+            });
+          }
+          const data = yield* Effect.tryPromise({
+            try: () =>
+              response.json() as Promise<{
+                issueKey: string;
+                _links?: { agent?: string };
+              }>,
+            catch: (e) => new JiraApiError({ message: `JSON parse failed: ${e}` }),
+          });
+          return {
+            issueKey: data.issueKey,
+            url: data._links?.agent ?? `${JIRA_BASE_URL}/browse/${data.issueKey}`,
+          };
+        }),
     });
   }),
 );

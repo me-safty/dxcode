@@ -207,8 +207,11 @@ export class WsTransport {
         for (const listener of channelListeners) {
           try {
             listener(message);
-          } catch {
-            // Swallow listener errors
+          } catch (error) {
+            console.error("[ws] channel listener error", {
+              channel: message.channel,
+              error: error instanceof Error ? error.message : String(error),
+            });
           }
         }
       }

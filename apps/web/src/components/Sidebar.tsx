@@ -3,11 +3,14 @@ import {
   ChevronRightIcon,
   FolderIcon,
   GitPullRequestIcon,
+  LoaderIcon,
   PlusIcon,
   RocketIcon,
   SettingsIcon,
   SquarePenIcon,
   TerminalIcon,
+  TicketIcon,
+  MessageSquareTextIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
@@ -50,6 +53,13 @@ import { useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { toastManager } from "./ui/toast";
+import { FileViewerModal } from "./FileViewerModal";
+import { SecDeskModal } from "./SecDeskModal";
+import { AuthStatusIndicators } from "./chat/AuthStatusIndicators";
+import { StandupModal } from "./StandupModal";
+import { TicketComparisonModal } from "./TicketComparisonModal";
+import { useProjectStatusStore } from "../projectStatusStore";
+import { useSecDeskStore } from "../secDeskStore";
 import {
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
@@ -91,10 +101,100 @@ import {
   shouldClearThreadSelectionOnMouseDown,
 } from "./Sidebar.logic";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-import { useScratchpadStore } from "~/scratchpadStore";
+import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
+import type { JiraTicket } from "@t3tools/contracts";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_PREVIEW_LIMIT = 6;
+
+function buildJiraTicketSummary(ticket: JiraTicket): string {
+  const lines: string[] = [
+    `# ${ticket.key}: ${ticket.summary}`,
+    "",
+    `**Status:** ${ticket.status}`,
+    `**Priority:** ${ticket.priority}`,
+    `**Type:** ${ticket.issueType}`,
+  ];
+  if (ticket.assignee) lines.push(`**Assignee:** ${ticket.assignee}`);
+  if (ticket.reporter) lines.push(`**Reporter:** ${ticket.reporter}`);
+  if (ticket.parentKey) lines.push(`**Parent:** ${ticket.parentKey}`);
+  if (ticket.components.length > 0) lines.push(`**Components:** ${ticket.components.join(", ")}`);
+  if (ticket.labels.length > 0) lines.push(`**Labels:** ${ticket.labels.join(", ")}`);
+  lines.push(`**URL:** ${ticket.url}`);
+  if (ticket.description) {
+    lines.push("", "## Description", "", ticket.description);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+const TOOLS_AND_ENVIRONMENT = `
+## Tools & Environment
+
+You have access to the following tools and services. Do NOT claim you lack access — these are pre-configured and working.
+
+### Jira (REST API)
+- **Auth:** \`~/.netrc\` (machine mediafly.atlassian.net) — Basic auth, already configured
+- **Base URL:** https://mediafly.atlassian.net
+- **Fetch tickets:** \`curl -sn https://mediafly.atlassian.net/rest/api/3/issue/{TICKET_KEY}\`
+- **Search:** \`curl -sn 'https://mediafly.atlassian.net/rest/api/3/search/jql?jql=assignee=currentUser()+AND+resolution=Unresolved'\`
+- **Post comment:** \`curl -sn -X POST -H "Content-Type: application/json" -d '{"body":{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"your comment"}]}]}}' https://mediafly.atlassian.net/rest/api/3/issue/{KEY}/comment\`
+- **Transition:** \`curl -sn -X POST -H "Content-Type: application/json" -d '{"transition":{"id":"TRANSITION_ID"}}' https://mediafly.atlassian.net/rest/api/3/issue/{KEY}/transitions\`
+
+### AWS (SSO)
+- **Auth:** AWS SSO via \`aws sso login --profile <profile>\`
+- **Available profiles:** Check \`~/.aws/config\` for all configured SSO profiles
+- **To login:** Run \`aws sso login --profile <profile-name>\` — this opens a browser for SSO auth
+- **Common operations:** \`aws sts get-caller-identity --profile <profile>\`, \`aws organizations list-accounts\`
+- **Infrastructure:** Mediafly has 45+ AWS accounts across multiple orgs
+
+### GitHub (gh CLI)
+- **Auth:** Already authenticated via \`gh auth status\`
+- **Org:** mediafly
+- **PRs:** \`gh pr list\`, \`gh pr create\`, \`gh pr view\`
+- **Issues:** \`gh issue list\`, \`gh issue create\`
+- **Search:** \`gh search prs --author tegryan\`
+
+### SECDESK (Jira Service Management)
+- **Purpose:** Create service desk tickets for AWS account closures, access requests, etc.
+- **API:** \`curl -sn https://mediafly.atlassian.net/rest/servicedeskapi/request\`
+- **Service Desk ID:** 1 (SECDESK)
+
+### General
+- **Shell:** zsh on macOS
+- **Package managers:** bun, npm, brew
+- **Git:** Fully configured with SSH keys
+- **Node:** v24+ via mise
+`;
+
+function buildClaudeContext(ticket: JiraTicket): string {
+  const lines: string[] = [
+    `# ${ticket.key}: ${ticket.summary}`,
+    "",
+    "## Ticket Context",
+    "",
+    `- **Jira:** ${ticket.url}`,
+    `- **Status:** ${ticket.status}`,
+    `- **Priority:** ${ticket.priority}`,
+    `- **Type:** ${ticket.issueType}`,
+  ];
+  if (ticket.assignee) lines.push(`- **Assignee:** ${ticket.assignee}`);
+  if (ticket.parentKey) lines.push(`- **Parent:** ${ticket.parentKey}`);
+  if (ticket.components.length > 0) lines.push(`- **Components:** ${ticket.components.join(", ")}`);
+  if (ticket.labels.length > 0) lines.push(`- **Labels:** ${ticket.labels.join(", ")}`);
+  if (ticket.description) {
+    lines.push("", "## Description", "", ticket.description);
+  }
+  lines.push(
+    "",
+    "## Workflow",
+    "",
+    "- Always use Infrastructure as Code (IaC) — no manual changes to infrastructure.",
+    "- Introduce all changes through Pull Requests unless the project is not a git repository.",
+  );
+  lines.push(TOOLS_AND_ENVIRONMENT);
+  return lines.join("\n");
+}
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -328,8 +428,6 @@ export default function Sidebar() {
   const clearProjectDraftThreadById = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadById,
   );
-  const scratchpadGet = useScratchpadStore((s) => s.get);
-  const scratchpadSet = useScratchpadStore((s) => s.set);
   const navigate = useNavigate();
   const isOnSettings = useLocation({ select: (loc) => loc.pathname === "/settings" });
   const { settings: appSettings } = useAppSettings();
@@ -341,6 +439,10 @@ export default function Sidebar() {
   const { data: keybindings = EMPTY_KEYBINDINGS } = useQuery({
     ...serverConfigQueryOptions(),
     select: (config) => config.keybindings,
+  });
+  const { data: serverBaseDir } = useQuery({
+    ...serverConfigQueryOptions(),
+    select: (config) => config.baseDir,
   });
   const queryClient = useQueryClient();
   const removeWorktreeMutation = useMutation(gitRemoveWorktreeMutationOptions({ queryClient }));
@@ -366,6 +468,37 @@ export default function Sidebar() {
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
+  const [jiraTickets, setJiraTickets] = useState<JiraTicket[]>([]);
+  const [jiraLoading, setJiraLoading] = useState(false);
+  const [jiraOpen, setJiraOpen] = useState(false);
+  const [jiraImporting, setJiraImporting] = useState<string | null>(null);
+  const [viewingSummaryCwd, setViewingSummaryCwd] = useState<string | null>(null);
+  const [secDeskProject, setSecDeskProject] = useState<{ name: string; cwd: string; ticketKey?: string | undefined; description?: string | undefined } | null>(null);
+  const [standupOpen, setStandupOpen] = useState(false);
+  const [compareTickets, setCompareTickets] = useState<{ jiraKey: string; secDeskKey: string } | null>(null);
+  const secDeskLinks = useSecDeskStore((s) => s.linksByTicketKey);
+  const setSecDeskLink = useSecDeskStore((s) => s.setLink);
+
+  // Auto-detect SECDESK links from summary.md files on load
+  useEffect(() => {
+    const api = readNativeApi();
+    if (!api) return;
+    for (const project of projects) {
+      if (!project.ticketKey || secDeskLinks[project.ticketKey]) continue;
+      void api.projects.readFile({ cwd: project.cwd, relativePath: "summary.md" }).then((result) => {
+        // Match patterns like [SECDESK-1234](https://...) or SECDESK-1234
+        const match = result.contents.match(/\[?(SECDESK-\d+)\]?\((https:\/\/[^\s)]+)\)/);
+        if (match) {
+          setSecDeskLink(project.ticketKey!, {
+            issueKey: match[1]!,
+            url: match[2]!,
+            createdAt: new Date().toISOString(),
+          });
+        }
+      }).catch(() => {/* no summary.md */});
+    }
+  }, [projects, secDeskLinks, setSecDeskLink]);
+
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
   const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
@@ -559,6 +692,186 @@ export default function Sidebar() {
     }
     setAddingProject((prev) => !prev);
   };
+
+  const handleOpenJiraPopover = useCallback(async (open: boolean) => {
+    setJiraOpen(open);
+    if (!open) return;
+    const api = readNativeApi();
+    if (!api) return;
+    setJiraLoading(true);
+    try {
+      const tickets = await api.jira.list({ maxResults: 50 });
+      // Filter out tickets that already have a project (check ticketKey and title prefix)
+      const existingKeys = new Set<string>();
+      for (const p of projects) {
+        if (p.ticketKey) existingKeys.add(p.ticketKey);
+        const titleMatch = p.name.match(/^([A-Z]+-\d+)/);
+        if (titleMatch) existingKeys.add(titleMatch[1]!);
+      }
+      setJiraTickets(tickets.filter((t: JiraTicket) => !existingKeys.has(t.key)));
+    } catch {
+      setJiraTickets([]);
+    } finally {
+      setJiraLoading(false);
+    }
+  }, [projects]);
+
+  const handleImportJiraTicket = useCallback(
+    async (ticket: JiraTicket) => {
+      const api = readNativeApi();
+      if (!api || jiraImporting || !serverBaseDir) return;
+
+      // Use the first existing project's cwd as the base repo
+      const baseCwd = projects[0]?.cwd;
+      if (!baseCwd) {
+        toastManager.add({
+          type: "error",
+          title: "No base project",
+          description: "Add at least one project first so we know which repo to use.",
+        });
+        return;
+      }
+
+      setJiraImporting(ticket.key);
+
+      // Track which steps completed so we can clean up on failure.
+      // Declared outside try/catch so the catch block can read them.
+      let directoryCreated = false;
+      let gitInitialized = false;
+      let projectCreated = false;
+      let jiraMetadataUpdated = false;
+      let threadCreated = false;
+      let failedStep = "";
+      let projectId: ProjectId | null = null;
+
+      try {
+        // 1. Create project folder at {baseDir}/projects/{ticket-key}/
+        const projectDir = `${serverBaseDir}/projects/${ticket.key.toLowerCase()}`;
+
+        // 2. Write summary.md into the project folder
+        failedStep = "writing summary.md";
+        const summaryContent = buildJiraTicketSummary(ticket);
+        await api.projects.writeFile({
+          cwd: projectDir,
+          relativePath: "summary.md",
+          contents: summaryContent,
+        });
+        directoryCreated = true;
+
+        // 3. Write CLAUDE.md so the AI agent has ticket context automatically
+        failedStep = "writing CLAUDE.md";
+        await api.projects.writeFile({
+          cwd: projectDir,
+          relativePath: "CLAUDE.md",
+          contents: buildClaudeContext(ticket),
+        });
+
+        // 4. Initialize a git repo so the project is recognized as a git workspace
+        failedStep = "initializing git repo";
+        await api.git.init({ cwd: projectDir });
+        gitInitialized = true;
+
+        // 5. Create the project with the project folder as workspace root
+        failedStep = "creating project";
+        projectId = newProjectId();
+        const createdAt = new Date().toISOString();
+        await api.orchestration.dispatchCommand({
+          type: "project.create",
+          commandId: newCommandId(),
+          projectId,
+          title: `${ticket.key}: ${ticket.summary}`,
+          workspaceRoot: projectDir,
+          defaultModel: DEFAULT_MODEL_BY_PROVIDER.codex,
+          createdAt,
+        });
+        projectCreated = true;
+
+        // 6. Update Jira metadata
+        failedStep = "updating Jira metadata";
+        await api.orchestration.dispatchCommand({
+          type: "project.jira-metadata.update",
+          commandId: newCommandId(),
+          projectId,
+          ticketKey: ticket.key,
+          jiraStatus: ticket.status,
+          priority: ticket.priority,
+          jiraUrl: ticket.url,
+          components: ticket.components,
+          labels: ticket.labels,
+          assignee: ticket.assignee ?? undefined,
+          reporter: ticket.reporter ?? undefined,
+          description: ticket.description ?? undefined,
+          parentKey: ticket.parentKey ?? undefined,
+        });
+        jiraMetadataUpdated = true;
+
+        // 7. Create a new thread — worktree can be added later at {projectDir}/repo/
+        failedStep = "creating thread";
+        await handleNewThread(projectId, { envMode: "local" });
+        threadCreated = true;
+
+        // 8. Auto-send ticket context so the agent immediately knows what it's working on
+        failedStep = "sending context prompt";
+        const contextPrompt = [
+          `I'm working on ${ticket.key}: ${ticket.summary}`,
+          ticket.description ? `\nDescription: ${ticket.description}` : "",
+          `\nJira: ${ticket.url}`,
+          `\nPlease read the CLAUDE.md and summary.md files in this workspace for full context.`,
+        ].filter(Boolean).join("");
+        setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent("commandTraySubmit", { detail: { command: contextPrompt } }),
+          );
+        }, 200);
+
+        // 9. Transition to "In Progress" if not already
+        failedStep = "transitioning Jira status";
+        if (ticket.status !== "In Progress") {
+          await api.jira.transition({
+            ticketKey: ticket.key,
+            transitionName: "In Progress",
+          }).catch(() => {/* best effort — transition may not be available */});
+        }
+
+        setJiraOpen(false);
+        toastManager.add({
+          type: "success",
+          title: "Imported",
+          description: `${ticket.key} project created with summary.md`,
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
+        // Attempt cleanup in reverse order. Each cleanup step has its own
+        // try/catch so a cleanup failure never masks the original error.
+        if (projectCreated && projectId !== null) {
+          try {
+            await api.orchestration.dispatchCommand({
+              type: "project.delete",
+              commandId: newCommandId(),
+              projectId,
+            });
+          } catch (cleanupErr) {
+            console.error("Cleanup: failed to delete project from store", cleanupErr);
+          }
+        }
+
+        // Note: no client-side API exists for directory removal. If the
+        // directory was created but the import failed, the user will need to
+        // remove it manually. The toast below tells them which step failed so
+        // they can take appropriate action.
+
+        toastManager.add({
+          type: "error",
+          title: "Import failed",
+          description: `Failed while ${failedStep}: ${errorMessage}`,
+        });
+      } finally {
+        setJiraImporting(null);
+      }
+    },
+    [projects, handleNewThread, jiraImporting, serverBaseDir],
+  );
 
   const cancelRename = useCallback(() => {
     setRenamingThreadId(null);
@@ -919,14 +1232,30 @@ export default function Sidebar() {
     ],
   );
 
+  const toggleWaiting = useProjectStatusStore((s) => s.toggleWaiting);
+  const waitingProjectIds = useProjectStatusStore((s) => s.waitingProjectIds);
+
   const handleProjectContextMenu = useCallback(
     async (projectId: ProjectId, position: { x: number; y: number }) => {
       const api = readNativeApi();
       if (!api) return;
+      const isWaiting = waitingProjectIds.has(projectId);
       const clicked = await api.contextMenu.show(
-        [{ id: "delete", label: "Remove project", destructive: true }],
+        [
+          {
+            id: "toggle-waiting",
+            label: isWaiting ? "Mark as active" : "Mark as waiting",
+          },
+          { id: "delete", label: "Remove project", destructive: true },
+        ],
         position,
       );
+
+      if (clicked === "toggle-waiting") {
+        toggleWaiting(projectId);
+        return;
+      }
+
       if (clicked !== "delete") return;
 
       const project = projects.find((entry) => entry.id === projectId);
@@ -972,6 +1301,8 @@ export default function Sidebar() {
       getDraftThreadByProjectId,
       projects,
       threads,
+      toggleWaiting,
+      waitingProjectIds,
     ],
   );
 
@@ -1032,9 +1363,23 @@ export default function Sidebar() {
       if (selectedThreadIds.size > 0) {
         clearSelection();
       }
+      // If the project has no threads, auto-create one instead of just toggling
+      const projectThreads = threads.filter((t) => t.projectId === projectId);
+      if (projectThreads.length === 0) {
+        const project = projects.find((p) => p.id === projectId);
+        if (project && !project.expanded) {
+          toggleProject(projectId);
+        }
+        void handleNewThread(projectId, {
+          envMode: resolveSidebarNewThreadEnvMode({
+            defaultEnvMode: appSettings.defaultThreadEnvMode,
+          }),
+        });
+        return;
+      }
       toggleProject(projectId);
     },
-    [clearSelection, selectedThreadIds.size, toggleProject],
+    [clearSelection, selectedThreadIds.size, toggleProject, threads, projects, handleNewThread, appSettings.defaultThreadEnvMode],
   );
 
   const handleProjectTitleKeyDown = useCallback(
@@ -1213,7 +1558,9 @@ export default function Sidebar() {
         <TooltipTrigger
           render={
             <div className="flex min-w-0 flex-1 items-center gap-1 ml-1 cursor-pointer">
-              <T3Wordmark />
+              <span className="truncate text-sm font-semibold tracking-tight text-foreground/80">
+                Fly
+              </span>
               <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
                 Code
               </span>
@@ -1228,6 +1575,15 @@ export default function Sidebar() {
         </TooltipPopup>
       </Tooltip>
     </div>
+  );
+
+  const activeProjects = useMemo(
+    () => projects.filter((p) => !waitingProjectIds.has(p.id)),
+    [projects, waitingProjectIds],
+  );
+  const waitingProjects = useMemo(
+    () => projects.filter((p) => waitingProjectIds.has(p.id)),
+    [projects, waitingProjectIds],
   );
 
   return (
@@ -1292,6 +1648,54 @@ export default function Sidebar() {
             <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
               Projects
             </span>
+            <div className="flex items-center gap-0.5">
+              <Popover open={jiraOpen} onOpenChange={handleOpenJiraPopover}>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <PopoverTrigger
+                        className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                      />
+                    }
+                  >
+                    <TicketIcon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="right">Import from Jira</TooltipPopup>
+                </Tooltip>
+                <PopoverPopup side="bottom" align="start" sideOffset={8} className="w-96">
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-foreground mb-2">Jira Tickets</p>
+                    {jiraLoading ? (
+                      <div className="flex items-center justify-center py-4">
+                        <LoaderIcon className="size-4 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : jiraTickets.length === 0 ? (
+                      <p className="text-xs text-muted-foreground py-2">No unassigned tickets found.</p>
+                    ) : (
+                      <div className="max-h-[70vh] overflow-y-auto -mx-4 px-4 space-y-0.5">
+                        {jiraTickets.map((ticket) => (
+                          <button
+                            key={ticket.key}
+                            type="button"
+                            className="flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                            disabled={jiraImporting === ticket.key}
+                            onClick={() => void handleImportJiraTicket(ticket)}
+                          >
+                            <div className="flex items-center gap-2 w-full">
+                              <span className="shrink-0 font-mono font-medium text-primary">{ticket.key}</span>
+                              <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">{ticket.status}</span>
+                              {ticket.priority && (
+                                <span className="shrink-0 text-[10px] text-muted-foreground">{ticket.priority}</span>
+                              )}
+                            </div>
+                            <span className="text-foreground leading-snug">{ticket.summary}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </PopoverPopup>
+              </Popover>
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -1314,6 +1718,7 @@ export default function Sidebar() {
                 {shouldShowProjectPathEntry ? "Cancel add project" : "Add project"}
               </TooltipPopup>
             </Tooltip>
+            </div>
           </div>
 
           {shouldShowProjectPathEntry && (
@@ -1394,7 +1799,7 @@ export default function Sidebar() {
                 items={projects.map((project) => project.id)}
                 strategy={verticalListSortingStrategy}
               >
-                {projects.map((project) => {
+                {activeProjects.map((project) => {
                   const projectThreads = threads
                     .filter((thread) => thread.projectId === project.id)
                     .toSorted((a, b) => {
@@ -1471,53 +1876,6 @@ export default function Sidebar() {
                                   }
                                 >
                                   <span className="truncate">{project.name}</span>
-                                  {project.ticketKey && (
-                                    <a
-                                      href={
-                                        project.jiraUrl ??
-                                        `https://mediafly.atlassian.net/browse/${project.ticketKey}`
-                                      }
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      onClick={(e) => e.stopPropagation()}
-                                      className="ml-1 inline-flex shrink-0 items-center rounded bg-blue-500/10 px-1 py-0.5 text-[10px] font-medium text-blue-400 hover:bg-blue-500/20"
-                                    >
-                                      {project.ticketKey}
-                                    </a>
-                                  )}
-                                  {project.jiraStatus && (
-                                    <span
-                                      className={`ml-1 inline-flex shrink-0 items-center rounded px-1 py-0.5 text-[10px] font-medium ${
-                                        project.jiraStatus === "In Progress"
-                                          ? "bg-yellow-500/10 text-yellow-400"
-                                          : project.jiraStatus === "Done"
-                                            ? "bg-green-500/10 text-green-400"
-                                            : "bg-gray-500/10 text-gray-400"
-                                      }`}
-                                    >
-                                      {project.jiraStatus}
-                                    </span>
-                                  )}
-                                  {project.priority &&
-                                    project.priority !== "Medium" && (
-                                      <span
-                                        className={`ml-1 shrink-0 text-[10px] ${
-                                          project.priority === "Highest" ||
-                                          project.priority === "High"
-                                            ? "text-red-400"
-                                            : project.priority === "Low" ||
-                                                project.priority === "Lowest"
-                                              ? "text-gray-500"
-                                              : ""
-                                        }`}
-                                      >
-                                        {project.priority === "Highest"
-                                          ? "\u{1F534}"
-                                          : project.priority === "High"
-                                            ? "\u{1F7E0}"
-                                            : "\u{1F535}"}
-                                      </span>
-                                    )}
                                 </TooltipTrigger>
                                 <TooltipPopup side="top">
                                   <span>{project.name}</span>
@@ -1562,6 +1920,71 @@ export default function Sidebar() {
                                   : "New thread"}
                               </TooltipPopup>
                             </Tooltip>
+                          </div>
+
+                          <div className="mx-3 mb-0.5 flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="flex items-center rounded px-1.5 py-0.5 text-[11px] text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/30 transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setViewingSummaryCwd(project.cwd);
+                              }}
+                            >
+                              summary.md
+                            </button>
+                            {(() => {
+                              const resolvedJiraUrl = project.jiraUrl ?? (project.ticketKey ? `https://mediafly.atlassian.net/browse/${project.ticketKey}` : null);
+                              const hasSecDesk = !!(project.ticketKey && secDeskLinks[project.ticketKey]);
+                              return (
+                                <>
+                                  {hasSecDesk ? (
+                                    <button
+                                      type="button"
+                                      className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-blue-400/70 hover:text-blue-400 hover:bg-muted/30 transition-colors"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const url = secDeskLinks[project.ticketKey!]!.url;
+                                        void readNativeApi()?.shell.openExternal(url);
+                                      }}
+                                      title={secDeskLinks[project.ticketKey!]!.issueKey}
+                                    >
+                                      <TicketIcon className="size-3" />
+                                      {secDeskLinks[project.ticketKey!]!.issueKey}
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="flex items-center rounded px-1.5 py-0.5 text-[11px] text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/30 transition-colors"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSecDeskProject({
+                                          name: project.name,
+                                          cwd: project.cwd,
+                                          ticketKey: project.ticketKey ?? undefined,
+                                          description: project.description ?? undefined,
+                                        });
+                                      }}
+                                    >
+                                      SECDESK
+                                    </button>
+                                  )}
+                                  {resolvedJiraUrl && (
+                                    <button
+                                      type="button"
+                                      className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-blue-400/70 hover:text-blue-400 hover:bg-muted/30 transition-colors"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void readNativeApi()?.shell.openExternal(resolvedJiraUrl);
+                                      }}
+                                      title={project.ticketKey ?? undefined}
+                                    >
+                                      Jira
+                                    </button>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
 
                           <CollapsibleContent keepMounted>
@@ -1779,36 +2202,8 @@ export default function Sidebar() {
                                 </SidebarMenuSubItem>
                               )}
                             </SidebarMenuSub>
-                            {/* Per-project note */}
-                            <div className="px-2 pb-1">
-                              <textarea
-                                className="w-full resize-none rounded border border-border bg-background/50 px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                                placeholder="Project notes..."
-                                rows={2}
-                                defaultValue={project.note ?? ""}
-                                onBlur={(e) => {
-                                  const note = e.target.value;
-                                  const api = readNativeApi();
-                                  if (!api) return;
-                                  api.orchestration.dispatchCommand({
-                                    type: "project.note.update",
-                                    commandId: newCommandId(),
-                                    projectId: project.id,
-                                    note,
-                                  });
-                                }}
-                              />
-                            </div>
-                            {/* Per-project scratchpad */}
-                            <div className="px-2 pb-1">
-                              <textarea
-                                className="w-full resize-none rounded border border-border bg-background/50 px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                                placeholder="Scratchpad..."
-                                rows={2}
-                                value={scratchpadGet(project.id)}
-                                onChange={(e) => scratchpadSet(project.id, e.target.value)}
-                              />
-                            </div>
+
+
                             {/* Prompt history */}
                             <PromptHistorySection
                               projectId={project.id}
@@ -1820,6 +2215,432 @@ export default function Sidebar() {
                     </SortableProjectItem>
                   );
                 })}
+
+                {waitingProjects.length > 0 && (
+                  <>
+                    <div className="mx-2 mt-3 mb-1 flex items-center gap-2">
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/40">
+                        Waiting
+                      </span>
+                      <div className="h-px flex-1 bg-border/30" />
+                    </div>
+                    {waitingProjects.map((project) => {
+                  const projectThreads = threads
+                    .filter((thread) => thread.projectId === project.id)
+                    .toSorted((a, b) => {
+                      const byDate =
+                        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+                      if (byDate !== 0) return byDate;
+                      return b.id.localeCompare(a.id);
+                    });
+                  const projectStatus = resolveProjectStatusIndicator(
+                    projectThreads.map((thread) =>
+                      resolveThreadStatusPill({
+                        thread,
+                        hasPendingApprovals: derivePendingApprovals(thread.activities).length > 0,
+                        hasPendingUserInput: derivePendingUserInputs(thread.activities).length > 0,
+                      }),
+                    ),
+                  );
+                  const isThreadListExpanded = expandedThreadListsByProject.has(project.id);
+                  const hasHiddenThreads = projectThreads.length > THREAD_PREVIEW_LIMIT;
+                  const visibleThreads =
+                    hasHiddenThreads && !isThreadListExpanded
+                      ? projectThreads.slice(0, THREAD_PREVIEW_LIMIT)
+                      : projectThreads;
+                  const orderedProjectThreadIds = projectThreads.map((thread) => thread.id);
+
+                  return (
+                    <SortableProjectItem key={project.id} projectId={project.id}>
+                      {(dragHandleProps) => (
+                        <Collapsible className="group/collapsible opacity-60 hover:opacity-100 transition-opacity" open={project.expanded}>
+                          <div className="group/project-header relative">
+                            <SidebarMenuButton
+                              size="sm"
+                              className="gap-2 px-2 py-1.5 text-left cursor-grab active:cursor-grabbing hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground"
+                              {...dragHandleProps.attributes}
+                              {...dragHandleProps.listeners}
+                              onPointerDownCapture={handleProjectTitlePointerDownCapture}
+                              onClick={(event) => handleProjectTitleClick(event, project.id)}
+                              onKeyDown={(event) => handleProjectTitleKeyDown(event, project.id)}
+                              onContextMenu={(event) => {
+                                event.preventDefault();
+                                void handleProjectContextMenu(project.id, {
+                                  x: event.clientX,
+                                  y: event.clientY,
+                                });
+                              }}
+                            >
+                              {!project.expanded && projectStatus ? (
+                                <span
+                                  aria-hidden="true"
+                                  title={projectStatus.label}
+                                  className={`-ml-0.5 relative inline-flex size-3.5 shrink-0 items-center justify-center ${projectStatus.colorClass}`}
+                                >
+                                  <span className="absolute inset-0 flex items-center justify-center transition-opacity duration-150 group-hover/project-header:opacity-0">
+                                    <span
+                                      className={`size-[9px] rounded-full ${projectStatus.dotClass} ${
+                                        projectStatus.pulse ? "animate-pulse" : ""
+                                      }`}
+                                    />
+                                  </span>
+                                  <ChevronRightIcon className="absolute inset-0 m-auto size-3.5 text-muted-foreground/70 opacity-0 transition-opacity duration-150 group-hover/project-header:opacity-100" />
+                                </span>
+                              ) : (
+                                <ChevronRightIcon
+                                  className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
+                                    project.expanded ? "rotate-90" : ""
+                                  }`}
+                                />
+                              )}
+                              <ProjectFavicon cwd={project.cwd} />
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <span className="flex min-w-0 flex-1 items-center gap-0.5 truncate text-xs font-medium text-foreground/90" />
+                                  }
+                                >
+                                  <span className="truncate">{project.name}</span>
+                                </TooltipTrigger>
+                                <TooltipPopup side="top">
+                                  <span>{project.name}</span>
+                                  {project.lastAccessedAt && (
+                                    <span className="ml-1 text-muted-foreground">
+                                      &middot; {formatRelativeTime(project.lastAccessedAt)}
+                                    </span>
+                                  )}
+                                </TooltipPopup>
+                              </Tooltip>
+                            </SidebarMenuButton>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <SidebarMenuAction
+                                    render={
+                                      <button
+                                        type="button"
+                                        aria-label={`Create new thread in ${project.name}`}
+                                        data-testid="new-thread-button"
+                                      />
+                                    }
+                                    showOnHover
+                                    className="top-1 right-1 size-5 rounded-md p-0 text-muted-foreground/70 hover:bg-secondary hover:text-foreground"
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      void handleNewThread(project.id, {
+                                        envMode: resolveSidebarNewThreadEnvMode({
+                                          defaultEnvMode: appSettings.defaultThreadEnvMode,
+                                        }),
+                                      });
+                                    }}
+                                  >
+                                    <SquarePenIcon className="size-3.5" />
+                                  </SidebarMenuAction>
+                                }
+                              />
+                              <TooltipPopup side="top">
+                                {newThreadShortcutLabel
+                                  ? `New thread (${newThreadShortcutLabel})`
+                                  : "New thread"}
+                              </TooltipPopup>
+                            </Tooltip>
+                          </div>
+
+                          <div className="mx-3 mb-0.5 flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="flex items-center rounded px-1.5 py-0.5 text-[11px] text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/30 transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setViewingSummaryCwd(project.cwd);
+                              }}
+                            >
+                              summary.md
+                            </button>
+                            {(() => {
+                              const resolvedJiraUrl = project.jiraUrl ?? (project.ticketKey ? `https://mediafly.atlassian.net/browse/${project.ticketKey}` : null);
+                              const hasSecDesk = !!(project.ticketKey && secDeskLinks[project.ticketKey]);
+                              return (
+                                <>
+                                  {hasSecDesk ? (
+                                    <button
+                                      type="button"
+                                      className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-blue-400/70 hover:text-blue-400 hover:bg-muted/30 transition-colors"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const url = secDeskLinks[project.ticketKey!]!.url;
+                                        void readNativeApi()?.shell.openExternal(url);
+                                      }}
+                                      title={secDeskLinks[project.ticketKey!]!.issueKey}
+                                    >
+                                      <TicketIcon className="size-3" />
+                                      {secDeskLinks[project.ticketKey!]!.issueKey}
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="flex items-center rounded px-1.5 py-0.5 text-[11px] text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/30 transition-colors"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSecDeskProject({
+                                          name: project.name,
+                                          cwd: project.cwd,
+                                          ticketKey: project.ticketKey ?? undefined,
+                                          description: project.description ?? undefined,
+                                        });
+                                      }}
+                                    >
+                                      SECDESK
+                                    </button>
+                                  )}
+                                  {resolvedJiraUrl && (
+                                    <button
+                                      type="button"
+                                      className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-blue-400/70 hover:text-blue-400 hover:bg-muted/30 transition-colors"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void readNativeApi()?.shell.openExternal(resolvedJiraUrl);
+                                      }}
+                                      title={project.ticketKey ?? undefined}
+                                    >
+                                      Jira
+                                    </button>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
+
+                          <CollapsibleContent keepMounted>
+                            <SidebarMenuSub className="mx-1 my-0 w-full translate-x-0 gap-0.5 px-1.5 py-0">
+                              {visibleThreads.map((thread) => {
+                                const isActive = routeThreadId === thread.id;
+                                const isSelected = selectedThreadIds.has(thread.id);
+                                const isHighlighted = isActive || isSelected;
+                                const threadStatus = resolveThreadStatusPill({
+                                  thread,
+                                  hasPendingApprovals:
+                                    derivePendingApprovals(thread.activities).length > 0,
+                                  hasPendingUserInput:
+                                    derivePendingUserInputs(thread.activities).length > 0,
+                                });
+                                const prStatus = prStatusIndicator(
+                                  prByThreadId.get(thread.id) ?? null,
+                                );
+                                const terminalStatus = terminalStatusFromRunningIds(
+                                  selectThreadTerminalState(terminalStateByThreadId, thread.id)
+                                    .runningTerminalIds,
+                                );
+
+                                return (
+                                  <SidebarMenuSubItem
+                                    key={thread.id}
+                                    className="w-full"
+                                    data-thread-item
+                                  >
+                                    <SidebarMenuSubButton
+                                      render={<div role="button" tabIndex={0} />}
+                                      size="sm"
+                                      isActive={isActive}
+                                      className={resolveThreadRowClassName({
+                                        isActive,
+                                        isSelected,
+                                      })}
+                                      onClick={(event) => {
+                                        handleThreadClick(
+                                          event,
+                                          thread.id,
+                                          orderedProjectThreadIds,
+                                        );
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (event.key !== "Enter" && event.key !== " ") return;
+                                        event.preventDefault();
+                                        if (selectedThreadIds.size > 0) {
+                                          clearSelection();
+                                        }
+                                        setSelectionAnchor(thread.id);
+                                        void navigate({
+                                          to: "/$threadId",
+                                          params: { threadId: thread.id },
+                                        });
+                                      }}
+                                      onContextMenu={(event) => {
+                                        event.preventDefault();
+                                        if (
+                                          selectedThreadIds.size > 0 &&
+                                          selectedThreadIds.has(thread.id)
+                                        ) {
+                                          void handleMultiSelectContextMenu({
+                                            x: event.clientX,
+                                            y: event.clientY,
+                                          });
+                                        } else {
+                                          if (selectedThreadIds.size > 0) {
+                                            clearSelection();
+                                          }
+                                          void handleThreadContextMenu(thread.id, {
+                                            x: event.clientX,
+                                            y: event.clientY,
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+                                        {prStatus && (
+                                          <Tooltip>
+                                            <TooltipTrigger
+                                              render={
+                                                <button
+                                                  type="button"
+                                                  aria-label={prStatus.tooltip}
+                                                  className={`inline-flex items-center justify-center ${prStatus.colorClass} cursor-pointer rounded-sm outline-hidden focus-visible:ring-1 focus-visible:ring-ring`}
+                                                  onClick={(event) => {
+                                                    openPrLink(event, prStatus.url);
+                                                  }}
+                                                >
+                                                  <GitPullRequestIcon className="size-3" />
+                                                </button>
+                                              }
+                                            />
+                                            <TooltipPopup side="top">
+                                              {prStatus.tooltip}
+                                            </TooltipPopup>
+                                          </Tooltip>
+                                        )}
+                                        {threadStatus && (
+                                          <span
+                                            className={`inline-flex items-center gap-1 text-[10px] ${threadStatus.colorClass}`}
+                                          >
+                                            <span
+                                              className={`h-1.5 w-1.5 rounded-full ${threadStatus.dotClass} ${
+                                                threadStatus.pulse ? "animate-pulse" : ""
+                                              }`}
+                                            />
+                                            <span className="hidden md:inline">
+                                              {threadStatus.label}
+                                            </span>
+                                          </span>
+                                        )}
+                                        {renamingThreadId === thread.id ? (
+                                          <input
+                                            ref={(el) => {
+                                              if (el && renamingInputRef.current !== el) {
+                                                renamingInputRef.current = el;
+                                                el.focus();
+                                                el.select();
+                                              }
+                                            }}
+                                            className="min-w-0 flex-1 truncate text-xs bg-transparent outline-none border border-ring rounded px-0.5"
+                                            value={renamingTitle}
+                                            onChange={(e) => setRenamingTitle(e.target.value)}
+                                            onKeyDown={(e) => {
+                                              e.stopPropagation();
+                                              if (e.key === "Enter") {
+                                                e.preventDefault();
+                                                renamingCommittedRef.current = true;
+                                                void commitRename(
+                                                  thread.id,
+                                                  renamingTitle,
+                                                  thread.title,
+                                                );
+                                              } else if (e.key === "Escape") {
+                                                e.preventDefault();
+                                                renamingCommittedRef.current = true;
+                                                cancelRename();
+                                              }
+                                            }}
+                                            onBlur={() => {
+                                              if (!renamingCommittedRef.current) {
+                                                void commitRename(
+                                                  thread.id,
+                                                  renamingTitle,
+                                                  thread.title,
+                                                );
+                                              }
+                                            }}
+                                            onClick={(e) => e.stopPropagation()}
+                                          />
+                                        ) : (
+                                          <span className="min-w-0 flex-1 truncate text-xs">
+                                            {thread.title}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                                        {terminalStatus && (
+                                          <span
+                                            role="img"
+                                            aria-label={terminalStatus.label}
+                                            title={terminalStatus.label}
+                                            className={`inline-flex items-center justify-center ${terminalStatus.colorClass}`}
+                                          >
+                                            <TerminalIcon
+                                              className={`size-3 ${terminalStatus.pulse ? "animate-pulse" : ""}`}
+                                            />
+                                          </span>
+                                        )}
+                                        <span
+                                          className={`text-[10px] ${
+                                            isHighlighted
+                                              ? "text-foreground/72 dark:text-foreground/82"
+                                              : "text-muted-foreground/40"
+                                          }`}
+                                        >
+                                          {formatRelativeTime(thread.createdAt)}
+                                        </span>
+                                      </div>
+                                    </SidebarMenuSubButton>
+                                  </SidebarMenuSubItem>
+                                );
+                              })}
+
+                              {hasHiddenThreads && !isThreadListExpanded && (
+                                <SidebarMenuSubItem className="w-full">
+                                  <SidebarMenuSubButton
+                                    render={<button type="button" />}
+                                    data-thread-selection-safe
+                                    size="sm"
+                                    className="h-6 w-full translate-x-0 justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80"
+                                    onClick={() => {
+                                      expandThreadListForProject(project.id);
+                                    }}
+                                  >
+                                    <span>Show more</span>
+                                  </SidebarMenuSubButton>
+                                </SidebarMenuSubItem>
+                              )}
+                              {hasHiddenThreads && isThreadListExpanded && (
+                                <SidebarMenuSubItem className="w-full">
+                                  <SidebarMenuSubButton
+                                    render={<button type="button" />}
+                                    data-thread-selection-safe
+                                    size="sm"
+                                    className="h-6 w-full translate-x-0 justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80"
+                                    onClick={() => {
+                                      collapseThreadListForProject(project.id);
+                                    }}
+                                  >
+                                    <span>Show less</span>
+                                  </SidebarMenuSubButton>
+                                </SidebarMenuSubItem>
+                              )}
+                            </SidebarMenuSub>
+
+                            {/* Prompt history */}
+                            <PromptHistorySection
+                              projectId={project.id}
+                              threadId={routeThreadId ?? undefined}
+                            />
+                          </CollapsibleContent>
+                        </Collapsible>
+                      )}
+                    </SortableProjectItem>
+                  );
+                })}
+                  </>
+                )}
               </SortableContext>
             </SidebarMenu>
           </DndContext>
@@ -1833,31 +2654,67 @@ export default function Sidebar() {
       </SidebarContent>
 
       <SidebarSeparator />
-      <SidebarFooter className="p-2">
+      <SidebarFooter className="p-2 space-y-2">
         <SidebarMenu>
           <SidebarMenuItem>
-            {isOnSettings ? (
-              <SidebarMenuButton
-                size="sm"
-                className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
-                onClick={() => window.history.back()}
-              >
-                <ArrowLeftIcon className="size-3.5" />
-                <span className="text-xs">Back</span>
-              </SidebarMenuButton>
-            ) : (
-              <SidebarMenuButton
-                size="sm"
-                className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
-                onClick={() => void navigate({ to: "/settings" })}
-              >
-                <SettingsIcon className="size-3.5" />
-                <span className="text-xs">Settings</span>
-              </SidebarMenuButton>
-            )}
+            <div className="flex items-center justify-between">
+              {isOnSettings ? (
+                <SidebarMenuButton
+                  size="sm"
+                  className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+                  onClick={() => window.history.back()}
+                >
+                  <ArrowLeftIcon className="size-3.5" />
+                  <span className="text-xs">Back</span>
+                </SidebarMenuButton>
+              ) : (
+                <SidebarMenuButton
+                  size="sm"
+                  className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+                  onClick={() => void navigate({ to: "/settings" })}
+                >
+                  <SettingsIcon className="size-3.5" />
+                  <span className="text-xs">Settings</span>
+                </SidebarMenuButton>
+              )}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setStandupOpen(true)}
+                  className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/30 transition-colors"
+                  title="Generate daily standup"
+                >
+                  <MessageSquareTextIcon className="size-3.5" />
+                  <span>Standup</span>
+                </button>
+                <AuthStatusIndicators />
+              </div>
+            </div>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
+
+      <StandupModal open={standupOpen} onOpenChange={setStandupOpen} />
+      <FileViewerModal
+        cwd={viewingSummaryCwd}
+        relativePath={viewingSummaryCwd ? "summary.md" : null}
+        open={viewingSummaryCwd !== null}
+        onOpenChange={(open) => { if (!open) setViewingSummaryCwd(null); }}
+      />
+      <SecDeskModal
+        open={secDeskProject !== null}
+        onOpenChange={(open) => { if (!open) setSecDeskProject(null); }}
+        defaultSummary={secDeskProject ? `Close AWS accounts: ${secDeskProject.ticketKey ?? secDeskProject.name}` : ""}
+        defaultDescription={secDeskProject?.description ?? ""}
+        ticketKey={secDeskProject?.ticketKey}
+        projectCwd={secDeskProject?.cwd}
+      />
+      <TicketComparisonModal
+        open={compareTickets !== null}
+        onOpenChange={(open) => { if (!open) setCompareTickets(null); }}
+        jiraTicketKey={compareTickets?.jiraKey ?? null}
+        secDeskTicketKey={compareTickets?.secDeskKey ?? null}
+      />
     </>
   );
 }

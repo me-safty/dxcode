@@ -12,6 +12,7 @@ import { GitManagerError } from "../Errors.ts";
 import { GitManager, type GitManagerShape } from "../Services/GitManager.ts";
 import { GitCore } from "../Services/GitCore.ts";
 import { GitHubCli } from "../Services/GitHubCli.ts";
+import { BitbucketApi } from "../Services/BitbucketApi.ts";
 import { TextGeneration } from "../Services/TextGeneration.ts";
 
 interface OpenPrInfo {
@@ -91,6 +92,50 @@ function resolvePullRequestWorktreeLocalBranchName(
   const sanitizedHeadBranch = sanitizeBranchFragment(pullRequest.headBranch).trim();
   const suffix = sanitizedHeadBranch.length > 0 ? sanitizedHeadBranch : "head";
   return `t3code/pr-${pullRequest.number}/${suffix}`;
+}
+
+type RemoteProvider = "github" | "bitbucket" | "unknown";
+
+interface BitbucketRemoteInfo {
+  workspace: string;
+  repoSlug: string;
+}
+
+function detectRemoteProvider(url: string | null): RemoteProvider {
+  const trimmed = url?.trim() ?? "";
+  if (trimmed.length === 0) return "unknown";
+  if (/github\.com/i.test(trimmed)) return "github";
+  if (/bitbucket\.org/i.test(trimmed)) return "bitbucket";
+  return "unknown";
+}
+
+function parseBitbucketRemoteInfo(url: string | null): BitbucketRemoteInfo | null {
+  const trimmed = url?.trim() ?? "";
+  if (trimmed.length === 0) return null;
+
+  // SSH: git@bitbucket.org:workspace/repo.git
+  const sshMatch =
+    /^git@bitbucket\.org:([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(trimmed);
+  if (sshMatch?.[1] && sshMatch[2]) {
+    return { workspace: sshMatch[1], repoSlug: sshMatch[2] };
+  }
+
+  // HTTPS: https://bitbucket.org/workspace/repo.git
+  const httpsMatch =
+    /^https?:\/\/(?:[^@]+@)?bitbucket\.org\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(trimmed);
+  if (httpsMatch?.[1] && httpsMatch[2]) {
+    return { workspace: httpsMatch[1], repoSlug: httpsMatch[2] };
+  }
+
+  return null;
+}
+
+function parseBitbucketPrUrl(url: string): { workspace: string; repoSlug: string; prId: number } | null {
+  const match = /^https?:\/\/bitbucket\.org\/([^/]+)\/([^/]+)\/pull-requests\/(\d+)/i.exec(url.trim());
+  if (match?.[1] && match[2] && match[3]) {
+    return { workspace: match[1], repoSlug: match[2], prId: parseInt(match[3], 10) };
+  }
+  return null;
 }
 
 function parseGitHubRepositoryNameWithOwnerFromRemoteUrl(url: string | null): string | null {
@@ -335,7 +380,77 @@ function toPullRequestHeadRemoteInfo(pr: {
 export const makeGitManager = Effect.gen(function* () {
   const gitCore = yield* GitCore;
   const gitHubCli = yield* GitHubCli;
+  const bitbucketApi = yield* BitbucketApi;
   const textGeneration = yield* TextGeneration;
+
+  /** Detect the remote provider for a repo by reading origin URL. */
+  const detectCwdProvider = (cwd: string) =>
+    gitCore
+      .readConfigValue(cwd, "remote.origin.url")
+      .pipe(
+        Effect.map(detectRemoteProvider),
+        Effect.catch(() => Effect.succeed("unknown" as RemoteProvider)),
+      );
+
+  /** Parse Bitbucket workspace/repo from origin remote. */
+  const resolveBitbucketRemote = (cwd: string) =>
+    gitCore
+      .readConfigValue(cwd, "remote.origin.url")
+      .pipe(
+        Effect.map(parseBitbucketRemoteInfo),
+        Effect.catch(() => Effect.succeed(null)),
+      );
+
+  /** Find the latest PR for a branch on Bitbucket. */
+  const findLatestBitbucketPr = (cwd: string, branch: string) =>
+    Effect.gen(function* () {
+      const remote = yield* resolveBitbucketRemote(cwd);
+      if (!remote) return null;
+
+      const prs = yield* bitbucketApi.listAllPullRequests({
+        workspace: remote.workspace,
+        repoSlug: remote.repoSlug,
+        sourceBranch: branch,
+        limit: 20,
+      });
+
+      // Prefer open PRs
+      const openPr = prs.find((pr) => pr.state === "open");
+      return openPr ?? prs[0] ?? null;
+    });
+
+  /** Find an open PR for a branch on Bitbucket. */
+  const findOpenBitbucketPr = (cwd: string, branch: string) =>
+    Effect.gen(function* () {
+      const remote = yield* resolveBitbucketRemote(cwd);
+      if (!remote) return null;
+
+      const prs = yield* bitbucketApi.listOpenPullRequests({
+        workspace: remote.workspace,
+        repoSlug: remote.repoSlug,
+        sourceBranch: branch,
+        limit: 1,
+      });
+
+      return prs[0] ?? null;
+    });
+
+  /** Convert a Bitbucket PR to the internal PullRequestInfo format. */
+  const bitbucketPrToStatusPr = (pr: {
+    id: number;
+    title: string;
+    url: string;
+    sourceRefName: string;
+    destinationRefName: string;
+    state: "open" | "closed" | "merged";
+  }) => ({
+    number: pr.id,
+    title: pr.title,
+    url: pr.url,
+    baseBranch: pr.destinationRefName,
+    headBranch: pr.sourceRefName,
+    state: pr.state,
+  });
 
   const configurePullRequestHeadUpstream = (
     cwd: string,
@@ -708,6 +823,64 @@ export const makeGitManager = Effect.gen(function* () {
       };
     });
 
+  const runBitbucketPrStep = (cwd: string, branch: string, model?: string) =>
+    Effect.gen(function* () {
+      const remote = yield* resolveBitbucketRemote(cwd);
+      if (!remote) {
+        return yield* gitManagerError(
+          "runPrStep",
+          "Could not resolve Bitbucket workspace/repo from origin remote.",
+        );
+      }
+
+      // Check for existing open PR
+      const existingPr = yield* findOpenBitbucketPr(cwd, branch);
+      if (existingPr) {
+        return {
+          status: "opened_existing" as const,
+          url: existingPr.url,
+          number: existingPr.id,
+          baseBranch: existingPr.destinationRefName,
+          headBranch: existingPr.sourceRefName,
+          title: existingPr.title,
+        };
+      }
+
+      const defaultBranch = yield* bitbucketApi
+        .getDefaultBranch({ workspace: remote.workspace, repoSlug: remote.repoSlug })
+        .pipe(Effect.map((b) => b ?? "main"));
+
+      const rangeContext = yield* gitCore.readRangeContext(cwd, defaultBranch);
+
+      const generated = yield* textGeneration.generatePrContent({
+        cwd,
+        baseBranch: defaultBranch,
+        headBranch: branch,
+        commitSummary: limitContext(rangeContext.commitSummary, 20_000),
+        diffSummary: limitContext(rangeContext.diffSummary, 20_000),
+        diffPatch: limitContext(rangeContext.diffPatch, 60_000),
+        ...(model ? { model } : {}),
+      });
+
+      const createdPr = yield* bitbucketApi.createPullRequest({
+        workspace: remote.workspace,
+        repoSlug: remote.repoSlug,
+        sourceBranch: branch,
+        destinationBranch: defaultBranch,
+        title: generated.title,
+        description: generated.body,
+      });
+
+      return {
+        status: "created" as const,
+        url: createdPr.url,
+        number: createdPr.id,
+        baseBranch: createdPr.destinationRefName,
+        headBranch: createdPr.sourceRefName,
+        title: createdPr.title,
+      };
+    });
+
   const runPrStep = (cwd: string, fallbackBranch: string | null, model?: string) =>
     Effect.gen(function* () {
       const details = yield* gitCore.statusDetails(cwd);
@@ -723,6 +896,12 @@ export const makeGitManager = Effect.gen(function* () {
           "runPrStep",
           "Current branch has not been pushed. Push before creating a PR.",
         );
+      }
+
+      // Route to Bitbucket if applicable
+      const provider = yield* detectCwdProvider(cwd);
+      if (provider === "bitbucket") {
+        return yield* runBitbucketPrStep(cwd, branch, model);
       }
 
       const headContext = yield* resolveBranchHeadContext(cwd, {
@@ -796,16 +975,26 @@ export const makeGitManager = Effect.gen(function* () {
   const status: GitManagerShape["status"] = Effect.fnUntraced(function* (input) {
     const details = yield* gitCore.statusDetails(input.cwd);
 
-    const pr =
-      details.branch !== null
-        ? yield* findLatestPr(input.cwd, {
-            branch: details.branch,
-            upstreamRef: details.upstreamRef,
-          }).pipe(
-            Effect.map((latest) => (latest ? toStatusPr(latest) : null)),
-            Effect.catch(() => Effect.succeed(null)),
-          )
-        : null;
+    let pr: { number: number; title: string; url: string; baseBranch: string; headBranch: string; state: "open" | "closed" | "merged" } | null = null;
+
+    if (details.branch !== null) {
+      const provider = yield* detectCwdProvider(input.cwd);
+
+      if (provider === "bitbucket") {
+        pr = yield* findLatestBitbucketPr(input.cwd, details.branch).pipe(
+          Effect.map((latest) => (latest ? bitbucketPrToStatusPr(latest) : null)),
+          Effect.catch(() => Effect.succeed(null)),
+        );
+      } else {
+        pr = yield* findLatestPr(input.cwd, {
+          branch: details.branch,
+          upstreamRef: details.upstreamRef,
+        }).pipe(
+          Effect.map((latest) => (latest ? toStatusPr(latest) : null)),
+          Effect.catch(() => Effect.succeed(null)),
+        );
+      }
+    }
 
     return {
       branch: details.branch,
@@ -820,10 +1009,56 @@ export const makeGitManager = Effect.gen(function* () {
 
   const resolvePullRequest: GitManagerShape["resolvePullRequest"] = Effect.fnUntraced(
     function* (input) {
+      const normalizedRef = normalizePullRequestReference(input.reference);
+
+      // Check if this is a Bitbucket PR URL
+      const bbPrUrl = parseBitbucketPrUrl(normalizedRef);
+      if (bbPrUrl) {
+        const bbPr = yield* bitbucketApi.getPullRequest({
+          workspace: bbPrUrl.workspace,
+          repoSlug: bbPrUrl.repoSlug,
+          prId: bbPrUrl.prId,
+        });
+        return {
+          pullRequest: {
+            number: bbPr.id,
+            title: bbPr.title,
+            url: bbPr.url,
+            baseBranch: bbPr.destinationRefName,
+            headBranch: bbPr.sourceRefName,
+            state: bbPr.state,
+          },
+        };
+      }
+
+      // Check if the cwd is a Bitbucket repo with a numeric PR reference
+      const provider = yield* detectCwdProvider(input.cwd);
+      if (provider === "bitbucket" && /^\d+$/.test(normalizedRef)) {
+        const remote = yield* resolveBitbucketRemote(input.cwd);
+        if (remote) {
+          const bbPr = yield* bitbucketApi.getPullRequest({
+            workspace: remote.workspace,
+            repoSlug: remote.repoSlug,
+            prId: parseInt(normalizedRef, 10),
+          });
+          return {
+            pullRequest: {
+              number: bbPr.id,
+              title: bbPr.title,
+              url: bbPr.url,
+              baseBranch: bbPr.destinationRefName,
+              headBranch: bbPr.sourceRefName,
+              state: bbPr.state,
+            },
+          };
+        }
+      }
+
+      // Fall back to GitHub
       const pullRequest = yield* gitHubCli
         .getPullRequest({
           cwd: input.cwd,
-          reference: normalizePullRequestReference(input.reference),
+          reference: normalizedRef,
         })
         .pipe(Effect.map((resolved) => toResolvedPullRequest(resolved)));
 

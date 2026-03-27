@@ -48,12 +48,45 @@ export const JiraPostCommentInput = Schema.Struct({
 });
 export type JiraPostCommentInput = typeof JiraPostCommentInput.Type;
 
+export const SecDeskRequestType = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  description: Schema.optional(Schema.String),
+});
+export type SecDeskRequestType = typeof SecDeskRequestType.Type;
+
+export const JiraCreateSecDeskRequestInput = Schema.Struct({
+  requestTypeId: TrimmedNonEmptyString,
+  summary: TrimmedNonEmptyString,
+  description: Schema.optional(Schema.String),
+});
+export type JiraCreateSecDeskRequestInput = typeof JiraCreateSecDeskRequestInput.Type;
+
+export const JiraCreateSecDeskRequestResult = Schema.Struct({
+  issueKey: TrimmedNonEmptyString,
+  url: TrimmedNonEmptyString,
+});
+export type JiraCreateSecDeskRequestResult = typeof JiraCreateSecDeskRequestResult.Type;
+
+export const JiraListSecDeskRequestTypesInput = Schema.Struct({});
+export type JiraListSecDeskRequestTypesInput = typeof JiraListSecDeskRequestTypesInput.Type;
+
+export const JiraTransitionInput = Schema.Struct({
+  ticketKey: TrimmedNonEmptyString,
+  /** Transition name (e.g. "In Progress", "Done") — the server resolves it to the numeric ID. */
+  transitionName: TrimmedNonEmptyString,
+});
+export type JiraTransitionInput = typeof JiraTransitionInput.Type;
+
 export const JIRA_WS_METHODS = {
   jiraList: "jira.list",
   jiraGet: "jira.get",
   jiraSearch: "jira.search",
   jiraRefresh: "jira.refresh",
   jiraPostComment: "jira.postComment",
+  jiraTransition: "jira.transition",
+  jiraListSecDeskRequestTypes: "jira.listSecDeskRequestTypes",
+  jiraCreateSecDeskRequest: "jira.createSecDeskRequest",
 } as const;
 
 export const JIRA_WS_CHANNELS = {

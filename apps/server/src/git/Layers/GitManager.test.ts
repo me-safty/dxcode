@@ -15,6 +15,8 @@ import {
   GitHubCli,
 } from "../Services/GitHubCli.ts";
 import { type TextGenerationShape, TextGeneration } from "../Services/TextGeneration.ts";
+import { BitbucketApi, type BitbucketApiShape } from "../Services/BitbucketApi.ts";
+import { BitbucketApiError } from "../Errors.ts";
 import { GitServiceLive } from "./GitService.ts";
 import { GitService } from "../Services/GitService.ts";
 import { GitCoreLive } from "./GitCore.ts";
@@ -485,9 +487,20 @@ function makeManager(input?: {
     Layer.provideMerge(ServerConfigLayer),
   );
 
+  const fakeBitbucketApi: BitbucketApiShape = {
+    listOpenPullRequests: () => Effect.succeed([]),
+    listAllPullRequests: () => Effect.succeed([]),
+    getPullRequest: () =>
+      Effect.fail(new BitbucketApiError({ operation: "getPullRequest", detail: "Not configured in test" })),
+    createPullRequest: () =>
+      Effect.fail(new BitbucketApiError({ operation: "createPullRequest", detail: "Not configured in test" })),
+    getDefaultBranch: () => Effect.succeed(null),
+  };
+
   const managerLayer = Layer.mergeAll(
     Layer.succeed(GitHubCli, gitHubCli),
     Layer.succeed(TextGeneration, textGeneration),
+    Layer.succeed(BitbucketApi, fakeBitbucketApi),
     gitCoreLayer,
   ).pipe(Layer.provideMerge(NodeServices.layer));
 

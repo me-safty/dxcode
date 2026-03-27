@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
+import type { ServerProviderStatus, ServiceAuthStatus } from "@t3tools/contracts";
 import { type ProviderKind, DEFAULT_GIT_TEXT_GENERATION_MODEL } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import {
@@ -15,7 +16,7 @@ import {
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";
-import { serverConfigQueryOptions } from "../lib/serverReactQuery";
+import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import { ensureNativeApi } from "../nativeApi";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -28,6 +29,7 @@ import {
 } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { APP_VERSION } from "../branding";
+import { CheckCircleIcon, XCircleIcon, AlertCircleIcon, RefreshCwIcon, LogInIcon } from "lucide-react";
 import { SidebarInset } from "~/components/ui/sidebar";
 
 const THEME_OPTIONS = [
@@ -58,8 +60,47 @@ function SettingsRouteView() {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { settings, defaults, updateSettings } = useAppSettings();
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
+  const queryClient = useQueryClient();
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
+  const [refreshingStatus, setRefreshingStatus] = useState(false);
+  const [loginProvider, setLoginProvider] = useState<string | null>(null);
+
+  const providerStatuses: ReadonlyArray<ServerProviderStatus> = serverConfigQuery.data?.providers ?? [];
+  const serviceStatuses: ReadonlyArray<ServiceAuthStatus> = serverConfigQuery.data?.services ?? [];
+
+  const handleRefreshStatus = useCallback(async () => {
+    setRefreshingStatus(true);
+    try {
+      const api = ensureNativeApi();
+      const [freshProviders, freshServices] = await Promise.all([
+        api.provider.refreshStatus(),
+        api.service.refreshStatus(),
+      ]);
+      queryClient.setQueryData(serverQueryKeys.config(), (prev: any) =>
+        prev ? { ...prev, providers: freshProviders, services: freshServices } : prev,
+      );
+    } finally {
+      setRefreshingStatus(false);
+    }
+  }, [queryClient]);
+
+  const handleLogin = useCallback(
+    async (provider: "codex" | "claudeAgent") => {
+      setLoginProvider(provider);
+      try {
+        const api = ensureNativeApi();
+        await api.provider.login({ provider });
+        const fresh = await api.provider.refreshStatus();
+        queryClient.setQueryData(serverQueryKeys.config(), (prev: any) =>
+          prev ? { ...prev, providers: fresh } : prev,
+        );
+      } finally {
+        setLoginProvider(null);
+      }
+    },
+    [queryClient],
+  );
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
   >({
@@ -174,8 +215,8 @@ function SettingsRouteView() {
   );
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+    <SidebarInset className="min-h-0 overflow-hidden bg-background text-foreground isolate">
+      <div className="flex h-full min-w-0 flex-col overflow-hidden bg-background text-foreground">
         {isElectron && (
           <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
@@ -197,7 +238,7 @@ function SettingsRouteView() {
               <div className="mb-4">
                 <h2 className="text-sm font-medium text-foreground">Appearance</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Choose how T3 Code looks across the app.
+                  Choose how Fly Code looks across the app.
                 </p>
               </div>
 
@@ -273,6 +314,44 @@ function SettingsRouteView() {
                         updateSettings({
                           timestampFormat: defaults.timestampFormat,
                         })
+                      }
+                    >
+                      Restore default
+                    </Button>
+                  </div>
+                ) : null}
+
+                <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Sidebar position</p>
+                    <p className="text-xs text-muted-foreground">
+                      Place the project sidebar on the left or right side of the window.
+                    </p>
+                  </div>
+                  <Select
+                    value={settings.sidebarSide ?? "left"}
+                    onValueChange={(value) => {
+                      if (value !== "left" && value !== "right") return;
+                      updateSettings({ sidebarSide: value });
+                    }}
+                  >
+                    <SelectTrigger className="w-40" aria-label="Sidebar position">
+                      <SelectValue>{settings.sidebarSide === "right" ? "Right" : "Left"}</SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup align="end">
+                      <SelectItem value="left">Left</SelectItem>
+                      <SelectItem value="right">Right</SelectItem>
+                    </SelectPopup>
+                  </Select>
+                </div>
+
+                {settings.sidebarSide !== defaults.sidebarSide ? (
+                  <div className="flex justify-end">
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() =>
+                        updateSettings({ sidebarSide: defaults.sidebarSide })
                       }
                     >
                       Restore default
@@ -699,6 +778,115 @@ function SettingsRouteView() {
                 </div>
               ) : null}
             </section>
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-medium text-foreground">Service Status</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    AI provider and external service authentication status.
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleRefreshStatus}
+                  disabled={refreshingStatus}
+                  className="h-7 w-7 p-0"
+                  title="Refresh all statuses"
+                >
+                  <RefreshCwIcon className={`h-3.5 w-3.5 ${refreshingStatus ? "animate-spin" : ""}`} />
+                </Button>
+              </div>
+
+              {/* AI Providers */}
+              <div className="mb-3">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">AI Providers</p>
+                <div className="space-y-2">
+                  {providerStatuses.map((s) => {
+                    const label = s.provider === "codex" ? "Codex" : s.provider === "claudeAgent" ? "Claude" : s.provider;
+                    const isOk = s.authStatus === "authenticated";
+                    const needsLogin = s.authStatus === "unauthenticated";
+                    const isLoggingIn = loginProvider === s.provider;
+                    return (
+                      <div key={s.provider} className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {isOk ? (
+                            <CheckCircleIcon className="h-4 w-4 text-emerald-500 shrink-0" />
+                          ) : needsLogin ? (
+                            <XCircleIcon className="h-4 w-4 text-red-400 shrink-0" />
+                          ) : (
+                            <AlertCircleIcon className="h-4 w-4 text-yellow-500 shrink-0" />
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground">{label}</p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {isOk ? "Authenticated" : s.message ?? (needsLogin ? "Not authenticated" : "Unknown")}
+                            </p>
+                          </div>
+                        </div>
+                        {needsLogin && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleLogin(s.provider as "codex" | "claudeAgent")}
+                            disabled={isLoggingIn}
+                            className="h-7 text-xs gap-1.5 shrink-0 ml-2"
+                          >
+                            <LogInIcon className="h-3 w-3" />
+                            {isLoggingIn ? "Logging in…" : "Login"}
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* External Services */}
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">External Services</p>
+                <div className="space-y-2">
+                  {serviceStatuses.length === 0 && (
+                    <p className="text-xs text-muted-foreground italic">No service status available. Click Refresh to check.</p>
+                  )}
+                  {serviceStatuses.map((s) => {
+                    const serviceInfo: Record<string, { label: string; setup: string }> = {
+                      gmail: { label: "Gmail", setup: "Install gogcli and run: gogcli auth add tryan@mediafly.com" },
+                      jira: { label: "Jira", setup: "Add to ~/.netrc: machine mediafly.atlassian.net login you@email password YOUR_API_TOKEN" },
+                      calendar: { label: "Calendar", setup: "Install gcalcli and run: gcalcli init" },
+                    };
+                    const info = serviceInfo[s.service] ?? { label: s.service, setup: "" };
+                    return (
+                      <div key={s.service} className="rounded-lg border border-border bg-background px-3 py-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {s.authenticated ? (
+                              <CheckCircleIcon className="h-4 w-4 text-emerald-500 shrink-0" />
+                            ) : s.available ? (
+                              <AlertCircleIcon className="h-4 w-4 text-yellow-500 shrink-0" />
+                            ) : (
+                              <XCircleIcon className="h-4 w-4 text-red-400 shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground">{info.label}</p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                {s.authenticated ? "Authenticated" : s.message ?? "Not configured"}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        {!s.authenticated && info.setup && (
+                          <div className="mt-1.5 ml-6">
+                            <code className="text-[11px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded break-all">{info.setup}</code>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
                 <h2 className="text-sm font-medium text-foreground">About</h2>

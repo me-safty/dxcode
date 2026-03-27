@@ -45,6 +45,22 @@ export class TextGenerationError extends Schema.TaggedErrorClass<TextGenerationE
 }
 
 /**
+ * BitbucketApiError - Bitbucket Cloud REST API call failed.
+ */
+export class BitbucketApiError extends Schema.TaggedErrorClass<BitbucketApiError>()(
+  "BitbucketApiError",
+  {
+    operation: Schema.String,
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {
+  override get message(): string {
+    return `Bitbucket API failed in ${this.operation}: ${this.detail}`;
+  }
+}
+
+/**
  * GitManagerError - Stacked Git workflow orchestration failed.
  */
 export class GitManagerError extends Schema.TaggedErrorClass<GitManagerError>()("GitManagerError", {
@@ -64,4 +80,5 @@ export type GitManagerServiceError =
   | GitManagerError
   | GitCommandError
   | GitHubCliError
+  | BitbucketApiError
   | TextGenerationError;
