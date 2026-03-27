@@ -938,9 +938,13 @@ export default function Sidebar() {
     suppressProjectClickAfterDragRef.current = false;
   }, []);
 
+  const visibleThreads = useMemo(
+    () => threads.filter((thread) => thread.archivedAt === null),
+    [threads],
+  );
   const sortedProjects = useMemo(
-    () => sortProjectsForSidebar(projects, threads, appSettings.sidebarProjectSortOrder),
-    [appSettings.sidebarProjectSortOrder, projects, threads],
+    () => sortProjectsForSidebar(projects, visibleThreads, appSettings.sidebarProjectSortOrder),
+    [appSettings.sidebarProjectSortOrder, projects, visibleThreads],
   );
   const isManualProjectSorting = appSettings.sidebarProjectSortOrder === "manual";
 
@@ -949,7 +953,7 @@ export default function Sidebar() {
     dragHandleProps: SortableProjectHandleProps | null,
   ) {
     const projectThreads = sortThreadsForSidebar(
-      threads.filter((thread) => thread.projectId === project.id && thread.archivedAt === null),
+      visibleThreads.filter((thread) => thread.projectId === project.id),
       appSettings.sidebarThreadSortOrder,
     );
     const projectStatus = resolveProjectStatusIndicator(
@@ -968,14 +972,16 @@ export default function Sidebar() {
         ? (projectThreads.find((thread) => thread.id === activeThreadId) ?? null)
         : null;
     const shouldShowThreadPanel = project.expanded || pinnedCollapsedThread !== null;
-    const { hasHiddenThreads, visibleThreads } = getVisibleThreadsForProject({
-      threads: projectThreads,
-      activeThreadId,
-      isThreadListExpanded,
-      previewLimit: THREAD_PREVIEW_LIMIT,
-    });
+    const { hasHiddenThreads, visibleThreads: visibleProjectThreads } = getVisibleThreadsForProject(
+      {
+        threads: projectThreads,
+        activeThreadId,
+        isThreadListExpanded,
+        previewLimit: THREAD_PREVIEW_LIMIT,
+      },
+    );
     const orderedProjectThreadIds = projectThreads.map((thread) => thread.id);
-    const renderedThreads = pinnedCollapsedThread ? [pinnedCollapsedThread] : visibleThreads;
+    const renderedThreads = pinnedCollapsedThread ? [pinnedCollapsedThread] : visibleProjectThreads;
     const renderThreadRow = (thread: (typeof projectThreads)[number]) => {
       const isActive = routeThreadId === thread.id;
       const isSelected = selectedThreadIds.has(thread.id);

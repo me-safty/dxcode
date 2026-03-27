@@ -179,6 +179,28 @@ function useRelativeTimeTick(intervalMs = 1_000) {
   return tick;
 }
 
+function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }) {
+  useRelativeTimeTick();
+  const lastCheckedRelative = lastCheckedAt ? formatRelativeTime(lastCheckedAt) : null;
+
+  if (!lastCheckedRelative) {
+    return null;
+  }
+
+  return (
+    <span className="text-[11px] text-muted-foreground/60">
+      {lastCheckedRelative.suffix ? (
+        <>
+          Checked <span className="font-mono tabular-nums">{lastCheckedRelative.value}</span>{" "}
+          {lastCheckedRelative.suffix}
+        </>
+      ) : (
+        <>Checked {lastCheckedRelative.value}</>
+      )}
+    </span>
+  );
+}
+
 function SettingsSection({
   title,
   icon,
@@ -382,8 +404,6 @@ export function GeneralSettingsPanel() {
   const refreshingRef = useRef(false);
   const queryClient = useQueryClient();
   const modelListRefs = useRef<Partial<Record<ProviderKind, HTMLDivElement | null>>>({});
-  useRelativeTimeTick();
-
   const refreshProviders = useCallback(() => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
@@ -576,8 +596,6 @@ export function GeneralSettingsPanel() {
           serverProviders[0]!.checkedAt,
         )
       : null;
-  const lastCheckedRelative = lastCheckedAt ? formatRelativeTime(lastCheckedAt) : null;
-
   return (
     <SettingsPageContainer>
       <SettingsSection title="General">
@@ -876,19 +894,7 @@ export function GeneralSettingsPanel() {
         title="Providers"
         headerAction={
           <div className="flex items-center gap-1.5">
-            {lastCheckedRelative ? (
-              <span className="text-[11px] text-muted-foreground/60">
-                {lastCheckedRelative.suffix ? (
-                  <>
-                    Checked{" "}
-                    <span className="font-mono tabular-nums">{lastCheckedRelative.value}</span>{" "}
-                    {lastCheckedRelative.suffix}
-                  </>
-                ) : (
-                  <>Checked {lastCheckedRelative.value}</>
-                )}
-              </span>
-            ) : null}
+            <ProviderLastChecked lastCheckedAt={lastCheckedAt} />
             <Tooltip>
               <TooltipTrigger
                 render={
