@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatThreadJumpHintLabel,
   getFallbackThreadIdAfterDelete,
+  getThreadJumpKey,
   getVisibleThreadsForProject,
   getProjectSortTimestamp,
   hasUnseenCompletion,
+  isThreadJumpModifierPressed,
+  resolveThreadJumpIndex,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
@@ -93,6 +97,97 @@ describe("resolveSidebarNewThreadEnvMode", () => {
         defaultEnvMode: "worktree",
       }),
     ).toBe("local");
+  });
+});
+
+describe("thread jump helpers", () => {
+  it("assigns jump keys for the first nine visible threads", () => {
+    expect(getThreadJumpKey(0)).toBe("1");
+    expect(getThreadJumpKey(8)).toBe("9");
+    expect(getThreadJumpKey(9)).toBeNull();
+  });
+
+  it("detects the active jump modifier by platform", () => {
+    expect(
+      isThreadJumpModifierPressed(
+        {
+          key: "Meta",
+          metaKey: true,
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: false,
+        },
+        "MacIntel",
+      ),
+    ).toBe(true);
+    expect(
+      isThreadJumpModifierPressed(
+        {
+          key: "Control",
+          metaKey: false,
+          ctrlKey: true,
+          shiftKey: false,
+          altKey: false,
+        },
+        "Win32",
+      ),
+    ).toBe(true);
+    expect(
+      isThreadJumpModifierPressed(
+        {
+          key: "Control",
+          metaKey: false,
+          ctrlKey: true,
+          shiftKey: true,
+          altKey: false,
+        },
+        "Win32",
+      ),
+    ).toBe(false);
+  });
+
+  it("resolves mod+digit events to zero-based visible thread indices", () => {
+    expect(
+      resolveThreadJumpIndex(
+        {
+          key: "1",
+          metaKey: true,
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: false,
+        },
+        "MacIntel",
+      ),
+    ).toBe(0);
+    expect(
+      resolveThreadJumpIndex(
+        {
+          key: "9",
+          metaKey: false,
+          ctrlKey: true,
+          shiftKey: false,
+          altKey: false,
+        },
+        "Linux",
+      ),
+    ).toBe(8);
+    expect(
+      resolveThreadJumpIndex(
+        {
+          key: "0",
+          metaKey: false,
+          ctrlKey: true,
+          shiftKey: false,
+          altKey: false,
+        },
+        "Linux",
+      ),
+    ).toBeNull();
+  });
+
+  it("formats thread jump hint labels for macOS and non-macOS", () => {
+    expect(formatThreadJumpHintLabel("3", "MacIntel")).toBe("⌘3");
+    expect(formatThreadJumpHintLabel("3", "Linux")).toBe("Ctrl+3");
   });
 });
 

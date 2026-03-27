@@ -1,6 +1,6 @@
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import type { Thread } from "../types";
-import { cn } from "../lib/utils";
+import { cn, isMacPlatform } from "../lib/utils";
 import {
   findLatestProposedPlan,
   hasActionableProposedPlan,
@@ -8,6 +8,7 @@ import {
 } from "../session-logic";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
+const THREAD_JUMP_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 export type SidebarNewThreadEnvMode = "local" | "worktree";
 type SidebarProject = {
   id: string;
@@ -16,6 +17,16 @@ type SidebarProject = {
   updatedAt?: string | undefined;
 };
 type SidebarThreadSortInput = Pick<Thread, "createdAt" | "updatedAt" | "messages">;
+type ThreadJumpKey = (typeof THREAD_JUMP_KEYS)[number];
+export type { ThreadJumpKey };
+
+export interface ThreadJumpEvent {
+  key: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+}
 
 export interface ThreadStatusPill {
   label:
@@ -65,6 +76,38 @@ export function resolveSidebarNewThreadEnvMode(input: {
   defaultEnvMode: SidebarNewThreadEnvMode;
 }): SidebarNewThreadEnvMode {
   return input.requestedEnvMode ?? input.defaultEnvMode;
+}
+
+export function getThreadJumpKey(index: number): ThreadJumpKey | null {
+  return THREAD_JUMP_KEYS[index] ?? null;
+}
+
+export function isThreadJumpModifierPressed(
+  event: ThreadJumpEvent,
+  platform = navigator.platform,
+): boolean {
+  return (
+    (isMacPlatform(platform) ? event.metaKey : event.ctrlKey) && !event.altKey && !event.shiftKey
+  );
+}
+
+export function resolveThreadJumpIndex(
+  event: ThreadJumpEvent,
+  platform = navigator.platform,
+): number | null {
+  if (!isThreadJumpModifierPressed(event, platform)) {
+    return null;
+  }
+
+  const index = THREAD_JUMP_KEYS.indexOf(event.key as ThreadJumpKey);
+  return index === -1 ? null : index;
+}
+
+export function formatThreadJumpHintLabel(
+  key: ThreadJumpKey,
+  platform = navigator.platform,
+): string {
+  return isMacPlatform(platform) ? `⌘${key}` : `Ctrl+${key}`;
 }
 
 export function resolveThreadRowClassName(input: {
