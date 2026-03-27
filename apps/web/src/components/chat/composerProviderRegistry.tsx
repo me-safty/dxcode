@@ -3,7 +3,7 @@ import {
   type ProviderKind,
   type ProviderModelOptions,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@tero/contracts";
 import {
   getModelCapabilities,
   isClaudeUltrathinkPrompt,
@@ -12,7 +12,7 @@ import {
   trimOrNull,
   getDefaultEffort,
   hasEffortLevel,
-} from "@t3tools/shared/model";
+} from "@tero/shared/model";
 import type { ReactNode } from "react";
 import { TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
 

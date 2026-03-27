@@ -4,7 +4,7 @@ import {
   type ProviderKind,
   type ProviderModelOptions,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@tero/contracts";
 import {
   applyClaudePromptEffortPrefix,
   getModelCapabilities,
@@ -12,7 +12,7 @@ import {
   trimOrNull,
   getDefaultEffort,
   hasEffortLevel,
-} from "@t3tools/shared/model";
+} from "@tero/shared/model";
 import { memo, useCallback, useState } from "react";
 import { ChevronDownIcon } from "lucide-react";
 import { Button } from "../ui/button";

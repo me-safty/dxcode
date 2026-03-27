@@ -1,4 +1,4 @@
-import { ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@tero/contracts";
 import {
   Outlet,
   createRootRouteWithContext,
@@ -24,6 +24,7 @@ import { onServerConfigUpdated, onServerWelcome } from "../wsNativeApi";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
+import type { OrchestrationReadModel } from "@tero/contracts";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -130,6 +131,17 @@ function errorDetails(error: unknown): string {
   }
 }
 
+function canBootstrapIntoThread(pathname: string): boolean {
+  return pathname === "/" || pathname === "/_chat" || pathname === "/_chat/";
+}
+
+function resolveFallbackBootstrapThread(snapshot: OrchestrationReadModel): ThreadId | null {
+  const candidate = snapshot.threads
+    .filter((thread) => thread.deletedAt === null)
+    .toSorted((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+  return candidate ? ThreadId.makeUnsafe(candidate.id) : null;
+}
+
 function EventRouter() {
   const syncServerReadModel = useStore((store) => store.syncServerReadModel);
   const setProjectExpanded = useStore((store) => store.setProjectExpanded);
@@ -153,9 +165,9 @@ function EventRouter() {
     let pending = false;
     let needsProviderInvalidation = false;
 
-    const flushSnapshotSync = async (): Promise<void> => {
+    const flushSnapshotSync = async (): Promise<OrchestrationReadModel | null> => {
       const snapshot = await api.orchestration.getSnapshot();
-      if (disposed) return;
+      if (disposed) return null;
       latestSequence = Math.max(latestSequence, snapshot.snapshotSequence);
       syncServerReadModel(snapshot);
       clearPromotedDraftThreads(new Set(snapshot.threads.map((t) => t.id)));
@@ -171,21 +183,24 @@ function EventRouter() {
         pending = false;
         await flushSnapshotSync();
       }
+      return snapshot;
     };
 
     const syncSnapshot = async () => {
       if (syncing) {
         pending = true;
-        return;
+        return null;
       }
       syncing = true;
       pending = false;
       try {
-        await flushSnapshotSync();
+        return await flushSnapshotSync();
       } catch {
         // Keep prior state and wait for next domain event to trigger a resync.
+        return null;
+      } finally {
+        syncing = false;
       }
-      syncing = false;
     };
 
     const domainEventFlushThrottler = new Throttler(
@@ -231,28 +246,43 @@ function EventRouter() {
     });
     const unsubWelcome = onServerWelcome((payload) => {
       void (async () => {
-        await syncSnapshot();
+        const snapshot = await syncSnapshot();
         if (disposed) {
           return;
         }
 
-        if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
+        if (!canBootstrapIntoThread(pathnameRef.current)) {
           return;
         }
-        setProjectExpanded(payload.bootstrapProjectId, true);
 
-        if (pathnameRef.current !== "/") {
+        if (payload.bootstrapProjectId && payload.bootstrapThreadId) {
+          setProjectExpanded(payload.bootstrapProjectId, true);
+          if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
+            return;
+          }
+          await navigate({
+            to: "/$threadId",
+            params: { threadId: payload.bootstrapThreadId },
+            replace: true,
+          });
+          handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
           return;
         }
-        if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
+
+        if (!snapshot) {
+          return;
+        }
+
+        const fallbackThreadId = resolveFallbackBootstrapThread(snapshot);
+        if (!fallbackThreadId || handledBootstrapThreadIdRef.current === fallbackThreadId) {
           return;
         }
         await navigate({
           to: "/$threadId",
-          params: { threadId: payload.bootstrapThreadId },
+          params: { threadId: fallbackThreadId },
           replace: true,
         });
-        handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
+        handledBootstrapThreadIdRef.current = fallbackThreadId;
       })().catch(() => undefined);
     });
     // onServerConfigUpdated replays the latest cached value synchronously

@@ -39,13 +39,13 @@ import {
   TurnId,
   type UserInputQuestion,
   ClaudeCodeEffort,
-} from "@t3tools/contracts";
+} from "@tero/contracts";
 import {
   hasEffortLevel,
   applyClaudePromptEffortPrefix,
   getModelCapabilities,
   trimOrNull,
-} from "@t3tools/shared/model";
+} from "@tero/shared/model";
 import {
   Cause,
   DateTime,

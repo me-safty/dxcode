@@ -2,8 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, PlusIcon, RotateCcwIcon, Undo2Icon, XIcon } from "lucide-react";
 import { type ReactNode, useCallback, useState } from "react";
-import { type ProviderKind, DEFAULT_GIT_TEXT_GENERATION_MODEL } from "@t3tools/contracts";
-import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
+import { type ProviderKind, DEFAULT_GIT_TEXT_GENERATION_MODEL } from "@tero/contracts";
+import { getModelOptions, normalizeModelSlug } from "@tero/shared/model";
 import {
   getAppModelOptions,
   getCustomModelsForProvider,

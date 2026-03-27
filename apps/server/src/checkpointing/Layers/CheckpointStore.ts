@@ -17,7 +17,7 @@ import { CheckpointInvariantError } from "../Errors.ts";
 import { GitCommandError } from "../../git/Errors.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";
-import { CheckpointRef } from "@t3tools/contracts";
+import { CheckpointRef } from "@tero/contracts";
 
 const makeCheckpointStore = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -91,17 +91,17 @@ const makeCheckpointStore = Effect.gen(function* () {
       const operation = "CheckpointStore.captureCheckpoint";
 
       yield* Effect.acquireUseRelease(
-        fs.makeTempDirectory({ prefix: "t3-fs-checkpoint-" }),
+        fs.makeTempDirectory({ prefix: "tero-fs-checkpoint-" }),
         (tempDir) =>
           Effect.gen(function* () {
             const tempIndexPath = path.join(tempDir, `index-${randomUUID()}`);
             const commitEnv: NodeJS.ProcessEnv = {
               ...process.env,
               GIT_INDEX_FILE: tempIndexPath,
-              GIT_AUTHOR_NAME: "T3 Code",
-              GIT_AUTHOR_EMAIL: "t3code@users.noreply.github.com",
-              GIT_COMMITTER_NAME: "T3 Code",
-              GIT_COMMITTER_EMAIL: "t3code@users.noreply.github.com",
+              GIT_AUTHOR_NAME: "Tero",
+              GIT_AUTHOR_EMAIL: "tero@users.noreply.github.com",
+              GIT_COMMITTER_NAME: "Tero",
+              GIT_COMMITTER_EMAIL: "tero@users.noreply.github.com",
             };
 
             const headExists = yield* hasHeadCommit(input.cwd);
@@ -137,7 +137,7 @@ const makeCheckpointStore = Effect.gen(function* () {
               });
             }
 
-            const message = `t3 checkpoint ref=${input.checkpointRef}`;
+            const message = `tero checkpoint ref=${input.checkpointRef}`;
             const commitTreeResult = yield* git.execute({
               operation,
               cwd: input.cwd,

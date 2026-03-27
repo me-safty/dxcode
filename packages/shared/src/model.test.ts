@@ -5,7 +5,7 @@ import {
   MODEL_OPTIONS,
   MODEL_OPTIONS_BY_PROVIDER,
   CODEX_REASONING_EFFORT_OPTIONS,
-} from "@t3tools/contracts";
+} from "@tero/contracts";
 
 import {
   applyClaudePromptEffortPrefix,

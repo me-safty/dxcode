@@ -26,6 +26,7 @@ await waitOn({
 
 const childEnv = { ...process.env };
 delete childEnv.ELECTRON_RUN_AS_NODE;
+process.env.TERO_DESKTOP_LOCAL_DEV = "1";
 
 let shuttingDown = false;
 let restartTimer = null;
@@ -47,7 +48,7 @@ function cleanupStaleDevApps() {
     return;
   }
 
-  spawnSync("pkill", ["-f", "--", `--t3code-dev-root=${desktopDir}`], { stdio: "ignore" });
+  spawnSync("pkill", ["-f", "--", `--tero-dev-root=${desktopDir}`], { stdio: "ignore" });
 }
 
 function startApp() {
@@ -57,11 +58,13 @@ function startApp() {
 
   const app = spawn(
     resolveElectronPath(),
-    [`--t3code-dev-root=${desktopDir}`, "dist-electron/main.js"],
+    ["--tero-local-dev", `--tero-dev-root=${desktopDir}`, "dist-electron/main.js"],
     {
       cwd: desktopDir,
       env: {
         ...childEnv,
+        TERO_DESKTOP_LOCAL_DEV: "1",
+        TERO_DESKTOP_SERVER_EXECUTABLE: process.execPath,
         VITE_DEV_SERVER_URL: devServerUrl,
       },
       stdio: "inherit",

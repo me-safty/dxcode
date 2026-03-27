@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@t3tools/monorepo",
+      "name": "@tero/monorepo",
       "devDependencies": {
         "@types/node": "catalog:",
         "oxfmt": "^0.40.0",
@@ -13,7 +13,7 @@
       },
     },
     "apps/desktop": {
-      "name": "@t3tools/desktop",
+      "name": "@tero/desktop",
       "version": "0.0.14",
       "dependencies": {
         "effect": "catalog:",
@@ -21,8 +21,8 @@
         "electron-updater": "^6.6.2",
       },
       "devDependencies": {
-        "@t3tools/contracts": "workspace:*",
-        "@t3tools/shared": "workspace:*",
+        "@tero/contracts": "workspace:*",
+        "@tero/shared": "workspace:*",
         "@types/node": "catalog:",
         "tsdown": "catalog:",
         "typescript": "catalog:",
@@ -31,7 +31,7 @@
       },
     },
     "apps/marketing": {
-      "name": "@t3tools/marketing",
+      "name": "@tero/marketing",
       "version": "0.0.0",
       "dependencies": {
         "astro": "^6.0.4",
@@ -60,9 +60,9 @@
       "devDependencies": {
         "@effect/language-service": "catalog:",
         "@effect/vitest": "catalog:",
-        "@t3tools/contracts": "workspace:*",
-        "@t3tools/shared": "workspace:*",
-        "@t3tools/web": "workspace:*",
+        "@tero/contracts": "workspace:*",
+        "@tero/shared": "workspace:*",
+        "@tero/web": "workspace:*",
         "@types/bun": "catalog:",
         "@types/node": "catalog:",
         "@types/ws": "^8.5.13",
@@ -72,7 +72,7 @@
       },
     },
     "apps/web": {
-      "name": "@t3tools/web",
+      "name": "@tero/web",
       "version": "0.0.14",
       "dependencies": {
         "@base-ui/react": "^1.2.0",
@@ -83,8 +83,8 @@
         "@formkit/auto-animate": "^0.9.0",
         "@lexical/react": "^0.41.0",
         "@pierre/diffs": "^1.1.0-beta.16",
-        "@t3tools/contracts": "workspace:*",
-        "@t3tools/shared": "workspace:*",
+        "@tero/contracts": "workspace:*",
+        "@tero/shared": "workspace:*",
         "@tanstack/react-pacer": "^0.19.4",
         "@tanstack/react-query": "^5.90.0",
         "@tanstack/react-router": "^1.160.2",
@@ -123,7 +123,7 @@
       },
     },
     "packages/contracts": {
-      "name": "@t3tools/contracts",
+      "name": "@tero/contracts",
       "version": "0.0.14",
       "dependencies": {
         "effect": "catalog:",
@@ -137,10 +137,10 @@
       },
     },
     "packages/shared": {
-      "name": "@t3tools/shared",
+      "name": "@tero/shared",
       "version": "0.0.0-alpha.1",
       "dependencies": {
-        "@t3tools/contracts": "workspace:*",
+        "@tero/contracts": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
@@ -152,12 +152,12 @@
       },
     },
     "scripts": {
-      "name": "@t3tools/scripts",
+      "name": "@tero/scripts",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.2.77",
         "@effect/platform-node": "catalog:",
-        "@t3tools/contracts": "workspace:*",
-        "@t3tools/shared": "workspace:*",
+        "@tero/contracts": "workspace:*",
+        "@tero/shared": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
@@ -663,17 +663,17 @@
 
     "@szmarczak/http-timer": ["@szmarczak/http-timer@4.0.6", "", { "dependencies": { "defer-to-connect": "^2.0.0" } }, "sha512-4BAffykYOgO+5nzBWYwE3W90sBgLJoUPRWWcL8wlyiM8IB8ipJz3UMJ9KXQd1RKQXpKp8Tutn80HZtWsu2u76w=="],
 
-    "@t3tools/contracts": ["@t3tools/contracts@workspace:packages/contracts"],
+    "@tero/contracts": ["@tero/contracts@workspace:packages/contracts"],
 
-    "@t3tools/desktop": ["@t3tools/desktop@workspace:apps/desktop"],
+    "@tero/desktop": ["@tero/desktop@workspace:apps/desktop"],
 
-    "@t3tools/marketing": ["@t3tools/marketing@workspace:apps/marketing"],
+    "@tero/marketing": ["@tero/marketing@workspace:apps/marketing"],
 
-    "@t3tools/scripts": ["@t3tools/scripts@workspace:scripts"],
+    "@tero/scripts": ["@tero/scripts@workspace:scripts"],
 
-    "@t3tools/shared": ["@t3tools/shared@workspace:packages/shared"],
+    "@tero/shared": ["@tero/shared@workspace:packages/shared"],
 
-    "@t3tools/web": ["@t3tools/web@workspace:apps/web"],
+    "@tero/web": ["@tero/web@workspace:apps/web"],
 
     "@tailwindcss/node": ["@tailwindcss/node@4.2.1", "", { "dependencies": { "@jridgewell/remapping": "^2.3.5", "enhanced-resolve": "^5.19.0", "jiti": "^2.6.1", "lightningcss": "1.31.1", "magic-string": "^0.30.21", "source-map-js": "^1.2.1", "tailwindcss": "4.2.1" } }, "sha512-jlx6sLk4EOwO6hHe1oCGm1Q4AN/s0rSrTTPBGPM0/RQ6Uylwq17FuU8IeJJKEjtc6K6O07zsvP+gDO6MMWo7pg=="],
 

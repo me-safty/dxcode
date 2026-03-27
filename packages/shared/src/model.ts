@@ -10,7 +10,7 @@ import {
   type ModelSlug,
   type ProviderKind,
   CodexReasoningEffort,
-} from "@t3tools/contracts";
+} from "@tero/contracts";
 
 const MODEL_SLUG_SET_BY_PROVIDER: Record<ProviderKind, ReadonlySet<ModelSlug>> = {
   claudeAgent: new Set(MODEL_OPTIONS_BY_PROVIDER.claudeAgent.map((option) => option.slug)),

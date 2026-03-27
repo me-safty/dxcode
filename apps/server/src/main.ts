@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 /**
  * CliConfig - CLI/runtime bootstrap service definitions.
  *
@@ -8,7 +9,7 @@
  */
 import { Config, Data, Effect, FileSystem, Layer, Option, Path, Schema, ServiceMap } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import { NetService } from "@t3tools/shared/Net";
+import { NetService } from "@tero/shared/Net";
 import {
   DEFAULT_PORT,
   deriveServerPaths,
@@ -37,7 +38,7 @@ interface CliInput {
   readonly mode: Option.Option<RuntimeMode>;
   readonly port: Option.Option<number>;
   readonly host: Option.Option<string>;
-  readonly t3Home: Option.Option<string>;
+  readonly teroHome: Option.Option<string>;
   readonly devUrl: Option.Option<URL>;
   readonly noBrowser: Option.Option<boolean>;
   readonly authToken: Option.Option<string>;
@@ -69,7 +70,7 @@ export interface CliConfigShape {
  * CliConfig - Service tag for startup CLI/runtime helpers.
  */
 export class CliConfig extends ServiceMap.Service<CliConfig, CliConfigShape>()(
-  "t3/main/CliConfig",
+  "tero/main/CliConfig",
 ) {
   static readonly layer = Layer.effect(
     CliConfig,
@@ -88,8 +89,45 @@ export class CliConfig extends ServiceMap.Service<CliConfig, CliConfigShape>()(
   );
 }
 
+const ENV_ALIASES = [
+  ["TERO_MODE", "T3CODE_MODE"],
+  ["TERO_PORT", "T3CODE_PORT"],
+  ["TERO_HOST", "T3CODE_HOST"],
+  ["TERO_HOME", "T3CODE_HOME"],
+  ["TERO_NO_BROWSER", "T3CODE_NO_BROWSER"],
+  ["TERO_AUTH_TOKEN", "T3CODE_AUTH_TOKEN"],
+  ["TERO_AUTO_BOOTSTRAP_PROJECT_FROM_CWD", "T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"],
+  ["TERO_LOG_WS_EVENTS", "T3CODE_LOG_WS_EVENTS"],
+] as const;
+
+for (const [preferred, legacy] of ENV_ALIASES) {
+  const preferredValue = process.env[preferred]?.trim();
+  const legacyValue = process.env[legacy]?.trim();
+  if (
+    preferredValue !== undefined &&
+    legacyValue !== undefined &&
+    preferredValue.length > 0 &&
+    legacyValue.length > 0 &&
+    preferredValue !== legacyValue
+  ) {
+    console.warn(
+      `[tero] conflicting environment values detected; preferring ${preferred} over ${legacy}`,
+      {
+        preferred,
+        legacy,
+      },
+    );
+  }
+}
+
+for (const [preferred, legacy] of ENV_ALIASES) {
+  if (process.env[preferred] === undefined && process.env[legacy] !== undefined) {
+    process.env[preferred] = process.env[legacy];
+  }
+}
+
 const CliEnvConfig = Config.all({
-  mode: Config.string("T3CODE_MODE").pipe(
+  mode: Config.string("TERO_MODE").pipe(
     Config.option,
     Config.map(
       Option.match<RuntimeMode, string>({
@@ -98,23 +136,23 @@ const CliEnvConfig = Config.all({
       }),
     ),
   ),
-  port: Config.port("T3CODE_PORT").pipe(Config.option, Config.map(Option.getOrUndefined)),
-  host: Config.string("T3CODE_HOST").pipe(Config.option, Config.map(Option.getOrUndefined)),
-  t3Home: Config.string("T3CODE_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  port: Config.port("TERO_PORT").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  host: Config.string("TERO_HOST").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  teroHome: Config.string("TERO_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
   devUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option, Config.map(Option.getOrUndefined)),
-  noBrowser: Config.boolean("T3CODE_NO_BROWSER").pipe(
+  noBrowser: Config.boolean("TERO_NO_BROWSER").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
-  authToken: Config.string("T3CODE_AUTH_TOKEN").pipe(
+  authToken: Config.string("TERO_AUTH_TOKEN").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
-  autoBootstrapProjectFromCwd: Config.boolean("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD").pipe(
+  autoBootstrapProjectFromCwd: Config.boolean("TERO_AUTO_BOOTSTRAP_PROJECT_FROM_CWD").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
-  logWebSocketEvents: Config.boolean("T3CODE_LOG_WS_EVENTS").pipe(
+  logWebSocketEvents: Config.boolean("TERO_LOG_WS_EVENTS").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
@@ -122,6 +160,23 @@ const CliEnvConfig = Config.all({
 
 const resolveBooleanFlag = (flag: Option.Option<boolean>, envValue: boolean) =>
   Option.getOrElse(Option.filter(flag, Boolean), () => envValue);
+
+const resolveRuntimeBaseDirInput = (
+  input: CliInput,
+  envTeroHome: string | undefined,
+  devUrl: URL | undefined,
+) => {
+  const explicitHome = Option.getOrUndefined(input.teroHome) ?? envTeroHome;
+  if (explicitHome !== undefined) {
+    return explicitHome;
+  }
+
+  if (devUrl !== undefined) {
+    return `${homedir()}/.tero-dev`;
+  }
+
+  return undefined;
+};
 
 const ServerConfigLive = (input: CliInput) =>
   Layer.effect(
@@ -152,7 +207,9 @@ const ServerConfigLive = (input: CliInput) =>
       });
 
       const devUrl = Option.getOrElse(input.devUrl, () => env.devUrl);
-      const baseDir = yield* resolveBaseDir(Option.getOrUndefined(input.t3Home) ?? env.t3Home);
+      const baseDir = yield* resolveBaseDir(
+        resolveRuntimeBaseDirInput(input, env.teroHome, devUrl),
+      );
       const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
       const noBrowser = resolveBooleanFlag(input.noBrowser, env.noBrowser ?? mode === "desktop");
       const authToken = Option.getOrUndefined(input.authToken) ?? env.authToken;
@@ -258,7 +315,7 @@ const makeServerProgram = (input: CliInput) =>
         ? `http://${formatHostForUrl(config.host)}:${config.port}`
         : localUrl;
     const { authToken, devUrl, ...safeConfig } = config;
-    yield* Effect.logInfo("T3 Code running", {
+    yield* Effect.logInfo("Tero running", {
       ...safeConfig,
       devUrl: devUrl?.toString(),
       authEnabled: Boolean(authToken),
@@ -295,8 +352,8 @@ const hostFlag = Flag.string("host").pipe(
   Flag.withDescription("Host/interface to bind (for example 127.0.0.1, 0.0.0.0, or a Tailnet IP)."),
   Flag.optional,
 );
-const t3HomeFlag = Flag.string("home-dir").pipe(
-  Flag.withDescription("Base directory for all T3 Code data (equivalent to T3CODE_HOME)."),
+const teroHomeFlag = Flag.string("home-dir").pipe(
+  Flag.withDescription("Base directory for all Tero data (equivalent to TERO_HOME)."),
   Flag.optional,
 );
 const devUrlFlag = Flag.string("dev-url").pipe(
@@ -321,23 +378,23 @@ const autoBootstrapProjectFromCwdFlag = Flag.boolean("auto-bootstrap-project-fro
 );
 const logWebSocketEventsFlag = Flag.boolean("log-websocket-events").pipe(
   Flag.withDescription(
-    "Emit server-side logs for outbound WebSocket push traffic (equivalent to T3CODE_LOG_WS_EVENTS).",
+    "Emit server-side logs for outbound WebSocket push traffic (equivalent to TERO_LOG_WS_EVENTS).",
   ),
   Flag.withAlias("log-ws-events"),
   Flag.optional,
 );
 
-export const t3Cli = Command.make("t3", {
+export const teroCli = Command.make("tero", {
   mode: modeFlag,
   port: portFlag,
   host: hostFlag,
-  t3Home: t3HomeFlag,
+  teroHome: teroHomeFlag,
   devUrl: devUrlFlag,
   noBrowser: noBrowserFlag,
   authToken: authTokenFlag,
   autoBootstrapProjectFromCwd: autoBootstrapProjectFromCwdFlag,
   logWebSocketEvents: logWebSocketEventsFlag,
 }).pipe(
-  Command.withDescription("Run the T3 Code server."),
+  Command.withDescription("Run the Tero server."),
   Command.withHandler((input) => Effect.scoped(makeServerProgram(input))),
 );

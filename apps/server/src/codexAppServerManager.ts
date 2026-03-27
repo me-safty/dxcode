@@ -18,8 +18,8 @@ import {
   type ProviderTurnStartResult,
   RuntimeMode,
   ProviderInteractionMode,
-} from "@t3tools/contracts";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+} from "@tero/contracts";
+import { normalizeModelSlug } from "@tero/shared/model";
 import { Effect, ServiceMap } from "effect";
 
 import {

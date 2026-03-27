@@ -26,7 +26,7 @@ import {
   type WsResponse as WsResponseMessage,
   WsResponse,
   type WsPushEnvelopeBase,
-} from "@t3tools/contracts";
+} from "@tero/contracts";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import {
   Cause,
@@ -77,7 +77,7 @@ import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
-import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import { decodeJsonResult, formatSchemaError } from "@tero/shared/schemaJson";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -101,7 +101,7 @@ export interface ServerShape {
 /**
  * Server - Service tag for HTTP/WebSocket lifecycle management.
  */
-export class Server extends ServiceMap.Service<Server, ServerShape>()("t3/wsServer/Server") {}
+export class Server extends ServiceMap.Service<Server, ServerShape>()("tero/wsServer/Server") {}
 
 const isServerNotRunningError = (error: Error): boolean => {
   const maybeCode = (error as NodeJS.ErrnoException).code;
@@ -623,6 +623,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   let welcomeBootstrapProjectId: ProjectId | undefined;
   let welcomeBootstrapThreadId: ThreadId | undefined;
+  let welcomeBootstrapSource:
+    | "disabled"
+    | "created-project-and-thread"
+    | "created-thread"
+    | "existing-thread" = "disabled";
 
   if (autoBootstrapProjectFromCwd) {
     yield* Effect.gen(function* () {
@@ -650,6 +655,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           defaultModelSelection: bootstrapProjectDefaultModelSelection,
           createdAt,
         });
+        welcomeBootstrapSource = "created-project-and-thread";
       } else {
         bootstrapProjectId = existingProject.id;
         bootstrapProjectDefaultModelSelection = existingProject.defaultModelSelection ?? {
@@ -679,9 +685,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         });
         welcomeBootstrapProjectId = bootstrapProjectId;
         welcomeBootstrapThreadId = threadId;
+        if (welcomeBootstrapSource !== "created-project-and-thread") {
+          welcomeBootstrapSource = "created-thread";
+        }
       } else {
         welcomeBootstrapProjectId = bootstrapProjectId;
         welcomeBootstrapThreadId = existingThread.id;
+        welcomeBootstrapSource = "existing-thread";
       }
     }).pipe(
       Effect.mapError(

@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 
 import { Effect, FileSystem, Layer, Path } from "effect";
-import type { GitActionProgressEvent, GitActionProgressPhase } from "@t3tools/contracts";
+import type { GitActionProgressEvent, GitActionProgressPhase } from "@tero/contracts";
 import {
   resolveAutoFeatureBranchName,
   sanitizeBranchFragment,
   sanitizeFeatureBranchName,
-} from "@t3tools/shared/git";
+} from "@tero/shared/git";
 
 import { GitManagerError } from "../Errors.ts";
 import {

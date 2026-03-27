@@ -1,14 +1,14 @@
 {
-  "name": "t3",
+  "name": "tero",
   "version": "0.0.14",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pingdotgg/t3code",
+    "url": "https://github.com/pingdotgg/tero",
     "directory": "apps/server"
   },
   "bin": {
-    "t3": "./dist/index.mjs"
+    "tero": "./dist/index.mjs"
   },
   "files": [
     "dist"
@@ -35,9 +35,9 @@
   "devDependencies": {
     "@effect/language-service": "catalog:",
     "@effect/vitest": "catalog:",
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/shared": "workspace:*",
-    "@t3tools/web": "workspace:*",
+    "@tero/contracts": "workspace:*",
+    "@tero/shared": "workspace:*",
+    "@tero/web": "workspace:*",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
     "@types/ws": "^8.5.13",

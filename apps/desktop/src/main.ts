@@ -16,17 +16,13 @@ import {
   shell,
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
+import type { ContextMenuItem } from "@tero/contracts";
 import * as Effect from "effect/Effect";
-import type {
-  DesktopTheme,
-  DesktopUpdateActionResult,
-  DesktopUpdateState,
-} from "@t3tools/contracts";
+import type { DesktopTheme, DesktopUpdateActionResult, DesktopUpdateState } from "@tero/contracts";
+import { NetService } from "@tero/shared/Net";
+import { RotatingFileSink } from "@tero/shared/logging";
 import { autoUpdater } from "electron-updater";
 
-import type { ContextMenuItem } from "@t3tools/contracts";
-import { NetService } from "@t3tools/shared/Net";
-import { RotatingFileSink } from "@t3tools/shared/logging";
 import { showDesktopConfirmDialog } from "./confirmDialog";
 import { syncShellEnvironment } from "./syncShellEnvironment";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
@@ -56,15 +52,23 @@ const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
-const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
+const isLocalDesktopRuntime =
+  process.env.TERO_DESKTOP_LOCAL_DEV === "1" || process.argv.includes("--tero-local-dev");
+const isPackaged = app.isPackaged && !isLocalDesktopRuntime;
+const isRendererDevServer = Boolean(process.env.VITE_DEV_SERVER_URL);
+const DEFAULT_BASE_DIR_NAME = isPackaged ? ".tero" : ".tero-dev";
+const BASE_DIR =
+  process.env.TERO_HOME?.trim() ??
+  process.env.T3CODE_HOME?.trim() ??
+  Path.join(OS.homedir(), DEFAULT_BASE_DIR_NAME);
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
-const DESKTOP_SCHEME = "t3";
+const DESKTOP_SCHEME = "tero";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
-const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
-const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
-const APP_USER_MODEL_ID = "com.t3tools.t3code";
-const USER_DATA_DIR_NAME = isDevelopment ? "t3code-dev" : "t3code";
-const LEGACY_USER_DATA_DIR_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+const isDevelopment = isRendererDevServer;
+const APP_DISPLAY_NAME = isPackaged ? "Tero (Alpha)" : "Tero (Dev)";
+const APP_USER_MODEL_ID = "com.tero.desktop";
+const USER_DATA_DIR_NAME = isPackaged ? "tero" : "tero-dev";
+const LEGACY_USER_DATA_DIR_NAME = isPackaged ? "Tero (Alpha)" : "Tero (Dev)";
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
 const LOG_DIR = Path.join(STATE_DIR, "logs");
@@ -77,6 +81,12 @@ const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
+type UserDataPathResolution = {
+  readonly appDataBase: string;
+  readonly legacyPath: string;
+  readonly chosenPath: string;
+  readonly usedLegacyPath: boolean;
+};
 
 let mainWindow: BrowserWindow | null = null;
 let backendProcess: ChildProcess.ChildProcess | null = null;
@@ -344,8 +354,8 @@ function resolveEmbeddedCommitHash(): string | null {
 
   try {
     const raw = FS.readFileSync(packageJsonPath, "utf8");
-    const parsed = JSON.parse(raw) as { t3codeCommitHash?: unknown };
-    return normalizeCommitHash(parsed.t3codeCommitHash);
+    const parsed = JSON.parse(raw) as { teroCommitHash?: unknown; t3codeCommitHash?: unknown };
+    return normalizeCommitHash(parsed.teroCommitHash ?? parsed.t3codeCommitHash);
   } catch {
     return null;
   }
@@ -356,7 +366,9 @@ function resolveAboutCommitHash(): string | null {
     return aboutCommitHashCache;
   }
 
-  const envCommitHash = normalizeCommitHash(process.env.T3CODE_COMMIT_HASH);
+  const envCommitHash = normalizeCommitHash(
+    process.env.TERO_COMMIT_HASH ?? process.env.T3CODE_COMMIT_HASH,
+  );
   if (envCommitHash) {
     aboutCommitHashCache = envCommitHash;
     return aboutCommitHashCache;
@@ -440,7 +452,7 @@ function handleFatalStartupError(stage: string, error: unknown): void {
   console.error(`[desktop] fatal startup error (${stage})`, error);
   if (!isQuitting) {
     isQuitting = true;
-    dialog.showErrorBox("T3 Code failed to start", `Stage: ${stage}\n${message}${detail}`);
+    dialog.showErrorBox("Tero failed to start", `Stage: ${stage}\n${message}${detail}`);
   }
   stopBackend();
   restoreStdIoCapture?.();
@@ -518,7 +530,8 @@ function handleCheckForUpdatesMenuClick(): void {
     isPackaged: app.isPackaged,
     platform: process.platform,
     appImage: process.env.APPIMAGE,
-    disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+    disabledByEnv:
+      (process.env.TERO_DISABLE_AUTO_UPDATE ?? process.env.T3CODE_DISABLE_AUTO_UPDATE) === "1",
   });
   if (disabledReason) {
     console.info("[desktop-updater] Manual update check requested, but updates are disabled.");
@@ -545,7 +558,7 @@ async function checkForUpdatesFromMenu(): Promise<void> {
     void dialog.showMessageBox({
       type: "info",
       title: "You're up to date!",
-      message: `T3 Code ${updateState.currentVersion} is currently the newest version available.`,
+      message: `Tero ${updateState.currentVersion} is currently the newest version available.`,
       buttons: ["OK"],
     });
   } else if (updateState.status === "error") {
@@ -663,14 +676,18 @@ function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
  *
  * Electron derives the default userData path from `productName` in
  * package.json, which currently produces directories with spaces and
- * parentheses (e.g. `~/.config/T3 Code (Alpha)` on Linux). This is
+ * parentheses (e.g. `~/.config/Tero (Alpha)` on Linux). This is
  * unfriendly for shell usage and violates Linux naming conventions.
  *
- * We override it to a clean lowercase name (`t3code`). If the legacy
+ * We override it to a clean lowercase name (`tero`). If the legacy
  * directory already exists we keep using it so existing users don't
  * lose their Chromium profile data (localStorage, cookies, sessions).
  */
 function resolveUserDataPath(): string {
+  return resolveUserDataPathDetails().chosenPath;
+}
+
+function resolveUserDataPathDetails(): UserDataPathResolution {
   const appDataBase =
     process.platform === "win32"
       ? process.env.APPDATA || Path.join(OS.homedir(), "AppData", "Roaming")
@@ -680,10 +697,20 @@ function resolveUserDataPath(): string {
 
   const legacyPath = Path.join(appDataBase, LEGACY_USER_DATA_DIR_NAME);
   if (FS.existsSync(legacyPath)) {
-    return legacyPath;
+    return {
+      appDataBase,
+      legacyPath,
+      chosenPath: legacyPath,
+      usedLegacyPath: true,
+    };
   }
 
-  return Path.join(appDataBase, USER_DATA_DIR_NAME);
+  return {
+    appDataBase,
+    legacyPath,
+    chosenPath: Path.join(appDataBase, USER_DATA_DIR_NAME),
+    usedLegacyPath: false,
+  };
 }
 
 function configureAppIdentity(): void {
@@ -737,7 +764,8 @@ function shouldEnableAutoUpdates(): boolean {
       isPackaged: app.isPackaged,
       platform: process.platform,
       appImage: process.env.APPIMAGE,
-      disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+      disabledByEnv:
+        (process.env.TERO_DISABLE_AUTO_UPDATE ?? process.env.T3CODE_DISABLE_AUTO_UPDATE) === "1",
     }) === null
   );
 }
@@ -822,7 +850,10 @@ function configureAutoUpdater(): void {
   updaterConfigured = true;
 
   const githubToken =
-    process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
+    process.env.TERO_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() ||
+    process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() ||
+    process.env.GH_TOKEN?.trim() ||
+    "";
   if (githubToken) {
     // When a token is provided, re-configure the feed with `private: true` so
     // electron-updater uses the GitHub API (api.github.com) instead of the
@@ -921,12 +952,43 @@ function configureAutoUpdater(): void {
 function backendEnv(): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    T3CODE_MODE: "desktop",
-    T3CODE_NO_BROWSER: "1",
-    T3CODE_PORT: String(backendPort),
-    T3CODE_HOME: BASE_DIR,
-    T3CODE_AUTH_TOKEN: backendAuthToken,
+    TERO_MODE: "desktop",
+    TERO_NO_BROWSER: "1",
+    TERO_PORT: String(backendPort),
+    TERO_HOME: BASE_DIR,
+    TERO_AUTH_TOKEN: backendAuthToken,
   };
+}
+
+function resolveLocalDevBackendExecutable(): string {
+  const explicitExecutable = process.env.TERO_DESKTOP_SERVER_EXECUTABLE?.trim();
+  if (explicitExecutable) {
+    return explicitExecutable;
+  }
+
+  const shellCandidates = [process.env.BUN, process.env.npm_node_execpath]
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+
+  for (const candidate of shellCandidates) {
+    if (FS.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  for (const binaryName of ["bun", "node"]) {
+    const resolved = ChildProcess.spawnSync("which", [binaryName], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const executable = resolved.stdout.trim();
+    if (resolved.status === 0 && executable.length > 0 && FS.existsSync(executable)) {
+      return executable;
+    }
+  }
+
+  return process.execPath;
 }
 
 function scheduleBackendRestart(reason: string): void {
@@ -952,13 +1014,26 @@ function startBackend(): void {
   }
 
   const captureBackendLogs = app.isPackaged && backendLogSink !== null;
-  const child = ChildProcess.spawn(process.execPath, [backendEntry], {
+  const backendExecutable = isLocalDesktopRuntime
+    ? resolveLocalDevBackendExecutable()
+    : process.env.TERO_DESKTOP_SERVER_EXECUTABLE?.trim() || process.execPath;
+  const backendArgs = [
+    backendEntry,
+    "--mode",
+    "desktop",
+    "--no-browser",
+    "--port",
+    String(backendPort),
+    "--home-dir",
+    BASE_DIR,
+    "--auth-token",
+    backendAuthToken,
+  ];
+  const child = ChildProcess.spawn(backendExecutable, backendArgs, {
     cwd: resolveBackendCwd(),
-    // In Electron main, process.execPath points to the Electron binary.
-    // Run the child in Node mode so this backend process does not become a GUI app instance.
     env: {
       ...backendEnv(),
-      ELECTRON_RUN_AS_NODE: "1",
+      ...(backendExecutable === process.execPath ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
     },
     stdio: captureBackendLogs ? ["ignore", "pipe", "pipe"] : "inherit",
   });
@@ -1312,7 +1387,11 @@ app.setPath("userData", resolveUserDataPath());
 configureAppIdentity();
 
 async function bootstrap(): Promise<void> {
+  const userDataPath = resolveUserDataPathDetails();
   writeDesktopLogHeader("bootstrap start");
+  writeDesktopLogHeader(
+    `startup paths packaged=${String(isPackaged)} localDesktopRuntime=${String(isLocalDesktopRuntime)} rendererDevServer=${String(isRendererDevServer)} baseDir=${BASE_DIR} stateDir=${STATE_DIR} userData=${userDataPath.chosenPath} legacyUserData=${userDataPath.legacyPath} legacyUserDataReused=${String(userDataPath.usedLegacyPath)}`,
+  );
   backendPort = await Effect.service(NetService).pipe(
     Effect.flatMap((net) => net.reserveLoopbackPort()),
     Effect.provide(NetService.layer),
@@ -1321,7 +1400,7 @@ async function bootstrap(): Promise<void> {
   writeDesktopLogHeader(`reserved backend port via NetService port=${backendPort}`);
   backendAuthToken = Crypto.randomBytes(24).toString("hex");
   backendWsUrl = `ws://127.0.0.1:${backendPort}/?token=${encodeURIComponent(backendAuthToken)}`;
-  process.env.T3CODE_DESKTOP_WS_URL = backendWsUrl;
+  process.env.TERO_DESKTOP_WS_URL = backendWsUrl;
   writeDesktopLogHeader(`bootstrap resolved websocket url=${backendWsUrl}`);
 
   registerIpcHandlers();
