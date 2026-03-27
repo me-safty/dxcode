@@ -11,6 +11,7 @@ import {
   TerminalIcon,
   TriangleAlertIcon,
 } from "lucide-react";
+import { ProjectFavicon } from "./ProjectFavicon";
 import { autoAnimate } from "@formkit/auto-animate";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
@@ -119,8 +120,6 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
 } as const;
-const loadedProjectFaviconSrcs = new Set<string>();
-
 interface TerminalStatusIndicator {
   label: "Terminal process running";
   colorClass: string;
@@ -196,52 +195,7 @@ function T3Wordmark() {
 }
 
 /**
- * Derives the server's HTTP origin (scheme + host + port) from the same
- * sources WsTransport uses, converting ws(s) to http(s).
  */
-function getServerHttpOrigin(): string {
-  const bridgeUrl = window.desktopBridge?.getWsUrl();
-  const envUrl = import.meta.env.VITE_WS_URL as string | undefined;
-  const wsUrl =
-    bridgeUrl && bridgeUrl.length > 0
-      ? bridgeUrl
-      : envUrl && envUrl.length > 0
-        ? envUrl
-        : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:${window.location.port}`;
-  // Parse to extract just the origin, dropping path/query (e.g. ?token=…)
-  const httpUrl = wsUrl.replace(/^wss:/, "https:").replace(/^ws:/, "http:");
-  try {
-    return new URL(httpUrl).origin;
-  } catch {
-    return httpUrl;
-  }
-}
-
-const serverHttpOrigin = getServerHttpOrigin();
-
-function ProjectFavicon({ cwd }: { cwd: string }) {
-  const src = `${serverHttpOrigin}/api/project-favicon?cwd=${encodeURIComponent(cwd)}`;
-  const [status, setStatus] = useState<"loading" | "loaded" | "error">(() =>
-    loadedProjectFaviconSrcs.has(src) ? "loaded" : "loading",
-  );
-
-  if (status === "error") {
-    return <FolderIcon className="size-3.5 shrink-0 text-muted-foreground/50" />;
-  }
-
-  return (
-    <img
-      src={src}
-      alt=""
-      className={`size-3.5 shrink-0 rounded-sm object-contain ${status === "loading" ? "hidden" : ""}`}
-      onLoad={() => {
-        loadedProjectFaviconSrcs.add(src);
-        setStatus("loaded");
-      }}
-      onError={() => setStatus("error")}
-    />
-  );
-}
 
 type SortableProjectHandleProps = Pick<
   ReturnType<typeof useSortable>,
@@ -1051,6 +1005,7 @@ export default function Sidebar() {
           }}
           onMouseLeave={() => {
             setHoveredThreadId((current) => (current === thread.id ? null : current));
+            setConfirmingArchiveThreadId((current) => (current === thread.id ? null : current));
           }}
         >
           <SidebarMenuSubButton
@@ -1181,7 +1136,7 @@ export default function Sidebar() {
                     type="button"
                     data-thread-selection-safe
                     aria-label={`Confirm archive ${thread.title}`}
-                    className="absolute top-1/2 right-1 inline-flex h-5 -translate-y-1/2 items-center rounded-full bg-destructive/12 px-2 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/18 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-destructive/40"
+                    className="absolute top-1/2 right-1 inline-flex h-5 -translate-y-1/2 cursor-pointer items-center rounded-full bg-destructive/12 px-2 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/18 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-destructive/40"
                     onPointerDown={(event) => {
                       event.stopPropagation();
                     }}
@@ -1203,7 +1158,7 @@ export default function Sidebar() {
                       type="button"
                       data-thread-selection-safe
                       aria-label={`Archive ${thread.title}`}
-                      className="absolute top-1/2 right-1 inline-flex size-5 -translate-y-1/2 items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                      className="absolute top-1/2 right-1 inline-flex size-5 -translate-y-1/2 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                       onPointerDown={(event) => {
                         event.stopPropagation();
                       }}
@@ -1223,7 +1178,7 @@ export default function Sidebar() {
                             type="button"
                             data-thread-selection-safe
                             aria-label={`Archive ${thread.title}`}
-                            className="absolute top-1/2 right-1 inline-flex size-5 -translate-y-1/2 items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                            className="absolute top-1/2 right-1 inline-flex size-5 -translate-y-1/2 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                             onPointerDown={(event) => {
                               event.stopPropagation();
                             }}

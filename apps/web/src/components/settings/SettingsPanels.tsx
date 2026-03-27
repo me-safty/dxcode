@@ -2,7 +2,6 @@ import {
   ArchiveIcon,
   ArchiveX,
   ChevronDownIcon,
-  FolderIcon,
   InfoIcon,
   LoaderIcon,
   PlusIcon,
@@ -48,6 +47,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { ProjectFavicon } from "../ProjectFavicon";
 
 const THEME_OPTIONS = [
   {
@@ -182,17 +182,20 @@ function useRelativeTimeTick(intervalMs = 1_000) {
 
 function SettingsSection({
   title,
+  icon,
   headerAction,
   children,
 }: {
   title: string;
+  icon?: ReactNode;
   headerAction?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+        <h2 className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          {icon}
           {title}
         </h2>
         {headerAction}
@@ -1265,8 +1268,6 @@ export function ArchivedThreadsPanel() {
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
   const { unarchiveThread, confirmAndDeleteThread } = useThreadActions();
-  const [hoveredThreadId, setHoveredThreadId] = useState<ThreadId | null>(null);
-
   const archivedGroups = useMemo(() => {
     const projectById = new Map(projects.map((project) => [project.id, project] as const));
     return [...projectById.values()]
@@ -1317,8 +1318,8 @@ export function ArchivedThreadsPanel() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection title="Archived threads">
-        {archivedGroups.length === 0 ? (
+      {archivedGroups.length === 0 ? (
+        <SettingsSection title="Archived threads">
           <Empty className="min-h-[22rem]">
             <EmptyMedia variant="icon">
               <ArchiveIcon />
@@ -1328,78 +1329,57 @@ export function ArchivedThreadsPanel() {
               <EmptyDescription>Archived threads will appear here.</EmptyDescription>
             </EmptyHeader>
           </Empty>
-        ) : (
-          <div className="divide-y divide-border">
-            {archivedGroups.map(({ project, threads: projectThreads }) => (
-              <section key={project.id} className="px-4 py-4 sm:px-5">
-                <div className="mb-3 flex items-center gap-2">
-                  <FolderIcon className="size-3.5 text-muted-foreground" />
-                  <h3 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                    {project.name}
-                  </h3>
+        </SettingsSection>
+      ) : (
+        archivedGroups.map(({ project, threads: projectThreads }) => (
+          <SettingsSection
+            key={project.id}
+            title={project.name}
+            icon={<ProjectFavicon cwd={project.cwd} />}
+          >
+            {projectThreads.map((thread) => (
+              <div
+                key={thread.id}
+                className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 first:border-t-0 sm:px-5"
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  void handleArchivedThreadContextMenu(thread.id, {
+                    x: event.clientX,
+                    y: event.clientY,
+                  });
+                }}
+              >
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate text-sm font-medium text-foreground">{thread.title}</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Archived {formatArchivedRelativeTime(thread.archivedAt ?? thread.createdAt)}
+                    {" \u00b7 Created "}
+                    {formatArchivedRelativeTime(thread.createdAt)}
+                  </p>
                 </div>
-                <div className="space-y-2">
-                  {projectThreads.map((thread) => (
-                    <div
-                      key={thread.id}
-                      className="flex w-full items-center justify-between gap-3 rounded-xl border border-border/70 px-3 py-3 text-left transition-colors hover:bg-accent"
-                      onMouseEnter={() => setHoveredThreadId(thread.id)}
-                      onMouseLeave={() =>
-                        setHoveredThreadId((current) => (current === thread.id ? null : current))
-                      }
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        setHoveredThreadId((current) => (current === thread.id ? null : current));
-                        void handleArchivedThreadContextMenu(thread.id, {
-                          x: event.clientX,
-                          y: event.clientY,
-                        });
-                      }}
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-foreground">
-                          {thread.title}
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          Archived{" "}
-                          {formatArchivedRelativeTime(thread.archivedAt ?? thread.createdAt)}
-                        </div>
-                      </div>
-                      <div className="flex min-w-20 shrink-0 justify-end pl-3">
-                        {hoveredThreadId === thread.id ? (
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            className="h-7 gap-1.5 rounded-full px-2.5"
-                            onClick={() =>
-                              void unarchiveThread(thread.id).catch((error) => {
-                                toastManager.add({
-                                  type: "error",
-                                  title: "Failed to unarchive thread",
-                                  description:
-                                    error instanceof Error ? error.message : "An error occurred.",
-                                });
-                              })
-                            }
-                          >
-                            <ArchiveX className="size-3.5" />
-                            <span>Unarchive</span>
-                          </Button>
-                        ) : (
-                          <div className="text-[11px] text-muted-foreground/70">
-                            {formatArchivedRelativeTime(thread.createdAt)}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
+                  onClick={() =>
+                    void unarchiveThread(thread.id).catch((error) => {
+                      toastManager.add({
+                        type: "error",
+                        title: "Failed to unarchive thread",
+                        description: error instanceof Error ? error.message : "An error occurred.",
+                      });
+                    })
+                  }
+                >
+                  <ArchiveX className="size-3.5" />
+                  <span>Unarchive</span>
+                </Button>
+              </div>
             ))}
-          </div>
-        )}
-      </SettingsSection>
+          </SettingsSection>
+        ))
+      )}
     </SettingsPageContainer>
   );
 }
