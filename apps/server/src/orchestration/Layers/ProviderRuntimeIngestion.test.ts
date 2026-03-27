@@ -4,7 +4,6 @@ import path from "node:path";
 
 import type {
   OrchestrationReadModel,
-  ProviderKind,
   ProviderRuntimeEvent,
   ProviderSession,
 } from "@t3tools/contracts";
@@ -56,7 +55,7 @@ const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 type LegacyProviderRuntimeEvent = {
   readonly type: string;
   readonly eventId: EventId;
-  readonly provider: ProviderKind;
+  readonly provider: ProviderRuntimeEvent["provider"];
   readonly createdAt: string;
   readonly threadId: ThreadId;
   readonly turnId?: string | undefined;
@@ -65,6 +64,23 @@ type LegacyProviderRuntimeEvent = {
   readonly payload?: unknown | undefined;
   readonly [key: string]: unknown;
 };
+
+type LegacyTurnCompletedEvent = LegacyProviderRuntimeEvent & {
+  readonly type: "turn.completed";
+  readonly payload?: undefined;
+  readonly status: "completed" | "failed" | "interrupted" | "cancelled";
+  readonly errorMessage?: string | undefined;
+};
+
+function isLegacyTurnCompletedEvent(
+  event: LegacyProviderRuntimeEvent,
+): event is LegacyTurnCompletedEvent {
+  return (
+    event.type === "turn.completed" &&
+    event.payload === undefined &&
+    typeof event.status === "string"
+  );
+}
 
 function createProviderServiceHarness() {
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
@@ -94,21 +110,18 @@ function createProviderServiceHarness() {
   };
 
   const normalizeLegacyEvent = (event: LegacyProviderRuntimeEvent): ProviderRuntimeEvent => {
-    if (
-      event.type === "turn.completed" &&
-      event.payload === undefined &&
-      typeof event.status === "string"
-    ) {
-      return {
-        ...(event as unknown as ProviderRuntimeEvent),
+    if (isLegacyTurnCompletedEvent(event)) {
+      const normalized: Extract<ProviderRuntimeEvent, { type: "turn.completed" }> = {
+        ...(event as Omit<Extract<ProviderRuntimeEvent, { type: "turn.completed" }>, "payload">),
         payload: {
           state: event.status,
           ...(typeof event.errorMessage === "string" ? { errorMessage: event.errorMessage } : {}),
         },
-      } as ProviderRuntimeEvent;
+      };
+      return normalized;
     }
 
-    return event as unknown as ProviderRuntimeEvent;
+    return event as ProviderRuntimeEvent;
   };
 
   const emit = (event: LegacyProviderRuntimeEvent): void => {
