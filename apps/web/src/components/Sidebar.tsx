@@ -57,7 +57,7 @@ import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { toastManager } from "./ui/toast";
-import { formatRelativeTime } from "../formatRelativeTime";
+import { formatRelativeTimeLabel } from "../timestampFormat";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import {
   getArm64IntelBuildWarningDescription,
@@ -193,9 +193,6 @@ function T3Wordmark() {
     </svg>
   );
 }
-
-/**
- */
 
 type SortableProjectHandleProps = Pick<
   ReturnType<typeof useSortable>,
@@ -1206,7 +1203,7 @@ export default function Sidebar() {
                         : "text-muted-foreground/40"
                     }`}
                   >
-                    {formatRelativeTime(thread.updatedAt ?? thread.createdAt)}
+                    {formatRelativeTimeLabel(thread.updatedAt ?? thread.createdAt)}
                   </span>
                 )}
               </div>

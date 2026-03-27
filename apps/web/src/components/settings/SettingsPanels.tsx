@@ -36,8 +36,7 @@ import {
 } from "../../modelSelection";
 import { ensureNativeApi, readNativeApi } from "../../nativeApi";
 import { useStore } from "../../store";
-import { formatRelativeTime as formatArchivedRelativeTime } from "../../formatRelativeTime";
-import { formatRelativeTime } from "../../timestampFormat";
+import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
@@ -1352,9 +1351,9 @@ export function ArchivedThreadsPanel() {
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate text-sm font-medium text-foreground">{thread.title}</h3>
                   <p className="text-xs text-muted-foreground">
-                    Archived {formatArchivedRelativeTime(thread.archivedAt ?? thread.createdAt)}
+                    Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
                     {" \u00b7 Created "}
-                    {formatArchivedRelativeTime(thread.createdAt)}
+                    {formatRelativeTimeLabel(thread.createdAt)}
                   </p>
                 </div>
                 <Button

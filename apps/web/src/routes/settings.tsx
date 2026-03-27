@@ -1,12 +1,14 @@
 import { RotateCcwIcon } from "lucide-react";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useState } from "react";
+
+import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { Button } from "../components/ui/button";
 import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
 import { isElectron } from "../env";
 
-function SettingsLayout() {
+function SettingsContentLayout() {
   const [restoreSignal, setRestoreSignal] = useState(0);
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(() =>
     setRestoreSignal((value) => value + 1),
@@ -62,11 +64,19 @@ function SettingsLayout() {
   );
 }
 
-export const Route = createFileRoute("/_chat/settings")({
+function SettingsRouteLayout() {
+  return (
+    <AppSidebarLayout>
+      <SettingsContentLayout />
+    </AppSidebarLayout>
+  );
+}
+
+export const Route = createFileRoute("/settings")({
   beforeLoad: ({ location }) => {
     if (location.pathname === "/settings") {
       throw redirect({ to: "/settings/general", replace: true });
     }
   },
-  component: SettingsLayout,
+  component: SettingsRouteLayout,
 });
