@@ -1758,6 +1758,57 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("does not start a new turn when Enter is pressed while the thread is running", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "follow-up while running");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-enter-while-running" as MessageId,
+        targetText: "enter while running target",
+        sessionStatus: "running",
+      }),
+    });
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+      const initialTurnStartRequestCount = wsRequests.filter(
+        (request) =>
+          request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+          request.command &&
+          typeof request.command === "object" &&
+          "type" in request.command &&
+          request.command.type === "thread.turn.start",
+      ).length;
+
+      composerEditor.focus();
+      composerEditor.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await waitForLayout();
+
+      const nextTurnStartRequestCount = wsRequests.filter(
+        (request) =>
+          request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+          request.command &&
+          typeof request.command === "object" &&
+          "type" in request.command &&
+          request.command.type === "thread.turn.start",
+      ).length;
+
+      expect(nextTurnStartRequestCount).toBe(initialTurnStartRequestCount);
+      expect(document.querySelector('button[aria-label="Stop generation"]')).toBeInstanceOf(
+        HTMLButtonElement,
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps the new thread selected after clicking the new-thread button", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
