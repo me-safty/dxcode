@@ -810,7 +810,7 @@ async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed
   clearUpdatePollTimer();
   try {
     await stopBackendAndWaitForExit();
-    // Destroy all windows before launching the NSIS installer
+    // Destroy all windows before launching the NSIS installer to avoid the installer finding live windows it needs to close.
     for (const win of BrowserWindow.getAllWindows()) {
       win.destroy();
     }
@@ -1392,7 +1392,7 @@ app
   });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  if (process.platform !== "darwin" && !isQuitting) {
     app.quit();
   }
 });
