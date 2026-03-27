@@ -451,7 +451,7 @@ export default function Sidebar() {
   const focusMostRecentThreadForProject = useCallback(
     (projectId: ProjectId) => {
       const latestThread = sortThreadsForSidebar(
-        threads.filter((thread) => thread.projectId === projectId),
+        threads.filter((thread) => thread.projectId === projectId && thread.archivedAt === null),
         appSettings.sidebarThreadSortOrder,
       )[0];
       if (!latestThread) return;
