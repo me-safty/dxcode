@@ -1,5 +1,5 @@
 /**
- * DrainableWorker - An queue-based worker with deterministic `drain()`.
+ * DrainableWorker - A queue-based worker with deterministic `drain()`.
  *
  * Tracks outstanding work in STM so `drain()` resolves only when no items
  * are queued or in flight. Useful in tests instead of timing-based waits.
