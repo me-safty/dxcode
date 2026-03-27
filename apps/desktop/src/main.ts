@@ -810,7 +810,11 @@ async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed
   clearUpdatePollTimer();
   try {
     await stopBackendAndWaitForExit();
-    autoUpdater.quitAndInstall();
+    // Destroy all windows before launching the NSIS installer
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.destroy();
+    }
+    autoUpdater.quitAndInstall(true, true);
     return { accepted: true, completed: true };
   } catch (error: unknown) {
     const message = formatErrorMessage(error);
