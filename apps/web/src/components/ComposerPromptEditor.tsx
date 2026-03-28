@@ -610,6 +610,23 @@ function getSelectionRangeForComposerOffsets(selection: ReturnType<typeof $getSe
   };
 }
 
+function getSelectionRangeForExpandedComposerOffsets(selection: ReturnType<typeof $getSelection>): {
+  start: number;
+  end: number;
+} | null {
+  if (!$isRangeSelection(selection)) {
+    return null;
+  }
+  const anchorNode = selection.anchor.getNode();
+  const focusNode = selection.focus.getNode();
+  const anchorOffset = getExpandedAbsoluteOffsetForPoint(anchorNode, selection.anchor.offset);
+  const focusOffset = getExpandedAbsoluteOffsetForPoint(focusNode, selection.focus.offset);
+  return {
+    start: Math.min(anchorOffset, focusOffset),
+    end: Math.max(anchorOffset, focusOffset),
+  };
+}
+
 function $selectionTouchesInlineToken(selection: ReturnType<typeof $getSelection>): boolean {
   if (!$isRangeSelection(selection)) {
     return false;
@@ -949,13 +966,13 @@ function ComposerSurroundSelectionPlugin(props: {
   const terminalContextsRef = useRef(props.terminalContexts);
   const pendingSurroundSelectionRef = useRef<{
     value: string;
-    start: number;
-    end: number;
+    expandedStart: number;
+    expandedEnd: number;
   } | null>(null);
   const pendingDeadKeySelectionRef = useRef<{
     value: string;
-    start: number;
-    end: number;
+    expandedStart: number;
+    expandedEnd: number;
   } | null>(null);
 
   useEffect(() => {
@@ -983,14 +1000,14 @@ function ComposerSurroundSelectionPlugin(props: {
             if ($selectionTouchesInlineToken(selection)) {
               return null;
             }
-            const range = getSelectionRangeForComposerOffsets(selection);
+            const range = getSelectionRangeForExpandedComposerOffsets(selection);
             if (!range || range.start === range.end) {
               return null;
             }
             return {
               value: $getRoot().getTextContent(),
-              start: range.start,
-              end: range.end,
+              expandedStart: range.start,
+              expandedEnd: range.end,
             };
           })();
 
@@ -999,14 +1016,18 @@ function ComposerSurroundSelectionPlugin(props: {
         }
 
         const selectedText = selectionSnapshot.value.slice(
-          selectionSnapshot.start,
-          selectionSnapshot.end,
+          selectionSnapshot.expandedStart,
+          selectionSnapshot.expandedEnd,
         );
-        const nextValue = `${selectionSnapshot.value.slice(0, selectionSnapshot.start)}${inputData}${selectedText}${surroundCloseSymbol}${selectionSnapshot.value.slice(selectionSnapshot.end)}`;
+        const nextValue = `${selectionSnapshot.value.slice(0, selectionSnapshot.expandedStart)}${inputData}${selectedText}${surroundCloseSymbol}${selectionSnapshot.value.slice(selectionSnapshot.expandedEnd)}`;
         $setComposerEditorPrompt(nextValue, terminalContextsRef.current);
+        const selectionStart = collapseExpandedComposerCursor(
+          nextValue,
+          selectionSnapshot.expandedStart,
+        );
         $setSelectionRangeAtComposerOffsets(
-          selectionSnapshot.start + inputData.length,
-          selectionSnapshot.start + inputData.length + selectedText.length,
+          selectionStart + inputData.length,
+          selectionStart + inputData.length + selectedText.length,
         );
         handled = true;
         pendingSurroundSelectionRef.current = null;
@@ -1046,7 +1067,7 @@ function ComposerSurroundSelectionPlugin(props: {
           pendingDeadKeySelectionRef.current = null;
           return;
         }
-        const range = getSelectionRangeForComposerOffsets(selection);
+        const range = getSelectionRangeForExpandedComposerOffsets(selection);
         if (!range || range.start === range.end) {
           pendingSurroundSelectionRef.current = null;
           pendingDeadKeySelectionRef.current = null;
@@ -1054,8 +1075,8 @@ function ComposerSurroundSelectionPlugin(props: {
         }
         const snapshot = {
           value: $getRoot().getTextContent(),
-          start: range.start,
-          end: range.end,
+          expandedStart: range.start,
+          expandedEnd: range.end,
         };
         pendingSurroundSelectionRef.current = snapshot;
         pendingDeadKeySelectionRef.current = shouldTrackDeadKeyBacktick ? snapshot : null;
@@ -1101,7 +1122,7 @@ function ComposerSurroundSelectionPlugin(props: {
               return;
             }
 
-            const expectedResolvedValue = `${pendingDeadKeySelection.value.slice(0, pendingDeadKeySelection.start)}\`${pendingDeadKeySelection.value.slice(pendingDeadKeySelection.end)}`;
+            const expectedResolvedValue = `${pendingDeadKeySelection.value.slice(0, pendingDeadKeySelection.expandedStart)}\`${pendingDeadKeySelection.value.slice(pendingDeadKeySelection.expandedEnd)}`;
             if (currentValue !== expectedResolvedValue) {
               if (options?.finalAttempt) {
                 pendingSurroundSelectionRef.current = null;
@@ -1111,13 +1132,14 @@ function ComposerSurroundSelectionPlugin(props: {
             }
 
             const selectedText = pendingDeadKeySelection.value.slice(
-              pendingDeadKeySelection.start,
-              pendingDeadKeySelection.end,
+              pendingDeadKeySelection.expandedStart,
+              pendingDeadKeySelection.expandedEnd,
             );
-            $setSelectionRangeAtComposerOffsets(
-              pendingDeadKeySelection.start,
-              pendingDeadKeySelection.start + 1,
+            const replacementStart = collapseExpandedComposerCursor(
+              currentValue,
+              pendingDeadKeySelection.expandedStart,
             );
+            $setSelectionRangeAtComposerOffsets(replacementStart, replacementStart + 1);
             const replacementSelection = $getSelection();
             if (!$isRangeSelection(replacementSelection)) {
               pendingSurroundSelectionRef.current = null;
@@ -1126,8 +1148,8 @@ function ComposerSurroundSelectionPlugin(props: {
             }
             replacementSelection.insertText(`\`${selectedText}${backtickCloseSymbol}`);
             $setSelectionRangeAtComposerOffsets(
-              pendingDeadKeySelection.start + 1,
-              pendingDeadKeySelection.start + 1 + selectedText.length,
+              replacementStart + 1,
+              replacementStart + 1 + selectedText.length,
             );
             pendingSurroundSelectionRef.current = null;
             pendingDeadKeySelectionRef.current = null;
@@ -1377,8 +1399,6 @@ function ComposerPromptEditorInner({
         previousSnapshot.value === nextValue &&
         previousSnapshot.cursor === nextCursor &&
         previousSnapshot.expandedCursor === nextExpandedCursor &&
-        previousSnapshot.selectionStart === selectionRange.start &&
-        previousSnapshot.selectionEnd === selectionRange.end &&
         previousSnapshot.terminalContextIds.length === terminalContextIds.length &&
         previousSnapshot.terminalContextIds.every((id, index) => id === terminalContextIds[index])
       ) {

@@ -1836,6 +1836,36 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("surrounds text after a mention using the correct expanded offsets", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "hi @package.json there");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-surround-after-mention" as MessageId,
+        targetText: "surround after mention",
+      }),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("package.json");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      await waitForComposerText("hi @package.json there");
+      await setComposerSelectionByTextOffsets({
+        start: "hi package.json ".length,
+        end: "hi package.json there".length,
+      });
+      await pressComposerKey("(");
+      await waitForComposerText("hi @package.json (there)");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("falls back to normal replacement when the selection includes a mention token", async () => {
     useComposerDraftStore.getState().setPrompt(THREAD_ID, "hi @package.json there ");
 
