@@ -322,7 +322,7 @@ describe("ProviderCommandReactor", () => {
         type: "thread.meta.update",
         commandId: CommandId.makeUnsafe("cmd-thread-meta-update-branch"),
         threadId: ThreadId.makeUnsafe("thread-1"),
-        branch: "T3code/abcd1234",
+        branch: "T3code/worktree-abcd1234",
         worktreePath: "/tmp/provider-project",
       }),
     );
@@ -347,7 +347,7 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.renameBranch.mock.calls.length === 1);
     expect(harness.renameBranch.mock.calls[0]?.[0]).toMatchObject({
       cwd: "/tmp/provider-project",
-      oldBranch: "T3code/abcd1234",
+      oldBranch: "T3code/worktree-abcd1234",
       newBranch: "T3code/feature",
     });
 
@@ -374,7 +374,7 @@ describe("ProviderCommandReactor", () => {
         type: "thread.meta.update",
         commandId: CommandId.makeUnsafe("cmd-thread-meta-update-digit-branch"),
         threadId: ThreadId.makeUnsafe("thread-1"),
-        branch: "3code/abcd1234",
+        branch: "3code/worktree-abcd1234",
         worktreePath: "/tmp/provider-project",
       }),
     );
@@ -399,9 +399,50 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.renameBranch.mock.calls.length === 1);
     expect(harness.renameBranch.mock.calls[0]?.[0]).toMatchObject({
       cwd: "/tmp/provider-project",
-      oldBranch: "3code/abcd1234",
+      oldBranch: "3code/worktree-abcd1234",
       newBranch: "3code/feature",
     });
+  });
+
+  it("does not rename ordinary user branches that happen to end with eight hex characters", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    harness.generateBranchName.mockImplementationOnce(() =>
+      Effect.succeed({
+        branch: "feature/session-cleanup",
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-thread-meta-update-user-branch"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        branch: "feature/deadbeef",
+        worktreePath: "/tmp/provider-project",
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-user-branch"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-user-branch"),
+          role: "user",
+          text: "keep my branch name",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.generateBranchName).not.toHaveBeenCalled();
+    expect(harness.renameBranch).not.toHaveBeenCalled();
   });
 
   it("forwards codex model options through session start and turn send", async () => {

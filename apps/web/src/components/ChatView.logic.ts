@@ -100,10 +100,10 @@ export function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 export function buildTemporaryWorktreeBranchName(prefix: string): string {
-  // Keep the 8-hex suffix shape for backend temporary-branch detection.
+  // Use an explicit temporary marker so backend rename logic does not match user branches.
   const resolvedPrefix = Schema.decodeUnknownSync(WorktreeBranchPrefix)(prefix);
   const token = randomUUID().slice(0, 8).toLowerCase();
-  return `${resolvedPrefix}/${token}`;
+  return `${resolvedPrefix}/worktree-${token}`;
 }
 
 export function cloneComposerImageForRetry(

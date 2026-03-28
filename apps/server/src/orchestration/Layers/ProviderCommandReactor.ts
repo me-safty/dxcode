@@ -73,8 +73,9 @@ const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const DEFAULT_WORKTREE_BRANCH_PREFIX = "t3code";
+const TEMP_WORKTREE_BRANCH_MARKER = "worktree";
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(
-  `^${WORKTREE_BRANCH_PREFIX_PATTERN.source.slice(1, -1)}\\/[0-9a-f]{8}$`,
+  `^${WORKTREE_BRANCH_PREFIX_PATTERN.source.slice(1, -1)}\\/${TEMP_WORKTREE_BRANCH_MARKER}-[0-9a-f]{8}$`,
   "i",
 );
 
