@@ -61,7 +61,7 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleDiff,
 }: ChatHeaderProps) {
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2">
+    <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
         <SidebarTrigger className="size-7 shrink-0 md:hidden" />
         <h2
@@ -82,7 +82,7 @@ export const ChatHeader = memo(function ChatHeader({
           <span className="shrink-0 text-[10px] text-amber-700">No Git</span>
         )}
       </div>
-      <div className="@container/header-actions flex min-w-0 flex-1 items-center justify-end gap-2 @sm/header-actions:gap-3">
+      <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}
