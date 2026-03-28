@@ -72,7 +72,6 @@ function resetComposerDraftStore() {
     draftsByThreadId: {},
     draftThreadsByThreadId: {},
     projectDraftThreadIdByProjectId: {},
-    queuedFollowUpsByThreadId: {},
     stickyModelSelectionByProvider: {},
     stickyActiveProvider: null,
   });
@@ -621,43 +620,41 @@ describe("composerDraftStore project draft thread mapping", () => {
   });
 });
 
-describe("composerDraftStore queued follow-ups", () => {
-  const threadId = ThreadId.makeUnsafe("thread-queued-follow-ups");
+describe("composerDraftStore queued follow-up edit state", () => {
+  const threadId = ThreadId.makeUnsafe("thread-queued-follow-up-edit-state");
 
   beforeEach(() => {
     resetComposerDraftStore();
   });
 
-  it("persists queued follow-ups with terminal context text", () => {
-    useComposerDraftStore.getState().enqueueQueuedFollowUp(threadId, {
-      id: "queued-1",
-      createdAt: "2026-03-27T12:00:00.000Z",
-      prompt: "investigate this next",
-      attachments: [
-        {
-          id: "image-1",
-          name: "image.png",
-          mimeType: "image/png",
-          sizeBytes: 4,
-          dataUrl: "data:image/png;base64,AAAA",
+  it("persists queued follow-up edit metadata inside the composer draft", () => {
+    useComposerDraftStore.getState().setPrompt(threadId, "edit queued follow-up");
+    useComposerDraftStore.setState((state) => ({
+      draftsByThreadId: {
+        ...state.draftsByThreadId,
+        [threadId]: {
+          ...(state.draftsByThreadId[threadId] ?? {
+            prompt: "",
+            images: [],
+            nonPersistedImageIds: [],
+            persistedAttachments: [],
+            terminalContexts: [],
+            modelSelectionByProvider: {},
+            activeProvider: null,
+            runtimeMode: null,
+            interactionMode: null,
+            queuedFollowUpEdit: null,
+          }),
+          prompt: "edit queued follow-up",
+          queuedFollowUpEdit: {
+            followUpId: "queued-follow-up-1",
+            queueIndex: 2,
+            previousFollowUpId: "queued-follow-up-0",
+            nextFollowUpId: "queued-follow-up-2",
+          },
         },
-      ],
-      terminalContexts: [
-        {
-          id: "ctx-queued",
-          threadId,
-          terminalId: "default",
-          terminalLabel: "Terminal 1",
-          lineStart: 1,
-          lineEnd: 2,
-          text: "bun install\nDone",
-          createdAt: "2026-03-27T12:00:00.000Z",
-        },
-      ],
-      modelSelection: modelSelection("codex", "gpt-5.3-codex"),
-      runtimeMode: "full-access",
-      interactionMode: "default",
-    });
+      },
+    }));
 
     const persistApi = useComposerDraftStore.persist as unknown as {
       getOptions: () => {
@@ -665,232 +662,16 @@ describe("composerDraftStore queued follow-ups", () => {
       };
     };
     const persistedState = persistApi.getOptions().partialize(useComposerDraftStore.getState()) as {
-      queuedFollowUpsByThreadId?: Record<
+      draftsByThreadId?: Record<
         string,
-        Array<{ terminalContexts?: Array<Record<string, unknown>> }>
+        { queuedFollowUpEdit?: { followUpId?: string; queueIndex?: number } }
       >;
     };
 
-    expect(
-      persistedState.queuedFollowUpsByThreadId?.[threadId]?.[0]?.terminalContexts?.[0]?.text,
-    ).toBe("bun install\nDone");
-  });
-
-  it("restores queued follow-ups into the live composer draft", () => {
-    useComposerDraftStore.getState().enqueueQueuedFollowUp(threadId, {
-      id: "queued-restore",
-      createdAt: "2026-03-27T12:00:00.000Z",
-      prompt: "restore me",
-      attachments: [
-        {
-          id: "image-1",
-          name: "image.png",
-          mimeType: "image/png",
-          sizeBytes: 4,
-          dataUrl: "data:image/png;base64,AAAA",
-        },
-      ],
-      terminalContexts: [
-        {
-          id: "ctx-queued",
-          threadId,
-          terminalId: "default",
-          terminalLabel: "Terminal 1",
-          lineStart: 1,
-          lineEnd: 2,
-          text: "bun install\nDone",
-          createdAt: "2026-03-27T12:00:00.000Z",
-        },
-      ],
-      modelSelection: modelSelection("codex", "gpt-5.3-codex"),
-      runtimeMode: "approval-required",
-      interactionMode: "plan",
-      lastSendError: "Auto-send failed.",
+    expect(persistedState.draftsByThreadId?.[threadId]?.queuedFollowUpEdit).toMatchObject({
+      followUpId: "queued-follow-up-1",
+      queueIndex: 2,
     });
-
-    useComposerDraftStore.getState().restoreQueuedFollowUpToDraft(threadId, "queued-restore");
-
-    expect(useComposerDraftStore.getState().queuedFollowUpsByThreadId[threadId]).toBeUndefined();
-    expect(useComposerDraftStore.getState().draftsByThreadId[threadId]).toMatchObject({
-      prompt: "restore me",
-      terminalContexts: [
-        {
-          id: "ctx-queued",
-          text: "bun install\nDone",
-        },
-      ],
-      persistedAttachments: [
-        {
-          id: "image-1",
-        },
-      ],
-      runtimeMode: "approval-required",
-      interactionMode: "plan",
-      activeProvider: "codex",
-    });
-  });
-
-  it("requeues an edited follow-up near its original position when the queue changes", () => {
-    const store = useComposerDraftStore.getState();
-
-    store.enqueueQueuedFollowUp(threadId, {
-      id: "queued-first",
-      createdAt: "2026-03-27T12:00:00.000Z",
-      prompt: "first",
-      attachments: [],
-      terminalContexts: [],
-      modelSelection: modelSelection("codex", "gpt-5.3-codex"),
-      runtimeMode: "full-access",
-      interactionMode: "default",
-    });
-    store.enqueueQueuedFollowUp(threadId, {
-      id: "queued-second",
-      createdAt: "2026-03-27T12:01:00.000Z",
-      prompt: "second",
-      attachments: [],
-      terminalContexts: [],
-      modelSelection: modelSelection("codex", "gpt-5.3-codex"),
-      runtimeMode: "full-access",
-      interactionMode: "default",
-    });
-    store.enqueueQueuedFollowUp(threadId, {
-      id: "queued-third",
-      createdAt: "2026-03-27T12:02:00.000Z",
-      prompt: "third",
-      attachments: [],
-      terminalContexts: [],
-      modelSelection: modelSelection("codex", "gpt-5.3-codex"),
-      runtimeMode: "full-access",
-      interactionMode: "default",
-    });
-
-    store.restoreQueuedFollowUpToDraft(threadId, "queued-second");
-    expect(store.shiftQueuedFollowUp(threadId)?.id).toBe("queued-first");
-
-    store.enqueueQueuedFollowUp(threadId, {
-      id: "queued-second-updated",
-      createdAt: "2026-03-27T12:03:00.000Z",
-      prompt: "second edited",
-      attachments: [],
-      terminalContexts: [],
-      modelSelection: modelSelection("codex", "gpt-5.3-codex"),
-      runtimeMode: "full-access",
-      interactionMode: "default",
-    });
-
-    expect(
-      useComposerDraftStore.getState().queuedFollowUpsByThreadId[threadId]?.map((followUp) => ({
-        id: followUp.id,
-        prompt: followUp.prompt,
-      })),
-    ).toEqual([
-      {
-        id: "queued-second",
-        prompt: "second edited",
-      },
-      {
-        id: "queued-third",
-        prompt: "third",
-      },
-    ]);
-  });
-
-  it("moves queued follow-ups up and down without dropping items", () => {
-    const store = useComposerDraftStore.getState();
-
-    store.enqueueQueuedFollowUp(threadId, {
-      id: "queued-first",
-      createdAt: "2026-03-27T12:00:00.000Z",
-      prompt: "first",
-      attachments: [],
-      terminalContexts: [],
-      modelSelection: modelSelection("codex", "gpt-5.3-codex"),
-      runtimeMode: "full-access",
-      interactionMode: "default",
-    });
-    store.enqueueQueuedFollowUp(threadId, {
-      id: "queued-second",
-      createdAt: "2026-03-27T12:01:00.000Z",
-      prompt: "second",
-      attachments: [],
-      terminalContexts: [],
-      modelSelection: modelSelection("codex", "gpt-5.3-codex"),
-      runtimeMode: "full-access",
-      interactionMode: "default",
-    });
-    store.enqueueQueuedFollowUp(threadId, {
-      id: "queued-third",
-      createdAt: "2026-03-27T12:02:00.000Z",
-      prompt: "third",
-      attachments: [],
-      terminalContexts: [],
-      modelSelection: modelSelection("codex", "gpt-5.3-codex"),
-      runtimeMode: "full-access",
-      interactionMode: "default",
-    });
-
-    store.moveQueuedFollowUp(threadId, "queued-second", "up");
-    expect(
-      useComposerDraftStore
-        .getState()
-        .queuedFollowUpsByThreadId[threadId]?.map((followUp) => followUp.id),
-    ).toEqual(["queued-second", "queued-first", "queued-third"]);
-
-    store.moveQueuedFollowUp(threadId, "queued-first", "down");
-    expect(
-      useComposerDraftStore
-        .getState()
-        .queuedFollowUpsByThreadId[threadId]?.map((followUp) => followUp.id),
-    ).toEqual(["queued-second", "queued-third", "queued-first"]);
-  });
-
-  it("reorders queued follow-ups to a target index without dropping items", () => {
-    const store = useComposerDraftStore.getState();
-
-    store.enqueueQueuedFollowUp(threadId, {
-      id: "queued-first",
-      createdAt: "2026-03-27T12:00:00.000Z",
-      prompt: "first",
-      attachments: [],
-      terminalContexts: [],
-      modelSelection: modelSelection("codex", "gpt-5.3-codex"),
-      runtimeMode: "full-access",
-      interactionMode: "default",
-    });
-    store.enqueueQueuedFollowUp(threadId, {
-      id: "queued-second",
-      createdAt: "2026-03-27T12:01:00.000Z",
-      prompt: "second",
-      attachments: [],
-      terminalContexts: [],
-      modelSelection: modelSelection("codex", "gpt-5.3-codex"),
-      runtimeMode: "full-access",
-      interactionMode: "default",
-    });
-    store.enqueueQueuedFollowUp(threadId, {
-      id: "queued-third",
-      createdAt: "2026-03-27T12:02:00.000Z",
-      prompt: "third",
-      attachments: [],
-      terminalContexts: [],
-      modelSelection: modelSelection("codex", "gpt-5.3-codex"),
-      runtimeMode: "full-access",
-      interactionMode: "default",
-    });
-
-    store.reorderQueuedFollowUp(threadId, "queued-third", 0);
-    expect(
-      useComposerDraftStore
-        .getState()
-        .queuedFollowUpsByThreadId[threadId]?.map((followUp) => followUp.id),
-    ).toEqual(["queued-third", "queued-first", "queued-second"]);
-
-    store.reorderQueuedFollowUp(threadId, "queued-third", 2);
-    expect(
-      useComposerDraftStore
-        .getState()
-        .queuedFollowUpsByThreadId[threadId]?.map((followUp) => followUp.id),
-    ).toEqual(["queued-first", "queued-second", "queued-third"]);
   });
 });
 

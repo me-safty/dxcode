@@ -6,13 +6,12 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { type FollowUpBehavior } from "@t3tools/contracts/settings";
-import { type ChatMessage, type Thread } from "../types";
+import { type ChatMessage, type QueuedFollowUp, type Thread } from "../types";
 import { randomUUID } from "~/lib/utils";
 import {
   type ComposerImageAttachment,
   type DraftThreadState,
   type PersistedComposerImageAttachment,
-  type QueuedFollowUpDraft,
 } from "../composerDraftStore";
 import { Schema } from "effect";
 import {
@@ -43,6 +42,7 @@ export function buildLocalDraftThread(
     interactionMode: draftThread.interactionMode,
     session: null,
     messages: [],
+    queuedFollowUps: [],
     error,
     createdAt: draftThread.createdAt,
     latestTurn: null,
@@ -201,6 +201,17 @@ export function followUpBehaviorShortcutLabel(platform = navigator.platform): st
   return isMacPlatform(platform) ? "Cmd+Shift+Enter" : "Ctrl+Shift+Enter";
 }
 
+export interface QueuedFollowUpDraftSnapshot {
+  id: string;
+  createdAt: string;
+  prompt: string;
+  attachments: PersistedComposerImageAttachment[];
+  terminalContexts: TerminalContextDraft[];
+  modelSelection: ModelSelection;
+  runtimeMode: RuntimeMode;
+  interactionMode: ProviderInteractionMode;
+}
+
 export function buildQueuedFollowUpDraft(input: {
   prompt: string;
   attachments: ReadonlyArray<PersistedComposerImageAttachment>;
@@ -209,7 +220,7 @@ export function buildQueuedFollowUpDraft(input: {
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
   createdAt: string;
-}): QueuedFollowUpDraft {
+}): QueuedFollowUpDraftSnapshot {
   return {
     id: randomUUID(),
     createdAt: input.createdAt,
@@ -245,7 +256,7 @@ export function canAutoDispatchQueuedFollowUp(input: {
 }
 
 export function describeQueuedFollowUp(
-  followUp: Pick<QueuedFollowUpDraft, "attachments" | "prompt" | "terminalContexts">,
+  followUp: Pick<QueuedFollowUp, "attachments" | "prompt" | "terminalContexts">,
 ): string {
   const trimmedPrompt = stripInlineTerminalContextPlaceholders(followUp.prompt).trim();
   if (trimmedPrompt.length > 0) {

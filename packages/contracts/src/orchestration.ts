@@ -118,8 +118,10 @@ export type UploadChatImageAttachment = typeof UploadChatImageAttachment.Type;
 
 export const ChatAttachment = Schema.Union([ChatImageAttachment]);
 export type ChatAttachment = typeof ChatAttachment.Type;
-const UploadChatAttachment = Schema.Union([UploadChatImageAttachment]);
+export const UploadChatAttachment = Schema.Union([UploadChatImageAttachment]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
+export const ClientChatAttachment = Schema.Union([ChatAttachment, UploadChatAttachment]);
+export type ClientChatAttachment = typeof ClientChatAttachment.Type;
 
 export const ProjectScriptIcon = Schema.Literals([
   "play",
@@ -166,6 +168,48 @@ export const OrchestrationMessage = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type OrchestrationMessage = typeof OrchestrationMessage.Type;
+
+export const OrchestrationQueuedTerminalContext = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+  terminalId: TrimmedNonEmptyString,
+  terminalLabel: TrimmedNonEmptyString,
+  lineStart: NonNegativeInt,
+  lineEnd: NonNegativeInt,
+  text: Schema.String,
+});
+export type OrchestrationQueuedTerminalContext = typeof OrchestrationQueuedTerminalContext.Type;
+
+export const OrchestrationQueuedFollowUp = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+  prompt: Schema.String,
+  attachments: Schema.Array(ChatAttachment),
+  terminalContexts: Schema.Array(OrchestrationQueuedTerminalContext),
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
+  ),
+  lastSendError: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
+});
+export type OrchestrationQueuedFollowUp = typeof OrchestrationQueuedFollowUp.Type;
+
+const ClientOrchestrationQueuedFollowUp = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+  prompt: Schema.String,
+  attachments: Schema.Array(ClientChatAttachment),
+  terminalContexts: Schema.Array(OrchestrationQueuedTerminalContext),
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
+  ),
+  lastSendError: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
+});
+type ClientOrchestrationQueuedFollowUp = typeof ClientOrchestrationQueuedFollowUp.Type;
 
 export const OrchestrationProposedPlanId = TrimmedNonEmptyString;
 export type OrchestrationProposedPlanId = typeof OrchestrationProposedPlanId.Type;
@@ -286,6 +330,9 @@ export const OrchestrationThread = Schema.Struct({
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(Schema.withDecodingDefault(() => [])),
+  queuedFollowUps: Schema.Array(OrchestrationQueuedFollowUp).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
@@ -401,7 +448,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
     messageId: MessageId,
     role: Schema.Literal("user"),
     text: Schema.String,
-    attachments: Schema.Array(UploadChatAttachment),
+    attachments: Schema.Array(ClientChatAttachment),
   }),
   modelSelection: Schema.optional(ModelSelection),
   runtimeMode: RuntimeMode,
@@ -415,6 +462,57 @@ const ThreadTurnInterruptCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   turnId: Schema.optional(TurnId),
+  createdAt: IsoDateTime,
+});
+
+const ThreadQueuedFollowUpEnqueueCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-follow-up.enqueue"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  followUp: OrchestrationQueuedFollowUp,
+  targetIndex: Schema.optional(NonNegativeInt),
+  createdAt: IsoDateTime,
+});
+
+const ClientThreadQueuedFollowUpEnqueueCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-follow-up.enqueue"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  followUp: ClientOrchestrationQueuedFollowUp,
+  targetIndex: Schema.optional(NonNegativeInt),
+  createdAt: IsoDateTime,
+});
+
+const ThreadQueuedFollowUpUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-follow-up.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  followUp: OrchestrationQueuedFollowUp,
+  createdAt: IsoDateTime,
+});
+
+const ClientThreadQueuedFollowUpUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-follow-up.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  followUp: ClientOrchestrationQueuedFollowUp,
+  createdAt: IsoDateTime,
+});
+
+const ThreadQueuedFollowUpRemoveCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-follow-up.remove"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  followUpId: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const ThreadQueuedFollowUpReorderCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-follow-up.reorder"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  followUpId: TrimmedNonEmptyString,
+  targetIndex: NonNegativeInt,
   createdAt: IsoDateTime,
 });
 
@@ -462,6 +560,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
+  ThreadQueuedFollowUpEnqueueCommand,
+  ThreadQueuedFollowUpUpdateCommand,
+  ThreadQueuedFollowUpRemoveCommand,
+  ThreadQueuedFollowUpReorderCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
@@ -481,6 +583,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
+  ClientThreadQueuedFollowUpEnqueueCommand,
+  ClientThreadQueuedFollowUpUpdateCommand,
+  ThreadQueuedFollowUpRemoveCommand,
+  ThreadQueuedFollowUpReorderCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
@@ -545,6 +651,23 @@ const ThreadActivityAppendCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadQueuedFollowUpSendFailedCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-follow-up.send-failed"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  followUpId: TrimmedNonEmptyString,
+  lastSendError: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const ThreadQueuedFollowUpSendErrorClearedCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-follow-up.send-error-cleared"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  followUpId: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 const ThreadRevertCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.revert.complete"),
   commandId: CommandId,
@@ -560,6 +683,8 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
+  ThreadQueuedFollowUpSendFailedCommand,
+  ThreadQueuedFollowUpSendErrorClearedCommand,
   ThreadRevertCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
@@ -582,6 +707,12 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.message-sent",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
+  "thread.queued-follow-up-enqueued",
+  "thread.queued-follow-up-updated",
+  "thread.queued-follow-up-removed",
+  "thread.queued-follow-up-reordered",
+  "thread.queued-follow-up-send-failed",
+  "thread.queued-follow-up-send-error-cleared",
   "thread.approval-response-requested",
   "thread.user-input-response-requested",
   "thread.checkpoint-revert-requested",
@@ -693,6 +824,45 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
 export const ThreadTurnInterruptRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnId: Schema.optional(TurnId),
+  createdAt: IsoDateTime,
+});
+
+export const ThreadQueuedFollowUpEnqueuedPayload = Schema.Struct({
+  threadId: ThreadId,
+  followUp: OrchestrationQueuedFollowUp,
+  targetIndex: Schema.optional(NonNegativeInt),
+  createdAt: IsoDateTime,
+});
+
+export const ThreadQueuedFollowUpUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  followUp: OrchestrationQueuedFollowUp,
+  createdAt: IsoDateTime,
+});
+
+export const ThreadQueuedFollowUpRemovedPayload = Schema.Struct({
+  threadId: ThreadId,
+  followUpId: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+export const ThreadQueuedFollowUpReorderedPayload = Schema.Struct({
+  threadId: ThreadId,
+  followUpId: TrimmedNonEmptyString,
+  targetIndex: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+
+export const ThreadQueuedFollowUpSendFailedPayload = Schema.Struct({
+  threadId: ThreadId,
+  followUpId: TrimmedNonEmptyString,
+  lastSendError: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+export const ThreadQueuedFollowUpSendErrorClearedPayload = Schema.Struct({
+  threadId: ThreadId,
+  followUpId: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
 });
 
@@ -831,6 +1001,36 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("thread.queued-follow-up-enqueued"),
+    payload: ThreadQueuedFollowUpEnqueuedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.queued-follow-up-updated"),
+    payload: ThreadQueuedFollowUpUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.queued-follow-up-removed"),
+    payload: ThreadQueuedFollowUpRemovedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.queued-follow-up-reordered"),
+    payload: ThreadQueuedFollowUpReorderedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.queued-follow-up-send-failed"),
+    payload: ThreadQueuedFollowUpSendFailedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.queued-follow-up-send-error-cleared"),
+    payload: ThreadQueuedFollowUpSendErrorClearedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.approval-response-requested"),
     payload: ThreadApprovalResponseRequestedPayload,
   }),
@@ -885,7 +1085,7 @@ export const TurnCountRange = Schema.Struct({
   toTurnCount: NonNegativeInt,
 }).check(
   Schema.makeFilter(
-    (input) =>
+    (input: { fromTurnCount: number; toTurnCount: number }) =>
       input.fromTurnCount <= input.toTurnCount ||
       new SchemaIssue.InvalidValue(Option.some(input.fromTurnCount), {
         message: "fromTurnCount must be less than or equal to toTurnCount",

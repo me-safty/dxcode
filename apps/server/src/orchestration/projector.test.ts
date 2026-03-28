@@ -90,6 +90,7 @@ describe("orchestration projector", () => {
         deletedAt: null,
         messages: [],
         proposedPlans: [],
+        queuedFollowUps: [],
         activities: [],
         checkpoints: [],
         session: null,
@@ -129,6 +130,89 @@ describe("orchestration projector", () => {
         ),
       ),
     ).rejects.toBeDefined();
+  });
+
+  it("tracks queued follow-ups in the in-memory thread snapshot", async () => {
+    const createdAt = "2026-03-28T12:00:00.000Z";
+    const queuedAt = "2026-03-28T12:00:05.000Z";
+    const model = createEmptyReadModel(createdAt);
+
+    const afterCreate = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-queue",
+          occurredAt: createdAt,
+          commandId: "cmd-create-queue",
+          payload: {
+            threadId: "thread-queue",
+            projectId: "project-1",
+            title: "queue demo",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.3-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        }),
+      ),
+    );
+
+    const afterQueue = await Effect.runPromise(
+      projectEvent(
+        afterCreate,
+        makeEvent({
+          sequence: 2,
+          type: "thread.queued-follow-up-enqueued",
+          aggregateKind: "thread",
+          aggregateId: "thread-queue",
+          occurredAt: queuedAt,
+          commandId: "cmd-queue-enqueue",
+          payload: {
+            threadId: "thread-queue",
+            followUp: {
+              id: "follow-up-1",
+              createdAt: queuedAt,
+              prompt: "queue this next",
+              attachments: [],
+              terminalContexts: [],
+              modelSelection: {
+                provider: "codex",
+                model: "gpt-5.3-codex",
+              },
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              lastSendError: null,
+            },
+            createdAt: queuedAt,
+          },
+        }),
+      ),
+    );
+
+    expect(afterQueue.threads[0]?.queuedFollowUps).toEqual([
+      {
+        id: "follow-up-1",
+        createdAt: queuedAt,
+        prompt: "queue this next",
+        attachments: [],
+        terminalContexts: [],
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5.3-codex",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        lastSendError: null,
+      },
+    ]);
   });
 
   it("keeps projector forward-compatible for unhandled event types", async () => {

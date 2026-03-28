@@ -1,7 +1,7 @@
 import type * as React from "react";
 import { memo, useEffect, useRef, useState } from "react";
 import { CornerDownRightIcon, EllipsisIcon, PencilIcon, Trash2Icon } from "lucide-react";
-import { type QueuedFollowUpDraft } from "../../composerDraftStore";
+import { type QueuedFollowUp } from "../../types";
 import { describeQueuedFollowUp } from "../ChatView.logic";
 import { Button } from "../ui/button";
 
@@ -64,7 +64,7 @@ export const ComposerQueuedFollowUpsPanel = memo(function ComposerQueuedFollowUp
   onReorder,
   onSteer,
 }: {
-  queuedFollowUps: ReadonlyArray<QueuedFollowUpDraft>;
+  queuedFollowUps: ReadonlyArray<QueuedFollowUp>;
   onDelete: (followUpId: string) => void;
   onEdit: (followUpId: string) => void;
   onReorder: (followUpId: string, targetIndex: number) => void;

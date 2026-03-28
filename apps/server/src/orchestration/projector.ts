@@ -262,6 +262,7 @@ export function projectEvent(
             updatedAt: payload.updatedAt,
             deletedAt: null,
             messages: [],
+            queuedFollowUps: [],
             activities: [],
             checkpoints: [],
             session: null,
@@ -391,6 +392,138 @@ export function projectEvent(
             updatedAt: event.occurredAt,
           }),
         };
+      });
+
+    case "thread.queued-follow-up-enqueued":
+      return Effect.succeed({
+        ...nextBase,
+        threads: nextBase.threads.map((thread) => {
+          if (thread.id !== event.payload.threadId) {
+            return thread;
+          }
+          const existingWithoutFollowUp = thread.queuedFollowUps.filter(
+            (followUp) => followUp.id !== event.payload.followUp.id,
+          );
+          const targetIndex =
+            event.payload.targetIndex === undefined
+              ? existingWithoutFollowUp.length
+              : Math.max(0, Math.min(event.payload.targetIndex, existingWithoutFollowUp.length));
+          return {
+            ...thread,
+            queuedFollowUps: [
+              ...existingWithoutFollowUp.slice(0, targetIndex),
+              event.payload.followUp,
+              ...existingWithoutFollowUp.slice(targetIndex),
+            ],
+            updatedAt: event.occurredAt,
+          };
+        }),
+      });
+
+    case "thread.queued-follow-up-updated":
+      return Effect.succeed({
+        ...nextBase,
+        threads: nextBase.threads.map((thread) => {
+          if (thread.id !== event.payload.threadId) {
+            return thread;
+          }
+          return {
+            ...thread,
+            queuedFollowUps: thread.queuedFollowUps.map((followUp) =>
+              followUp.id === event.payload.followUp.id ? event.payload.followUp : followUp,
+            ),
+            updatedAt: event.occurredAt,
+          };
+        }),
+      });
+
+    case "thread.queued-follow-up-removed":
+      return Effect.succeed({
+        ...nextBase,
+        threads: nextBase.threads.map((thread) => {
+          if (thread.id !== event.payload.threadId) {
+            return thread;
+          }
+          return {
+            ...thread,
+            queuedFollowUps: thread.queuedFollowUps.filter(
+              (followUp) => followUp.id !== event.payload.followUpId,
+            ),
+            updatedAt: event.occurredAt,
+          };
+        }),
+      });
+
+    case "thread.queued-follow-up-reordered":
+      return Effect.succeed({
+        ...nextBase,
+        threads: nextBase.threads.map((thread) => {
+          if (thread.id !== event.payload.threadId) {
+            return thread;
+          }
+          const currentIndex = thread.queuedFollowUps.findIndex(
+            (followUp) => followUp.id === event.payload.followUpId,
+          );
+          if (currentIndex < 0) {
+            return thread;
+          }
+          const boundedTargetIndex = Math.max(
+            0,
+            Math.min(event.payload.targetIndex, thread.queuedFollowUps.length - 1),
+          );
+          if (boundedTargetIndex === currentIndex) {
+            return thread;
+          }
+          const nextQueuedFollowUps = [...thread.queuedFollowUps];
+          const [movedFollowUp] = nextQueuedFollowUps.splice(currentIndex, 1);
+          if (!movedFollowUp) {
+            return thread;
+          }
+          nextQueuedFollowUps.splice(boundedTargetIndex, 0, movedFollowUp);
+          return {
+            ...thread,
+            queuedFollowUps: nextQueuedFollowUps,
+            updatedAt: event.occurredAt,
+          };
+        }),
+      });
+
+    case "thread.queued-follow-up-send-failed":
+      return Effect.succeed({
+        ...nextBase,
+        threads: nextBase.threads.map((thread) => {
+          if (thread.id !== event.payload.threadId) {
+            return thread;
+          }
+          return {
+            ...thread,
+            queuedFollowUps: thread.queuedFollowUps.map((followUp) =>
+              followUp.id === event.payload.followUpId
+                ? { ...followUp, lastSendError: event.payload.lastSendError }
+                : followUp,
+            ),
+            updatedAt: event.occurredAt,
+          };
+        }),
+      });
+
+    case "thread.queued-follow-up-send-error-cleared":
+      return Effect.succeed({
+        ...nextBase,
+        threads: nextBase.threads.map((thread) => {
+          if (thread.id !== event.payload.threadId) {
+            return thread;
+          }
+          return {
+            ...thread,
+            queuedFollowUps: thread.queuedFollowUps.map((followUp) =>
+              followUp.id === event.payload.followUpId
+                ? { ...followUp, lastSendError: null }
+                : followUp,
+            ),
+            updatedAt: event.occurredAt,
+          };
+        }),
       });
 
     case "thread.session-set":

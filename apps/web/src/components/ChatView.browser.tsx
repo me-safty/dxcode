@@ -260,6 +260,7 @@ function createSnapshotForTargetUser(options: {
         updatedAt: NOW_ISO,
         deletedAt: null,
         messages,
+        queuedFollowUps: [],
         activities: [],
         proposedPlans: [],
         checkpoints: [],
@@ -317,6 +318,7 @@ function addThreadToSnapshot(
         updatedAt: NOW_ISO,
         deletedAt: null,
         messages: [],
+        queuedFollowUps: [],
         activities: [],
         proposedPlans: [],
         checkpoints: [],
@@ -433,6 +435,29 @@ function createSnapshotWithLongProposedPlan(): OrchestrationReadModel {
   };
 }
 
+function updateFixtureThread(
+  updater: (
+    thread: OrchestrationReadModel["threads"][number],
+  ) => OrchestrationReadModel["threads"][number],
+): void {
+  fixture.snapshot = {
+    ...fixture.snapshot,
+    threads: fixture.snapshot.threads.map((thread) =>
+      thread.id === THREAD_ID ? updater(thread) : thread,
+    ),
+  };
+  useStore.getState().syncServerReadModel(fixture.snapshot);
+}
+
+function getQueuedFollowUpPrompts(): string[] {
+  return (
+    useStore
+      .getState()
+      .threads.find((thread) => thread.id === THREAD_ID)
+      ?.queuedFollowUps?.map((followUp) => followUp.prompt) ?? []
+  );
+}
+
 function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
   const customResult = customWsRpcResolver?.(body);
   if (customResult !== undefined) {
@@ -441,6 +466,109 @@ function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
   const tag = body._tag;
   if (tag === ORCHESTRATION_WS_METHODS.getSnapshot) {
     return fixture.snapshot;
+  }
+  if (tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+    const command = (body as { command?: Record<string, unknown> }).command;
+    switch (command?.type) {
+      case "thread.queued-follow-up.enqueue": {
+        const followUp =
+          command.followUp as OrchestrationReadModel["threads"][number]["queuedFollowUps"][number];
+        const rawTargetIndex =
+          typeof command.targetIndex === "number" ? command.targetIndex : undefined;
+        updateFixtureThread((thread) => {
+          const withoutExisting = thread.queuedFollowUps.filter(
+            (entry) => entry.id !== followUp.id,
+          );
+          const targetIndex =
+            rawTargetIndex === undefined
+              ? withoutExisting.length
+              : Math.max(0, Math.min(rawTargetIndex, withoutExisting.length));
+          return {
+            ...thread,
+            queuedFollowUps: [
+              ...withoutExisting.slice(0, targetIndex),
+              { ...followUp, lastSendError: followUp.lastSendError ?? null },
+              ...withoutExisting.slice(targetIndex),
+            ],
+          };
+        });
+        return { sequence: 1 };
+      }
+      case "thread.queued-follow-up.remove": {
+        const followUpId = typeof command.followUpId === "string" ? command.followUpId : null;
+        if (followUpId) {
+          updateFixtureThread((thread) => ({
+            ...thread,
+            queuedFollowUps: thread.queuedFollowUps.filter((entry) => entry.id !== followUpId),
+          }));
+        }
+        return { sequence: 1 };
+      }
+      case "thread.queued-follow-up.reorder": {
+        const followUpId = typeof command.followUpId === "string" ? command.followUpId : null;
+        const rawTargetIndex =
+          typeof command.targetIndex === "number" ? Math.floor(command.targetIndex) : null;
+        if (followUpId !== null && rawTargetIndex !== null) {
+          updateFixtureThread((thread) => {
+            const currentIndex = thread.queuedFollowUps.findIndex(
+              (entry) => entry.id === followUpId,
+            );
+            if (currentIndex < 0) {
+              return thread;
+            }
+            const boundedTargetIndex = Math.max(
+              0,
+              Math.min(rawTargetIndex, thread.queuedFollowUps.length - 1),
+            );
+            if (boundedTargetIndex === currentIndex) {
+              return thread;
+            }
+            const nextQueuedFollowUps = [...thread.queuedFollowUps];
+            const [movedFollowUp] = nextQueuedFollowUps.splice(currentIndex, 1);
+            if (!movedFollowUp) {
+              return thread;
+            }
+            nextQueuedFollowUps.splice(boundedTargetIndex, 0, movedFollowUp);
+            return {
+              ...thread,
+              queuedFollowUps: nextQueuedFollowUps,
+            };
+          });
+        }
+        return { sequence: 1 };
+      }
+      case "thread.queued-follow-up.update":
+      case "thread.turn.start":
+      case "thread.meta.update":
+      case "thread.create":
+      case "thread.delete":
+      case "thread.interaction-mode.set":
+      case "thread.runtime-mode.set":
+      case "thread.approval.respond":
+      case "thread.user-input.respond":
+      case "thread.checkpoint.revert":
+      case "thread.session.stop":
+      case "project.create":
+      case "project.meta.update":
+      case "project.delete":
+        return { sequence: 1 };
+      case "thread.turn.interrupt": {
+        updateFixtureThread((thread) => ({
+          ...thread,
+          session: thread.session
+            ? {
+                ...thread.session,
+                status: "ready",
+                activeTurnId: null,
+                updatedAt: isoAt(9_999),
+              }
+            : null,
+        }));
+        return { sequence: 1 };
+      }
+      default:
+        break;
+    }
   }
   if (tag === WS_METHODS.serverGetConfig) {
     return fixture.serverConfig;
@@ -768,12 +896,28 @@ function getTurnStartRequests(): Array<WsRequestEnvelope["body"] & { command: { 
   });
 }
 
-function getQueuedFollowUpPrompts(): string[] {
-  return (
-    useComposerDraftStore
-      .getState()
-      .queuedFollowUpsByThreadId[THREAD_ID]?.map((followUp) => followUp.prompt) ?? []
-  );
+function getInterruptRequests(): Array<WsRequestEnvelope["body"] & { command: { type: string } }> {
+  return wsRequests.flatMap((request) => {
+    const command = (request as { command?: { type?: string } }).command;
+    if (
+      request._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand ||
+      !command ||
+      command.type !== "thread.turn.interrupt"
+    ) {
+      return [];
+    }
+    return [request as WsRequestEnvelope["body"] & { command: { type: string } }];
+  });
+}
+
+function getDispatchCommandTypes(): string[] {
+  return wsRequests.flatMap((request) => {
+    if (request._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
+      return [];
+    }
+    const command = (request as { command?: { type?: unknown } }).command;
+    return typeof command?.type === "string" ? [command.type] : [];
+  });
 }
 
 async function waitForInteractionModeButton(
@@ -1024,7 +1168,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
       draftsByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
-      queuedFollowUpsByThreadId: {},
       stickyModelSelectionByProvider: {},
       stickyActiveProvider: null,
     });
@@ -1933,9 +2076,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await vi.waitFor(
         () => {
-          expect(
-            useComposerDraftStore.getState().queuedFollowUpsByThreadId[THREAD_ID] ?? [],
-          ).toHaveLength(0);
+          expect(getQueuedFollowUpPrompts()).toHaveLength(0);
           expect(
             JSON.parse(localStorage.getItem("t3code:client-settings:v1") ?? "{}").followUpBehavior,
           ).toBe("queue");
@@ -1979,7 +2120,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         () => {
           expect(getTurnStartRequests()).toHaveLength(1);
-          expect(document.body.textContent ?? "").not.toContain("steer this run");
+          expect(document.body.textContent ?? "").toContain("steer this run");
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -1989,7 +2130,71 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("auto-sends only the queued head after the current run settles", async () => {
+  it("interrupts the active run before sending a steered follow-up", async () => {
+    let sawInterrupt = false;
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-follow-up-steer-interrupt" as MessageId,
+        targetText: "follow-up steer interrupt target",
+        sessionStatus: "running",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return undefined;
+        }
+        const command = (body as { command?: { type?: string } }).command;
+        if (!command) {
+          return undefined;
+        }
+        if (command.type === "thread.turn.interrupt") {
+          sawInterrupt = true;
+          updateFixtureThread((thread) => ({
+            ...thread,
+            session: thread.session
+              ? {
+                  ...thread.session,
+                  status: "ready",
+                  activeTurnId: null,
+                  updatedAt: isoAt(9_999),
+                }
+              : null,
+          }));
+          return { sequence: 1 };
+        }
+        if (command.type === "thread.turn.start") {
+          expect(sawInterrupt).toBe(true);
+          return { sequence: 1 };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await setComposerPrompt("please steer now");
+      const submitButton = await waitForComposerSubmitButton("Steer follow-up");
+      submitButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(getInterruptRequests()).toHaveLength(1);
+          expect(getTurnStartRequests()).toHaveLength(1);
+          const commandTypes = getDispatchCommandTypes();
+          expect(commandTypes).toEqual(
+            expect.arrayContaining(["thread.turn.interrupt", "thread.turn.start"]),
+          );
+          expect(commandTypes.indexOf("thread.turn.interrupt")).toBeLessThan(
+            commandTypes.indexOf("thread.turn.start"),
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders queued follow-ups from the server-backed thread snapshot", async () => {
     setClientSettings({
       followUpBehavior: "queue",
     });
@@ -2016,22 +2221,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
-
-      const readySnapshot = createSnapshotForTargetUser({
-        targetMessageId: "msg-user-follow-up-auto-send" as MessageId,
-        targetText: "follow-up auto-send target",
-        sessionStatus: "ready",
-      });
-      fixture.snapshot = readySnapshot;
-      useStore.getState().syncServerReadModel(readySnapshot);
-
-      await vi.waitFor(
-        () => {
-          expect(getTurnStartRequests()).toHaveLength(1);
-          expect(getQueuedFollowUpPrompts()).toEqual(["queued tail"]);
-        },
-        { timeout: 8_000, interval: 16 },
-      );
+      expect(getTurnStartRequests()).toHaveLength(0);
     } finally {
       await mounted.cleanup();
     }
@@ -2068,7 +2258,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         () => {
           expect(getTurnStartRequests()).toHaveLength(1);
           expect(getQueuedFollowUpPrompts()).toEqual(["panel second"]);
-          expect(document.body.textContent ?? "").not.toContain("panel first");
+          expect(document.body.textContent ?? "").toContain("panel first");
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -2085,6 +2275,82 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         () => {
           expect(getQueuedFollowUpPrompts()).toEqual([]);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("interrupts the active run before steering a queued follow-up from the panel", async () => {
+    let sawInterrupt = false;
+    setClientSettings({
+      followUpBehavior: "queue",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-follow-up-panel-steer-interrupt" as MessageId,
+        targetText: "follow-up panel steer interrupt target",
+        sessionStatus: "running",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return undefined;
+        }
+        const command = (body as { command?: { type?: string; followUpId?: string } }).command;
+        if (!command) {
+          return undefined;
+        }
+        if (command.type === "thread.turn.interrupt") {
+          sawInterrupt = true;
+          updateFixtureThread((thread) => ({
+            ...thread,
+            session: thread.session
+              ? {
+                  ...thread.session,
+                  status: "ready",
+                  activeTurnId: null,
+                  updatedAt: isoAt(9_998),
+                }
+              : null,
+          }));
+          return { sequence: 1 };
+        }
+        if (command.type === "thread.turn.start") {
+          expect(sawInterrupt).toBe(true);
+          return { sequence: 1 };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await queueFollowUpFromComposer("interrupt queued steer");
+
+      const panel = await waitForQueuedFollowUpsPanel();
+      const steerButton = Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).find(
+        (button) => button.textContent?.trim() === "Steer",
+      );
+      expect(steerButton).toBeTruthy();
+      steerButton?.click();
+
+      await vi.waitFor(
+        () => {
+          expect(getInterruptRequests()).toHaveLength(1);
+          expect(getTurnStartRequests()).toHaveLength(1);
+          const commandTypes = getDispatchCommandTypes();
+          expect(commandTypes).toEqual(
+            expect.arrayContaining([
+              "thread.queued-follow-up.remove",
+              "thread.turn.interrupt",
+              "thread.turn.start",
+            ]),
+          );
+          expect(commandTypes.indexOf("thread.turn.interrupt")).toBeLessThan(
+            commandTypes.indexOf("thread.turn.start"),
+          );
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -2271,6 +2537,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         () => {
           expect(getTurnStartRequests()).toHaveLength(1);
           expect(getQueuedFollowUpPrompts()).toEqual([]);
+          expect(document.body.textContent ?? "").toContain("shortcut steer once");
         },
         { timeout: 8_000, interval: 16 },
       );

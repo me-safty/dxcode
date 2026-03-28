@@ -1,5 +1,6 @@
 import {
   type ApprovalRequestId,
+  type ClientChatAttachment,
   DEFAULT_MODEL_BY_PROVIDER,
   type ClaudeCodeEffort,
   type MessageId,
@@ -75,7 +76,9 @@ import {
   DEFAULT_RUNTIME_MODE,
   DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
+  type ChatAttachment,
   type ChatMessage,
+  type QueuedFollowUp,
   type TurnDiffSummary,
 } from "../types";
 import { basenameOfPath } from "../vscode-icons";
@@ -130,11 +133,9 @@ import {
   type DraftThreadEnvMode,
   hydrateComposerImagesFromPersistedAttachments,
   type PersistedComposerImageAttachment,
-  type QueuedFollowUpDraft,
   useComposerDraftStore,
   useEffectiveComposerModelState,
   useComposerThreadDraft,
-  useQueuedFollowUps,
 } from "../composerDraftStore";
 import {
   appendTerminalContextsToPrompt,
@@ -173,7 +174,6 @@ import {
   buildQueuedFollowUpDraft,
   buildLocalDraftThread,
   buildTemporaryWorktreeBranchName,
-  canAutoDispatchQueuedFollowUp,
   cloneComposerImageForRetry,
   collectUserMessageBlobPreviewUrls,
   deriveComposerSendState,
@@ -199,6 +199,7 @@ const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_AVAILABLE_EDITORS: EditorId[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
+const EMPTY_QUEUED_FOLLOW_UPS: QueuedFollowUp[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 
 function formatOutgoingPrompt(params: {
@@ -256,7 +257,86 @@ interface PendingPullRequestSetupRequest {
   scriptId: string;
 }
 
-type FollowUpSubmissionSnapshot = QueuedFollowUpDraft;
+type FollowUpSubmissionAttachment =
+  | PersistedComposerImageAttachment
+  | (ChatAttachment & { previewUrl?: string | undefined });
+
+interface FollowUpSubmissionSnapshot {
+  id: string;
+  createdAt: string;
+  prompt: string;
+  attachments: FollowUpSubmissionAttachment[];
+  terminalContexts: TerminalContextDraft[];
+  modelSelection: ModelSelection;
+  runtimeMode: RuntimeMode;
+  interactionMode: ProviderInteractionMode;
+  lastSendError?: string | null;
+}
+
+interface PendingSteerSubmission {
+  threadId: ThreadId;
+  snapshot: FollowUpSubmissionSnapshot;
+  source: "composer" | "queued-follow-up";
+  queuedFollowUpId?: string;
+  queuedFollowUpTargetIndex?: number;
+}
+
+function isUploadedFollowUpAttachment(
+  attachment: FollowUpSubmissionAttachment,
+): attachment is PersistedComposerImageAttachment {
+  return "dataUrl" in attachment;
+}
+
+function toCommandAttachment(attachment: FollowUpSubmissionAttachment): ClientChatAttachment {
+  if (isUploadedFollowUpAttachment(attachment)) {
+    return {
+      type: "image",
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      dataUrl: attachment.dataUrl,
+    };
+  }
+  return {
+    type: "image",
+    id: attachment.id,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    sizeBytes: attachment.sizeBytes,
+  };
+}
+
+function toDraftPersistedAttachment(
+  attachment: FollowUpSubmissionAttachment,
+): PersistedComposerImageAttachment | null {
+  return isUploadedFollowUpAttachment(attachment) ? attachment : null;
+}
+
+async function responseBlobToDataUrl(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return `data:${blob.type || "application/octet-stream"};base64,${btoa(binary)}`;
+}
+
+async function hydratePersistedAttachmentForDraft(
+  attachment: ChatAttachment,
+): Promise<PersistedComposerImageAttachment> {
+  const response = await fetch(attachment.previewUrl ?? "", { credentials: "same-origin" });
+  if (!response.ok) {
+    throw new Error(`Failed to load queued attachment '${attachment.name}'.`);
+  }
+  const blob = await response.blob();
+  return {
+    id: attachment.id,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    sizeBytes: attachment.sizeBytes,
+    dataUrl: await responseBlobToDataUrl(blob),
+  };
+}
 
 function persistedModelOptionsFromSelection(
   modelSelection: ModelSelection,
@@ -280,7 +360,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     (store) => store.setStickyModelSelection,
   );
   const timestampFormat = settings.timestampFormat;
-  const queuedFollowUps = useQueuedFollowUps(threadId);
   const navigate = useNavigate();
   const rawSearch = useSearch({
     strict: false,
@@ -329,14 +408,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const syncComposerDraftPersistedAttachments = useComposerDraftStore(
     (store) => store.syncPersistedAttachments,
-  );
-  const enqueueQueuedFollowUp = useComposerDraftStore((store) => store.enqueueQueuedFollowUp);
-  const reorderQueuedFollowUp = useComposerDraftStore((store) => store.reorderQueuedFollowUp);
-  const updateQueuedFollowUp = useComposerDraftStore((store) => store.updateQueuedFollowUp);
-  const removeQueuedFollowUp = useComposerDraftStore((store) => store.removeQueuedFollowUp);
-  const shiftQueuedFollowUp = useComposerDraftStore((store) => store.shiftQueuedFollowUp);
-  const restoreQueuedFollowUpToDraft = useComposerDraftStore(
-    (store) => store.restoreQueuedFollowUpToDraft,
   );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
@@ -431,7 +502,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewHandoffTimeoutByMessageIdRef = useRef<Record<string, number>>({});
   const sendInFlightRef = useRef(false);
-  const autoDispatchQueuedFollowUpIdRef = useRef<string | null>(null);
+  const pendingSteerSubmissionRef = useRef<PendingSteerSubmission | null>(null);
+  const [pendingSteerSubmissionVersion, setPendingSteerSubmissionVersion] = useState(0);
   const dragDepthRef = useRef(0);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
   const setMessagesScrollContainerRef = useCallback((element: HTMLDivElement | null) => {
@@ -455,6 +527,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [setComposerDraftPrompt, threadId],
   );
+  const setPendingSteerSubmission = useCallback((submission: PendingSteerSubmission | null) => {
+    pendingSteerSubmissionRef.current = submission;
+    setPendingSteerSubmissionVersion((current) => current + 1);
+  }, []);
   const addComposerImage = useCallback(
     (image: ComposerImageAttachment) => {
       addComposerDraftImage(threadId, image);
@@ -521,6 +597,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [draftThread, fallbackDraftProject?.defaultModelSelection, localDraftError, threadId],
   );
   const activeThread = serverThread ?? localDraftThread;
+  const queuedFollowUps = activeThread?.queuedFollowUps ?? EMPTY_QUEUED_FOLLOW_UPS;
   const runtimeMode =
     composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
@@ -2554,12 +2631,54 @@ export default function ChatView({ threadId }: ChatViewProps) {
       );
 
       if (effectiveBehavior === "queue") {
-        enqueueQueuedFollowUp(activeThread.id, followUpSnapshot);
-        promptRef.current = "";
-        clearComposerDraftContent(activeThread.id);
-        setComposerHighlightedItemId(null);
-        setComposerCursor(0);
-        setComposerTrigger(null);
+        const queuedFollowUpEdit = composerDraft.queuedFollowUpEdit;
+        const targetIndex = (() => {
+          if (!queuedFollowUpEdit) {
+            return undefined;
+          }
+          if (queuedFollowUpEdit.nextFollowUpId) {
+            const nextIndex = queuedFollowUps.findIndex(
+              (queuedFollowUp) => queuedFollowUp.id === queuedFollowUpEdit.nextFollowUpId,
+            );
+            if (nextIndex >= 0) {
+              return nextIndex;
+            }
+          }
+          if (queuedFollowUpEdit.previousFollowUpId) {
+            const previousIndex = queuedFollowUps.findIndex(
+              (queuedFollowUp) => queuedFollowUp.id === queuedFollowUpEdit.previousFollowUpId,
+            );
+            if (previousIndex >= 0) {
+              return previousIndex + 1;
+            }
+          }
+          return Math.max(0, Math.min(queuedFollowUpEdit.queueIndex, queuedFollowUps.length));
+        })();
+        try {
+          await api.orchestration.dispatchCommand({
+            type: "thread.queued-follow-up.enqueue",
+            commandId: newCommandId(),
+            threadId: activeThread.id,
+            followUp: {
+              ...followUpSnapshot,
+              id: queuedFollowUpEdit?.followUpId ?? followUpSnapshot.id,
+              attachments: followUpSnapshot.attachments.map(toCommandAttachment),
+              lastSendError: null,
+            },
+            ...(targetIndex !== undefined ? { targetIndex } : {}),
+            createdAt,
+          });
+          promptRef.current = "";
+          clearComposerDraftContent(activeThread.id);
+          setComposerHighlightedItemId(null);
+          setComposerCursor(0);
+          setComposerTrigger(null);
+        } catch (err) {
+          setThreadError(
+            activeThread.id,
+            err instanceof Error ? err.message : "Failed to queue follow-up.",
+          );
+        }
         return;
       }
 
@@ -2569,14 +2688,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerCursor(0);
       setComposerTrigger(null);
 
-      const dispatched = await dispatchServerThreadSnapshot({
+      setPendingSteerSubmission({
         threadId: activeThread.id,
         snapshot: followUpSnapshot,
-        errorMessage: "Failed to send follow-up.",
-        suppressOptimisticMessage: true,
-        hideServerMessage: true,
+        source: "composer",
       });
-      if (!dispatched) {
+      const interrupted = await requestThreadInterrupt(activeThread.id);
+      if (!interrupted) {
+        setPendingSteerSubmission(null);
         restoreFollowUpSnapshotToComposer(followUpSnapshot);
       }
       return;
@@ -2875,15 +2994,34 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
   };
 
+  const requestThreadInterrupt = useCallback(
+    async (threadIdToInterrupt: ThreadId) => {
+      const api = readNativeApi();
+      if (!api) {
+        return false;
+      }
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.interrupt",
+          commandId: newCommandId(),
+          threadId: threadIdToInterrupt,
+          createdAt: new Date().toISOString(),
+        });
+        return true;
+      } catch (err) {
+        setThreadError(
+          threadIdToInterrupt,
+          err instanceof Error ? err.message : "Failed to interrupt active turn.",
+        );
+        return false;
+      }
+    },
+    [setThreadError],
+  );
+
   const onInterrupt = async () => {
-    const api = readNativeApi();
-    if (!api || !activeThread) return;
-    await api.orchestration.dispatchCommand({
-      type: "thread.turn.interrupt",
-      commandId: newCommandId(),
-      threadId: activeThread.id,
-      createdAt: new Date().toISOString(),
-    });
+    if (!activeThread) return;
+    await requestThreadInterrupt(activeThread.id);
   };
 
   const onRespondToApproval = useCallback(
@@ -3084,6 +3222,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   const restoreFollowUpSnapshotToComposer = useCallback(
     (snapshot: FollowUpSubmissionSnapshot) => {
+      const hydratedAttachments = snapshot.attachments.flatMap((attachment) => {
+        const draftAttachment = toDraftPersistedAttachment(attachment);
+        return draftAttachment ? [draftAttachment] : [];
+      });
       setComposerDraftPrompt(threadId, snapshot.prompt);
       useComposerDraftStore.setState((state) => {
         const currentDraft = state.draftsByThreadId[threadId];
@@ -3093,9 +3235,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
             [threadId]: {
               ...(currentDraft ?? composerDraft),
               prompt: snapshot.prompt,
-              images: hydrateComposerImagesFromPersistedAttachments(snapshot.attachments),
+              images: hydrateComposerImagesFromPersistedAttachments(hydratedAttachments),
               nonPersistedImageIds: [],
-              persistedAttachments: [...snapshot.attachments],
+              persistedAttachments: hydratedAttachments,
               terminalContexts: snapshot.terminalContexts.map((context) => ({ ...context })),
               modelSelectionByProvider: {
                 ...(currentDraft?.modelSelectionByProvider ??
@@ -3154,14 +3296,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
         effort: snapshotProviderState.promptEffort,
         text: promptWithTerminalContexts || IMAGE_ONLY_BOOTSTRAP_PROMPT,
       });
-      const optimisticAttachments = input.snapshot.attachments.map((attachment) => ({
-        type: "image" as const,
-        id: attachment.id,
-        name: attachment.name,
-        mimeType: attachment.mimeType,
-        sizeBytes: attachment.sizeBytes,
-        previewUrl: attachment.dataUrl,
-      }));
+      const optimisticAttachments = input.snapshot.attachments.map((attachment) => {
+        const previewUrl = isUploadedFollowUpAttachment(attachment)
+          ? attachment.dataUrl
+          : attachment.previewUrl;
+        return {
+          type: "image" as const,
+          id: attachment.id,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          ...(previewUrl ? { previewUrl } : {}),
+        };
+      });
       const messageIdForSend = newMessageId();
       const dispatchCreatedAt = new Date().toISOString();
 
@@ -3204,13 +3351,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             messageId: messageIdForSend,
             role: "user",
             text: outgoingMessageText,
-            attachments: input.snapshot.attachments.map((attachment) => ({
-              type: "image" as const,
-              name: attachment.name,
-              mimeType: attachment.mimeType,
-              sizeBytes: attachment.sizeBytes,
-              dataUrl: attachment.dataUrl,
-            })),
+            attachments: input.snapshot.attachments.map(toCommandAttachment),
           },
           modelSelection: input.snapshot.modelSelection,
           runtimeMode: input.snapshot.runtimeMode,
@@ -3250,6 +3391,94 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setThreadError,
     ],
   );
+
+  const requeuePendingSteerSubmission = useCallback(
+    async (pending: PendingSteerSubmission) => {
+      if (pending.source !== "queued-follow-up") {
+        return;
+      }
+      const api = readNativeApi();
+      if (!api) {
+        restoreFollowUpSnapshotToComposer(pending.snapshot);
+        return;
+      }
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.queued-follow-up.enqueue",
+          commandId: newCommandId(),
+          threadId: pending.threadId,
+          followUp: {
+            ...pending.snapshot,
+            id: pending.queuedFollowUpId ?? pending.snapshot.id,
+            attachments: pending.snapshot.attachments.map(toCommandAttachment),
+            lastSendError: null,
+          },
+          ...(pending.queuedFollowUpTargetIndex !== undefined
+            ? { targetIndex: pending.queuedFollowUpTargetIndex }
+            : {}),
+          createdAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        setThreadError(
+          pending.threadId,
+          err instanceof Error ? err.message : "Failed to requeue steered follow-up.",
+        );
+        restoreFollowUpSnapshotToComposer(pending.snapshot);
+      }
+    },
+    [restoreFollowUpSnapshotToComposer, setThreadError],
+  );
+
+  useEffect(() => {
+    const pendingSteerSubmission = pendingSteerSubmissionRef.current;
+    if (!pendingSteerSubmission || pendingSteerSubmission.threadId !== activeThread?.id) {
+      return;
+    }
+    if (
+      phase === "running" ||
+      isSendBusy ||
+      isConnecting ||
+      sendInFlightRef.current ||
+      isComposerApprovalState ||
+      pendingUserInputs.length > 0
+    ) {
+      return;
+    }
+
+    setPendingSteerSubmission(null);
+    void (async () => {
+      const dispatched = await dispatchServerThreadSnapshot({
+        threadId: pendingSteerSubmission.threadId,
+        snapshot: pendingSteerSubmission.snapshot,
+        errorMessage:
+          pendingSteerSubmission.source === "queued-follow-up"
+            ? "Failed to steer queued follow-up."
+            : "Failed to send follow-up.",
+        suppressOptimisticMessage: false,
+        hideServerMessage: false,
+      });
+      if (dispatched) {
+        return;
+      }
+      if (pendingSteerSubmission.source === "queued-follow-up") {
+        await requeuePendingSteerSubmission(pendingSteerSubmission);
+        return;
+      }
+      restoreFollowUpSnapshotToComposer(pendingSteerSubmission.snapshot);
+    })();
+  }, [
+    activeThread?.id,
+    dispatchServerThreadSnapshot,
+    isComposerApprovalState,
+    isConnecting,
+    isSendBusy,
+    pendingSteerSubmissionVersion,
+    pendingUserInputs.length,
+    phase,
+    requeuePendingSteerSubmission,
+    restoreFollowUpSnapshotToComposer,
+    setPendingSteerSubmission,
+  ]);
 
   const onSubmitPlanFollowUp = useCallback(
     async ({
@@ -3318,26 +3547,116 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
 
   const onDeleteQueuedFollowUp = useCallback(
-    (followUpId: string) => {
-      removeQueuedFollowUp(threadId, followUpId);
+    async (followUpId: string) => {
+      const api = readNativeApi();
+      if (!api || !activeThread || !isServerThread) {
+        return;
+      }
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.queued-follow-up.remove",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          followUpId,
+          createdAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        setThreadError(
+          activeThread.id,
+          err instanceof Error ? err.message : "Failed to delete queued follow-up.",
+        );
+      }
     },
-    [removeQueuedFollowUp, threadId],
+    [activeThread, isServerThread, setThreadError],
   );
 
   const onReorderQueuedFollowUp = useCallback(
-    (followUpId: string, targetIndex: number) => {
-      reorderQueuedFollowUp(threadId, followUpId, targetIndex);
+    async (followUpId: string, targetIndex: number) => {
+      const api = readNativeApi();
+      if (!api || !activeThread || !isServerThread) {
+        return;
+      }
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.queued-follow-up.reorder",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          followUpId,
+          targetIndex,
+          createdAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        setThreadError(
+          activeThread.id,
+          err instanceof Error ? err.message : "Failed to reorder queued follow-up.",
+        );
+      }
     },
-    [reorderQueuedFollowUp, threadId],
+    [activeThread, isServerThread, setThreadError],
   );
 
   const onEditQueuedFollowUp = useCallback(
-    (followUpId: string) => {
+    async (followUpId: string) => {
+      const api = readNativeApi();
+      if (!api || !activeThread || !isServerThread) {
+        return;
+      }
       const followUp = queuedFollowUps.find((entry) => entry.id === followUpId);
       if (!followUp) {
         return;
       }
-      restoreQueuedFollowUpToDraft(threadId, followUpId);
+      const queueIndex = queuedFollowUps.findIndex((entry) => entry.id === followUpId);
+      const previousFollowUp = queueIndex > 0 ? queuedFollowUps[queueIndex - 1] : null;
+      const nextFollowUp = queuedFollowUps[queueIndex + 1] ?? null;
+      try {
+        const hydratedAttachments = await Promise.all(
+          followUp.attachments.map((attachment) => hydratePersistedAttachmentForDraft(attachment)),
+        );
+        await api.orchestration.dispatchCommand({
+          type: "thread.queued-follow-up.remove",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          followUpId,
+          createdAt: new Date().toISOString(),
+        });
+        setComposerDraftPrompt(threadId, followUp.prompt);
+        useComposerDraftStore.setState((state) => {
+          const currentDraft = state.draftsByThreadId[threadId] ?? composerDraft;
+          return {
+            draftsByThreadId: {
+              ...state.draftsByThreadId,
+              [threadId]: {
+                ...(currentDraft ?? composerDraft),
+                prompt: followUp.prompt,
+                images: hydrateComposerImagesFromPersistedAttachments(hydratedAttachments),
+                nonPersistedImageIds: [],
+                persistedAttachments: [...hydratedAttachments],
+                terminalContexts: followUp.terminalContexts.map((context) => ({ ...context })),
+                modelSelectionByProvider: {
+                  ...(currentDraft?.modelSelectionByProvider ??
+                    composerDraft.modelSelectionByProvider),
+                  [followUp.modelSelection.provider]: followUp.modelSelection,
+                },
+                activeProvider: followUp.modelSelection.provider,
+                runtimeMode: followUp.runtimeMode,
+                interactionMode: followUp.interactionMode,
+                queuedFollowUpEdit: {
+                  followUpId: followUp.id,
+                  queueIndex,
+                  previousFollowUpId: previousFollowUp?.id ?? null,
+                  nextFollowUpId: nextFollowUp?.id ?? null,
+                },
+              },
+            },
+          };
+        });
+      } catch (err) {
+        setThreadError(
+          activeThread.id,
+          err instanceof Error ? err.message : "Failed to edit queued follow-up.",
+        );
+        return;
+      }
       promptRef.current = followUp.prompt;
       setComposerCursor(collapseExpandedComposerCursor(followUp.prompt, followUp.prompt.length));
       setComposerTrigger(detectComposerTrigger(followUp.prompt, followUp.prompt.length));
@@ -3347,12 +3666,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
         );
       });
     },
-    [queuedFollowUps, restoreQueuedFollowUpToDraft, threadId],
+    [
+      activeThread,
+      composerDraft,
+      isServerThread,
+      queuedFollowUps,
+      setComposerDraftPrompt,
+      setThreadError,
+      threadId,
+    ],
   );
 
   const onSteerQueuedFollowUp = useCallback(
     async (followUpId: string) => {
+      const api = readNativeApi();
       if (
+        !api ||
         !activeThread ||
         !isServerThread ||
         isSendBusy ||
@@ -3365,24 +3694,66 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (!followUp) {
         return;
       }
-      updateQueuedFollowUp(threadId, followUpId, (existing) => {
-        const { lastSendError: _lastSendError, ...rest } = existing;
-        return { ...rest };
-      });
+      const queueIndex = queuedFollowUps.findIndex((entry) => entry.id === followUpId);
+      if (phase === "running") {
+        try {
+          await api.orchestration.dispatchCommand({
+            type: "thread.queued-follow-up.remove",
+            commandId: newCommandId(),
+            threadId: activeThread.id,
+            followUpId,
+            createdAt: new Date().toISOString(),
+          });
+        } catch (err) {
+          setThreadError(
+            activeThread.id,
+            err instanceof Error ? err.message : "Failed to remove queued follow-up.",
+          );
+          return;
+        }
+
+        setPendingSteerSubmission({
+          threadId: activeThread.id,
+          snapshot: followUp,
+          source: "queued-follow-up",
+          queuedFollowUpId: followUp.id,
+          ...(queueIndex >= 0 ? { queuedFollowUpTargetIndex: queueIndex } : {}),
+        });
+        const interrupted = await requestThreadInterrupt(activeThread.id);
+        if (!interrupted) {
+          setPendingSteerSubmission(null);
+          await requeuePendingSteerSubmission({
+            threadId: activeThread.id,
+            snapshot: followUp,
+            source: "queued-follow-up",
+            queuedFollowUpId: followUp.id,
+            ...(queueIndex >= 0 ? { queuedFollowUpTargetIndex: queueIndex } : {}),
+          });
+        }
+        return;
+      }
       const dispatched = await dispatchServerThreadSnapshot({
         threadId: activeThread.id,
         snapshot: followUp,
         errorMessage: "Failed to steer queued follow-up.",
-        suppressOptimisticMessage: phase === "running",
-        hideServerMessage: true,
+        suppressOptimisticMessage: false,
+        hideServerMessage: false,
       });
       if (dispatched) {
-        removeQueuedFollowUp(threadId, followUpId);
-      } else {
-        updateQueuedFollowUp(threadId, followUpId, (existing) => ({
-          ...existing,
-          lastSendError: "Steer failed. Review the thread error or edit this follow-up.",
-        }));
+        await api.orchestration
+          .dispatchCommand({
+            type: "thread.queued-follow-up.remove",
+            commandId: newCommandId(),
+            threadId: activeThread.id,
+            followUpId,
+            createdAt: new Date().toISOString(),
+          })
+          .catch((err: unknown) => {
+            setThreadError(
+              activeThread.id,
+              err instanceof Error ? err.message : "Failed to remove queued follow-up.",
+            );
+          });
       }
     },
     [
@@ -3393,71 +3764,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
       isServerThread,
       phase,
       queuedFollowUps,
-      removeQueuedFollowUp,
-      threadId,
-      updateQueuedFollowUp,
+      requestThreadInterrupt,
+      requeuePendingSteerSubmission,
+      setPendingSteerSubmission,
+      setThreadError,
     ],
   );
-
-  useEffect(() => {
-    if (!activeThread || !isServerThread) {
-      autoDispatchQueuedFollowUpIdRef.current = null;
-      return;
-    }
-    const nextQueuedFollowUp = queuedFollowUps[0];
-    if (!nextQueuedFollowUp || nextQueuedFollowUp.lastSendError) {
-      autoDispatchQueuedFollowUpIdRef.current = null;
-      return;
-    }
-    if (
-      !canAutoDispatchQueuedFollowUp({
-        phase,
-        queuedFollowUpCount: queuedFollowUps.length,
-        isConnecting,
-        isSendBusy,
-        isRevertingCheckpoint,
-        hasThreadError: Boolean(activeThread.error),
-        hasPendingApproval: activePendingApproval !== null,
-        hasPendingUserInput: activePendingUserInput !== null,
-      })
-    ) {
-      return;
-    }
-    if (autoDispatchQueuedFollowUpIdRef.current === nextQueuedFollowUp.id) {
-      return;
-    }
-    autoDispatchQueuedFollowUpIdRef.current = nextQueuedFollowUp.id;
-    void (async () => {
-      const dispatched = await dispatchServerThreadSnapshot({
-        threadId: activeThread.id,
-        snapshot: nextQueuedFollowUp,
-        errorMessage: "Failed to send queued follow-up.",
-      });
-      if (dispatched) {
-        shiftQueuedFollowUp(threadId);
-      } else {
-        updateQueuedFollowUp(threadId, nextQueuedFollowUp.id, (existing) => ({
-          ...existing,
-          lastSendError: "Auto-send failed. Steer, edit, or delete this follow-up.",
-        }));
-      }
-      autoDispatchQueuedFollowUpIdRef.current = null;
-    })();
-  }, [
-    activePendingApproval,
-    activePendingUserInput,
-    activeThread,
-    dispatchServerThreadSnapshot,
-    isConnecting,
-    isRevertingCheckpoint,
-    isSendBusy,
-    isServerThread,
-    phase,
-    queuedFollowUps,
-    shiftQueuedFollowUp,
-    threadId,
-    updateQueuedFollowUp,
-  ]);
 
   const onImplementPlanInNewThread = useCallback(async () => {
     const api = readNativeApi();
