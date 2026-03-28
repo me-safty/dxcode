@@ -20,6 +20,7 @@ import {
   ProviderItemId,
   ThreadId,
   TurnId,
+  ProviderSendTurnInput,
 } from "@t3tools/contracts";
 import { Effect, FileSystem, Layer, Queue, Schema, ServiceMap, Stream } from "effect";
 
@@ -1413,8 +1414,8 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   );
 
   const resolveAttachment = Effect.fn("resolveAttachment")(function* (
-    input: Parameters<CodexAdapterShape["sendTurn"]>[0],
-    attachment: NonNullable<Parameters<CodexAdapterShape["sendTurn"]>[0]["attachments"]>[number],
+    input: ProviderSendTurnInput,
+    attachment: NonNullable<ProviderSendTurnInput["attachments"]>[number],
   ) {
     const attachmentPath = resolveAttachmentPath({
       attachmentsDir: serverConfig.attachmentsDir,
