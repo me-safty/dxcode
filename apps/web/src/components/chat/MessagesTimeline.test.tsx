@@ -1,6 +1,14 @@
 import { MessageId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { buildTimelineRows } from "./MessagesTimeline.logic";
+
+vi.mock("../../hooks/useTheme", () => ({
+  useTheme: () => ({
+    theme: "light",
+    resolvedTheme: "light",
+  }),
+}));
 
 function matchMedia() {
   return {
@@ -45,36 +53,39 @@ beforeAll(() => {
 describe("MessagesTimeline", () => {
   it("renders inline terminal labels with the composer chip UI", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
+    const rows = buildTimelineRows({
+      timelineEntries: [
+        {
+          id: "entry-1",
+          kind: "message",
+          createdAt: "2026-03-17T19:12:28.000Z",
+          message: {
+            id: MessageId.makeUnsafe("message-2"),
+            role: "user",
+            text: [
+              "yoo what's @terminal-1:1-5 mean",
+              "",
+              "<terminal_context>",
+              "- Terminal 1 lines 1-5:",
+              "  1 | julius@mac effect-http-ws-cli % bun i",
+              "  2 | bun install v1.3.9 (cf6cdbbb)",
+              "</terminal_context>",
+            ].join("\n"),
+            createdAt: "2026-03-17T19:12:28.000Z",
+            streaming: false,
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+    });
     const markup = renderToStaticMarkup(
       <MessagesTimeline
-        hasMessages
-        isWorking={false}
+        rows={rows}
         activeTurnInProgress={false}
         activeTurnStartedAt={null}
         scrollContainer={null}
-        timelineEntries={[
-          {
-            id: "entry-1",
-            kind: "message",
-            createdAt: "2026-03-17T19:12:28.000Z",
-            message: {
-              id: MessageId.makeUnsafe("message-2"),
-              role: "user",
-              text: [
-                "yoo what's @terminal-1:1-5 mean",
-                "",
-                "<terminal_context>",
-                "- Terminal 1 lines 1-5:",
-                "  1 | julius@mac effect-http-ws-cli % bun i",
-                "  2 | bun install v1.3.9 (cf6cdbbb)",
-                "</terminal_context>",
-              ].join("\n"),
-              createdAt: "2026-03-17T19:12:28.000Z",
-              streaming: false,
-            },
-          },
-        ]}
-        completionDividerBeforeEntryId={null}
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         nowIso="2026-03-17T19:12:30.000Z"
@@ -89,6 +100,9 @@ describe("MessagesTimeline", () => {
         resolvedTheme="light"
         timestampFormat="locale"
         workspaceRoot={undefined}
+        activeSearchRowId={null}
+        matchedSearchRowIds={new Set()}
+        searchQuery=""
       />,
     );
 
@@ -99,27 +113,30 @@ describe("MessagesTimeline", () => {
 
   it("renders context compaction entries in the normal work log", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
+    const rows = buildTimelineRows({
+      timelineEntries: [
+        {
+          id: "entry-1",
+          kind: "work",
+          createdAt: "2026-03-17T19:12:28.000Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            label: "Context compacted",
+            tone: "info",
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+    });
     const markup = renderToStaticMarkup(
       <MessagesTimeline
-        hasMessages
-        isWorking={false}
+        rows={rows}
         activeTurnInProgress={false}
         activeTurnStartedAt={null}
         scrollContainer={null}
-        timelineEntries={[
-          {
-            id: "entry-1",
-            kind: "work",
-            createdAt: "2026-03-17T19:12:28.000Z",
-            entry: {
-              id: "work-1",
-              createdAt: "2026-03-17T19:12:28.000Z",
-              label: "Context compacted",
-              tone: "info",
-            },
-          },
-        ]}
-        completionDividerBeforeEntryId={null}
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         nowIso="2026-03-17T19:12:30.000Z"
@@ -134,10 +151,120 @@ describe("MessagesTimeline", () => {
         resolvedTheme="light"
         timestampFormat="locale"
         workspaceRoot={undefined}
+        activeSearchRowId={null}
+        matchedSearchRowIds={new Set()}
+        searchQuery=""
       />,
     );
 
     expect(markup).toContain("Context compacted");
     expect(markup).toContain("Work log");
+  });
+
+  it("renders active inline search highlights without row-level emphasis", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const rows = buildTimelineRows({
+      timelineEntries: [
+        {
+          id: "message-1",
+          kind: "message",
+          createdAt: "2026-03-17T19:12:28.000Z",
+          message: {
+            id: MessageId.makeUnsafe("message-1"),
+            role: "user",
+            text: "Search target",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            streaming: false,
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+    });
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        rows={rows}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:12:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+        activeSearchRowId="message-1"
+        matchedSearchRowIds={new Set(["message-1"])}
+        searchQuery="Search"
+      />,
+    );
+
+    expect(markup).toContain('data-timeline-row-id="message-1"');
+    expect(markup).toContain('data-search-match-state="active"');
+    expect(markup).toContain('data-thread-search-highlight="active"');
+    expect(markup).toContain("<mark");
+    expect(markup).not.toContain("bg-warning/12");
+  });
+
+  it("renders assistant markdown search highlights", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const rows = buildTimelineRows({
+      timelineEntries: [
+        {
+          id: "assistant-row-1",
+          kind: "message",
+          createdAt: "2026-03-17T19:12:28.000Z",
+          message: {
+            id: MessageId.makeUnsafe("assistant-message-1"),
+            role: "assistant",
+            text: "The **highlight** should also appear in assistant markdown.",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            streaming: false,
+          },
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+    });
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        rows={rows}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:12:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+        activeSearchRowId="assistant-row-1"
+        matchedSearchRowIds={new Set(["assistant-row-1"])}
+        searchQuery="highlight"
+      />,
+    );
+
+    expect(markup).toContain('data-timeline-row-id="assistant-row-1"');
+    expect(markup).toContain('data-thread-search-highlight="active"');
+    expect(markup).toContain("<mark");
+    expect(markup).toContain(">highlight<");
   });
 });

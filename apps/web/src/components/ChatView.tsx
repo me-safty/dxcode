@@ -22,7 +22,15 @@ import {
   RuntimeMode,
 } from "@t3tools/contracts";
 import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@t3tools/shared/model";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -99,7 +107,7 @@ import {
 import { Button } from "./ui/button";
 import { Separator } from "./ui/separator";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
-import { cn, randomUUID } from "~/lib/utils";
+import { cn, isMacPlatform, randomUUID } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
@@ -145,6 +153,7 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../terminalSta
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
+import { buildTimelineRows } from "./chat/MessagesTimeline.logic";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -162,6 +171,13 @@ import {
 } from "./chat/composerProviderRegistry";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
+import { ThreadSearchBar } from "./chat/ThreadSearchBar";
+import {
+  buildThreadSearchIndex,
+  createEmptyThreadSearchLookupState,
+  findThreadSearchLookupState,
+  type ThreadSearchLookupState,
+} from "./chat/threadSearch";
 import {
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
@@ -206,6 +222,23 @@ function formatOutgoingPrompt(params: {
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
+const THREAD_SEARCH_INPUT_SELECTOR = "[data-testid='thread-search-input']";
+
+function isThreadSearchShortcut(event: KeyboardEvent, platform = navigator.platform): boolean {
+  if (event.key.toLowerCase() !== "f") {
+    return false;
+  }
+  if (event.shiftKey || event.altKey) {
+    return false;
+  }
+  return isMacPlatform(platform)
+    ? event.metaKey && !event.ctrlKey
+    : event.ctrlKey && !event.metaKey;
+}
+
+function isThreadSearchInputTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && target.closest(THREAD_SEARCH_INPUT_SELECTOR) !== null;
+}
 
 const extendReplacementRangeForTrailingSpace = (
   text: string,
@@ -321,6 +354,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const promptRef = useRef(prompt);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [threadSearchOpen, setThreadSearchOpen] = useState(false);
+  const [threadSearchQuery, setThreadSearchQuery] = useState("");
+  const [activeThreadSearchResultIndex, setActiveThreadSearchResultIndex] = useState(-1);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
@@ -398,6 +434,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const sendInFlightRef = useRef(false);
   const dragDepthRef = useRef(0);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
+  const threadSearchInputRef = useRef<HTMLInputElement>(null);
+  const threadSearchRestoreFocusRef = useRef<HTMLElement | null>(null);
   const setMessagesScrollContainerRef = useCallback((element: HTMLDivElement | null) => {
     messagesScrollRef.current = element;
     setMessagesScrollElement(element);
@@ -1009,6 +1047,57 @@ export default function ChatView({ threadId }: ChatViewProps) {
     latestTurnSettled,
     timelineEntries,
   ]);
+  const timelineRows = useMemo(
+    () =>
+      buildTimelineRows({
+        timelineEntries,
+        completionDividerBeforeEntryId,
+        isWorking,
+        activeTurnStartedAt: activeWorkStartedAt,
+      }),
+    [activeWorkStartedAt, completionDividerBeforeEntryId, isWorking, timelineEntries],
+  );
+  const deferredThreadSearchQuery = useDeferredValue(threadSearchQuery);
+  const threadSearchIndex = useMemo(() => buildThreadSearchIndex(timelineRows), [timelineRows]);
+  const threadSearchLookupStateRef = useRef<ThreadSearchLookupState>(
+    createEmptyThreadSearchLookupState(threadSearchIndex),
+  );
+  const threadSearchResults = useMemo(() => {
+    const nextLookupState = findThreadSearchLookupState(
+      threadSearchIndex,
+      deferredThreadSearchQuery,
+      threadSearchLookupStateRef.current,
+    );
+    threadSearchLookupStateRef.current = nextLookupState;
+    return nextLookupState.results;
+  }, [deferredThreadSearchQuery, threadSearchIndex]);
+  const visibleThreadSearchResults = useMemo(
+    () => (threadSearchOpen ? threadSearchResults : []),
+    [threadSearchOpen, threadSearchResults],
+  );
+  const matchedThreadSearchRowIds = useMemo(
+    () => new Set(visibleThreadSearchResults.map((result) => result.rowId)),
+    [visibleThreadSearchResults],
+  );
+  const activeThreadSearchRowId =
+    threadSearchOpen && activeThreadSearchResultIndex >= 0
+      ? (visibleThreadSearchResults[activeThreadSearchResultIndex]?.rowId ?? null)
+      : null;
+  useEffect(() => {
+    const normalizedQuery = threadSearchQuery.trim();
+    setActiveThreadSearchResultIndex(normalizedQuery.length > 0 ? 0 : -1);
+  }, [threadSearchQuery]);
+  useEffect(() => {
+    setActiveThreadSearchResultIndex((current) => {
+      if (visibleThreadSearchResults.length === 0) {
+        return -1;
+      }
+      if (current < 0) {
+        return 0;
+      }
+      return Math.min(current, visibleThreadSearchResults.length - 1);
+    });
+  }, [visibleThreadSearchResults]);
   const gitCwd = activeProject
     ? projectScriptCwd({
         project: { cwd: activeProject.cwd },
@@ -1237,6 +1326,54 @@ export default function ChatView({ threadId }: ChatViewProps) {
       focusComposer();
     });
   }, [focusComposer]);
+  const focusThreadSearchInput = useCallback((select = false) => {
+    window.requestAnimationFrame(() => {
+      const input = threadSearchInputRef.current;
+      if (!input) {
+        return;
+      }
+      input.focus();
+      if (select) {
+        input.select();
+      }
+    });
+  }, []);
+  const openThreadSearch = useCallback(
+    (select = true) => {
+      threadSearchRestoreFocusRef.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setThreadSearchOpen(true);
+      focusThreadSearchInput(select);
+    },
+    [focusThreadSearchInput],
+  );
+  const closeThreadSearch = useCallback(() => {
+    setThreadSearchOpen(false);
+    const focusTarget = threadSearchRestoreFocusRef.current;
+    threadSearchRestoreFocusRef.current = null;
+    if (focusTarget && focusTarget.isConnected) {
+      window.requestAnimationFrame(() => {
+        focusTarget.focus();
+      });
+    }
+  }, []);
+  const stepThreadSearch = useCallback(
+    (direction: 1 | -1) => {
+      if (visibleThreadSearchResults.length === 0) {
+        return;
+      }
+      setActiveThreadSearchResultIndex((current) => {
+        if (current < 0) {
+          return direction > 0 ? 0 : visibleThreadSearchResults.length - 1;
+        }
+        return (
+          (current + direction + visibleThreadSearchResults.length) %
+          visibleThreadSearchResults.length
+        );
+      });
+    },
+    [visibleThreadSearchResults.length],
+  );
   const addTerminalContextToDraft = useCallback(
     (selection: TerminalContextSelection) => {
       if (!activeThread) {
@@ -2199,6 +2336,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (!activeThreadId || event.defaultPrevented) return;
+      if (isThreadSearchShortcut(event) && !isTerminalFocused() && !expandedImage) {
+        event.preventDefault();
+        event.stopPropagation();
+        openThreadSearch(!isThreadSearchInputTarget(event.target));
+        return;
+      }
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
@@ -2268,7 +2411,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activeThreadId,
     closeTerminal,
     createNewTerminal,
+    expandedImage,
     setTerminalOpen,
+    openThreadSearch,
     runProjectScript,
     splitTerminal,
     keybindings,
@@ -3598,6 +3743,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
           <div className="relative flex min-h-0 flex-1 flex-col">
+            {threadSearchOpen && (
+              <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex justify-end sm:inset-x-5 sm:top-4">
+                <ThreadSearchBar
+                  query={threadSearchQuery}
+                  resultCount={threadSearchResults.length}
+                  activeResultIndex={activeThreadSearchResultIndex}
+                  inputRef={threadSearchInputRef}
+                  onQueryChange={setThreadSearchQuery}
+                  onNext={() => stepThreadSearch(1)}
+                  onPrevious={() => stepThreadSearch(-1)}
+                  onClose={closeThreadSearch}
+                />
+              </div>
+            )}
             {/* Messages */}
             <div
               ref={setMessagesScrollContainerRef}
@@ -3615,13 +3774,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
             >
               <MessagesTimeline
                 key={activeThread.id}
-                hasMessages={timelineEntries.length > 0}
-                isWorking={isWorking}
+                rows={timelineRows}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
                 activeTurnStartedAt={activeWorkStartedAt}
                 scrollContainer={messagesScrollElement}
-                timelineEntries={timelineEntries}
-                completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                 completionSummary={completionSummary}
                 turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
                 nowIso={nowIso}
@@ -3636,6 +3792,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeProject?.cwd ?? undefined}
+                activeSearchRowId={activeThreadSearchRowId}
+                matchedSearchRowIds={matchedThreadSearchRowIds}
+                searchQuery={deferredThreadSearchQuery}
               />
             </div>
 
