@@ -79,8 +79,16 @@ const DEFAULT_THREAD_TITLE = "New thread";
 function buildReplaceableThreadTitles(input: {
   readonly messageText: string;
   readonly attachments?: ReadonlyArray<ChatAttachment>;
+  readonly titleSeed?: string;
 }): ReadonlySet<string> {
   const titles = new Set<string>([DEFAULT_THREAD_TITLE]);
+  const trimmedTitleSeed = input.titleSeed?.trim();
+
+  if (trimmedTitleSeed) {
+    titles.add(trimmedTitleSeed);
+    return titles;
+  }
+
   const trimmedMessage = input.messageText.trim();
 
   if (trimmedMessage.length > 0) {
@@ -101,6 +109,7 @@ function isReplaceableThreadTitle(
   input: {
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
+    readonly titleSeed?: string;
   },
 ): boolean {
   return buildReplaceableThreadTitles(input).has(currentTitle.trim());
@@ -565,6 +574,7 @@ const make = Effect.gen(function* () {
       const generationInput = {
         messageText: message.text,
         ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+        ...(event.payload.titleSeed !== undefined ? { titleSeed: event.payload.titleSeed } : {}),
         ...(event.payload.textGenerationModel !== undefined
           ? { textGenerationModel: event.payload.textGenerationModel }
           : {}),

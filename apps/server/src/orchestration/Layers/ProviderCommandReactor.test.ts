@@ -425,6 +425,58 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.title).toBe("Keep this custom title");
   });
 
+  it("matches the client-seeded title even when the outgoing prompt is reformatted", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const seededTitle = "Fix reconnect spinner on resume";
+    harness.generateThreadTitle.mockReturnValue(
+      Effect.succeed({
+        title: "Reconnect spinner resume bug",
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-thread-title-formatted-seed"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        title: seededTitle,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-title-formatted"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-title-formatted"),
+          role: "user",
+          text: "[effort:high]\\n\\nFix reconnect spinner on resume",
+          attachments: [],
+        },
+        titleSeed: seededTitle,
+        textGenerationModel: "gpt-5.4-mini",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.generateThreadTitle.mock.calls.length === 1);
+    await waitFor(async () => {
+      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      return (
+        readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"))?.title ===
+        "Reconnect spinner resume bug"
+      );
+    });
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+    expect(thread?.title).toBe("Reconnect spinner resume bug");
+  });
+
   it("reuses the text generation model for automatic worktree branch naming", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

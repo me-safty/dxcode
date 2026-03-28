@@ -132,7 +132,7 @@ it.layer(NodeServices.layer)("readBootstrapEnvelope", (it) => {
       const duplicatedFdPath = resolveFdPath(fd);
       assert.notStrictEqual(duplicatedFdPath, undefined);
       const closeSyncSpy = vi.spyOn(NFS, "closeSync");
-      bootstrapFsInterceptor.failCreateReadStreamForDuplicatedPath = duplicatedFdPath;
+      bootstrapFsInterceptor.failCreateReadStreamForDuplicatedPath = duplicatedFdPath ?? null;
 
       try {
         const payload = yield* readBootstrapEnvelope(TestEnvelopeSchema, fd, { timeoutMs: 100 });

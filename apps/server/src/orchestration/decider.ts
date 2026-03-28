@@ -377,6 +377,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.modelSelection !== undefined
             ? { modelSelection: command.modelSelection }
             : {}),
+          ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
           ...(command.textGenerationModel !== undefined
             ? { textGenerationModel: command.textGenerationModel }
             : {}),
