@@ -274,7 +274,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   useEffect(() => {
     if (timelineWidthPx === null) return;
     rowVirtualizer.measure();
-  }, [rowVirtualizer, timelineWidthPx]);
+  }, [assistantResponseCopyFormat, rowVirtualizer, timelineWidthPx]);
   useEffect(() => {
     rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (_item, _delta, instance) => {
       const viewportHeight = instance.scrollRect?.height ?? 0;
