@@ -96,4 +96,10 @@ describe("assistantMessageCopy", () => {
 
     expect(markdownToPlainText(markdown)).toBe("  print('hi')");
   });
+
+  it("collapses soft-wrapped paragraph newlines but preserves explicit breaks", () => {
+    const markdown = ["soft", "wrap", "", "hard  ", "break"].join("\n");
+
+    expect(markdownToPlainText(markdown)).toBe(["soft wrap", "", "hard", "break"].join("\n"));
+  });
 });

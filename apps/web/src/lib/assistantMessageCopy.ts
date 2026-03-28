@@ -142,6 +142,7 @@ function renderInlineChildren(nodes: readonly MarkdownNode[]): string {
 function renderInline(node: MarkdownNode): string {
   switch (node.type) {
     case "text":
+      return (node.value ?? "").replace(/\r?\n+/g, " ");
     case "inlineCode":
     case "html":
       return node.value ?? "";
