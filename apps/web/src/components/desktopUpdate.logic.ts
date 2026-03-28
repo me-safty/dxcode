@@ -5,16 +5,13 @@ export type DesktopUpdateButtonAction = "download" | "install" | "none";
 export function resolveDesktopUpdateButtonAction(
   state: DesktopUpdateState,
 ): DesktopUpdateButtonAction {
+  if (state.downloadedVersion) {
+    return "install";
+  }
   if (state.status === "available") {
     return "download";
   }
-  if (state.status === "downloaded") {
-    return "install";
-  }
   if (state.status === "error") {
-    if (state.errorContext === "install" && state.downloadedVersion) {
-      return "install";
-    }
     if (state.errorContext === "download" && state.availableVersion) {
       return "download";
     }

@@ -429,7 +429,7 @@ function AboutVersionSection() {
             render={
               <Button
                 size="xs"
-                variant="outline"
+                variant={action === "install" ? "default" : "outline"}
                 disabled={buttonDisabled}
                 onClick={handleButtonClick}
               >

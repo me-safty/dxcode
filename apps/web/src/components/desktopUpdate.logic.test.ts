@@ -70,6 +70,16 @@ describe("desktop update button state", () => {
     expect(getDesktopUpdateButtonTooltip(state)).toContain("Click to retry");
   });
 
+  it("prefers install when a downloaded version already exists", () => {
+    const state: DesktopUpdateState = {
+      ...baseState,
+      status: "available",
+      availableVersion: "1.1.0",
+      downloadedVersion: "1.1.0",
+    };
+    expect(resolveDesktopUpdateButtonAction(state)).toBe("install");
+  });
+
   it("hides the button for non-actionable check errors", () => {
     const state: DesktopUpdateState = {
       ...baseState,
