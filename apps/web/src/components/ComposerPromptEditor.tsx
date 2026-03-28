@@ -1085,7 +1085,7 @@ function ComposerSurroundSelectionPlugin(props: {
       event.stopImmediatePropagation();
     };
 
-    const tryApplyDeadKeyBacktickSurround = () => {
+    const tryApplyDeadKeyBacktickSurround = (options?: { finalAttempt?: boolean }) => {
       queueMicrotask(() => {
         editor.update(
           () => {
@@ -1103,6 +1103,10 @@ function ComposerSurroundSelectionPlugin(props: {
 
             const expectedResolvedValue = `${pendingDeadKeySelection.value.slice(0, pendingDeadKeySelection.start)}\`${pendingDeadKeySelection.value.slice(pendingDeadKeySelection.end)}`;
             if (currentValue !== expectedResolvedValue) {
+              if (options?.finalAttempt) {
+                pendingSurroundSelectionRef.current = null;
+                pendingDeadKeySelectionRef.current = null;
+              }
               return;
             }
 
@@ -1116,6 +1120,8 @@ function ComposerSurroundSelectionPlugin(props: {
             );
             const replacementSelection = $getSelection();
             if (!$isRangeSelection(replacementSelection)) {
+              pendingSurroundSelectionRef.current = null;
+              pendingDeadKeySelectionRef.current = null;
               return;
             }
             replacementSelection.insertText(`\`${selectedText}${backtickCloseSymbol}`);
@@ -1142,7 +1148,7 @@ function ComposerSurroundSelectionPlugin(props: {
     };
 
     const onCompositionEnd = () => {
-      tryApplyDeadKeyBacktickSurround();
+      tryApplyDeadKeyBacktickSurround({ finalAttempt: true });
     };
 
     let activeRootElement: HTMLElement | null = null;
