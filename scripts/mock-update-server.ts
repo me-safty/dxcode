@@ -1,11 +1,10 @@
-import { resolve, relative, dirname } from "node:path";
+import { resolve, relative } from "node:path";
 import { realpathSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 const port = Number(process.env.T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT ?? 3000);
 const root =
   process.env.T3CODE_DESKTOP_MOCK_UPDATE_SERVER_ROOT ??
-  resolve(dirname(fileURLToPath(import.meta.url)), "..", "release-mock");
+  resolve(import.meta.dirname, "..", "release-mock");
 
 const mockServerLog = (level: "info" | "warn" | "error" = "info", message: string) => {
   console[level](`[mock-update-server] ${message}`);
