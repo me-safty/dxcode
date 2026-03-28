@@ -2,6 +2,28 @@
 
 Generated from a repo scan for non-test wrapper-style candidates matching either `=> Effect.gen(function* ...)` or `return Effect.gen(function* ...)`.
 
+Refactor Method:
+
+```ts
+// Old
+function old () {
+    return Effect.gen(function* () {
+        ...
+    });
+}
+
+const old2 = () => Effect.gen(function* () {
+    ...
+});
+```
+
+```ts
+// New
+const new = Effect.fn('functionName')(function* () {
+    ...
+})
+```
+
 ## Summary
 
 - Total non-test candidates: `322`
