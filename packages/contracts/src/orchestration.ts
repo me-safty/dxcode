@@ -11,7 +11,6 @@ import {
   ProjectId,
   ProviderItemId,
   ThreadId,
-  TrimmedString,
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas";
@@ -44,20 +43,6 @@ export const ProviderSandboxMode = Schema.Literals([
 ]);
 export type ProviderSandboxMode = typeof ProviderSandboxMode.Type;
 
-export const ProviderStartOptions = Schema.Struct({
-  codex: Schema.optional(
-    Schema.Struct({
-      binaryPath: TrimmedString,
-      homePath: TrimmedString,
-    }),
-  ),
-  claudeAgent: Schema.optional(
-    Schema.Struct({
-      binaryPath: TrimmedString,
-    }),
-  ),
-});
-export type ProviderStartOptions = typeof ProviderStartOptions.Type;
 export const DEFAULT_PROVIDER_KIND: ProviderKind = "codex";
 
 export const CodexModelSelection = Schema.Struct({
@@ -415,7 +400,6 @@ export const ThreadTurnStartCommand = Schema.Struct({
   }),
   modelSelection: Schema.optional(ModelSelection),
   textGenerationModel: Schema.optional(TrimmedNonEmptyString),
-  providerOptions: Schema.optional(ProviderStartOptions),
   assistantDeliveryMode: Schema.optional(AssistantDeliveryMode),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(() => DEFAULT_RUNTIME_MODE)),
   interactionMode: ProviderInteractionMode.pipe(
@@ -437,7 +421,6 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   }),
   modelSelection: Schema.optional(ModelSelection),
   textGenerationModel: Schema.optional(TrimmedNonEmptyString),
-  providerOptions: Schema.optional(ProviderStartOptions),
   assistantDeliveryMode: Schema.optional(AssistantDeliveryMode),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
@@ -734,7 +717,6 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   messageId: MessageId,
   modelSelection: Schema.optional(ModelSelection),
   textGenerationModel: Schema.optional(TrimmedNonEmptyString),
-  providerOptions: Schema.optional(ProviderStartOptions),
   assistantDeliveryMode: Schema.optional(AssistantDeliveryMode),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(() => DEFAULT_RUNTIME_MODE)),
   interactionMode: ProviderInteractionMode.pipe(

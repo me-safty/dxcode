@@ -21,7 +21,6 @@ import {
   ProviderInteractionMode,
   RuntimeMode,
 } from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@t3tools/shared/model";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -664,30 +663,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [selectedModel, selectedModelOptionsForDispatch, selectedProvider],
   );
   const selectedTextGenerationModel = settings.textGenerationModelSelection.model;
-  const providerOptionsForDispatch = useMemo(() => {
-    const providerOptions = {
-      ...(settings.providers.codex.binaryPath !==
-        DEFAULT_UNIFIED_SETTINGS.providers.codex.binaryPath ||
-      settings.providers.codex.homePath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.homePath
-        ? {
-            codex: {
-              binaryPath: settings.providers.codex.binaryPath,
-              homePath: settings.providers.codex.homePath,
-            },
-          }
-        : {}),
-      ...(settings.providers.claudeAgent.binaryPath !==
-      DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath
-        ? {
-            claudeAgent: {
-              binaryPath: settings.providers.claudeAgent.binaryPath,
-            },
-          }
-        : {}),
-    };
-
-    return Object.keys(providerOptions).length > 0 ? providerOptions : undefined;
-  }, [settings]);
   const selectedModelForPicker = selectedModel;
   const phase = derivePhase(activeThread?.session ?? null);
   const isSendBusy = sendPhase !== "idle";
@@ -2737,7 +2712,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         },
         modelSelection: selectedModelSelection,
         textGenerationModel: selectedTextGenerationModel,
-        ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
         assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
         runtimeMode,
         interactionMode,
@@ -3021,7 +2995,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
           },
           modelSelection: selectedModelSelection,
           textGenerationModel: selectedTextGenerationModel,
-          ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
           assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
           runtimeMode,
           interactionMode: nextInteractionMode,
@@ -3070,7 +3043,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       selectedModelSelection,
       selectedProvider,
       selectedProviderModels,
-      providerOptionsForDispatch,
       setComposerDraftInteractionMode,
       setThreadError,
       settings.enableAssistantStreaming,
@@ -3142,7 +3114,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
           },
           modelSelection: selectedModelSelection,
           textGenerationModel: selectedTextGenerationModel,
-          ...(providerOptionsForDispatch ? { providerOptions: providerOptionsForDispatch } : {}),
           assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
           runtimeMode,
           interactionMode: "default",
@@ -3197,7 +3168,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedProvider,
     selectedProviderModels,
     settings.enableAssistantStreaming,
-    providerOptionsForDispatch,
     selectedTextGenerationModel,
     syncServerReadModel,
     selectedModel,
