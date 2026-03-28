@@ -115,14 +115,15 @@ function extractWorktreeBranchPrefix(branch: string): string {
 }
 
 function buildGeneratedWorktreeBranchName(raw: string, prefix: string): string {
+  const normalizedPrefix = prefix.trim().toLowerCase().replace(/['"`]/g, "");
   const normalized = raw
     .trim()
     .toLowerCase()
     .replace(/^refs\/heads\//, "")
     .replace(/['"`]/g, "");
 
-  const withoutPrefix = normalized.startsWith(`${prefix}/`)
-    ? normalized.slice(`${prefix}/`.length)
+  const withoutPrefix = normalized.startsWith(`${normalizedPrefix}/`)
+    ? normalized.slice(`${normalizedPrefix}/`.length)
     : normalized;
 
   const branchFragment = withoutPrefix
