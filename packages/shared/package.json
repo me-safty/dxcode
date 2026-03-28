@@ -36,9 +36,9 @@
       "types": "./src/Struct.ts",
       "import": "./src/Struct.ts"
     },
-    "./truncateTitle": {
-      "types": "./src/truncateTitle.ts",
-      "import": "./src/truncateTitle.ts"
+    "./String": {
+      "types": "./src/String.ts",
+      "import": "./src/String.ts"
     }
   },
   "scripts": {

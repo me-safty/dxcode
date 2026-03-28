@@ -13,7 +13,7 @@ import {
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { truncateTitle } from "@t3tools/shared/truncateTitle";
+import { truncate } from "@t3tools/shared/String";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
@@ -92,13 +92,13 @@ function buildReplaceableThreadTitles(input: {
   const trimmedMessage = input.messageText.trim();
 
   if (trimmedMessage.length > 0) {
-    titles.add(truncateTitle(trimmedMessage));
+    titles.add(truncate(trimmedMessage));
     return titles;
   }
 
   const firstImageAttachment = input.attachments?.find((attachment) => attachment.type === "image");
   if (firstImageAttachment) {
-    titles.add(truncateTitle(`Image: ${firstImageAttachment.name}`));
+    titles.add(truncate(`Image: ${firstImageAttachment.name}`));
   }
 
   return titles;
