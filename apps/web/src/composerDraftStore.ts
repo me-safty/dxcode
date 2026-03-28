@@ -2169,6 +2169,9 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           if (!current) {
             return state;
           }
+          for (const image of current.images) {
+            revokeObjectPreviewUrl(image.previewUrl);
+          }
           const nextDraft: ComposerThreadDraftState = {
             ...current,
             prompt: "",

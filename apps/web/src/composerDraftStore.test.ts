@@ -194,7 +194,7 @@ describe("composerDraftStore clearComposerContent", () => {
     URL.revokeObjectURL = originalRevokeObjectUrl;
   });
 
-  it("does not revoke blob preview URLs when clearing composer content", () => {
+  it("revokes blob preview URLs when clearing composer content", () => {
     const first = makeImage({
       id: "img-optimistic",
       previewUrl: "blob:optimistic",
@@ -205,7 +205,7 @@ describe("composerDraftStore clearComposerContent", () => {
 
     const draft = useComposerDraftStore.getState().draftsByThreadId[threadId];
     expect(draft).toBeUndefined();
-    expect(revokeSpy).not.toHaveBeenCalledWith("blob:optimistic");
+    expect(revokeSpy).toHaveBeenCalledWith("blob:optimistic");
   });
 });
 
