@@ -8,7 +8,6 @@ import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
 import {
   $applyNodeReplacement,
   $createRangeSelection,
-  BEFORE_INPUT_COMMAND,
   $getSelection,
   $setSelection,
   $isElementNode,
@@ -1168,11 +1167,6 @@ function ComposerSurroundSelectionPlugin(props: {
       rootElement?.addEventListener("compositionend", onCompositionEnd);
       activeRootElement = rootElement;
     });
-    const unregisterBeforeInputCommand = editor.registerCommand(
-      BEFORE_INPUT_COMMAND,
-      () => false,
-      COMMAND_PRIORITY_HIGH,
-    );
 
     return () => {
       if (activeRootElement) {
@@ -1182,7 +1176,6 @@ function ComposerSurroundSelectionPlugin(props: {
         activeRootElement.removeEventListener("compositionend", onCompositionEnd);
       }
       unregisterRootListener();
-      unregisterBeforeInputCommand();
     };
   }, [applySurroundInsertion, editor]);
 
