@@ -257,6 +257,10 @@ function normalizeQueuedTerminalContextText(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
 }
 
+function countLeadingQueuedTerminalContextLines(text: string): number {
+  return text.replace(/\r\n/g, "\n").match(/^\n+/)?.[0].length ?? 0;
+}
+
 function formatQueuedTerminalContextRange(
   context: Pick<OrchestrationQueuedTerminalContext, "lineStart" | "lineEnd">,
 ): string {
@@ -288,10 +292,11 @@ function buildQueuedTerminalContextBlock(
     if (normalizedText.length === 0) {
       continue;
     }
+    const leadingLineOffset = countLeadingQueuedTerminalContextLines(context.text);
     lines.push(`- ${formatQueuedTerminalContextLabel(context)}:`);
     const bodyLines = normalizedText
       .split("\n")
-      .map((line, lineIndex) => `  ${context.lineStart + lineIndex} | ${line}`);
+      .map((line, lineIndex) => `  ${context.lineStart + leadingLineOffset + lineIndex} | ${line}`);
     lines.push(...bodyLines);
     if (index < contexts.length - 1) {
       lines.push("");

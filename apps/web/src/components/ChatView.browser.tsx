@@ -2336,16 +2336,44 @@ describe("ChatView timeline estimator parity (full app)", () => {
       snapshot: createSnapshotForTargetUser({
         targetMessageId: "msg-user-follow-up-panel-actions" as MessageId,
         targetText: "follow-up panel actions target",
-        sessionStatus: "running",
+        sessionStatus: "ready",
       }),
     });
 
     try {
-      await setComposerPrompt("panel first");
-      await waitForComposerSubmitButton("Queue follow-up");
-
-      await queueFollowUpFromComposer("panel first");
-      await queueFollowUpFromComposer("panel second");
+      updateFixtureThread((thread) => ({
+        ...thread,
+        queuedFollowUps: [
+          {
+            id: "panel-first",
+            createdAt: isoAt(8_700),
+            prompt: "panel first",
+            attachments: [],
+            terminalContexts: [],
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            lastSendError: null,
+          },
+          {
+            id: "panel-second",
+            createdAt: isoAt(8_800),
+            prompt: "panel second",
+            attachments: [],
+            terminalContexts: [],
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            lastSendError: null,
+          },
+        ],
+      }));
 
       const panel = await waitForQueuedFollowUpsPanel();
       const steerButton = Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).find(
@@ -2383,8 +2411,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("interrupts the active run before steering a queued follow-up from the panel", async () => {
-    let sawInterrupt = false;
+  it("lets the server claim a queued head after steering interrupts the active run", async () => {
     setClientSettings({
       followUpBehavior: "queue",
     });
@@ -2404,7 +2431,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
           return undefined;
         }
         if (command.type === "thread.turn.interrupt") {
-          sawInterrupt = true;
           updateFixtureThread((thread) => ({
             ...thread,
             session: thread.session
@@ -2416,10 +2442,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
                 }
               : null,
           }));
-          return { sequence: 1 };
-        }
-        if (command.type === "thread.turn.start") {
-          expect(sawInterrupt).toBe(true);
           return { sequence: 1 };
         }
         return undefined;
@@ -2439,21 +2461,50 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         () => {
           expect(getInterruptRequests()).toHaveLength(1);
-          expect(getTurnStartRequests()).toHaveLength(1);
+          expect(getTurnStartRequests()).toHaveLength(0);
           const commandTypes = getDispatchCommandTypes();
-          expect(commandTypes).toEqual(
-            expect.arrayContaining([
-              "thread.queued-follow-up.remove",
-              "thread.turn.interrupt",
-              "thread.turn.start",
-            ]),
-          );
-          const interruptIndex = commandTypes.indexOf("thread.turn.interrupt");
-          const turnStartIndex = commandTypes.indexOf("thread.turn.start");
-          const removeIndex = commandTypes.indexOf("thread.queued-follow-up.remove");
-          expect(interruptIndex).toBeGreaterThanOrEqual(0);
-          expect(turnStartIndex).toBeGreaterThan(interruptIndex);
-          expect(removeIndex).toBeGreaterThan(turnStartIndex);
+          expect(commandTypes).toEqual(expect.arrayContaining(["thread.turn.interrupt"]));
+          expect(commandTypes).not.toContain("thread.turn.start");
+          expect(commandTypes).not.toContain("thread.queued-follow-up.remove");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("does not issue duplicate steer interrupts while the first interrupt request is in flight", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-follow-up-steer-in-flight-guard" as MessageId,
+        targetText: "follow-up steer in-flight guard target",
+        sessionStatus: "running",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return undefined;
+        }
+        const command = (body as { command?: { type?: string } }).command;
+        if (!command || command.type !== "thread.turn.interrupt") {
+          return undefined;
+        }
+        return new Promise((resolve) => {
+          window.setTimeout(() => resolve({ sequence: 1 }), 100);
+        });
+      },
+    });
+
+    try {
+      await setComposerPrompt("steer only once");
+      const submitButton = await waitForComposerSubmitButton("Steer follow-up");
+      submitButton.click();
+      submitButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(getInterruptRequests()).toHaveLength(1);
         },
         { timeout: 8_000, interval: 16 },
       );

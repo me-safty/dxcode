@@ -173,8 +173,8 @@ describe("QueuedFollowUpReactor", () => {
                   terminalId: "default",
                   terminalLabel: "Terminal 1",
                   lineStart: 3,
-                  lineEnd: 4,
-                  text: "alpha\nbeta",
+                  lineEnd: 6,
+                  text: "\n\nalpha\nbeta",
                 },
               ],
             ],
@@ -208,9 +208,9 @@ describe("QueuedFollowUpReactor", () => {
     }
     expect(turnStart.message.text).toContain("Investigate this");
     expect(turnStart.message.text).toContain("<terminal_context>");
-    expect(turnStart.message.text).toContain("- Terminal 1 lines 3-4:");
-    expect(turnStart.message.text).toContain("3 | alpha");
-    expect(turnStart.message.text).toContain("4 | beta");
+    expect(turnStart.message.text).toContain("- Terminal 1 lines 3-6:");
+    expect(turnStart.message.text).toContain("5 | alpha");
+    expect(turnStart.message.text).toContain("6 | beta");
 
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });

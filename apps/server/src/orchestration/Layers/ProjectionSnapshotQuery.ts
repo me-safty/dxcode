@@ -39,7 +39,10 @@ import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionTh
 import { ProjectionThreadProposedPlan } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
-import { ProjectionThreadQueuedFollowUp } from "../../persistence/Services/ProjectionThreadQueuedFollowUps.ts";
+import {
+  projectionQueuedFollowUpToContract,
+  ProjectionThreadQueuedFollowUp,
+} from "../../persistence/Services/ProjectionThreadQueuedFollowUps.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   ProjectionSnapshotQuery,
@@ -536,17 +539,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           for (const row of queuedFollowUpRows) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
             const threadQueuedFollowUps = queuedFollowUpsByThread.get(row.threadId) ?? [];
-            threadQueuedFollowUps.push({
-              id: row.followUpId,
-              createdAt: row.createdAt,
-              prompt: row.prompt,
-              attachments: row.attachments,
-              terminalContexts: row.terminalContexts,
-              modelSelection: row.modelSelection,
-              runtimeMode: row.runtimeMode,
-              interactionMode: row.interactionMode,
-              lastSendError: row.lastSendError,
-            });
+            threadQueuedFollowUps.push(projectionQueuedFollowUpToContract(row));
             queuedFollowUpsByThread.set(row.threadId, threadQueuedFollowUps);
           }
 

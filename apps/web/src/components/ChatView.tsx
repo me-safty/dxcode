@@ -175,6 +175,7 @@ import {
   buildQueuedFollowUpDraft,
   buildLocalDraftThread,
   buildTemporaryWorktreeBranchName,
+  canAutoDispatchQueuedFollowUp,
   cloneComposerImageForRetry,
   collectUserMessageBlobPreviewUrls,
   deriveComposerSendState,
@@ -2626,7 +2627,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
           input?.keyboardEvent && shouldInvertFollowUpBehaviorFromKeyEvent(input.keyboardEvent),
         ),
       );
-      if (effectiveBehavior === "queue") {
+      const shouldGuardFollowUpSend =
+        effectiveBehavior === "queue" || effectiveBehavior === "steer";
+      if (shouldGuardFollowUpSend) {
         sendInFlightRef.current = true;
         beginSendPhase("sending-turn");
       }
@@ -2634,7 +2637,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       try {
         followUpSnapshot = await createFollowUpSnapshotFromComposer(createdAt);
       } catch (err) {
-        if (effectiveBehavior === "queue") {
+        if (shouldGuardFollowUpSend) {
           sendInFlightRef.current = false;
           resetSendPhase();
         }
@@ -2645,7 +2648,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
       if (!followUpSnapshot) {
-        if (effectiveBehavior === "queue") {
+        if (shouldGuardFollowUpSend) {
           sendInFlightRef.current = false;
           resetSendPhase();
         }
@@ -2713,15 +2716,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerCursor(0);
       setComposerTrigger(null);
 
-      setPendingSteerSubmission({
+      const pendingSubmission: PendingSteerSubmission = {
         threadId: activeThread.id,
         snapshot: followUpSnapshot,
         source: "composer",
-      });
+      };
+      setPendingSteerSubmission(pendingSubmission);
       const interrupted = await requestThreadInterrupt(activeThread.id);
+      sendInFlightRef.current = false;
+      resetSendPhase();
       if (!interrupted) {
         setPendingSteerSubmission(null);
         restoreFollowUpSnapshotToComposer(followUpSnapshot);
+      } else {
+        setPendingSteerSubmission(pendingSubmission);
       }
       return;
     }
@@ -3467,6 +3475,35 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!pendingSteerSubmission || pendingSteerSubmission.threadId !== activeThread?.id) {
       return;
     }
+    if (pendingSteerSubmission.source === "queued-follow-up") {
+      const pendingQueuedFollowUpId = pendingSteerSubmission.queuedFollowUpId;
+      const queuedHead = queuedFollowUps[0];
+      const queuedPendingFollowUp = queuedFollowUps.find(
+        (followUp) => followUp.id === pendingQueuedFollowUpId,
+      );
+      if (!queuedPendingFollowUp) {
+        setPendingSteerSubmission(null);
+        return;
+      }
+      if (
+        queuedHead &&
+        queuedHead.id === pendingQueuedFollowUpId &&
+        canAutoDispatchQueuedFollowUp({
+          phase,
+          queuedFollowUpCount: queuedFollowUps.length,
+          queuedHeadHasError: queuedHead.lastSendError !== null,
+          isConnecting,
+          isSendBusy,
+          isRevertingCheckpoint,
+          hasThreadError: activeThread.error !== null,
+          hasPendingApproval: pendingApprovals.length > 0,
+          hasPendingUserInput: pendingUserInputs.length > 0,
+        })
+      ) {
+        setPendingSteerSubmission(null);
+        return;
+      }
+    }
     if (
       phase === "running" ||
       isSendBusy ||
@@ -3507,11 +3544,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
     isComposerApprovalState,
     isConnecting,
     isSendBusy,
+    isRevertingCheckpoint,
     pendingSteerSubmissionVersion,
+    pendingApprovals.length,
     pendingUserInputs.length,
     phase,
+    queuedFollowUps,
     restoreFollowUpSnapshotToComposer,
     setPendingSteerSubmission,
+    activeThread?.error,
   ]);
 
   const onSubmitPlanFollowUp = useCallback(
@@ -3739,6 +3780,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         const interrupted = await requestThreadInterrupt(activeThread.id);
         if (!interrupted) {
           setPendingSteerSubmission(null);
+        } else {
+          setPendingSteerSubmission(pendingSubmission);
         }
         return;
       }
