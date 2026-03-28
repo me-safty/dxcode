@@ -70,6 +70,7 @@ export function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
 }
 
+export type TimelineWorkEntry = Extract<TimelineEntry, { kind: "work" }>["entry"];
 function capitalizePhrase(value: string): string {
   const trimmed = value.trim();
   if (trimmed.length === 0) {
@@ -78,24 +79,37 @@ function capitalizePhrase(value: string): string {
   return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
 }
 
-export function renderableWorkEntryHeading(workEntry: WorkLogEntry): string {
-  const label = workEntry.toolTitle ?? workEntry.label;
-  return capitalizePhrase(normalizeCompactToolLabel(label));
+export function renderableWorkEntryHeading(workEntry: TimelineWorkEntry): string {
+  if (!workEntry.toolTitle) {
+    return capitalizePhrase(normalizeCompactToolLabel(workEntry.label));
+  }
+  return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
 }
 
 export function renderableWorkEntryPreview(
-  workEntry: Pick<WorkLogEntry, "detail" | "command" | "changedFiles">,
+  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
 ): string | null {
   if (workEntry.command) return workEntry.command;
   if (workEntry.detail) return workEntry.detail;
   if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
-  return workEntry.changedFiles?.join("\n") ?? null;
+  const [firstPath] = workEntry.changedFiles ?? [];
+  if (!firstPath) return null;
+  return workEntry.changedFiles!.length === 1
+    ? firstPath
+    : `${firstPath} +${workEntry.changedFiles!.length - 1} more`;
 }
 
 export function renderableWorkEntryChangedFiles(
-  workEntry: Pick<WorkLogEntry, "changedFiles">,
+  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
 ): string[] {
-  return workEntry.changedFiles ?? [];
+  const changedFiles = workEntry.changedFiles ?? [];
+  if (changedFiles.length === 0) {
+    return [];
+  }
+  if (!workEntry.command && !workEntry.detail) {
+    return [];
+  }
+  return changedFiles.slice(0, 4);
 }
 
 export function resolveAssistantMessageCopyState({

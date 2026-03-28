@@ -18,7 +18,7 @@ interface TerminalContextInlineChipProps {
 }
 
 export function TerminalContextInlineChip(props: TerminalContextInlineChipProps) {
-  const { label, tooltipText, expired = false } = props;
+  const { label, tooltipText, expired = false, searchQuery = "", searchActive = false } = props;
 
   return (
     <Tooltip>
@@ -39,8 +39,8 @@ export function TerminalContextInlineChip(props: TerminalContextInlineChipProps)
               )}
             />
             <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>
-              {renderHighlightedText(label, props.searchQuery ?? "", `terminal-chip:${label}`, {
-                active: props.searchActive,
+              {renderHighlightedText(label, searchQuery, `terminal-context-chip:${label}`, {
+                active: searchActive,
               })}
             </span>
           </span>

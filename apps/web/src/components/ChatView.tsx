@@ -210,6 +210,7 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 const EMPTY_THREAD_SEARCH_INDEX: readonly ThreadSearchIndexEntry[] = [];
+const EMPTY_MATCHED_THREAD_SEARCH_ROW_IDS = new Set<string>();
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -1710,7 +1711,7 @@ export default function ChatView(props: ChatViewProps) {
     () =>
       threadSearchResults.length > 0
         ? new Set(threadSearchResults.map((result) => result.rowId))
-        : new Set<string>(),
+        : EMPTY_MATCHED_THREAD_SEARCH_ROW_IDS,
     [threadSearchResults],
   );
   const activeThreadSearchRowId =
