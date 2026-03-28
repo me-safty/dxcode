@@ -2,6 +2,7 @@ import { type AssistantResponseCopyFormat } from "@t3tools/contracts/settings";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
+import { LRUCache } from "./lruCache";
 
 type MarkdownNode = {
   type: string;
@@ -15,8 +16,12 @@ type MarkdownNode = {
 };
 
 const markdownProcessor = unified().use(remarkParse).use(remarkGfm);
-const plainTextCache = new Map<string, string>();
 const MAX_PLAIN_TEXT_CACHE_ENTRIES = 500;
+const MAX_PLAIN_TEXT_CACHE_MEMORY_BYTES = 5 * 1024 * 1024;
+const plainTextCache = new LRUCache<string>(
+  MAX_PLAIN_TEXT_CACHE_ENTRIES,
+  MAX_PLAIN_TEXT_CACHE_MEMORY_BYTES,
+);
 
 export function resolveAssistantMessageCopyText(
   messageText: string,
@@ -187,14 +192,11 @@ function splitLines(value: string): string[] {
 
 function getCachedPlainText(markdown: string): string {
   const cached = plainTextCache.get(markdown);
-  if (typeof cached === "string") {
+  if (cached !== null) {
     return cached;
   }
 
   const plainText = markdownToPlainText(markdown);
-  if (plainTextCache.size >= MAX_PLAIN_TEXT_CACHE_ENTRIES) {
-    plainTextCache.clear();
-  }
-  plainTextCache.set(markdown, plainText);
+  plainTextCache.set(markdown, plainText, plainText.length * 2);
   return plainText;
 }
