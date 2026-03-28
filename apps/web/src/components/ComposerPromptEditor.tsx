@@ -1036,7 +1036,7 @@ function ComposerSurroundSelectionPlugin(props: {
       }
 
       const shouldTrackDeadKeyBacktick =
-        BACKTICK_SURROUND_CLOSE_SYMBOL !== null && event.key === "Dead" && event.shiftKey;
+        BACKTICK_SURROUND_CLOSE_SYMBOL !== null && event.key === "Dead";
       editor.getEditorState().read(() => {
         const selection = $getSelection();
         if (!$isRangeSelection(selection) || selection.isCollapsed()) {
