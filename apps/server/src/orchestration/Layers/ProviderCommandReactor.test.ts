@@ -360,6 +360,50 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  it("renames temporary worktree branches that start with a digit prefix", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    harness.generateBranchName.mockImplementationOnce(() =>
+      Effect.succeed({
+        branch: "3code/Feature",
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-thread-meta-update-digit-branch"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        branch: "3code/abcd1234",
+        worktreePath: "/tmp/provider-project",
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-digit-prefix"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-digit-prefix"),
+          role: "user",
+          text: "rename the branch",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.renameBranch.mock.calls.length === 1);
+    expect(harness.renameBranch.mock.calls[0]?.[0]).toMatchObject({
+      cwd: "/tmp/provider-project",
+      oldBranch: "3code/abcd1234",
+      newBranch: "3code/feature",
+    });
+  });
+
   it("forwards codex model options through session start and turn send", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

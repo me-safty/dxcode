@@ -18,9 +18,14 @@ import {
   type ServerProviderModel,
   ThreadId,
 } from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_UNIFIED_SETTINGS,
+  DEFAULT_WORKTREE_BRANCH_PREFIX,
+  WorktreeBranchPrefix,
+  WORKTREE_BRANCH_PREFIX_PATTERN,
+} from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
-import { Equal } from "effect";
+import { Equal, Schema } from "effect";
 import { APP_VERSION } from "../../branding";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
@@ -400,6 +405,10 @@ export function GeneralSettingsPanel() {
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
   >({});
+  const [worktreeBranchPrefixInput, setWorktreeBranchPrefixInput] = useState(
+    settings.worktreeBranchPrefix,
+  );
+  const [worktreeBranchPrefixError, setWorktreeBranchPrefixError] = useState<string | null>(null);
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
   const refreshingRef = useRef(false);
   const queryClient = useQueryClient();
@@ -424,6 +433,33 @@ export function GeneralSettingsPanel() {
   const availableEditors = serverConfigQuery.data?.availableEditors;
   const serverProviders = serverConfigQuery.data?.providers ?? EMPTY_SERVER_PROVIDERS;
   const codexHomePath = settings.providers.codex.homePath;
+  const saveWorktreeBranchPrefix = useCallback(
+    (rawValue: string) => {
+      const trimmed = rawValue.trim();
+      if (trimmed.length === 0) {
+        setWorktreeBranchPrefixError(null);
+        setWorktreeBranchPrefixInput(DEFAULT_WORKTREE_BRANCH_PREFIX);
+        updateSettings({ worktreeBranchPrefix: DEFAULT_WORKTREE_BRANCH_PREFIX });
+        return;
+      }
+
+      if (!WORKTREE_BRANCH_PREFIX_PATTERN.test(trimmed)) {
+        setWorktreeBranchPrefixError("Use 1-64 letters, numbers, dots, hyphens, or underscores.");
+        return;
+      }
+
+      const normalized = Schema.decodeUnknownSync(WorktreeBranchPrefix)(trimmed);
+      setWorktreeBranchPrefixError(null);
+      setWorktreeBranchPrefixInput(normalized);
+      updateSettings({ worktreeBranchPrefix: normalized });
+    },
+    [updateSettings],
+  );
+
+  useEffect(() => {
+    setWorktreeBranchPrefixInput(settings.worktreeBranchPrefix);
+    setWorktreeBranchPrefixError(null);
+  }, [settings.worktreeBranchPrefix]);
 
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenProvider = textGenerationModelSelection.provider;
@@ -768,7 +804,8 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           title="Worktree branch prefix"
-          description={`Prefix used for worktree branch names (e.g., ${settings.worktreeBranchPrefix || "t3code"}/feature-name).`}
+          description={`Prefix used for worktree branch names (e.g., ${settings.worktreeBranchPrefix}/feature-name).`}
+          status={worktreeBranchPrefixError}
           resetAction={
             settings.worktreeBranchPrefix !== DEFAULT_UNIFIED_SETTINGS.worktreeBranchPrefix ? (
               <SettingResetButton
@@ -785,8 +822,20 @@ export function GeneralSettingsPanel() {
             <Input
               id="worktree-branch-prefix"
               className="w-full sm:w-44"
-              value={settings.worktreeBranchPrefix}
-              onChange={(event) => updateSettings({ worktreeBranchPrefix: event.target.value })}
+              value={worktreeBranchPrefixInput}
+              aria-invalid={worktreeBranchPrefixError ? true : undefined}
+              pattern={WORKTREE_BRANCH_PREFIX_PATTERN.source.slice(1, -1)}
+              title="Use 1-64 letters, numbers, dots, hyphens, or underscores."
+              onBlur={(event) => saveWorktreeBranchPrefix(event.target.value)}
+              onChange={(event) => {
+                setWorktreeBranchPrefixInput(event.target.value);
+                if (
+                  worktreeBranchPrefixError &&
+                  WORKTREE_BRANCH_PREFIX_PATTERN.test(event.target.value.trim())
+                ) {
+                  setWorktreeBranchPrefixError(null);
+                }
+              }}
               placeholder="t3code"
               spellCheck={false}
             />

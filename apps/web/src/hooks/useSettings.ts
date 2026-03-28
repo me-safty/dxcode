@@ -24,6 +24,7 @@ import {
   ClientSettingsSchema,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
+  WorktreeBranchPrefix,
   SidebarProjectSortOrder,
   SidebarThreadSortOrder,
   TimestampFormat,
@@ -227,7 +228,9 @@ export function buildLegacyClientSettingsMigrationPatch(
   }
 
   if (typeof legacySettings.worktreeBranchPrefix === "string") {
-    patch.worktreeBranchPrefix = legacySettings.worktreeBranchPrefix;
+    patch.worktreeBranchPrefix = Schema.decodeUnknownSync(WorktreeBranchPrefix)(
+      legacySettings.worktreeBranchPrefix,
+    );
   }
 
   return patch;

@@ -1,4 +1,5 @@
 import { ProjectId, type ModelSelection, type ThreadId } from "@t3tools/contracts";
+import { WorktreeBranchPrefix } from "@t3tools/contracts/settings";
 import { type ChatMessage, type Thread } from "../types";
 import { randomUUID } from "~/lib/utils";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
@@ -100,8 +101,9 @@ export function readFileAsDataUrl(file: File): Promise<string> {
 
 export function buildTemporaryWorktreeBranchName(prefix: string): string {
   // Keep the 8-hex suffix shape for backend temporary-branch detection.
+  const resolvedPrefix = Schema.decodeUnknownSync(WorktreeBranchPrefix)(prefix);
   const token = randomUUID().slice(0, 8).toLowerCase();
-  return `${prefix}/${token}`;
+  return `${resolvedPrefix}/${token}`;
 }
 
 export function cloneComposerImageForRetry(
