@@ -443,6 +443,21 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         row.message.role === "assistant" &&
         (() => {
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+          let assistantCopyText: string | null = null;
+          const getAssistantCopyText = () => {
+            if (assistantCopyText !== null) {
+              return assistantCopyText;
+            }
+            assistantCopyText = resolveAssistantMessageCopyText(
+              row.message.text,
+              assistantResponseCopyFormat,
+            );
+            return assistantCopyText;
+          };
+          const showAssistantCopyButton =
+            !row.message.streaming &&
+            row.message.text.trim().length > 0 &&
+            getAssistantCopyText().trim().length > 0;
           return (
             <>
               {row.showCompletionDivider && (
@@ -518,16 +533,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 })()}
                 <div className="mt-1.5 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
-                    {!row.message.streaming && row.message.text.trim().length > 0 ? (
-                      <MessageCopyButton
-                        text={() =>
-                          resolveAssistantMessageCopyText(
-                            row.message.text,
-                            assistantResponseCopyFormat,
-                          )
-                        }
-                        label="Copy response"
-                      />
+                    {showAssistantCopyButton ? (
+                      <MessageCopyButton text={getAssistantCopyText} label="Copy response" />
                     ) : null}
                   </div>
                   <p className="text-[10px] text-muted-foreground/30">

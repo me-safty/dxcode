@@ -5,6 +5,7 @@ const ASSISTANT_CHARS_PER_LINE_FALLBACK = 72;
 const USER_CHARS_PER_LINE_FALLBACK = 56;
 const LINE_HEIGHT_PX = 22;
 const ASSISTANT_BASE_HEIGHT_PX = 78;
+const ASSISTANT_COMPLETED_ACTION_BASE_HEIGHT_PX = 96;
 const USER_BASE_HEIGHT_PX = 96;
 const ATTACHMENTS_PER_ROW = 2;
 // Attachment thumbnails render with `max-h-[220px]` plus ~8px row gap.
@@ -20,6 +21,7 @@ const MIN_ASSISTANT_CHARS_PER_LINE = 20;
 interface TimelineMessageHeightInput {
   role: "user" | "assistant" | "system";
   text: string;
+  streaming?: boolean;
   attachments?: ReadonlyArray<{ id: string }>;
 }
 
@@ -73,7 +75,11 @@ export function estimateTimelineMessageHeight(
   if (message.role === "assistant") {
     const charsPerLine = estimateCharsPerLineForAssistant(layout.timelineWidthPx);
     const estimatedLines = estimateWrappedLineCount(message.text, charsPerLine);
-    return ASSISTANT_BASE_HEIGHT_PX + estimatedLines * LINE_HEIGHT_PX;
+    const assistantBaseHeightPx =
+      message.streaming !== true && message.text.trim().length > 0
+        ? ASSISTANT_COMPLETED_ACTION_BASE_HEIGHT_PX
+        : ASSISTANT_BASE_HEIGHT_PX;
+    return assistantBaseHeightPx + estimatedLines * LINE_HEIGHT_PX;
   }
 
   if (message.role === "user") {

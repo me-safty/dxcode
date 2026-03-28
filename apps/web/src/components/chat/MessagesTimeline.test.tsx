@@ -51,7 +51,10 @@ beforeAll(() => {
   });
 });
 
-async function renderTimeline(timelineEntries: ReturnType<typeof deriveTimelineEntries>) {
+async function renderTimeline(
+  timelineEntries: ReturnType<typeof deriveTimelineEntries>,
+  assistantResponseCopyFormat: "markdown" | "plain-text" = "markdown",
+) {
   const { MessagesTimeline } = await import("./MessagesTimeline");
   return renderToStaticMarkup(
     <MessagesTimeline
@@ -74,7 +77,7 @@ async function renderTimeline(timelineEntries: ReturnType<typeof deriveTimelineE
       onImageExpand={() => {}}
       markdownCwd={undefined}
       resolvedTheme="light"
-      assistantResponseCopyFormat="markdown"
+      assistantResponseCopyFormat={assistantResponseCopyFormat}
       timestampFormat="locale"
       workspaceRoot={undefined}
     />,
@@ -185,6 +188,29 @@ describe("MessagesTimeline", () => {
         },
       },
     ]);
+
+    expect(markup).not.toContain("Copy response");
+  });
+
+  it("does not render a copy control when plain-text resolution is empty", async () => {
+    const markup = await renderTimeline(
+      [
+        {
+          id: "entry-1",
+          kind: "message",
+          createdAt: "2026-03-17T19:12:28.000Z",
+          message: {
+            id: MessageId.makeUnsafe("assistant-plain-text-empty"),
+            role: "assistant",
+            text: "---",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            completedAt: "2026-03-17T19:12:30.000Z",
+            streaming: false,
+          },
+        },
+      ],
+      "plain-text",
+    );
 
     expect(markup).not.toContain("Copy response");
   });
