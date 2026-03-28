@@ -95,7 +95,7 @@ function renderListItem(node: MarkdownNode, marker: string): string {
 
   for (const block of remainingBlocks) {
     for (const line of splitLines(block)) {
-      lines.push(`  ${line}`);
+      lines.push(`${continuationPrefix}${line}`);
     }
   }
 

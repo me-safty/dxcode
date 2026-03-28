@@ -57,4 +57,18 @@ describe("assistantMessageCopy", () => {
       ].join("\n"),
     );
   });
+
+  it("aligns continuation blocks for ordered lists with wide markers", () => {
+    const markdown = [
+      "10. first paragraph",
+      "",
+      "    ```ts",
+      "    const value = 1;",
+      "    ```",
+    ].join("\n");
+
+    expect(markdownToPlainText(markdown)).toBe(
+      ["10. first paragraph", "    const value = 1;"].join("\n"),
+    );
+  });
 });
