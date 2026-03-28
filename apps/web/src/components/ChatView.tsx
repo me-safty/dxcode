@@ -2147,6 +2147,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
     setExpandedImage(null);
+    setThreadSearchOpen(false);
+    setThreadSearchQuery("");
+    setActiveThreadSearchResultIndex(-1);
   }, [threadId]);
 
   useEffect(() => {

@@ -42,6 +42,7 @@ const rows: TimelineRow[] = [
         id: "work-1",
         createdAt: "2026-03-28T12:00:10.000Z",
         label: "Updated README",
+        toolTitle: "Edit README",
         detail: "Added the migration note",
         command: "bun run lint",
         changedFiles: ["README.md"],
@@ -82,6 +83,7 @@ describe("findThreadSearchResults", () => {
         rowId: "work-row",
         rowIndex: 1,
         normalizedTexts: [
+          "edit readme",
           "updated readme",
           "added the migration note",
           "bun run lint",
@@ -116,7 +118,17 @@ describe("findThreadSearchResults", () => {
       {
         rowId: "work-row",
         rowIndex: 1,
-        matchCount: 2,
+        matchCount: 3,
+      },
+    ]);
+  });
+
+  it("matches tool titles shown in work log headings", () => {
+    expect(findThreadSearchResults(rows, "edit readme")).toEqual([
+      {
+        rowId: "work-row",
+        rowIndex: 1,
+        matchCount: 1,
       },
     ]);
   });

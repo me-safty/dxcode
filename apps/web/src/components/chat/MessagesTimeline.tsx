@@ -135,7 +135,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     return () => {
       observer.disconnect();
     };
-  }, [rows]);
+  }, [hasRows, isWorking]);
 
   const firstUnvirtualizedRowIndex = useMemo(() => {
     const firstTailRowIndex = Math.max(rows.length - ALWAYS_UNVIRTUALIZED_TAIL_ROWS, 0);
@@ -304,8 +304,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             const groupedEntries = row.groupedEntries;
             const isExpanded = expandedWorkGroups[groupId] ?? false;
             const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
+            const searchExpanded =
+              rowSearchState !== null && rowSearchQuery.trim().length > 0 && hasOverflow;
             const visibleEntries =
-              hasOverflow && !isExpanded
+              hasOverflow && !isExpanded && !searchExpanded
                 ? groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
                 : groupedEntries;
             const hiddenCount = groupedEntries.length - visibleEntries.length;
@@ -320,7 +322,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/55">
                       {groupLabel} ({groupedEntries.length})
                     </p>
-                    {hasOverflow && (
+                    {hasOverflow && !searchExpanded && (
                       <button
                         type="button"
                         className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"

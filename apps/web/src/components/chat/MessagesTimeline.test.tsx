@@ -215,6 +215,68 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("bg-warning/12");
   });
 
+  it("exposes hidden work log matches while searching overflowed groups", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const rows = buildTimelineRows({
+      timelineEntries: [
+        {
+          id: "work-entry-1",
+          kind: "work",
+          createdAt: "2026-03-17T19:12:28.000Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            label: "Seeded hidden match",
+            tone: "info",
+          },
+        },
+        ...Array.from({ length: 6 }, (_, index) => ({
+          id: `work-entry-${index + 2}`,
+          kind: "work" as const,
+          createdAt: `2026-03-17T19:12:${String(29 + index).padStart(2, "0")}.000Z`,
+          entry: {
+            id: `work-${index + 2}`,
+            createdAt: `2026-03-17T19:12:${String(29 + index).padStart(2, "0")}.000Z`,
+            label: `Visible filler ${index + 1}`,
+            tone: "info" as const,
+          },
+        })),
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+    });
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        rows={rows}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:12:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+        activeSearchRowId="work-entry-1"
+        matchedSearchRowIds={new Set(["work-entry-1"])}
+        searchQuery="Seeded"
+      />,
+    );
+
+    expect(markup).toContain("Seeded hidden match");
+    expect(markup).toContain('data-thread-search-highlight="active"');
+    expect(markup).not.toContain("Show 1 more");
+  });
+
   it("renders assistant markdown search highlights", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const rows = buildTimelineRows({
