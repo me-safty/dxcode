@@ -194,7 +194,7 @@ describe("composerDraftStore clearComposerContent", () => {
     URL.revokeObjectURL = originalRevokeObjectUrl;
   });
 
-  it("revokes blob preview URLs when clearing composer content", () => {
+  it("does not revoke blob preview URLs when clearing composer content by default", () => {
     const first = makeImage({
       id: "img-optimistic",
       previewUrl: "blob:optimistic",
@@ -202,6 +202,22 @@ describe("composerDraftStore clearComposerContent", () => {
     useComposerDraftStore.getState().addImage(threadId, first);
 
     useComposerDraftStore.getState().clearComposerContent(threadId);
+
+    const draft = useComposerDraftStore.getState().draftsByThreadId[threadId];
+    expect(draft).toBeUndefined();
+    expect(revokeSpy).not.toHaveBeenCalled();
+  });
+
+  it("revokes blob preview URLs when explicitly requested while clearing composer content", () => {
+    const first = makeImage({
+      id: "img-optimistic",
+      previewUrl: "blob:optimistic",
+    });
+    useComposerDraftStore.getState().addImage(threadId, first);
+
+    useComposerDraftStore.getState().clearComposerContent(threadId, {
+      revokeImagePreviewUrls: true,
+    });
 
     const draft = useComposerDraftStore.getState().draftsByThreadId[threadId];
     expect(draft).toBeUndefined();

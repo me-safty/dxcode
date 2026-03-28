@@ -555,7 +555,21 @@ function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
         }
         return { sequence: 1 };
       }
-      case "thread.queued-follow-up.update":
+      case "thread.queued-follow-up.update": {
+        const followUp =
+          command.followUp as OrchestrationReadModel["threads"][number]["queuedFollowUps"][number];
+        if (followUp?.id) {
+          updateFixtureThread((thread) => ({
+            ...thread,
+            queuedFollowUps: thread.queuedFollowUps.map((entry) =>
+              entry.id === followUp.id
+                ? { ...entry, ...followUp, lastSendError: followUp.lastSendError ?? null }
+                : entry,
+            ),
+          }));
+        }
+        return { sequence: 1 };
+      }
       case "thread.turn.start":
       case "thread.meta.update":
       case "thread.create":
@@ -664,12 +678,23 @@ const worker = setupWorker(
       const method = request.body?._tag;
       if (typeof method !== "string") return;
       wsRequests.push(request.body);
-      client.send(
-        JSON.stringify({
-          id: request.id,
-          result: resolveWsRpc(request.body),
-        }),
-      );
+      try {
+        client.send(
+          JSON.stringify({
+            id: request.id,
+            result: resolveWsRpc(request.body),
+          }),
+        );
+      } catch (error) {
+        client.send(
+          JSON.stringify({
+            id: request.id,
+            error: {
+              message: error instanceof Error ? error.message : String(error),
+            },
+          }),
+        );
+      }
     });
   }),
   http.get("*/attachments/:attachmentId", () =>
@@ -2425,6 +2450,82 @@ describe("ChatView timeline estimator parity (full app)", () => {
           );
           expect(commandTypes.indexOf("thread.turn.interrupt")).toBeLessThan(
             commandTypes.indexOf("thread.turn.start"),
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("marks a ready-state steered queued follow-up as failed when queue cleanup fails", async () => {
+    setClientSettings({
+      followUpBehavior: "queue",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-follow-up-panel-steer-remove-failure" as MessageId,
+        targetText: "follow-up panel steer remove failure target",
+        sessionStatus: "ready",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return undefined;
+        }
+        const command = (body as { command?: { type?: string } }).command;
+        if (!command) {
+          return undefined;
+        }
+        if (command.type === "thread.queued-follow-up.remove") {
+          throw new Error("queued cleanup failed");
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      updateFixtureThread((thread) => ({
+        ...thread,
+        queuedFollowUps: [
+          {
+            id: "queued-ready-steer-failure",
+            createdAt: isoAt(8_500),
+            prompt: "ready steer failure",
+            attachments: [],
+            terminalContexts: [],
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            lastSendError: null,
+          },
+        ],
+      }));
+
+      const panel = await waitForQueuedFollowUpsPanel();
+      const steerButton = Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).find(
+        (button) => button.textContent?.trim() === "Steer",
+      );
+      expect(steerButton).toBeTruthy();
+      steerButton?.click();
+
+      await vi.waitFor(
+        () => {
+          expect(getTurnStartRequests()).toHaveLength(1);
+          expect(getDispatchCommandTypes()).toEqual(
+            expect.arrayContaining([
+              "thread.turn.start",
+              "thread.queued-follow-up.remove",
+              "thread.queued-follow-up.update",
+            ]),
+          );
+          expect(getQueuedFollowUpPrompts()).toEqual(["ready steer failure"]);
+          expect(document.body.textContent ?? "").toContain(
+            "Queued follow-up was sent but queue cleanup failed.",
           );
         },
         { timeout: 8_000, interval: 16 },

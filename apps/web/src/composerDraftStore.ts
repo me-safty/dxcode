@@ -276,7 +276,10 @@ interface ComposerDraftStoreState {
     threadId: ThreadId,
     attachments: PersistedComposerImageAttachment[],
   ) => void;
-  clearComposerContent: (threadId: ThreadId) => void;
+  clearComposerContent: (
+    threadId: ThreadId,
+    options?: { revokeImagePreviewUrls?: boolean },
+  ) => void;
 }
 
 export interface EffectiveComposerModelState {
@@ -2160,7 +2163,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           verifyPersistedAttachments(threadId, attachments, set);
         });
       },
-      clearComposerContent: (threadId) => {
+      clearComposerContent: (threadId, options) => {
         if (threadId.length === 0) {
           return;
         }
@@ -2169,8 +2172,10 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           if (!current) {
             return state;
           }
-          for (const image of current.images) {
-            revokeObjectPreviewUrl(image.previewUrl);
+          if (options?.revokeImagePreviewUrls) {
+            for (const image of current.images) {
+              revokeObjectPreviewUrl(image.previewUrl);
+            }
           }
           const nextDraft: ComposerThreadDraftState = {
             ...current,

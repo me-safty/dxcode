@@ -2680,7 +2680,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             createdAt,
           });
           promptRef.current = "";
-          clearComposerDraftContent(activeThread.id);
+          clearComposerDraftContent(activeThread.id, { revokeImagePreviewUrls: true });
           setComposerHighlightedItemId(null);
           setComposerCursor(0);
           setComposerTrigger(null);
@@ -2697,7 +2697,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
 
       promptRef.current = "";
-      clearComposerDraftContent(activeThread.id);
+      clearComposerDraftContent(activeThread.id, { revokeImagePreviewUrls: true });
       setComposerHighlightedItemId(null);
       setComposerCursor(0);
       setComposerTrigger(null);
@@ -3755,20 +3755,35 @@ export default function ChatView({ threadId }: ChatViewProps) {
         hideServerMessage: false,
       });
       if (dispatched) {
-        await api.orchestration
-          .dispatchCommand({
+        try {
+          await api.orchestration.dispatchCommand({
             type: "thread.queued-follow-up.remove",
             commandId: newCommandId(),
             threadId: activeThread.id,
             followUpId,
             createdAt: new Date().toISOString(),
-          })
-          .catch((err: unknown) => {
-            setThreadError(
-              activeThread.id,
-              err instanceof Error ? err.message : "Failed to remove queued follow-up.",
-            );
           });
+        } catch (err) {
+          const errorMessage =
+            err instanceof Error ? err.message : "Failed to remove queued follow-up.";
+          setThreadError(activeThread.id, errorMessage);
+          try {
+            await api.orchestration.dispatchCommand({
+              type: "thread.queued-follow-up.update",
+              commandId: newCommandId(),
+              threadId: activeThread.id,
+              followUp: {
+                ...followUp,
+                attachments: followUp.attachments.map(toCommandAttachment),
+                lastSendError: "Queued follow-up was sent but queue cleanup failed.",
+              },
+              createdAt: new Date().toISOString(),
+            });
+          } catch {
+            // Best effort. The UI error above preserves operator visibility if the error marker
+            // could not be persisted for the queued item.
+          }
+        }
       }
     },
     [
