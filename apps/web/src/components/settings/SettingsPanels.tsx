@@ -310,6 +310,15 @@ function SettingsPageContainer({ children }: { children: ReactNode }) {
   );
 }
 
+function AboutVersionTitle() {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span>Version</span>
+      <code className="text-[11px] font-medium text-muted-foreground">{APP_VERSION}</code>
+    </span>
+  );
+}
+
 function AboutVersionSection() {
   const queryClient = useQueryClient();
   const updateStateQuery = useQuery(desktopUpdateStateQueryOptions());
@@ -411,17 +420,12 @@ function AboutVersionSection() {
     actionLabel[action] ?? statusLabel[updateState?.status ?? ""] ?? "Check for Updates";
   const description =
     action === "download" || action === "install"
-      ? "Update available !"
+      ? "Update available."
       : "Current version of the application.";
 
   return (
     <SettingsRow
-      title={
-        <span className="inline-flex items-center gap-2">
-          <span>Version</span>
-          <code className="text-[11px] font-medium text-muted-foreground">{APP_VERSION}</code>
-        </span>
-      }
+      title={<AboutVersionTitle />}
       description={description}
       control={
         <Tooltip>
@@ -1415,7 +1419,10 @@ export function AboutSettingsPanel() {
         {isElectron ? (
           <AboutVersionSection />
         ) : (
-          <SettingsRow title="Version" description="Current application version." />
+          <SettingsRow
+            title={<AboutVersionTitle />}
+            description="Current version of the application."
+          />
         )}
       </SettingsSection>
     </SettingsPageContainer>
