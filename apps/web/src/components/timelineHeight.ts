@@ -1,4 +1,6 @@
+import { type AssistantResponseCopyFormat } from "@t3tools/contracts/settings";
 import { deriveDisplayedUserMessageState } from "../lib/terminalContext";
+import { hasAssistantResponseCopyText } from "../lib/assistantMessageCopy";
 import { buildInlineTerminalContextText } from "./chat/userMessageTerminalContexts";
 
 const ASSISTANT_CHARS_PER_LINE_FALLBACK = 72;
@@ -27,6 +29,7 @@ interface TimelineMessageHeightInput {
 
 interface TimelineHeightEstimateLayout {
   timelineWidthPx: number | null;
+  assistantResponseCopyFormat?: AssistantResponseCopyFormat;
 }
 
 function estimateWrappedLineCount(text: string, charsPerLine: number): number {
@@ -76,7 +79,8 @@ export function estimateTimelineMessageHeight(
     const charsPerLine = estimateCharsPerLineForAssistant(layout.timelineWidthPx);
     const estimatedLines = estimateWrappedLineCount(message.text, charsPerLine);
     const assistantBaseHeightPx =
-      message.streaming !== true && message.text.trim().length > 0
+      message.streaming !== true &&
+      hasAssistantResponseCopyText(message.text, layout.assistantResponseCopyFormat ?? "markdown")
         ? ASSISTANT_COMPLETED_ACTION_BASE_HEIGHT_PX
         : ASSISTANT_BASE_HEIGHT_PX;
     return assistantBaseHeightPx + estimatedLines * LINE_HEIGHT_PX;

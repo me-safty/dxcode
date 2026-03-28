@@ -10,10 +10,13 @@ type MarkdownNode = {
   url?: string;
   ordered?: boolean;
   start?: number | null;
+  checked?: boolean | null;
   children?: MarkdownNode[];
 };
 
 const markdownProcessor = unified().use(remarkParse).use(remarkGfm);
+const plainTextCache = new Map<string, string>();
+const MAX_PLAIN_TEXT_CACHE_ENTRIES = 500;
 
 export function resolveAssistantMessageCopyText(
   messageText: string,
@@ -23,7 +26,18 @@ export function resolveAssistantMessageCopyText(
     return messageText;
   }
 
-  return markdownToPlainText(messageText);
+  return getCachedPlainText(messageText);
+}
+
+export function hasAssistantResponseCopyText(
+  messageText: string,
+  format: AssistantResponseCopyFormat,
+): boolean {
+  if (messageText.trim().length === 0) {
+    return false;
+  }
+
+  return resolveAssistantMessageCopyText(messageText, format).trim().length > 0;
 }
 
 export function markdownToPlainText(markdown: string): string {
@@ -58,6 +72,7 @@ function renderBlock(node: MarkdownNode): string {
     case "table":
       return renderTable(node);
     case "html":
+      return normalizeCodeBlock(node.value ?? "");
     case "thematicBreak":
       return "";
     default:
@@ -80,17 +95,19 @@ function renderListItem(node: MarkdownNode, marker: string): string {
   const blocks = (node.children ?? [])
     .map((child) => renderBlock(child))
     .filter((block) => block.length > 0);
+  const taskPrefix = node.checked === true ? "[x] " : node.checked === false ? "[ ] " : "";
+  const contentPrefix = `${marker}${taskPrefix}`;
 
   if (blocks.length === 0) {
-    return marker.trimEnd();
+    return contentPrefix.trimEnd();
   }
 
-  const continuationPrefix = " ".repeat(marker.length);
+  const continuationPrefix = " ".repeat(contentPrefix.length);
   const firstBlock = blocks[0]!;
   const remainingBlocks = blocks.slice(1);
   const firstBlockLines = splitLines(firstBlock);
   const lines = firstBlockLines.map((line, index) =>
-    index === 0 ? `${marker}${line}` : `${continuationPrefix}${line}`,
+    index === 0 ? `${contentPrefix}${line}` : `${continuationPrefix}${line}`,
   );
 
   for (const block of remainingBlocks) {
@@ -121,6 +138,7 @@ function renderInline(node: MarkdownNode): string {
   switch (node.type) {
     case "text":
     case "inlineCode":
+    case "html":
       return node.value ?? "";
     case "break":
       return "\n";
@@ -165,4 +183,18 @@ function normalizePlainText(value: string): string {
 
 function splitLines(value: string): string[] {
   return value.replace(/\r\n/g, "\n").split("\n");
+}
+
+function getCachedPlainText(markdown: string): string {
+  const cached = plainTextCache.get(markdown);
+  if (typeof cached === "string") {
+    return cached;
+  }
+
+  const plainText = markdownToPlainText(markdown);
+  if (plainTextCache.size >= MAX_PLAIN_TEXT_CACHE_ENTRIES) {
+    plainTextCache.clear();
+  }
+  plainTextCache.set(markdown, plainText);
+  return plainText;
 }

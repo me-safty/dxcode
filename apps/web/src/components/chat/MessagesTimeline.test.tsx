@@ -214,4 +214,27 @@ describe("MessagesTimeline", () => {
 
     expect(markup).not.toContain("Copy response");
   });
+
+  it("renders a copy control for html-only assistant messages in plain-text mode", async () => {
+    const markup = await renderTimeline(
+      [
+        {
+          id: "entry-1",
+          kind: "message",
+          createdAt: "2026-03-17T19:12:28.000Z",
+          message: {
+            id: MessageId.makeUnsafe("assistant-html-only"),
+            role: "assistant",
+            text: "<details><summary>Example</summary></details>",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            completedAt: "2026-03-17T19:12:30.000Z",
+            streaming: false,
+          },
+        },
+      ],
+      "plain-text",
+    );
+
+    expect(markup).toContain("Copy response");
+  });
 });

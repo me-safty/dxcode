@@ -58,7 +58,10 @@ import {
   formatInlineTerminalContextLabel,
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
-import { resolveAssistantMessageCopyText } from "../../lib/assistantMessageCopy";
+import {
+  hasAssistantResponseCopyText,
+  resolveAssistantMessageCopyText,
+} from "../../lib/assistantMessageCopy";
 
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
@@ -259,7 +262,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       if (row.kind === "work") return 112;
       if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
       if (row.kind === "working") return 40;
-      return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
+      return estimateTimelineMessageHeight(row.message, {
+        timelineWidthPx,
+        assistantResponseCopyFormat,
+      });
     },
     measureElement: measureVirtualElement,
     useAnimationFrameWithResizeObserver: true,
@@ -443,21 +449,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         row.message.role === "assistant" &&
         (() => {
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
-          let assistantCopyText: string | null = null;
-          const getAssistantCopyText = () => {
-            if (assistantCopyText !== null) {
-              return assistantCopyText;
-            }
-            assistantCopyText = resolveAssistantMessageCopyText(
-              row.message.text,
-              assistantResponseCopyFormat,
-            );
-            return assistantCopyText;
-          };
           const showAssistantCopyButton =
             !row.message.streaming &&
-            row.message.text.trim().length > 0 &&
-            getAssistantCopyText().trim().length > 0;
+            hasAssistantResponseCopyText(row.message.text, assistantResponseCopyFormat);
           return (
             <>
               {row.showCompletionDivider && (
@@ -534,7 +528,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 <div className="mt-1.5 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
                     {showAssistantCopyButton ? (
-                      <MessageCopyButton text={getAssistantCopyText} label="Copy response" />
+                      <MessageCopyButton
+                        text={() =>
+                          resolveAssistantMessageCopyText(
+                            row.message.text,
+                            assistantResponseCopyFormat,
+                          )
+                        }
+                        label="Copy response"
+                      />
                     ) : null}
                   </div>
                   <p className="text-[10px] text-muted-foreground/30">

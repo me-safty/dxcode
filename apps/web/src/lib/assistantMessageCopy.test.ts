@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { markdownToPlainText, resolveAssistantMessageCopyText } from "./assistantMessageCopy";
+import {
+  hasAssistantResponseCopyText,
+  markdownToPlainText,
+  resolveAssistantMessageCopyText,
+} from "./assistantMessageCopy";
 
 describe("assistantMessageCopy", () => {
   it("returns the raw assistant markdown unchanged in markdown mode", () => {
@@ -70,5 +74,20 @@ describe("assistantMessageCopy", () => {
     expect(markdownToPlainText(markdown)).toBe(
       ["10. first paragraph", "    const value = 1;"].join("\n"),
     );
+  });
+
+  it("preserves gfm task state in copied plain text", () => {
+    const markdown = ["- [x] done", "- [ ] todo", "", "1. [x] ship it"].join("\n");
+
+    expect(markdownToPlainText(markdown)).toBe(
+      ["- [x] done", "- [ ] todo", "", "1. [x] ship it"].join("\n"),
+    );
+  });
+
+  it("preserves visible raw html text in plain-text mode", () => {
+    const markdown = ["<details>", "<summary>Example</summary>", "</details>"].join("\n");
+
+    expect(markdownToPlainText(markdown)).toBe(markdown);
+    expect(hasAssistantResponseCopyText(markdown, "plain-text")).toBe(true);
   });
 });

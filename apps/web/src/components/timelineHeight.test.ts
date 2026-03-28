@@ -25,6 +25,19 @@ describe("estimateTimelineMessageHeight", () => {
     ).toBe(122);
   });
 
+  it("keeps the smaller assistant base height when plain-text copy resolves empty", () => {
+    expect(
+      estimateTimelineMessageHeight(
+        {
+          role: "assistant",
+          text: "---",
+          streaming: false,
+        },
+        { timelineWidthPx: null, assistantResponseCopyFormat: "plain-text" },
+      ),
+    ).toBe(100);
+  });
+
   it("uses assistant sizing rules for system messages", () => {
     expect(
       estimateTimelineMessageHeight({
