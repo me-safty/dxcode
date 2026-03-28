@@ -593,23 +593,6 @@ function $setSelectionRangeAtComposerOffsets(startOffset: number, endOffset: num
   $setSelection(selection);
 }
 
-function getSelectionRangeForComposerOffsets(selection: ReturnType<typeof $getSelection>): {
-  start: number;
-  end: number;
-} | null {
-  if (!$isRangeSelection(selection)) {
-    return null;
-  }
-  const anchorNode = selection.anchor.getNode();
-  const focusNode = selection.focus.getNode();
-  const anchorOffset = getAbsoluteOffsetForPoint(anchorNode, selection.anchor.offset);
-  const focusOffset = getAbsoluteOffsetForPoint(focusNode, selection.focus.offset);
-  return {
-    start: Math.min(anchorOffset, focusOffset),
-    end: Math.max(anchorOffset, focusOffset),
-  };
-}
-
 function getSelectionRangeForExpandedComposerOffsets(selection: ReturnType<typeof $getSelection>): {
   start: number;
   end: number;
@@ -1229,8 +1212,6 @@ function ComposerPromptEditorInner({
     cursor: initialCursor,
     expandedCursor: expandCollapsedComposerCursor(value, initialCursor),
     terminalContextIds: terminalContexts.map((context) => context.id),
-    selectionStart: initialCursor,
-    selectionEnd: initialCursor,
   });
   const isApplyingControlledUpdateRef = useRef(false);
   const terminalContextActions = useMemo(
@@ -1263,8 +1244,6 @@ function ComposerPromptEditorInner({
       cursor: normalizedCursor,
       expandedCursor: expandCollapsedComposerCursor(value, normalizedCursor),
       terminalContextIds: terminalContexts.map((context) => context.id),
-      selectionStart: normalizedCursor,
-      selectionEnd: normalizedCursor,
     };
     terminalContextsSignatureRef.current = terminalContextsSignature;
 
@@ -1303,8 +1282,6 @@ function ComposerPromptEditorInner({
         cursor: boundedCursor,
         expandedCursor: expandCollapsedComposerCursor(snapshotRef.current.value, boundedCursor),
         terminalContextIds: snapshotRef.current.terminalContextIds,
-        selectionStart: boundedCursor,
-        selectionEnd: boundedCursor,
       };
       onChangeRef.current(
         snapshotRef.current.value,
@@ -1345,8 +1322,6 @@ function ComposerPromptEditorInner({
         cursor: nextCursor,
         expandedCursor: nextExpandedCursor,
         terminalContextIds,
-        selectionStart: nextCursor,
-        selectionEnd: nextCursor,
       };
     });
     snapshotRef.current = snapshot;
@@ -1389,10 +1364,6 @@ function ComposerPromptEditorInner({
         nextValue,
         $readExpandedSelectionOffsetFromEditorState(fallbackExpandedCursor),
       );
-      const selectionRange = getSelectionRangeForComposerOffsets($getSelection()) ?? {
-        start: nextCursor,
-        end: nextCursor,
-      };
       const terminalContextIds = collectTerminalContextIds($getRoot());
       const previousSnapshot = snapshotRef.current;
       if (
@@ -1412,8 +1383,6 @@ function ComposerPromptEditorInner({
         cursor: nextCursor,
         expandedCursor: nextExpandedCursor,
         terminalContextIds,
-        selectionStart: selectionRange.start,
-        selectionEnd: selectionRange.end,
       };
       const cursorAdjacentToMention =
         isCollapsedCursorAdjacentToInlineToken(nextValue, nextCursor, "left") ||
