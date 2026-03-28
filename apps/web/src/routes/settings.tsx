@@ -2,7 +2,6 @@ import { RotateCcwIcon } from "lucide-react";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { Button } from "../components/ui/button";
 import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
@@ -65,11 +64,7 @@ function SettingsContentLayout() {
 }
 
 function SettingsRouteLayout() {
-  return (
-    <AppSidebarLayout>
-      <SettingsContentLayout />
-    </AppSidebarLayout>
-  );
+  return <SettingsContentLayout />;
 }
 
 export const Route = createFileRoute("/settings")({

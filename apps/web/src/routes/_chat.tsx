@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
@@ -91,10 +90,10 @@ function ChatRouteGlobalShortcuts() {
 
 function ChatRouteLayout() {
   return (
-    <AppSidebarLayout>
+    <>
       <ChatRouteGlobalShortcuts />
       <Outlet />
-    </AppSidebarLayout>
+    </>
   );
 }
 
