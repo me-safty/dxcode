@@ -29,22 +29,21 @@ export function ProjectFavicon({ cwd, className }: { cwd: string; className?: st
     loadedProjectFaviconSrcs.has(src) ? "loaded" : "loading",
   );
 
-  if (status === "error") {
-    return (
-      <FolderIcon className={`size-3.5 shrink-0 text-muted-foreground/50 ${className ?? ""}`} />
-    );
-  }
-
   return (
-    <img
-      src={src}
-      alt=""
-      className={`size-3.5 shrink-0 rounded-sm object-contain ${status === "loading" ? "hidden" : ""} ${className ?? ""}`}
-      onLoad={() => {
-        loadedProjectFaviconSrcs.add(src);
-        setStatus("loaded");
-      }}
-      onError={() => setStatus("error")}
-    />
+    <>
+      {status !== "loaded" ? (
+        <FolderIcon className={`size-3.5 shrink-0 text-muted-foreground/50 ${className ?? ""}`} />
+      ) : null}
+      <img
+        src={src}
+        alt=""
+        className={`size-3.5 shrink-0 rounded-sm object-contain ${status === "loaded" ? "" : "hidden"} ${className ?? ""}`}
+        onLoad={() => {
+          loadedProjectFaviconSrcs.add(src);
+          setStatus("loaded");
+        }}
+        onError={() => setStatus("error")}
+      />
+    </>
   );
 }
