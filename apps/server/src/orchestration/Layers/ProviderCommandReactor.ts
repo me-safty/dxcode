@@ -73,6 +73,46 @@ const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const WORKTREE_BRANCH_PREFIX = "t3code";
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
+const DEFAULT_THREAD_TITLE = "New thread";
+
+function truncateAutoThreadTitle(text: string, maxLength = 50): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxLength) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, maxLength)}...`;
+}
+
+function buildReplaceableThreadTitles(input: {
+  readonly messageText: string;
+  readonly attachments?: ReadonlyArray<ChatAttachment>;
+}): ReadonlySet<string> {
+  const titles = new Set<string>([DEFAULT_THREAD_TITLE]);
+  const trimmedMessage = input.messageText.trim();
+
+  if (trimmedMessage.length > 0) {
+    titles.add(truncateAutoThreadTitle(trimmedMessage));
+    return titles;
+  }
+
+  const firstImageAttachment = input.attachments?.find((attachment) => attachment.type === "image");
+  if (firstImageAttachment) {
+    titles.add(truncateAutoThreadTitle(`Image: ${firstImageAttachment.name}`));
+  }
+
+  return titles;
+}
+
+function isReplaceableThreadTitle(
+  currentTitle: string,
+  input: {
+    readonly messageText: string;
+    readonly attachments?: ReadonlyArray<ChatAttachment>;
+  },
+): boolean {
+  return buildReplaceableThreadTitles(input).has(currentTitle.trim());
+}
 
 function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
   const error = Cause.squash(cause);
@@ -473,6 +513,12 @@ const make = Effect.gen(function* () {
       });
       if (!generated) return;
 
+      const thread = yield* resolveThread(input.threadId);
+      if (!thread) return;
+      if (!isReplaceableThreadTitle(thread.title, input)) {
+        return;
+      }
+
       yield* orchestrationEngine.dispatch({
         type: "thread.meta.update",
         commandId: serverCommandId("thread-title-rename"),
@@ -539,11 +585,13 @@ const make = Effect.gen(function* () {
         ...generationInput,
       }).pipe(Effect.forkScoped);
 
-      yield* maybeGenerateThreadTitleForFirstTurn({
-        threadId: event.payload.threadId,
-        cwd: generationCwd,
-        ...generationInput,
-      }).pipe(Effect.forkScoped);
+      if (isReplaceableThreadTitle(thread.title, generationInput)) {
+        yield* maybeGenerateThreadTitleForFirstTurn({
+          threadId: event.payload.threadId,
+          cwd: generationCwd,
+          ...generationInput,
+        }).pipe(Effect.forkScoped);
+      }
     }
 
     yield* sendTurnForThread({
