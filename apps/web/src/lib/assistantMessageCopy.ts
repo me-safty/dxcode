@@ -183,7 +183,7 @@ function normalizePlainText(value: string): string {
   return value
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/\n+$/g, "");
 }
 
 function splitLines(value: string): string[] {

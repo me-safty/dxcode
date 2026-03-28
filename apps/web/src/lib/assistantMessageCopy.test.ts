@@ -90,4 +90,10 @@ describe("assistantMessageCopy", () => {
     expect(markdownToPlainText(markdown)).toBe(markdown);
     expect(hasAssistantResponseCopyText(markdown, "plain-text")).toBe(true);
   });
+
+  it("preserves leading indentation for top-level code blocks", () => {
+    const markdown = ["```py", "  print('hi')", "```"].join("\n");
+
+    expect(markdownToPlainText(markdown)).toBe("  print('hi')");
+  });
 });
