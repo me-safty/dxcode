@@ -26,6 +26,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_state`;
+      yield* sql`DELETE FROM projection_thread_proposed_plans`;
       yield* sql`DELETE FROM projection_turns`;
 
       yield* sql`
@@ -33,7 +34,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           project_id,
           title,
           workspace_root,
-          default_model,
+          default_model_selection_json,
           scripts_json,
           created_at,
           updated_at,
@@ -43,7 +44,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'project-1',
           'Project 1',
           '/tmp/project-1',
-          'gpt-5-codex',
+          '{"provider":"codex","model":"gpt-5-codex"}',
           '[{"id":"script-1","name":"Build","command":"bun run build","icon":"build","runOnWorktreeCreate":false}]',
           '2026-02-24T00:00:00.000Z',
           '2026-02-24T00:00:01.000Z',
@@ -56,7 +57,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           thread_id,
           project_id,
           title,
-          model,
+          model_selection_json,
           branch,
           worktree_path,
           latest_turn_id,
@@ -68,7 +69,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'thread-1',
           'project-1',
           'Thread 1',
-          'gpt-5-codex',
+          '{"provider":"codex","model":"gpt-5-codex"}',
           NULL,
           NULL,
           'turn-1',
@@ -98,6 +99,29 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           0,
           '2026-02-24T00:00:04.000Z',
           '2026-02-24T00:00:05.000Z'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_proposed_plans (
+          plan_id,
+          thread_id,
+          turn_id,
+          plan_markdown,
+          implemented_at,
+          implementation_thread_id,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'plan-1',
+          'thread-1',
+          'turn-1',
+          '# Ship it',
+          '2026-02-24T00:00:05.500Z',
+          'thread-2',
+          '2026-02-24T00:00:05.000Z',
+          '2026-02-24T00:00:05.500Z'
         )
       `;
 
@@ -154,6 +178,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           thread_id,
           turn_id,
           pending_message_id,
+          source_proposed_plan_thread_id,
+          source_proposed_plan_id,
           assistant_message_id,
           state,
           requested_at,
@@ -168,6 +194,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'thread-1',
           'turn-1',
           NULL,
+          'thread-1',
+          'plan-1',
           'message-1',
           'completed',
           '2026-02-24T00:00:08.000Z',
@@ -206,7 +234,10 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           id: asProjectId("project-1"),
           title: "Project 1",
           workspaceRoot: "/tmp/project-1",
-          defaultModel: "gpt-5-codex",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
           scripts: [
             {
               id: "script-1",
@@ -226,7 +257,10 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           id: ThreadId.makeUnsafe("thread-1"),
           projectId: asProjectId("project-1"),
           title: "Thread 1",
-          model: "gpt-5-codex",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
           interactionMode: "default",
           runtimeMode: "full-access",
           branch: null,
@@ -238,6 +272,10 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             startedAt: "2026-02-24T00:00:08.000Z",
             completedAt: "2026-02-24T00:00:08.000Z",
             assistantMessageId: asMessageId("message-1"),
+            sourceProposedPlan: {
+              threadId: ThreadId.makeUnsafe("thread-1"),
+              planId: "plan-1",
+            },
           },
           createdAt: "2026-02-24T00:00:02.000Z",
           updatedAt: "2026-02-24T00:00:03.000Z",
@@ -253,7 +291,17 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               updatedAt: "2026-02-24T00:00:05.000Z",
             },
           ],
-          proposedPlans: [],
+          proposedPlans: [
+            {
+              id: "plan-1",
+              turnId: asTurnId("turn-1"),
+              planMarkdown: "# Ship it",
+              implementedAt: "2026-02-24T00:00:05.500Z",
+              implementationThreadId: ThreadId.makeUnsafe("thread-2"),
+              createdAt: "2026-02-24T00:00:05.000Z",
+              updatedAt: "2026-02-24T00:00:05.500Z",
+            },
+          ],
           activities: [
             {
               id: asEventId("activity-1"),
