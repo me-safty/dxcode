@@ -8,6 +8,7 @@ import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
 import {
   $applyNodeReplacement,
   $createRangeSelection,
+  BEFORE_INPUT_COMMAND,
   $getSelection,
   $setSelection,
   $isElementNode,
@@ -73,6 +74,21 @@ import {
 import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTerminalContexts";
 
 const COMPOSER_EDITOR_HMR_KEY = `composer-editor-${Math.random().toString(36).slice(2)}`;
+const SURROUND_SYMBOLS: [string, string][] = [
+  ["(", ")"],
+  ["[", "]"],
+  ["{", "}"],
+  ["'", "'"],
+  ['"', '"'],
+  ['`', '`'],
+  ['“', '”'],
+  ['´', '´'],
+  ["<", ">"],
+  ["«", "»"],
+  ["*", "*"],
+  ["_", "_"],
+];
+const SURROUND_SYMBOLS_MAP = new Map<string, string>(SURROUND_SYMBOLS);
 
 type SerializedComposerMentionNode = Spread<
   {
@@ -553,6 +569,53 @@ function $setSelectionAtComposerOffset(nextOffset: number): void {
   $setSelection(selection);
 }
 
+function $setSelectionRangeAtComposerOffsets(startOffset: number, endOffset: number): void {
+  const root = $getRoot();
+  const composerLength = $getComposerRootLength();
+  const boundedStart = Math.max(0, Math.min(startOffset, composerLength));
+  const boundedEnd = Math.max(0, Math.min(endOffset, composerLength));
+  const anchorRemainingRef = { value: boundedStart };
+  const focusRemainingRef = { value: boundedEnd };
+  const anchorPoint = findSelectionPointAtOffset(root, anchorRemainingRef) ?? {
+    key: root.getKey(),
+    offset: root.getChildren().length,
+    type: "element" as const,
+  };
+  const focusPoint = findSelectionPointAtOffset(root, focusRemainingRef) ?? {
+    key: root.getKey(),
+    offset: root.getChildren().length,
+    type: "element" as const,
+  };
+  const selection = $createRangeSelection();
+  selection.anchor.set(anchorPoint.key, anchorPoint.offset, anchorPoint.type);
+  selection.focus.set(focusPoint.key, focusPoint.offset, focusPoint.type);
+  $setSelection(selection);
+}
+
+function getSelectionRangeForComposerOffsets(selection: ReturnType<typeof $getSelection>): {
+  start: number;
+  end: number;
+} | null {
+  if (!$isRangeSelection(selection)) {
+    return null;
+  }
+  const anchorNode = selection.anchor.getNode();
+  const focusNode = selection.focus.getNode();
+  const anchorOffset = getAbsoluteOffsetForPoint(anchorNode, selection.anchor.offset);
+  const focusOffset = getAbsoluteOffsetForPoint(focusNode, selection.focus.offset);
+  return {
+    start: Math.min(anchorOffset, focusOffset),
+    end: Math.max(anchorOffset, focusOffset),
+  };
+}
+
+function $selectionTouchesInlineToken(selection: ReturnType<typeof $getSelection>): boolean {
+  if (!$isRangeSelection(selection)) {
+    return false;
+  }
+  return selection.getNodes().some((node) => isComposerInlineTokenNode(node));
+}
+
 function $readSelectionOffsetFromEditorState(fallback: number): number {
   const selection = $getSelection();
   if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
@@ -878,6 +941,147 @@ function ComposerInlineTokenBackspacePlugin() {
   return null;
 }
 
+function ComposerSurroundSelectionPlugin(props: {
+  terminalContexts: ReadonlyArray<TerminalContextDraft>;
+}) {
+  const [editor] = useLexicalComposerContext();
+  const terminalContextsRef = useRef(props.terminalContexts);
+  const pendingSurroundSelectionRef = useRef<{
+    value: string;
+    start: number;
+    end: number;
+  } | null>(null);
+
+  useEffect(() => {
+    terminalContextsRef.current = props.terminalContexts;
+  }, [props.terminalContexts]);
+
+  const applySurroundInsertion = useCallback(
+    (inputData: string): boolean => {
+      const surroundCloseSymbol = SURROUND_SYMBOLS_MAP.get(inputData);
+      const pendingSurroundSelection = pendingSurroundSelectionRef.current;
+      if (!surroundCloseSymbol) {
+        pendingSurroundSelectionRef.current = null;
+        return false;
+      }
+
+      let handled = false;
+      editor.update(() => {
+        const selectionSnapshot =
+          pendingSurroundSelection ??
+          (() => {
+            const selection = $getSelection();
+            if (!$isRangeSelection(selection) || selection.isCollapsed()) {
+              return null;
+            }
+            if ($selectionTouchesInlineToken(selection)) {
+              return null;
+            }
+            const range = getSelectionRangeForComposerOffsets(selection);
+            if (!range || range.start === range.end) {
+              return null;
+            }
+            return {
+              value: $getRoot().getTextContent(),
+              start: range.start,
+              end: range.end,
+            };
+          })();
+
+        if (!selectionSnapshot || !surroundCloseSymbol) {
+          return;
+        }
+
+        const selectedText = selectionSnapshot.value.slice(
+          selectionSnapshot.start,
+          selectionSnapshot.end,
+        );
+        const nextValue = `${selectionSnapshot.value.slice(0, selectionSnapshot.start)}${inputData}${selectedText}${surroundCloseSymbol}${selectionSnapshot.value.slice(selectionSnapshot.end)}`;
+        $setComposerEditorPrompt(nextValue, terminalContextsRef.current);
+        $setSelectionRangeAtComposerOffsets(
+          selectionSnapshot.start + inputData.length,
+          selectionSnapshot.start + inputData.length + selectedText.length,
+        );
+        handled = true;
+        pendingSurroundSelectionRef.current = null;
+      });
+
+      return handled;
+    },
+    [editor],
+  );
+
+  useEffect(() => {
+    const unregisterRootListener = editor.registerRootListener((rootElement, prevRootElement) => {
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey) {
+          pendingSurroundSelectionRef.current = null;
+          return;
+        }
+
+        editor.getEditorState().read(() => {
+          const selection = $getSelection();
+          if (!$isRangeSelection(selection) || selection.isCollapsed()) {
+            pendingSurroundSelectionRef.current = null;
+            return;
+          }
+          if ($selectionTouchesInlineToken(selection)) {
+            pendingSurroundSelectionRef.current = null;
+            return;
+          }
+          const range = getSelectionRangeForComposerOffsets(selection);
+          if (!range || range.start === range.end) {
+            pendingSurroundSelectionRef.current = null;
+            return;
+          }
+          const snapshot = {
+            value: $getRoot().getTextContent(),
+            start: range.start,
+            end: range.end,
+          };
+          pendingSurroundSelectionRef.current = snapshot;
+        });
+      };
+      const onBeforeInput = (event: InputEvent) => {
+        if (typeof event.data !== 'string') {
+          pendingSurroundSelectionRef.current = null;
+          return
+        }
+        const inputData =
+          (event.inputType === "insertText") && typeof event.data === "string" ? event.data : null;
+        if (!inputData || inputData.length !== 1) {
+          pendingSurroundSelectionRef.current = null;
+          return;
+        }
+        if (!applySurroundInsertion(inputData)) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      };
+
+      prevRootElement?.removeEventListener("keydown", onKeyDown);
+      prevRootElement?.removeEventListener("beforeinput", onBeforeInput, true);
+      rootElement?.addEventListener("keydown", onKeyDown);
+      rootElement?.addEventListener("beforeinput", onBeforeInput, true);
+    });
+    const unregisterBeforeInputCommand = editor.registerCommand(
+      BEFORE_INPUT_COMMAND,
+      () => false,
+      COMMAND_PRIORITY_HIGH,
+    );
+
+    return () => {
+      unregisterRootListener();
+      unregisterBeforeInputCommand();
+    };
+  }, [applySurroundInsertion, editor]);
+
+  return null;
+}
+
 function ComposerPromptEditorInner({
   value,
   cursor,
@@ -901,6 +1105,8 @@ function ComposerPromptEditorInner({
     cursor: initialCursor,
     expandedCursor: expandCollapsedComposerCursor(value, initialCursor),
     terminalContextIds: terminalContexts.map((context) => context.id),
+    selectionStart: initialCursor,
+    selectionEnd: initialCursor,
   });
   const isApplyingControlledUpdateRef = useRef(false);
   const terminalContextActions = useMemo(
@@ -933,6 +1139,8 @@ function ComposerPromptEditorInner({
       cursor: normalizedCursor,
       expandedCursor: expandCollapsedComposerCursor(value, normalizedCursor),
       terminalContextIds: terminalContexts.map((context) => context.id),
+      selectionStart: normalizedCursor,
+      selectionEnd: normalizedCursor,
     };
     terminalContextsSignatureRef.current = terminalContextsSignature;
 
@@ -971,6 +1179,8 @@ function ComposerPromptEditorInner({
         cursor: boundedCursor,
         expandedCursor: expandCollapsedComposerCursor(snapshotRef.current.value, boundedCursor),
         terminalContextIds: snapshotRef.current.terminalContextIds,
+        selectionStart: boundedCursor,
+        selectionEnd: boundedCursor,
       };
       onChangeRef.current(
         snapshotRef.current.value,
@@ -1011,6 +1221,8 @@ function ComposerPromptEditorInner({
         cursor: nextCursor,
         expandedCursor: nextExpandedCursor,
         terminalContextIds,
+        selectionStart: nextCursor,
+        selectionEnd: nextCursor,
       };
     });
     snapshotRef.current = snapshot;
@@ -1053,12 +1265,18 @@ function ComposerPromptEditorInner({
         nextValue,
         $readExpandedSelectionOffsetFromEditorState(fallbackExpandedCursor),
       );
+      const selectionRange = getSelectionRangeForComposerOffsets($getSelection()) ?? {
+        start: nextCursor,
+        end: nextCursor,
+      };
       const terminalContextIds = collectTerminalContextIds($getRoot());
       const previousSnapshot = snapshotRef.current;
       if (
         previousSnapshot.value === nextValue &&
         previousSnapshot.cursor === nextCursor &&
         previousSnapshot.expandedCursor === nextExpandedCursor &&
+        previousSnapshot.selectionStart === selectionRange.start &&
+        previousSnapshot.selectionEnd === selectionRange.end &&
         previousSnapshot.terminalContextIds.length === terminalContextIds.length &&
         previousSnapshot.terminalContextIds.every((id, index) => id === terminalContextIds[index])
       ) {
@@ -1072,6 +1290,8 @@ function ComposerPromptEditorInner({
         cursor: nextCursor,
         expandedCursor: nextExpandedCursor,
         terminalContextIds,
+        selectionStart: selectionRange.start,
+        selectionEnd: selectionRange.end,
       };
       const cursorAdjacentToMention =
         isCollapsedCursorAdjacentToInlineToken(nextValue, nextCursor, "left") ||
@@ -1113,6 +1333,7 @@ function ComposerPromptEditorInner({
         />
         <OnChangePlugin onChange={handleEditorChange} />
         <ComposerCommandKeyPlugin {...(onCommandKeyDown ? { onCommandKeyDown } : {})} />
+        <ComposerSurroundSelectionPlugin terminalContexts={terminalContexts} />
         <ComposerInlineTokenArrowPlugin />
         <ComposerInlineTokenSelectionNormalizePlugin />
         <ComposerInlineTokenBackspacePlugin />
