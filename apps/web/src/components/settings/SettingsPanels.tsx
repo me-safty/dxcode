@@ -22,12 +22,19 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
+import {
+  canCheckForUpdate,
+  getDesktopUpdateButtonTooltip,
+  resolveDesktopUpdateButtonAction,
+} from "../../components/desktopUpdate.logic";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
+import { isElectron } from "../../env";
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
+import { desktopUpdateStateQueryOptions } from "../../lib/desktopUpdateReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "../../lib/serverReactQuery";
 import {
   MAX_CUSTOM_MODEL_LENGTH,
@@ -296,6 +303,132 @@ function SettingsPageContainer({ children }: { children: ReactNode }) {
     <div className="flex-1 overflow-y-auto p-6">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">{children}</div>
     </div>
+  );
+}
+
+function DesktopUpdateCheckSection() {
+  const queryClient = useQueryClient();
+  const updateStateQuery = useQuery(desktopUpdateStateQueryOptions());
+  const [checkError, setCheckError] = useState<string | null>(null);
+
+  const updateState = updateStateQuery.data ?? null;
+
+  useEffect(() => {
+    const bridge = window.desktopBridge;
+    if (!bridge || typeof bridge.onUpdateState !== "function") return;
+
+    const opts = desktopUpdateStateQueryOptions();
+    const unsubscribe = bridge.onUpdateState((nextState) => {
+      queryClient.setQueryData(opts.queryKey, nextState);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [queryClient]);
+
+  const handleButtonClick = useCallback(() => {
+    const bridge = window.desktopBridge;
+    if (!bridge) return;
+    setCheckError(null);
+
+    const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
+    const opts = desktopUpdateStateQueryOptions();
+
+    if (action === "download") {
+      void bridge
+        .downloadUpdate()
+        .then((result) => {
+          queryClient.setQueryData(opts.queryKey, result.state);
+        })
+        .catch((error: unknown) => {
+          setCheckError(error instanceof Error ? error.message : "Download failed.");
+        });
+      return;
+    }
+
+    if (action === "install") {
+      const version = updateState?.downloadedVersion ?? updateState?.availableVersion;
+      const confirmed = window.confirm(
+        `Install update${version ? ` ${version}` : ""} and restart T3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.`,
+      );
+      if (!confirmed) return;
+      void bridge
+        .installUpdate()
+        .then((result) => {
+          queryClient.setQueryData(opts.queryKey, result.state);
+        })
+        .catch((error: unknown) => {
+          setCheckError(error instanceof Error ? error.message : "Install failed.");
+        });
+      return;
+    }
+
+    if (typeof bridge.checkForUpdate !== "function") return;
+    void bridge
+      .checkForUpdate()
+      .then((result) => {
+        queryClient.setQueryData(opts.queryKey, result.state);
+        if (!result.checked) {
+          setCheckError(
+            result.state.message ?? "Automatic updates are not available in this build.",
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        setCheckError(error instanceof Error ? error.message : "Update check failed.");
+      });
+  }, [queryClient, updateState]);
+
+  const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
+  const buttonTooltip = updateState ? getDesktopUpdateButtonTooltip(updateState) : null;
+  const buttonDisabled = !canCheckForUpdate(updateState);
+
+  const actionLabel: Record<string, string> = { download: "Download", install: "Install" };
+  const statusLabel: Record<string, string> = {
+    checking: "Checking…",
+    downloading: "Downloading…",
+    "up-to-date": "Up to Date",
+  };
+  const buttonLabel =
+    actionLabel[action] ?? statusLabel[updateState?.status ?? ""] ?? "Check for Updates";
+
+  return (
+    <SettingsRow
+      title="Updates"
+      description={
+        updateState?.checkedAt
+          ? `Last checked: ${new Date(updateState.checkedAt).toLocaleString()}`
+          : "Check for available updates."
+      }
+      control={
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={buttonDisabled}
+                onClick={handleButtonClick}
+              >
+                {buttonLabel}
+              </Button>
+            }
+          />
+          {buttonTooltip ? <TooltipPopup>{buttonTooltip}</TooltipPopup> : null}
+        </Tooltip>
+      }
+      status={
+        <>
+          {checkError ? <p className="text-xs text-destructive">{checkError}</p> : null}
+          {updateState?.status === "error" && updateState.errorContext === "check" ? (
+            <p className="text-xs text-destructive">
+              {updateState.message ?? "Could not check for updates."}
+            </p>
+          ) : null}
+        </>
+      }
+    />
   );
 }
 
@@ -1264,6 +1397,21 @@ export function GeneralSettingsPanel() {
           description="Current application version."
           control={<code className="text-xs font-medium text-muted-foreground">{APP_VERSION}</code>}
         />
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
+
+export function AboutSettingsPanel() {
+  return (
+    <SettingsPageContainer>
+      <SettingsSection title="About" icon={<InfoIcon className="size-3.5" />}>
+        <SettingsRow
+          title="Version"
+          description="Current application version."
+          control={<code className="text-xs font-medium text-muted-foreground">{APP_VERSION}</code>}
+        />
+        {isElectron ? <DesktopUpdateCheckSection /> : null}
       </SettingsSection>
     </SettingsPageContainer>
   );
