@@ -2622,16 +2622,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     if (canUseRunningFollowUps && isServerThread) {
       const createdAt = new Date().toISOString();
-      const followUpSnapshot = await createFollowUpSnapshotFromComposer(createdAt);
-      if (!followUpSnapshot) {
-        return;
-      }
       const effectiveBehavior = resolveFollowUpBehavior(
         followUpBehavior,
         Boolean(
           input?.keyboardEvent && shouldInvertFollowUpBehaviorFromKeyEvent(input.keyboardEvent),
         ),
       );
+      if (effectiveBehavior === "queue") {
+        sendInFlightRef.current = true;
+        beginSendPhase("sending-turn");
+      }
+      const followUpSnapshot = await createFollowUpSnapshotFromComposer(createdAt);
+      if (!followUpSnapshot) {
+        if (effectiveBehavior === "queue") {
+          sendInFlightRef.current = false;
+          resetSendPhase();
+        }
+        return;
+      }
 
       if (effectiveBehavior === "queue") {
         const queuedFollowUpEdit = composerDraft.queuedFollowUpEdit;
@@ -2681,6 +2689,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
             activeThread.id,
             err instanceof Error ? err.message : "Failed to queue follow-up.",
           );
+        } finally {
+          sendInFlightRef.current = false;
+          resetSendPhase();
         }
         return;
       }
@@ -3237,6 +3248,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             ...state.draftsByThreadId,
             [threadId]: {
               ...(currentDraft ?? composerDraft),
+              queuedFollowUpEdit: null,
               prompt: snapshot.prompt,
               images: hydrateComposerImagesFromPersistedAttachments(hydratedAttachments),
               nonPersistedImageIds: [],

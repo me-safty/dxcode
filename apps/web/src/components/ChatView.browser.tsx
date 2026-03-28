@@ -460,6 +460,22 @@ function getQueuedFollowUpPrompts(): string[] {
   );
 }
 
+function getQueuedFollowUpEnqueueRequests(): Array<
+  WsRequestEnvelope["body"] & { command: { type: string } }
+> {
+  return wsRequests.flatMap((request) => {
+    const command = (request as { command?: { type?: string } }).command;
+    if (
+      request._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand ||
+      !command ||
+      command.type !== "thread.queued-follow-up.enqueue"
+    ) {
+      return [];
+    }
+    return [request as WsRequestEnvelope["body"] & { command: { type: string } }];
+  });
+}
+
 function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
   const customResult = customWsRpcResolver?.(body);
   if (customResult !== undefined) {
@@ -2254,6 +2270,38 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("does not enqueue duplicate follow-ups on rapid repeated submit", async () => {
+    setClientSettings({
+      followUpBehavior: "queue",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-follow-up-no-duplicate-queue" as MessageId,
+        targetText: "follow-up duplicate queue target",
+        sessionStatus: "running",
+      }),
+    });
+
+    try {
+      await setComposerPrompt("rapid queue");
+      const submitButton = await waitForComposerSubmitButton("Queue follow-up");
+
+      submitButton.click();
+      submitButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(getQueuedFollowUpPrompts()).toEqual(["rapid queue"]);
+          expect(getQueuedFollowUpEnqueueRequests()).toHaveLength(1);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("supports steering and deleting queued follow-ups from the panel", async () => {
     setClientSettings({
       followUpBehavior: "queue",
@@ -2475,6 +2523,58 @@ describe("ChatView timeline estimator parity (full app)", () => {
             "queue first",
             "queue second edited",
             "queue third",
+          ]);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("appends a new queued follow-up after requeueing an edited item", async () => {
+    setClientSettings({
+      followUpBehavior: "queue",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-follow-up-panel-edit-append" as MessageId,
+        targetText: "follow-up panel edit append target",
+        sessionStatus: "running",
+      }),
+    });
+
+    try {
+      await queueFollowUpFromComposer("queue first");
+      await queueFollowUpFromComposer("queue second");
+      await queueFollowUpFromComposer("queue third");
+
+      await openQueuedFollowUpActionsMenu(1);
+      const editButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('button[aria-label^="Edit queued follow-up"]'),
+        "Unable to find the queued follow-up edit button.",
+      );
+      editButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(getQueuedFollowUpPrompts()).toEqual(["queue first", "queue third"]);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await queueFollowUpFromComposer("queue second edited");
+      await queueFollowUpFromComposer("queue fourth");
+
+      await vi.waitFor(
+        () => {
+          expect(getQueuedFollowUpPrompts()).toEqual([
+            "queue first",
+            "queue second edited",
+            "queue third",
+            "queue fourth",
           ]);
         },
         { timeout: 8_000, interval: 16 },
