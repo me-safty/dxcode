@@ -339,9 +339,8 @@ it.layer(testLayer)("server CLI command", (it) => {
       assert.equal(start.mock.calls.length, 1);
       const fixPathOrder = fixPath.mock.invocationCallOrder[0];
       const startOrder = start.mock.invocationCallOrder[0];
-      assert.isTrue(typeof fixPathOrder === "number" && typeof startOrder === "number");
       if (typeof fixPathOrder !== "number" || typeof startOrder !== "number") {
-        throw new Error("Expected fixPath and start to be called");
+        assert.fail("Expected fixPath and start to be called");
       }
       assert.isTrue(fixPathOrder < startOrder);
     }),
