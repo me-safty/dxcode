@@ -64,6 +64,7 @@ function makeReadModel(input?: {
         worktreePath: null,
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
+        archivedAt: null,
         deletedAt: null,
         messages: [],
         queuedFollowUps: queuedPrompts.map((prompt, index) => ({

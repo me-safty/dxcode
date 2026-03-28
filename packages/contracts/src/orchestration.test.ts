@@ -5,6 +5,8 @@ import {
   ClientOrchestrationCommand,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  OrchestrationCommand,
+  OrchestrationEvent,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
   OrchestrationProposedPlan,
@@ -35,6 +37,8 @@ const decodeOrchestrationLatestTurn = Schema.decodeUnknownEffect(OrchestrationLa
 const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
+const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
+const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
 
 describe("orchestration contracts", () => {
@@ -239,6 +243,73 @@ describe("orchestration contracts", () => {
     );
 
     expect(parsed.modelSelection?.provider).toBe("claudeAgent");
+  });
+
+  it("decodes thread archive and unarchive commands", async () => {
+    const archive = await Effect.runPromise(
+      decodeOrchestrationCommand({
+        type: "thread.archive",
+        commandId: "cmd-archive-1",
+        threadId: "thread-1",
+      }),
+    );
+    const unarchive = await Effect.runPromise(
+      decodeOrchestrationCommand({
+        type: "thread.unarchive",
+        commandId: "cmd-unarchive-1",
+        threadId: "thread-1",
+      }),
+    );
+
+    expect(archive.type).toBe("thread.archive");
+    expect(unarchive.type).toBe("thread.unarchive");
+  });
+
+  it("decodes thread archived and unarchived events", async () => {
+    const archived = await Effect.runPromise(
+      decodeOrchestrationEvent({
+        sequence: 1,
+        eventId: "event-archive-1",
+        aggregateKind: "thread",
+        aggregateId: "thread-1",
+        type: "thread.archived",
+        occurredAt: "2026-01-01T00:00:00.000Z",
+        commandId: "cmd-archive-1",
+        causationEventId: null,
+        correlationId: "cmd-archive-1",
+        metadata: {},
+        payload: {
+          threadId: "thread-1",
+          archivedAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      }),
+    );
+    const unarchived = await Effect.runPromise(
+      decodeOrchestrationEvent({
+        sequence: 2,
+        eventId: "event-unarchive-1",
+        aggregateKind: "thread",
+        aggregateId: "thread-1",
+        type: "thread.unarchived",
+        occurredAt: "2026-01-02T00:00:00.000Z",
+        commandId: "cmd-unarchive-1",
+        causationEventId: null,
+        correlationId: "cmd-unarchive-1",
+        metadata: {},
+        payload: {
+          threadId: "thread-1",
+          updatedAt: "2026-01-02T00:00:00.000Z",
+        },
+      }),
+    );
+
+    expect(archived.type).toBe("thread.archived");
+    expect(unarchived.type).toBe("thread.unarchived");
+    if (archived.type !== "thread.archived") {
+      throw new Error(`Unexpected archived event type: ${archived.type}`);
+    }
+    expect(archived.payload.archivedAt).toBe("2026-01-01T00:00:00.000Z");
   });
 
   it("accepts provider-scoped model options in thread.turn.start", async () => {
