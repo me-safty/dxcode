@@ -13,7 +13,6 @@ import {
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { truncate } from "@t3tools/shared/String";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
@@ -76,43 +75,16 @@ const WORKTREE_BRANCH_PREFIX = "t3code";
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
 const DEFAULT_THREAD_TITLE = "New thread";
 
-function buildReplaceableThreadTitles(input: {
-  readonly messageText: string;
-  readonly attachments?: ReadonlyArray<ChatAttachment>;
-  readonly titleSeed?: string;
-}): ReadonlySet<string> {
-  const titles = new Set<string>([DEFAULT_THREAD_TITLE]);
-  const trimmedTitleSeed = input.titleSeed?.trim();
-
-  if (trimmedTitleSeed) {
-    titles.add(trimmedTitleSeed);
-    return titles;
+function canReplaceThreadTitle(currentTitle: string, titleSeed?: string): boolean {
+  const trimmedCurrentTitle = currentTitle.trim();
+  if (trimmedCurrentTitle === DEFAULT_THREAD_TITLE) {
+    return true;
   }
 
-  const trimmedMessage = input.messageText.trim();
-
-  if (trimmedMessage.length > 0) {
-    titles.add(truncate(trimmedMessage));
-    return titles;
-  }
-
-  const firstImageAttachment = input.attachments?.find((attachment) => attachment.type === "image");
-  if (firstImageAttachment) {
-    titles.add(truncate(`Image: ${firstImageAttachment.name}`));
-  }
-
-  return titles;
-}
-
-function isReplaceableThreadTitle(
-  currentTitle: string,
-  input: {
-    readonly messageText: string;
-    readonly attachments?: ReadonlyArray<ChatAttachment>;
-    readonly titleSeed?: string;
-  },
-): boolean {
-  return buildReplaceableThreadTitles(input).has(currentTitle.trim());
+  const trimmedTitleSeed = titleSeed?.trim();
+  return trimmedTitleSeed !== undefined && trimmedTitleSeed.length > 0
+    ? trimmedCurrentTitle === trimmedTitleSeed
+    : false;
 }
 
 function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
@@ -511,7 +483,7 @@ const make = Effect.gen(function* () {
 
       const thread = yield* resolveThread(input.threadId);
       if (!thread) return;
-      if (!isReplaceableThreadTitle(thread.title, input)) {
+      if (!canReplaceThreadTitle(thread.title, input.titleSeed)) {
         return;
       }
 
@@ -579,7 +551,7 @@ const make = Effect.gen(function* () {
         ...generationInput,
       }).pipe(Effect.forkScoped);
 
-      if (isReplaceableThreadTitle(thread.title, generationInput)) {
+      if (canReplaceThreadTitle(thread.title, event.payload.titleSeed)) {
         yield* maybeGenerateThreadTitleForFirstTurn({
           threadId: event.payload.threadId,
           cwd: generationCwd,

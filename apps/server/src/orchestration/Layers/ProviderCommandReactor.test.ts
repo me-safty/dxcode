@@ -323,6 +323,7 @@ describe("ProviderCommandReactor", () => {
   it("generates a thread title on the first turn", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
+    const seededTitle = "Please investigate reconnect failures after restar...";
     harness.generateThreadTitle.mockReturnValue(Effect.succeed({ title: "Generated title" }));
 
     await Effect.runPromise(
@@ -330,7 +331,7 @@ describe("ProviderCommandReactor", () => {
         type: "thread.meta.update",
         commandId: CommandId.makeUnsafe("cmd-thread-title-seed"),
         threadId: ThreadId.makeUnsafe("thread-1"),
-        title: "Please investigate reconnect failures after restar...",
+        title: seededTitle,
       }),
     );
 
@@ -345,6 +346,7 @@ describe("ProviderCommandReactor", () => {
           text: "Please investigate reconnect failures after restarting the session.",
           attachments: [],
         },
+        titleSeed: seededTitle,
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         createdAt: now,
@@ -371,6 +373,7 @@ describe("ProviderCommandReactor", () => {
   it("does not overwrite an existing custom thread title on the first turn", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
+    const seededTitle = "Please investigate reconnect failures after restar...";
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -392,6 +395,7 @@ describe("ProviderCommandReactor", () => {
           text: "Please investigate reconnect failures after restarting the session.",
           attachments: [],
         },
+        titleSeed: seededTitle,
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         createdAt: now,
