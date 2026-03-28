@@ -497,6 +497,7 @@ const make = Effect.gen(function* () {
     readonly cwd: string;
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
+    readonly titleSeed?: string;
     readonly textGenerationModel?: string;
   }) {
     const attachments = input.attachments ?? [];
