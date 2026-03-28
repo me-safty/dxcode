@@ -2380,12 +2380,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         existingResumeSessionId === undefined ? yield* Random.nextUUIDv4 : undefined;
       const sessionId = existingResumeSessionId ?? newSessionId;
 
-      const runFork = yield* Effect.withFiber((fiber) =>
-        Effect.succeed(Effect.runForkWith(fiber.services)),
-      );
-      const runPromise = yield* Effect.withFiber((fiber) =>
-        Effect.succeed(Effect.runPromiseWith(fiber.services)),
-      );
+      const services = yield* Effect.services();
+      const runFork = Effect.runForkWith(services);
+      const runPromise = Effect.runPromiseWith(services);
 
       const promptQueue = yield* Queue.unbounded<PromptQueueItem>();
       const prompt = Stream.fromQueue(promptQueue).pipe(

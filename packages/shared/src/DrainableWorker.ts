@@ -40,7 +40,7 @@ export const makeDrainableWorker = <A, E, R>(
     const ref = yield* TxRef.make(0);
 
     const queue = yield* Effect.acquireRelease(TxQueue.unbounded<A>(), (queue) =>
-      TxQueue.shutdown(queue).pipe(Effect.asVoid),
+      TxQueue.shutdown(queue),
     );
 
     const takeItem = Effect.tx(
@@ -53,7 +53,7 @@ export const makeDrainableWorker = <A, E, R>(
 
     yield* takeItem.pipe(
       Effect.flatMap((item) =>
-        process(item).pipe(Effect.ensuring(Effect.tx(TxRef.update(ref, (n) => n - 1)))),
+        process(item).pipe(Effect.ensuring(TxRef.update(ref, (n) => n - 1))),
       ),
       Effect.forever,
       Effect.forkScoped,
@@ -70,7 +70,7 @@ export const makeDrainableWorker = <A, E, R>(
     );
 
     return {
-      enqueue: (item) => TxQueue.offer(queue, item).pipe(Effect.asVoid),
+      enqueue: (item) => TxQueue.offer(queue, item),
       drain,
     } satisfies DrainableWorker<A>;
   });

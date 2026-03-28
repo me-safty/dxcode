@@ -1100,9 +1100,8 @@ describe("ClaudeAdapterLive", () => {
   it.effect("closes the session when the Claude stream aborts after a turn starts", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
-      const runFork = yield* Effect.withFiber((fiber) =>
-        Effect.succeed(Effect.runForkWith(fiber.services)),
-      );
+      const services = yield* Effect.services();
+      const runFork = Effect.runForkWith(services);
 
       const adapter = yield* ClaudeAdapter;
       const runtimeEvents: Array<ProviderRuntimeEvent> = [];
@@ -1201,9 +1200,8 @@ describe("ClaudeAdapterLive", () => {
     );
 
     return Effect.gen(function* () {
-      const runFork = yield* Effect.withFiber((fiber) =>
-        Effect.succeed(Effect.runForkWith(fiber.services)),
-      );
+      const services = yield* Effect.services();
+      const runFork = Effect.runForkWith(services);
 
       const adapter = yield* ClaudeAdapter;
 

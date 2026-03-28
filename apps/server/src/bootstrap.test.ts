@@ -13,11 +13,7 @@ import { vi } from "vitest";
 import { readBootstrapEnvelope, resolveFdPath } from "./bootstrap";
 import { assertNone, assertSome } from "@effect/vitest/utils";
 
-const bootstrapFsInterceptor = vi.hoisted(() => ({
-  failOpenPath: null as string | null,
-  failCreateReadStreamForDuplicatedPath: null as string | null,
-  duplicatedFdForPathFailure: null as number | null,
-}));
+const openSyncInterceptor = vi.hoisted(() => ({ failPath: null as string | null }));
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -27,34 +23,14 @@ vi.mock("node:fs", async (importOriginal) => {
       const [filePath, flags] = args;
       if (
         typeof filePath === "string" &&
-        filePath === bootstrapFsInterceptor.failOpenPath &&
+        filePath === openSyncInterceptor.failPath &&
         flags === "r"
       ) {
         const error = new Error("no such device or address");
         Object.assign(error, { code: "ENXIO" });
         throw error;
       }
-      const fd = (actual.openSync as (...a: typeof args) => number)(...args);
-      if (
-        typeof filePath === "string" &&
-        filePath === bootstrapFsInterceptor.failCreateReadStreamForDuplicatedPath &&
-        flags === "r"
-      ) {
-        bootstrapFsInterceptor.duplicatedFdForPathFailure = fd;
-      }
-      return fd;
-    },
-    createReadStream: (...args: Parameters<typeof actual.createReadStream>) => {
-      const [, options] = args;
-      const fd = typeof options === "object" && options && "fd" in options ? options.fd : undefined;
-      if (typeof fd === "number" && fd === bootstrapFsInterceptor.duplicatedFdForPathFailure) {
-        const error = new Error("bad file descriptor");
-        Object.assign(error, { code: "EBADF" });
-        throw error;
-      }
-      return (
-        actual.createReadStream as (...a: typeof args) => ReturnType<typeof actual.createReadStream>
-      )(...args);
+      return (actual.openSync as (...a: typeof args) => number)(...args);
     },
   };
 });
@@ -62,6 +38,14 @@ vi.mock("node:fs", async (importOriginal) => {
 const TestEnvelopeSchema = Schema.Struct({ mode: Schema.String });
 
 it.layer(NodeServices.layer)("readBootstrapEnvelope", (it) => {
+  it.effect("uses platform-specific fd paths", () =>
+    Effect.sync(() => {
+      assert.equal(resolveFdPath(3, "linux"), "/proc/self/fd/3");
+      assert.equal(resolveFdPath(3, "darwin"), "/dev/fd/3");
+      assert.equal(resolveFdPath(3, "win32"), undefined);
+    }),
+  );
+
   it.effect("reads a bootstrap envelope from a provided fd", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -104,49 +88,14 @@ it.layer(NodeServices.layer)("readBootstrapEnvelope", (it) => {
       // stream's async close and produces an uncaught EBADF.
       const fd = NFS.openSync(filePath, "r");
 
-      bootstrapFsInterceptor.failOpenPath = resolveFdPath(fd) ?? null;
+      openSyncInterceptor.failPath = `/proc/self/fd/${fd}`;
       try {
         const payload = yield* readBootstrapEnvelope(TestEnvelopeSchema, fd, { timeoutMs: 100 });
         assertSome(payload, {
           mode: "desktop",
         });
       } finally {
-        bootstrapFsInterceptor.failOpenPath = null;
-      }
-    }),
-  );
-
-  it.effect("closes the duplicated fd before falling back when the duplicated stream fails", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const filePath = yield* fs.makeTempFileScoped({ prefix: "t3-bootstrap-", suffix: ".ndjson" });
-
-      yield* fs.writeFileString(
-        filePath,
-        `${yield* Schema.encodeEffect(Schema.fromJsonString(TestEnvelopeSchema))({
-          mode: "desktop",
-        })}\n`,
-      );
-
-      const fd = NFS.openSync(filePath, "r");
-      const duplicatedFdPath = resolveFdPath(fd);
-      assert.notStrictEqual(duplicatedFdPath, undefined);
-      const closeSyncSpy = vi.spyOn(NFS, "closeSync");
-      bootstrapFsInterceptor.failCreateReadStreamForDuplicatedPath = duplicatedFdPath ?? null;
-
-      try {
-        const payload = yield* readBootstrapEnvelope(TestEnvelopeSchema, fd, { timeoutMs: 100 });
-        assertSome(payload, {
-          mode: "desktop",
-        });
-
-        const duplicatedFd = bootstrapFsInterceptor.duplicatedFdForPathFailure;
-        assert.notStrictEqual(duplicatedFd, null);
-        assert.ok(closeSyncSpy.mock.calls.some(([closedFd]) => closedFd === duplicatedFd));
-      } finally {
-        bootstrapFsInterceptor.failCreateReadStreamForDuplicatedPath = null;
-        bootstrapFsInterceptor.duplicatedFdForPathFailure = null;
-        closeSyncSpy.mockRestore();
+        openSyncInterceptor.failPath = null;
       }
     }),
   );
