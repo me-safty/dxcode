@@ -64,10 +64,11 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const lineCount = planMarkdown.split("\n").length;
   const canCollapse = planMarkdown.length > 900 || lineCount > 20;
   const displayedPlanMarkdown = stripDisplayedPlanMarkdown(planMarkdown);
+  const searchExpanded = canCollapse && searchQuery.trim().length > 0;
+  const showExpandedPlan = expanded || searchExpanded;
   const collapsedPreview = canCollapse
     ? buildCollapsedProposedPlanPreviewMarkdown(planMarkdown, { maxLines: 10 })
     : null;
-  const searchIsActive = searchQuery.trim().length > 0;
   const downloadFilename = buildProposedPlanMarkdownFilename(planMarkdown);
   const saveContents = normalizePlanMarkdownForExport(planMarkdown);
 
@@ -174,10 +175,10 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         <div
           className={cn(
             "relative",
-            canCollapse && !expanded && !searchIsActive && "max-h-104 overflow-hidden",
+            canCollapse && !showExpandedPlan && "max-h-104 overflow-hidden",
           )}
         >
-          {canCollapse && !expanded && !searchIsActive ? (
+          {canCollapse && !showExpandedPlan ? (
             <ChatMarkdown
               text={collapsedPreview ?? ""}
               cwd={cwd}
@@ -194,11 +195,11 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
               searchActive={searchActive}
             />
           )}
-          {canCollapse && !expanded && !searchIsActive ? (
+          {canCollapse && !showExpandedPlan ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-linear-to-t from-card/95 via-card/80 to-transparent" />
           ) : null}
         </div>
-        {canCollapse && !searchIsActive ? (
+        {canCollapse && !searchExpanded ? (
           <div className="mt-4 flex justify-center">
             <Button
               size="sm"

@@ -34,6 +34,44 @@ const rows: TimelineRow[] = [
     },
   },
   {
+    kind: "message",
+    id: "user-message-row",
+    createdAt: "2026-03-28T12:00:05.000Z",
+    durationStart: "2026-03-28T12:00:05.000Z",
+    showCompletionDivider: false,
+    message: {
+      id: MessageId.makeUnsafe("message-1b"),
+      role: "user",
+      text: [
+        "Visible composer text",
+        "",
+        "<terminal_context>",
+        "- Terminal 1 lines 1-5:",
+        "  1 | hidden needle payload",
+        "</terminal_context>",
+      ].join("\n"),
+      createdAt: "2026-03-28T12:00:05.000Z",
+      streaming: false,
+      attachments: [
+        {
+          type: "image",
+          id: "attachment-hidden",
+          name: "hidden-preview-name.png",
+          mimeType: "image/png",
+          sizeBytes: 512,
+          previewUrl: "https://example.com/preview.png",
+        },
+        {
+          type: "image",
+          id: "attachment-visible",
+          name: "visible-upload-name.png",
+          mimeType: "image/png",
+          sizeBytes: 256,
+        },
+      ],
+    },
+  },
+  {
     kind: "work",
     id: "work-row",
     createdAt: "2026-03-28T12:00:10.000Z",
@@ -77,11 +115,16 @@ describe("findThreadSearchResults", () => {
       {
         rowId: "message-row",
         rowIndex: 0,
-        normalizedTexts: ["needle in the response. another needle is here.", "needle-diagram.png"],
+        normalizedTexts: ["needle in the response. another needle is here."],
+      },
+      {
+        rowId: "user-message-row",
+        rowIndex: 1,
+        normalizedTexts: ["visible composer text", "visible-upload-name.png"],
       },
       {
         rowId: "work-row",
-        rowIndex: 1,
+        rowIndex: 2,
         normalizedTexts: [
           "edit readme",
           "updated readme",
@@ -92,12 +135,12 @@ describe("findThreadSearchResults", () => {
       },
       {
         rowId: "plan-row",
-        rowIndex: 2,
+        rowIndex: 3,
         normalizedTexts: ["1. add thread search\n2. jump to the matching row"],
       },
       {
         rowId: "working-row",
-        rowIndex: 3,
+        rowIndex: 4,
         normalizedTexts: [],
       },
     ]);
@@ -108,7 +151,7 @@ describe("findThreadSearchResults", () => {
       {
         rowId: "message-row",
         rowIndex: 0,
-        matchCount: 3,
+        matchCount: 2,
       },
     ]);
   });
@@ -117,7 +160,7 @@ describe("findThreadSearchResults", () => {
     expect(findThreadSearchResults(rows, "readme")).toEqual([
       {
         rowId: "work-row",
-        rowIndex: 1,
+        rowIndex: 2,
         matchCount: 3,
       },
     ]);
@@ -127,7 +170,7 @@ describe("findThreadSearchResults", () => {
     expect(findThreadSearchResults(rows, "edit readme")).toEqual([
       {
         rowId: "work-row",
-        rowIndex: 1,
+        rowIndex: 2,
         matchCount: 1,
       },
     ]);
@@ -137,11 +180,30 @@ describe("findThreadSearchResults", () => {
     expect(findThreadSearchResults(rows, "thread search")).toEqual([
       {
         rowId: "plan-row",
-        rowIndex: 2,
+        rowIndex: 3,
         matchCount: 1,
       },
     ]);
     expect(findThreadSearchResults(rows, "working")).toEqual([]);
+  });
+
+  it("ignores hidden terminal-context payloads and hidden preview attachment names", () => {
+    expect(findThreadSearchResults(rows, "hidden needle payload")).toEqual([]);
+    expect(findThreadSearchResults(rows, "hidden-preview-name")).toEqual([]);
+    expect(findThreadSearchResults(rows, "visible composer text")).toEqual([
+      {
+        rowId: "user-message-row",
+        rowIndex: 1,
+        matchCount: 1,
+      },
+    ]);
+    expect(findThreadSearchResults(rows, "visible-upload-name")).toEqual([
+      {
+        rowId: "user-message-row",
+        rowIndex: 1,
+        matchCount: 1,
+      },
+    ]);
   });
 
   it("returns no results for empty queries", () => {
@@ -152,7 +214,7 @@ describe("findThreadSearchResults", () => {
     expect(findThreadSearchResults(rows, "row")).toEqual([
       {
         rowId: "plan-row",
-        rowIndex: 2,
+        rowIndex: 3,
         matchCount: 1,
       },
     ]);
@@ -176,7 +238,7 @@ describe("findThreadSearchResults", () => {
       {
         rowId: "message-row",
         rowIndex: 0,
-        matchCount: 3,
+        matchCount: 2,
       },
     ]);
   });

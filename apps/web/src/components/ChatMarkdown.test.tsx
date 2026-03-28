@@ -24,4 +24,20 @@ describe("ChatMarkdown", () => {
     expect(markup).toContain("<mark");
     expect(markup).toContain(">highlight<");
   });
+
+  it("highlights fenced code matches without dropping the visible mark", async () => {
+    const { default: ChatMarkdown } = await import("./ChatMarkdown");
+    const markup = renderToStaticMarkup(
+      <ChatMarkdown
+        text={"```ts\nconst highlightNeedle = true;\n```"}
+        cwd={undefined}
+        searchQuery="highlightNeedle"
+        searchActive
+      />,
+    );
+
+    expect(markup).toContain('data-thread-search-highlight="active"');
+    expect(markup).toContain("<mark");
+    expect(markup).toContain(">highlightNeedle<");
+  });
 });

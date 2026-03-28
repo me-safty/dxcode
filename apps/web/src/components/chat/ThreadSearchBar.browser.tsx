@@ -88,6 +88,13 @@ describe("ThreadSearchBar", () => {
     } finally {
       await active.cleanup();
     }
+
+    const reopened = await mountBar({ query: "needle", resultCount: 3, activeResultIndex: -1 });
+    try {
+      await expect.element(page.getByTestId("thread-search-count")).toHaveTextContent("1 / 3");
+    } finally {
+      await reopened.cleanup();
+    }
   });
 
   it("routes Enter, Shift+Enter, and Escape to the expected callbacks", async () => {

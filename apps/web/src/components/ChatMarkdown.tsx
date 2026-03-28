@@ -28,7 +28,11 @@ import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
-import { createThreadSearchHighlightRehypePlugin } from "./chat/threadSearchHighlight";
+import {
+  createThreadSearchHighlightRehypePlugin,
+  renderHighlightedText,
+  textContainsThreadSearchMatch,
+} from "./chat/threadSearchHighlight";
 import {
   normalizeMarkdownLinkDestination,
   resolveMarkdownFileLinkMeta,
@@ -594,10 +598,21 @@ function ChatMarkdown({
         if (!codeBlock) {
           return <pre {...props}>{children}</pre>;
         }
-        if (searchQuery.trim().length > 0) {
+        if (textContainsThreadSearchMatch(codeBlock.code, searchQuery)) {
           return (
             <MarkdownCodeBlock code={codeBlock.code}>
-              <pre {...props}>{children}</pre>
+              <pre {...props}>
+                <code className={codeBlock.className}>
+                  {renderHighlightedText(
+                    codeBlock.code,
+                    searchQuery,
+                    `markdown-code:${codeBlock.code}`,
+                    {
+                      active: searchActive,
+                    },
+                  )}
+                </code>
+              </pre>
             </MarkdownCodeBlock>
           );
         }
@@ -624,6 +639,7 @@ function ChatMarkdown({
       isStreaming,
       markdownFileLinkMetaByHref,
       resolvedTheme,
+      searchActive,
       searchQuery,
       skills,
     ],

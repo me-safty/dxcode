@@ -31,7 +31,7 @@ export function ThreadSearchBar({
       ? "Type to search"
       : resultCount === 0
         ? "No matches"
-        : `${Math.min(activeResultIndex + 1, resultCount)} / ${resultCount}`;
+        : `${Math.min(Math.max(activeResultIndex, 0) + 1, resultCount)} / ${resultCount}`;
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") {
