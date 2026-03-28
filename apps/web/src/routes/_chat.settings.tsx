@@ -75,6 +75,11 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
+const FOLLOW_UP_BEHAVIOR_LABELS = {
+  queue: "Queue",
+  steer: "Steer",
+} as const;
+
 const EMPTY_SERVER_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 
 type InstallProviderSettings = {
@@ -677,6 +682,50 @@ function SettingsRouteView() {
                       </SelectItem>
                       <SelectItem hideIndicator value="24-hour">
                         {TIMESTAMP_FORMAT_LABELS["24-hour"]}
+                      </SelectItem>
+                    </SelectPopup>
+                  </Select>
+                }
+              />
+
+              <SettingsRow
+                title="Follow-up behavior"
+                description="While a turn is running, choose whether new follow-ups queue for later or steer the current run."
+                resetAction={
+                  settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior ? (
+                    <SettingResetButton
+                      label="follow-up behavior"
+                      onClick={() =>
+                        updateSettings({
+                          followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
+                        })
+                      }
+                    />
+                  ) : null
+                }
+                control={
+                  <Select
+                    value={settings.followUpBehavior}
+                    onValueChange={(value) => {
+                      if (value !== "queue" && value !== "steer") {
+                        return;
+                      }
+                      updateSettings({
+                        followUpBehavior: value,
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="w-full sm:w-40" aria-label="Follow-up behavior">
+                      <SelectValue>
+                        {FOLLOW_UP_BEHAVIOR_LABELS[settings.followUpBehavior]}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup align="end" alignItemWithTrigger={false}>
+                      <SelectItem hideIndicator value="queue">
+                        {FOLLOW_UP_BEHAVIOR_LABELS.queue}
+                      </SelectItem>
+                      <SelectItem hideIndicator value="steer">
+                        {FOLLOW_UP_BEHAVIOR_LABELS.steer}
                       </SelectItem>
                     </SelectPopup>
                   </Select>

@@ -87,6 +87,8 @@ import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   BotIcon,
+  Clock3Icon,
+  CornerDownRightIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -126,10 +128,13 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
+  hydrateComposerImagesFromPersistedAttachments,
   type PersistedComposerImageAttachment,
+  type QueuedFollowUpDraft,
   useComposerDraftStore,
   useEffectiveComposerModelState,
   useComposerThreadDraft,
+  useQueuedFollowUps,
 } from "../composerDraftStore";
 import {
   appendTerminalContextsToPrompt,
@@ -155,6 +160,7 @@ import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu"
 import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./chat/ComposerPlanFollowUpBanner";
+import { ComposerQueuedFollowUpsPanel } from "./chat/ComposerQueuedFollowUpsPanel";
 import {
   getComposerProviderState,
   renderProviderTraitsMenuContent,
@@ -164,18 +170,23 @@ import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import {
   buildExpiredTerminalContextToastCopy,
+  buildQueuedFollowUpDraft,
   buildLocalDraftThread,
   buildTemporaryWorktreeBranchName,
+  canAutoDispatchQueuedFollowUp,
   cloneComposerImageForRetry,
   collectUserMessageBlobPreviewUrls,
   deriveComposerSendState,
+  followUpBehaviorShortcutLabel,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
   PullRequestDialogState,
   readFileAsDataUrl,
+  resolveFollowUpBehavior,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   SendPhase,
+  shouldInvertFollowUpBehaviorFromKeyEvent,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 
@@ -245,6 +256,18 @@ interface PendingPullRequestSetupRequest {
   scriptId: string;
 }
 
+type FollowUpSubmissionSnapshot = QueuedFollowUpDraft;
+
+function persistedModelOptionsFromSelection(
+  modelSelection: ModelSelection,
+): Parameters<typeof getComposerProviderState>[0]["modelOptions"] {
+  return modelSelection.options
+    ? {
+        [modelSelection.provider]: modelSelection.options,
+      }
+    : null;
+}
+
 export default function ChatView({ threadId }: ChatViewProps) {
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
@@ -257,6 +280,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     (store) => store.setStickyModelSelection,
   );
   const timestampFormat = settings.timestampFormat;
+  const queuedFollowUps = useQueuedFollowUps(threadId);
   const navigate = useNavigate();
   const rawSearch = useSearch({
     strict: false,
@@ -306,6 +330,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const syncComposerDraftPersistedAttachments = useComposerDraftStore(
     (store) => store.syncPersistedAttachments,
   );
+  const enqueueQueuedFollowUp = useComposerDraftStore((store) => store.enqueueQueuedFollowUp);
+  const reorderQueuedFollowUp = useComposerDraftStore((store) => store.reorderQueuedFollowUp);
+  const updateQueuedFollowUp = useComposerDraftStore((store) => store.updateQueuedFollowUp);
+  const removeQueuedFollowUp = useComposerDraftStore((store) => store.removeQueuedFollowUp);
+  const shiftQueuedFollowUp = useComposerDraftStore((store) => store.shiftQueuedFollowUp);
+  const restoreQueuedFollowUpToDraft = useComposerDraftStore(
+    (store) => store.restoreQueuedFollowUpToDraft,
+  );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const getDraftThreadByProjectId = useComposerDraftStore(
@@ -324,6 +356,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
+  const [hiddenTimelineMessageIds, setHiddenTimelineMessageIds] = useState<ReadonlySet<MessageId>>(
+    () => new Set(),
+  );
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>(composerTerminalContexts);
@@ -396,6 +431,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewHandoffTimeoutByMessageIdRef = useRef<Record<string, number>>({});
   const sendInFlightRef = useRef(false);
+  const autoDispatchQueuedFollowUpIdRef = useRef<string | null>(null);
   const dragDepthRef = useRef(0);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
   const setMessagesScrollContainerRef = useCallback((element: HTMLDivElement | null) => {
@@ -667,6 +703,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const isSendBusy = sendPhase !== "idle";
   const isPreparingWorktree = sendPhase === "preparing-worktree";
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const followUpBehavior = settings.followUpBehavior;
   const nowIso = new Date(nowTick).toISOString();
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
@@ -753,11 +790,33 @@ export default function ChatView({ threadId }: ChatViewProps) {
     hasActionableProposedPlan(activeProposedPlan);
   const activePendingApproval = pendingApprovals[0] ?? null;
   const isComposerApprovalState = activePendingApproval !== null;
+  const canUseRunningFollowUps =
+    phase === "running" && !isComposerApprovalState && pendingUserInputs.length === 0;
   const hasComposerHeader =
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
     (showPlanFollowUpPrompt && activeProposedPlan !== null);
   const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
+  const runningFollowUpActionLabel =
+    followUpBehavior === "queue" ? "Queue follow-up" : "Steer follow-up";
+  const runningFollowUpShortcutRows =
+    followUpBehavior === "queue"
+      ? [
+          { label: "Queue", shortcut: "Enter", active: true },
+          {
+            label: "Steer",
+            shortcut: followUpBehaviorShortcutLabel(),
+            active: false,
+          },
+        ]
+      : [
+          { label: "Steer", shortcut: "Enter", active: true },
+          {
+            label: "Queue",
+            shortcut: followUpBehaviorShortcutLabel(),
+            active: false,
+          },
+        ];
   const lastSyncedPendingInputRef = useRef<{
     requestId: string | null;
     questionId: string | null;
@@ -823,6 +882,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
     };
   }, [clearAttachmentPreviewHandoffs]);
+  useEffect(() => {
+    setHiddenTimelineMessageIds(new Set());
+  }, [activeThread?.id]);
   const handoffAttachmentPreviews = useCallback((messageId: MessageId, previewUrls: string[]) => {
     if (previewUrls.length === 0) return;
 
@@ -907,15 +969,30 @@ export default function ChatView({ threadId }: ChatViewProps) {
           });
 
     if (optimisticUserMessages.length === 0) {
-      return serverMessagesWithPreviewHandoff;
+      return hiddenTimelineMessageIds.size === 0
+        ? serverMessagesWithPreviewHandoff
+        : serverMessagesWithPreviewHandoff.filter(
+            (message) => !hiddenTimelineMessageIds.has(message.id),
+          );
     }
-    const serverIds = new Set(serverMessagesWithPreviewHandoff.map((message) => message.id));
+    const visibleServerMessages =
+      hiddenTimelineMessageIds.size === 0
+        ? serverMessagesWithPreviewHandoff
+        : serverMessagesWithPreviewHandoff.filter(
+            (message) => !hiddenTimelineMessageIds.has(message.id),
+          );
+    const serverIds = new Set(visibleServerMessages.map((message) => message.id));
     const pendingMessages = optimisticUserMessages.filter((message) => !serverIds.has(message.id));
     if (pendingMessages.length === 0) {
-      return serverMessagesWithPreviewHandoff;
+      return visibleServerMessages;
     }
-    return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
-  }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
+    return [...visibleServerMessages, ...pendingMessages];
+  }, [
+    serverMessages,
+    attachmentPreviewHandoffByMessageId,
+    hiddenTimelineMessageIds,
+    optimisticUserMessages,
+  ]);
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
@@ -2428,8 +2505,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeThread, isConnecting, isRevertingCheckpoint, isSendBusy, phase, setThreadError],
   );
 
-  const onSend = async (e?: { preventDefault: () => void }) => {
-    e?.preventDefault();
+  const onSend = async (input?: { preventDefault?: () => void; keyboardEvent?: KeyboardEvent }) => {
+    input?.preventDefault?.();
     const api = readNativeApi();
     if (!api || !activeThread || isSendBusy || isConnecting || sendInFlightRef.current) return;
     if (activePendingProgress) {
@@ -2461,6 +2538,47 @@ export default function ChatView({ threadId }: ChatViewProps) {
         text: followUp.text,
         interactionMode: followUp.interactionMode,
       });
+      return;
+    }
+    if (canUseRunningFollowUps && isServerThread) {
+      const createdAt = new Date().toISOString();
+      const followUpSnapshot = await createFollowUpSnapshotFromComposer(createdAt);
+      if (!followUpSnapshot) {
+        return;
+      }
+      const effectiveBehavior = resolveFollowUpBehavior(
+        followUpBehavior,
+        Boolean(
+          input?.keyboardEvent && shouldInvertFollowUpBehaviorFromKeyEvent(input.keyboardEvent),
+        ),
+      );
+
+      if (effectiveBehavior === "queue") {
+        enqueueQueuedFollowUp(activeThread.id, followUpSnapshot);
+        promptRef.current = "";
+        clearComposerDraftContent(activeThread.id);
+        setComposerHighlightedItemId(null);
+        setComposerCursor(0);
+        setComposerTrigger(null);
+        return;
+      }
+
+      promptRef.current = "";
+      clearComposerDraftContent(activeThread.id);
+      setComposerHighlightedItemId(null);
+      setComposerCursor(0);
+      setComposerTrigger(null);
+
+      const dispatched = await dispatchServerThreadSnapshot({
+        threadId: activeThread.id,
+        snapshot: followUpSnapshot,
+        errorMessage: "Failed to send follow-up.",
+        suppressOptimisticMessage: true,
+        hideServerMessage: true,
+      });
+      if (!dispatched) {
+        restoreFollowUpSnapshotToComposer(followUpSnapshot);
+      }
       return;
     }
     const standaloneSlashCommand =
@@ -2915,6 +3033,224 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setActivePendingUserInputQuestionIndex(Math.max(activePendingProgress.questionIndex - 1, 0));
   }, [activePendingProgress, setActivePendingUserInputQuestionIndex]);
 
+  const createFollowUpSnapshotFromComposer = useCallback(
+    async (createdAt: string): Promise<FollowUpSubmissionSnapshot | null> => {
+      const promptForSend = promptRef.current;
+      const {
+        trimmedPrompt,
+        sendableTerminalContexts,
+        expiredTerminalContextCount,
+        hasSendableContent,
+      } = deriveComposerSendState({
+        prompt: promptForSend,
+        imageCount: composerImagesRef.current.length,
+        terminalContexts: composerTerminalContextsRef.current,
+      });
+      if (!hasSendableContent) {
+        if (expiredTerminalContextCount > 0) {
+          const toastCopy = buildExpiredTerminalContextToastCopy(
+            expiredTerminalContextCount,
+            "empty",
+          );
+          toastManager.add({
+            type: "warning",
+            title: toastCopy.title,
+            description: toastCopy.description,
+          });
+        }
+        return null;
+      }
+      const persistedAttachments = await Promise.all(
+        composerImagesRef.current.map(async (image) => ({
+          id: image.id,
+          name: image.name,
+          mimeType: image.mimeType,
+          sizeBytes: image.sizeBytes,
+          dataUrl: await readFileAsDataUrl(image.file),
+        })),
+      );
+      return buildQueuedFollowUpDraft({
+        prompt: trimmedPrompt,
+        attachments: persistedAttachments,
+        terminalContexts: sendableTerminalContexts,
+        modelSelection: selectedModelSelection,
+        runtimeMode,
+        interactionMode,
+        createdAt,
+      });
+    },
+    [interactionMode, runtimeMode, selectedModelSelection],
+  );
+
+  const restoreFollowUpSnapshotToComposer = useCallback(
+    (snapshot: FollowUpSubmissionSnapshot) => {
+      setComposerDraftPrompt(threadId, snapshot.prompt);
+      useComposerDraftStore.setState((state) => {
+        const currentDraft = state.draftsByThreadId[threadId];
+        return {
+          draftsByThreadId: {
+            ...state.draftsByThreadId,
+            [threadId]: {
+              ...(currentDraft ?? composerDraft),
+              prompt: snapshot.prompt,
+              images: hydrateComposerImagesFromPersistedAttachments(snapshot.attachments),
+              nonPersistedImageIds: [],
+              persistedAttachments: [...snapshot.attachments],
+              terminalContexts: snapshot.terminalContexts.map((context) => ({ ...context })),
+              modelSelectionByProvider: {
+                ...(currentDraft?.modelSelectionByProvider ??
+                  composerDraft.modelSelectionByProvider),
+                [snapshot.modelSelection.provider]: snapshot.modelSelection,
+              },
+              activeProvider: snapshot.modelSelection.provider,
+              runtimeMode: snapshot.runtimeMode,
+              interactionMode: snapshot.interactionMode,
+            },
+          },
+        };
+      });
+      promptRef.current = snapshot.prompt;
+      setComposerCursor(collapseExpandedComposerCursor(snapshot.prompt, snapshot.prompt.length));
+      setComposerTrigger(detectComposerTrigger(snapshot.prompt, snapshot.prompt.length));
+    },
+    [composerDraft, setComposerDraftPrompt, threadId],
+  );
+
+  const dispatchServerThreadSnapshot = useCallback(
+    async (input: {
+      threadId: ThreadId;
+      snapshot: FollowUpSubmissionSnapshot;
+      errorMessage: string;
+      suppressOptimisticMessage?: boolean;
+      hideServerMessage?: boolean;
+      sourceProposedPlan?: {
+        threadId: ThreadId;
+        planId: string;
+      };
+      onAfterDispatch?: () => void;
+    }) => {
+      const api = readNativeApi();
+      if (!api) {
+        return false;
+      }
+      const snapshotProvider = input.snapshot.modelSelection.provider;
+      const snapshotModel = input.snapshot.modelSelection.model;
+      const snapshotModels = getProviderModels(providerStatuses, snapshotProvider);
+      const snapshotProviderState = getComposerProviderState({
+        provider: snapshotProvider,
+        model: snapshotModel,
+        models: snapshotModels,
+        prompt: input.snapshot.prompt,
+        modelOptions: persistedModelOptionsFromSelection(input.snapshot.modelSelection),
+      });
+      const promptWithTerminalContexts = appendTerminalContextsToPrompt(
+        input.snapshot.prompt,
+        input.snapshot.terminalContexts,
+      );
+      const outgoingMessageText = formatOutgoingPrompt({
+        provider: snapshotProvider,
+        model: snapshotModel,
+        models: snapshotModels,
+        effort: snapshotProviderState.promptEffort,
+        text: promptWithTerminalContexts || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+      });
+      const optimisticAttachments = input.snapshot.attachments.map((attachment) => ({
+        type: "image" as const,
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        previewUrl: attachment.dataUrl,
+      }));
+      const messageIdForSend = newMessageId();
+      const dispatchCreatedAt = new Date().toISOString();
+
+      sendInFlightRef.current = true;
+      beginSendPhase("sending-turn");
+      setThreadError(input.threadId, null);
+      if (input.hideServerMessage) {
+        setHiddenTimelineMessageIds((existing) => new Set(existing).add(messageIdForSend));
+      }
+      if (!input.suppressOptimisticMessage) {
+        setOptimisticUserMessages((existing) => [
+          ...existing,
+          {
+            id: messageIdForSend,
+            role: "user",
+            text: outgoingMessageText,
+            ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+            createdAt: dispatchCreatedAt,
+            streaming: false,
+          },
+        ]);
+      }
+      shouldAutoScrollRef.current = true;
+      forceStickToBottom();
+
+      try {
+        await persistThreadSettingsForNextTurn({
+          threadId: input.threadId,
+          createdAt: dispatchCreatedAt,
+          modelSelection: input.snapshot.modelSelection,
+          runtimeMode: input.snapshot.runtimeMode,
+          interactionMode: input.snapshot.interactionMode,
+        });
+        setComposerDraftInteractionMode(input.threadId, input.snapshot.interactionMode);
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.start",
+          commandId: newCommandId(),
+          threadId: input.threadId,
+          message: {
+            messageId: messageIdForSend,
+            role: "user",
+            text: outgoingMessageText,
+            attachments: input.snapshot.attachments.map((attachment) => ({
+              type: "image" as const,
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              sizeBytes: attachment.sizeBytes,
+              dataUrl: attachment.dataUrl,
+            })),
+          },
+          modelSelection: input.snapshot.modelSelection,
+          runtimeMode: input.snapshot.runtimeMode,
+          interactionMode: input.snapshot.interactionMode,
+          ...(input.sourceProposedPlan ? { sourceProposedPlan: input.sourceProposedPlan } : {}),
+          createdAt: dispatchCreatedAt,
+        });
+        input.onAfterDispatch?.();
+        sendInFlightRef.current = false;
+        return true;
+      } catch (err) {
+        if (input.hideServerMessage) {
+          setHiddenTimelineMessageIds((existing) => {
+            const next = new Set(existing);
+            next.delete(messageIdForSend);
+            return next;
+          });
+        }
+        if (!input.suppressOptimisticMessage) {
+          setOptimisticUserMessages((existing) =>
+            existing.filter((message) => message.id !== messageIdForSend),
+          );
+        }
+        setThreadError(input.threadId, err instanceof Error ? err.message : input.errorMessage);
+        sendInFlightRef.current = false;
+        resetSendPhase();
+        return false;
+      }
+    },
+    [
+      beginSendPhase,
+      forceStickToBottom,
+      persistThreadSettingsForNextTurn,
+      providerStatuses,
+      resetSendPhase,
+      setComposerDraftInteractionMode,
+      setThreadError,
+    ],
+  );
+
   const onSubmitPlanFollowUp = useCallback(
     async ({
       text,
@@ -2940,109 +3276,188 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
 
-      const threadIdForSend = activeThread.id;
-      const messageIdForSend = newMessageId();
-      const messageCreatedAt = new Date().toISOString();
-      const outgoingMessageText = formatOutgoingPrompt({
-        provider: selectedProvider,
-        model: selectedModel,
-        models: selectedProviderModels,
-        effort: selectedPromptEffort,
-        text: trimmed,
-      });
-
-      sendInFlightRef.current = true;
-      beginSendPhase("sending-turn");
-      setThreadError(threadIdForSend, null);
-      setOptimisticUserMessages((existing) => [
-        ...existing,
-        {
-          id: messageIdForSend,
-          role: "user",
-          text: outgoingMessageText,
-          createdAt: messageCreatedAt,
-          streaming: false,
+      await dispatchServerThreadSnapshot({
+        threadId: activeThread.id,
+        snapshot: {
+          id: randomUUID(),
+          createdAt: new Date().toISOString(),
+          prompt: trimmed,
+          attachments: [],
+          terminalContexts: [],
+          modelSelection: selectedModelSelection,
+          runtimeMode,
+          interactionMode: nextInteractionMode,
         },
-      ]);
-      shouldAutoScrollRef.current = true;
-      forceStickToBottom();
-
-      try {
-        await persistThreadSettingsForNextTurn({
-          threadId: threadIdForSend,
-          createdAt: messageCreatedAt,
-          modelSelection: selectedModelSelection,
-          runtimeMode,
-          interactionMode: nextInteractionMode,
-        });
-
-        // Keep the mode toggle and plan-follow-up banner in sync immediately
-        // while the same-thread implementation turn is starting.
-        setComposerDraftInteractionMode(threadIdForSend, nextInteractionMode);
-
-        await api.orchestration.dispatchCommand({
-          type: "thread.turn.start",
-          commandId: newCommandId(),
-          threadId: threadIdForSend,
-          message: {
-            messageId: messageIdForSend,
-            role: "user",
-            text: outgoingMessageText,
-            attachments: [],
-          },
-          modelSelection: selectedModelSelection,
-          runtimeMode,
-          interactionMode: nextInteractionMode,
-          ...(nextInteractionMode === "default" && activeProposedPlan
-            ? {
-                sourceProposedPlan: {
-                  threadId: activeThread.id,
-                  planId: activeProposedPlan.id,
-                },
-              }
-            : {}),
-          createdAt: messageCreatedAt,
-        });
-        // Optimistically open the plan sidebar when implementing (not refining).
-        // "default" mode here means the agent is executing the plan, which produces
-        // step-tracking activities that the sidebar will display.
-        if (nextInteractionMode === "default") {
-          planSidebarDismissedForTurnRef.current = null;
-          setPlanSidebarOpen(true);
-        }
-        sendInFlightRef.current = false;
-      } catch (err) {
-        setOptimisticUserMessages((existing) =>
-          existing.filter((message) => message.id !== messageIdForSend),
-        );
-        setThreadError(
-          threadIdForSend,
-          err instanceof Error ? err.message : "Failed to send plan follow-up.",
-        );
-        sendInFlightRef.current = false;
-        resetSendPhase();
-      }
+        errorMessage: "Failed to send plan follow-up.",
+        ...(nextInteractionMode === "default" && activeProposedPlan
+          ? {
+              sourceProposedPlan: {
+                threadId: activeThread.id,
+                planId: activeProposedPlan.id,
+              },
+            }
+          : {}),
+        onAfterDispatch: () => {
+          if (nextInteractionMode === "default") {
+            planSidebarDismissedForTurnRef.current = null;
+            setPlanSidebarOpen(true);
+          }
+        },
+      });
     },
     [
       activeThread,
       activeProposedPlan,
-      beginSendPhase,
-      forceStickToBottom,
+      dispatchServerThreadSnapshot,
       isConnecting,
       isSendBusy,
       isServerThread,
-      persistThreadSettingsForNextTurn,
-      resetSendPhase,
       runtimeMode,
-      selectedPromptEffort,
       selectedModelSelection,
-      selectedProvider,
-      selectedProviderModels,
-      setComposerDraftInteractionMode,
-      setThreadError,
-      selectedModel,
     ],
   );
+
+  const onDeleteQueuedFollowUp = useCallback(
+    (followUpId: string) => {
+      removeQueuedFollowUp(threadId, followUpId);
+    },
+    [removeQueuedFollowUp, threadId],
+  );
+
+  const onReorderQueuedFollowUp = useCallback(
+    (followUpId: string, targetIndex: number) => {
+      reorderQueuedFollowUp(threadId, followUpId, targetIndex);
+    },
+    [reorderQueuedFollowUp, threadId],
+  );
+
+  const onEditQueuedFollowUp = useCallback(
+    (followUpId: string) => {
+      const followUp = queuedFollowUps.find((entry) => entry.id === followUpId);
+      if (!followUp) {
+        return;
+      }
+      restoreQueuedFollowUpToDraft(threadId, followUpId);
+      promptRef.current = followUp.prompt;
+      setComposerCursor(collapseExpandedComposerCursor(followUp.prompt, followUp.prompt.length));
+      setComposerTrigger(detectComposerTrigger(followUp.prompt, followUp.prompt.length));
+      window.requestAnimationFrame(() => {
+        composerEditorRef.current?.focusAt(
+          collapseExpandedComposerCursor(followUp.prompt, followUp.prompt.length),
+        );
+      });
+    },
+    [queuedFollowUps, restoreQueuedFollowUpToDraft, threadId],
+  );
+
+  const onSteerQueuedFollowUp = useCallback(
+    async (followUpId: string) => {
+      if (
+        !activeThread ||
+        !isServerThread ||
+        isSendBusy ||
+        isConnecting ||
+        sendInFlightRef.current
+      ) {
+        return;
+      }
+      const followUp = queuedFollowUps.find((entry) => entry.id === followUpId);
+      if (!followUp) {
+        return;
+      }
+      updateQueuedFollowUp(threadId, followUpId, (existing) => {
+        const { lastSendError: _lastSendError, ...rest } = existing;
+        return { ...rest };
+      });
+      const dispatched = await dispatchServerThreadSnapshot({
+        threadId: activeThread.id,
+        snapshot: followUp,
+        errorMessage: "Failed to steer queued follow-up.",
+        suppressOptimisticMessage: phase === "running",
+        hideServerMessage: true,
+      });
+      if (dispatched) {
+        removeQueuedFollowUp(threadId, followUpId);
+      } else {
+        updateQueuedFollowUp(threadId, followUpId, (existing) => ({
+          ...existing,
+          lastSendError: "Steer failed. Review the thread error or edit this follow-up.",
+        }));
+      }
+    },
+    [
+      activeThread,
+      dispatchServerThreadSnapshot,
+      isConnecting,
+      isSendBusy,
+      isServerThread,
+      phase,
+      queuedFollowUps,
+      removeQueuedFollowUp,
+      threadId,
+      updateQueuedFollowUp,
+    ],
+  );
+
+  useEffect(() => {
+    if (!activeThread || !isServerThread) {
+      autoDispatchQueuedFollowUpIdRef.current = null;
+      return;
+    }
+    const nextQueuedFollowUp = queuedFollowUps[0];
+    if (!nextQueuedFollowUp || nextQueuedFollowUp.lastSendError) {
+      autoDispatchQueuedFollowUpIdRef.current = null;
+      return;
+    }
+    if (
+      !canAutoDispatchQueuedFollowUp({
+        phase,
+        queuedFollowUpCount: queuedFollowUps.length,
+        isConnecting,
+        isSendBusy,
+        isRevertingCheckpoint,
+        hasThreadError: Boolean(activeThread.error),
+        hasPendingApproval: activePendingApproval !== null,
+        hasPendingUserInput: activePendingUserInput !== null,
+      })
+    ) {
+      return;
+    }
+    if (autoDispatchQueuedFollowUpIdRef.current === nextQueuedFollowUp.id) {
+      return;
+    }
+    autoDispatchQueuedFollowUpIdRef.current = nextQueuedFollowUp.id;
+    void (async () => {
+      const dispatched = await dispatchServerThreadSnapshot({
+        threadId: activeThread.id,
+        snapshot: nextQueuedFollowUp,
+        errorMessage: "Failed to send queued follow-up.",
+      });
+      if (dispatched) {
+        shiftQueuedFollowUp(threadId);
+      } else {
+        updateQueuedFollowUp(threadId, nextQueuedFollowUp.id, (existing) => ({
+          ...existing,
+          lastSendError: "Auto-send failed. Steer, edit, or delete this follow-up.",
+        }));
+      }
+      autoDispatchQueuedFollowUpIdRef.current = null;
+    })();
+  }, [
+    activePendingApproval,
+    activePendingUserInput,
+    activeThread,
+    dispatchServerThreadSnapshot,
+    isConnecting,
+    isRevertingCheckpoint,
+    isSendBusy,
+    isServerThread,
+    phase,
+    queuedFollowUps,
+    shiftQueuedFollowUp,
+    threadId,
+    updateQueuedFollowUp,
+  ]);
 
   const onImplementPlanInNewThread = useCallback(async () => {
     const api = readNativeApi();
@@ -3483,8 +3898,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
     }
 
-    if (key === "Enter" && !event.shiftKey) {
-      void onSend();
+    if (key === "Enter" && (!event.shiftKey || shouldInvertFollowUpBehaviorFromKeyEvent(event))) {
+      void onSend({ keyboardEvent: event });
       return true;
     }
     return false;
@@ -3662,9 +4077,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
               className="mx-auto w-full min-w-0 max-w-3xl"
               data-chat-composer-form="true"
             >
+              <ComposerQueuedFollowUpsPanel
+                queuedFollowUps={queuedFollowUps}
+                onDelete={onDeleteQueuedFollowUp}
+                onEdit={onEditQueuedFollowUp}
+                onReorder={onReorderQueuedFollowUp}
+                onSteer={(followUpId) => {
+                  void onSteerQueuedFollowUp(followUpId);
+                }}
+              />
               <div
                 className={cn(
-                  "group rounded-[22px] p-px transition-colors duration-200",
+                  "relative z-10 group rounded-[22px] p-px transition-colors duration-200",
                   composerProviderState.composerFrameClassName,
                 )}
                 onDragEnter={onComposerDragEnter}
@@ -4027,22 +4451,81 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             </Button>
                           </div>
                         ) : phase === "running" ? (
-                          <button
-                            type="button"
-                            className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
-                            onClick={() => void onInterrupt()}
-                            aria-label="Stop generation"
-                          >
-                            <svg
-                              width="12"
-                              height="12"
-                              viewBox="0 0 12 12"
-                              fill="currentColor"
-                              aria-hidden="true"
+                          composerSendState.hasSendableContent ? (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <Button
+                                    type="submit"
+                                    size="sm"
+                                    className="h-9 w-9 rounded-full p-0 enabled:cursor-pointer sm:h-8 sm:w-8"
+                                    disabled={isSendBusy || isConnecting}
+                                    aria-label={runningFollowUpActionLabel}
+                                  >
+                                    {followUpBehavior === "queue" ? (
+                                      <Clock3Icon className="size-4" />
+                                    ) : (
+                                      <CornerDownRightIcon className="size-4" />
+                                    )}
+                                  </Button>
+                                }
+                              />
+                              <TooltipPopup
+                                side="top"
+                                sideOffset={8}
+                                className="rounded-[22px] border-border/70 bg-card/95 p-0 text-sm shadow-xl"
+                              >
+                                <div className="min-w-44 rounded-[20px] p-3">
+                                  <div className="space-y-2">
+                                    {runningFollowUpShortcutRows.map((row) => (
+                                      <div
+                                        key={row.label}
+                                        className="flex items-center justify-between gap-3"
+                                      >
+                                        <span
+                                          className={cn(
+                                            "text-[15px] leading-none",
+                                            row.active
+                                              ? "font-semibold text-foreground"
+                                              : "text-foreground/90",
+                                          )}
+                                        >
+                                          {row.label}
+                                        </span>
+                                        <span
+                                          className={cn(
+                                            "rounded-full px-3 py-1 text-xs font-medium leading-none",
+                                            row.active
+                                              ? "bg-accent text-foreground"
+                                              : "bg-muted text-muted-foreground",
+                                          )}
+                                        >
+                                          {row.shortcut}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </TooltipPopup>
+                            </Tooltip>
+                          ) : (
+                            <button
+                              type="button"
+                              className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
+                              onClick={() => void onInterrupt()}
+                              aria-label="Stop generation"
                             >
-                              <rect x="2" y="2" width="8" height="8" rx="1.5" />
-                            </svg>
-                          </button>
+                              <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 12 12"
+                                fill="currentColor"
+                                aria-hidden="true"
+                              >
+                                <rect x="2" y="2" width="8" height="8" rx="1.5" />
+                              </svg>
+                            </button>
+                          )
                         ) : pendingUserInputs.length === 0 ? (
                           showPlanFollowUpPrompt ? (
                             prompt.trim().length > 0 ? (

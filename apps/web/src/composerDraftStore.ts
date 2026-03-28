@@ -32,7 +32,7 @@ import { getDefaultServerModel } from "./providerModels";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
 
 export const COMPOSER_DRAFT_STORAGE_KEY = "t3code:composer-drafts:v1";
-const COMPOSER_DRAFT_STORAGE_VERSION = 3;
+const COMPOSER_DRAFT_STORAGE_VERSION = 4;
 const DraftThreadEnvModeSchema = Schema.Literals(["local", "worktree"]);
 export type DraftThreadEnvMode = typeof DraftThreadEnvModeSchema.Type;
 
@@ -75,6 +75,26 @@ const PersistedTerminalContextDraft = Schema.Struct({
 });
 type PersistedTerminalContextDraft = typeof PersistedTerminalContextDraft.Type;
 
+const PersistedQueuedTerminalContextDraft = Schema.Struct({
+  id: Schema.String,
+  threadId: ThreadId,
+  createdAt: Schema.String,
+  terminalId: Schema.String,
+  terminalLabel: Schema.String,
+  lineStart: Schema.Number,
+  lineEnd: Schema.Number,
+  text: Schema.String,
+});
+type PersistedQueuedTerminalContextDraft = typeof PersistedQueuedTerminalContextDraft.Type;
+
+const PersistedQueuedFollowUpEditState = Schema.Struct({
+  followUpId: Schema.String,
+  queueIndex: Schema.Number,
+  previousFollowUpId: Schema.NullOr(Schema.String),
+  nextFollowUpId: Schema.NullOr(Schema.String),
+});
+type PersistedQueuedFollowUpEditState = typeof PersistedQueuedFollowUpEditState.Type;
+
 const PersistedComposerThreadDraftState = Schema.Struct({
   prompt: Schema.String,
   attachments: Schema.Array(PersistedComposerImageAttachment),
@@ -85,8 +105,22 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   activeProvider: Schema.optionalKey(Schema.NullOr(ProviderKind)),
   runtimeMode: Schema.optionalKey(RuntimeMode),
   interactionMode: Schema.optionalKey(ProviderInteractionMode),
+  queuedFollowUpEdit: Schema.optionalKey(PersistedQueuedFollowUpEditState),
 });
 type PersistedComposerThreadDraftState = typeof PersistedComposerThreadDraftState.Type;
+
+const PersistedQueuedFollowUpDraft = Schema.Struct({
+  id: Schema.String,
+  createdAt: Schema.String,
+  prompt: Schema.String,
+  attachments: Schema.Array(PersistedComposerImageAttachment),
+  terminalContexts: Schema.Array(PersistedQueuedTerminalContextDraft),
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  lastSendError: Schema.optionalKey(Schema.String),
+});
+type PersistedQueuedFollowUpDraft = typeof PersistedQueuedFollowUpDraft.Type;
 
 const LegacyCodexFields = Schema.Struct({
   effort: Schema.optionalKey(Schema.Literals(CODEX_REASONING_EFFORT_OPTIONS)),
@@ -143,6 +177,9 @@ const PersistedComposerDraftStoreState = Schema.Struct({
   draftsByThreadId: Schema.Record(ThreadId, PersistedComposerThreadDraftState),
   draftThreadsByThreadId: Schema.Record(ThreadId, PersistedDraftThreadState),
   projectDraftThreadIdByProjectId: Schema.Record(ProjectId, ThreadId),
+  queuedFollowUpsByThreadId: Schema.optionalKey(
+    Schema.Record(ThreadId, Schema.Array(PersistedQueuedFollowUpDraft)),
+  ),
   stickyModelSelectionByProvider: Schema.optionalKey(
     Schema.Record(ProviderKind, Schema.optionalKey(ModelSelection)),
   ),
@@ -165,6 +202,26 @@ export interface ComposerThreadDraftState {
   activeProvider: ProviderKind | null;
   runtimeMode: RuntimeMode | null;
   interactionMode: ProviderInteractionMode | null;
+  queuedFollowUpEdit: QueuedFollowUpEditState | null;
+}
+
+export interface QueuedFollowUpEditState {
+  followUpId: string;
+  queueIndex: number;
+  previousFollowUpId: string | null;
+  nextFollowUpId: string | null;
+}
+
+export interface QueuedFollowUpDraft {
+  id: string;
+  createdAt: string;
+  prompt: string;
+  attachments: PersistedComposerImageAttachment[];
+  terminalContexts: TerminalContextDraft[];
+  modelSelection: ModelSelection;
+  runtimeMode: RuntimeMode;
+  interactionMode: ProviderInteractionMode;
+  lastSendError?: string;
 }
 
 export interface DraftThreadState {
@@ -185,6 +242,7 @@ interface ComposerDraftStoreState {
   draftsByThreadId: Record<ThreadId, ComposerThreadDraftState>;
   draftThreadsByThreadId: Record<ThreadId, DraftThreadState>;
   projectDraftThreadIdByProjectId: Record<ProjectId, ThreadId>;
+  queuedFollowUpsByThreadId: Record<ThreadId, QueuedFollowUpDraft[]>;
   stickyModelSelectionByProvider: Partial<Record<ProviderKind, ModelSelection>>;
   stickyActiveProvider: ProviderKind | null;
   getDraftThreadByProjectId: (projectId: ProjectId) => ProjectDraftThread | null;
@@ -259,6 +317,17 @@ interface ComposerDraftStoreState {
     threadId: ThreadId,
     attachments: PersistedComposerImageAttachment[],
   ) => void;
+  enqueueQueuedFollowUp: (threadId: ThreadId, followUp: QueuedFollowUpDraft) => void;
+  reorderQueuedFollowUp: (threadId: ThreadId, followUpId: string, targetIndex: number) => void;
+  updateQueuedFollowUp: (
+    threadId: ThreadId,
+    followUpId: string,
+    updater: (followUp: QueuedFollowUpDraft) => QueuedFollowUpDraft,
+  ) => void;
+  moveQueuedFollowUp: (threadId: ThreadId, followUpId: string, direction: "up" | "down") => void;
+  removeQueuedFollowUp: (threadId: ThreadId, followUpId: string) => void;
+  shiftQueuedFollowUp: (threadId: ThreadId) => QueuedFollowUpDraft | null;
+  restoreQueuedFollowUpToDraft: (threadId: ThreadId, followUpId: string) => void;
   clearComposerContent: (threadId: ThreadId) => void;
 }
 
@@ -296,6 +365,7 @@ const EMPTY_PERSISTED_DRAFT_STORE_STATE = Object.freeze<PersistedComposerDraftSt
   draftsByThreadId: {},
   draftThreadsByThreadId: {},
   projectDraftThreadIdByProjectId: {},
+  queuedFollowUpsByThreadId: {},
   stickyModelSelectionByProvider: {},
   stickyActiveProvider: null,
 });
@@ -304,9 +374,11 @@ const EMPTY_IMAGES: ComposerImageAttachment[] = [];
 const EMPTY_IDS: string[] = [];
 const EMPTY_PERSISTED_ATTACHMENTS: PersistedComposerImageAttachment[] = [];
 const EMPTY_TERMINAL_CONTEXTS: TerminalContextDraft[] = [];
+const EMPTY_QUEUED_FOLLOW_UPS: QueuedFollowUpDraft[] = [];
 Object.freeze(EMPTY_IMAGES);
 Object.freeze(EMPTY_IDS);
 Object.freeze(EMPTY_PERSISTED_ATTACHMENTS);
+Object.freeze(EMPTY_QUEUED_FOLLOW_UPS);
 const EMPTY_MODEL_SELECTION_BY_PROVIDER: Partial<Record<ProviderKind, ModelSelection>> =
   Object.freeze({});
 
@@ -320,6 +392,7 @@ const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   activeProvider: null,
   runtimeMode: null,
   interactionMode: null,
+  queuedFollowUpEdit: null,
 });
 
 function createEmptyThreadDraft(): ComposerThreadDraftState {
@@ -333,6 +406,7 @@ function createEmptyThreadDraft(): ComposerThreadDraftState {
     activeProvider: null,
     runtimeMode: null,
     interactionMode: null,
+    queuedFollowUpEdit: null,
   };
 }
 
@@ -402,8 +476,35 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
     Object.keys(draft.modelSelectionByProvider).length === 0 &&
     draft.activeProvider === null &&
     draft.runtimeMode === null &&
-    draft.interactionMode === null
+    draft.interactionMode === null &&
+    draft.queuedFollowUpEdit === null
   );
+}
+
+function normalizeQueuedFollowUpLink(linkedFollowUpId: unknown): string | null {
+  return typeof linkedFollowUpId === "string" && linkedFollowUpId.trim().length > 0
+    ? linkedFollowUpId.trim()
+    : null;
+}
+
+function normalizeQueuedFollowUpEditState(value: unknown): QueuedFollowUpEditState | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Partial<QueuedFollowUpEditState>;
+  const followUpId = typeof candidate.followUpId === "string" ? candidate.followUpId.trim() : "";
+  if (followUpId.length === 0) {
+    return null;
+  }
+  const queueIndex = Number.isFinite(candidate.queueIndex)
+    ? Math.max(0, Math.floor(candidate.queueIndex as number))
+    : 0;
+  return {
+    followUpId,
+    queueIndex,
+    previousFollowUpId: normalizeQueuedFollowUpLink(candidate.previousFollowUpId),
+    nextFollowUpId: normalizeQueuedFollowUpLink(candidate.nextFollowUpId),
+  };
 }
 
 function normalizeProviderKind(value: unknown): ProviderKind | null {
@@ -738,6 +839,109 @@ function normalizePersistedTerminalContextDraft(
   };
 }
 
+function normalizePersistedQueuedTerminalContextDraft(
+  value: unknown,
+): PersistedQueuedTerminalContextDraft | null {
+  const normalized = normalizePersistedTerminalContextDraft(value);
+  if (!normalized) {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const text = typeof candidate.text === "string" ? candidate.text : "";
+  return {
+    ...normalized,
+    text,
+  };
+}
+
+function normalizePersistedQueuedFollowUpDraft(
+  value: unknown,
+): PersistedQueuedFollowUpDraft | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const id = typeof candidate.id === "string" ? candidate.id : "";
+  const createdAt = typeof candidate.createdAt === "string" ? candidate.createdAt : "";
+  const prompt = typeof candidate.prompt === "string" ? candidate.prompt : "";
+  const attachments = Array.isArray(candidate.attachments)
+    ? candidate.attachments.flatMap((entry) => {
+        const normalized = normalizePersistedAttachment(entry);
+        return normalized ? [normalized] : [];
+      })
+    : [];
+  const terminalContexts = Array.isArray(candidate.terminalContexts)
+    ? candidate.terminalContexts.flatMap((entry) => {
+        const normalized = normalizePersistedQueuedTerminalContextDraft(entry);
+        return normalized ? [normalized] : [];
+      })
+    : [];
+  const modelSelection = normalizeModelSelection(candidate.modelSelection);
+  const runtimeMode =
+    candidate.runtimeMode === "approval-required" || candidate.runtimeMode === "full-access"
+      ? candidate.runtimeMode
+      : null;
+  const interactionMode =
+    candidate.interactionMode === "plan" || candidate.interactionMode === "default"
+      ? candidate.interactionMode
+      : null;
+  const lastSendError =
+    typeof candidate.lastSendError === "string" && candidate.lastSendError.length > 0
+      ? candidate.lastSendError
+      : undefined;
+
+  if (
+    id.length === 0 ||
+    createdAt.length === 0 ||
+    !modelSelection ||
+    runtimeMode === null ||
+    interactionMode === null
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    createdAt,
+    prompt,
+    attachments,
+    terminalContexts,
+    modelSelection,
+    runtimeMode,
+    interactionMode,
+    ...(lastSendError ? { lastSendError } : {}),
+  };
+}
+
+function normalizeQueuedFollowUpsByThreadId(
+  rawQueuedFollowUpsByThreadId: unknown,
+): Record<ThreadId, PersistedQueuedFollowUpDraft[]> {
+  const queuedFollowUpsByThreadId: Record<ThreadId, PersistedQueuedFollowUpDraft[]> = {};
+  if (!rawQueuedFollowUpsByThreadId || typeof rawQueuedFollowUpsByThreadId !== "object") {
+    return queuedFollowUpsByThreadId;
+  }
+  for (const [threadId, rawQueuedFollowUps] of Object.entries(
+    rawQueuedFollowUpsByThreadId as Record<string, unknown>,
+  )) {
+    if (
+      typeof threadId !== "string" ||
+      threadId.length === 0 ||
+      !Array.isArray(rawQueuedFollowUps)
+    ) {
+      continue;
+    }
+    const normalizedQueuedFollowUps = rawQueuedFollowUps.flatMap((entry) => {
+      const normalized = normalizePersistedQueuedFollowUpDraft(entry);
+      return normalized ? [normalized] : [];
+    });
+    if (normalizedQueuedFollowUps.length === 0) {
+      continue;
+    }
+    queuedFollowUpsByThreadId[threadId as ThreadId] = normalizedQueuedFollowUps;
+  }
+  return queuedFollowUpsByThreadId;
+}
+
 function normalizeDraftThreadEnvMode(
   value: unknown,
   fallbackWorktreePath: string | null,
@@ -933,10 +1137,12 @@ function normalizePersistedDraftsByThreadId(
       terminalContexts.length === 0 &&
       !hasModelData &&
       !runtimeMode &&
-      !interactionMode
+      !interactionMode &&
+      normalizeQueuedFollowUpEditState(draftCandidate.queuedFollowUpEdit) === null
     ) {
       continue;
     }
+    const queuedFollowUpEdit = normalizeQueuedFollowUpEditState(draftCandidate.queuedFollowUpEdit);
     nextDraftsByThreadId[threadId as ThreadId] = {
       prompt,
       attachments,
@@ -944,6 +1150,7 @@ function normalizePersistedDraftsByThreadId(
       ...(hasModelData ? { modelSelectionByProvider, activeProvider } : {}),
       ...(runtimeMode ? { runtimeMode } : {}),
       ...(interactionMode ? { interactionMode } : {}),
+      ...(queuedFollowUpEdit ? { queuedFollowUpEdit } : {}),
     };
   }
 
@@ -985,10 +1192,14 @@ function migratePersistedComposerDraftStoreState(
   const { draftThreadsByThreadId, projectDraftThreadIdByProjectId } =
     normalizePersistedDraftThreads(rawDraftThreadsByThreadId, rawProjectDraftThreadIdByProjectId);
   const draftsByThreadId = normalizePersistedDraftsByThreadId(rawDraftMap);
+  const queuedFollowUpsByThreadId = normalizeQueuedFollowUpsByThreadId(
+    candidate.queuedFollowUpsByThreadId,
+  );
   return {
     draftsByThreadId,
     draftThreadsByThreadId,
     projectDraftThreadIdByProjectId,
+    queuedFollowUpsByThreadId,
     stickyModelSelectionByProvider,
     stickyActiveProvider,
   };
@@ -1012,7 +1223,8 @@ function partializeComposerDraftStoreState(
       draft.terminalContexts.length === 0 &&
       !hasModelData &&
       draft.runtimeMode === null &&
-      draft.interactionMode === null
+      draft.interactionMode === null &&
+      draft.queuedFollowUpEdit === null
     ) {
       continue;
     }
@@ -1040,13 +1252,26 @@ function partializeComposerDraftStoreState(
         : {}),
       ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
       ...(draft.interactionMode ? { interactionMode: draft.interactionMode } : {}),
+      ...(draft.queuedFollowUpEdit
+        ? {
+            queuedFollowUpEdit: draft.queuedFollowUpEdit,
+          }
+        : {}),
     };
     persistedDraftsByThreadId[threadId as ThreadId] = persistedDraft;
   }
+  const persistedQueuedFollowUpsByThreadId = Object.fromEntries(
+    Object.entries(state.queuedFollowUpsByThreadId).filter(
+      ([, queuedFollowUps]) => queuedFollowUps.length > 0,
+    ),
+  ) as Record<ThreadId, PersistedQueuedFollowUpDraft[]>;
   return {
     draftsByThreadId: persistedDraftsByThreadId,
     draftThreadsByThreadId: state.draftThreadsByThreadId,
     projectDraftThreadIdByProjectId: state.projectDraftThreadIdByProjectId,
+    ...(Object.keys(persistedQueuedFollowUpsByThreadId).length > 0
+      ? { queuedFollowUpsByThreadId: persistedQueuedFollowUpsByThreadId }
+      : {}),
     stickyModelSelectionByProvider: state.stickyModelSelectionByProvider,
     stickyActiveProvider: state.stickyActiveProvider,
   };
@@ -1108,6 +1333,9 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     draftsByThreadId: normalizePersistedDraftsByThreadId(normalizedPersistedState.draftsByThreadId),
     draftThreadsByThreadId,
     projectDraftThreadIdByProjectId,
+    queuedFollowUpsByThreadId: normalizeQueuedFollowUpsByThreadId(
+      normalizedPersistedState.queuedFollowUpsByThreadId,
+    ),
     stickyModelSelectionByProvider,
     stickyActiveProvider,
   };
@@ -1212,7 +1440,7 @@ function hydreatePersistedComposerImageAttachment(
   }
 }
 
-function hydrateImagesFromPersisted(
+export function hydrateComposerImagesFromPersistedAttachments(
   attachments: ReadonlyArray<PersistedComposerImageAttachment>,
 ): ComposerImageAttachment[] {
   return attachments.flatMap((attachment) => {
@@ -1243,7 +1471,7 @@ function toHydratedThreadDraft(
 
   return {
     prompt: persistedDraft.prompt,
-    images: hydrateImagesFromPersisted(persistedDraft.attachments),
+    images: hydrateComposerImagesFromPersistedAttachments(persistedDraft.attachments),
     nonPersistedImageIds: [],
     persistedAttachments: [...persistedDraft.attachments],
     terminalContexts:
@@ -1255,6 +1483,23 @@ function toHydratedThreadDraft(
     activeProvider,
     runtimeMode: persistedDraft.runtimeMode ?? null,
     interactionMode: persistedDraft.interactionMode ?? null,
+    queuedFollowUpEdit: normalizeQueuedFollowUpEditState(persistedDraft.queuedFollowUpEdit),
+  };
+}
+
+function toHydratedQueuedFollowUpDraft(
+  persistedDraft: PersistedQueuedFollowUpDraft,
+): QueuedFollowUpDraft {
+  return {
+    id: persistedDraft.id,
+    createdAt: persistedDraft.createdAt,
+    prompt: persistedDraft.prompt,
+    attachments: [...persistedDraft.attachments],
+    terminalContexts: persistedDraft.terminalContexts.map((context) => ({ ...context })),
+    modelSelection: persistedDraft.modelSelection,
+    runtimeMode: persistedDraft.runtimeMode,
+    interactionMode: persistedDraft.interactionMode,
+    ...(persistedDraft.lastSendError ? { lastSendError: persistedDraft.lastSendError } : {}),
   };
 }
 
@@ -1264,6 +1509,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
       draftsByThreadId: {},
       draftThreadsByThreadId: {},
       projectDraftThreadIdByProjectId: {},
+      queuedFollowUpsByThreadId: {},
       stickyModelSelectionByProvider: {},
       stickyActiveProvider: null,
       getDraftThreadByProjectId: (projectId) => {
@@ -1504,10 +1750,13 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             state.draftThreadsByThreadId;
           const { [threadId]: _removedComposerDraft, ...restDraftsByThreadId } =
             state.draftsByThreadId;
+          const { [threadId]: _removedQueuedFollowUps, ...restQueuedFollowUpsByThreadId } =
+            state.queuedFollowUpsByThreadId;
           return {
             draftsByThreadId: restDraftsByThreadId,
             draftThreadsByThreadId: restDraftThreadsByThreadId,
             projectDraftThreadIdByProjectId: nextProjectDraftThreadIdByProjectId,
+            queuedFollowUpsByThreadId: restQueuedFollowUpsByThreadId,
           };
         });
       },
@@ -2104,6 +2353,266 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           verifyPersistedAttachments(threadId, attachments, set);
         });
       },
+      enqueueQueuedFollowUp: (threadId, followUp) => {
+        if (threadId.length === 0) {
+          return;
+        }
+        set((state) => {
+          const current = state.queuedFollowUpsByThreadId[threadId] ?? EMPTY_QUEUED_FOLLOW_UPS;
+          const draft = state.draftsByThreadId[threadId];
+          const queuedFollowUpEdit = draft?.queuedFollowUpEdit ?? null;
+          const nextFollowUp = queuedFollowUpEdit
+            ? {
+                ...followUp,
+                id: queuedFollowUpEdit.followUpId,
+              }
+            : followUp;
+          const insertIndexFromEditState = (() => {
+            if (!queuedFollowUpEdit) {
+              return current.length;
+            }
+            if (queuedFollowUpEdit.nextFollowUpId) {
+              const nextIndex = current.findIndex(
+                (queuedFollowUp) => queuedFollowUp.id === queuedFollowUpEdit.nextFollowUpId,
+              );
+              if (nextIndex >= 0) {
+                return nextIndex;
+              }
+            }
+            if (queuedFollowUpEdit.previousFollowUpId) {
+              const previousIndex = current.findIndex(
+                (queuedFollowUp) => queuedFollowUp.id === queuedFollowUpEdit.previousFollowUpId,
+              );
+              if (previousIndex >= 0) {
+                return previousIndex + 1;
+              }
+            }
+            return Math.max(0, Math.min(queuedFollowUpEdit.queueIndex, current.length));
+          })();
+          const nextQueuedFollowUps = [
+            ...current.slice(0, insertIndexFromEditState),
+            nextFollowUp,
+            ...current.slice(insertIndexFromEditState),
+          ];
+          const nextDraftsByThreadId =
+            queuedFollowUpEdit && draft
+              ? {
+                  ...state.draftsByThreadId,
+                  [threadId]: {
+                    ...draft,
+                    queuedFollowUpEdit: null,
+                  },
+                }
+              : state.draftsByThreadId;
+          return {
+            ...(nextDraftsByThreadId !== state.draftsByThreadId
+              ? { draftsByThreadId: nextDraftsByThreadId }
+              : {}),
+            queuedFollowUpsByThreadId: {
+              ...state.queuedFollowUpsByThreadId,
+              [threadId]: nextQueuedFollowUps,
+            },
+          };
+        });
+      },
+      updateQueuedFollowUp: (threadId, followUpId, updater) => {
+        if (threadId.length === 0 || followUpId.length === 0) {
+          return;
+        }
+        set((state) => {
+          const current = state.queuedFollowUpsByThreadId[threadId];
+          if (!current || current.length === 0) {
+            return state;
+          }
+          let changed = false;
+          const nextQueuedFollowUps = current.map((followUp) => {
+            if (followUp.id !== followUpId) {
+              return followUp;
+            }
+            const nextFollowUp = updater(followUp);
+            changed = changed || nextFollowUp !== followUp;
+            return nextFollowUp;
+          });
+          if (!changed) {
+            return state;
+          }
+          return {
+            queuedFollowUpsByThreadId: {
+              ...state.queuedFollowUpsByThreadId,
+              [threadId]: nextQueuedFollowUps,
+            },
+          };
+        });
+      },
+      moveQueuedFollowUp: (threadId, followUpId, direction) => {
+        if (threadId.length === 0 || followUpId.length === 0) {
+          return;
+        }
+        set((state) => {
+          const current = state.queuedFollowUpsByThreadId[threadId];
+          if (!current || current.length < 2) {
+            return state;
+          }
+          const currentIndex = current.findIndex((followUp) => followUp.id === followUpId);
+          if (currentIndex < 0) {
+            return state;
+          }
+          const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+          if (nextIndex < 0 || nextIndex >= current.length) {
+            return state;
+          }
+          const nextQueuedFollowUps = [...current];
+          const currentFollowUp = nextQueuedFollowUps[currentIndex];
+          const swappedFollowUp = nextQueuedFollowUps[nextIndex];
+          if (!currentFollowUp || !swappedFollowUp) {
+            return state;
+          }
+          nextQueuedFollowUps[currentIndex] = swappedFollowUp;
+          nextQueuedFollowUps[nextIndex] = currentFollowUp;
+          return {
+            queuedFollowUpsByThreadId: {
+              ...state.queuedFollowUpsByThreadId,
+              [threadId]: nextQueuedFollowUps,
+            },
+          };
+        });
+      },
+      reorderQueuedFollowUp: (threadId, followUpId, targetIndex) => {
+        if (threadId.length === 0 || followUpId.length === 0 || !Number.isFinite(targetIndex)) {
+          return;
+        }
+        set((state) => {
+          const current = state.queuedFollowUpsByThreadId[threadId];
+          if (!current || current.length < 2) {
+            return state;
+          }
+          const currentIndex = current.findIndex((followUp) => followUp.id === followUpId);
+          if (currentIndex < 0) {
+            return state;
+          }
+          const boundedTargetIndex = Math.max(
+            0,
+            Math.min(Math.floor(targetIndex), current.length - 1),
+          );
+          if (boundedTargetIndex === currentIndex) {
+            return state;
+          }
+          const nextQueuedFollowUps = [...current];
+          const [movedFollowUp] = nextQueuedFollowUps.splice(currentIndex, 1);
+          if (!movedFollowUp) {
+            return state;
+          }
+          nextQueuedFollowUps.splice(boundedTargetIndex, 0, movedFollowUp);
+          return {
+            queuedFollowUpsByThreadId: {
+              ...state.queuedFollowUpsByThreadId,
+              [threadId]: nextQueuedFollowUps,
+            },
+          };
+        });
+      },
+      removeQueuedFollowUp: (threadId, followUpId) => {
+        if (threadId.length === 0 || followUpId.length === 0) {
+          return;
+        }
+        set((state) => {
+          const current = state.queuedFollowUpsByThreadId[threadId];
+          if (!current || current.length === 0) {
+            return state;
+          }
+          const nextQueuedFollowUps = current.filter((followUp) => followUp.id !== followUpId);
+          if (nextQueuedFollowUps.length === current.length) {
+            return state;
+          }
+          const nextQueuedFollowUpsByThreadId = { ...state.queuedFollowUpsByThreadId };
+          if (nextQueuedFollowUps.length === 0) {
+            delete nextQueuedFollowUpsByThreadId[threadId];
+          } else {
+            nextQueuedFollowUpsByThreadId[threadId] = nextQueuedFollowUps;
+          }
+          return {
+            queuedFollowUpsByThreadId: nextQueuedFollowUpsByThreadId,
+          };
+        });
+      },
+      shiftQueuedFollowUp: (threadId) => {
+        if (threadId.length === 0) {
+          return null;
+        }
+        const current = get().queuedFollowUpsByThreadId[threadId];
+        const nextFollowUp = current?.[0] ?? null;
+        if (!nextFollowUp) {
+          return null;
+        }
+        set((state) => {
+          const latest = state.queuedFollowUpsByThreadId[threadId];
+          if (!latest || latest.length === 0 || latest[0]?.id !== nextFollowUp.id) {
+            return state;
+          }
+          const remaining = latest.slice(1);
+          const nextQueuedFollowUpsByThreadId = { ...state.queuedFollowUpsByThreadId };
+          if (remaining.length === 0) {
+            delete nextQueuedFollowUpsByThreadId[threadId];
+          } else {
+            nextQueuedFollowUpsByThreadId[threadId] = remaining;
+          }
+          return {
+            queuedFollowUpsByThreadId: nextQueuedFollowUpsByThreadId,
+          };
+        });
+        return nextFollowUp;
+      },
+      restoreQueuedFollowUpToDraft: (threadId, followUpId) => {
+        if (threadId.length === 0 || followUpId.length === 0) {
+          return;
+        }
+        set((state) => {
+          const queuedFollowUps = state.queuedFollowUpsByThreadId[threadId];
+          const queueIndex = queuedFollowUps?.findIndex((entry) => entry.id === followUpId) ?? -1;
+          const followUp = queueIndex >= 0 ? queuedFollowUps?.[queueIndex] : undefined;
+          if (!queuedFollowUps || !followUp || queueIndex < 0) {
+            return state;
+          }
+          const currentDraft = state.draftsByThreadId[threadId] ?? createEmptyThreadDraft();
+          const previousFollowUp = queueIndex > 0 ? queuedFollowUps[queueIndex - 1] : null;
+          const nextFollowUp = queuedFollowUps[queueIndex + 1] ?? null;
+          const nextDraft: ComposerThreadDraftState = {
+            ...currentDraft,
+            prompt: followUp.prompt,
+            images: hydrateComposerImagesFromPersistedAttachments(followUp.attachments),
+            nonPersistedImageIds: [],
+            persistedAttachments: [...followUp.attachments],
+            terminalContexts: followUp.terminalContexts.map((context) => ({ ...context })),
+            modelSelectionByProvider: {
+              ...currentDraft.modelSelectionByProvider,
+              [followUp.modelSelection.provider]: followUp.modelSelection,
+            },
+            activeProvider: followUp.modelSelection.provider,
+            runtimeMode: followUp.runtimeMode,
+            interactionMode: followUp.interactionMode,
+            queuedFollowUpEdit: {
+              followUpId: followUp.id,
+              queueIndex,
+              previousFollowUpId: previousFollowUp?.id ?? null,
+              nextFollowUpId: nextFollowUp?.id ?? null,
+            },
+          };
+          const remaining = queuedFollowUps.filter((entry) => entry.id !== followUpId);
+          const nextQueuedFollowUpsByThreadId = { ...state.queuedFollowUpsByThreadId };
+          if (remaining.length === 0) {
+            delete nextQueuedFollowUpsByThreadId[threadId];
+          } else {
+            nextQueuedFollowUpsByThreadId[threadId] = remaining;
+          }
+          return {
+            draftsByThreadId: {
+              ...state.draftsByThreadId,
+              [threadId]: nextDraft,
+            },
+            queuedFollowUpsByThreadId: nextQueuedFollowUpsByThreadId,
+          };
+        });
+      },
       clearComposerContent: (threadId) => {
         if (threadId.length === 0) {
           return;
@@ -2120,6 +2629,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             nonPersistedImageIds: [],
             persistedAttachments: [],
             terminalContexts: [],
+            queuedFollowUpEdit: null,
           };
           const nextDraftsByThreadId = { ...state.draftsByThreadId };
           if (shouldRemoveDraft(nextDraft)) {
@@ -2146,11 +2656,20 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             toHydratedThreadDraft(draft),
           ]),
         );
+        const queuedFollowUpsByThreadId = Object.fromEntries(
+          Object.entries(normalizedPersisted.queuedFollowUpsByThreadId ?? {}).map(
+            ([threadId, queuedFollowUps]) => [
+              threadId,
+              queuedFollowUps.map((followUp) => toHydratedQueuedFollowUpDraft(followUp)),
+            ],
+          ),
+        );
         return {
           ...currentState,
           draftsByThreadId,
           draftThreadsByThreadId: normalizedPersisted.draftThreadsByThreadId,
           projectDraftThreadIdByProjectId: normalizedPersisted.projectDraftThreadIdByProjectId,
+          queuedFollowUpsByThreadId,
           stickyModelSelectionByProvider: normalizedPersisted.stickyModelSelectionByProvider ?? {},
           stickyActiveProvider: normalizedPersisted.stickyActiveProvider ?? null,
         };
@@ -2161,6 +2680,12 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
 
 export function useComposerThreadDraft(threadId: ThreadId): ComposerThreadDraftState {
   return useComposerDraftStore((state) => state.draftsByThreadId[threadId] ?? EMPTY_THREAD_DRAFT);
+}
+
+export function useQueuedFollowUps(threadId: ThreadId): QueuedFollowUpDraft[] {
+  return useComposerDraftStore(
+    (state) => state.queuedFollowUpsByThreadId[threadId] ?? EMPTY_QUEUED_FOLLOW_UPS,
+  );
 }
 
 export function useEffectiveComposerModelState(input: {
