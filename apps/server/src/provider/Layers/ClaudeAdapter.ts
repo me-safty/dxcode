@@ -2429,6 +2429,10 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           existingResumeSessionId === undefined ? yield* Random.nextUUIDv4 : undefined;
         const sessionId = existingResumeSessionId ?? newSessionId;
 
+        const services = yield* Effect.services();
+        const runFork = Effect.runForkWith(services);
+        const runPromise = Effect.runPromiseWith(services);
+
         const promptQueue = yield* Queue.unbounded<PromptQueueItem>();
         const prompt = Stream.fromQueue(promptQueue).pipe(
           Stream.filter((item) => item.type === "message"),
@@ -2511,7 +2515,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               }
               aborted = true;
               pendingUserInputs.delete(requestId);
-              Effect.runFork(Deferred.succeed(answersDeferred, {} as ProviderUserInputAnswers));
+              runFork(Deferred.succeed(answersDeferred, {} as ProviderUserInputAnswers));
             };
             callbackOptions.signal.addEventListener("abort", onAbort, { once: true });
 
@@ -2559,7 +2563,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           });
 
         const canUseTool: CanUseTool = (toolName, toolInput, callbackOptions) =>
-          Effect.runPromise(
+          runPromise(
             Effect.gen(function* () {
               const context = yield* Ref.get(contextRef);
               if (!context) {
@@ -2659,7 +2663,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                   return;
                 }
                 pendingApprovals.delete(requestId);
-                Effect.runFork(Deferred.succeed(decisionDeferred, "cancel"));
+                runFork(Deferred.succeed(decisionDeferred, "cancel"));
               };
 
               callbackOptions.signal.addEventListener("abort", onAbort, {
@@ -2867,7 +2871,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           providerRefs: {},
         });
 
-        const streamFiber = Effect.runFork(runSdkStream(context));
+        const streamFiber = runFork(runSdkStream(context));
         context.streamFiber = streamFiber;
         streamFiber.addObserver((exit) => {
           if (context.stopped) {
@@ -2876,7 +2880,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           if (context.streamFiber === streamFiber) {
             context.streamFiber = undefined;
           }
-          Effect.runFork(handleStreamExit(context, exit));
+          runFork(handleStreamExit(context, exit));
         });
 
         return {
