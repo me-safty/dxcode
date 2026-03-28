@@ -145,6 +145,9 @@ const makeBootstrapInputStream = (fd: number) =>
           throw error;
         }
 
+        if (streamFd !== undefined) {
+          NFS.closeSync(streamFd);
+        }
         return makeDirectBootstrapStream(fd);
       }
     },
