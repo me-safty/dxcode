@@ -26,6 +26,7 @@ import { useStore } from "../store";
 import { isMacPlatform } from "../lib/utils";
 
 const THREAD_ID = "thread-search-browser" as ThreadId;
+const SECOND_THREAD_ID = "thread-search-browser-second" as ThreadId;
 const PROJECT_ID = "project-1" as ProjectId;
 const NOW_ISO = "2026-03-04T12:00:00.000Z";
 const BASE_TIME_MS = Date.parse(NOW_ISO);
@@ -144,6 +145,47 @@ function createSearchSnapshot(): OrchestrationReadModel {
         checkpoints: [],
         session: {
           threadId: THREAD_ID,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: NOW_ISO,
+        },
+      },
+      {
+        id: SECOND_THREAD_ID,
+        projectId: PROJECT_ID,
+        title: "Second thread",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5",
+        },
+        interactionMode: "default",
+        runtimeMode: "full-access",
+        branch: "main",
+        worktreePath: null,
+        latestTurn: null,
+        createdAt: NOW_ISO,
+        updatedAt: NOW_ISO,
+        archivedAt: null,
+        deletedAt: null,
+        messages: [
+          {
+            id: "second-thread-message-1" as MessageId,
+            role: "assistant",
+            text: "This second thread should not inherit any stale search state.",
+            turnId: null,
+            streaming: false,
+            createdAt: isoAt(500),
+            updatedAt: isoAt(501),
+          },
+        ],
+        activities: [],
+        proposedPlans: [],
+        checkpoints: [],
+        session: {
+          threadId: SECOND_THREAD_ID,
           status: "ready",
           providerName: "codex",
           runtimeMode: "full-access",
@@ -291,7 +333,10 @@ function dispatchSearchInputKey(key: string, options: { shiftKey?: boolean } = {
   );
 }
 
-async function mountApp(): Promise<{ cleanup: () => Promise<void> }> {
+async function mountApp(): Promise<{
+  cleanup: () => Promise<void>;
+  router: ReturnType<typeof getRouter>;
+}> {
   const host = document.createElement("div");
   host.style.position = "fixed";
   host.style.inset = "0";
@@ -306,6 +351,7 @@ async function mountApp(): Promise<{ cleanup: () => Promise<void> }> {
   await waitForComposerEditor();
 
   return {
+    router,
     cleanup: async () => {
       await screen.unmount();
       host.remove();
@@ -337,13 +383,6 @@ async function waitForActiveSearchHighlight(messageId: string, text: string): Pr
       ).find((element) => element.textContent?.toLowerCase() === text.toLowerCase()) ?? null
     );
   }, `Message row ${messageId} should highlight "${text}" inline`);
-}
-
-async function waitForMessageRow(messageId: string): Promise<HTMLElement> {
-  return waitForElement(
-    () => document.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`),
-    `Message row ${messageId} should be rendered`,
-  );
 }
 
 async function waitForAnyTimelineRow(): Promise<HTMLElement> {
@@ -509,6 +548,34 @@ describe("ChatView thread search", () => {
       });
       await waitForActiveMessageRow("user-0");
       await waitForActiveSearchHighlight("user-0", "virtualized alpha marker near the top");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("resets the search UI and query when navigating to another thread", async () => {
+    const mounted = await mountApp();
+
+    try {
+      dispatchThreadSearchShortcut();
+      await page.getByTestId("thread-search-input").fill("alpha marker");
+      await waitForActiveSearchHighlight("user-0", "alpha marker");
+
+      await mounted.router.navigate({
+        to: "/$threadId",
+        params: { threadId: SECOND_THREAD_ID },
+      });
+
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-message-id="second-thread-message-1"]'),
+        "Second thread content should be rendered after navigation",
+      );
+
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-testid="thread-search-input"]')).toBeNull();
+        expect(document.querySelector('[data-search-match-state="active"]')).toBeNull();
+        expect(document.querySelector('[data-thread-search-highlight="active"]')).toBeNull();
+      });
     } finally {
       await mounted.cleanup();
     }

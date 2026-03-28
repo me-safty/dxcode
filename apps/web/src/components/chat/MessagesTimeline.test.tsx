@@ -238,4 +238,44 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("t3code/apps/web/src/session-logic.ts");
     expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
   });
+
+  it("exposes hidden work log matches while searching overflowed groups", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "work-entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Seeded hidden match",
+              tone: "info",
+            },
+          },
+          ...Array.from({ length: 6 }, (_, index) => ({
+            id: `work-entry-${index + 2}`,
+            kind: "work" as const,
+            createdAt: `2026-03-17T19:12:${String(29 + index).padStart(2, "0")}.000Z`,
+            entry: {
+              id: `work-${index + 2}`,
+              createdAt: `2026-03-17T19:12:${String(29 + index).padStart(2, "0")}.000Z`,
+              label: `Visible filler ${index + 1}`,
+              tone: "info" as const,
+            },
+          })),
+        ]}
+        activeSearchRowId="work-entry-1"
+        matchedSearchRowIds={new Set(["work-entry-1"])}
+        searchQuery="Seeded"
+      />,
+    );
+
+    expect(markup).toContain("Seeded hidden match");
+    expect(markup).toContain('data-thread-search-highlight="active"');
+    expect(markup).not.toContain("Show 1 more");
+  });
 });

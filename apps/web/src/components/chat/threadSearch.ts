@@ -51,12 +51,23 @@ function collectRowSearchText(row: TimelineRow): string[] {
     case "proposed-plan":
       return [row.proposedPlan.planMarkdown];
     case "work":
-      return row.groupedEntries.flatMap((entry) => [
-        entry.label,
-        entry.detail ?? "",
-        entry.command ?? "",
-        ...(entry.changedFiles ?? []),
-      ]);
+      return row.groupedEntries.flatMap((entry) => {
+        const values = [
+          entry.label,
+          entry.detail ?? "",
+          entry.command ?? "",
+          ...(entry.changedFiles ?? []),
+        ];
+        const normalizedLabel = normalizeThreadSearchText(entry.label.trim());
+        const normalizedToolTitle =
+          typeof entry.toolTitle === "string"
+            ? normalizeThreadSearchText(entry.toolTitle.trim())
+            : "";
+        if (normalizedToolTitle.length > 0 && normalizedToolTitle !== normalizedLabel) {
+          values.unshift(entry.toolTitle!);
+        }
+        return values;
+      });
     case "working":
       return [];
   }
