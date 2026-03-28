@@ -257,6 +257,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     (store) => store.setStickyModelSelection,
   );
   const timestampFormat = settings.timestampFormat;
+  const assistantResponseCopyFormat = settings.assistantResponseCopyFormat;
   const navigate = useNavigate();
   const rawSearch = useSearch({
     strict: false,
@@ -3634,6 +3635,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}
                 resolvedTheme={resolvedTheme}
+                assistantResponseCopyFormat={assistantResponseCopyFormat}
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeProject?.cwd ?? undefined}
               />

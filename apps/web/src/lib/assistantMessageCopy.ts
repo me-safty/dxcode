@@ -1,0 +1,168 @@
+import { type AssistantResponseCopyFormat } from "@t3tools/contracts/settings";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
+
+type MarkdownNode = {
+  type: string;
+  value?: string;
+  alt?: string;
+  url?: string;
+  ordered?: boolean;
+  start?: number | null;
+  children?: MarkdownNode[];
+};
+
+const markdownProcessor = unified().use(remarkParse).use(remarkGfm);
+
+export function resolveAssistantMessageCopyText(
+  messageText: string,
+  format: AssistantResponseCopyFormat,
+): string {
+  if (format === "markdown") {
+    return messageText;
+  }
+
+  return markdownToPlainText(messageText);
+}
+
+export function markdownToPlainText(markdown: string): string {
+  const normalizedMarkdown = markdown.replace(/\r\n/g, "\n");
+  if (normalizedMarkdown.trim().length === 0) {
+    return "";
+  }
+
+  const tree = markdownProcessor.parse(normalizedMarkdown) as MarkdownNode;
+  return normalizePlainText(renderBlockChildren(tree.children ?? []));
+}
+
+function renderBlockChildren(nodes: readonly MarkdownNode[]): string {
+  return nodes
+    .map((node) => renderBlock(node))
+    .filter((block) => block.length > 0)
+    .join("\n\n");
+}
+
+function renderBlock(node: MarkdownNode): string {
+  switch (node.type) {
+    case "root":
+    case "blockquote":
+      return renderBlockChildren(node.children ?? []);
+    case "paragraph":
+    case "heading":
+      return normalizeInlineText(renderInlineChildren(node.children ?? []));
+    case "code":
+      return normalizeCodeBlock(node.value ?? "");
+    case "list":
+      return renderList(node);
+    case "table":
+      return renderTable(node);
+    case "html":
+    case "thematicBreak":
+      return "";
+    default:
+      return normalizeInlineText(renderInline(node));
+  }
+}
+
+function renderList(node: MarkdownNode): string {
+  const items = node.children ?? [];
+  const ordered = Boolean(node.ordered);
+  const start = typeof node.start === "number" ? node.start : 1;
+
+  return items
+    .map((item, index) => renderListItem(item, ordered ? `${start + index}. ` : "- "))
+    .filter((item) => item.length > 0)
+    .join("\n");
+}
+
+function renderListItem(node: MarkdownNode, marker: string): string {
+  const blocks = (node.children ?? [])
+    .map((child) => renderBlock(child))
+    .filter((block) => block.length > 0);
+
+  if (blocks.length === 0) {
+    return marker.trimEnd();
+  }
+
+  const continuationPrefix = " ".repeat(marker.length);
+  const firstBlock = blocks[0]!;
+  const remainingBlocks = blocks.slice(1);
+  const firstBlockLines = splitLines(firstBlock);
+  const lines = firstBlockLines.map((line, index) =>
+    index === 0 ? `${marker}${line}` : `${continuationPrefix}${line}`,
+  );
+
+  for (const block of remainingBlocks) {
+    for (const line of splitLines(block)) {
+      lines.push(`  ${line}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function renderTable(node: MarkdownNode): string {
+  return (node.children ?? [])
+    .map((row) =>
+      (row.children ?? [])
+        .map((cell) => normalizeInlineText(renderInlineChildren(cell.children ?? [])))
+        .join(" | "),
+    )
+    .filter((row) => row.length > 0)
+    .join("\n");
+}
+
+function renderInlineChildren(nodes: readonly MarkdownNode[]): string {
+  return nodes.map((node) => renderInline(node)).join("");
+}
+
+function renderInline(node: MarkdownNode): string {
+  switch (node.type) {
+    case "text":
+    case "inlineCode":
+      return node.value ?? "";
+    case "break":
+      return "\n";
+    case "link": {
+      const label = normalizeInlineText(renderInlineChildren(node.children ?? []));
+      if (label.length > 0) {
+        return label;
+      }
+      return typeof node.url === "string" ? node.url : "";
+    }
+    case "image":
+      return node.alt?.trim() || node.url || "";
+    case "delete":
+    case "emphasis":
+    case "strong":
+    case "paragraph":
+    case "heading":
+      return renderInlineChildren(node.children ?? []);
+    default:
+      return renderInlineChildren(node.children ?? []);
+  }
+}
+
+function normalizeCodeBlock(value: string): string {
+  return value.replace(/\r\n/g, "\n").replace(/\n+$/g, "");
+}
+
+function normalizeInlineText(value: string): string {
+  return value
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function normalizePlainText(value: string): string {
+  return value
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function splitLines(value: string): string[] {
+  return value.replace(/\r\n/g, "\n").split("\n");
+}

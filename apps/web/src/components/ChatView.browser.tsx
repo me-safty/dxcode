@@ -39,6 +39,7 @@ const PROJECT_ID = "project-1" as ProjectId;
 const NOW_ISO = "2026-03-04T12:00:00.000Z";
 const BASE_TIME_MS = Date.parse(NOW_ISO);
 const ATTACHMENT_SVG = "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='300'></svg>";
+const CLIENT_SETTINGS_STORAGE_KEY = "t3code:client-settings:v1";
 
 interface WsRequestEnvelope {
   id: string;
@@ -275,6 +276,29 @@ function createSnapshotForTargetUser(options: {
       },
     ],
     updatedAt: NOW_ISO,
+  };
+}
+
+function createSnapshotForTargetAssistantMessage(options: {
+  targetAssistantId: MessageId;
+  targetText: string;
+}): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-assistant-copy-target" as MessageId,
+    targetText: "assistant copy target",
+  });
+
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread) =>
+      Object.assign({}, thread, {
+        messages: thread.messages.map((message) =>
+          message.id === options.targetAssistantId
+            ? Object.assign({}, message, { text: options.targetText })
+            : message,
+        ),
+      }),
+    ),
   };
 }
 
@@ -616,6 +640,25 @@ async function waitForSendButton(): Promise<HTMLButtonElement> {
   return waitForElement(
     () => document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]'),
     "Unable to find send button.",
+  );
+}
+
+function installClipboardWriteTextSpy() {
+  const writeText = vi.fn<(value: string) => Promise<void>>().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  return writeText;
+}
+
+function setAssistantResponseCopyFormat(format: "markdown" | "plain-text"): void {
+  localStorage.setItem(
+    CLIENT_SETTINGS_STORAGE_KEY,
+    JSON.stringify({
+      ...DEFAULT_CLIENT_SETTINGS,
+      assistantResponseCopyFormat: format,
+    }),
   );
 }
 
@@ -1220,6 +1263,149 @@ describe("ChatView timeline estimator parity (full app)", () => {
             cwd: "/repo/project",
             editor: "vscode-insiders",
           });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("copies the raw assistant markdown by default", async () => {
+    const assistantMessageId = "msg-assistant-21" as MessageId;
+    const assistantText = [
+      "# Copy me",
+      "",
+      "Paragraph with [docs](https://example.com/docs).",
+      "",
+      "```ts",
+      "const value = 1;",
+      "```",
+    ].join("\n");
+    const writeText = installClipboardWriteTextSpy();
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetAssistantMessage({
+        targetAssistantId: assistantMessageId,
+        targetText: assistantText,
+      }),
+    });
+
+    try {
+      const assistantRow = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>(
+            `[data-message-id="${assistantMessageId}"][data-message-role="assistant"]`,
+          ),
+        "Unable to find assistant response row.",
+      );
+      const copyButton = await waitForElement(
+        () => assistantRow.querySelector<HTMLButtonElement>('button[aria-label="Copy response"]'),
+        "Unable to find assistant copy button.",
+      );
+
+      copyButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(writeText).toHaveBeenCalledWith(assistantText);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("copies assistant responses as plain text when the setting is enabled", async () => {
+    const assistantMessageId = "msg-assistant-21" as MessageId;
+    const assistantText = [
+      "# Copy me",
+      "",
+      "Paragraph with [docs](https://example.com/docs).",
+      "",
+      "```ts",
+      "const value = 1;",
+      "```",
+    ].join("\n");
+    const writeText = installClipboardWriteTextSpy();
+    setAssistantResponseCopyFormat("plain-text");
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetAssistantMessage({
+        targetAssistantId: assistantMessageId,
+        targetText: assistantText,
+      }),
+    });
+
+    try {
+      const assistantRow = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>(
+            `[data-message-id="${assistantMessageId}"][data-message-role="assistant"]`,
+          ),
+        "Unable to find assistant response row.",
+      );
+      const copyButton = await waitForElement(
+        () => assistantRow.querySelector<HTMLButtonElement>('button[aria-label="Copy response"]'),
+        "Unable to find assistant copy button.",
+      );
+
+      copyButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(writeText).toHaveBeenCalledWith(
+            ["Copy me", "", "Paragraph with docs.", "", "const value = 1;"].join("\n"),
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps markdown code-block copy scoped to the code block", async () => {
+    const assistantMessageId = "msg-assistant-21" as MessageId;
+    const assistantText = [
+      "# Copy me",
+      "",
+      "Paragraph with [docs](https://example.com/docs).",
+      "",
+      "```ts",
+      "const value = 1;",
+      "```",
+    ].join("\n");
+    const writeText = installClipboardWriteTextSpy();
+    setAssistantResponseCopyFormat("plain-text");
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetAssistantMessage({
+        targetAssistantId: assistantMessageId,
+        targetText: assistantText,
+      }),
+    });
+
+    try {
+      const assistantRow = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>(
+            `[data-message-id="${assistantMessageId}"][data-message-role="assistant"]`,
+          ),
+        "Unable to find assistant response row.",
+      );
+      const codeCopyButton = await waitForElement(
+        () => assistantRow.querySelector<HTMLButtonElement>('button[aria-label="Copy code"]'),
+        "Unable to find code-block copy button.",
+      );
+
+      codeCopyButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(writeText).toHaveBeenCalled();
+          expect(writeText.mock.calls.at(-1)?.[0].trim()).toBe("const value = 1;");
         },
         { timeout: 8_000, interval: 16 },
       );
