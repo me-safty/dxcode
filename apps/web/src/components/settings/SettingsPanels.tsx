@@ -409,6 +409,10 @@ function AboutVersionSection() {
   };
   const buttonLabel =
     actionLabel[action] ?? statusLabel[updateState?.status ?? ""] ?? "Check for Updates";
+  const description =
+    action === "download" || action === "install"
+      ? "Update available !"
+      : "Current version of the application.";
 
   return (
     <SettingsRow
@@ -418,7 +422,7 @@ function AboutVersionSection() {
           <code className="text-[11px] font-medium text-muted-foreground">{APP_VERSION}</code>
         </span>
       }
-      description="Current version of the application."
+      description={description}
       control={
         <Tooltip>
           <TooltipTrigger
