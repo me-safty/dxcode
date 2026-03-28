@@ -25,4 +25,24 @@ describe("ProposedPlanCard", () => {
     expect(markup).toContain("<mark");
     expect(markup).toContain(">Seed<");
   });
+
+  it("reveals collapsed plan matches while searching", async () => {
+    const { ProposedPlanCard } = await import("./ProposedPlanCard");
+    const longBody = Array.from({ length: 14 }, (_, index) => `- filler line ${index + 1}`).join(
+      "\n",
+    );
+    const markup = renderToStaticMarkup(
+      <ProposedPlanCard
+        planMarkdown={`# Search plan\n\n${longBody}\n- buried search token`}
+        cwd={undefined}
+        workspaceRoot={undefined}
+        searchQuery="search token"
+        searchActive
+      />,
+    );
+
+    expect(markup).toContain('data-thread-search-highlight="active"');
+    expect(markup).toContain(">search token<");
+    expect(markup).not.toContain("Expand plan");
+  });
 });

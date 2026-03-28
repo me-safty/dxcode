@@ -1062,15 +1062,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const threadSearchLookupStateRef = useRef<ThreadSearchLookupState>(
     createEmptyThreadSearchLookupState(threadSearchIndex),
   );
-  const threadSearchResults = useMemo(() => {
-    const nextLookupState = findThreadSearchLookupState(
-      threadSearchIndex,
-      deferredThreadSearchQuery,
-      threadSearchLookupStateRef.current,
-    );
-    threadSearchLookupStateRef.current = nextLookupState;
-    return nextLookupState.results;
-  }, [deferredThreadSearchQuery, threadSearchIndex]);
+  const threadSearchLookupState = useMemo(
+    () =>
+      findThreadSearchLookupState(
+        threadSearchIndex,
+        deferredThreadSearchQuery,
+        threadSearchLookupStateRef.current,
+      ),
+    [deferredThreadSearchQuery, threadSearchIndex],
+  );
+  useEffect(() => {
+    threadSearchLookupStateRef.current = threadSearchLookupState;
+  }, [threadSearchLookupState]);
+  const threadSearchResults = useMemo(
+    () => threadSearchLookupState.results,
+    [threadSearchLookupState],
+  );
   const visibleThreadSearchResults = useMemo(
     () => (threadSearchOpen ? threadSearchResults : []),
     [threadSearchOpen, threadSearchResults],
@@ -1340,8 +1347,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, []);
   const openThreadSearch = useCallback(
     (select = true) => {
-      threadSearchRestoreFocusRef.current =
+      const activeElement =
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      if (!isThreadSearchInputTarget(activeElement)) {
+        threadSearchRestoreFocusRef.current = activeElement;
+      }
       setThreadSearchOpen(true);
       focusThreadSearchInput(select);
     },

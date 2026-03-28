@@ -23,7 +23,11 @@ import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
-import { createThreadSearchHighlightRehypePlugin } from "./chat/threadSearchHighlight";
+import {
+  createThreadSearchHighlightRehypePlugin,
+  renderHighlightedText,
+  textContainsThreadSearchMatch,
+} from "./chat/threadSearchHighlight";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -282,6 +286,25 @@ function ChatMarkdown({
           return <pre {...props}>{children}</pre>;
         }
 
+        if (textContainsThreadSearchMatch(codeBlock.code, searchQuery)) {
+          return (
+            <MarkdownCodeBlock code={codeBlock.code}>
+              <pre {...props}>
+                <code className={codeBlock.className}>
+                  {renderHighlightedText(
+                    codeBlock.code,
+                    searchQuery,
+                    `markdown-code:${codeBlock.code}`,
+                    {
+                      active: searchActive,
+                    },
+                  )}
+                </code>
+              </pre>
+            </MarkdownCodeBlock>
+          );
+        }
+
         return (
           <MarkdownCodeBlock code={codeBlock.code}>
             <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
@@ -298,7 +321,7 @@ function ChatMarkdown({
         );
       },
     }),
-    [cwd, diffThemeName, isStreaming],
+    [cwd, diffThemeName, isStreaming, searchActive, searchQuery],
   );
 
   return (

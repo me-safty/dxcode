@@ -22,6 +22,10 @@ function normalizeQuery(query: string): string {
   return query.trim().toLocaleLowerCase();
 }
 
+export function textContainsThreadSearchMatch(text: string, query: string): boolean {
+  return findMatchRanges(text, query).length > 0;
+}
+
 function findMatchRanges(text: string, query: string): TextMatchRange[] {
   const normalizedQuery = normalizeQuery(query);
   if (normalizedQuery.length === 0) {

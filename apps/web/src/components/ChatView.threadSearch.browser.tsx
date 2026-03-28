@@ -457,20 +457,43 @@ describe("ChatView thread search", () => {
     }
   });
 
+  it("preserves the original focus restore target when Cmd/Ctrl+F is pressed again inside search", async () => {
+    const mounted = await mountApp();
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+      composerEditor.focus();
+
+      dispatchThreadSearchShortcut();
+      await waitForSearchInput();
+
+      dispatchThreadSearchShortcut();
+      dispatchSearchInputKey("Escape");
+
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-testid="thread-search-input"]')).toBeNull();
+        expect(document.activeElement?.getAttribute("data-testid")).toBe("composer-editor");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("does not shift the thread layout when opened", async () => {
     const mounted = await mountApp();
 
     try {
-      const firstRenderedRow = await waitForAnyTimelineRow();
-      const trackedRowId = firstRenderedRow.dataset.timelineRowId;
-      const beforeTop = firstRenderedRow.getBoundingClientRect().top;
+      await waitForAnyTimelineRow();
+      const messagesScrollContainer = document.querySelector<HTMLElement>(".overscroll-y-contain");
+      expect(messagesScrollContainer).toBeTruthy();
+      const beforeTop = messagesScrollContainer!.getBoundingClientRect().top;
 
       dispatchThreadSearchShortcut();
       await waitForSearchInput();
 
       await vi.waitFor(() => {
         const afterTop = document
-          .querySelector<HTMLElement>(`[data-timeline-row-id="${trackedRowId}"]`)
+          .querySelector<HTMLElement>(".overscroll-y-contain")
           ?.getBoundingClientRect().top;
         expect(afterTop).toBeDefined();
         expect(Math.abs((afterTop ?? 0) - beforeTop)).toBeLessThan(1);

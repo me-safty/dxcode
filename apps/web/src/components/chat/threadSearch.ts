@@ -1,4 +1,5 @@
 import type { TimelineRow } from "./MessagesTimeline.logic";
+import { deriveDisplayedUserMessageState } from "~/lib/terminalContext";
 
 export interface ThreadSearchResult {
   rowId: string;
@@ -43,11 +44,19 @@ function countMatches(haystack: string, needle: string): number {
 
 function collectRowSearchText(row: TimelineRow): string[] {
   switch (row.kind) {
-    case "message":
-      return [
-        row.message.text,
-        ...(row.message.attachments?.map((attachment) => attachment.name) ?? []),
-      ];
+    case "message": {
+      const visibleMessageText =
+        row.message.role === "user"
+          ? deriveDisplayedUserMessageState(row.message.text).visibleText
+          : row.message.text;
+      const visibleAttachmentNames =
+        row.message.role === "user"
+          ? (row.message.attachments
+              ?.filter((attachment) => attachment.previewUrl == null)
+              .map((attachment) => attachment.name) ?? [])
+          : [];
+      return [visibleMessageText, ...visibleAttachmentNames];
+    }
     case "proposed-plan":
       return [row.proposedPlan.planMarkdown];
     case "work":
