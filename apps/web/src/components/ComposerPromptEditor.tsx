@@ -80,9 +80,8 @@ const SURROUND_SYMBOLS: [string, string][] = [
   ["{", "}"],
   ["'", "'"],
   ['"', '"'],
-  ['`', '`'],
-  ['“', '”'],
-  ['´', '´'],
+  ["“", "”"],
+  ["`", "`"],
   ["<", ">"],
   ["«", "»"],
   ["*", "*"],
@@ -1012,60 +1011,62 @@ function ComposerSurroundSelectionPlugin(props: {
   );
 
   useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey) {
+        pendingSurroundSelectionRef.current = null;
+        return;
+      }
+
+      editor.getEditorState().read(() => {
+        const selection = $getSelection();
+        if (!$isRangeSelection(selection) || selection.isCollapsed()) {
+          pendingSurroundSelectionRef.current = null;
+          return;
+        }
+        if ($selectionTouchesInlineToken(selection)) {
+          pendingSurroundSelectionRef.current = null;
+          return;
+        }
+        const range = getSelectionRangeForComposerOffsets(selection);
+        if (!range || range.start === range.end) {
+          pendingSurroundSelectionRef.current = null;
+          return;
+        }
+        const snapshot = {
+          value: $getRoot().getTextContent(),
+          start: range.start,
+          end: range.end,
+        };
+        pendingSurroundSelectionRef.current = snapshot;
+      });
+    };
+
+    const onBeforeInput = (event: InputEvent) => {
+      if (typeof event.data !== "string") {
+        pendingSurroundSelectionRef.current = null;
+        return;
+      }
+      const inputData = event.inputType === "insertText" ? event.data : null;
+      if (!inputData || inputData.length !== 1) {
+        pendingSurroundSelectionRef.current = null;
+        return;
+      }
+      if (!applySurroundInsertion(inputData)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+
+    let activeRootElement: HTMLElement | null = null;
     const unregisterRootListener = editor.registerRootListener((rootElement, prevRootElement) => {
-      const onKeyDown = (event: KeyboardEvent) => {
-        if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey) {
-          pendingSurroundSelectionRef.current = null;
-          return;
-        }
-
-        editor.getEditorState().read(() => {
-          const selection = $getSelection();
-          if (!$isRangeSelection(selection) || selection.isCollapsed()) {
-            pendingSurroundSelectionRef.current = null;
-            return;
-          }
-          if ($selectionTouchesInlineToken(selection)) {
-            pendingSurroundSelectionRef.current = null;
-            return;
-          }
-          const range = getSelectionRangeForComposerOffsets(selection);
-          if (!range || range.start === range.end) {
-            pendingSurroundSelectionRef.current = null;
-            return;
-          }
-          const snapshot = {
-            value: $getRoot().getTextContent(),
-            start: range.start,
-            end: range.end,
-          };
-          pendingSurroundSelectionRef.current = snapshot;
-        });
-      };
-      const onBeforeInput = (event: InputEvent) => {
-        if (typeof event.data !== 'string') {
-          pendingSurroundSelectionRef.current = null;
-          return
-        }
-        const inputData =
-          (event.inputType === "insertText") && typeof event.data === "string" ? event.data : null;
-        if (!inputData || inputData.length !== 1) {
-          pendingSurroundSelectionRef.current = null;
-          return;
-        }
-        if (!applySurroundInsertion(inputData)) {
-          return;
-        }
-
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-      };
-
       prevRootElement?.removeEventListener("keydown", onKeyDown);
       prevRootElement?.removeEventListener("beforeinput", onBeforeInput, true);
       rootElement?.addEventListener("keydown", onKeyDown);
       rootElement?.addEventListener("beforeinput", onBeforeInput, true);
+      activeRootElement = rootElement;
     });
     const unregisterBeforeInputCommand = editor.registerCommand(
       BEFORE_INPUT_COMMAND,
@@ -1074,6 +1075,10 @@ function ComposerSurroundSelectionPlugin(props: {
     );
 
     return () => {
+      if (activeRootElement) {
+        activeRootElement.removeEventListener("keydown", onKeyDown);
+        activeRootElement.removeEventListener("beforeinput", onBeforeInput, true);
+      }
       unregisterRootListener();
       unregisterBeforeInputCommand();
     };
