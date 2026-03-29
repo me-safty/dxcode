@@ -1,32 +1,17 @@
 import { memo } from "react";
-import { useSettings } from "~/hooks/useSettings";
-import { useTheme } from "~/hooks/useTheme";
+import type { ColorblindDiffStyle } from "~/lib/diffRendering";
 
 export function hasNonZeroStat(stat: { additions: number; deletions: number }): boolean {
   return stat.additions > 0 || stat.deletions > 0;
 }
 
-// GitHub Primer colorblind palette (protanopia/deuteranopia).
-const CB_STYLES = {
-  light: {
-    addition: { color: "#0969da" },
-    deletion: { color: "#bc4c00" },
-  },
-  dark: {
-    addition: { color: "#388bfd" },
-    deletion: { color: "#db6d28" },
-  },
-} as const;
-
 export const DiffStatLabel = memo(function DiffStatLabel(props: {
   additions: number;
   deletions: number;
   showParentheses?: boolean;
+  colorblindStyle?: ColorblindDiffStyle | null | undefined;
 }) {
-  const { additions, deletions, showParentheses = false } = props;
-  const { colorblindMode } = useSettings();
-  const { resolvedTheme } = useTheme();
-  const cb = colorblindMode ? CB_STYLES[resolvedTheme] : null;
+  const { additions, deletions, showParentheses = false, colorblindStyle: cb } = props;
 
   return (
     <>

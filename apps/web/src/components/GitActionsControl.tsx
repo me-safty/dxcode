@@ -52,18 +52,7 @@ import { resolvePathLinkTarget } from "~/terminal-links";
 import { readNativeApi } from "~/nativeApi";
 import { useSettings } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
-
-// GitHub Primer colorblind palette (protanopia/deuteranopia).
-const CB_STYLES = {
-  light: {
-    addition: { color: "#0969da" },
-    deletion: { color: "#bc4c00" },
-  },
-  dark: {
-    addition: { color: "#388bfd" },
-    deletion: { color: "#db6d28" },
-  },
-} as const;
+import { COLORBLIND_DIFF_STYLES } from "~/lib/diffRendering";
 
 interface GitActionsControlProps {
   gitCwd: string | null;
@@ -220,7 +209,7 @@ function GitQuickActionIcon({ quickAction }: { quickAction: GitQuickAction }) {
 export default function GitActionsControl({ gitCwd, activeThreadId }: GitActionsControlProps) {
   const { colorblindMode } = useSettings();
   const { resolvedTheme } = useTheme();
-  const cb = colorblindMode ? CB_STYLES[resolvedTheme] : null;
+  const cb = colorblindMode ? COLORBLIND_DIFF_STYLES[resolvedTheme] : null;
   const threadToastData = useMemo(
     () => (activeThreadId ? { threadId: activeThreadId } : undefined),
     [activeThreadId],

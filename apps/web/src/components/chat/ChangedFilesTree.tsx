@@ -6,15 +6,18 @@ import { ChevronRightIcon, FolderIcon, FolderClosedIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { VscodeEntryIcon } from "./VscodeEntryIcon";
+import type { ColorblindDiffStyle } from "~/lib/diffRendering";
 
 export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
   turnId: TurnId;
   files: ReadonlyArray<TurnDiffFileChange>;
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
+  colorblindStyle?: ColorblindDiffStyle | null | undefined;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
-  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, turnId } = props;
+  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, colorblindStyle, turnId } =
+    props;
   const treeNodes = useMemo(() => buildTurnDiffTree(files), [files]);
   const directoryPathsKey = useMemo(
     () => collectDirectoryPaths(treeNodes).join("\u0000"),
@@ -71,7 +74,11 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
             </span>
             {hasNonZeroStat(node.stat) && (
               <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
-                <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} />
+                <DiffStatLabel
+                  additions={node.stat.additions}
+                  deletions={node.stat.deletions}
+                  colorblindStyle={colorblindStyle}
+                />
               </span>
             )}
           </button>
@@ -104,7 +111,11 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
         </span>
         {node.stat && (
           <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
-            <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} />
+            <DiffStatLabel
+              additions={node.stat.additions}
+              deletions={node.stat.deletions}
+              colorblindStyle={colorblindStyle}
+            />
           </span>
         )}
       </button>

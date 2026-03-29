@@ -40,6 +40,7 @@ import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImage
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
+import type { ColorblindDiffStyle } from "~/lib/diffRendering";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { computeMessageDurationStart, normalizeCompactToolLabel } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
@@ -79,6 +80,7 @@ interface MessagesTimelineProps {
   onImageExpand: (preview: ExpandedImagePreview) => void;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
+  colorblindStyle?: ColorblindDiffStyle | null | undefined;
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
 }
@@ -103,6 +105,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onImageExpand,
   markdownCwd,
   resolvedTheme,
+  colorblindStyle,
   timestampFormat,
   workspaceRoot,
 }: MessagesTimelineProps) {
@@ -474,6 +477,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                               <DiffStatLabel
                                 additions={summaryStat.additions}
                                 deletions={summaryStat.deletions}
+                                colorblindStyle={colorblindStyle}
                               />
                             </>
                           )}
@@ -505,6 +509,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                         files={checkpointFiles}
                         allDirectoriesExpanded={allDirectoriesExpanded}
                         resolvedTheme={resolvedTheme}
+                        colorblindStyle={colorblindStyle}
                         onOpenTurnDiff={onOpenTurnDiff}
                       />
                     </div>

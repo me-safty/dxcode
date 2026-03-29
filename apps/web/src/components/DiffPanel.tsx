@@ -26,8 +26,11 @@ import { readNativeApi } from "../nativeApi";
 import { resolvePathLinkTarget } from "../terminal-links";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import { useTheme } from "../hooks/useTheme";
-import { buildPatchCacheKey } from "../lib/diffRendering";
-import { resolveDiffThemeName } from "../lib/diffRendering";
+import {
+  buildPatchCacheKey,
+  COLORBLIND_DIFF_STYLES,
+  resolveDiffThemeName,
+} from "../lib/diffRendering";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useStore } from "../store";
 import { useSettings } from "../hooks/useSettings";
@@ -38,26 +41,10 @@ import { ToggleGroup, Toggle } from "./ui/toggle-group";
 type DiffRenderMode = "stacked" | "split";
 type DiffThemeType = "light" | "dark";
 
-// GitHub Primer colorblind palette (protanopia/deuteranopia).
-// Source: @primer/primitives diffBlob tokens — the industry standard.
-// Light: addition #0969da (blue), deletion #bc4c00 (orange)
-// Dark:  addition #388bfd (blue), deletion #db6d28 (orange)
-const CB_ADDITION_LIGHT = "#0969da";
-const CB_ADDITION_DARK = "#388bfd";
-const CB_DELETION_LIGHT = "#bc4c00";
-const CB_DELETION_DARK = "#db6d28";
-
 function buildDiffPanelCss(colorblind: boolean, theme: "light" | "dark"): string {
-  const addition = colorblind
-    ? theme === "dark"
-      ? CB_ADDITION_DARK
-      : CB_ADDITION_LIGHT
-    : "var(--success)";
-  const deletion = colorblind
-    ? theme === "dark"
-      ? CB_DELETION_DARK
-      : CB_DELETION_LIGHT
-    : "var(--destructive)";
+  const cb = colorblind ? COLORBLIND_DIFF_STYLES[theme] : null;
+  const addition = cb ? cb.addition.color : "var(--success)";
+  const deletion = cb ? cb.deletion.color : "var(--destructive)";
 
   return `
 [data-diffs-header],

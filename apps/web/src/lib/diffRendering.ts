@@ -1,3 +1,20 @@
+// GitHub Primer colorblind palette (protanopia/deuteranopia).
+// Source: @primer/primitives diffBlob tokens.
+// Light: addition #0969da (blue), deletion #bc4c00 (orange)
+// Dark:  addition #388bfd (blue), deletion #db6d28 (orange)
+export const COLORBLIND_DIFF_STYLES = {
+  light: {
+    addition: { color: "#0969da" } as const,
+    deletion: { color: "#bc4c00" } as const,
+  },
+  dark: {
+    addition: { color: "#388bfd" } as const,
+    deletion: { color: "#db6d28" } as const,
+  },
+} as const;
+
+export type ColorblindDiffStyle = (typeof COLORBLIND_DIFF_STYLES)["light" | "dark"];
+
 export const DIFF_THEME_NAMES = {
   light: "pierre-light",
   dark: "pierre-dark",
