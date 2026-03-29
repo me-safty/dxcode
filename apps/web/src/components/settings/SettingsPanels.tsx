@@ -25,6 +25,7 @@ import { APP_VERSION } from "../../branding";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
+  isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
@@ -408,7 +409,10 @@ function AboutVersionSection() {
 
   const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
   const buttonTooltip = updateState ? getDesktopUpdateButtonTooltip(updateState) : null;
-  const buttonDisabled = !canCheckForUpdate(updateState);
+  const buttonDisabled =
+    action === "none"
+      ? !canCheckForUpdate(updateState)
+      : isDesktopUpdateButtonDisabled(updateState);
 
   const actionLabel: Record<string, string> = { download: "Download", install: "Install" };
   const statusLabel: Record<string, string> = {
@@ -1408,14 +1412,8 @@ export function GeneralSettingsPanel() {
           }
         />
       </SettingsSection>
-    </SettingsPageContainer>
-  );
-}
 
-export function AboutSettingsPanel() {
-  return (
-    <SettingsPageContainer>
-      <SettingsSection title="About" icon={<InfoIcon className="size-3.5" />} hideHeader>
+      <SettingsSection title="About">
         {isElectron ? (
           <AboutVersionSection />
         ) : (
