@@ -186,11 +186,7 @@ describe("findThreadSearchResults", () => {
       {
         rowId: "user-message-row",
         rowIndex: 2,
-        normalizedTexts: [
-          "visible composer text @terminal-1:1-5",
-          "terminal 1 lines 1-5",
-          "visible-upload-name.png",
-        ],
+        normalizedTexts: ["visible composer text terminal 1 lines 1-5", "visible-upload-name.png"],
       },
       {
         rowId: "work-row",
@@ -281,6 +277,7 @@ describe("findThreadSearchResults", () => {
         matchCount: 1,
       },
     ]);
+    expect(findThreadSearchResults(rows, "@terminal-1:1-5")).toEqual([]);
     expect(findThreadSearchResults(rows, "terminal 1 lines 1-5")).toEqual([
       {
         rowId: "user-message-row",

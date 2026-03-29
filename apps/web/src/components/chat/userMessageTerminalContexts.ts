@@ -14,6 +14,14 @@ export function buildInlineTerminalContextText(
     .join(" ");
 }
 
+function visibleTerminalContextHeaders(
+  contexts: ReadonlyArray<{
+    header: string;
+  }>,
+): string[] {
+  return contexts.map((context) => context.header.trim()).filter((header) => header.length > 0);
+}
+
 export function formatInlineTerminalContextLabel(header: string): string {
   const trimmedHeader = header.trim();
   const match = TERMINAL_CONTEXT_HEADER_PATTERN.exec(trimmedHeader);
@@ -52,4 +60,42 @@ export function textContainsInlineTerminalContextLabels(
   }
 
   return true;
+}
+
+export function buildRenderedUserMessageText(
+  text: string,
+  contexts: ReadonlyArray<{
+    header: string;
+  }>,
+): string {
+  const headers = visibleTerminalContextHeaders(contexts);
+  if (headers.length === 0) {
+    return text;
+  }
+
+  if (textContainsInlineTerminalContextLabels(text, contexts)) {
+    let cursor = 0;
+    let renderedText = "";
+
+    for (const context of contexts) {
+      const replacement = context.header.trim();
+      if (replacement.length === 0) {
+        continue;
+      }
+
+      const label = formatInlineTerminalContextLabel(context.header);
+      const matchIndex = text.indexOf(label, cursor);
+      if (matchIndex === -1) {
+        return text;
+      }
+
+      renderedText += text.slice(cursor, matchIndex);
+      renderedText += replacement;
+      cursor = matchIndex + label.length;
+    }
+
+    return renderedText + text.slice(cursor);
+  }
+
+  return text.length > 0 ? `${headers.join(" ")} ${text}` : headers.join(" ");
 }

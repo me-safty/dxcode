@@ -4,6 +4,7 @@ import {
   renderableWorkEntryPreview,
   type TimelineRow,
 } from "./MessagesTimeline.logic";
+import { buildRenderedUserMessageText } from "./userMessageTerminalContexts";
 import { stripDisplayedPlanMarkdown, proposedPlanTitle } from "~/proposedPlan";
 import { markdownToPlainText } from "~/lib/markdownPlainText";
 import { deriveDisplayedUserMessageState } from "~/lib/terminalContext";
@@ -64,15 +65,13 @@ function collectRowSearchText(row: TimelineRow): string[] {
               ?.filter((attachment) => attachment.previewUrl == null)
               .map((attachment) => attachment.name) ?? [])
           : [];
-      const visibleTerminalChipLabels =
-        row.message.role === "user"
-          ? (visibleMessageState?.contexts.map((context) => context.header) ?? [])
-          : [];
       return [
         row.message.role === "user"
-          ? (visibleMessageState?.visibleText ?? "")
+          ? buildRenderedUserMessageText(
+              visibleMessageState?.visibleText ?? "",
+              visibleMessageState?.contexts ?? [],
+            )
           : markdownToPlainText(visibleAssistantText),
-        ...visibleTerminalChipLabels,
         ...visibleAttachmentNames,
       ];
     }

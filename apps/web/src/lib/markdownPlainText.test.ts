@@ -15,6 +15,16 @@ describe("markdownToPlainText", () => {
     );
   });
 
+  it("strips single-delimiter emphasis and decodes rendered entities", () => {
+    expect(markdownToPlainText("it is *important* to decode &lt;div&gt; and _notes_.")).toBe(
+      "it is important to decode <div> and notes.",
+    );
+  });
+
+  it("strips empty fenced code blocks without leaving fence syntax behind", () => {
+    expect(markdownToPlainText("Before\n```\n```\nAfter")).toBe("Before\n\n\nAfter");
+  });
+
   it("removes the first-line markdown structure while preserving visible content", () => {
     expect(
       markdownToPlainText("# Heading\n\n## Summary\n\n- **alpha marker**\n- `thread search`"),
