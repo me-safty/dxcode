@@ -336,14 +336,11 @@ export function BranchToolbarBranchSelector({
     effectiveEnvMode,
     resolvedActiveBranch,
   });
-  const branchSelectorHighlightClassName =
-    "hover:bg-accent hover:text-accent-foreground data-selected:bg-accent data-selected:text-accent-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground";
 
   function renderPickerItem(itemValue: string, index: number, style?: CSSProperties) {
     if (checkoutPullRequestItemValue && itemValue === checkoutPullRequestItemValue) {
       return (
         <ComboboxItem
-          className={branchSelectorHighlightClassName}
           hideIndicator
           key={itemValue}
           index={index}
@@ -369,7 +366,6 @@ export function BranchToolbarBranchSelector({
     if (createBranchItemValue && itemValue === createBranchItemValue) {
       return (
         <ComboboxItem
-          className={branchSelectorHighlightClassName}
           hideIndicator
           key={itemValue}
           index={index}
@@ -397,7 +393,6 @@ export function BranchToolbarBranchSelector({
             : null;
     return (
       <ComboboxItem
-        className={branchSelectorHighlightClassName}
         hideIndicator
         key={itemValue}
         index={index}
