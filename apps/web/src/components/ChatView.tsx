@@ -1673,10 +1673,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const togglePlanSidebar = useCallback(() => {
     setPlanSidebarOpen((open) => {
       if (open) {
-        const turnKey = activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? null;
-        if (turnKey) {
-          planSidebarDismissedForTurnRef.current = turnKey;
-        }
+        planSidebarDismissedForTurnRef.current =
+          activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
       } else {
         planSidebarDismissedForTurnRef.current = null;
       }
@@ -1950,8 +1948,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   useEffect(() => {
     if (!activePlan) return;
     if (planSidebarOpen) return;
-    const turnKey = activePlan.turnId;
-    if (turnKey && planSidebarDismissedForTurnRef.current === turnKey) return;
+    const turnKey = activePlan.turnId ?? "__dismissed__";
+    if (planSidebarDismissedForTurnRef.current === turnKey) return;
     setPlanSidebarOpen(true);
   }, [activePlan, planSidebarOpen]);
 
