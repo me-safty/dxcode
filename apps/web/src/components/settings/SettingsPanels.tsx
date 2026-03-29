@@ -147,8 +147,9 @@ function getProviderSummary(provider: ServerProvider | undefined) {
     };
   }
   if (provider.auth.status === "authenticated") {
+    const authLabel = provider.auth.label ?? provider.auth.type;
     return {
-      headline: provider.auth.type ? `Authenticated · ${provider.auth.type}` : "Authenticated",
+      headline: authLabel ? `Authenticated · ${authLabel}` : "Authenticated",
       detail: provider.message ?? null,
     };
   }

@@ -276,6 +276,37 @@ const PREMIUM_SUBSCRIPTION_TYPES = new Set([
   "team",
 ]);
 
+function toTitleCaseWords(value: string): string {
+  return value
+    .split(/[\s_-]+/g)
+    .filter(Boolean)
+    .map((part) => part[0]!.toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function claudeSubscriptionLabel(subscriptionType: string | undefined): string | undefined {
+  const normalized = subscriptionType?.toLowerCase().replace(/[\s_-]+/g, "");
+  if (!normalized) return undefined;
+
+  switch (normalized) {
+    case "max":
+    case "maxplan":
+    case "max5":
+    case "max20":
+      return "Max";
+    case "enterprise":
+      return "Enterprise";
+    case "team":
+      return "Team";
+    case "pro":
+      return "Pro";
+    case "free":
+      return "Free";
+    default:
+      return toTitleCaseWords(subscriptionType!);
+  }
+}
+
 /**
  * Adjust the built-in model list based on the user's detected subscription.
  *
@@ -524,6 +555,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   }
 
   const parsed = parseClaudeAuthStatusFromOutput(authProbe.success.value);
+  const subscriptionLabel = claudeSubscriptionLabel(subscriptionType);
   return buildServerProvider({
     provider: PROVIDER,
     enabled: claudeSettings.enabled,
@@ -533,7 +565,11 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       installed: true,
       version: parsedVersion,
       status: parsed.status,
-      auth: { ...parsed.auth, ...(subscriptionType ? { type: subscriptionType } : {}) },
+      auth: {
+        ...parsed.auth,
+        ...(subscriptionType ? { type: subscriptionType } : {}),
+        ...(subscriptionLabel ? { label: subscriptionLabel } : {}),
+      },
       ...(parsed.message ? { message: parsed.message } : {}),
     },
   });
