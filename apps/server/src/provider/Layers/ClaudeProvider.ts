@@ -7,9 +7,11 @@ import type {
   ServerProviderAuthStatus,
   ServerProviderState,
 } from "@t3tools/contracts";
-import { Effect, Equal, Layer, Option, Result, Stream } from "effect";
+import { Cache, Duration, Effect, Equal, Layer, Option, Result, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { resolveContextWindow, resolveEffort } from "@t3tools/shared/model";
+import { decodeJsonResult } from "@t3tools/shared/schemaJson";
+import { query as claudeQuery } from "@anthropic-ai/claude-agent-sdk";
 
 import {
   buildServerProvider,
@@ -43,8 +45,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
       supportsFastMode: true,
       supportsThinkingToggle: false,
       contextWindowOptions: [
-        { value: "200k", label: "200k" },
-        { value: "1m", label: "1M", isDefault: true },
+        { value: "200k", label: "200k", isDefault: true },
+        { value: "1m", label: "1M" },
       ],
       promptInjectedEffortLevels: ["ultrathink"],
     } satisfies ModelCapabilities,
@@ -63,8 +65,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
       supportsFastMode: false,
       supportsThinkingToggle: false,
       contextWindowOptions: [
-        { value: "200k", label: "200k" },
-        { value: "1m", label: "1M", isDefault: true },
+        { value: "200k", label: "200k", isDefault: true },
+        { value: "1m", label: "1M" },
       ],
       promptInjectedEffortLevels: ["ultrathink"],
     } satisfies ModelCapabilities,
@@ -196,6 +198,162 @@ export function parseClaudeAuthStatusFromOutput(result: CommandResult): {
   };
 }
 
+// ── Subscription type detection ─────────────────────────────────────
+//
+// The SDK probe returns typed `AccountInfo.subscriptionType` directly.
+// This walker is a best-effort fallback for the `claude auth status`
+// JSON output whose shape is not guaranteed.
+
+/** Keys that directly hold a subscription/plan identifier. */
+const SUBSCRIPTION_TYPE_KEYS = [
+  "subscriptionType",
+  "subscription_type",
+  "plan",
+  "tier",
+  "planType",
+  "plan_type",
+] as const;
+
+/** Keys whose value may be a nested object containing subscription info. */
+const SUBSCRIPTION_CONTAINER_KEYS = ["account", "subscription", "user", "billing"] as const;
+
+/** Lift an unknown value into `Option<string>` if it is a non-empty string. */
+const asNonEmptyString = (v: unknown): Option.Option<string> =>
+  typeof v === "string" && v.length > 0 ? Option.some(v) : Option.none();
+
+/** Lift an unknown value into `Option<Record>` if it is a plain object. */
+const asRecord = (v: unknown): Option.Option<Record<string, unknown>> =>
+  typeof v === "object" && v !== null && !globalThis.Array.isArray(v)
+    ? Option.some(v as Record<string, unknown>)
+    : Option.none();
+
+/**
+ * Walk an unknown parsed JSON value looking for a subscription/plan
+ * identifier, returning the first match as an `Option`.
+ */
+function findSubscriptionType(value: unknown): Option.Option<string> {
+  if (globalThis.Array.isArray(value)) {
+    return Option.firstSomeOf(value.map(findSubscriptionType));
+  }
+
+  return asRecord(value).pipe(
+    Option.flatMap((record) => {
+      const direct = Option.firstSomeOf(
+        SUBSCRIPTION_TYPE_KEYS.map((key) => asNonEmptyString(record[key])),
+      );
+      if (Option.isSome(direct)) return direct;
+
+      return Option.firstSomeOf(
+        SUBSCRIPTION_CONTAINER_KEYS.map((key) =>
+          asRecord(record[key]).pipe(Option.flatMap(findSubscriptionType)),
+        ),
+      );
+    }),
+  );
+}
+
+/**
+ * Try to extract a subscription type from the `claude auth status` JSON
+ * output. This is a zero-cost operation on data we already have.
+ */
+const decodeUnknownJson = decodeJsonResult(Schema.Unknown);
+
+function extractSubscriptionTypeFromOutput(result: CommandResult): string | undefined {
+  const parsed = decodeUnknownJson(result.stdout.trim());
+  if (Result.isFailure(parsed)) return undefined;
+  return Option.getOrUndefined(findSubscriptionType(parsed.success));
+}
+
+// ── Dynamic model capability adjustment ─────────────────────────────
+
+/** Subscription types where the 1M context window is included in the plan. */
+const PREMIUM_SUBSCRIPTION_TYPES = new Set([
+  "max",
+  "max_plan",
+  "max5",
+  "max20",
+  "enterprise",
+  "team",
+]);
+
+/**
+ * Adjust the built-in model list based on the user's detected subscription.
+ *
+ * - Premium tiers (Max, Enterprise, Team): 1M context becomes the default.
+ * - Other tiers (Pro, free, unknown): 200k context stays the default;
+ *   1M remains available as a manual option so users can still enable it.
+ */
+export function adjustModelsForSubscription(
+  baseModels: ReadonlyArray<ServerProviderModel>,
+  subscriptionType: string | undefined,
+): ReadonlyArray<ServerProviderModel> {
+  const normalized = subscriptionType?.toLowerCase().replace(/[\s_-]+/g, "");
+  if (!normalized || !PREMIUM_SUBSCRIPTION_TYPES.has(normalized)) {
+    return baseModels;
+  }
+
+  // Flip 1M to be the default for premium users
+  return baseModels.map((model) => {
+    const caps = model.capabilities;
+    if (!caps || caps.contextWindowOptions.length === 0) return model;
+
+    return {
+      ...model,
+      capabilities: {
+        ...caps,
+        contextWindowOptions: caps.contextWindowOptions.map((opt) => ({
+          ...opt,
+          isDefault: opt.value === "1m" ? true : undefined,
+        })),
+      },
+    };
+  });
+}
+
+// ── SDK capability probe ────────────────────────────────────────────
+
+const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
+
+/**
+ * Probe account information by spawning a lightweight Claude Agent SDK
+ * session and reading the initialization result.
+ *
+ * The prompt is never sent to the Anthropic API — we abort immediately
+ * after the local initialization phase completes. This gives us the
+ * user's subscription type without incurring any token cost.
+ *
+ * This is used as a fallback when `claude auth status` does not include
+ * subscription type information.
+ */
+const probeClaudeCapabilities = (binaryPath: string) =>
+  Effect.tryPromise(async () => {
+    const abort = new AbortController();
+    try {
+      const q = claudeQuery({
+        prompt: ".",
+        options: {
+          pathToClaudeCodeExecutable: binaryPath,
+          abortController: abort,
+          maxTurns: 0,
+          settingSources: [],
+          allowedTools: [],
+          stderr: () => {},
+        },
+      });
+      const init = await q.initializationResult();
+      return { subscriptionType: init.account?.subscriptionType };
+    } finally {
+      if (!abort.signal.aborted) abort.abort();
+    }
+  }).pipe(
+    Effect.timeoutOption(CAPABILITIES_PROBE_TIMEOUT_MS),
+    Effect.result,
+    Effect.map((result) => {
+      if (Result.isFailure(result)) return undefined;
+      return Option.isSome(result.success) ? result.success.value : undefined;
+    }),
+  );
+
 const runClaudeCommand = (args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const claudeSettings = yield* Effect.service(ServerSettingsService).pipe(
@@ -208,144 +366,81 @@ const runClaudeCommand = (args: ReadonlyArray<string>) =>
     return yield* spawnAndCollect(claudeSettings.binaryPath, command);
   });
 
-export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
-  function* (): Effect.fn.Return<
-    ServerProvider,
-    ServerSettingsError,
-    ChildProcessSpawner.ChildProcessSpawner | ServerSettingsService
-  > {
-    const claudeSettings = yield* Effect.service(ServerSettingsService).pipe(
-      Effect.flatMap((service) => service.getSettings),
-      Effect.map((settings) => settings.providers.claudeAgent),
-    );
-    const checkedAt = new Date().toISOString();
-    const models = providerModelsFromSettings(
-      BUILT_IN_MODELS,
-      PROVIDER,
-      claudeSettings.customModels,
-    );
+export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(function* (
+  resolveSubscriptionType?: (binaryPath: string) => Effect.Effect<string | undefined>,
+): Effect.fn.Return<
+  ServerProvider,
+  ServerSettingsError,
+  ChildProcessSpawner.ChildProcessSpawner | ServerSettingsService
+> {
+  const claudeSettings = yield* Effect.service(ServerSettingsService).pipe(
+    Effect.flatMap((service) => service.getSettings),
+    Effect.map((settings) => settings.providers.claudeAgent),
+  );
+  const checkedAt = new Date().toISOString();
+  const models = providerModelsFromSettings(BUILT_IN_MODELS, PROVIDER, claudeSettings.customModels);
 
-    if (!claudeSettings.enabled) {
-      return buildServerProvider({
-        provider: PROVIDER,
-        enabled: false,
-        checkedAt,
-        models,
-        probe: {
-          installed: false,
-          version: null,
-          status: "warning",
-          authStatus: "unknown",
-          message: "Claude is disabled in T3 Code settings.",
-        },
-      });
-    }
+  if (!claudeSettings.enabled) {
+    return buildServerProvider({
+      provider: PROVIDER,
+      enabled: false,
+      checkedAt,
+      models,
+      probe: {
+        installed: false,
+        version: null,
+        status: "warning",
+        authStatus: "unknown",
+        message: "Claude is disabled in T3 Code settings.",
+      },
+    });
+  }
 
-    const versionProbe = yield* runClaudeCommand(["--version"]).pipe(
-      Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
-      Effect.result,
-    );
+  const versionProbe = yield* runClaudeCommand(["--version"]).pipe(
+    Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
+    Effect.result,
+  );
 
-    if (Result.isFailure(versionProbe)) {
-      const error = versionProbe.failure;
-      return buildServerProvider({
-        provider: PROVIDER,
-        enabled: claudeSettings.enabled,
-        checkedAt,
-        models,
-        probe: {
-          installed: !isCommandMissingCause(error),
-          version: null,
-          status: "error",
-          authStatus: "unknown",
-          message: isCommandMissingCause(error)
-            ? "Claude Agent CLI (`claude`) is not installed or not on PATH."
-            : `Failed to execute Claude Agent CLI health check: ${error instanceof Error ? error.message : String(error)}.`,
-        },
-      });
-    }
+  if (Result.isFailure(versionProbe)) {
+    const error = versionProbe.failure;
+    return buildServerProvider({
+      provider: PROVIDER,
+      enabled: claudeSettings.enabled,
+      checkedAt,
+      models,
+      probe: {
+        installed: !isCommandMissingCause(error),
+        version: null,
+        status: "error",
+        authStatus: "unknown",
+        message: isCommandMissingCause(error)
+          ? "Claude Agent CLI (`claude`) is not installed or not on PATH."
+          : `Failed to execute Claude Agent CLI health check: ${error instanceof Error ? error.message : String(error)}.`,
+      },
+    });
+  }
 
-    if (Option.isNone(versionProbe.success)) {
-      return buildServerProvider({
-        provider: PROVIDER,
-        enabled: claudeSettings.enabled,
-        checkedAt,
-        models,
-        probe: {
-          installed: true,
-          version: null,
-          status: "error",
-          authStatus: "unknown",
-          message:
-            "Claude Agent CLI is installed but failed to run. Timed out while running command.",
-        },
-      });
-    }
+  if (Option.isNone(versionProbe.success)) {
+    return buildServerProvider({
+      provider: PROVIDER,
+      enabled: claudeSettings.enabled,
+      checkedAt,
+      models,
+      probe: {
+        installed: true,
+        version: null,
+        status: "error",
+        authStatus: "unknown",
+        message:
+          "Claude Agent CLI is installed but failed to run. Timed out while running command.",
+      },
+    });
+  }
 
-    const version = versionProbe.success.value;
-    const parsedVersion = parseGenericCliVersion(`${version.stdout}\n${version.stderr}`);
-    if (version.code !== 0) {
-      const detail = detailFromResult(version);
-      return buildServerProvider({
-        provider: PROVIDER,
-        enabled: claudeSettings.enabled,
-        checkedAt,
-        models,
-        probe: {
-          installed: true,
-          version: parsedVersion,
-          status: "error",
-          authStatus: "unknown",
-          message: detail
-            ? `Claude Agent CLI is installed but failed to run. ${detail}`
-            : "Claude Agent CLI is installed but failed to run.",
-        },
-      });
-    }
-
-    const authProbe = yield* runClaudeCommand(["auth", "status"]).pipe(
-      Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
-      Effect.result,
-    );
-
-    if (Result.isFailure(authProbe)) {
-      const error = authProbe.failure;
-      return buildServerProvider({
-        provider: PROVIDER,
-        enabled: claudeSettings.enabled,
-        checkedAt,
-        models,
-        probe: {
-          installed: true,
-          version: parsedVersion,
-          status: "warning",
-          authStatus: "unknown",
-          message:
-            error instanceof Error
-              ? `Could not verify Claude authentication status: ${error.message}.`
-              : "Could not verify Claude authentication status.",
-        },
-      });
-    }
-
-    if (Option.isNone(authProbe.success)) {
-      return buildServerProvider({
-        provider: PROVIDER,
-        enabled: claudeSettings.enabled,
-        checkedAt,
-        models,
-        probe: {
-          installed: true,
-          version: parsedVersion,
-          status: "warning",
-          authStatus: "unknown",
-          message:
-            "Could not verify Claude authentication status. Timed out while running command.",
-        },
-      });
-    }
-
-    const parsed = parseClaudeAuthStatusFromOutput(authProbe.success.value);
+  const version = versionProbe.success.value;
+  const parsedVersion = parseGenericCliVersion(`${version.stdout}\n${version.stderr}`);
+  if (version.code !== 0) {
+    const detail = detailFromResult(version);
     return buildServerProvider({
       provider: PROVIDER,
       enabled: claudeSettings.enabled,
@@ -354,13 +449,93 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       probe: {
         installed: true,
         version: parsedVersion,
-        status: parsed.status,
-        authStatus: parsed.authStatus,
-        ...(parsed.message ? { message: parsed.message } : {}),
+        status: "error",
+        authStatus: "unknown",
+        message: detail
+          ? `Claude Agent CLI is installed but failed to run. ${detail}`
+          : "Claude Agent CLI is installed but failed to run.",
       },
     });
-  },
-);
+  }
+
+  // ── Auth check + subscription detection ────────────────────────────
+
+  const authProbe = yield* runClaudeCommand(["auth", "status"]).pipe(
+    Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
+    Effect.result,
+  );
+
+  // Determine subscription type from multiple sources (cheapest first):
+  // 1. `claude auth status` JSON output (may or may not contain it)
+  // 2. Cached SDK probe (spawns a Claude process on miss, reads
+  //    `initializationResult()` for account metadata, then aborts
+  //    immediately — no API tokens are consumed)
+
+  let subscriptionType: string | undefined;
+
+  if (Result.isSuccess(authProbe) && Option.isSome(authProbe.success)) {
+    subscriptionType = extractSubscriptionTypeFromOutput(authProbe.success.value);
+  }
+
+  if (!subscriptionType && resolveSubscriptionType) {
+    subscriptionType = yield* resolveSubscriptionType(claudeSettings.binaryPath);
+  }
+
+  const resolvedModels = adjustModelsForSubscription(models, subscriptionType);
+
+  // ── Handle auth results (same logic as before, adjusted models) ──
+
+  if (Result.isFailure(authProbe)) {
+    const error = authProbe.failure;
+    return buildServerProvider({
+      provider: PROVIDER,
+      enabled: claudeSettings.enabled,
+      checkedAt,
+      models: resolvedModels,
+      probe: {
+        installed: true,
+        version: parsedVersion,
+        status: "warning",
+        authStatus: "unknown",
+        message:
+          error instanceof Error
+            ? `Could not verify Claude authentication status: ${error.message}.`
+            : "Could not verify Claude authentication status.",
+      },
+    });
+  }
+
+  if (Option.isNone(authProbe.success)) {
+    return buildServerProvider({
+      provider: PROVIDER,
+      enabled: claudeSettings.enabled,
+      checkedAt,
+      models: resolvedModels,
+      probe: {
+        installed: true,
+        version: parsedVersion,
+        status: "warning",
+        authStatus: "unknown",
+        message: "Could not verify Claude authentication status. Timed out while running command.",
+      },
+    });
+  }
+
+  const parsed = parseClaudeAuthStatusFromOutput(authProbe.success.value);
+  return buildServerProvider({
+    provider: PROVIDER,
+    enabled: claudeSettings.enabled,
+    checkedAt,
+    models: resolvedModels,
+    probe: {
+      installed: true,
+      version: parsedVersion,
+      status: parsed.status,
+      authStatus: parsed.authStatus,
+      ...(parsed.message ? { message: parsed.message } : {}),
+    },
+  });
+});
 
 export const ClaudeProviderLive = Layer.effect(
   ClaudeProvider,
@@ -368,7 +543,16 @@ export const ClaudeProviderLive = Layer.effect(
     const serverSettings = yield* ServerSettingsService;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
-    const checkProvider = checkClaudeProviderStatus().pipe(
+    const subscriptionProbeCache = yield* Cache.make({
+      capacity: 1,
+      timeToLive: Duration.minutes(5),
+      lookup: (binaryPath: string) =>
+        probeClaudeCapabilities(binaryPath).pipe(Effect.map((r) => r?.subscriptionType)),
+    });
+
+    const checkProvider = checkClaudeProviderStatus((binaryPath) =>
+      Cache.get(subscriptionProbeCache, binaryPath),
+    ).pipe(
       Effect.provideService(ServerSettingsService, serverSettings),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );
