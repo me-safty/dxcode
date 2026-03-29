@@ -463,8 +463,7 @@ function classifyRequestType(toolName: string): CanonicalRequestType {
 }
 
 function isTodoTool(toolName: string): boolean {
-  const normalized = toolName.toLowerCase();
-  return normalized === "todowrite" || normalized.includes("todowrite");
+  return toolName.toLowerCase().includes("todowrite");
 }
 
 type PlanStep = { step: string; status: "pending" | "inProgress" | "completed" };
