@@ -248,6 +248,7 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
 }): {
   hasHiddenThreads: boolean;
   visibleThreads: T[];
+  hiddenThreads: T[];
 } {
   const { activeThreadId, isThreadListExpanded, previewLimit, threads } = input;
   const hasHiddenThreads = threads.length > previewLimit;
@@ -255,6 +256,7 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
   if (!hasHiddenThreads || isThreadListExpanded) {
     return {
       hasHiddenThreads,
+      hiddenThreads: [],
       visibleThreads: [...threads],
     };
   }
@@ -263,6 +265,7 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
   if (!activeThreadId || previewThreads.some((thread) => thread.id === activeThreadId)) {
     return {
       hasHiddenThreads: true,
+      hiddenThreads: threads.slice(previewLimit),
       visibleThreads: previewThreads,
     };
   }
@@ -271,6 +274,7 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
   if (!activeThread) {
     return {
       hasHiddenThreads: true,
+      hiddenThreads: threads.slice(previewLimit),
       visibleThreads: previewThreads,
     };
   }
@@ -279,6 +283,7 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
 
   return {
     hasHiddenThreads: true,
+    hiddenThreads: threads.filter((thread) => !visibleThreadIds.has(thread.id)),
     visibleThreads: threads.filter((thread) => visibleThreadIds.has(thread.id)),
   };
 }
