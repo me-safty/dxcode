@@ -208,6 +208,52 @@ describe("orchestration contracts", () => {
     expect(parsed.interactionMode).toBe(DEFAULT_PROVIDER_INTERACTION_MODE);
   });
 
+  it("accepts a title seed in thread.turn.start", async () => {
+    const parsed = await Effect.runPromise(
+      decodeThreadTurnStartCommand({
+        type: "thread.turn.start",
+        commandId: "cmd-turn-title-seed",
+        threadId: "thread-1",
+        message: {
+          messageId: "msg-title-seed",
+          role: "user",
+          text: "hello",
+          attachments: [],
+        },
+        titleSeed: "Investigate reconnect failures",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    expect(parsed.titleSeed).toBe("Investigate reconnect failures");
+  });
+
+  it("accepts a source proposed plan reference in thread.turn.start", async () => {
+    const parsed = await Effect.runPromise(
+      decodeThreadTurnStartCommand({
+        type: "thread.turn.start",
+        commandId: "cmd-turn-source-plan",
+        threadId: "thread-2",
+        message: {
+          messageId: "msg-source-plan",
+          role: "user",
+          text: "implement this",
+          attachments: [],
+        },
+        sourceProposedPlan: {
+          threadId: "thread-1",
+          planId: "plan-1",
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    expect(parsed.sourceProposedPlan).toEqual({
+      threadId: "thread-1",
+      planId: "plan-1",
+    });
+  });
+
   it("decodes thread.created runtime mode for historical events", async () => {
     const parsed = await Effect.runPromise(
       decodeThreadCreatedPayload({
@@ -484,6 +530,19 @@ describe("orchestration contracts", () => {
       threadId: "thread-1",
       planId: "plan-1",
     });
+  });
+
+  it("decodes thread.turn-start-requested title seed when present", async () => {
+    const parsed = await Effect.runPromise(
+      decodeThreadTurnStartRequestedPayload({
+        threadId: "thread-2",
+        messageId: "msg-2",
+        titleSeed: "Investigate reconnect failures",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    expect(parsed.titleSeed).toBe("Investigate reconnect failures");
   });
 
   it("decodes latest turn source proposed plan metadata when present", async () => {

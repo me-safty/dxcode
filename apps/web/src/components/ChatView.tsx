@@ -24,6 +24,7 @@ import {
 } from "@t3tools/contracts";
 import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@t3tools/shared/model";
 import { IMAGE_ONLY_BOOTSTRAP_PROMPT } from "@t3tools/shared/orchestration";
+import { truncate } from "@t3tools/shared/String";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
@@ -71,7 +72,6 @@ import {
   proposedPlanTitle,
   resolvePlanFollowUpSubmission,
 } from "../proposedPlan";
-import { truncateTitle } from "../truncateTitle";
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -2895,7 +2895,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           titleSeed = "New thread";
         }
       }
-      const title = truncateTitle(titleSeed);
+      const title = truncate(titleSeed);
       const threadCreateModelSelection: ModelSelection = {
         provider: selectedProvider,
         model:
@@ -2980,6 +2980,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           attachments: turnAttachments,
         },
         modelSelection: selectedModelSelection,
+        titleSeed: title,
         runtimeMode,
         interactionMode,
         createdAt: messageCreatedAt,
@@ -3299,6 +3300,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       errorMessage: string;
       suppressOptimisticMessage?: boolean;
       hideServerMessage?: boolean;
+      titleSeed?: string;
       sourceProposedPlan?: {
         threadId: ThreadId;
         planId: string;
@@ -3388,6 +3390,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             attachments: input.snapshot.attachments.map(toCommandAttachment),
           },
           modelSelection: input.snapshot.modelSelection,
+          ...(input.titleSeed ? { titleSeed: input.titleSeed } : {}),
           runtimeMode: input.snapshot.runtimeMode,
           interactionMode: input.snapshot.interactionMode,
           ...(input.sourceProposedPlan ? { sourceProposedPlan: input.sourceProposedPlan } : {}),
@@ -3593,6 +3596,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           interactionMode: nextInteractionMode,
         },
         errorMessage: "Failed to send plan follow-up.",
+        titleSeed: activeThread.title,
         ...(nextInteractionMode === "default" && activeProposedPlan
           ? {
               sourceProposedPlan: {
@@ -3836,7 +3840,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       effort: selectedPromptEffort,
       text: implementationPrompt,
     });
-    const nextThreadTitle = truncateTitle(buildPlanImplementationThreadTitle(planMarkdown));
+    const nextThreadTitle = truncate(buildPlanImplementationThreadTitle(planMarkdown));
     const nextThreadModelSelection: ModelSelection = selectedModelSelection;
 
     sendInFlightRef.current = true;
@@ -3872,6 +3876,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             attachments: [],
           },
           modelSelection: selectedModelSelection,
+          titleSeed: nextThreadTitle,
           runtimeMode,
           interactionMode: "default",
           createdAt,
