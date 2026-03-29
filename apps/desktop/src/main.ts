@@ -43,6 +43,7 @@ import {
   reduceDesktopUpdateStateOnDownloadStart,
   reduceDesktopUpdateStateOnInstallFailure,
   reduceDesktopUpdateStateOnNoUpdate,
+  reduceDesktopUpdateStateToIdle,
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
@@ -78,6 +79,7 @@ const LOG_FILE_MAX_FILES = 10;
 const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
 const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
+const AUTO_UPDATE_TRANSIENT_IDLE_RESET_DELAY_MS = 5_000;
 const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
 
@@ -294,6 +296,7 @@ let updateDownloadInFlight = false;
 let updateInstallInFlight = false;
 let updaterConfigured = false;
 let updateState: DesktopUpdateState = initialUpdateState();
+let updateIdleResetTimer: ReturnType<typeof setTimeout> | null = null;
 const updateStateListeners = new Set<(state: DesktopUpdateState) => void>();
 updateStateListeners.add(() => emitUpdateState());
 
@@ -578,20 +581,22 @@ async function checkForUpdatesFromMenu(): Promise<void> {
   await checkForUpdates("menu");
 
   if (updateState.status === "up-to-date") {
-    void dialog.showMessageBox({
+    await dialog.showMessageBox({
       type: "info",
       title: "You're up to date!",
       message: `T3 Code ${updateState.currentVersion} is currently the newest version available.`,
       buttons: ["OK"],
     });
+    resetUpdateStateToIdleIfNeeded();
   } else if (updateState.status === "error") {
-    void dialog.showMessageBox({
+    await dialog.showMessageBox({
       type: "warning",
       title: "Update check failed",
       message: "Could not check for updates.",
       detail: updateState.message ?? "An unknown error occurred. Please try again later.",
       buttons: ["OK"],
     });
+    resetUpdateStateToIdleIfNeeded();
   }
 }
 
@@ -788,8 +793,43 @@ function emitUpdateState(): void {
   }
 }
 
+function shouldResetUpdateStateToIdle(state: DesktopUpdateState): boolean {
+  return state.status === "up-to-date" || state.errorContext === "check";
+}
+
+function clearUpdateIdleResetTimer(): void {
+  if (updateIdleResetTimer) {
+    clearTimeout(updateIdleResetTimer);
+    updateIdleResetTimer = null;
+  }
+}
+
+function resetUpdateStateToIdleIfNeeded(): boolean {
+  clearUpdateIdleResetTimer();
+  if (!shouldResetUpdateStateToIdle(updateState)) {
+    return false;
+  }
+  setUpdateState(reduceDesktopUpdateStateToIdle(updateState));
+  return true;
+}
+
+function scheduleUpdateStateIdleReset(delayMs = AUTO_UPDATE_TRANSIENT_IDLE_RESET_DELAY_MS): void {
+  clearUpdateIdleResetTimer();
+  if (!shouldResetUpdateStateToIdle(updateState)) {
+    return;
+  }
+  updateIdleResetTimer = setTimeout(() => {
+    updateIdleResetTimer = null;
+    resetUpdateStateToIdleIfNeeded();
+  }, delayMs);
+  updateIdleResetTimer.unref();
+}
+
 function setUpdateState(patch: Partial<DesktopUpdateState>): void {
   updateState = { ...updateState, ...patch };
+  if (!shouldResetUpdateStateToIdle(updateState)) {
+    clearUpdateIdleResetTimer();
+  }
   for (const listener of updateStateListeners) {
     listener(updateState);
   }
@@ -827,6 +867,7 @@ async function checkForUpdates(reason: string): Promise<boolean> {
     setUpdateState(
       reduceDesktopUpdateStateOnCheckFailure(updateState, message, new Date().toISOString()),
     );
+    scheduleUpdateStateIdleReset();
     console.error(`[desktop-updater] Failed to check for updates: ${message}`);
     return true;
   } finally {
@@ -952,6 +993,7 @@ function configureAutoUpdater(): void {
   });
   autoUpdater.on("update-not-available", () => {
     setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
+    scheduleUpdateStateIdleReset();
     lastLoggedDownloadMilestone = -1;
     console.info("[desktop-updater] No updates available.");
   });
@@ -1456,6 +1498,7 @@ app.on("before-quit", () => {
   isQuitting = true;
   updateInstallInFlight = false;
   writeDesktopLogHeader("before-quit received");
+  clearUpdateIdleResetTimer();
   clearUpdatePollTimer();
   stopBackend();
   restoreStdIoCapture?.();
@@ -1494,6 +1537,7 @@ if (process.platform !== "win32") {
     if (isQuitting) return;
     isQuitting = true;
     writeDesktopLogHeader("SIGINT received");
+    clearUpdateIdleResetTimer();
     clearUpdatePollTimer();
     stopBackend();
     restoreStdIoCapture?.();
@@ -1504,6 +1548,7 @@ if (process.platform !== "win32") {
     if (isQuitting) return;
     isQuitting = true;
     writeDesktopLogHeader("SIGTERM received");
+    clearUpdateIdleResetTimer();
     clearUpdatePollTimer();
     stopBackend();
     restoreStdIoCapture?.();
