@@ -570,6 +570,20 @@ function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
         }
         return { sequence: 1 };
       }
+      case "thread.queued-follow-up.send-failed": {
+        const followUpId = typeof command.followUpId === "string" ? command.followUpId : null;
+        const lastSendError =
+          typeof command.lastSendError === "string" ? command.lastSendError : null;
+        if (followUpId && lastSendError) {
+          updateFixtureThread((thread) => ({
+            ...thread,
+            queuedFollowUps: thread.queuedFollowUps.map((entry) =>
+              entry.id === followUpId ? { ...entry, lastSendError } : entry,
+            ),
+          }));
+        }
+        return { sequence: 1 };
+      }
       case "thread.turn.start":
       case "thread.meta.update":
       case "thread.create":
@@ -2438,8 +2452,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(commandTypes).toEqual(
             expect.arrayContaining(["thread.queued-follow-up.remove", "thread.turn.start"]),
           );
-          expect(commandTypes.indexOf("thread.queued-follow-up.remove")).toBeLessThan(
-            commandTypes.indexOf("thread.turn.start"),
+          expect(commandTypes.indexOf("thread.turn.start")).toBeLessThan(
+            commandTypes.indexOf("thread.queued-follow-up.remove"),
           );
         },
         { timeout: 8_000, interval: 16 },
@@ -2567,7 +2581,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("restores a ready-state steered queued follow-up with an error when send fails after claim", async () => {
+  it("marks a ready-state steered queued follow-up as failed when send fails", async () => {
     setClientSettings({
       followUpBehavior: "queue",
     });
@@ -2625,17 +2639,75 @@ describe("ChatView timeline estimator parity (full app)", () => {
         () => {
           expect(getTurnStartRequests()).toHaveLength(1);
           expect(getDispatchCommandTypes()).toEqual(
-            expect.arrayContaining([
-              "thread.queued-follow-up.remove",
-              "thread.turn.start",
-              "thread.queued-follow-up.enqueue",
-            ]),
+            expect.arrayContaining(["thread.turn.start", "thread.queued-follow-up.update"]),
           );
           expect(getQueuedFollowUpPrompts()).toEqual(["ready steer failure"]);
           const restoredFollowUp = fixture.snapshot.threads
             .find((thread) => thread.id === THREAD_ID)
             ?.queuedFollowUps.find((followUp) => followUp.id === "queued-ready-steer-failure");
           expect(restoredFollowUp?.lastSendError).toBe("Failed to steer queued follow-up.");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps queued image attachments owned by the thread until ready-state steer send succeeds", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-follow-up-panel-steer-image-order" as MessageId,
+        targetText: "follow-up panel steer image order target",
+        sessionStatus: "ready",
+      }),
+    });
+
+    try {
+      updateFixtureThread((thread) => ({
+        ...thread,
+        queuedFollowUps: [
+          {
+            id: "queued-ready-steer-image",
+            createdAt: isoAt(8_600),
+            prompt: "",
+            attachments: [
+              {
+                type: "image",
+                id: "thread-1-att-steer-image",
+                name: "queued.png",
+                mimeType: "image/png",
+                sizeBytes: 128,
+              },
+            ],
+            terminalContexts: [],
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            lastSendError: null,
+          },
+        ],
+      }));
+
+      const panel = await waitForQueuedFollowUpsPanel();
+      const steerButton = Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).find(
+        (button) => button.textContent?.trim() === "Steer",
+      );
+      expect(steerButton).toBeTruthy();
+      steerButton?.click();
+
+      await vi.waitFor(
+        () => {
+          expect(getTurnStartRequests()).toHaveLength(1);
+          expect(getDispatchCommandTypes()).toEqual([
+            "thread.turn.start",
+            "thread.queued-follow-up.remove",
+          ]);
+          expect(getQueuedFollowUpPrompts()).toEqual([]);
         },
         { timeout: 8_000, interval: 16 },
       );

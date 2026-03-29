@@ -4,9 +4,11 @@ import {
   buildQueuedFollowUpMessageText,
   canDispatchQueuedFollowUp,
 } from "@t3tools/shared/orchestration";
+import { formatOutgoingPrompt, promptEffortFromModelSelection } from "@t3tools/shared/model";
 import { Cause, Effect, Exit, Layer, Stream } from "effect";
 
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import {
   QueuedFollowUpReactor,
   type QueuedFollowUpReactorShape,
@@ -17,6 +19,7 @@ const serverCommandId = (tag: string): CommandId =>
 
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
+  const providerRegistry = yield* ProviderRegistry;
   const inFlightFollowUpIds = new Set<string>();
   const pendingQueuedDispatchByThreadId = new Map<ThreadId, string>();
   const blockedQueuedFollowUpIdsByThreadId = new Map<ThreadId, string>();
@@ -104,25 +107,57 @@ const make = Effect.gen(function* () {
       });
 
       const turnStartCreatedAt = new Date().toISOString();
+      const providers = yield* providerRegistry.getProviders;
+      const queuedProviderModels =
+        providers.find((provider) => provider.provider === queuedHead.modelSelection.provider)
+          ?.models ?? [];
+      const outgoingMessageText = formatOutgoingPrompt({
+        provider: queuedHead.modelSelection.provider,
+        model: queuedHead.modelSelection.model,
+        models: queuedProviderModels,
+        effort: promptEffortFromModelSelection(queuedHead.modelSelection),
+        text:
+          buildQueuedFollowUpMessageText({
+            prompt: queuedHead.prompt,
+            terminalContexts: queuedHead.terminalContexts,
+            attachmentCount: queuedHead.attachments.length,
+          }) || "",
+      });
       const turnStartExit = yield* Effect.exit(
-        orchestrationEngine.dispatch({
-          type: "thread.turn.start",
-          commandId: serverCommandId("queued-follow-up-turn-start"),
-          threadId,
-          message: {
-            messageId: MessageId.makeUnsafe(crypto.randomUUID()),
-            role: "user",
-            text: buildQueuedFollowUpMessageText({
-              prompt: queuedHead.prompt,
-              terminalContexts: queuedHead.terminalContexts,
-              attachmentCount: queuedHead.attachments.length,
-            }),
-            attachments: queuedHead.attachments,
-          },
-          modelSelection: queuedHead.modelSelection,
-          runtimeMode: queuedHead.runtimeMode,
-          interactionMode: queuedHead.interactionMode,
-          createdAt: turnStartCreatedAt,
+        Effect.gen(function* () {
+          if (thread.runtimeMode !== queuedHead.runtimeMode) {
+            yield* orchestrationEngine.dispatch({
+              type: "thread.runtime-mode.set",
+              commandId: serverCommandId("queued-follow-up-runtime-mode-set"),
+              threadId,
+              runtimeMode: queuedHead.runtimeMode,
+              createdAt: turnStartCreatedAt,
+            });
+          }
+          if (thread.interactionMode !== queuedHead.interactionMode) {
+            yield* orchestrationEngine.dispatch({
+              type: "thread.interaction-mode.set",
+              commandId: serverCommandId("queued-follow-up-interaction-mode-set"),
+              threadId,
+              interactionMode: queuedHead.interactionMode,
+              createdAt: turnStartCreatedAt,
+            });
+          }
+          yield* orchestrationEngine.dispatch({
+            type: "thread.turn.start",
+            commandId: serverCommandId("queued-follow-up-turn-start"),
+            threadId,
+            message: {
+              messageId: MessageId.makeUnsafe(crypto.randomUUID()),
+              role: "user",
+              text: outgoingMessageText,
+              attachments: queuedHead.attachments,
+            },
+            modelSelection: queuedHead.modelSelection,
+            runtimeMode: queuedHead.runtimeMode,
+            interactionMode: queuedHead.interactionMode,
+            createdAt: turnStartCreatedAt,
+          });
         }),
       );
 

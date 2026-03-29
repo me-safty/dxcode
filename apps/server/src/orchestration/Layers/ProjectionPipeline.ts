@@ -1160,16 +1160,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             event.payload.targetIndex === undefined
               ? withoutExisting.length
               : Math.max(0, Math.min(event.payload.targetIndex, withoutExisting.length));
-          yield* replaceThreadQueue(event.payload.threadId, [
+          const nextQueuedFollowUps = [
             ...withoutExisting.slice(0, targetIndex),
             nextFollowUp,
             ...withoutExisting.slice(targetIndex),
-          ]);
-          yield* syncQueuedFollowUpAttachmentPaths(event.payload.threadId, [
-            ...withoutExisting.slice(0, targetIndex),
-            nextFollowUp,
-            ...withoutExisting.slice(targetIndex),
-          ]);
+          ];
+          yield* replaceThreadQueue(event.payload.threadId, nextQueuedFollowUps);
+          yield* syncQueuedFollowUpAttachmentPaths(event.payload.threadId, nextQueuedFollowUps);
           yield* touchProjectedThreadUpdatedAt(event.payload.threadId, event.occurredAt);
           return;
         }

@@ -2,7 +2,6 @@ import {
   type ApprovalRequestId,
   type ClientChatAttachment,
   DEFAULT_MODEL_BY_PROVIDER,
-  type ClaudeCodeEffort,
   type MessageId,
   type ModelSelection,
   type ProjectScript,
@@ -22,7 +21,7 @@ import {
   ProviderInteractionMode,
   RuntimeMode,
 } from "@t3tools/contracts";
-import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@t3tools/shared/model";
+import { formatOutgoingPrompt, normalizeModelSlug } from "@t3tools/shared/model";
 import { IMAGE_ONLY_BOOTSTRAP_PROMPT } from "@t3tools/shared/orchestration";
 import { truncate } from "@t3tools/shared/String";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -121,11 +120,7 @@ import {
 import { SidebarTrigger } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
-import {
-  getProviderModelCapabilities,
-  getProviderModels,
-  resolveSelectableProvider,
-} from "../providerModels";
+import { getProviderModels, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelection } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -203,19 +198,6 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_QUEUED_FOLLOW_UPS: QueuedFollowUp[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 
-function formatOutgoingPrompt(params: {
-  provider: ProviderKind;
-  model: string | null;
-  models: ReadonlyArray<ServerProvider["models"][number]>;
-  effort: string | null;
-  text: string;
-}): string {
-  const caps = getProviderModelCapabilities(params.models, params.model, params.provider);
-  if (params.effort && caps.promptInjectedEffortLevels.includes(params.effort)) {
-    return applyClaudePromptEffortPrefix(params.text, params.effort as ClaudeCodeEffort | null);
-  }
-  return params.text;
-}
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
@@ -279,7 +261,6 @@ interface PendingSteerSubmission {
   snapshot: FollowUpSubmissionSnapshot;
   source: "composer" | "queued-follow-up";
   queuedFollowUpId?: string;
-  queuedFollowUpIndex?: number;
 }
 
 function isUploadedFollowUpAttachment(
@@ -3448,8 +3429,40 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ],
   );
 
-  const claimQueuedFollowUpForSteer = useCallback(
-    async (pending: PendingSteerSubmission) => {
+  const markQueuedFollowUpSteerFailed = useCallback(
+    async (pending: PendingSteerSubmission, errorMessage: string) => {
+      if (pending.source !== "queued-follow-up" || !pending.queuedFollowUpId) {
+        return;
+      }
+      const api = readNativeApi();
+      if (!api) {
+        return;
+      }
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.queued-follow-up.update",
+          commandId: newCommandId(),
+          threadId: pending.threadId,
+          followUp: {
+            ...pending.snapshot,
+            id: pending.queuedFollowUpId,
+            attachments: pending.snapshot.attachments.map(toCommandAttachment),
+            lastSendError: errorMessage,
+          },
+          createdAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        setThreadError(
+          pending.threadId,
+          err instanceof Error ? err.message : "Failed to persist queued follow-up error.",
+        );
+      }
+    },
+    [setThreadError],
+  );
+
+  const removeQueuedFollowUpAfterSteer = useCallback(
+    async (pending: PendingSteerSubmission, errorMessage: string) => {
       if (pending.source !== "queued-follow-up" || !pending.queuedFollowUpId) {
         return true;
       }
@@ -3467,6 +3480,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         });
         return true;
       } catch (err) {
+        await markQueuedFollowUpSteerFailed(pending, errorMessage);
         setThreadError(
           pending.threadId,
           err instanceof Error ? err.message : "Failed to remove queued follow-up.",
@@ -3474,42 +3488,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return false;
       }
     },
-    [setThreadError],
-  );
-
-  const restoreFailedSteeredQueuedFollowUp = useCallback(
-    async (pending: PendingSteerSubmission, errorMessage: string) => {
-      if (pending.source !== "queued-follow-up" || !pending.queuedFollowUpId) {
-        return;
-      }
-      const api = readNativeApi();
-      if (!api) {
-        return;
-      }
-      try {
-        await api.orchestration.dispatchCommand({
-          type: "thread.queued-follow-up.enqueue",
-          commandId: newCommandId(),
-          threadId: pending.threadId,
-          followUp: {
-            ...pending.snapshot,
-            id: pending.queuedFollowUpId,
-            attachments: pending.snapshot.attachments.map(toCommandAttachment),
-            lastSendError: errorMessage,
-          },
-          ...(pending.queuedFollowUpIndex !== undefined
-            ? { targetIndex: pending.queuedFollowUpIndex }
-            : {}),
-          createdAt: new Date().toISOString(),
-        });
-      } catch (err) {
-        setThreadError(
-          pending.threadId,
-          err instanceof Error ? err.message : "Failed to restore queued follow-up after steer.",
-        );
-      }
-    },
-    [setThreadError],
+    [markQueuedFollowUpSteerFailed, setThreadError],
   );
 
   useEffect(() => {
@@ -3550,6 +3529,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       phase === "running" ||
       isSendBusy ||
       isConnecting ||
+      isRevertingCheckpoint ||
       sendInFlightRef.current ||
       isComposerApprovalState ||
       pendingUserInputs.length > 0
@@ -3559,13 +3539,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
     setPendingSteerSubmission(null);
     void (async () => {
-      let claimedQueuedFollowUp = false;
-      if (pendingSteerSubmission.source === "queued-follow-up") {
-        claimedQueuedFollowUp = await claimQueuedFollowUpForSteer(pendingSteerSubmission);
-        if (!claimedQueuedFollowUp) {
-          return;
-        }
-      }
       const dispatched = await dispatchServerThreadSnapshot({
         threadId: pendingSteerSubmission.threadId,
         snapshot: pendingSteerSubmission.snapshot,
@@ -3576,32 +3549,38 @@ export default function ChatView({ threadId }: ChatViewProps) {
         suppressOptimisticMessage: false,
         hideServerMessage: false,
       });
-      if (dispatched) {
+      if (!dispatched) {
+        if (pendingSteerSubmission.source === "queued-follow-up") {
+          await markQueuedFollowUpSteerFailed(
+            pendingSteerSubmission,
+            "Failed to steer queued follow-up.",
+          );
+        } else {
+          restoreFollowUpSnapshotToComposer(pendingSteerSubmission.snapshot);
+        }
         return;
       }
-      if (claimedQueuedFollowUp) {
-        await restoreFailedSteeredQueuedFollowUp(
+      if (pendingSteerSubmission.source === "queued-follow-up") {
+        await removeQueuedFollowUpAfterSteer(
           pendingSteerSubmission,
-          "Failed to steer queued follow-up.",
+          "Queued follow-up was sent but queue cleanup failed.",
         );
-      } else if (pendingSteerSubmission.source !== "queued-follow-up") {
-        restoreFollowUpSnapshotToComposer(pendingSteerSubmission.snapshot);
       }
     })();
   }, [
     activeThread?.id,
-    claimQueuedFollowUpForSteer,
     dispatchServerThreadSnapshot,
     isComposerApprovalState,
     isConnecting,
     isSendBusy,
     isRevertingCheckpoint,
+    markQueuedFollowUpSteerFailed,
     pendingSteerSubmissionVersion,
     pendingApprovals.length,
     pendingUserInputs.length,
     phase,
     queuedFollowUps,
-    restoreFailedSteeredQueuedFollowUp,
+    removeQueuedFollowUpAfterSteer,
     restoreFollowUpSnapshotToComposer,
     setPendingSteerSubmission,
     activeThread?.error,
@@ -3827,7 +3806,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         snapshot: followUp,
         source: "queued-follow-up",
         queuedFollowUpId: followUp.id,
-        queuedFollowUpIndex: queuedFollowUps.findIndex((entry) => entry.id === followUp.id),
       };
       if (phase === "running") {
         setPendingSteerSubmission(pendingSubmission);
@@ -3839,10 +3817,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
         return;
       }
-      const claimedQueuedFollowUp = await claimQueuedFollowUpForSteer(pendingSubmission);
-      if (!claimedQueuedFollowUp) {
-        return;
-      }
       const dispatched = await dispatchServerThreadSnapshot({
         threadId: activeThread.id,
         snapshot: followUp,
@@ -3851,23 +3825,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
         hideServerMessage: false,
       });
       if (!dispatched) {
-        await restoreFailedSteeredQueuedFollowUp(
-          pendingSubmission,
-          "Failed to steer queued follow-up.",
-        );
+        await markQueuedFollowUpSteerFailed(pendingSubmission, "Failed to steer queued follow-up.");
+        return;
       }
+      await removeQueuedFollowUpAfterSteer(
+        pendingSubmission,
+        "Queued follow-up was sent but queue cleanup failed.",
+      );
     },
     [
       activeThread,
-      claimQueuedFollowUpForSteer,
       dispatchServerThreadSnapshot,
       isConnecting,
       isSendBusy,
       isServerThread,
+      markQueuedFollowUpSteerFailed,
       phase,
       queuedFollowUps,
+      removeQueuedFollowUpAfterSteer,
       requestThreadInterrupt,
-      restoreFailedSteeredQueuedFollowUp,
       setPendingSteerSubmission,
     ],
   );

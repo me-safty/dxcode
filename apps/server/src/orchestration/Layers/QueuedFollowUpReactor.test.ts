@@ -7,6 +7,7 @@ import {
   type OrchestrationThreadActivity,
   type OrchestrationSessionStatus,
   ProjectId,
+  type ServerProvider,
   ThreadId,
   type OrchestrationCommand,
   type OrchestrationReadModel,
@@ -19,6 +20,7 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { QueuedFollowUpReactor } from "../Services/QueuedFollowUpReactor.ts";
 import { QueuedFollowUpReactorLive } from "./QueuedFollowUpReactor.ts";
 
@@ -34,8 +36,19 @@ function makeReadModel(input?: {
   queuedTerminalContexts?: ReadonlyArray<
     OrchestrationReadModel["threads"][number]["queuedFollowUps"][number]["terminalContexts"]
   >;
+  queuedModelSelections?: ReadonlyArray<
+    OrchestrationReadModel["threads"][number]["queuedFollowUps"][number]["modelSelection"]
+  >;
+  queuedRuntimeModes?: ReadonlyArray<
+    OrchestrationReadModel["threads"][number]["queuedFollowUps"][number]["runtimeMode"]
+  >;
+  queuedInteractionModes?: ReadonlyArray<
+    OrchestrationReadModel["threads"][number]["queuedFollowUps"][number]["interactionMode"]
+  >;
   latestTurnState?: OrchestrationReadModel["threads"][number]["latestTurn"];
   activities?: ReadonlyArray<OrchestrationThreadActivity>;
+  threadRuntimeMode?: OrchestrationReadModel["threads"][number]["runtimeMode"];
+  threadInteractionMode?: OrchestrationReadModel["threads"][number]["interactionMode"];
 }): OrchestrationReadModel {
   const queuedPrompts = input?.queuedPrompts ?? ["send this next"];
   return {
@@ -65,8 +78,8 @@ function makeReadModel(input?: {
           provider: "codex",
           model: "gpt-5.3-codex",
         },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: input?.threadInteractionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: input?.threadRuntimeMode ?? DEFAULT_RUNTIME_MODE,
         branch: null,
         worktreePath: null,
         createdAt: NOW_ISO,
@@ -80,12 +93,13 @@ function makeReadModel(input?: {
           prompt,
           attachments: input?.queuedAttachments?.[index] ?? [],
           terminalContexts: input?.queuedTerminalContexts?.[index] ?? [],
-          modelSelection: {
+          modelSelection: input?.queuedModelSelections?.[index] ?? {
             provider: "codex",
             model: "gpt-5.3-codex",
           },
-          runtimeMode: DEFAULT_RUNTIME_MODE,
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: input?.queuedRuntimeModes?.[index] ?? DEFAULT_RUNTIME_MODE,
+          interactionMode:
+            input?.queuedInteractionModes?.[index] ?? DEFAULT_PROVIDER_INTERACTION_MODE,
           lastSendError: input?.lastSendError ?? null,
         })),
         proposedPlans: [],
@@ -99,7 +113,7 @@ function makeReadModel(input?: {
                 threadId: ThreadId.makeUnsafe("thread-1"),
                 status: input?.sessionStatus ?? "ready",
                 providerName: "codex",
-                runtimeMode: DEFAULT_RUNTIME_MODE,
+                runtimeMode: input?.threadRuntimeMode ?? DEFAULT_RUNTIME_MODE,
                 activeTurnId: null,
                 lastError: null,
                 updatedAt: NOW_ISO,
@@ -107,6 +121,74 @@ function makeReadModel(input?: {
       },
     ],
   };
+}
+
+const DEFAULT_PROVIDERS: ReadonlyArray<ServerProvider> = [
+  {
+    provider: "codex",
+    enabled: true,
+    installed: true,
+    version: "1.0.0",
+    status: "ready",
+    authStatus: "authenticated",
+    checkedAt: NOW_ISO,
+    models: [
+      {
+        slug: "gpt-5.3-codex",
+        name: "GPT-5.3 Codex",
+        isCustom: false,
+        capabilities: {
+          reasoningEffortLevels: [],
+          supportsFastMode: false,
+          supportsThinkingToggle: false,
+          contextWindowOptions: [],
+          promptInjectedEffortLevels: [],
+        },
+      },
+    ],
+  },
+  {
+    provider: "claudeAgent",
+    enabled: true,
+    installed: true,
+    version: "1.0.0",
+    status: "ready",
+    authStatus: "authenticated",
+    checkedAt: NOW_ISO,
+    models: [
+      {
+        slug: "claude-sonnet-4-6",
+        name: "Claude Sonnet 4.6",
+        isCustom: false,
+        capabilities: {
+          reasoningEffortLevels: [
+            { value: "ultrathink", label: "Ultrathink" },
+            { value: "high", label: "High" },
+          ],
+          supportsFastMode: false,
+          supportsThinkingToggle: false,
+          contextWindowOptions: [],
+          promptInjectedEffortLevels: ["ultrathink"],
+        },
+      },
+    ],
+  },
+];
+
+function provideQueuedFollowUpReactorTestServices(
+  engine: OrchestrationEngineShape,
+  providers: ReadonlyArray<ServerProvider> = DEFAULT_PROVIDERS,
+) {
+  return QueuedFollowUpReactorLive.pipe(
+    Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
+    Layer.provide(
+      Layer.succeed(ProviderRegistry, {
+        getProviders: Effect.succeed(providers),
+        refresh: () => Effect.succeed(providers),
+        streamChanges: Stream.empty,
+      }),
+    ),
+  );
 }
 
 describe("QueuedFollowUpReactor", () => {
@@ -132,11 +214,7 @@ describe("QueuedFollowUpReactor", () => {
       streamDomainEvents: Stream.empty,
     };
 
-    runtime = ManagedRuntime.make(
-      QueuedFollowUpReactorLive.pipe(
-        Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
-      ),
-    );
+    runtime = ManagedRuntime.make(provideQueuedFollowUpReactorTestServices(engine));
 
     const reactor = await runtime.runPromise(Effect.service(QueuedFollowUpReactor));
     const scope = await Effect.runPromise(Scope.make("sequential"));
@@ -190,11 +268,7 @@ describe("QueuedFollowUpReactor", () => {
       streamDomainEvents: Stream.empty,
     };
 
-    runtime = ManagedRuntime.make(
-      QueuedFollowUpReactorLive.pipe(
-        Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
-      ),
-    );
+    runtime = ManagedRuntime.make(provideQueuedFollowUpReactorTestServices(engine));
 
     const reactor = await runtime.runPromise(Effect.service(QueuedFollowUpReactor));
     const scope = await Effect.runPromise(Scope.make("sequential"));
@@ -245,11 +319,7 @@ describe("QueuedFollowUpReactor", () => {
       streamDomainEvents: Stream.empty,
     };
 
-    runtime = ManagedRuntime.make(
-      QueuedFollowUpReactorLive.pipe(
-        Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
-      ),
-    );
+    runtime = ManagedRuntime.make(provideQueuedFollowUpReactorTestServices(engine));
 
     const reactor = await runtime.runPromise(Effect.service(QueuedFollowUpReactor));
     const scope = await Effect.runPromise(Scope.make("sequential"));
@@ -284,11 +354,7 @@ describe("QueuedFollowUpReactor", () => {
       streamDomainEvents: Stream.empty,
     };
 
-    runtime = ManagedRuntime.make(
-      QueuedFollowUpReactorLive.pipe(
-        Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
-      ),
-    );
+    runtime = ManagedRuntime.make(provideQueuedFollowUpReactorTestServices(engine));
 
     const reactor = await runtime.runPromise(Effect.service(QueuedFollowUpReactor));
     const scope = await Effect.runPromise(Scope.make("sequential"));
@@ -317,11 +383,7 @@ describe("QueuedFollowUpReactor", () => {
       streamDomainEvents: Stream.empty,
     };
 
-    runtime = ManagedRuntime.make(
-      QueuedFollowUpReactorLive.pipe(
-        Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
-      ),
-    );
+    runtime = ManagedRuntime.make(provideQueuedFollowUpReactorTestServices(engine));
 
     const reactor = await runtime.runPromise(Effect.service(QueuedFollowUpReactor));
     const scope = await Effect.runPromise(Scope.make("sequential"));
@@ -365,11 +427,7 @@ describe("QueuedFollowUpReactor", () => {
       streamDomainEvents: Stream.empty,
     };
 
-    runtime = ManagedRuntime.make(
-      QueuedFollowUpReactorLive.pipe(
-        Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
-      ),
-    );
+    runtime = ManagedRuntime.make(provideQueuedFollowUpReactorTestServices(engine));
 
     const reactor = await runtime.runPromise(Effect.service(QueuedFollowUpReactor));
     const scope = await Effect.runPromise(Scope.make("sequential"));
@@ -425,11 +483,7 @@ describe("QueuedFollowUpReactor", () => {
       streamDomainEvents: Stream.empty,
     };
 
-    runtime = ManagedRuntime.make(
-      QueuedFollowUpReactorLive.pipe(
-        Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
-      ),
-    );
+    runtime = ManagedRuntime.make(provideQueuedFollowUpReactorTestServices(engine));
 
     const reactor = await runtime.runPromise(Effect.service(QueuedFollowUpReactor));
     const scope = await Effect.runPromise(Scope.make("sequential"));
@@ -489,11 +543,7 @@ describe("QueuedFollowUpReactor", () => {
       streamDomainEvents: Stream.fromIterable([threadEvent, threadEvent]),
     };
 
-    runtime = ManagedRuntime.make(
-      QueuedFollowUpReactorLive.pipe(
-        Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
-      ),
-    );
+    runtime = ManagedRuntime.make(provideQueuedFollowUpReactorTestServices(engine));
 
     const reactor = await runtime.runPromise(Effect.service(QueuedFollowUpReactor));
     const scope = await Effect.runPromise(Scope.make("sequential"));
@@ -575,11 +625,7 @@ describe("QueuedFollowUpReactor", () => {
       streamDomainEvents: Stream.fromIterable([threadEvent, threadEvent]),
     };
 
-    runtime = ManagedRuntime.make(
-      QueuedFollowUpReactorLive.pipe(
-        Layer.provide(Layer.succeed(OrchestrationEngineService, engine)),
-      ),
-    );
+    runtime = ManagedRuntime.make(provideQueuedFollowUpReactorTestServices(engine));
 
     const reactor = await runtime.runPromise(Effect.service(QueuedFollowUpReactor));
     const scope = await Effect.runPromise(Scope.make("sequential"));
@@ -592,6 +638,97 @@ describe("QueuedFollowUpReactor", () => {
       "thread.queued-follow-up.remove",
       "thread.queued-follow-up.send-failed",
     ]);
+
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
+  it("sets queued runtime and interaction modes before auto-dispatching the queued head", async () => {
+    const dispatched: OrchestrationCommand[] = [];
+    const engine: OrchestrationEngineShape = {
+      getReadModel: () =>
+        Effect.succeed(
+          makeReadModel({
+            queuedPrompts: ["mode-sensitive follow-up"],
+            queuedRuntimeModes: ["approval-required"],
+            queuedInteractionModes: ["plan"],
+            threadRuntimeMode: "full-access",
+            threadInteractionMode: "default",
+          }),
+        ),
+      readEvents: () => Stream.empty,
+      dispatch: (command) =>
+        Effect.sync(() => {
+          dispatched.push(command);
+          return { sequence: dispatched.length };
+        }),
+      streamDomainEvents: Stream.empty,
+    };
+
+    runtime = ManagedRuntime.make(provideQueuedFollowUpReactorTestServices(engine));
+
+    const reactor = await runtime.runPromise(Effect.service(QueuedFollowUpReactor));
+    const scope = await Effect.runPromise(Scope.make("sequential"));
+
+    await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+    await runtime.runPromise(reactor.drain);
+
+    expect(dispatched.map((command) => command.type)).toEqual([
+      "thread.runtime-mode.set",
+      "thread.interaction-mode.set",
+      "thread.turn.start",
+      "thread.queued-follow-up.remove",
+    ]);
+
+    const turnStart = dispatched[2];
+    expect(turnStart?.type).toBe("thread.turn.start");
+    if (turnStart?.type !== "thread.turn.start") {
+      throw new Error("Expected third command to be thread.turn.start");
+    }
+    expect(turnStart.runtimeMode).toBe("approval-required");
+    expect(turnStart.interactionMode).toBe("plan");
+
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
+  it("applies prompt-injected effort formatting during queued auto-dispatch", async () => {
+    const dispatched: OrchestrationCommand[] = [];
+    const engine: OrchestrationEngineShape = {
+      getReadModel: () =>
+        Effect.succeed(
+          makeReadModel({
+            queuedPrompts: ["Investigate this carefully"],
+            queuedModelSelections: [
+              {
+                provider: "claudeAgent",
+                model: "claude-sonnet-4-6",
+                options: { effort: "ultrathink" },
+              },
+            ],
+          }),
+        ),
+      readEvents: () => Stream.empty,
+      dispatch: (command) =>
+        Effect.sync(() => {
+          dispatched.push(command);
+          return { sequence: dispatched.length };
+        }),
+      streamDomainEvents: Stream.empty,
+    };
+
+    runtime = ManagedRuntime.make(provideQueuedFollowUpReactorTestServices(engine));
+
+    const reactor = await runtime.runPromise(Effect.service(QueuedFollowUpReactor));
+    const scope = await Effect.runPromise(Scope.make("sequential"));
+
+    await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+    await runtime.runPromise(reactor.drain);
+
+    const turnStart = dispatched.find((command) => command.type === "thread.turn.start");
+    expect(turnStart?.type).toBe("thread.turn.start");
+    if (turnStart?.type !== "thread.turn.start") {
+      throw new Error("Expected a thread.turn.start command");
+    }
+    expect(turnStart.message.text).toBe("Ultrathink:\nInvestigate this carefully");
 
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
