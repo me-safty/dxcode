@@ -5,9 +5,11 @@ import {
   FolderIcon,
   GitPullRequestIcon,
   PlusIcon,
+  RocketIcon,
   SettingsIcon,
   SquarePenIcon,
   TerminalIcon,
+  TriangleAlertIcon,
 } from "lucide-react";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { autoAnimate } from "@formkit/auto-animate";
@@ -37,6 +39,7 @@ import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-
 import { CSS } from "@dnd-kit/utilities";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
+  type DesktopUpdateState,
   ProjectId,
   ThreadId,
   type GitStatusResult,
@@ -50,9 +53,17 @@ import {
 } from "@t3tools/contracts/settings";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
+import { isTerminalFocused } from "../lib/terminalFocus";
 import { isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import { useStore } from "../store";
-import { shortcutLabelForCommand } from "../keybindings";
+import {
+  resolveShortcutCommand,
+  shortcutLabelForCommand,
+  shouldShowThreadJumpHints,
+  threadJumpCommandForIndex,
+  threadJumpIndexFromCommand,
+  threadTraversalDirectionFromCommand,
+} from "../keybindings";
 import { derivePendingApprovals, derivePendingUserInputs } from "../session-logic";
 import { gitStatusQueryOptions } from "../lib/gitReactQuery";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
@@ -64,6 +75,19 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../terminalSta
 import { toastManager } from "./ui/toast";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
+import {
+  getArm64IntelBuildWarningDescription,
+  getDesktopUpdateActionError,
+  getDesktopUpdateButtonTooltip,
+  isDesktopUpdateButtonDisabled,
+  resolveDesktopUpdateButtonAction,
+  shouldHighlightDesktopUpdateError,
+  shouldShowArm64IntelBuildWarning,
+  shouldShowDesktopUpdateButton,
+  shouldToastDesktopUpdateActionResult,
+} from "./desktopUpdate.logic";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
+import { Button } from "./ui/button";
 import { Menu, MenuGroup, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
@@ -84,7 +108,9 @@ import {
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
+  getVisibleSidebarThreadIds,
   getVisibleThreadsForProject,
+  resolveAdjacentThreadId,
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadEnvMode,
@@ -338,11 +364,13 @@ export default function Sidebar() {
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<ProjectId>
   >(() => new Set());
+  const [showThreadJumpHints, setShowThreadJumpHints] = useState(false);
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const dragInProgressRef = useRef(false);
   const suppressProjectClickAfterDragRef = useRef(false);
   const suppressProjectClickForContextMenuRef = useRef(false);
+  const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
   const selectedThreadIds = useThreadSelectionStore((s) => s.selectedThreadIds);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
   const rangeSelectTo = useThreadSelectionStore((s) => s.rangeSelectTo);
@@ -350,11 +378,25 @@ export default function Sidebar() {
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
+  const platform = navigator.platform;
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
   const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
   const projectCwdById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
     [projects],
+  );
+  const routeTerminalOpen = routeThreadId
+    ? selectThreadTerminalState(terminalStateByThreadId, routeThreadId).terminalOpen
+    : false;
+  const sidebarShortcutLabelOptions = useMemo(
+    () => ({
+      platform,
+      context: {
+        terminalFocus: false,
+        terminalOpen: routeTerminalOpen,
+      },
+    }),
+    [platform, routeTerminalOpen],
   );
   const threadGitTargets = useMemo(
     () =>
@@ -807,6 +849,20 @@ export default function Sidebar() {
     ],
   );
 
+  const navigateToThread = useCallback(
+    (threadId: ThreadId) => {
+      if (selectedThreadIds.size > 0) {
+        clearSelection();
+      }
+      setSelectionAnchor(threadId);
+      void navigate({
+        to: "/$threadId",
+        params: { threadId },
+      });
+    },
+    [clearSelection, navigate, selectedThreadIds.size, setSelectionAnchor],
+  );
+
   const handleProjectContextMenu = useCallback(
     async (projectId: ProjectId, position: { x: number; y: number }) => {
       const api = readNativeApi();
@@ -963,45 +1019,201 @@ export default function Sidebar() {
     [appSettings.sidebarProjectSortOrder, projects, visibleThreads],
   );
   const isManualProjectSorting = appSettings.sidebarProjectSortOrder === "manual";
+  const renderedProjects = useMemo(
+    () =>
+      sortedProjects.map((project) => {
+        const projectThreads = sortThreadsForSidebar(
+          visibleThreads.filter((thread) => thread.projectId === project.id),
+          appSettings.sidebarThreadSortOrder,
+        );
+        const projectStatus = resolveProjectStatusIndicator(
+          projectThreads.map((thread) =>
+            resolveThreadStatusPill({
+              thread,
+              hasPendingApprovals: derivePendingApprovals(thread.activities).length > 0,
+              hasPendingUserInput: derivePendingUserInputs(thread.activities).length > 0,
+            }),
+          ),
+        );
+        const activeThreadId = routeThreadId ?? undefined;
+        const isThreadListExpanded = expandedThreadListsByProject.has(project.id);
+        const pinnedCollapsedThread =
+          !project.expanded && activeThreadId
+            ? (projectThreads.find((thread) => thread.id === activeThreadId) ?? null)
+            : null;
+        const shouldShowThreadPanel = project.expanded || pinnedCollapsedThread !== null;
+        const { hasHiddenThreads, visibleThreads: visibleProjectThreads } =
+          getVisibleThreadsForProject({
+            threads: projectThreads,
+            activeThreadId,
+            isThreadListExpanded,
+            previewLimit: THREAD_PREVIEW_LIMIT,
+          });
+        const orderedProjectThreadIds = projectThreads.map((thread) => thread.id);
+        const renderedThreads = pinnedCollapsedThread
+          ? [pinnedCollapsedThread]
+          : visibleProjectThreads;
+
+        return {
+          hasHiddenThreads,
+          orderedProjectThreadIds,
+          project,
+          projectStatus,
+          projectThreads,
+          renderedThreads,
+          shouldShowThreadPanel,
+          isThreadListExpanded,
+        };
+      }),
+    [
+      appSettings.sidebarThreadSortOrder,
+      expandedThreadListsByProject,
+      routeThreadId,
+      sortedProjects,
+      visibleThreads,
+    ],
+  );
+  const threadJumpCommandById = useMemo(() => {
+    const mapping = new Map<ThreadId, NonNullable<ReturnType<typeof threadJumpCommandForIndex>>>();
+    let visibleThreadIndex = 0;
+
+    for (const renderedProject of renderedProjects) {
+      for (const thread of renderedProject.renderedThreads) {
+        const jumpCommand = threadJumpCommandForIndex(visibleThreadIndex);
+        if (!jumpCommand) {
+          return mapping;
+        }
+        mapping.set(thread.id, jumpCommand);
+        visibleThreadIndex += 1;
+      }
+    }
+
+    return mapping;
+  }, [renderedProjects]);
+  const threadJumpThreadIds = useMemo(
+    () => [...threadJumpCommandById.keys()],
+    [threadJumpCommandById],
+  );
+  const threadJumpLabelById = useMemo(() => {
+    const mapping = new Map<ThreadId, string>();
+    for (const [threadId, command] of threadJumpCommandById) {
+      const label = shortcutLabelForCommand(keybindings, command, sidebarShortcutLabelOptions);
+      if (label) {
+        mapping.set(threadId, label);
+      }
+    }
+    return mapping;
+  }, [keybindings, sidebarShortcutLabelOptions, threadJumpCommandById]);
+  const orderedSidebarThreadIds = useMemo(
+    () => getVisibleSidebarThreadIds(renderedProjects),
+    [renderedProjects],
+  );
+
+  useEffect(() => {
+    const getShortcutContext = () => ({
+      terminalFocus: isTerminalFocused(),
+      terminalOpen: routeTerminalOpen,
+    });
+
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      setShowThreadJumpHints(
+        shouldShowThreadJumpHints(event, keybindings, {
+          platform,
+          context: getShortcutContext(),
+        }),
+      );
+
+      if (event.defaultPrevented || event.repeat) {
+        return;
+      }
+
+      const command = resolveShortcutCommand(event, keybindings, {
+        platform,
+        context: getShortcutContext(),
+      });
+      const traversalDirection = threadTraversalDirectionFromCommand(command);
+      if (traversalDirection !== null) {
+        const targetThreadId = resolveAdjacentThreadId({
+          threadIds: orderedSidebarThreadIds,
+          currentThreadId: routeThreadId,
+          direction: traversalDirection,
+        });
+        if (!targetThreadId) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        navigateToThread(targetThreadId);
+        return;
+      }
+
+      const jumpIndex = threadJumpIndexFromCommand(command ?? "");
+      if (jumpIndex === null) {
+        return;
+      }
+
+      const targetThreadId = threadJumpThreadIds[jumpIndex];
+      if (!targetThreadId) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      navigateToThread(targetThreadId);
+    };
+
+    const onWindowKeyUp = (event: KeyboardEvent) => {
+      setShowThreadJumpHints(
+        shouldShowThreadJumpHints(event, keybindings, {
+          platform,
+          context: getShortcutContext(),
+        }),
+      );
+    };
+
+    const onWindowBlur = () => {
+      setShowThreadJumpHints(false);
+    };
+
+    window.addEventListener("keydown", onWindowKeyDown);
+    window.addEventListener("keyup", onWindowKeyUp);
+    window.addEventListener("blur", onWindowBlur);
+
+    return () => {
+      window.removeEventListener("keydown", onWindowKeyDown);
+      window.removeEventListener("keyup", onWindowKeyUp);
+      window.removeEventListener("blur", onWindowBlur);
+    };
+  }, [
+    keybindings,
+    navigateToThread,
+    orderedSidebarThreadIds,
+    platform,
+    routeTerminalOpen,
+    routeThreadId,
+    threadJumpThreadIds,
+  ]);
 
   function renderProjectItem(
-    project: (typeof sortedProjects)[number],
+    renderedProject: (typeof renderedProjects)[number],
     dragHandleProps: SortableProjectHandleProps | null,
   ) {
-    const projectThreads = sortThreadsForSidebar(
-      visibleThreads.filter((thread) => thread.projectId === project.id),
-      appSettings.sidebarThreadSortOrder,
-    );
-    const projectStatus = resolveProjectStatusIndicator(
-      projectThreads.map((thread) =>
-        resolveThreadStatusPill({
-          thread,
-          hasPendingApprovals: derivePendingApprovals(thread.activities).length > 0,
-          hasPendingUserInput: derivePendingUserInputs(thread.activities).length > 0,
-        }),
-      ),
-    );
-    const activeThreadId = routeThreadId ?? undefined;
-    const isThreadListExpanded = expandedThreadListsByProject.has(project.id);
-    const pinnedCollapsedThread =
-      !project.expanded && activeThreadId
-        ? (projectThreads.find((thread) => thread.id === activeThreadId) ?? null)
-        : null;
-    const shouldShowThreadPanel = project.expanded || pinnedCollapsedThread !== null;
-    const { hasHiddenThreads, visibleThreads: visibleProjectThreads } = getVisibleThreadsForProject(
-      {
-        threads: projectThreads,
-        activeThreadId,
-        isThreadListExpanded,
-        previewLimit: THREAD_PREVIEW_LIMIT,
-      },
-    );
-    const orderedProjectThreadIds = projectThreads.map((thread) => thread.id);
-    const renderedThreads = pinnedCollapsedThread ? [pinnedCollapsedThread] : visibleProjectThreads;
+    const {
+      hasHiddenThreads,
+      orderedProjectThreadIds,
+      project,
+      projectStatus,
+      projectThreads,
+      renderedThreads,
+      shouldShowThreadPanel,
+      isThreadListExpanded,
+    } = renderedProject;
     const renderThreadRow = (thread: (typeof projectThreads)[number]) => {
       const isActive = routeThreadId === thread.id;
       const isSelected = selectedThreadIds.has(thread.id);
       const isHighlighted = isActive || isSelected;
+      const jumpLabel = threadJumpLabelById.get(thread.id) ?? null;
       const isThreadRunning =
         thread.session?.status === "running" && thread.session.activeTurnId != null;
       const threadStatus = resolveThreadStatusPill({
@@ -1041,14 +1253,7 @@ export default function Sidebar() {
             onKeyDown={(event) => {
               if (event.key !== "Enter" && event.key !== " ") return;
               event.preventDefault();
-              if (selectedThreadIds.size > 0) {
-                clearSelection();
-              }
-              setSelectionAnchor(thread.id);
-              void navigate({
-                to: "/$threadId",
-                params: { threadId: thread.id },
-              });
+              navigateToThread(thread.id);
             }}
             onContextMenu={(event) => {
               event.preventDefault();
@@ -1218,15 +1423,26 @@ export default function Sidebar() {
                     </Tooltip>
                   )
                 ) : (
-                  <span
-                    className={`text-[10px] ${
-                      isHighlighted
-                        ? "text-foreground/72 dark:text-foreground/82"
-                        : "text-muted-foreground/40"
-                    }`}
-                  >
-                    {formatRelativeTimeLabel(thread.updatedAt ?? thread.createdAt)}
-                  </span>
+                  <>
+                    {showThreadJumpHints && jumpLabel ? (
+                      <span
+                        className="inline-flex h-5 items-center rounded-full border border-border/80 bg-background/90 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground shadow-sm"
+                        title={jumpLabel}
+                      >
+                        {jumpLabel}
+                      </span>
+                    ) : (
+                      <span
+                        className={`text-[10px] ${
+                          isHighlighted
+                            ? "text-foreground/72 dark:text-foreground/82"
+                            : "text-muted-foreground/40"
+                        }`}
+                      >
+                        {formatRelativeTimeLabel(thread.updatedAt ?? thread.createdAt)}
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -1413,12 +1629,127 @@ export default function Sidebar() {
     };
   }, [clearSelection, selectedThreadIds.size]);
 
-  const newThreadShortcutLabel = useMemo(
-    () =>
-      shortcutLabelForCommand(keybindings, "chat.newLocal") ??
-      shortcutLabelForCommand(keybindings, "chat.new"),
-    [keybindings],
-  );
+  useEffect(() => {
+    if (!isElectron) return;
+    const bridge = window.desktopBridge;
+    if (
+      !bridge ||
+      typeof bridge.getUpdateState !== "function" ||
+      typeof bridge.onUpdateState !== "function"
+    ) {
+      return;
+    }
+
+    let disposed = false;
+    let receivedSubscriptionUpdate = false;
+    const unsubscribe = bridge.onUpdateState((nextState) => {
+      if (disposed) return;
+      receivedSubscriptionUpdate = true;
+      setDesktopUpdateState(nextState);
+    });
+
+    void bridge
+      .getUpdateState()
+      .then((nextState) => {
+        if (disposed || receivedSubscriptionUpdate) return;
+        setDesktopUpdateState(nextState);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, []);
+
+  const showDesktopUpdateButton = isElectron && shouldShowDesktopUpdateButton(desktopUpdateState);
+
+  const desktopUpdateTooltip = desktopUpdateState
+    ? getDesktopUpdateButtonTooltip(desktopUpdateState)
+    : "Update available";
+
+  const desktopUpdateButtonDisabled = isDesktopUpdateButtonDisabled(desktopUpdateState);
+  const desktopUpdateButtonAction = desktopUpdateState
+    ? resolveDesktopUpdateButtonAction(desktopUpdateState)
+    : "none";
+  const showArm64IntelBuildWarning =
+    isElectron && shouldShowArm64IntelBuildWarning(desktopUpdateState);
+  const arm64IntelBuildWarningDescription =
+    desktopUpdateState && showArm64IntelBuildWarning
+      ? getArm64IntelBuildWarningDescription(desktopUpdateState)
+      : null;
+  const desktopUpdateButtonInteractivityClasses = desktopUpdateButtonDisabled
+    ? "cursor-not-allowed opacity-60"
+    : "hover:bg-accent hover:text-foreground";
+  const desktopUpdateButtonClasses =
+    desktopUpdateState?.status === "downloaded"
+      ? "text-emerald-500"
+      : desktopUpdateState?.status === "downloading"
+        ? "text-sky-400"
+        : shouldHighlightDesktopUpdateError(desktopUpdateState)
+          ? "text-rose-500 animate-pulse"
+          : "text-amber-500 animate-pulse";
+  const newThreadShortcutLabel =
+    shortcutLabelForCommand(keybindings, "chat.newLocal", sidebarShortcutLabelOptions) ??
+    shortcutLabelForCommand(keybindings, "chat.new", sidebarShortcutLabelOptions);
+
+  const handleDesktopUpdateButtonClick = useCallback(() => {
+    const bridge = window.desktopBridge;
+    if (!bridge || !desktopUpdateState) return;
+    if (desktopUpdateButtonDisabled || desktopUpdateButtonAction === "none") return;
+
+    if (desktopUpdateButtonAction === "download") {
+      void bridge
+        .downloadUpdate()
+        .then((result) => {
+          if (result.completed) {
+            toastManager.add({
+              type: "success",
+              title: "Update downloaded",
+              description: "Restart the app from the update button to install it.",
+            });
+          }
+          if (!shouldToastDesktopUpdateActionResult(result)) return;
+          const actionError = getDesktopUpdateActionError(result);
+          if (!actionError) return;
+          toastManager.add({
+            type: "error",
+            title: "Could not download update",
+            description: actionError,
+          });
+        })
+        .catch((error) => {
+          toastManager.add({
+            type: "error",
+            title: "Could not start update download",
+            description: error instanceof Error ? error.message : "An unexpected error occurred.",
+          });
+        });
+      return;
+    }
+
+    if (desktopUpdateButtonAction === "install") {
+      void bridge
+        .installUpdate()
+        .then((result) => {
+          if (!shouldToastDesktopUpdateActionResult(result)) return;
+          const actionError = getDesktopUpdateActionError(result);
+          if (!actionError) return;
+          toastManager.add({
+            type: "error",
+            title: "Could not install update",
+            description: actionError,
+          });
+        })
+        .catch((error) => {
+          toastManager.add({
+            type: "error",
+            title: "Could not install update",
+            description: error instanceof Error ? error.message : "An unexpected error occurred.",
+          });
+        });
+    }
+  }, [desktopUpdateButtonAction, desktopUpdateButtonDisabled, desktopUpdateState]);
 
   const expandThreadListForProject = useCallback((projectId: ProjectId) => {
     setExpandedThreadListsByProject((current) => {
@@ -1468,6 +1799,25 @@ export default function Sidebar() {
         <>
           <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]">
             {wordmark}
+            {showDesktopUpdateButton && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={desktopUpdateTooltip}
+                      aria-disabled={desktopUpdateButtonDisabled || undefined}
+                      disabled={desktopUpdateButtonDisabled}
+                      className={`inline-flex size-7 ml-auto mt-1.5 items-center justify-center rounded-md text-muted-foreground transition-colors ${desktopUpdateButtonInteractivityClasses} ${desktopUpdateButtonClasses}`}
+                      onClick={handleDesktopUpdateButtonClick}
+                    >
+                      <RocketIcon className="size-3.5" />
+                    </button>
+                  }
+                />
+                <TooltipPopup side="bottom">{desktopUpdateTooltip}</TooltipPopup>
+              </Tooltip>
+            )}
           </SidebarHeader>
         </>
       ) : (
@@ -1481,6 +1831,29 @@ export default function Sidebar() {
       ) : (
         <>
           <SidebarContent className="gap-0">
+            {showArm64IntelBuildWarning && arm64IntelBuildWarningDescription ? (
+              <SidebarGroup className="px-2 pt-2 pb-0">
+                <Alert variant="warning" className="rounded-2xl border-warning/40 bg-warning/8">
+                  <TriangleAlertIcon />
+                  <AlertTitle>Intel build on Apple Silicon</AlertTitle>
+                  <AlertDescription>{arm64IntelBuildWarningDescription}</AlertDescription>
+                  {desktopUpdateButtonAction !== "none" ? (
+                    <AlertAction>
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={desktopUpdateButtonDisabled}
+                        onClick={handleDesktopUpdateButtonClick}
+                      >
+                        {desktopUpdateButtonAction === "download"
+                          ? "Download ARM build"
+                          : "Install ARM build"}
+                      </Button>
+                    </AlertAction>
+                  ) : null}
+                </Alert>
+              </SidebarGroup>
+            ) : null}
             <SidebarGroup className="px-2 py-2">
               <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
                 <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
@@ -1600,12 +1973,15 @@ export default function Sidebar() {
                 >
                   <SidebarMenu>
                     <SortableContext
-                      items={sortedProjects.map((project) => project.id)}
+                      items={renderedProjects.map((renderedProject) => renderedProject.project.id)}
                       strategy={verticalListSortingStrategy}
                     >
-                      {sortedProjects.map((project) => (
-                        <SortableProjectItem key={project.id} projectId={project.id}>
-                          {(dragHandleProps) => renderProjectItem(project, dragHandleProps)}
+                      {renderedProjects.map((renderedProject) => (
+                        <SortableProjectItem
+                          key={renderedProject.project.id}
+                          projectId={renderedProject.project.id}
+                        >
+                          {(dragHandleProps) => renderProjectItem(renderedProject, dragHandleProps)}
                         </SortableProjectItem>
                       ))}
                     </SortableContext>
@@ -1613,9 +1989,9 @@ export default function Sidebar() {
                 </DndContext>
               ) : (
                 <SidebarMenu ref={attachProjectListAutoAnimateRef}>
-                  {sortedProjects.map((project) => (
-                    <SidebarMenuItem key={project.id} className="rounded-md">
-                      {renderProjectItem(project, null)}
+                  {renderedProjects.map((renderedProject) => (
+                    <SidebarMenuItem key={renderedProject.project.id} className="rounded-md">
+                      {renderProjectItem(renderedProject, null)}
                     </SidebarMenuItem>
                   ))}
                 </SidebarMenu>
