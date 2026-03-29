@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 
-import { Effect, FileSystem, Layer, Path } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, Ref } from "effect";
 import {
   GitActionProgressEvent,
   GitActionProgressPhase,
@@ -1177,7 +1177,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         ...(input.action !== "commit" ? (["push"] as const) : []),
         ...(input.action === "commit_push_pr" ? (["pr"] as const) : []),
       ];
-      let currentPhase: GitActionProgressPhase | null = null;
+      const currentPhase = yield* Ref.make<Option.Option<GitActionProgressPhase>>(Option.none());
 
       const runAction = Effect.fn("runStackedAction.runAction")(function* (): Effect.fn.Return<
         GitRunStackedActionResult,
@@ -1214,7 +1214,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         );
 
         if (input.featureBranch) {
-          currentPhase = "branch";
+          yield* Ref.set(currentPhase, Option.some("branch"));
           yield* progress.emit({
             kind: "phase_started",
             phase: "branch",
@@ -1236,7 +1236,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
 
         const currentBranch = branchStep.name ?? initialStatus.branch;
 
-        currentPhase = "commit";
+        yield* Ref.set(currentPhase, Option.some("commit"));
         const commit = yield* runCommitStep(
           modelSelection,
           input.cwd,
@@ -1257,11 +1257,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
                 label: "Pushing...",
               })
               .pipe(
-                Effect.tap(() =>
-                  Effect.sync(() => {
-                    currentPhase = "push";
-                  }),
-                ),
+                Effect.tap(() => Ref.set(currentPhase, Option.some("push"))),
                 Effect.flatMap(() => gitCore.pushCurrentBranch(input.cwd, currentBranch)),
               )
           : { status: "skipped_not_requested" as const };
@@ -1274,11 +1270,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
                 label: "Creating PR...",
               })
               .pipe(
-                Effect.tap(() =>
-                  Effect.sync(() => {
-                    currentPhase = "pr";
-                  }),
-                ),
+                Effect.tap(() => Ref.set(currentPhase, Option.some("pr"))),
                 Effect.flatMap(() => runPrStep(modelSelection, input.cwd, currentBranch)),
               )
           : { status: "skipped_not_requested" as const };
@@ -1298,14 +1290,14 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       });
 
       return yield* runAction().pipe(
-        Effect.catch((error: GitManagerServiceError) =>
-          progress
-            .emit({
+        Effect.tapError((error) =>
+          Effect.flatMap(Ref.get(currentPhase), (phase) =>
+            progress.emit({
               kind: "action_failed",
-              phase: currentPhase,
+              phase: Option.getOrNull(phase),
               message: error.message,
-            })
-            .pipe(Effect.flatMap(() => Effect.fail(error))),
+            }),
+          ),
         ),
       );
     },
