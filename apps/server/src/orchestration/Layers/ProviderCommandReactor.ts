@@ -787,7 +787,7 @@ const make = Effect.gen(function* () {
       }
     });
 
-    return yield* Effect.forkScoped(
+    yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent),
     );
   });
