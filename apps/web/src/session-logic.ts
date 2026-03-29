@@ -492,15 +492,20 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
   const isTaskActivity = activity.kind === "task.progress" || activity.kind === "task.completed";
-  const taskSummary =
-    isTaskActivity && typeof payload?.summary === "string" && payload.summary.length > 0
-      ? payload.summary
-      : null;
+  const taskLabel =
+    isTaskActivity &&
+    ((typeof payload?.summary === "string" && payload.summary.length > 0 && payload.summary) ||
+      (typeof payload?.detail === "string" && payload.detail.length > 0 && payload.detail));
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
-    label: taskSummary ?? activity.summary,
-    tone: isTaskActivity ? "thinking" : activity.tone === "approval" ? "info" : activity.tone,
+    label: taskLabel || activity.summary,
+    tone:
+      activity.kind === "task.progress"
+        ? "thinking"
+        : activity.tone === "approval"
+          ? "info"
+          : activity.tone,
     activityKind: activity.kind,
   };
   const itemType = extractWorkLogItemType(payload);
