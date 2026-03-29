@@ -43,6 +43,8 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
 }) {
   return (
     <Command
+      autoHighlight={false}
+      keepHighlight={false}
       mode="none"
       onItemHighlighted={(highlightedValue) => {
         props.onHighlightedItemChange(
