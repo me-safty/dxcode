@@ -47,9 +47,9 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
       keepHighlight={false}
       mode="none"
       onItemHighlighted={(highlightedValue) => {
-        props.onHighlightedItemChange(
-          typeof highlightedValue === "string" ? highlightedValue : null,
-        );
+        if (typeof highlightedValue === "string") {
+          props.onHighlightedItemChange(highlightedValue);
+        }
       }}
     >
       <div className="relative overflow-hidden rounded-xl border border-border/80 bg-popover/96 shadow-lg/8 backdrop-blur-xs">
