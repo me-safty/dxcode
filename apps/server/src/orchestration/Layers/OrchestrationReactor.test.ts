@@ -24,28 +24,28 @@ describe("OrchestrationReactor", () => {
       Layer.effect(OrchestrationReactor, makeOrchestrationReactor).pipe(
         Layer.provideMerge(
           Layer.succeed(ProviderRuntimeIngestionService, {
-            start: () =>
-              Effect.sync(() => {
-                started.push("provider-runtime-ingestion");
-              }),
+            start: () => {
+              started.push("provider-runtime-ingestion");
+              return Effect.void;
+            },
             drain: Effect.void,
           }),
         ),
         Layer.provideMerge(
           Layer.succeed(ProviderCommandReactor, {
-            start: () =>
-              Effect.sync(() => {
-                started.push("provider-command-reactor");
-              }),
+            start: () => {
+              started.push("provider-command-reactor");
+              return Effect.void;
+            },
             drain: Effect.void,
           }),
         ),
         Layer.provideMerge(
           Layer.succeed(CheckpointReactor, {
-            start: () =>
-              Effect.sync(() => {
-                started.push("checkpoint-reactor");
-              }),
+            start: () => {
+              started.push("checkpoint-reactor");
+              return Effect.void;
+            },
             drain: Effect.void,
           }),
         ),
