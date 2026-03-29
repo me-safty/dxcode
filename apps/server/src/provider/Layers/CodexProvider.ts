@@ -5,7 +5,7 @@ import type {
   CodexSettings,
   ServerProvider,
   ServerProviderModel,
-  ServerProviderAuthStatus,
+  ServerProviderAuth,
   ServerProviderState,
 } from "@t3tools/contracts";
 import { Effect, Equal, FileSystem, Layer, Option, Path, Result, Stream } from "effect";
@@ -170,7 +170,7 @@ export function normalizeCodexModelOptions(
 
 export function parseAuthStatusFromOutput(result: CommandResult): {
   readonly status: Exclude<ServerProviderState, "disabled">;
-  readonly authStatus: ServerProviderAuthStatus;
+  readonly auth: Pick<ServerProviderAuth, "status">;
   readonly message?: string;
 } {
   const lowerOutput = `${result.stdout}\n${result.stderr}`.toLowerCase();
@@ -182,7 +182,7 @@ export function parseAuthStatusFromOutput(result: CommandResult): {
   ) {
     return {
       status: "warning",
-      authStatus: "unknown",
+      auth: { status: "unknown" },
       message: "Codex CLI authentication status command is unavailable in this Codex version.",
     };
   }
@@ -196,7 +196,7 @@ export function parseAuthStatusFromOutput(result: CommandResult): {
   ) {
     return {
       status: "error",
-      authStatus: "unauthenticated",
+      auth: { status: "unauthenticated" },
       message: "Codex CLI is not authenticated. Run `codex login` and try again.",
     };
   }
@@ -217,31 +217,31 @@ export function parseAuthStatusFromOutput(result: CommandResult): {
   })();
 
   if (parsedAuth.auth === true) {
-    return { status: "ready", authStatus: "authenticated" };
+    return { status: "ready", auth: { status: "authenticated" } };
   }
   if (parsedAuth.auth === false) {
     return {
       status: "error",
-      authStatus: "unauthenticated",
+      auth: { status: "unauthenticated" },
       message: "Codex CLI is not authenticated. Run `codex login` and try again.",
     };
   }
   if (parsedAuth.attemptedJsonParse) {
     return {
       status: "warning",
-      authStatus: "unknown",
+      auth: { status: "unknown" },
       message:
         "Could not verify Codex authentication status from JSON output (missing auth marker).",
     };
   }
   if (result.code === 0) {
-    return { status: "ready", authStatus: "authenticated" };
+    return { status: "ready", auth: { status: "authenticated" } };
   }
 
   const detail = detailFromResult(result);
   return {
     status: "warning",
-    authStatus: "unknown",
+    auth: { status: "unknown" },
     message: detail
       ? `Could not verify Codex authentication status. ${detail}`
       : "Could not verify Codex authentication status.",
@@ -336,7 +336,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(
           installed: false,
           version: null,
           status: "warning",
-          authStatus: "unknown",
+          auth: { status: "unknown" },
           message: "Codex is disabled in T3 Code settings.",
         },
       });
@@ -358,7 +358,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(
           installed: !isCommandMissingCause(error),
           version: null,
           status: "error",
-          authStatus: "unknown",
+          auth: { status: "unknown" },
           message: isCommandMissingCause(error)
             ? "Codex CLI (`codex`) is not installed or not on PATH."
             : `Failed to execute Codex CLI health check: ${error instanceof Error ? error.message : String(error)}.`,
@@ -376,7 +376,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(
           installed: true,
           version: null,
           status: "error",
-          authStatus: "unknown",
+          auth: { status: "unknown" },
           message: "Codex CLI is installed but failed to run. Timed out while running command.",
         },
       });
@@ -397,7 +397,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(
           installed: true,
           version: parsedVersion,
           status: "error",
-          authStatus: "unknown",
+          auth: { status: "unknown" },
           message: detail
             ? `Codex CLI is installed but failed to run. ${detail}`
             : "Codex CLI is installed but failed to run.",
@@ -415,7 +415,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(
           installed: true,
           version: parsedVersion,
           status: "error",
-          authStatus: "unknown",
+          auth: { status: "unknown" },
           message: formatCodexCliUpgradeMessage(parsedVersion),
         },
       });
@@ -431,7 +431,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(
           installed: true,
           version: parsedVersion,
           status: "ready",
-          authStatus: "unknown",
+          auth: { status: "unknown" },
           message: "Using a custom Codex model provider; OpenAI login check skipped.",
         },
       });
@@ -453,7 +453,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(
           installed: true,
           version: parsedVersion,
           status: "warning",
-          authStatus: "unknown",
+          auth: { status: "unknown" },
           message:
             error instanceof Error
               ? `Could not verify Codex authentication status: ${error.message}.`
@@ -472,7 +472,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(
           installed: true,
           version: parsedVersion,
           status: "warning",
-          authStatus: "unknown",
+          auth: { status: "unknown" },
           message: "Could not verify Codex authentication status. Timed out while running command.",
         },
       });
@@ -488,7 +488,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(
         installed: true,
         version: parsedVersion,
         status: parsed.status,
-        authStatus: parsed.authStatus,
+        auth: parsed.auth,
         ...(parsed.message ? { message: parsed.message } : {}),
       },
     });

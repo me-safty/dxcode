@@ -22,7 +22,7 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     installed: true,
     version: "0.116.0",
     status: "ready",
-    authStatus: "authenticated",
+    auth: { status: "authenticated" },
     checkedAt: new Date().toISOString(),
     models: [
       {
@@ -57,7 +57,7 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     installed: true,
     version: "1.0.0",
     status: "ready",
-    authStatus: "authenticated",
+    auth: { status: "authenticated" },
     checkedAt: new Date().toISOString(),
     models: [
       {

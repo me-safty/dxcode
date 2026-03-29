@@ -146,13 +146,13 @@ function getProviderSummary(provider: ServerProvider | undefined) {
       detail: provider.message ?? "CLI not detected on PATH.",
     };
   }
-  if (provider.authStatus === "authenticated") {
+  if (provider.auth.status === "authenticated") {
     return {
-      headline: "Authenticated",
+      headline: provider.auth.type ? `Authenticated · ${provider.auth.type}` : "Authenticated",
       detail: provider.message ?? null,
     };
   }
-  if (provider.authStatus === "unauthenticated") {
+  if (provider.auth.status === "unauthenticated") {
     return {
       headline: "Not authenticated",
       detail: provider.message ?? null,

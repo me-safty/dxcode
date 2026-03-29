@@ -4,7 +4,7 @@ import type {
   ModelCapabilities,
   ServerProvider,
   ServerProviderModel,
-  ServerProviderAuthStatus,
+  ServerProviderAuth,
   ServerProviderState,
 } from "@t3tools/contracts";
 import { Cache, Duration, Effect, Equal, Layer, Option, Result, Schema, Stream } from "effect";
@@ -119,7 +119,7 @@ export function normalizeClaudeModelOptions(
 
 export function parseClaudeAuthStatusFromOutput(result: CommandResult): {
   readonly status: Exclude<ServerProviderState, "disabled">;
-  readonly authStatus: ServerProviderAuthStatus;
+  readonly auth: Pick<ServerProviderAuth, "status">;
   readonly message?: string;
 } {
   const lowerOutput = `${result.stdout}\n${result.stderr}`.toLowerCase();
@@ -131,7 +131,7 @@ export function parseClaudeAuthStatusFromOutput(result: CommandResult): {
   ) {
     return {
       status: "warning",
-      authStatus: "unknown",
+      auth: { status: "unknown" },
       message:
         "Claude Agent authentication status command is unavailable in this version of Claude.",
     };
@@ -146,7 +146,7 @@ export function parseClaudeAuthStatusFromOutput(result: CommandResult): {
   ) {
     return {
       status: "error",
-      authStatus: "unauthenticated",
+      auth: { status: "unauthenticated" },
       message: "Claude is not authenticated. Run `claude auth login` and try again.",
     };
   }
@@ -167,31 +167,31 @@ export function parseClaudeAuthStatusFromOutput(result: CommandResult): {
   })();
 
   if (parsedAuth.auth === true) {
-    return { status: "ready", authStatus: "authenticated" };
+    return { status: "ready", auth: { status: "authenticated" } };
   }
   if (parsedAuth.auth === false) {
     return {
       status: "error",
-      authStatus: "unauthenticated",
+      auth: { status: "unauthenticated" },
       message: "Claude is not authenticated. Run `claude auth login` and try again.",
     };
   }
   if (parsedAuth.attemptedJsonParse) {
     return {
       status: "warning",
-      authStatus: "unknown",
+      auth: { status: "unknown" },
       message:
         "Could not verify Claude authentication status from JSON output (missing auth marker).",
     };
   }
   if (result.code === 0) {
-    return { status: "ready", authStatus: "authenticated" };
+    return { status: "ready", auth: { status: "authenticated" } };
   }
 
   const detail = detailFromResult(result);
   return {
     status: "warning",
-    authStatus: "unknown",
+    auth: { status: "unknown" },
     message: detail
       ? `Could not verify Claude authentication status. ${detail}`
       : "Could not verify Claude authentication status.",
@@ -389,7 +389,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         installed: false,
         version: null,
         status: "warning",
-        authStatus: "unknown",
+        auth: { status: "unknown" },
         message: "Claude is disabled in T3 Code settings.",
       },
     });
@@ -411,7 +411,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         installed: !isCommandMissingCause(error),
         version: null,
         status: "error",
-        authStatus: "unknown",
+        auth: { status: "unknown" },
         message: isCommandMissingCause(error)
           ? "Claude Agent CLI (`claude`) is not installed or not on PATH."
           : `Failed to execute Claude Agent CLI health check: ${error instanceof Error ? error.message : String(error)}.`,
@@ -429,7 +429,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         installed: true,
         version: null,
         status: "error",
-        authStatus: "unknown",
+        auth: { status: "unknown" },
         message:
           "Claude Agent CLI is installed but failed to run. Timed out while running command.",
       },
@@ -449,7 +449,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         installed: true,
         version: parsedVersion,
         status: "error",
-        authStatus: "unknown",
+        auth: { status: "unknown" },
         message: detail
           ? `Claude Agent CLI is installed but failed to run. ${detail}`
           : "Claude Agent CLI is installed but failed to run.",
@@ -495,7 +495,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         installed: true,
         version: parsedVersion,
         status: "warning",
-        authStatus: "unknown",
+        auth: { status: "unknown" },
         message:
           error instanceof Error
             ? `Could not verify Claude authentication status: ${error.message}.`
@@ -514,7 +514,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         installed: true,
         version: parsedVersion,
         status: "warning",
-        authStatus: "unknown",
+        auth: { status: "unknown" },
         message: "Could not verify Claude authentication status. Timed out while running command.",
       },
     });
@@ -530,7 +530,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       installed: true,
       version: parsedVersion,
       status: parsed.status,
-      authStatus: parsed.authStatus,
+      auth: { ...parsed.auth, ...(subscriptionType ? { type: subscriptionType } : {}) },
       ...(parsed.message ? { message: parsed.message } : {}),
     },
   });
