@@ -1948,10 +1948,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   useEffect(() => {
     if (!activePlan) return;
     if (planSidebarOpen) return;
-    const turnKey = activePlan.turnId ?? "__dismissed__";
+    const turnKey = activePlan.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
     if (planSidebarDismissedForTurnRef.current === turnKey) return;
     setPlanSidebarOpen(true);
-  }, [activePlan, planSidebarOpen]);
+  }, [activePlan, planSidebarOpen, sidebarProposedPlan?.turnId]);
 
   useEffect(() => {
     if (!composerMenuOpen) {
