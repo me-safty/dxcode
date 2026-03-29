@@ -343,7 +343,6 @@ export default function Sidebar() {
   const dragInProgressRef = useRef(false);
   const suppressProjectClickAfterDragRef = useRef(false);
   const suppressProjectClickForContextMenuRef = useRef(false);
-  const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
   const selectedThreadIds = useThreadSelectionStore((s) => s.selectedThreadIds);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
   const rangeSelectTo = useThreadSelectionStore((s) => s.rangeSelectTo);
