@@ -11,6 +11,7 @@ import {
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
   getDesktopUpdateButtonTooltip,
+  getDesktopUpdateInstallConfirmationMessage,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
   shouldShowArm64IntelBuildWarning,
@@ -71,6 +72,8 @@ export function SidebarUpdatePill() {
     }
 
     if (action === "install") {
+      const confirmed = window.confirm(getDesktopUpdateInstallConfirmationMessage(state));
+      if (!confirmed) return;
       void bridge
         .installUpdate()
         .then((result) => {
@@ -97,7 +100,7 @@ export function SidebarUpdatePill() {
   if (!visible && !showArm64Warning) return null;
 
   return (
-    <div className="px-1 pb-1 flex flex-col gap-1">
+    <div className="flex flex-col gap-1">
       {showArm64Warning && arm64Description && (
         <Alert variant="warning" className="rounded-2xl border-warning/40 bg-warning/8 text-xs">
           <TriangleAlertIcon />
@@ -107,11 +110,11 @@ export function SidebarUpdatePill() {
       )}
       {visible && (
         <div
-          className={`group/update relative flex w-full items-center rounded-full text-xs font-medium bg-sky-400/15 text-sky-400${
+          className={`group/update relative flex h-7 w-full items-center rounded-lg bg-primary/15 text-xs font-medium text-primary ${
             disabled ? " cursor-not-allowed opacity-60" : ""
           }`}
         >
-          <div className="absolute inset-0 rounded-full transition-colors group-has-[button.update-main:hover]/update:bg-sky-400/25 pointer-events-none" />
+          <div className="pointer-events-none absolute inset-0 rounded-lg transition-colors group-has-[button.update-main:hover]/update:bg-primary/22" />
           <Tooltip>
             <TooltipTrigger
               render={
@@ -120,7 +123,7 @@ export function SidebarUpdatePill() {
                   aria-label={tooltip}
                   aria-disabled={disabled || undefined}
                   disabled={disabled}
-                  className="update-main relative flex flex-1 items-center gap-2 px-3 py-1.5"
+                  className="update-main relative flex h-full flex-1 items-center gap-2 px-2 enabled:cursor-pointer"
                   onClick={handleAction}
                 >
                   {action === "install" ? (
@@ -156,7 +159,7 @@ export function SidebarUpdatePill() {
                   <button
                     type="button"
                     aria-label="Dismiss update"
-                    className="inline-flex size-6 items-center justify-center rounded-md text-sky-400/60 transition-colors hover:text-sky-400 mr-1"
+                    className="mr-1 inline-flex size-5 items-center justify-center rounded-md text-primary/60 transition-colors hover:text-primary"
                     onClick={() => setDismissed(true)}
                   >
                     <XIcon className="size-3.5" />

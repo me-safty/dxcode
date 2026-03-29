@@ -25,6 +25,7 @@ import { APP_VERSION } from "../../branding";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
+  getDesktopUpdateInstallConfirmationMessage,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
@@ -352,9 +353,10 @@ function AboutVersionSection() {
     }
 
     if (action === "install") {
-      const version = updateState?.downloadedVersion ?? updateState?.availableVersion;
       const confirmed = window.confirm(
-        `Install update${version ? ` ${version}` : ""} and restart T3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.`,
+        getDesktopUpdateInstallConfirmationMessage(
+          updateState ?? { availableVersion: null, downloadedVersion: null },
+        ),
       );
       if (!confirmed) return;
       void bridge
