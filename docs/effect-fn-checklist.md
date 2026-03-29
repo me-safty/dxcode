@@ -24,6 +24,8 @@ const new = Effect.fn('functionName')(function* () {
 })
 ```
 
+Use `Effect.fn('name')(function* (input: Input): Effect.fn.Return<A, E, R> {})` to annotate the return type of the function if needed:
+
 ## Summary
 
 - Total non-test candidates: `322`
