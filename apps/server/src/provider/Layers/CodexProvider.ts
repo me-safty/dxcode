@@ -158,12 +158,12 @@ export function normalizeCodexModelOptions(
 ): CodexModelOptions | undefined {
   const caps = getCodexModelCapabilities(model);
   const reasoningEffort = resolveEffort(caps, modelOptions?.reasoningEffort);
-  const fastModeEnabled = modelOptions?.fastMode === true;
+  const fastMode = caps.supportsFastMode ? modelOptions?.fastMode : undefined;
   const nextOptions: CodexModelOptions = {
     ...(reasoningEffort
       ? { reasoningEffort: reasoningEffort as CodexModelOptions["reasoningEffort"] }
       : {}),
-    ...(fastModeEnabled ? { fastMode: true } : {}),
+    ...(fastMode !== undefined ? { fastMode } : {}),
   };
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }

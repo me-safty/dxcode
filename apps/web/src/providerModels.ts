@@ -75,12 +75,12 @@ export function normalizeCodexModelOptionsWithCapabilities(
   modelOptions: CodexModelOptions | null | undefined,
 ): CodexModelOptions | undefined {
   const reasoningEffort = resolveEffort(caps, modelOptions?.reasoningEffort);
-  const fastModeEnabled = modelOptions?.fastMode === true;
+  const fastMode = caps.supportsFastMode ? modelOptions?.fastMode : undefined;
   const nextOptions: CodexModelOptions = {
     ...(reasoningEffort
       ? { reasoningEffort: reasoningEffort as CodexModelOptions["reasoningEffort"] }
       : {}),
-    ...(fastModeEnabled ? { fastMode: true } : {}),
+    ...(fastMode !== undefined ? { fastMode } : {}),
   };
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
@@ -90,14 +90,13 @@ export function normalizeClaudeModelOptionsWithCapabilities(
   modelOptions: ClaudeModelOptions | null | undefined,
 ): ClaudeModelOptions | undefined {
   const effort = resolveEffort(caps, modelOptions?.effort);
-  const thinking =
-    caps.supportsThinkingToggle && modelOptions?.thinking === false ? false : undefined;
-  const fastMode = caps.supportsFastMode && modelOptions?.fastMode === true ? true : undefined;
+  const thinking = caps.supportsThinkingToggle ? modelOptions?.thinking : undefined;
+  const fastMode = caps.supportsFastMode ? modelOptions?.fastMode : undefined;
   const contextWindow = resolveContextWindow(caps, modelOptions?.contextWindow);
   const nextOptions: ClaudeModelOptions = {
-    ...(thinking === false ? { thinking: false } : {}),
+    ...(thinking !== undefined ? { thinking } : {}),
     ...(effort ? { effort: effort as ClaudeModelOptions["effort"] } : {}),
-    ...(fastMode ? { fastMode: true } : {}),
+    ...(fastMode !== undefined ? { fastMode } : {}),
     ...(contextWindow ? { contextWindow } : {}),
   };
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;

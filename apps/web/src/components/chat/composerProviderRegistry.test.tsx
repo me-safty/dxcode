@@ -156,6 +156,7 @@ describe("getComposerProviderState", () => {
       promptEffort: "high",
       modelOptionsForDispatch: {
         reasoningEffort: "high",
+        fastMode: false,
       },
     });
   });
@@ -268,7 +269,62 @@ describe("getComposerProviderState", () => {
       promptEffort: "high",
       modelOptionsForDispatch: {
         effort: "high",
+        fastMode: false,
       },
     });
+  });
+
+  it("preserves explicit fastMode: false so deepMerge can overwrite a prior true", () => {
+    // Regression: normalizeClaudeModelOptionsWithCapabilities used to strip
+    // fastMode: false, which meant deepMerge could never clear a previous true.
+    const state = getComposerProviderState({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      models: CLAUDE_MODELS,
+      prompt: "",
+      modelOptions: {
+        claudeAgent: {
+          effort: "high",
+          fastMode: false,
+        },
+      },
+    });
+
+    expect(state.modelOptionsForDispatch).toHaveProperty("fastMode", false);
+  });
+
+  it("preserves explicit thinking: true so deepMerge can overwrite a prior false", () => {
+    // Regression: thinking: true (the default) used to be stripped, which
+    // meant deepMerge could never clear a previous thinking: false.
+    const state = getComposerProviderState({
+      provider: "claudeAgent",
+      model: "claude-haiku-4-5",
+      models: CLAUDE_MODELS,
+      prompt: "",
+      modelOptions: {
+        claudeAgent: {
+          thinking: true,
+        },
+      },
+    });
+
+    expect(state.modelOptionsForDispatch).toHaveProperty("thinking", true);
+  });
+
+  it("omits fastMode when the model does not support it", () => {
+    const state = getComposerProviderState({
+      provider: "claudeAgent",
+      model: "claude-sonnet-4-6",
+      models: CLAUDE_MODELS,
+      prompt: "",
+      modelOptions: {
+        claudeAgent: {
+          effort: "high",
+          fastMode: true,
+        },
+      },
+    });
+
+    expect(state.modelOptionsForDispatch).not.toHaveProperty("fastMode");
   });
 });
