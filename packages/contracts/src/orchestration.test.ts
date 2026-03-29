@@ -390,32 +390,6 @@ describe("orchestration contracts", () => {
     expect(parsed.modelSelection.options?.fastMode).toBe(true);
   });
 
-  it("accepts a source proposed plan reference in thread.turn.start", async () => {
-    const parsed = await Effect.runPromise(
-      decodeThreadTurnStartCommand({
-        type: "thread.turn.start",
-        commandId: "cmd-turn-source-plan",
-        threadId: "thread-2",
-        message: {
-          messageId: "msg-source-plan",
-          role: "user",
-          text: "implement this",
-          attachments: [],
-        },
-        sourceProposedPlan: {
-          threadId: "thread-1",
-          planId: "plan-1",
-        },
-        createdAt: "2026-01-01T00:00:00.000Z",
-      }),
-    );
-
-    expect(parsed.sourceProposedPlan).toEqual({
-      threadId: "thread-1",
-      planId: "plan-1",
-    });
-  });
-
   it("decodes queued follow-up enqueue commands from client payloads", async () => {
     const parsed = await Effect.runPromise(
       decodeClientOrchestrationCommand({

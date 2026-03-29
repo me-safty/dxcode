@@ -216,6 +216,94 @@ describe("orchestration projector", () => {
     ]);
   });
 
+  it("clears queued follow-ups from the in-memory snapshot on thread.reverted", async () => {
+    const createdAt = "2026-03-28T12:00:00.000Z";
+    const queuedAt = "2026-03-28T12:00:05.000Z";
+    const revertedAt = "2026-03-28T12:00:10.000Z";
+    const model = createEmptyReadModel(createdAt);
+
+    const afterCreate = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-queue-revert",
+          occurredAt: createdAt,
+          commandId: "cmd-create-queue-revert",
+          payload: {
+            threadId: "thread-queue-revert",
+            projectId: "project-1",
+            title: "queue revert demo",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.3-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        }),
+      ),
+    );
+
+    const afterQueue = await Effect.runPromise(
+      projectEvent(
+        afterCreate,
+        makeEvent({
+          sequence: 2,
+          type: "thread.queued-follow-up-enqueued",
+          aggregateKind: "thread",
+          aggregateId: "thread-queue-revert",
+          occurredAt: queuedAt,
+          commandId: "cmd-queue-revert-enqueue",
+          payload: {
+            threadId: "thread-queue-revert",
+            followUp: {
+              id: "follow-up-revert-1",
+              createdAt: queuedAt,
+              prompt: "queue this before revert",
+              attachments: [],
+              terminalContexts: [],
+              modelSelection: {
+                provider: "codex",
+                model: "gpt-5.3-codex",
+              },
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              lastSendError: null,
+            },
+            createdAt: queuedAt,
+          },
+        }),
+      ),
+    );
+
+    const afterRevert = await Effect.runPromise(
+      projectEvent(
+        afterQueue,
+        makeEvent({
+          sequence: 3,
+          type: "thread.reverted",
+          aggregateKind: "thread",
+          aggregateId: "thread-queue-revert",
+          occurredAt: revertedAt,
+          commandId: "cmd-queue-revert",
+          payload: {
+            threadId: "thread-queue-revert",
+            turnCount: 0,
+          },
+        }),
+      ),
+    );
+
+    expect(afterRevert.threads[0]?.queuedFollowUps).toEqual([]);
+    expect(afterRevert.threads[0]?.updatedAt).toBe(revertedAt);
+  });
+
   it("applies thread.archived and thread.unarchived events", async () => {
     const now = new Date().toISOString();
     const later = new Date(Date.parse(now) + 1_000).toISOString();

@@ -1127,6 +1127,19 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           ),
         );
       });
+      const touchProjectedThreadUpdatedAt = Effect.fn(function* (
+        threadId: ProjectionThreadQueuedFollowUp["threadId"],
+        updatedAt: string,
+      ) {
+        const existingThread = yield* projectionThreadRepository.getById({ threadId });
+        if (Option.isNone(existingThread)) {
+          return;
+        }
+        yield* projectionThreadRepository.upsert({
+          ...existingThread.value,
+          updatedAt,
+        });
+      });
 
       switch (event.type) {
         case "thread.queued-follow-up-enqueued": {
@@ -1159,6 +1172,12 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             nextFollowUp,
             ...withoutExisting.slice(targetIndex),
           ]);
+          yield* syncQueuedFollowUpAttachmentPaths(event.payload.threadId, [
+            ...withoutExisting.slice(0, targetIndex),
+            nextFollowUp,
+            ...withoutExisting.slice(targetIndex),
+          ]);
+          yield* touchProjectedThreadUpdatedAt(event.payload.threadId, event.occurredAt);
           return;
         }
 
@@ -1182,6 +1201,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           );
           yield* replaceThreadQueue(event.payload.threadId, nextFollowUps);
           yield* syncQueuedFollowUpAttachmentPaths(event.payload.threadId, nextFollowUps);
+          yield* touchProjectedThreadUpdatedAt(event.payload.threadId, event.occurredAt);
           return;
         }
 
@@ -1194,6 +1214,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           );
           yield* replaceThreadQueue(event.payload.threadId, nextFollowUps);
           yield* syncQueuedFollowUpAttachmentPaths(event.payload.threadId, nextFollowUps);
+          yield* touchProjectedThreadUpdatedAt(event.payload.threadId, event.occurredAt);
           return;
         }
 
@@ -1221,6 +1242,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             updatedAt: event.payload.createdAt,
           });
           yield* replaceThreadQueue(event.payload.threadId, nextQueuedFollowUps);
+          yield* touchProjectedThreadUpdatedAt(event.payload.threadId, event.occurredAt);
           return;
         }
 
@@ -1239,6 +1261,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                 : followUp,
             ),
           );
+          yield* touchProjectedThreadUpdatedAt(event.payload.threadId, event.occurredAt);
           return;
         }
 
@@ -1257,6 +1280,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                 : followUp,
             ),
           );
+          yield* touchProjectedThreadUpdatedAt(event.payload.threadId, event.occurredAt);
           return;
         }
 

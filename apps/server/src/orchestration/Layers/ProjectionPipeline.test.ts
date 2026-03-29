@@ -1235,6 +1235,174 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
       }),
     );
 
+    it.effect(
+      "prunes replaced queued follow-up attachments on enqueue upsert and bumps thread recency",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const projectionPipeline = yield* OrchestrationProjectionPipeline;
+          const eventStore = yield* OrchestrationEventStore;
+          const sql = yield* SqlClient.SqlClient;
+          const { attachmentsDir } = yield* ServerConfig;
+          const now = "2026-03-29T02:00:00.000Z";
+          const later = "2026-03-29T02:00:05.000Z";
+          const threadId = ThreadId.makeUnsafe("thread-queued-upsert");
+          const originalAttachmentId = "thread-queued-upsert-00000000-0000-4000-8000-000000000001";
+          const replacementAttachmentId =
+            "thread-queued-upsert-00000000-0000-4000-8000-000000000002";
+
+          const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+            eventStore
+              .append(event)
+              .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+          yield* appendAndProject({
+            type: "project.created",
+            eventId: EventId.makeUnsafe("evt-queued-upsert-1"),
+            aggregateKind: "project",
+            aggregateId: ProjectId.makeUnsafe("project-queued-upsert"),
+            occurredAt: now,
+            commandId: CommandId.makeUnsafe("cmd-queued-upsert-1"),
+            causationEventId: null,
+            correlationId: CorrelationId.makeUnsafe("cmd-queued-upsert-1"),
+            metadata: {},
+            payload: {
+              projectId: ProjectId.makeUnsafe("project-queued-upsert"),
+              title: "Project Queued Upsert",
+              workspaceRoot: "/tmp/project-queued-upsert",
+              defaultModelSelection: null,
+              scripts: [],
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+
+          yield* appendAndProject({
+            type: "thread.created",
+            eventId: EventId.makeUnsafe("evt-queued-upsert-2"),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt: now,
+            commandId: CommandId.makeUnsafe("cmd-queued-upsert-2"),
+            causationEventId: null,
+            correlationId: CorrelationId.makeUnsafe("cmd-queued-upsert-2"),
+            metadata: {},
+            payload: {
+              threadId,
+              projectId: ProjectId.makeUnsafe("project-queued-upsert"),
+              title: "Thread Queued Upsert",
+              modelSelection: {
+                provider: "codex",
+                model: "gpt-5.3-codex",
+              },
+              runtimeMode: "full-access",
+              branch: null,
+              worktreePath: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+
+          yield* appendAndProject({
+            type: "thread.queued-follow-up-enqueued",
+            eventId: EventId.makeUnsafe("evt-queued-upsert-3"),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt: now,
+            commandId: CommandId.makeUnsafe("cmd-queued-upsert-3"),
+            causationEventId: null,
+            correlationId: CorrelationId.makeUnsafe("cmd-queued-upsert-3"),
+            metadata: {},
+            payload: {
+              threadId,
+              createdAt: now,
+              followUp: {
+                id: "queued-follow-up-upsert",
+                createdAt: now,
+                prompt: "original queued prompt",
+                attachments: [
+                  {
+                    type: "image",
+                    id: originalAttachmentId,
+                    name: "original.png",
+                    mimeType: "image/png",
+                    sizeBytes: 5,
+                  },
+                ],
+                terminalContexts: [],
+                modelSelection: {
+                  provider: "codex",
+                  model: "gpt-5.3-codex",
+                },
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                lastSendError: null,
+              },
+            },
+          });
+
+          const originalAttachmentPath = path.join(attachmentsDir, `${originalAttachmentId}.png`);
+          const replacementAttachmentPath = path.join(
+            attachmentsDir,
+            `${replacementAttachmentId}.png`,
+          );
+          yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true });
+          yield* fileSystem.writeFileString(originalAttachmentPath, "original");
+          yield* fileSystem.writeFileString(replacementAttachmentPath, "replacement");
+          assert.isTrue(yield* exists(originalAttachmentPath));
+          assert.isTrue(yield* exists(replacementAttachmentPath));
+
+          yield* appendAndProject({
+            type: "thread.queued-follow-up-enqueued",
+            eventId: EventId.makeUnsafe("evt-queued-upsert-4"),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt: later,
+            commandId: CommandId.makeUnsafe("cmd-queued-upsert-4"),
+            causationEventId: null,
+            correlationId: CorrelationId.makeUnsafe("cmd-queued-upsert-4"),
+            metadata: {},
+            payload: {
+              threadId,
+              createdAt: later,
+              followUp: {
+                id: "queued-follow-up-upsert",
+                createdAt: now,
+                prompt: "replacement queued prompt",
+                attachments: [
+                  {
+                    type: "image",
+                    id: replacementAttachmentId,
+                    name: "replacement.png",
+                    mimeType: "image/png",
+                    sizeBytes: 5,
+                  },
+                ],
+                terminalContexts: [],
+                modelSelection: {
+                  provider: "codex",
+                  model: "gpt-5.3-codex",
+                },
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                lastSendError: null,
+              },
+            },
+          });
+
+          assert.isFalse(yield* exists(originalAttachmentPath));
+          assert.isTrue(yield* exists(replacementAttachmentPath));
+
+          const threadRows = yield* sql<{ readonly updatedAt: string }>`
+          SELECT updated_at AS "updatedAt"
+          FROM projection_threads
+          WHERE thread_id = ${threadId}
+        `;
+          assert.deepEqual(threadRows, [{ updatedAt: later }]);
+        }),
+    );
+
     it.effect("removes thread attachment directory when thread is deleted", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;

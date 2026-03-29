@@ -72,8 +72,10 @@ import {
 
 import {
   createAttachmentId,
+  parseThreadSegmentFromAttachmentId,
   resolveAttachmentPath,
   resolveAttachmentPathById,
+  toSafeThreadAttachmentSegment,
 } from "./attachmentStore.ts";
 import { parseBase64DataUrl } from "./imageMime.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
@@ -318,11 +320,32 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       threadId: ThreadId,
       attachments: ReadonlyArray<ClientChatAttachment>,
     ) {
+      const threadAttachmentSegment = toSafeThreadAttachmentSegment(threadId);
+      if (!threadAttachmentSegment) {
+        return yield* new RouteRequestError({
+          message: "Failed to resolve a safe attachment segment for this thread.",
+        });
+      }
       return yield* Effect.forEach(
         attachments,
         (attachment) =>
           Effect.gen(function* () {
             if ("id" in attachment) {
+              const attachmentThreadSegment = parseThreadSegmentFromAttachmentId(attachment.id);
+              if (!attachmentThreadSegment || attachmentThreadSegment !== threadAttachmentSegment) {
+                return yield* new RouteRequestError({
+                  message: `Persisted attachment '${attachment.name}' does not belong to this thread.`,
+                });
+              }
+              const persistedPath = resolveAttachmentPathById({
+                attachmentsDir: serverConfig.attachmentsDir,
+                attachmentId: attachment.id,
+              });
+              if (!persistedPath) {
+                return yield* new RouteRequestError({
+                  message: `Persisted attachment '${attachment.name}' could not be found.`,
+                });
+              }
               return attachment;
             }
 

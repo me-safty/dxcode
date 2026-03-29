@@ -790,6 +790,7 @@ export function projectEvent(
             threads: updateThread(nextBase.threads, payload.threadId, {
               checkpoints,
               messages,
+              queuedFollowUps: [],
               proposedPlans,
               activities,
               latestTurn,

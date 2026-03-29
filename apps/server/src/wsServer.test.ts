@@ -1533,6 +1533,133 @@ describe("WebSocket Server", () => {
     expect(attachmentResponse.headers.get("content-type")).toBe("image/png");
   });
 
+  it("rejects persisted attachment ids from a different thread", async () => {
+    const baseDir = makeTempDir("t3code-ws-queued-attachments-thread-scope-");
+    const workspaceRoot = path.join(baseDir, "workspace");
+    fs.mkdirSync(workspaceRoot, { recursive: true });
+
+    server = await createTestServer({
+      cwd: "/test",
+      baseDir,
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const createdAt = new Date().toISOString();
+    const createProjectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: "cmd-cross-thread-attachment-project-create",
+      projectId: "project-cross-thread-attachment",
+      title: "Cross Thread Attachment Project",
+      workspaceRoot,
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      createdAt,
+    });
+    expect(createProjectResponse.error).toBeUndefined();
+
+    for (const threadId of ["thread-cross-a", "thread-cross-b"]) {
+      const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+        type: "thread.create",
+        commandId: `cmd-${threadId}-create`,
+        threadId,
+        projectId: "project-cross-thread-attachment",
+        title: threadId,
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      });
+      expect(createThreadResponse.error).toBeUndefined();
+    }
+
+    const enqueueResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.queued-follow-up.enqueue",
+      commandId: "cmd-cross-thread-attachment-enqueue",
+      threadId: "thread-cross-a",
+      followUp: {
+        id: "follow-up-cross-thread-attachment-1",
+        createdAt,
+        prompt: "Queue with image",
+        attachments: [
+          {
+            type: "image",
+            name: "queued.png",
+            mimeType: "image/png",
+            sizeBytes: 68,
+            dataUrl: TINY_PNG_DATA_URL,
+          },
+        ],
+        terminalContexts: [],
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        lastSendError: null,
+      },
+      createdAt,
+    });
+    expect(enqueueResponse.error).toBeUndefined();
+
+    const snapshotResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot);
+    expect(snapshotResponse.error).toBeUndefined();
+    const snapshot = snapshotResponse.result as {
+      threads: Array<{
+        id: string;
+        queuedFollowUps: Array<{
+          attachments: Array<{
+            id: string;
+            name: string;
+            mimeType: string;
+            sizeBytes: number;
+          }>;
+        }>;
+      }>;
+    };
+    const persistedAttachment = snapshot.threads.find((thread) => thread.id === "thread-cross-a")
+      ?.queuedFollowUps[0]?.attachments[0];
+
+    expect(persistedAttachment?.id).toBeTruthy();
+
+    const crossThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.turn.start",
+      commandId: "cmd-cross-thread-attachment-send",
+      threadId: "thread-cross-b",
+      message: {
+        messageId: "msg-cross-thread-attachment",
+        role: "user",
+        text: "use another thread attachment",
+        attachments: [
+          {
+            type: "image",
+            id: persistedAttachment!.id,
+            name: persistedAttachment!.name,
+            mimeType: persistedAttachment!.mimeType,
+            sizeBytes: persistedAttachment!.sizeBytes,
+          },
+        ],
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt,
+    });
+
+    expect(crossThreadResponse.result).toBeUndefined();
+    expect(crossThreadResponse.error?.message).toContain("does not belong to this thread");
+  });
+
   it("routes terminal RPC methods and broadcasts terminal events", async () => {
     const cwd = makeTempDir("t3code-ws-terminal-cwd-");
     const terminalManager = new MockTerminalManager();

@@ -2387,6 +2387,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(getTurnStartRequests()).toHaveLength(1);
           expect(getQueuedFollowUpPrompts()).toEqual(["panel second"]);
           expect(document.body.textContent ?? "").toContain("panel first");
+          const commandTypes = getDispatchCommandTypes();
+          expect(commandTypes).toEqual(
+            expect.arrayContaining(["thread.queued-follow-up.remove", "thread.turn.start"]),
+          );
+          expect(commandTypes.indexOf("thread.queued-follow-up.remove")).toBeLessThan(
+            commandTypes.indexOf("thread.turn.start"),
+          );
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -2513,7 +2520,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("marks a ready-state steered queued follow-up as failed when queue cleanup fails", async () => {
+  it("restores a ready-state steered queued follow-up with an error when send fails after claim", async () => {
     setClientSettings({
       followUpBehavior: "queue",
     });
@@ -2532,8 +2539,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
         if (!command) {
           return undefined;
         }
-        if (command.type === "thread.queued-follow-up.remove") {
-          throw new Error("queued cleanup failed");
+        if (command.type === "thread.turn.start") {
+          throw new Error("steered send failed");
         }
         return undefined;
       },
@@ -2572,15 +2579,16 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(getTurnStartRequests()).toHaveLength(1);
           expect(getDispatchCommandTypes()).toEqual(
             expect.arrayContaining([
-              "thread.turn.start",
               "thread.queued-follow-up.remove",
-              "thread.queued-follow-up.update",
+              "thread.turn.start",
+              "thread.queued-follow-up.enqueue",
             ]),
           );
           expect(getQueuedFollowUpPrompts()).toEqual(["ready steer failure"]);
-          expect(document.body.textContent ?? "").toContain(
-            "Queued follow-up was sent but queue cleanup failed.",
-          );
+          const restoredFollowUp = fixture.snapshot.threads
+            .find((thread) => thread.id === THREAD_ID)
+            ?.queuedFollowUps.find((followUp) => followUp.id === "queued-ready-steer-failure");
+          expect(restoredFollowUp?.lastSendError).toBe("Failed to steer queued follow-up.");
         },
         { timeout: 8_000, interval: 16 },
       );

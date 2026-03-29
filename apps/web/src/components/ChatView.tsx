@@ -278,6 +278,7 @@ interface PendingSteerSubmission {
   snapshot: FollowUpSubmissionSnapshot;
   source: "composer" | "queued-follow-up";
   queuedFollowUpId?: string;
+  queuedFollowUpIndex?: number;
 }
 
 function isUploadedFollowUpAttachment(
@@ -3429,14 +3430,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ],
   );
 
-  const finalizeSteeredQueuedFollowUp = useCallback(
+  const claimQueuedFollowUpForSteer = useCallback(
     async (pending: PendingSteerSubmission) => {
       if (pending.source !== "queued-follow-up" || !pending.queuedFollowUpId) {
-        return;
+        return true;
       }
       const api = readNativeApi();
       if (!api) {
-        return;
+        return false;
       }
       try {
         await api.orchestration.dispatchCommand({
@@ -3446,28 +3447,48 @@ export default function ChatView({ threadId }: ChatViewProps) {
           followUpId: pending.queuedFollowUpId,
           createdAt: new Date().toISOString(),
         });
+        return true;
       } catch (err) {
         setThreadError(
           pending.threadId,
           err instanceof Error ? err.message : "Failed to remove queued follow-up.",
         );
-        try {
-          await api.orchestration.dispatchCommand({
-            type: "thread.queued-follow-up.update",
-            commandId: newCommandId(),
-            threadId: pending.threadId,
-            followUp: {
-              ...pending.snapshot,
-              id: pending.queuedFollowUpId,
-              attachments: pending.snapshot.attachments.map(toCommandAttachment),
-              lastSendError: "Queued follow-up was sent but queue cleanup failed.",
-            },
-            createdAt: new Date().toISOString(),
-          });
-        } catch {
-          // Best effort. The UI error above preserves operator visibility if the queue marker
-          // could not be persisted.
-        }
+        return false;
+      }
+    },
+    [setThreadError],
+  );
+
+  const restoreFailedSteeredQueuedFollowUp = useCallback(
+    async (pending: PendingSteerSubmission, errorMessage: string) => {
+      if (pending.source !== "queued-follow-up" || !pending.queuedFollowUpId) {
+        return;
+      }
+      const api = readNativeApi();
+      if (!api) {
+        return;
+      }
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.queued-follow-up.enqueue",
+          commandId: newCommandId(),
+          threadId: pending.threadId,
+          followUp: {
+            ...pending.snapshot,
+            id: pending.queuedFollowUpId,
+            attachments: pending.snapshot.attachments.map(toCommandAttachment),
+            lastSendError: errorMessage,
+          },
+          ...(pending.queuedFollowUpIndex !== undefined
+            ? { targetIndex: pending.queuedFollowUpIndex }
+            : {}),
+          createdAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        setThreadError(
+          pending.threadId,
+          err instanceof Error ? err.message : "Failed to restore queued follow-up after steer.",
+        );
       }
     },
     [setThreadError],
@@ -3520,6 +3541,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
     setPendingSteerSubmission(null);
     void (async () => {
+      let claimedQueuedFollowUp = false;
+      if (pendingSteerSubmission.source === "queued-follow-up") {
+        claimedQueuedFollowUp = await claimQueuedFollowUpForSteer(pendingSteerSubmission);
+        if (!claimedQueuedFollowUp) {
+          return;
+        }
+      }
       const dispatched = await dispatchServerThreadSnapshot({
         threadId: pendingSteerSubmission.threadId,
         snapshot: pendingSteerSubmission.snapshot,
@@ -3531,19 +3559,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
         hideServerMessage: false,
       });
       if (dispatched) {
-        if (pendingSteerSubmission.source === "queued-follow-up") {
-          await finalizeSteeredQueuedFollowUp(pendingSteerSubmission);
-        }
         return;
       }
-      if (pendingSteerSubmission.source !== "queued-follow-up") {
+      if (claimedQueuedFollowUp) {
+        await restoreFailedSteeredQueuedFollowUp(
+          pendingSteerSubmission,
+          "Failed to steer queued follow-up.",
+        );
+      } else if (pendingSteerSubmission.source !== "queued-follow-up") {
         restoreFollowUpSnapshotToComposer(pendingSteerSubmission.snapshot);
       }
     })();
   }, [
     activeThread?.id,
+    claimQueuedFollowUpForSteer,
     dispatchServerThreadSnapshot,
-    finalizeSteeredQueuedFollowUp,
     isComposerApprovalState,
     isConnecting,
     isSendBusy,
@@ -3553,6 +3583,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     pendingUserInputs.length,
     phase,
     queuedFollowUps,
+    restoreFailedSteeredQueuedFollowUp,
     restoreFollowUpSnapshotToComposer,
     setPendingSteerSubmission,
     activeThread?.error,
@@ -3778,6 +3809,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         snapshot: followUp,
         source: "queued-follow-up",
         queuedFollowUpId: followUp.id,
+        queuedFollowUpIndex: queuedFollowUps.findIndex((entry) => entry.id === followUp.id),
       };
       if (phase === "running") {
         setPendingSteerSubmission(pendingSubmission);
@@ -3789,6 +3821,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
         return;
       }
+      const claimedQueuedFollowUp = await claimQueuedFollowUpForSteer(pendingSubmission);
+      if (!claimedQueuedFollowUp) {
+        return;
+      }
       const dispatched = await dispatchServerThreadSnapshot({
         threadId: activeThread.id,
         snapshot: followUp,
@@ -3796,20 +3832,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
         suppressOptimisticMessage: false,
         hideServerMessage: false,
       });
-      if (dispatched) {
-        await finalizeSteeredQueuedFollowUp(pendingSubmission);
+      if (!dispatched) {
+        await restoreFailedSteeredQueuedFollowUp(
+          pendingSubmission,
+          "Failed to steer queued follow-up.",
+        );
       }
     },
     [
       activeThread,
+      claimQueuedFollowUpForSteer,
       dispatchServerThreadSnapshot,
-      finalizeSteeredQueuedFollowUp,
       isConnecting,
       isSendBusy,
       isServerThread,
       phase,
       queuedFollowUps,
       requestThreadInterrupt,
+      restoreFailedSteeredQueuedFollowUp,
       setPendingSteerSubmission,
     ],
   );
