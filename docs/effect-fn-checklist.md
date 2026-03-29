@@ -24,7 +24,16 @@ const new = Effect.fn('functionName')(function* () {
 })
 ```
 
-Use `Effect.fn('name')(function* (input: Input): Effect.fn.Return<A, E, R> {})` to annotate the return type of the function if needed:
+- Use `Effect.fn('name')(function* (input: Input): Effect.fn.Return<A, E, R> {})` to annotate the return type of the function if needed.
+
+- The 2nd argument works as a pipe, and it gets the effect and input as arguments:
+
+```ts
+Effect.fn("name")(
+  function* (input: Input): Effect.fn.Return<A, E, R> {},
+  (effect, input) => Effect.catch(effect, (reason) => Effect.logWarning("Err", { input, reason })),
+);
+```
 
 ## Summary
 
@@ -183,3 +192,7 @@ Use `Effect.fn('name')(function* (input: Input): Effect.fn.Return<A, E, R> {})` 
 - [ ] [apps/server/src/git/Layers/ClaudeTextGeneration.ts](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/ClaudeTextGeneration.ts) (`2`)
 - [ ] [apps/server/src/checkpointing/Layers/CheckpointDiffQuery.ts](/Users/julius/Development/Work/codething-mvp/apps/server/src/checkpointing/Layers/CheckpointDiffQuery.ts) (`2`)
 - [ ] [apps/server/src/provider/makeManagedServerProvider.ts](/Users/julius/Development/Work/codething-mvp/apps/server/src/provider/makeManagedServerProvider.ts) (`1`)
+
+```
+
+```
