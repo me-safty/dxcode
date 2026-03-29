@@ -235,6 +235,27 @@ describe("getVisibleSidebarThreadIds", () => {
       ThreadId.makeUnsafe("thread-6"),
     ]);
   });
+
+  it("skips threads from collapsed projects whose thread panels are not shown", () => {
+    expect(
+      getVisibleSidebarThreadIds([
+        {
+          shouldShowThreadPanel: false,
+          renderedThreads: [
+            { id: ThreadId.makeUnsafe("thread-hidden-2") },
+            { id: ThreadId.makeUnsafe("thread-hidden-1") },
+          ],
+        },
+        {
+          shouldShowThreadPanel: true,
+          renderedThreads: [
+            { id: ThreadId.makeUnsafe("thread-12") },
+            { id: ThreadId.makeUnsafe("thread-11") },
+          ],
+        },
+      ]),
+    ).toEqual([ThreadId.makeUnsafe("thread-12"), ThreadId.makeUnsafe("thread-11")]);
+  });
 });
 
 describe("isContextMenuPointerDown", () => {

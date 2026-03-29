@@ -1075,23 +1075,22 @@ export default function Sidebar() {
       visibleThreads,
     ],
   );
+  const visibleSidebarThreadIds = useMemo(
+    () => getVisibleSidebarThreadIds(renderedProjects),
+    [renderedProjects],
+  );
   const threadJumpCommandById = useMemo(() => {
     const mapping = new Map<ThreadId, NonNullable<ReturnType<typeof threadJumpCommandForIndex>>>();
-    let visibleThreadIndex = 0;
-
-    for (const renderedProject of renderedProjects) {
-      for (const thread of renderedProject.renderedThreads) {
-        const jumpCommand = threadJumpCommandForIndex(visibleThreadIndex);
-        if (!jumpCommand) {
-          return mapping;
-        }
-        mapping.set(thread.id, jumpCommand);
-        visibleThreadIndex += 1;
+    for (const [visibleThreadIndex, threadId] of visibleSidebarThreadIds.entries()) {
+      const jumpCommand = threadJumpCommandForIndex(visibleThreadIndex);
+      if (!jumpCommand) {
+        return mapping;
       }
+      mapping.set(threadId, jumpCommand);
     }
 
     return mapping;
-  }, [renderedProjects]);
+  }, [visibleSidebarThreadIds]);
   const threadJumpThreadIds = useMemo(
     () => [...threadJumpCommandById.keys()],
     [threadJumpCommandById],
@@ -1106,10 +1105,7 @@ export default function Sidebar() {
     }
     return mapping;
   }, [keybindings, sidebarShortcutLabelOptions, threadJumpCommandById]);
-  const orderedSidebarThreadIds = useMemo(
-    () => getVisibleSidebarThreadIds(renderedProjects),
-    [renderedProjects],
-  );
+  const orderedSidebarThreadIds = visibleSidebarThreadIds;
 
   useEffect(() => {
     const controller = createThreadJumpHintVisibilityController({

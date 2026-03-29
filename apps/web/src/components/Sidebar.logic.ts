@@ -122,13 +122,16 @@ export function resolveSidebarNewThreadEnvMode(input: {
 
 export function getVisibleSidebarThreadIds<TThreadId>(
   renderedProjects: readonly {
+    shouldShowThreadPanel?: boolean;
     renderedThreads: readonly {
       id: TThreadId;
     }[];
   }[],
 ): TThreadId[] {
   return renderedProjects.flatMap((renderedProject) =>
-    renderedProject.renderedThreads.map((thread) => thread.id),
+    renderedProject.shouldShowThreadPanel === false
+      ? []
+      : renderedProject.renderedThreads.map((thread) => thread.id),
   );
 }
 
