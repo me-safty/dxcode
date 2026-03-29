@@ -133,11 +133,11 @@
 }
 
 .diff-stat-addition {
-  color: var(--color-success-foreground);
+  color: var(--color-success);
 }
 
 .diff-stat-deletion {
-  color: var(--color-destructive-foreground);
+  color: var(--color-destructive);
 }
 
 :root.colorblind-mode .diff-stat-addition {

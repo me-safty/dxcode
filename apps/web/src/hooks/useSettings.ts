@@ -277,6 +277,10 @@ export function applyColorblindMode(enabled: boolean): void {
 }
 
 export function getStoredColorblindMode(): boolean {
-  const stored = getLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY, ClientSettingsSchema);
-  return stored?.colorblindMode ?? false;
+  try {
+    const stored = getLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY, ClientSettingsSchema);
+    return stored?.colorblindMode ?? false;
+  } catch {
+    return false;
+  }
 }

@@ -22,8 +22,11 @@ import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
 import { onServerConfigUpdated, onServerProvidersUpdated, onServerWelcome } from "../wsNativeApi";
-import { applyColorblindMode, migrateLocalSettingsToServer } from "../hooks/useSettings";
-import { useSettings } from "../hooks/useSettings";
+import {
+  applyColorblindMode,
+  migrateLocalSettingsToServer,
+  useSettings,
+} from "../hooks/useSettings";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
