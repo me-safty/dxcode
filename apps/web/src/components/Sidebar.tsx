@@ -69,7 +69,7 @@ import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
-import { useThreadJumpHintVisibility } from "../hooks/useThreadJumpHintVisibility";
+
 import { useThreadActions } from "../hooks/useThreadActions";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { toastManager } from "./ui/toast";
@@ -117,6 +117,7 @@ import {
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   sortThreadsForSidebar,
+  useThreadJumpHintVisibility,
 } from "./Sidebar.logic";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
