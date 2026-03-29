@@ -29,7 +29,11 @@ import { NetService } from "@t3tools/shared/Net";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { showDesktopConfirmDialog } from "./confirmDialog";
 import { syncShellEnvironment } from "./syncShellEnvironment";
-import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
+import {
+  getAutoUpdateDisabledReason,
+  shouldAllowPrereleaseAutoUpdates,
+  shouldBroadcastDownloadProgress,
+} from "./updateState";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -75,7 +79,6 @@ const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
 const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const DESKTOP_UPDATE_CHANNEL = "latest";
-const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 
@@ -834,8 +837,10 @@ async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed
 
 function configureAutoUpdater(): void {
   const enabled = shouldEnableAutoUpdates();
+  const currentVersion = app.getVersion();
+  const allowPrereleaseUpdates = shouldAllowPrereleaseAutoUpdates(currentVersion);
   setUpdateState({
-    ...createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo),
+    ...createInitialDesktopUpdateState(currentVersion, desktopRuntimeInfo),
     enabled,
     status: enabled ? "idle" : "disabled",
   });
@@ -870,9 +875,10 @@ function configureAutoUpdater(): void {
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
-  // Keep alpha branding, but force all installs onto the stable update track.
+  // Keep alpha branding on the default channel, but let prerelease installs
+  // continue following prerelease releases from their current track.
   autoUpdater.channel = DESKTOP_UPDATE_CHANNEL;
-  autoUpdater.allowPrerelease = DESKTOP_UPDATE_ALLOW_PRERELEASE;
+  autoUpdater.allowPrerelease = allowPrereleaseUpdates;
   autoUpdater.allowDowngrade = false;
   autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
   let lastLoggedDownloadMilestone = -1;
@@ -881,6 +887,9 @@ function configureAutoUpdater(): void {
     console.info(
       "[desktop-updater] Apple Silicon host detected while running Intel build; updates will switch to arm64 packages.",
     );
+  }
+  if (allowPrereleaseUpdates) {
+    console.info(`[desktop-updater] Prerelease updates enabled for ${currentVersion}.`);
   }
 
   autoUpdater.on("checking-for-update", () => {

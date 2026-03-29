@@ -5,6 +5,7 @@ import {
   getCanRetryAfterDownloadFailure,
   getAutoUpdateDisabledReason,
   nextStatusAfterDownloadFailure,
+  shouldAllowPrereleaseAutoUpdates,
   shouldBroadcastDownloadProgress,
 } from "./updateState";
 
@@ -97,6 +98,20 @@ describe("getAutoUpdateDisabledReason", () => {
         disabledByEnv: false,
       }),
     ).toContain("AppImage");
+  });
+});
+
+describe("shouldAllowPrereleaseAutoUpdates", () => {
+  it("returns false for stable versions", () => {
+    expect(shouldAllowPrereleaseAutoUpdates("1.2.3")).toBe(false);
+  });
+
+  it("returns true for prerelease versions", () => {
+    expect(shouldAllowPrereleaseAutoUpdates("1.2.3-main-xavier.0")).toBe(true);
+  });
+
+  it("accepts a leading v prefix", () => {
+    expect(shouldAllowPrereleaseAutoUpdates("v1.2.3-beta.4")).toBe(true);
   });
 });
 

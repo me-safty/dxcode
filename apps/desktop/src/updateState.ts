@@ -28,6 +28,11 @@ export function getCanRetryAfterDownloadFailure(currentState: DesktopUpdateState
   return currentState.availableVersion !== null;
 }
 
+export function shouldAllowPrereleaseAutoUpdates(currentVersion: string): boolean {
+  const normalizedVersion = currentVersion.trim().replace(/^v/i, "");
+  return /^\d+\.\d+\.\d+-[0-9A-Za-z.-]+$/.test(normalizedVersion);
+}
+
 export function getAutoUpdateDisabledReason(args: {
   isDevelopment: boolean;
   isPackaged: boolean;
