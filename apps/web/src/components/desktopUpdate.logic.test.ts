@@ -245,6 +245,17 @@ describe("canCheckForUpdate", () => {
     );
   });
 
+  it("returns false once an update has been downloaded", () => {
+    expect(
+      canCheckForUpdate({
+        ...baseState,
+        status: "downloaded",
+        availableVersion: "1.1.0",
+        downloadedVersion: "1.1.0",
+      }),
+    ).toBe(false);
+  });
+
   it("returns true when idle", () => {
     expect(canCheckForUpdate({ ...baseState, status: "idle" })).toBe(true);
   });

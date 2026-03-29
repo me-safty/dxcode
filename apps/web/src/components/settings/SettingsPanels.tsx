@@ -35,7 +35,10 @@ import { isElectron } from "../../env";
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
-import { desktopUpdateStateQueryOptions } from "../../lib/desktopUpdateReactQuery";
+import {
+  setDesktopUpdateStateQueryData,
+  useDesktopUpdateState,
+} from "../../lib/desktopUpdateReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "../../lib/serverReactQuery";
 import {
   MAX_CUSTOM_MODEL_LENGTH,
@@ -322,36 +325,21 @@ function AboutVersionTitle() {
 
 function AboutVersionSection() {
   const queryClient = useQueryClient();
-  const updateStateQuery = useQuery(desktopUpdateStateQueryOptions());
+  const updateStateQuery = useDesktopUpdateState();
 
   const updateState = updateStateQuery.data ?? null;
-
-  useEffect(() => {
-    const bridge = window.desktopBridge;
-    if (!bridge || typeof bridge.onUpdateState !== "function") return;
-
-    const opts = desktopUpdateStateQueryOptions();
-    const unsubscribe = bridge.onUpdateState((nextState) => {
-      queryClient.setQueryData(opts.queryKey, nextState);
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [queryClient]);
 
   const handleButtonClick = useCallback(() => {
     const bridge = window.desktopBridge;
     if (!bridge) return;
 
     const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
-    const opts = desktopUpdateStateQueryOptions();
 
     if (action === "download") {
       void bridge
         .downloadUpdate()
         .then((result) => {
-          queryClient.setQueryData(opts.queryKey, result.state);
+          setDesktopUpdateStateQueryData(queryClient, result.state);
         })
         .catch((error: unknown) => {
           toastManager.add({
@@ -372,7 +360,7 @@ function AboutVersionSection() {
       void bridge
         .installUpdate()
         .then((result) => {
-          queryClient.setQueryData(opts.queryKey, result.state);
+          setDesktopUpdateStateQueryData(queryClient, result.state);
         })
         .catch((error: unknown) => {
           toastManager.add({
@@ -388,7 +376,7 @@ function AboutVersionSection() {
     void bridge
       .checkForUpdate()
       .then((result) => {
-        queryClient.setQueryData(opts.queryKey, result.state);
+        setDesktopUpdateStateQueryData(queryClient, result.state);
         if (!result.checked) {
           toastManager.add({
             type: "error",

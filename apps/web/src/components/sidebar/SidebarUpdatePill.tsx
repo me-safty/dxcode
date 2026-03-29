@@ -1,7 +1,11 @@
 import { DownloadIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
-import type { DesktopUpdateState } from "@t3tools/contracts";
+import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
 import { isElectron } from "../../env";
+import {
+  setDesktopUpdateStateQueryData,
+  useDesktopUpdateState,
+} from "../../lib/desktopUpdateReactQuery";
 import { toastManager } from "../ui/toast";
 import {
   getArm64IntelBuildWarningDescription,
@@ -17,41 +21,9 @@ import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export function SidebarUpdatePill() {
-  const [state, setState] = useState<DesktopUpdateState | null>(null);
+  const queryClient = useQueryClient();
+  const state = useDesktopUpdateState().data ?? null;
   const [dismissed, setDismissed] = useState(false);
-
-  useEffect(() => {
-    if (!isElectron) return;
-    const bridge = window.desktopBridge;
-    if (
-      !bridge ||
-      typeof bridge.getUpdateState !== "function" ||
-      typeof bridge.onUpdateState !== "function"
-    ) {
-      return;
-    }
-
-    let disposed = false;
-    let receivedSubscriptionUpdate = false;
-    const unsubscribe = bridge.onUpdateState((nextState) => {
-      if (disposed) return;
-      receivedSubscriptionUpdate = true;
-      setState(nextState);
-    });
-
-    void bridge
-      .getUpdateState()
-      .then((nextState) => {
-        if (disposed || receivedSubscriptionUpdate) return;
-        setState(nextState);
-      })
-      .catch(() => undefined);
-
-    return () => {
-      disposed = true;
-      unsubscribe();
-    };
-  }, []);
 
   const visible = isElectron && shouldShowDesktopUpdateButton(state) && !dismissed;
   const tooltip = state ? getDesktopUpdateButtonTooltip(state) : "Update available";
@@ -71,6 +43,7 @@ export function SidebarUpdatePill() {
       void bridge
         .downloadUpdate()
         .then((result) => {
+          setDesktopUpdateStateQueryData(queryClient, result.state);
           if (result.completed) {
             toastManager.add({
               type: "success",
@@ -101,6 +74,7 @@ export function SidebarUpdatePill() {
       void bridge
         .installUpdate()
         .then((result) => {
+          setDesktopUpdateStateQueryData(queryClient, result.state);
           if (!shouldToastDesktopUpdateActionResult(result)) return;
           const actionError = getDesktopUpdateActionError(result);
           if (!actionError) return;
@@ -118,7 +92,7 @@ export function SidebarUpdatePill() {
           });
         });
     }
-  }, [action, disabled, state]);
+  }, [action, disabled, queryClient, state]);
 
   if (!visible && !showArm64Warning) return null;
 
