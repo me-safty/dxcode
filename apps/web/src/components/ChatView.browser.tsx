@@ -453,8 +453,7 @@ function createSnapshotWithProposedPlan(options?: {
     ),
     threads: snapshot.threads.map((thread) =>
       thread.id === THREAD_ID
-        ? {
-            ...thread,
+        ? Object.assign({}, thread, {
             interactionMode: "plan",
             branch: options?.branch ?? "main",
             worktreePath: options?.worktreePath ?? null,
@@ -486,7 +485,7 @@ function createSnapshotWithProposedPlan(options?: {
               lastError: null,
               updatedAt: isoAt(102),
             },
-          }
+          })
         : thread,
     ),
   };

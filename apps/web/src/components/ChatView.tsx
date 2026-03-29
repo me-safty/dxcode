@@ -1408,7 +1408,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const targetThreadWorktreePath =
         options?.targetThreadWorktreePath ?? activeThread?.worktreePath ?? null;
       if (!api || !targetThreadId || !targetProject) return;
-      if (targetThreadId === activeThreadId && !isServerThread && !options?.allowLocalDraftThread) {
+      if (targetThreadId !== activeThreadId && !isServerThread && !options?.allowLocalDraftThread) {
         return;
       }
       if (options?.rememberAsLastInvoked !== false) {
