@@ -74,6 +74,11 @@ const FOLLOW_UP_BEHAVIOR_LABELS = {
   steer: "Steer",
 } as const;
 
+const ASSISTANT_RESPONSE_COPY_FORMAT_LABELS = {
+  markdown: "Raw markdown",
+  "plain-text": "Rendered plain text",
+} as const;
+
 const EMPTY_SERVER_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 
 type InstallProviderSettings = {
@@ -322,6 +327,10 @@ export function useSettingsRestore(onRestored?: () => void) {
   const changedSettingLabels = useMemo(
     () => [
       ...(theme !== "system" ? ["Theme"] : []),
+      ...(settings.assistantResponseCopyFormat !==
+      DEFAULT_UNIFIED_SETTINGS.assistantResponseCopyFormat
+        ? ["Assistant copy format"]
+        : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
@@ -349,6 +358,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     [
       areProviderSettingsDirty,
       isGitWritingModelDirty,
+      settings.assistantResponseCopyFormat,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.defaultThreadEnvMode,
@@ -636,6 +646,53 @@ export function GeneralSettingsPanel() {
                     {option.label}
                   </SelectItem>
                 ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Assistant copy format"
+          description="Choose how the full assistant response copy button writes to the clipboard. Code-block copy buttons always copy the selected code block."
+          resetAction={
+            settings.assistantResponseCopyFormat !==
+            DEFAULT_UNIFIED_SETTINGS.assistantResponseCopyFormat ? (
+              <SettingResetButton
+                label="assistant copy format"
+                onClick={() =>
+                  updateSettings({
+                    assistantResponseCopyFormat:
+                      DEFAULT_UNIFIED_SETTINGS.assistantResponseCopyFormat,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.assistantResponseCopyFormat}
+              onValueChange={(value) => {
+                if (value === "markdown" || value === "plain-text") {
+                  updateSettings({ assistantResponseCopyFormat: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-48" aria-label="Assistant copy format">
+                <SelectValue>
+                  {
+                    ASSISTANT_RESPONSE_COPY_FORMAT_LABELS[
+                      settings.assistantResponseCopyFormat
+                    ]
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="markdown">
+                  {ASSISTANT_RESPONSE_COPY_FORMAT_LABELS.markdown}
+                </SelectItem>
+                <SelectItem hideIndicator value="plain-text">
+                  {ASSISTANT_RESPONSE_COPY_FORMAT_LABELS["plain-text"]}
+                </SelectItem>
               </SelectPopup>
             </Select>
           }

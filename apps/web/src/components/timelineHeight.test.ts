@@ -10,8 +10,32 @@ describe("estimateTimelineMessageHeight", () => {
       estimateTimelineMessageHeight({
         role: "assistant",
         text: "a".repeat(144),
+        streaming: false,
+      }),
+    ).toBe(140);
+  });
+
+  it("keeps the smaller assistant base height while streaming", () => {
+    expect(
+      estimateTimelineMessageHeight({
+        role: "assistant",
+        text: "a".repeat(144),
+        streaming: true,
       }),
     ).toBe(122);
+  });
+
+  it("keeps the smaller assistant base height when plain-text copy resolves empty", () => {
+    expect(
+      estimateTimelineMessageHeight(
+        {
+          role: "assistant",
+          text: "---",
+          streaming: false,
+        },
+        { timelineWidthPx: null, assistantResponseCopyFormat: "plain-text" },
+      ),
+    ).toBe(100);
   });
 
   it("uses assistant sizing rules for system messages", () => {
@@ -130,9 +154,10 @@ describe("estimateTimelineMessageHeight", () => {
     const message = {
       role: "assistant" as const,
       text: "a".repeat(200),
+      streaming: false,
     };
 
-    expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 320 })).toBe(188);
-    expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 768 })).toBe(122);
+    expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 320 })).toBe(206);
+    expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 768 })).toBe(140);
   });
 });

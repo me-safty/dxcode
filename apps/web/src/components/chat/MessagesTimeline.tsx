@@ -48,13 +48,20 @@ import {
   type ParsedTerminalContextEntry,
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
-import { type TimestampFormat } from "@t3tools/contracts/settings";
+import {
+  type AssistantResponseCopyFormat,
+  type TimestampFormat,
+} from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
 import {
   buildInlineTerminalContextText,
   formatInlineTerminalContextLabel,
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
+import {
+  hasAssistantResponseCopyText,
+  resolveAssistantMessageCopyText,
+} from "../../lib/assistantMessageCopy";
 
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
@@ -79,6 +86,7 @@ interface MessagesTimelineProps {
   onImageExpand: (preview: ExpandedImagePreview) => void;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
+  assistantResponseCopyFormat: AssistantResponseCopyFormat;
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
 }
@@ -103,6 +111,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onImageExpand,
   markdownCwd,
   resolvedTheme,
+  assistantResponseCopyFormat,
   timestampFormat,
   workspaceRoot,
 }: MessagesTimelineProps) {
@@ -253,7 +262,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       if (row.kind === "work") return 112;
       if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
       if (row.kind === "working") return 40;
-      return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
+      return estimateTimelineMessageHeight(row.message, {
+        timelineWidthPx,
+        assistantResponseCopyFormat,
+      });
     },
     measureElement: measureVirtualElement,
     useAnimationFrameWithResizeObserver: true,
@@ -262,7 +274,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   useEffect(() => {
     if (timelineWidthPx === null) return;
     rowVirtualizer.measure();
-  }, [rowVirtualizer, timelineWidthPx]);
+  }, [assistantResponseCopyFormat, rowVirtualizer, timelineWidthPx]);
   useEffect(() => {
     rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (_item, _delta, instance) => {
       const viewportHeight = instance.scrollRect?.height ?? 0;
@@ -437,6 +449,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         row.message.role === "assistant" &&
         (() => {
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+          const showAssistantCopyButton =
+            !row.message.streaming &&
+            hasAssistantResponseCopyText(row.message.text, assistantResponseCopyFormat);
           return (
             <>
               {row.showCompletionDivider && (
@@ -448,7 +463,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   <span className="h-px flex-1 bg-border" />
                 </div>
               )}
-              <div className="min-w-0 px-1 py-0.5">
+              <div className="group min-w-0 px-1 py-0.5">
                 <ChatMarkdown
                   text={messageText}
                   cwd={markdownCwd}
@@ -510,15 +525,30 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     </div>
                   );
                 })()}
-                <p className="mt-1.5 text-[10px] text-muted-foreground/30">
-                  {formatMessageMeta(
-                    row.message.createdAt,
-                    row.message.streaming
-                      ? formatElapsed(row.durationStart, nowIso)
-                      : formatElapsed(row.durationStart, row.message.completedAt),
-                    timestampFormat,
-                  )}
-                </p>
+                <div className="mt-1.5 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+                    {showAssistantCopyButton ? (
+                      <MessageCopyButton
+                        text={() =>
+                          resolveAssistantMessageCopyText(
+                            row.message.text,
+                            assistantResponseCopyFormat,
+                          )
+                        }
+                        label="Copy response"
+                      />
+                    ) : null}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/30">
+                    {formatMessageMeta(
+                      row.message.createdAt,
+                      row.message.streaming
+                        ? formatElapsed(row.durationStart, nowIso)
+                        : formatElapsed(row.durationStart, row.message.completedAt),
+                      timestampFormat,
+                    )}
+                  </p>
+                </div>
               </div>
             </>
           );
