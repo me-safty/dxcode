@@ -25,15 +25,20 @@ import {
 } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 import { readNativeApi } from "~/nativeApi";
+import { renderHighlightedText } from "./threadSearchHighlight";
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
   planMarkdown,
   cwd,
   workspaceRoot,
+  searchQuery = "",
+  searchActive = false,
 }: {
   planMarkdown: string;
   cwd: string | undefined;
   workspaceRoot: string | undefined;
+  searchQuery?: string;
+  searchActive?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
@@ -44,6 +49,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const lineCount = planMarkdown.split("\n").length;
   const canCollapse = planMarkdown.length > 900 || lineCount > 20;
   const displayedPlanMarkdown = stripDisplayedPlanMarkdown(planMarkdown);
+  const searchExpanded = canCollapse && searchQuery.trim().length > 0;
+  const showExpandedPlan = expanded || searchExpanded;
   const collapsedPreview = canCollapse
     ? buildCollapsedProposedPlanPreviewMarkdown(planMarkdown, { maxLines: 10 })
     : null;
@@ -118,7 +125,11 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Badge variant="secondary">Plan</Badge>
-          <p className="truncate text-sm font-medium text-foreground">{title}</p>
+          <p className="truncate text-sm font-medium text-foreground">
+            {renderHighlightedText(title, searchQuery, `proposed-plan-title:${title}`, {
+              active: searchActive,
+            })}
+          </p>
         </div>
         <Menu>
           <MenuTrigger
@@ -135,17 +146,34 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         </Menu>
       </div>
       <div className="mt-4">
-        <div className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")}>
-          {canCollapse && !expanded ? (
-            <ChatMarkdown text={collapsedPreview ?? ""} cwd={cwd} isStreaming={false} />
-          ) : (
-            <ChatMarkdown text={displayedPlanMarkdown} cwd={cwd} isStreaming={false} />
+        <div
+          className={cn(
+            "relative",
+            canCollapse && !showExpandedPlan && "max-h-104 overflow-hidden",
           )}
-          {canCollapse && !expanded ? (
+        >
+          {canCollapse && !showExpandedPlan ? (
+            <ChatMarkdown
+              text={collapsedPreview ?? ""}
+              cwd={cwd}
+              isStreaming={false}
+              searchQuery={searchQuery}
+              searchActive={searchActive}
+            />
+          ) : (
+            <ChatMarkdown
+              text={displayedPlanMarkdown}
+              cwd={cwd}
+              isStreaming={false}
+              searchQuery={searchQuery}
+              searchActive={searchActive}
+            />
+          )}
+          {canCollapse && !showExpandedPlan ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-linear-to-t from-card/95 via-card/80 to-transparent" />
           ) : null}
         </div>
-        {canCollapse ? (
+        {canCollapse && !searchExpanded ? (
           <div className="mt-4 flex justify-center">
             <Button
               size="sm"
