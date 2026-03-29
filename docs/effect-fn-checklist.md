@@ -33,7 +33,7 @@ const new = Effect.fn('functionName')(function* () {
 - [ ] `apps/server/src/provider/Layers/ProviderService.ts`
 - [x] `apps/server/src/provider/Layers/ClaudeAdapter.ts`
 - [x] `apps/server/src/provider/Layers/CodexAdapter.ts`
-- [ ] `apps/server/src/git/Layers/GitCore.ts`
+- [x] `apps/server/src/git/Layers/GitCore.ts`
 - [ ] `apps/server/src/git/Layers/GitManager.ts`
 - [ ] `apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts`
 - [ ] `apps/server/src/orchestration/Layers/ProjectionPipeline.ts`
@@ -57,25 +57,25 @@ const new = Effect.fn('functionName')(function* () {
 
 ### `apps/server/src/git/Layers/GitCore.ts` (`58`)
 
-- [ ] [makeGitCore](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L495)
-- [ ] [handleTraceLine](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L317)
-- [ ] [emitCompleteLines](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L449)
-- [ ] [commit](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L1178)
-- [ ] [pushCurrentBranch](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L1217)
-- [ ] [pullCurrentBranch](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L1316)
-- [ ] [checkoutBranch](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L1697)
-- [ ] Service methods and callback wrappers in this file
+- [x] [makeGitCore](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L513)
+- [x] [handleTraceLine](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L324)
+- [x] [emitCompleteLines](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L455)
+- [x] [commit](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L1190)
+- [x] [pushCurrentBranch](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L1223)
+- [x] [pullCurrentBranch](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L1323)
+- [x] [checkoutBranch](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitCore.ts#L1727)
+- [x] Service methods and callback wrappers in this file
 
 ### `apps/server/src/git/Layers/GitManager.ts` (`28`)
 
-- [ ] [configurePullRequestHeadUpstream](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L387)
-- [ ] [materializePullRequestHeadBranch](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L428)
-- [ ] [findOpenPr](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L576)
-- [ ] [findLatestPr](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L602)
-- [ ] [runCommitStep](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L728)
-- [ ] [runPrStep](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L842)
-- [ ] [runFeatureBranchStep](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L1106)
-- [ ] Remaining helpers and nested callback wrappers in this file
+- [x] [configurePullRequestHeadUpstream](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L387)
+- [x] [materializePullRequestHeadBranch](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L428)
+- [x] [findOpenPr](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L576)
+- [x] [findLatestPr](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L602)
+- [x] [runCommitStep](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L728)
+- [x] [runPrStep](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L842)
+- [x] [runFeatureBranchStep](/Users/julius/Development/Work/codething-mvp/apps/server/src/git/Layers/GitManager.ts#L1106)
+- [x] Remaining helpers and nested callback wrappers in this file
 
 ### `apps/server/src/orchestration/Layers/ProjectionPipeline.ts` (`25`)
 
