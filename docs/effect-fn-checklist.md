@@ -32,7 +32,7 @@ const new = Effect.fn('functionName')(function* () {
 
 - [ ] `apps/server/src/provider/Layers/ProviderService.ts`
 - [x] `apps/server/src/provider/Layers/ClaudeAdapter.ts`
-- [ ] `apps/server/src/provider/Layers/CodexAdapter.ts`
+- [x] `apps/server/src/provider/Layers/CodexAdapter.ts`
 - [ ] `apps/server/src/git/Layers/GitCore.ts`
 - [ ] `apps/server/src/git/Layers/GitManager.ts`
 - [ ] `apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts`
@@ -113,11 +113,11 @@ const new = Effect.fn('functionName')(function* () {
 
 ### `apps/server/src/provider/Layers/CodexAdapter.ts` (`12`)
 
-- [ ] [makeCodexAdapter](/Users/julius/Development/Work/codething-mvp/apps/server/src/provider/Layers/CodexAdapter.ts#L1317)
-- [ ] [sendTurn](/Users/julius/Development/Work/codething-mvp/apps/server/src/provider/Layers/CodexAdapter.ts#L1399)
-- [ ] [writeNativeEvent](/Users/julius/Development/Work/codething-mvp/apps/server/src/provider/Layers/CodexAdapter.ts#L1546)
-- [ ] [listener](/Users/julius/Development/Work/codething-mvp/apps/server/src/provider/Layers/CodexAdapter.ts#L1555)
-- [ ] Remaining nested callback wrappers in this file
+- [x] [makeCodexAdapter](/Users/julius/Development/Work/codething-mvp/apps/server/src/provider/Layers/CodexAdapter.ts#L1317)
+- [x] [sendTurn](/Users/julius/Development/Work/codething-mvp/apps/server/src/provider/Layers/CodexAdapter.ts#L1399)
+- [x] [writeNativeEvent](/Users/julius/Development/Work/codething-mvp/apps/server/src/provider/Layers/CodexAdapter.ts#L1546)
+- [x] [listener](/Users/julius/Development/Work/codething-mvp/apps/server/src/provider/Layers/CodexAdapter.ts#L1555)
+- [x] Remaining nested callback wrappers in this file
 
 ### `apps/server/src/checkpointing/Layers/CheckpointStore.ts` (`10`)
 
