@@ -38,13 +38,26 @@ import { ToggleGroup, Toggle } from "./ui/toggle-group";
 type DiffRenderMode = "stacked" | "split";
 type DiffThemeType = "light" | "dark";
 
-// Blue/orange palette for colorblind users (distinguishable under deuteranopia/protanopia).
-const CB_ADDITION = "oklch(0.75 0.15 70)";
-const CB_DELETION = "oklch(0.55 0.18 250)";
+// GitHub Primer colorblind palette (protanopia/deuteranopia).
+// Source: @primer/primitives diffBlob tokens — the industry standard.
+// Light: addition #0969da (blue), deletion #bc4c00 (orange)
+// Dark:  addition #388bfd (blue), deletion #db6d28 (orange)
+const CB_ADDITION_LIGHT = "#0969da";
+const CB_ADDITION_DARK = "#388bfd";
+const CB_DELETION_LIGHT = "#bc4c00";
+const CB_DELETION_DARK = "#db6d28";
 
-function buildDiffPanelCss(colorblind: boolean): string {
-  const addition = colorblind ? CB_ADDITION : "var(--success)";
-  const deletion = colorblind ? CB_DELETION : "var(--destructive)";
+function buildDiffPanelCss(colorblind: boolean, theme: "light" | "dark"): string {
+  const addition = colorblind
+    ? theme === "dark"
+      ? CB_ADDITION_DARK
+      : CB_ADDITION_LIGHT
+    : "var(--success)";
+  const deletion = colorblind
+    ? theme === "dark"
+      ? CB_DELETION_DARK
+      : CB_DELETION_LIGHT
+    : "var(--destructive)";
 
   return `
 [data-diffs-header],
@@ -63,11 +76,13 @@ function buildDiffPanelCss(colorblind: boolean): string {
   --diffs-bg-separator-override: color-mix(in srgb, var(--background) 95%, var(--foreground));
   --diffs-bg-buffer-override: color-mix(in srgb, var(--background) 90%, var(--foreground));
 
+  --diffs-addition-color-override: ${addition};
   --diffs-bg-addition-override: color-mix(in srgb, var(--background) 92%, ${addition});
   --diffs-bg-addition-number-override: color-mix(in srgb, var(--background) 88%, ${addition});
   --diffs-bg-addition-hover-override: color-mix(in srgb, var(--background) 85%, ${addition});
   --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--background) 80%, ${addition});
 
+  --diffs-deletion-color-override: ${deletion};
   --diffs-bg-deletion-override: color-mix(in srgb, var(--background) 92%, ${deletion});
   --diffs-bg-deletion-number-override: color-mix(in srgb, var(--background) 88%, ${deletion});
   --diffs-bg-deletion-hover-override: color-mix(in srgb, var(--background) 85%, ${deletion});
@@ -176,8 +191,8 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const [diffRenderMode, setDiffRenderMode] = useState<DiffRenderMode>("stacked");
   const [diffWordWrap, setDiffWordWrap] = useState(settings.diffWordWrap);
   const diffUnsafeCss = useMemo(
-    () => buildDiffPanelCss(settings.colorblindDiffColors) + DIFF_PANEL_STATIC_CSS,
-    [settings.colorblindDiffColors],
+    () => buildDiffPanelCss(settings.colorblindDiffColors, resolvedTheme) + DIFF_PANEL_STATIC_CSS,
+    [settings.colorblindDiffColors, resolvedTheme],
   );
   const patchViewportRef = useRef<HTMLDivElement>(null);
   const turnStripRef = useRef<HTMLDivElement>(null);
