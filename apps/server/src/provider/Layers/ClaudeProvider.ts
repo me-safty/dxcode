@@ -269,7 +269,7 @@ function extractSubscriptionTypeFromOutput(result: CommandResult): string | unde
 /** Subscription types where the 1M context window is included in the plan. */
 const PREMIUM_SUBSCRIPTION_TYPES = new Set([
   "max",
-  "max_plan",
+  "maxplan",
   "max5",
   "max20",
   "enterprise",
