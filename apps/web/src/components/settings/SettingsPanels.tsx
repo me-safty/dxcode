@@ -217,26 +217,22 @@ function SettingsSection({
   title,
   icon,
   headerAction,
-  hideHeader = false,
   children,
 }: {
   title: string;
   icon?: ReactNode;
   headerAction?: ReactNode;
-  hideHeader?: boolean;
   children: ReactNode;
 }) {
   return (
     <section className="space-y-3">
-      {!hideHeader ? (
-        <div className="flex items-center justify-between">
-          <h2 className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-            {icon}
-            {title}
-          </h2>
-          {headerAction}
-        </div>
-      ) : null}
+      <div className="flex items-center justify-between">
+        <h2 className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          {icon}
+          {title}
+        </h2>
+        {headerAction}
+      </div>
       <div className="relative overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-xs/5 not-dark:bg-clip-padding before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]">
         {children}
       </div>
@@ -741,7 +737,7 @@ export function GeneralSettingsPanel() {
       : null;
   return (
     <SettingsPageContainer>
-      <SettingsSection title="General" hideHeader>
+      <SettingsSection title="General">
         <SettingsRow
           title="Theme"
           description="Choose how T3 Code looks across the app."
@@ -1472,8 +1468,8 @@ export function ArchivedThreadsPanel() {
   return (
     <SettingsPageContainer>
       {archivedGroups.length === 0 ? (
-        <SettingsSection title="Archived threads" hideHeader>
-          <Empty className="min-h-[22rem]">
+        <SettingsSection title="Archived threads">
+          <Empty className="min-h-88">
             <EmptyMedia variant="icon">
               <ArchiveIcon />
             </EmptyMedia>
