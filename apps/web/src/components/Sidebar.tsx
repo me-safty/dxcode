@@ -1540,14 +1540,12 @@ export default function Sidebar() {
         >
           {shouldShowThreadPanel && showEmptyThreadState ? (
             <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
-              <SidebarMenuSubButton
-                render={<div />}
+              <div
                 data-thread-selection-safe
-                size="sm"
-                className="h-6 w-full translate-x-0 cursor-default justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-transparent hover:text-muted-foreground/60 active:bg-transparent active:text-muted-foreground/60"
+                className="flex h-6 w-full translate-x-0 items-center px-2 text-left text-[10px] text-muted-foreground/60"
               >
                 <span>No threads yet</span>
-              </SidebarMenuSubButton>
+              </div>
             </SidebarMenuSubItem>
           ) : null}
           {shouldShowThreadPanel && renderedThreads.map((thread) => renderThreadRow(thread))}
