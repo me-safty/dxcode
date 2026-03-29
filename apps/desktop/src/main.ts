@@ -24,6 +24,7 @@ import type {
   DesktopUpdateCheckResult,
   DesktopUpdateState,
 } from "@t3tools/contracts";
+import { DesktopUpdateStatusFriendlyLabelMap } from "@t3tools/contracts";
 import { autoUpdater } from "electron-updater";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
@@ -578,18 +579,9 @@ async function checkForUpdatesFromMenu(): Promise<void> {
   }
 }
 
-const CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DEFAULT = "Check for Updates...";
-const CHECK_FOR_UPDATES_MENU_ITEM_LABEL_CHECKING = "Checking for Updates...";
-const CHECK_FOR_UPDATES_MENU_ITEM_LABEL_IDLE = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DEFAULT;
-const CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DISABLED = "Updates unavailable";
-const CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DOWNLOADING = "Downloading update...";
-const CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DOWNLOADED = "Update downloaded";
-const CHECK_FOR_UPDATES_MENU_ITEM_LABEL_AVAILABLE = "Update available";
-const CHECK_FOR_UPDATES_MENU_ITEM_LABEL_UP_TO_DATE = "You're up to date!";
-const CHECK_FOR_UPDATES_MENU_ITEM_LABEL_ERROR = "Update check failed";
 function makeCheckForUpdatesMenuItem(): MenuItem {
   return new MenuItem({
-    label: CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DEFAULT,
+    label: DesktopUpdateStatusFriendlyLabelMap["idle"],
     click: async () => await handleCheckForUpdatesMenuClick(),
   });
 }
@@ -597,37 +589,18 @@ const checkForUpdatesMenuItemInAppMenu = makeCheckForUpdatesMenuItem();
 const checkForUpdatesMenuItemInHelpMenu = makeCheckForUpdatesMenuItem();
 
 function updateCheckForUpdatesMenuItem(menuItem: MenuItem, state: DesktopUpdateState): void {
+  menuItem.label = DesktopUpdateStatusFriendlyLabelMap[state.status];
   switch (state.status) {
     case "checking":
-      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_CHECKING;
-      menuItem.enabled = false;
-      break;
     case "available":
-      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_AVAILABLE;
-      menuItem.enabled = false;
-      break;
     case "downloading":
-      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DOWNLOADING;
-      menuItem.enabled = false;
-      break;
     case "downloaded":
-      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DOWNLOADED;
-      menuItem.enabled = false;
-      break;
     case "disabled":
-      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_DISABLED;
-      menuItem.enabled = false;
-      break;
     case "error":
-      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_ERROR;
-      menuItem.enabled = false;
-      break;
     case "up-to-date":
-      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_UP_TO_DATE;
       menuItem.enabled = false;
       break;
     case "idle":
-      menuItem.label = CHECK_FOR_UPDATES_MENU_ITEM_LABEL_IDLE;
       menuItem.enabled = true;
       break;
   }
