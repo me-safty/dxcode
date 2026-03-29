@@ -1946,6 +1946,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
     planSidebarDismissedForTurnRef.current = null;
   }, [activeThread?.id]);
 
+  // Auto-open the plan sidebar when plan/todo steps arrive (unless user dismissed it for this turn).
+  useEffect(() => {
+    if (!activePlan) return;
+    if (planSidebarOpen) return;
+    const turnKey = activePlan.turnId;
+    if (turnKey && planSidebarDismissedForTurnRef.current === turnKey) return;
+    setPlanSidebarOpen(true);
+  }, [activePlan, planSidebarOpen]);
+
   useEffect(() => {
     if (!composerMenuOpen) {
       setComposerHighlightedItemId(null);

@@ -462,7 +462,7 @@ export function deriveWorkLogEntries(
   const entries = ordered
     .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
     .filter((activity) => activity.kind !== "tool.started")
-    .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
+    .filter((activity) => activity.kind !== "task.started")
     .filter((activity) => activity.kind !== "context-window.updated")
     .filter((activity) => activity.summary !== "Checkpoint captured")
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
@@ -492,11 +492,16 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const command = extractToolCommand(payload);
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
+  const isTaskActivity = activity.kind === "task.progress" || activity.kind === "task.completed";
+  const taskSummary =
+    isTaskActivity && typeof payload?.summary === "string" && payload.summary.length > 0
+      ? payload.summary
+      : null;
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
-    label: activity.summary,
-    tone: activity.tone === "approval" ? "info" : activity.tone,
+    label: taskSummary ?? activity.summary,
+    tone: isTaskActivity ? "thinking" : activity.tone === "approval" ? "info" : activity.tone,
     activityKind: activity.kind,
   };
   const itemType = extractWorkLogItemType(payload);

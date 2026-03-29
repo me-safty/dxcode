@@ -563,7 +563,7 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
   });
 
-  it("omits task start and completion lifecycle entries", () => {
+  it("omits task.started but shows task.progress and task.completed", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "task-start",
@@ -589,7 +589,23 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities, undefined);
-    expect(entries.map((entry) => entry.id)).toEqual(["task-progress"]);
+    expect(entries.map((entry) => entry.id)).toEqual(["task-progress", "task-complete"]);
+  });
+
+  it("uses payload summary as label for task entries when available", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "task-progress-with-summary",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "task.progress",
+        summary: "Reasoning update",
+        tone: "info",
+        payload: { summary: "Searching for API endpoints" },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries[0]?.label).toBe("Searching for API endpoints");
   });
 
   it("filters by turn id when provided", () => {
