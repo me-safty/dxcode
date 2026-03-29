@@ -17,7 +17,6 @@ type SidebarProject = {
   updatedAt?: string | undefined;
 };
 type SidebarThreadSortInput = Pick<Thread, "createdAt" | "updatedAt" | "messages">;
-type TimeoutHandle = ReturnType<typeof globalThis.setTimeout>;
 
 export type ThreadTraversalDirection = "previous" | "next";
 
@@ -48,19 +47,21 @@ type ThreadStatusInput = Pick<
   "interactionMode" | "latestTurn" | "lastVisitedAt" | "proposedPlans" | "session"
 >;
 
+export interface ThreadJumpHintVisibilityController {
+  sync: (shouldShow: boolean) => void;
+  dispose: () => void;
+}
+
 export function createThreadJumpHintVisibilityController(input: {
   delayMs: number;
   onVisibilityChange: (visible: boolean) => void;
   setTimeoutFn?: typeof globalThis.setTimeout;
   clearTimeoutFn?: typeof globalThis.clearTimeout;
-}): {
-  sync: (shouldShow: boolean) => void;
-  dispose: () => void;
-} {
+}): ThreadJumpHintVisibilityController {
   const setTimeoutFn = input.setTimeoutFn ?? globalThis.setTimeout;
   const clearTimeoutFn = input.clearTimeoutFn ?? globalThis.clearTimeout;
   let isVisible = false;
-  let timeoutId: TimeoutHandle | null = null;
+  let timeoutId: NodeJS.Timeout | null = null;
 
   const clearPendingShow = () => {
     if (timeoutId === null) {

@@ -69,6 +69,7 @@ import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useThreadJumpHintVisibility } from "../hooks/useThreadJumpHintVisibility";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { toastManager } from "./ui/toast";
@@ -105,7 +106,6 @@ import {
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
-  createThreadJumpHintVisibilityController,
   getVisibleSidebarThreadIds,
   getVisibleThreadsForProject,
   resolveAdjacentThreadId,
@@ -117,7 +117,6 @@ import {
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   sortThreadsForSidebar,
-  THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -363,10 +362,7 @@ export default function Sidebar() {
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<ProjectId>
   >(() => new Set());
-  const [showThreadJumpHints, setShowThreadJumpHints] = useState(false);
-  const threadJumpHintVisibilityControllerRef = useRef<ReturnType<
-    typeof createThreadJumpHintVisibilityController
-  > | null>(null);
+  const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const dragInProgressRef = useRef(false);
@@ -1106,27 +1102,6 @@ export default function Sidebar() {
     return mapping;
   }, [keybindings, sidebarShortcutLabelOptions, threadJumpCommandById]);
   const orderedSidebarThreadIds = visibleSidebarThreadIds;
-
-  useEffect(() => {
-    const controller = createThreadJumpHintVisibilityController({
-      delayMs: THREAD_JUMP_HINT_SHOW_DELAY_MS,
-      onVisibilityChange: (visible) => {
-        setShowThreadJumpHints(visible);
-      },
-      setTimeoutFn: window.setTimeout.bind(window),
-      clearTimeoutFn: window.clearTimeout.bind(window),
-    });
-    threadJumpHintVisibilityControllerRef.current = controller;
-
-    return () => {
-      controller.dispose();
-      threadJumpHintVisibilityControllerRef.current = null;
-    };
-  }, []);
-
-  const updateThreadJumpHintsVisibility = useCallback((shouldShow: boolean) => {
-    threadJumpHintVisibilityControllerRef.current?.sync(shouldShow);
-  }, []);
 
   useEffect(() => {
     const getShortcutContext = () => ({
