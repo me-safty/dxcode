@@ -29,6 +29,10 @@ interface ShortcutMatchOptions {
   context?: Partial<ShortcutMatchContext>;
 }
 
+interface ResolvedShortcutLabelOptions extends ShortcutMatchOptions {
+  platform?: string;
+}
+
 const TERMINAL_WORD_BACKWARD = "\u001bb";
 const TERMINAL_WORD_FORWARD = "\u001bf";
 const TERMINAL_LINE_START = "\u0001";
@@ -125,17 +129,45 @@ function matchesWhenClause(
   return evaluateWhenNode(whenAst, context);
 }
 
-function findShortcutForCommand(
+function shortcutConflictKey(shortcut: KeybindingShortcut, platform = navigator.platform): string {
+  const useMetaForMod = isMacPlatform(platform);
+  const metaKey = shortcut.metaKey || (shortcut.modKey && useMetaForMod);
+  const ctrlKey = shortcut.ctrlKey || (shortcut.modKey && !useMetaForMod);
+
+  return [
+    shortcut.key,
+    metaKey ? "meta" : "",
+    ctrlKey ? "ctrl" : "",
+    shortcut.shiftKey ? "shift" : "",
+    shortcut.altKey ? "alt" : "",
+  ].join("|");
+}
+
+function findEffectiveShortcutForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand,
-  context?: ShortcutMatchContext,
+  options?: ShortcutMatchOptions,
 ): KeybindingShortcut | null {
+  const platform = resolvePlatform(options);
+  const context = resolveContext(options);
+  const claimedShortcuts = new Set<string>();
+
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
-    if (!binding || binding.command !== command) continue;
-    if (context && !matchesWhenClause(binding.whenAst, context)) continue;
-    return binding.shortcut;
+    if (!binding) continue;
+    if (!matchesWhenClause(binding.whenAst, context)) continue;
+
+    const conflictKey = shortcutConflictKey(binding.shortcut, platform);
+    if (claimedShortcuts.has(conflictKey)) {
+      continue;
+    }
+
+    claimedShortcuts.add(conflictKey);
+    if (binding.command === command) {
+      return binding.shortcut;
+    }
   }
+
   return null;
 }
 
@@ -204,9 +236,14 @@ export function formatShortcutLabel(
 export function shortcutLabelForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand,
-  platform = navigator.platform,
+  options?: string | ResolvedShortcutLabelOptions,
 ): string | null {
-  const shortcut = findShortcutForCommand(keybindings, command);
+  const resolvedOptions =
+    typeof options === "string"
+      ? ({ platform: options } satisfies ResolvedShortcutLabelOptions)
+      : options;
+  const platform = resolvePlatform(resolvedOptions);
+  const shortcut = findEffectiveShortcutForCommand(keybindings, command, resolvedOptions);
   return shortcut ? formatShortcutLabel(shortcut, platform) : null;
 }
 
@@ -233,10 +270,9 @@ export function shouldShowThreadJumpHints(
   options?: ShortcutMatchOptions,
 ): boolean {
   const platform = resolvePlatform(options);
-  const context = resolveContext(options);
 
   for (const command of THREAD_JUMP_KEYBINDING_COMMANDS) {
-    const shortcut = findShortcutForCommand(keybindings, command, context);
+    const shortcut = findEffectiveShortcutForCommand(keybindings, command, options);
     if (!shortcut) continue;
     if (matchesShortcutModifiers(event, shortcut, platform)) {
       return true;

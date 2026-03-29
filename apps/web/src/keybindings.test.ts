@@ -224,7 +224,7 @@ describe("split/new/close terminal shortcuts", () => {
 });
 
 describe("shortcutLabelForCommand", () => {
-  it("returns the most recent binding label", () => {
+  it("returns the effective binding label", () => {
     const bindings = compile([
       {
         shortcut: modShortcut("\\"),
@@ -238,12 +238,15 @@ describe("shortcutLabelForCommand", () => {
       },
     ]);
     assert.strictEqual(
-      shortcutLabelForCommand(bindings, "terminal.split", "Linux"),
+      shortcutLabelForCommand(bindings, "terminal.split", {
+        platform: "Linux",
+        context: { terminalFocus: false },
+      }),
       "Ctrl+Shift+\\",
     );
   });
 
-  it("returns labels for non-terminal commands", () => {
+  it("returns effective labels for non-terminal commands", () => {
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "chat.new", "MacIntel"), "⇧⌘O");
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "diff.toggle", "Linux"), "Ctrl+D");
     assert.strictEqual(
@@ -257,6 +260,48 @@ describe("shortcutLabelForCommand", () => {
     assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "thread.previous", "Linux"),
       "Ctrl+Shift+[",
+    );
+  });
+
+  it("returns null for commands shadowed by a later conflicting shortcut", () => {
+    const bindings = compile([
+      { shortcut: modShortcut("1", { shiftKey: true }), command: "thread.jump.1" },
+      { shortcut: modShortcut("1", { shiftKey: true }), command: "thread.jump.7" },
+    ]);
+
+    assert.isNull(shortcutLabelForCommand(bindings, "thread.jump.1", "MacIntel"));
+    assert.strictEqual(shortcutLabelForCommand(bindings, "thread.jump.7", "MacIntel"), "⇧⌘1");
+  });
+
+  it("respects when-context while resolving labels", () => {
+    const bindings = compile([
+      { shortcut: modShortcut("d"), command: "diff.toggle" },
+      {
+        shortcut: modShortcut("d"),
+        command: "terminal.split",
+        whenAst: whenIdentifier("terminalFocus"),
+      },
+    ]);
+
+    assert.strictEqual(
+      shortcutLabelForCommand(bindings, "diff.toggle", {
+        platform: "Linux",
+        context: { terminalFocus: false },
+      }),
+      "Ctrl+D",
+    );
+    assert.isNull(
+      shortcutLabelForCommand(bindings, "diff.toggle", {
+        platform: "Linux",
+        context: { terminalFocus: true },
+      }),
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(bindings, "terminal.split", {
+        platform: "Linux",
+        context: { terminalFocus: true },
+      }),
+      "Ctrl+D",
     );
   });
 });

@@ -387,6 +387,16 @@ export default function Sidebar() {
   const routeTerminalOpen = routeThreadId
     ? selectThreadTerminalState(terminalStateByThreadId, routeThreadId).terminalOpen
     : false;
+  const sidebarShortcutLabelOptions = useMemo(
+    () => ({
+      platform,
+      context: {
+        terminalFocus: false,
+        terminalOpen: routeTerminalOpen,
+      },
+    }),
+    [platform, routeTerminalOpen],
+  );
   const threadGitTargets = useMemo(
     () =>
       threads.map((thread) => ({
@@ -1086,13 +1096,13 @@ export default function Sidebar() {
   const threadJumpLabelById = useMemo(() => {
     const mapping = new Map<ThreadId, string>();
     for (const [threadId, command] of threadJumpCommandById) {
-      const label = shortcutLabelForCommand(keybindings, command, platform);
+      const label = shortcutLabelForCommand(keybindings, command, sidebarShortcutLabelOptions);
       if (label) {
         mapping.set(threadId, label);
       }
     }
     return mapping;
-  }, [keybindings, platform, threadJumpCommandById]);
+  }, [keybindings, sidebarShortcutLabelOptions, threadJumpCommandById]);
   const orderedSidebarThreadIds = useMemo(
     () => getVisibleSidebarThreadIds(renderedProjects),
     [renderedProjects],
@@ -1679,8 +1689,8 @@ export default function Sidebar() {
           ? "text-rose-500 animate-pulse"
           : "text-amber-500 animate-pulse";
   const newThreadShortcutLabel =
-    shortcutLabelForCommand(keybindings, "chat.newLocal") ??
-    shortcutLabelForCommand(keybindings, "chat.new");
+    shortcutLabelForCommand(keybindings, "chat.newLocal", sidebarShortcutLabelOptions) ??
+    shortcutLabelForCommand(keybindings, "chat.new", sidebarShortcutLabelOptions);
 
   const handleDesktopUpdateButtonClick = useCallback(() => {
     const bridge = window.desktopBridge;
