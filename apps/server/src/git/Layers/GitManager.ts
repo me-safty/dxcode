@@ -361,7 +361,7 @@ function toPullRequestHeadRemoteInfo(pr: {
   };
 }
 
-export const makeGitManager = Effect.gen(function* () {
+export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   const gitCore = yield* GitCore;
   const gitHubCli = yield* GitHubCli;
   const textGeneration = yield* TextGeneration;
@@ -1322,4 +1322,4 @@ export const makeGitManager = Effect.gen(function* () {
   } satisfies GitManagerShape;
 });
 
-export const GitManagerLive = Layer.effect(GitManager, makeGitManager);
+export const GitManagerLive = Layer.effect(GitManager, makeGitManager());

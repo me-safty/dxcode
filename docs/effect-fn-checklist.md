@@ -34,7 +34,7 @@ const new = Effect.fn('functionName')(function* () {
 - [x] `apps/server/src/provider/Layers/ClaudeAdapter.ts`
 - [x] `apps/server/src/provider/Layers/CodexAdapter.ts`
 - [x] `apps/server/src/git/Layers/GitCore.ts`
-- [ ] `apps/server/src/git/Layers/GitManager.ts`
+- [x] `apps/server/src/git/Layers/GitManager.ts`
 - [ ] `apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts`
 - [ ] `apps/server/src/orchestration/Layers/ProjectionPipeline.ts`
 - [ ] `apps/server/src/orchestration/Layers/OrchestrationEngine.ts`
