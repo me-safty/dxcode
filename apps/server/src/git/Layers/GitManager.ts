@@ -889,19 +889,9 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       upstreamRef: details.upstreamRef,
     });
 
-    const existing = yield* findOpenPr(cwd, headContext.headSelectors);
-    if (existing) {
-      return {
-        status: "opened_existing" as const,
-        url: existing.url,
-        number: existing.number,
-        baseBranch: existing.baseRefName,
-        headBranch: existing.headRefName,
-        title: existing.title,
-      };
-    }
-
     const baseBranch = yield* resolveBaseBranch(cwd, branch, details.upstreamRef, headContext);
+    const existing = yield* findOpenPr(cwd, headContext.headSelectors);
+
     const rangeContext = yield* gitCore.readRangeContext(cwd, baseBranch);
 
     const generated = yield* textGeneration.generatePrContent({
@@ -922,6 +912,27 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
           gitManagerError("runPrStep", "Failed to write pull request body temp file.", cause),
         ),
       );
+
+    if (existing) {
+      yield* gitHubCli
+        .editPullRequest({
+          cwd,
+          number: existing.number,
+          title: generated.title,
+          bodyFile,
+        })
+        .pipe(Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void))));
+
+      return {
+        status: "opened_existing" as const,
+        url: existing.url,
+        number: existing.number,
+        baseBranch: existing.baseRefName,
+        headBranch: existing.headRefName,
+        title: generated.title,
+      };
+    }
+
     yield* gitHubCli
       .createPullRequest({
         cwd,

@@ -352,6 +352,16 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
       });
     }
 
+    if (args[0] === "pr" && args[1] === "edit") {
+      return Effect.succeed({
+        stdout: "",
+        stderr: "",
+        code: 0,
+        signal: null,
+        timedOut: false,
+      });
+    }
+
     if (args[0] === "repo" && args[1] === "view") {
       const repository = args[2];
       if (typeof repository === "string" && args.includes("nameWithOwner,url,sshUrl")) {
@@ -463,6 +473,17 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
         execute({
           cwd: input.cwd,
           args: ["pr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
+        }).pipe(Effect.asVoid),
+      editPullRequest: (input) =>
+        execute({
+          cwd: input.cwd,
+          args: [
+            "pr",
+            "edit",
+            String(input.number),
+            ...(input.title ? ["--title", input.title] : []),
+            ...(input.bodyFile ? ["--body-file", input.bodyFile] : []),
+          ],
         }).pipe(Effect.asVoid),
     },
     ghCalls,
