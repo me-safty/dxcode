@@ -50,6 +50,20 @@ import {
 import { randomUUID } from "~/lib/utils";
 import { resolvePathLinkTarget } from "~/terminal-links";
 import { readNativeApi } from "~/nativeApi";
+import { useSettings } from "~/hooks/useSettings";
+import { useTheme } from "~/hooks/useTheme";
+
+// GitHub Primer colorblind palette (protanopia/deuteranopia).
+const CB_STYLES = {
+  light: {
+    addition: { color: "#0969da" },
+    deletion: { color: "#bc4c00" },
+  },
+  dark: {
+    addition: { color: "#388bfd" },
+    deletion: { color: "#db6d28" },
+  },
+} as const;
 
 interface GitActionsControlProps {
   gitCwd: string | null;
@@ -204,6 +218,9 @@ function GitQuickActionIcon({ quickAction }: { quickAction: GitQuickAction }) {
 }
 
 export default function GitActionsControl({ gitCwd, activeThreadId }: GitActionsControlProps) {
+  const { colorblindMode } = useSettings();
+  const { resolvedTheme } = useTheme();
+  const cb = colorblindMode ? CB_STYLES[resolvedTheme] : null;
   const threadToastData = useMemo(
     () => (activeThreadId ? { threadId: activeThreadId } : undefined),
     [activeThreadId],
@@ -970,9 +987,19 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                                     <span className="text-muted-foreground">Excluded</span>
                                   ) : (
                                     <>
-                                      <span className="text-success">+{file.insertions}</span>
+                                      <span
+                                        className={cb ? undefined : "text-success"}
+                                        style={cb?.addition}
+                                      >
+                                        +{file.insertions}
+                                      </span>
                                       <span className="text-muted-foreground"> / </span>
-                                      <span className="text-destructive">-{file.deletions}</span>
+                                      <span
+                                        className={cb ? undefined : "text-destructive"}
+                                        style={cb?.deletion}
+                                      >
+                                        -{file.deletions}
+                                      </span>
                                     </>
                                   )}
                                 </span>
@@ -983,11 +1010,11 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                       </div>
                     </ScrollArea>
                     <div className="flex justify-end font-mono">
-                      <span className="text-success">
+                      <span className={cb ? undefined : "text-success"} style={cb?.addition}>
                         +{selectedFiles.reduce((sum, f) => sum + f.insertions, 0)}
                       </span>
                       <span className="text-muted-foreground"> / </span>
-                      <span className="text-destructive">
+                      <span className={cb ? undefined : "text-destructive"} style={cb?.deletion}>
                         -{selectedFiles.reduce((sum, f) => sum + f.deletions, 0)}
                       </span>
                     </div>

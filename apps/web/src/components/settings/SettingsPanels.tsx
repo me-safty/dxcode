@@ -459,8 +459,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
-      ...(settings.colorblindDiffColors !== DEFAULT_UNIFIED_SETTINGS.colorblindDiffColors
-        ? ["Colorblind diff colors"]
+      ...(settings.colorblindMode !== DEFAULT_UNIFIED_SETTINGS.colorblindMode
+        ? ["Colorblind mode"]
         : []),
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
@@ -483,7 +483,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     [
       areProviderSettingsDirty,
       isGitWritingModelDirty,
-      settings.colorblindDiffColors,
+      settings.colorblindMode,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.defaultThreadEnvMode,
@@ -842,15 +842,15 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          title="Colorblind diff colors"
-          description="Use blue/orange instead of red/green for diff additions and deletions."
+          title="Colorblind mode"
+          description="Replace red/green with blue/orange across diffs and stats."
           resetAction={
-            settings.colorblindDiffColors !== DEFAULT_UNIFIED_SETTINGS.colorblindDiffColors ? (
+            settings.colorblindMode !== DEFAULT_UNIFIED_SETTINGS.colorblindMode ? (
               <SettingResetButton
-                label="colorblind diff colors"
+                label="colorblind mode"
                 onClick={() =>
                   updateSettings({
-                    colorblindDiffColors: DEFAULT_UNIFIED_SETTINGS.colorblindDiffColors,
+                    colorblindMode: DEFAULT_UNIFIED_SETTINGS.colorblindMode,
                   })
                 }
               />
@@ -858,11 +858,9 @@ export function GeneralSettingsPanel() {
           }
           control={
             <Switch
-              checked={settings.colorblindDiffColors}
-              onCheckedChange={(checked) =>
-                updateSettings({ colorblindDiffColors: Boolean(checked) })
-              }
-              aria-label="Use colorblind-friendly diff colors"
+              checked={settings.colorblindMode}
+              onCheckedChange={(checked) => updateSettings({ colorblindMode: Boolean(checked) })}
+              aria-label="Enable colorblind mode"
             />
           }
         />

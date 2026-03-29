@@ -191,8 +191,8 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   const [diffRenderMode, setDiffRenderMode] = useState<DiffRenderMode>("stacked");
   const [diffWordWrap, setDiffWordWrap] = useState(settings.diffWordWrap);
   const diffUnsafeCss = useMemo(
-    () => buildDiffPanelCss(settings.colorblindDiffColors, resolvedTheme) + DIFF_PANEL_STATIC_CSS,
-    [settings.colorblindDiffColors, resolvedTheme],
+    () => buildDiffPanelCss(settings.colorblindMode, resolvedTheme) + DIFF_PANEL_STATIC_CSS,
+    [settings.colorblindMode, resolvedTheme],
   );
   const patchViewportRef = useRef<HTMLDivElement>(null);
   const turnStripRef = useRef<HTMLDivElement>(null);
