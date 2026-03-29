@@ -272,6 +272,17 @@ const makeGitHubCli = Effect.sync(() => {
         cwd: input.cwd,
         args: ["pr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
       }).pipe(Effect.asVoid),
+    editPullRequest: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: [
+          "pr",
+          "edit",
+          String(input.number),
+          ...(input.title ? ["--title", input.title] : []),
+          ...(input.bodyFile ? ["--body-file", input.bodyFile] : []),
+        ],
+      }).pipe(Effect.asVoid),
   } satisfies GitHubCliShape;
 
   return service;

@@ -93,6 +93,16 @@ export interface GitHubCliShape {
     readonly reference: string;
     readonly force?: boolean;
   }) => Effect.Effect<void, GitHubCliError>;
+
+  /**
+   * Edit an existing pull request's title and/or body.
+   */
+  readonly editPullRequest: (input: {
+    readonly cwd: string;
+    readonly number: number;
+    readonly title?: string;
+    readonly bodyFile?: string;
+  }) => Effect.Effect<void, GitHubCliError>;
 }
 
 /**
