@@ -4220,10 +4220,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
             onClose={() => {
               setPlanSidebarOpen(false);
               // Track that the user explicitly dismissed for this turn so auto-open won't fight them.
-              const turnKey = activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? null;
-              if (turnKey) {
-                planSidebarDismissedForTurnRef.current = turnKey;
-              }
+              planSidebarDismissedForTurnRef.current =
+                activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
             }}
           />
         ) : null}
