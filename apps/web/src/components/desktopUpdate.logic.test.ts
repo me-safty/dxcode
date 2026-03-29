@@ -8,7 +8,6 @@ import {
   getDesktopUpdateButtonTooltip,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
-  shouldHighlightDesktopUpdateError,
   shouldShowArm64IntelBuildWarning,
   shouldShowDesktopUpdateButton,
   shouldToastDesktopUpdateActionResult,
@@ -176,25 +175,6 @@ describe("desktop update UI helpers", () => {
         accepted: true,
         completed: true,
         state: { ...baseState, message: "checksum mismatch" },
-      }),
-    ).toBe(false);
-  });
-
-  it("highlights only actionable updater errors", () => {
-    expect(
-      shouldHighlightDesktopUpdateError({
-        ...baseState,
-        status: "error",
-        errorContext: "download",
-        canRetry: true,
-      }),
-    ).toBe(true);
-    expect(
-      shouldHighlightDesktopUpdateError({
-        ...baseState,
-        status: "error",
-        errorContext: "check",
-        canRetry: true,
       }),
     ).toBe(false);
   });
