@@ -533,29 +533,45 @@ function dispatchMenuAction(action: string): void {
 }
 
 function handleCheckForUpdatesMenuClick(): void {
-  const disabledReason = getAutoUpdateDisabledReason({
-    isDevelopment,
-    isPackaged: app.isPackaged,
-    platform: process.platform,
-    appImage: process.env.APPIMAGE,
-    disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
-  });
-  if (disabledReason) {
-    console.info("[desktop-updater] Manual update check requested, but updates are disabled.");
-    void dialog.showMessageBox({
-      type: "info",
-      title: "Updates unavailable",
-      message: "Automatic updates are not available right now.",
-      detail: disabledReason,
-      buttons: ["OK"],
-    });
-    return;
-  }
+  switch (updateState.status) {
+    case "idle":
+      {
+        const disabledReason = getAutoUpdateDisabledReason({
+          isDevelopment,
+          isPackaged: app.isPackaged,
+          platform: process.platform,
+          appImage: process.env.APPIMAGE,
+          disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+        });
+        if (disabledReason) {
+          console.info(
+            "[desktop-updater] Manual update check requested, but updates are disabled.",
+          );
+          void dialog.showMessageBox({
+            type: "info",
+            title: "Updates unavailable",
+            message: "Automatic updates are not available right now.",
+            detail: disabledReason,
+            buttons: ["OK"],
+          });
+          return;
+        }
 
-  if (!BrowserWindow.getAllWindows().length) {
-    mainWindow = createWindow();
+        if (!BrowserWindow.getAllWindows().length) {
+          mainWindow = createWindow();
+        }
+        void checkForUpdatesFromMenu();
+      }
+      break;
+    case "available":
+      void downloadAvailableUpdate();
+      break;
+    case "downloaded":
+      void installDownloadedUpdate();
+      break;
+    default:
+      break;
   }
-  void checkForUpdatesFromMenu();
 }
 
 async function checkForUpdatesFromMenu(): Promise<void> {
@@ -582,7 +598,7 @@ async function checkForUpdatesFromMenu(): Promise<void> {
 function makeCheckForUpdatesMenuItem(): MenuItem {
   return new MenuItem({
     label: DesktopUpdateStatusFriendlyLabelMap["idle"],
-    click: async () => await handleCheckForUpdatesMenuClick(),
+    click: handleCheckForUpdatesMenuClick,
   });
 }
 const checkForUpdatesMenuItemInAppMenu = makeCheckForUpdatesMenuItem();
@@ -592,15 +608,15 @@ function updateCheckForUpdatesMenuItem(menuItem: MenuItem, state: DesktopUpdateS
   menuItem.label = DesktopUpdateStatusFriendlyLabelMap[state.status];
   switch (state.status) {
     case "checking":
-    case "available":
     case "downloading":
-    case "downloaded":
     case "disabled":
     case "error":
     case "up-to-date":
       menuItem.enabled = false;
       break;
     case "idle":
+    case "available":
+    case "downloaded":
       menuItem.enabled = true;
       break;
   }
