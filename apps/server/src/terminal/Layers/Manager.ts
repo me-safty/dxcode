@@ -6,6 +6,7 @@ import {
   type TerminalSessionSnapshot,
   type TerminalSessionStatus,
 } from "@t3tools/contracts";
+import { makeCoalescingDrainableWorker } from "@t3tools/shared/CoalescingDrainableWorker";
 import {
   Data,
   Effect,
@@ -100,26 +101,14 @@ interface TerminalSessionState {
   runtimeEnv: Record<string, string> | null;
 }
 
-interface PersistSessionState {
-  pendingHistory: string | null;
+interface PersistHistoryRequest {
+  history: string;
   immediate: boolean;
-  worker: Fiber.Fiber<void, never> | null;
 }
 
 interface TerminalManagerState {
   sessions: Map<string, TerminalSessionState>;
-  persistStates: Map<string, PersistSessionState>;
   killFibers: Map<PtyProcess, Fiber.Fiber<void, never>>;
-}
-
-type FlushPersistState = { done: true } | { done: false; worker: Fiber.Fiber<void, never> | null };
-
-function clonePersistState(state?: PersistSessionState): PersistSessionState {
-  return {
-    pendingHistory: state?.pendingHistory ?? null,
-    immediate: state?.immediate ?? false,
-    worker: state?.worker ?? null,
-  };
 }
 
 function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
@@ -646,7 +635,6 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
     const managerStateRef = yield* SynchronizedRef.make<TerminalManagerState>({
       sessions: new Map(),
-      persistStates: new Map(),
       killFibers: new Map(),
     });
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
@@ -686,10 +674,6 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     const modifyManagerState = <A>(
       f: (state: TerminalManagerState) => readonly [A, TerminalManagerState],
     ) => SynchronizedRef.modify(managerStateRef, f);
-
-    const modifyManagerStateEffect = <A, E, R>(
-      f: (state: TerminalManagerState) => Effect.Effect<readonly [A, TerminalManagerState], E, R>,
-    ): Effect.Effect<A, E, R> => SynchronizedRef.modifyEffect(managerStateRef, f);
 
     const getThreadSemaphore = (threadId: string) =>
       SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
@@ -820,119 +804,39 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       yield* registerKillFiber(process, fiber);
     });
 
-    const persistWorker = Effect.fn("terminal.persistWorker")(function* (sessionKey: string) {
-      while (true) {
-        const startState = yield* modifyManagerState((state) => {
-          const persistState = state.persistStates.get(sessionKey);
-          if (!persistState || persistState.pendingHistory === null) {
-            return [null, state] as const;
-          }
-          return [
-            {
-              history: persistState.pendingHistory,
-              immediate: persistState.immediate,
-            },
-            state,
-          ] as const;
-        });
-
-        if (!startState) {
-          yield* modifyManagerState((state) => {
-            const existing = state.persistStates.get(sessionKey);
-            if (!existing || existing.pendingHistory !== null) {
-              return [undefined, state] as const;
-            }
-            const persistStates = new Map(state.persistStates);
-            persistStates.delete(sessionKey);
-            return [undefined, { ...state, persistStates }] as const;
-          });
-          return;
-        }
-
-        if (!startState.immediate) {
-          yield* Effect.sleep(DEFAULT_PERSIST_DEBOUNCE_MS);
-        }
-
-        const writeState = yield* modifyManagerState((state) => {
-          const existing = state.persistStates.get(sessionKey);
-          if (!existing || existing.pendingHistory === null) {
-            return [null, state] as const;
-          }
-          const persistStates = new Map(state.persistStates);
-          persistStates.set(sessionKey, {
-            ...existing,
-            immediate: false,
-          });
-          return [existing.pendingHistory, { ...state, persistStates }] as const;
-        });
-
-        if (writeState === null) {
-          continue;
-        }
-
-        const [threadId, terminalId] = sessionKey.split("\u0000");
-        if (!threadId || !terminalId) {
-          return;
-        }
-
-        yield* fileSystem.writeFileString(historyPath(threadId, terminalId), writeState).pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("failed to persist terminal history", {
-              threadId,
-              terminalId,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          ),
-        );
-
-        const shouldContinue = yield* modifyManagerState((state) => {
-          const existing = state.persistStates.get(sessionKey);
-          if (!existing) {
-            return [false, state] as const;
+    const persistWorker = yield* makeCoalescingDrainableWorker<
+      string,
+      PersistHistoryRequest,
+      never,
+      never
+    >({
+      merge: (current, next) => ({
+        history: next.history,
+        immediate: current.immediate || next.immediate,
+      }),
+      process: (sessionKey, request) =>
+        Effect.gen(function* () {
+          if (!request.immediate) {
+            yield* Effect.sleep(DEFAULT_PERSIST_DEBOUNCE_MS);
           }
 
-          const nextPersistState = clonePersistState(existing);
-          if (nextPersistState.pendingHistory === writeState) {
-            nextPersistState.pendingHistory = null;
+          const [threadId, terminalId] = sessionKey.split("\u0000");
+          if (!threadId || !terminalId) {
+            return;
           }
 
-          if (nextPersistState.pendingHistory === null) {
-            const persistStates = new Map(state.persistStates);
-            persistStates.delete(sessionKey);
-            return [false, { ...state, persistStates }] as const;
-          }
-
-          const persistStates = new Map(state.persistStates);
-          persistStates.set(sessionKey, nextPersistState);
-          return [true, { ...state, persistStates }] as const;
-        });
-
-        if (!shouldContinue) {
-          return;
-        }
-      }
-    });
-
-    const ensurePersistWorker = Effect.fn("terminal.ensurePersistWorker")(function* (
-      sessionKey: string,
-    ) {
-      yield* modifyManagerStateEffect((state) => {
-        const existing = clonePersistState(state.persistStates.get(sessionKey));
-        if (existing.worker) {
-          return Effect.succeed([undefined, state] as const);
-        }
-        return persistWorker(sessionKey).pipe(
-          Effect.forkIn(workerScope),
-          Effect.map((fiber) => {
-            const persistStates = new Map(state.persistStates);
-            persistStates.set(sessionKey, {
-              ...existing,
-              worker: fiber,
-            });
-            return [undefined, { ...state, persistStates }] as const;
-          }),
-        );
-      });
+          yield* fileSystem
+            .writeFileString(historyPath(threadId, terminalId), request.history)
+            .pipe(
+              Effect.catch((error) =>
+                Effect.logWarning("failed to persist terminal history", {
+                  threadId,
+                  terminalId,
+                  error: error instanceof Error ? error.message : String(error),
+                }),
+              ),
+            );
+        }),
     });
 
     const queuePersist = Effect.fn("terminal.queuePersist")(function* (
@@ -940,80 +844,17 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       terminalId: string,
       history: string,
     ) {
-      const sessionKey = toSessionKey(threadId, terminalId);
-      yield* modifyManagerState((state) => {
-        const persistStates = new Map(state.persistStates);
-        const persistState = clonePersistState(persistStates.get(sessionKey));
-        persistState.pendingHistory = history;
-        persistStates.set(sessionKey, persistState);
-        return [undefined, { ...state, persistStates }] as const;
+      yield* persistWorker.enqueue(toSessionKey(threadId, terminalId), {
+        history,
+        immediate: false,
       });
-      yield* ensurePersistWorker(sessionKey);
     });
 
     const flushPersist = Effect.fn("terminal.flushPersist")(function* (
       threadId: string,
       terminalId: string,
     ) {
-      const sessionKey = toSessionKey(threadId, terminalId);
-
-      while (true) {
-        const state = yield* modifyManagerState<FlushPersistState>((current) => {
-          const existing = current.persistStates.get(sessionKey);
-          if (!existing) {
-            return [{ done: true }, current];
-          }
-          if (existing.pendingHistory === null && existing.worker === null) {
-            const persistStates = new Map(current.persistStates);
-            persistStates.delete(sessionKey);
-            return [{ done: true }, { ...current, persistStates }];
-          }
-          return [
-            {
-              done: false,
-              worker: existing.worker,
-            },
-            current,
-          ];
-        });
-
-        if (state.done) {
-          return;
-        }
-
-        if (state.worker) {
-          yield* modifyManagerState((current) => {
-            const existing = current.persistStates.get(sessionKey);
-            if (!existing || existing.worker !== state.worker) {
-              return [undefined, current] as const;
-            }
-            const persistStates = new Map(current.persistStates);
-            persistStates.set(sessionKey, {
-              ...existing,
-              immediate: true,
-              worker: null,
-            });
-            return [undefined, { ...current, persistStates }] as const;
-          });
-          yield* Fiber.interrupt(state.worker).pipe(Effect.ignore);
-        } else {
-          yield* modifyManagerState((current) => {
-            const existing = current.persistStates.get(sessionKey);
-            if (!existing) {
-              return [undefined, current] as const;
-            }
-            const persistStates = new Map(current.persistStates);
-            persistStates.set(sessionKey, {
-              ...existing,
-              immediate: true,
-            });
-            return [undefined, { ...current, persistStates }] as const;
-          });
-        }
-
-        yield* ensurePersistWorker(sessionKey);
-        yield* Effect.sleep(1);
-      }
+      yield* persistWorker.drainKey(toSessionKey(threadId, terminalId));
     });
 
     const persistHistory = Effect.fn("terminal.persistHistory")(function* (
@@ -1021,33 +862,10 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       terminalId: string,
       history: string,
     ) {
-      const sessionKey = toSessionKey(threadId, terminalId);
-      const worker = yield* modifyManagerState((state) => {
-        const existing = clonePersistState(state.persistStates.get(sessionKey));
-        existing.pendingHistory = history;
-        existing.immediate = true;
-        const persistStates = new Map(state.persistStates);
-        persistStates.set(sessionKey, existing);
-        return [existing.worker, { ...state, persistStates }] as const;
+      yield* persistWorker.enqueue(toSessionKey(threadId, terminalId), {
+        history,
+        immediate: true,
       });
-
-      if (worker) {
-        yield* modifyManagerState((state) => {
-          const existing = state.persistStates.get(sessionKey);
-          if (!existing || existing.worker !== worker) {
-            return [undefined, state] as const;
-          }
-          const persistStates = new Map(state.persistStates);
-          persistStates.set(sessionKey, {
-            ...existing,
-            worker: null,
-          });
-          return [undefined, { ...state, persistStates }] as const;
-        });
-        yield* Fiber.interrupt(worker).pipe(Effect.ignore);
-      }
-
-      yield* ensurePersistWorker(sessionKey);
       yield* flushPersist(threadId, terminalId);
     });
 
@@ -1229,16 +1047,14 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           );
 
           const sessions = new Map(state.sessions);
-          const persistStates = new Map(state.persistStates);
 
           const toEvict = inactiveSessions.length - maxRetainedInactiveSessions;
           for (const session of inactiveSessions.slice(0, toEvict)) {
             const key = toSessionKey(session.threadId, session.terminalId);
             sessions.delete(key);
-            persistStates.delete(key);
           }
 
-          return [undefined, { ...state, sessions, persistStates }] as const;
+          return [undefined, { ...state, sessions }] as const;
         });
       },
     );
@@ -1531,25 +1347,24 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       deleteHistoryOnClose: boolean,
     ) {
       const key = toSessionKey(threadId, terminalId);
-      const session: Option.Option<TerminalSessionState> = yield* modifyManagerState<
-        Option.Option<TerminalSessionState>
-      >((state) => {
-        const existing: Option.Option<TerminalSessionState> = Option.fromNullishOr(
-          state.sessions.get(key),
-        );
-        if (Option.isNone(existing)) {
-          return [Option.none<TerminalSessionState>(), state] as const;
-        }
-        const sessions = new Map(state.sessions);
-        sessions.delete(key);
-        return [existing, { ...state, sessions }] as const;
-      });
+      const session = yield* getSession(threadId, terminalId);
 
       if (Option.isSome(session)) {
         yield* stopProcess(session.value);
+        yield* persistHistory(threadId, terminalId, session.value.history);
       }
 
       yield* flushPersist(threadId, terminalId);
+
+      yield* modifyManagerState((state) => {
+        if (!state.sessions.has(key)) {
+          return [undefined, state] as const;
+        }
+        const sessions = new Map(state.sessions);
+        sessions.delete(key);
+        return [undefined, { ...state, sessions }] as const;
+      });
+
       if (deleteHistoryOnClose) {
         yield* deleteHistory(threadId, terminalId);
       }
@@ -1632,7 +1447,6 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               {
                 ...state,
                 sessions: new Map(),
-                persistStates: new Map(),
               },
             ] as const,
         );
