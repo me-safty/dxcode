@@ -383,7 +383,7 @@ export const makeOrchestrationIntegrationHarness = (
       }
       reactorStarted = true;
       yield* tryRuntimePromise("start OrchestrationReactor", () =>
-        runtime.runPromise(reactor.start.pipe(Scope.provide(scope))),
+        runtime.runPromise(reactor.start().pipe(Scope.provide(scope))),
       ).pipe(Effect.orDie);
     }).pipe(Effect.orDie);
     if (options?.autoStartReactor !== false) {
