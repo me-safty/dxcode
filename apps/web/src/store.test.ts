@@ -1,13 +1,24 @@
 import {
+  CheckpointRef,
   DEFAULT_MODEL_BY_PROVIDER,
+  EventId,
+  MessageId,
   ProjectId,
   ThreadId,
   TurnId,
+  type OrchestrationEvent,
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { markThreadUnread, reorderProjects, syncServerReadModel, type AppState } from "./store";
+import {
+  applyOrchestrationEvent,
+  applyOrchestrationEvents,
+  markThreadUnread,
+  reorderProjects,
+  syncServerReadModel,
+  type AppState,
+} from "./store";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
@@ -55,6 +66,33 @@ function makeState(thread: Thread): AppState {
     threads: [thread],
     threadsHydrated: true,
   };
+}
+
+function makeEvent<T extends OrchestrationEvent["type"]>(
+  type: T,
+  payload: Extract<OrchestrationEvent, { type: T }>["payload"],
+  overrides: Partial<Extract<OrchestrationEvent, { type: T }>> = {},
+): Extract<OrchestrationEvent, { type: T }> {
+  const sequence = overrides.sequence ?? 1;
+  return {
+    sequence,
+    eventId: EventId.makeUnsafe(`event-${sequence}`),
+    aggregateKind: "thread",
+    aggregateId:
+      "threadId" in payload
+        ? payload.threadId
+        : "projectId" in payload
+          ? payload.projectId
+          : ProjectId.makeUnsafe("project-1"),
+    occurredAt: "2026-02-27T00:00:00.000Z",
+    commandId: null,
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    type,
+    payload,
+    ...overrides,
+  } as Extract<OrchestrationEvent, { type: T }>;
 }
 
 function makeReadModelThread(overrides: Partial<OrchestrationReadModel["threads"][number]>) {
@@ -345,5 +383,212 @@ describe("store read model sync", () => {
     const next = syncServerReadModel(initialState, readModel);
 
     expect(next.projects.map((project) => project.id)).toEqual([project2, project1, project3]);
+  });
+});
+
+describe("incremental orchestration updates", () => {
+  it("updates only the affected thread for message events", () => {
+    const thread1 = makeThread({
+      id: ThreadId.makeUnsafe("thread-1"),
+      messages: [
+        {
+          id: MessageId.makeUnsafe("message-1"),
+          role: "assistant",
+          text: "hello",
+          turnId: TurnId.makeUnsafe("turn-1"),
+          createdAt: "2026-02-27T00:00:00.000Z",
+          completedAt: "2026-02-27T00:00:00.000Z",
+          streaming: false,
+        },
+      ],
+    });
+    const thread2 = makeThread({ id: ThreadId.makeUnsafe("thread-2") });
+    const state: AppState = {
+      ...makeState(thread1),
+      threads: [thread1, thread2],
+    };
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.message-sent", {
+        threadId: thread1.id,
+        messageId: MessageId.makeUnsafe("message-1"),
+        role: "assistant",
+        text: " world",
+        turnId: TurnId.makeUnsafe("turn-1"),
+        streaming: true,
+        createdAt: "2026-02-27T00:00:01.000Z",
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      }),
+    );
+
+    expect(next.threads[0]?.messages[0]?.text).toBe("hello world");
+    expect(next.threads[0]?.latestTurn?.state).toBe("running");
+    expect(next.threads[1]).toBe(thread2);
+  });
+
+  it("applies replay batches in sequence and updates session state", () => {
+    const thread = makeThread({
+      latestTurn: {
+        turnId: TurnId.makeUnsafe("turn-1"),
+        state: "running",
+        requestedAt: "2026-02-27T00:00:00.000Z",
+        startedAt: "2026-02-27T00:00:00.000Z",
+        completedAt: null,
+        assistantMessageId: null,
+      },
+    });
+    const state = makeState(thread);
+
+    const next = applyOrchestrationEvents(state, [
+      makeEvent(
+        "thread.session-set",
+        {
+          threadId: thread.id,
+          session: {
+            threadId: thread.id,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: TurnId.makeUnsafe("turn-1"),
+            lastError: null,
+            updatedAt: "2026-02-27T00:00:02.000Z",
+          },
+        },
+        { sequence: 2 },
+      ),
+      makeEvent(
+        "thread.message-sent",
+        {
+          threadId: thread.id,
+          messageId: MessageId.makeUnsafe("assistant-1"),
+          role: "assistant",
+          text: "done",
+          turnId: TurnId.makeUnsafe("turn-1"),
+          streaming: false,
+          createdAt: "2026-02-27T00:00:03.000Z",
+          updatedAt: "2026-02-27T00:00:03.000Z",
+        },
+        { sequence: 3 },
+      ),
+    ]);
+
+    expect(next.threads[0]?.session?.status).toBe("running");
+    expect(next.threads[0]?.latestTurn?.state).toBe("completed");
+    expect(next.threads[0]?.messages).toHaveLength(1);
+  });
+
+  it("reverts messages, plans, activities, and checkpoints by retained turns", () => {
+    const state = makeState(
+      makeThread({
+        messages: [
+          {
+            id: MessageId.makeUnsafe("user-1"),
+            role: "user",
+            text: "first",
+            turnId: TurnId.makeUnsafe("turn-1"),
+            createdAt: "2026-02-27T00:00:00.000Z",
+            completedAt: "2026-02-27T00:00:00.000Z",
+            streaming: false,
+          },
+          {
+            id: MessageId.makeUnsafe("assistant-1"),
+            role: "assistant",
+            text: "first reply",
+            turnId: TurnId.makeUnsafe("turn-1"),
+            createdAt: "2026-02-27T00:00:01.000Z",
+            completedAt: "2026-02-27T00:00:01.000Z",
+            streaming: false,
+          },
+          {
+            id: MessageId.makeUnsafe("user-2"),
+            role: "user",
+            text: "second",
+            turnId: TurnId.makeUnsafe("turn-2"),
+            createdAt: "2026-02-27T00:00:02.000Z",
+            completedAt: "2026-02-27T00:00:02.000Z",
+            streaming: false,
+          },
+        ],
+        proposedPlans: [
+          {
+            id: "plan-1",
+            turnId: TurnId.makeUnsafe("turn-1"),
+            planMarkdown: "plan 1",
+            implementedAt: null,
+            implementationThreadId: null,
+            createdAt: "2026-02-27T00:00:00.000Z",
+            updatedAt: "2026-02-27T00:00:00.000Z",
+          },
+          {
+            id: "plan-2",
+            turnId: TurnId.makeUnsafe("turn-2"),
+            planMarkdown: "plan 2",
+            implementedAt: null,
+            implementationThreadId: null,
+            createdAt: "2026-02-27T00:00:02.000Z",
+            updatedAt: "2026-02-27T00:00:02.000Z",
+          },
+        ],
+        activities: [
+          {
+            id: EventId.makeUnsafe("activity-1"),
+            tone: "info",
+            kind: "step",
+            summary: "one",
+            payload: {},
+            turnId: TurnId.makeUnsafe("turn-1"),
+            createdAt: "2026-02-27T00:00:00.000Z",
+          },
+          {
+            id: EventId.makeUnsafe("activity-2"),
+            tone: "info",
+            kind: "step",
+            summary: "two",
+            payload: {},
+            turnId: TurnId.makeUnsafe("turn-2"),
+            createdAt: "2026-02-27T00:00:02.000Z",
+          },
+        ],
+        turnDiffSummaries: [
+          {
+            turnId: TurnId.makeUnsafe("turn-1"),
+            completedAt: "2026-02-27T00:00:01.000Z",
+            status: "ready",
+            checkpointTurnCount: 1,
+            checkpointRef: CheckpointRef.makeUnsafe("ref-1"),
+            files: [],
+          },
+          {
+            turnId: TurnId.makeUnsafe("turn-2"),
+            completedAt: "2026-02-27T00:00:03.000Z",
+            status: "ready",
+            checkpointTurnCount: 2,
+            checkpointRef: CheckpointRef.makeUnsafe("ref-2"),
+            files: [],
+          },
+        ],
+      }),
+    );
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.reverted", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        turnCount: 1,
+      }),
+    );
+
+    expect(next.threads[0]?.messages.map((message) => message.id)).toEqual([
+      "user-1",
+      "assistant-1",
+    ]);
+    expect(next.threads[0]?.proposedPlans.map((plan) => plan.id)).toEqual(["plan-1"]);
+    expect(next.threads[0]?.activities.map((activity) => activity.id)).toEqual([
+      EventId.makeUnsafe("activity-1"),
+    ]);
+    expect(next.threads[0]?.turnDiffSummaries.map((summary) => summary.turnId)).toEqual([
+      TurnId.makeUnsafe("turn-1"),
+    ]);
   });
 });

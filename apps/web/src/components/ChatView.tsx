@@ -27,6 +27,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useShallow } from "zustand/react/shallow";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
@@ -63,7 +64,7 @@ import {
   setPendingUserInputCustomAnswer,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
-import { useStore } from "../store";
+import { selectProjectById, selectThreadById, useStore } from "../store";
 import {
   buildPlanImplementationThreadTitle,
   buildPlanImplementationPrompt,
@@ -76,8 +77,33 @@ import {
   DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
   type ChatMessage,
+  type Thread,
   type TurnDiffSummary,
 } from "../types";
+
+type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
+
+const threadPlanCatalogCache = new Map<
+  ThreadId,
+  { proposedPlans: Thread["proposedPlans"]; entry: ThreadPlanCatalogEntry }
+>();
+
+function toThreadPlanCatalogEntry(thread: Thread): ThreadPlanCatalogEntry {
+  const cached = threadPlanCatalogCache.get(thread.id);
+  if (cached && cached.proposedPlans === thread.proposedPlans) {
+    return cached.entry;
+  }
+
+  const entry: ThreadPlanCatalogEntry = {
+    id: thread.id,
+    proposedPlans: thread.proposedPlans,
+  };
+  threadPlanCatalogCache.set(thread.id, {
+    proposedPlans: thread.proposedPlans,
+    entry,
+  });
+  return entry;
+}
 import { basenameOfPath } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
@@ -246,10 +272,8 @@ interface PendingPullRequestSetupRequest {
 }
 
 export default function ChatView({ threadId }: ChatViewProps) {
-  const threads = useStore((store) => store.threads);
-  const projects = useStore((store) => store.projects);
+  const serverThread = useStore(selectThreadById(threadId));
   const markThreadVisited = useStore((store) => store.markThreadVisited);
-  const syncServerReadModel = useStore((store) => store.syncServerReadModel);
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const settings = useSettings();
@@ -466,8 +490,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [composerTerminalContexts, removeComposerDraftTerminalContext, setPrompt, threadId],
   );
 
-  const serverThread = threads.find((t) => t.id === threadId);
-  const fallbackDraftProject = projects.find((project) => project.id === draftThread?.projectId);
+  const fallbackDraftProject = useStore(selectProjectById(draftThread?.projectId));
+  const threadPlanCatalog = useStore(
+    useShallow((store) => store.threads.map(toThreadPlanCatalogEntry)),
+  );
   const localDraftError = serverThread ? null : (localDraftErrorsByThreadId[threadId] ?? null);
   const localDraftThread = useMemo(
     () =>
@@ -500,7 +526,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeThread?.activities],
   );
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
-  const activeProject = projects.find((p) => p.id === activeThread?.projectId);
+  const activeProject = useStore(selectProjectById(activeThread?.projectId));
 
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
@@ -735,12 +761,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const sidebarProposedPlan = useMemo(
     () =>
       findSidebarProposedPlan({
-        threads,
+        threads: threadPlanCatalog,
         latestTurn: activeLatestTurn,
         latestTurnSettled,
         threadId: activeThread?.id ?? null,
       }),
-    [activeLatestTurn, activeThread?.id, latestTurnSettled, threads],
+    [activeLatestTurn, activeThread?.id, latestTurnSettled, threadPlanCatalog],
   );
   const activePlan = useMemo(
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
@@ -1230,7 +1256,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const setThreadError = useCallback(
     (targetThreadId: ThreadId | null, error: string | null) => {
       if (!targetThreadId) return;
-      if (threads.some((thread) => thread.id === targetThreadId)) {
+      if (useStore.getState().threads.some((thread) => thread.id === targetThreadId)) {
         setStoreThreadError(targetThreadId, error);
         return;
       }
@@ -1244,7 +1270,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         };
       });
     },
-    [setStoreThreadError, threads],
+    [setStoreThreadError],
   );
 
   const focusComposer = useCallback(() => {
@@ -3132,9 +3158,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           createdAt,
         });
       })
-      .then(() => api.orchestration.getSnapshot())
-      .then((snapshot) => {
-        syncServerReadModel(snapshot);
+      .then(() => {
         // Signal that the plan sidebar should open on the new thread.
         planSidebarOpenOnNextThreadRef.current = true;
         return navigate({
@@ -3148,12 +3172,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
             type: "thread.delete",
             commandId: newCommandId(),
             threadId: nextThreadId,
-          })
-          .catch(() => undefined);
-        await api.orchestration
-          .getSnapshot()
-          .then((snapshot) => {
-            syncServerReadModel(snapshot);
           })
           .catch(() => undefined);
         toastManager.add({
@@ -3179,7 +3197,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedModelSelection,
     selectedProvider,
     selectedProviderModels,
-    syncServerReadModel,
     selectedModel,
   ]);
 

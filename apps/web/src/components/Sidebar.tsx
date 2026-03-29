@@ -21,6 +21,7 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   DndContext,
   type DragCancelEvent,
@@ -120,6 +121,7 @@ import {
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
+import type { Thread } from "../types";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_PREVIEW_LIMIT = 6;
@@ -136,6 +138,70 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
 } as const;
+
+type SidebarThreadSnapshot = Pick<
+  Thread,
+  | "activities"
+  | "archivedAt"
+  | "branch"
+  | "createdAt"
+  | "id"
+  | "interactionMode"
+  | "lastVisitedAt"
+  | "latestTurn"
+  | "projectId"
+  | "proposedPlans"
+  | "session"
+  | "title"
+  | "updatedAt"
+  | "worktreePath"
+> & {
+  latestUserMessageAt: string | null;
+};
+
+const sidebarThreadSnapshotCache = new WeakMap<Thread, SidebarThreadSnapshot>();
+
+function getLatestUserMessageAt(thread: Thread): string | null {
+  let latestUserMessageAt: string | null = null;
+
+  for (const message of thread.messages) {
+    if (message.role !== "user") {
+      continue;
+    }
+    if (latestUserMessageAt === null || message.createdAt > latestUserMessageAt) {
+      latestUserMessageAt = message.createdAt;
+    }
+  }
+
+  return latestUserMessageAt;
+}
+
+function toSidebarThreadSnapshot(thread: Thread): SidebarThreadSnapshot {
+  const cached = sidebarThreadSnapshotCache.get(thread);
+  if (cached) {
+    return cached;
+  }
+
+  const snapshot: SidebarThreadSnapshot = {
+    id: thread.id,
+    projectId: thread.projectId,
+    title: thread.title,
+    interactionMode: thread.interactionMode,
+    session: thread.session,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    archivedAt: thread.archivedAt,
+    latestTurn: thread.latestTurn,
+    lastVisitedAt: thread.lastVisitedAt,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    activities: thread.activities,
+    proposedPlans: thread.proposedPlans,
+    latestUserMessageAt: getLatestUserMessageAt(thread),
+  };
+  sidebarThreadSnapshotCache.set(thread, snapshot);
+  return snapshot;
+}
 interface TerminalStatusIndicator {
   label: "Terminal process running";
   colorClass: string;
@@ -320,8 +386,8 @@ function SortableProjectItem({
 }
 
 export default function Sidebar() {
-  const projects = useStore((store) => store.projects);
-  const threads = useStore((store) => store.threads);
+  const projects = useStore(useShallow((store) => store.projects));
+  const threads = useStore(useShallow((store) => store.threads.map(toSidebarThreadSnapshot)));
   const markThreadUnread = useStore((store) => store.markThreadUnread);
   const toggleProject = useStore((store) => store.toggleProject);
   const reorderProjects = useStore((store) => store.reorderProjects);

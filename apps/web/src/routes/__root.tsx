@@ -135,6 +135,7 @@ function errorDetails(error: unknown): string {
 }
 
 function EventRouter() {
+  const applyOrchestrationEvents = useStore((store) => store.applyOrchestrationEvents);
   const syncServerReadModel = useStore((store) => store.syncServerReadModel);
   const setProjectExpanded = useStore((store) => store.setProjectExpanded);
   const removeOrphanedTerminalStates = useTerminalStateStore(
@@ -146,62 +147,45 @@ function EventRouter() {
   const pathnameRef = useRef(pathname);
   const handledBootstrapThreadIdRef = useRef<string | null>(null);
 
-  pathnameRef.current = pathname;
+  useEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
 
   useEffect(() => {
     const api = readNativeApi();
     if (!api) return;
     let disposed = false;
     let latestSequence = 0;
-    let syncing = false;
-    let pending = false;
+    let highestObservedSequence = 0;
+    let bootstrapped = false;
+    let snapshotSyncInFlight = false;
+    let replayInFlight = false;
+    let pendingReplay = false;
     let needsProviderInvalidation = false;
 
-    const flushSnapshotSync = async (): Promise<void> => {
-      const snapshot = await api.orchestration.getSnapshot();
-      if (disposed) return;
-      latestSequence = Math.max(latestSequence, snapshot.snapshotSequence);
-      syncServerReadModel(snapshot);
-      clearPromotedDraftThreads(new Set(snapshot.threads.map((t) => t.id)));
+    const syncThreadDerivedState = () => {
+      const threads = useStore.getState().threads;
+      clearPromotedDraftThreads(new Set(threads.map((thread) => thread.id)));
       const draftThreadIds = Object.keys(
         useComposerDraftStore.getState().draftThreadsByThreadId,
       ) as ThreadId[];
       const activeThreadIds = collectActiveTerminalThreadIds({
-        snapshotThreads: snapshot.threads,
+        snapshotThreads: threads.map((thread) => ({ id: thread.id, deletedAt: null })),
         draftThreadIds,
       });
       removeOrphanedTerminalStates(activeThreadIds);
-      if (pending) {
-        pending = false;
-        await flushSnapshotSync();
-      }
     };
 
-    const syncSnapshot = async () => {
-      if (syncing) {
-        pending = true;
-        return;
-      }
-      syncing = true;
-      pending = false;
-      try {
-        await flushSnapshotSync();
-      } catch {
-        // Keep prior state and wait for next domain event to trigger a resync.
-      }
-      syncing = false;
-    };
-
-    const domainEventFlushThrottler = new Throttler(
+    const queryInvalidationThrottler = new Throttler(
       () => {
-        if (needsProviderInvalidation) {
-          needsProviderInvalidation = false;
-          void queryClient.invalidateQueries({ queryKey: providerQueryKeys.all });
-          // Invalidate workspace entry queries so the @-mention file picker
-          // reflects files created, deleted, or restored during this turn.
-          void queryClient.invalidateQueries({ queryKey: projectQueryKeys.all });
+        if (!needsProviderInvalidation) {
+          return;
         }
-        void syncSnapshot();
+        needsProviderInvalidation = false;
+        void queryClient.invalidateQueries({ queryKey: providerQueryKeys.all });
+        // Invalidate workspace entry queries so the @-mention file picker
+        // reflects files created, deleted, or restored during this turn.
+        void queryClient.invalidateQueries({ queryKey: projectQueryKeys.all });
       },
       {
         wait: 100,
@@ -210,15 +194,108 @@ function EventRouter() {
       },
     );
 
+    const applyEventBatch = (events: Parameters<typeof applyOrchestrationEvents>[0]) => {
+      const nextEvents = events
+        .filter((event) => event.sequence > latestSequence)
+        .toSorted((left, right) => left.sequence - right.sequence);
+      if (nextEvents.length === 0) {
+        return;
+      }
+
+      latestSequence = nextEvents.at(-1)?.sequence ?? latestSequence;
+      highestObservedSequence = Math.max(highestObservedSequence, latestSequence);
+
+      if (
+        nextEvents.some(
+          (event) =>
+            event.type === "thread.turn-diff-completed" || event.type === "thread.reverted",
+        )
+      ) {
+        needsProviderInvalidation = true;
+        void queryInvalidationThrottler.maybeExecute();
+      }
+
+      applyOrchestrationEvents(nextEvents);
+      syncThreadDerivedState();
+    };
+
+    const replayFromLatest = async (): Promise<void> => {
+      if (!bootstrapped || snapshotSyncInFlight) {
+        pendingReplay = true;
+        return;
+      }
+      if (replayInFlight) {
+        pendingReplay = true;
+        return;
+      }
+
+      replayInFlight = true;
+      pendingReplay = false;
+      try {
+        const events = await api.orchestration.replayEvents(latestSequence);
+        if (!disposed) {
+          applyEventBatch(events);
+        }
+      } catch {
+        bootstrapped = false;
+        void bootstrapSnapshot();
+      }
+
+      replayInFlight = false;
+      if (
+        !disposed &&
+        bootstrapped &&
+        (pendingReplay || highestObservedSequence > latestSequence)
+      ) {
+        void replayFromLatest();
+      }
+    };
+
+    const bootstrapSnapshot = async (): Promise<void> => {
+      if (snapshotSyncInFlight) {
+        pendingReplay = true;
+        return;
+      }
+
+      snapshotSyncInFlight = true;
+      try {
+        const snapshot = await api.orchestration.getSnapshot();
+        if (!disposed) {
+          latestSequence = Math.max(latestSequence, snapshot.snapshotSequence);
+          highestObservedSequence = Math.max(highestObservedSequence, latestSequence);
+          syncServerReadModel(snapshot);
+          bootstrapped = true;
+          syncThreadDerivedState();
+        }
+      } catch {
+        // Keep prior state and wait for welcome or a later replay attempt.
+      }
+
+      snapshotSyncInFlight = false;
+      if (
+        !disposed &&
+        bootstrapped &&
+        (pendingReplay || highestObservedSequence > latestSequence)
+      ) {
+        void replayFromLatest();
+      }
+    };
+
     const unsubDomainEvent = api.orchestration.onDomainEvent((event) => {
+      highestObservedSequence = Math.max(highestObservedSequence, event.sequence);
       if (event.sequence <= latestSequence) {
         return;
       }
-      latestSequence = event.sequence;
-      if (event.type === "thread.turn-diff-completed" || event.type === "thread.reverted") {
-        needsProviderInvalidation = true;
+      if (!bootstrapped || snapshotSyncInFlight || replayInFlight) {
+        pendingReplay = true;
+        return;
       }
-      domainEventFlushThrottler.maybeExecute();
+      if (event.sequence !== latestSequence + 1) {
+        pendingReplay = true;
+        void replayFromLatest();
+        return;
+      }
+      applyEventBatch([event]);
     });
     const unsubTerminalEvent = api.terminal.onEvent((event) => {
       const hasRunningSubprocess = terminalRunningSubprocessFromEvent(event);
@@ -237,7 +314,7 @@ function EventRouter() {
       // Migrate old localStorage settings to server on first connect
       migrateLocalSettingsToServer();
       void (async () => {
-        await syncSnapshot();
+        await bootstrapSnapshot();
         if (disposed) {
           return;
         }
@@ -319,7 +396,7 @@ function EventRouter() {
     return () => {
       disposed = true;
       needsProviderInvalidation = false;
-      domainEventFlushThrottler.cancel();
+      queryInvalidationThrottler.cancel();
       unsubDomainEvent();
       unsubTerminalEvent();
       unsubWelcome();
@@ -327,6 +404,7 @@ function EventRouter() {
       unsubProvidersUpdated();
     };
   }, [
+    applyOrchestrationEvents,
     navigate,
     queryClient,
     removeOrphanedTerminalStates,
