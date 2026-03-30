@@ -1255,7 +1255,7 @@ export default function Sidebar() {
             className={`${resolveThreadRowClassName({
               isActive,
               isSelected,
-            })} relative`}
+            })} relative isolate`}
             onClick={(event) => {
               handleThreadClick(event, thread.id, orderedProjectThreadIds);
             }}
@@ -1376,7 +1376,7 @@ export default function Sidebar() {
                     data-thread-selection-safe
                     data-testid={`thread-archive-confirm-${thread.id}`}
                     aria-label={`Confirm archive ${thread.title}`}
-                    className="absolute top-1/2 right-1 z-10 inline-flex h-5 -translate-y-1/2 cursor-pointer items-center rounded-full bg-destructive/12 px-2 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/18 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-destructive/40"
+                    className="absolute top-1/2 right-1 inline-flex h-5 -translate-y-1/2 cursor-pointer items-center rounded-full bg-destructive/12 px-2 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/18 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-destructive/40"
                     onPointerDown={(event) => {
                       event.stopPropagation();
                     }}
@@ -1393,7 +1393,7 @@ export default function Sidebar() {
                   </button>
                 ) : !isThreadRunning ? (
                   appSettings.confirmThreadArchive ? (
-                    <div className="pointer-events-none absolute top-1/2 right-1 z-10 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                    <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
                       <button
                         type="button"
                         data-thread-selection-safe
@@ -1419,7 +1419,7 @@ export default function Sidebar() {
                     <Tooltip>
                       <TooltipTrigger
                         render={
-                          <div className="pointer-events-none absolute top-1/2 right-1 z-10 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                          <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
                             <button
                               type="button"
                               data-thread-selection-safe
