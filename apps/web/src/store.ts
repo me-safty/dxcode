@@ -568,7 +568,9 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
 
     case "project.deleted": {
       const projects = state.projects.filter((project) => project.id !== event.payload.projectId);
-      return projects === state.projects ? state : { ...state, projects, threadsHydrated: true };
+      return projects.length === state.projects.length
+        ? state
+        : { ...state, projects, threadsHydrated: true };
     }
 
     case "thread.created": {
@@ -604,7 +606,9 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
 
     case "thread.deleted": {
       const threads = state.threads.filter((thread) => thread.id !== event.payload.threadId);
-      return threads === state.threads ? state : { ...state, threads, threadsHydrated: true };
+      return threads.length === state.threads.length
+        ? state
+        : { ...state, threads, threadsHydrated: true };
     }
 
     case "thread.archived": {
@@ -876,24 +880,22 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
               (right.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER),
           )
           .slice(-MAX_THREAD_CHECKPOINTS);
+        const latestTurn =
+          thread.latestTurn === null || thread.latestTurn.turnId === event.payload.turnId
+            ? buildLatestTurn({
+                previous: thread.latestTurn,
+                turnId: event.payload.turnId,
+                state: checkpointStatusToLatestTurnState(event.payload.status),
+                requestedAt: thread.latestTurn?.requestedAt ?? event.payload.completedAt,
+                startedAt: thread.latestTurn?.startedAt ?? event.payload.completedAt,
+                completedAt: event.payload.completedAt,
+                assistantMessageId: event.payload.assistantMessageId,
+              })
+            : thread.latestTurn;
         return {
           ...thread,
           turnDiffSummaries,
-          latestTurn: buildLatestTurn({
-            previous: thread.latestTurn,
-            turnId: event.payload.turnId,
-            state: checkpointStatusToLatestTurnState(event.payload.status),
-            requestedAt:
-              thread.latestTurn?.turnId === event.payload.turnId
-                ? thread.latestTurn.requestedAt
-                : event.payload.completedAt,
-            startedAt:
-              thread.latestTurn?.turnId === event.payload.turnId
-                ? (thread.latestTurn.startedAt ?? event.payload.completedAt)
-                : event.payload.completedAt,
-            completedAt: event.payload.completedAt,
-            assistantMessageId: event.payload.assistantMessageId,
-          }),
+          latestTurn,
           updatedAt: event.occurredAt,
         };
       });

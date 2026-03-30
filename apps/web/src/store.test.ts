@@ -387,6 +387,29 @@ describe("store read model sync", () => {
 });
 
 describe("incremental orchestration updates", () => {
+  it("preserves state identity for no-op project and thread deletes", () => {
+    const thread = makeThread();
+    const state = makeState(thread);
+
+    const nextAfterProjectDelete = applyOrchestrationEvent(
+      state,
+      makeEvent("project.deleted", {
+        projectId: ProjectId.makeUnsafe("project-missing"),
+        deletedAt: "2026-02-27T00:00:01.000Z",
+      }),
+    );
+    const nextAfterThreadDelete = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.deleted", {
+        threadId: ThreadId.makeUnsafe("thread-missing"),
+        deletedAt: "2026-02-27T00:00:01.000Z",
+      }),
+    );
+
+    expect(nextAfterProjectDelete).toBe(state);
+    expect(nextAfterThreadDelete).toBe(state);
+  });
+
   it("updates only the affected thread for message events", () => {
     const thread1 = makeThread({
       id: ThreadId.makeUnsafe("thread-1"),
@@ -476,6 +499,38 @@ describe("incremental orchestration updates", () => {
     expect(next.threads[0]?.session?.status).toBe("running");
     expect(next.threads[0]?.latestTurn?.state).toBe("completed");
     expect(next.threads[0]?.messages).toHaveLength(1);
+  });
+
+  it("does not regress latestTurn when an older turn diff completes late", () => {
+    const state = makeState(
+      makeThread({
+        latestTurn: {
+          turnId: TurnId.makeUnsafe("turn-2"),
+          state: "running",
+          requestedAt: "2026-02-27T00:00:02.000Z",
+          startedAt: "2026-02-27T00:00:03.000Z",
+          completedAt: null,
+          assistantMessageId: null,
+        },
+      }),
+    );
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.turn-diff-completed", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        turnId: TurnId.makeUnsafe("turn-1"),
+        checkpointTurnCount: 1,
+        checkpointRef: CheckpointRef.makeUnsafe("checkpoint-1"),
+        status: "ready",
+        files: [],
+        assistantMessageId: MessageId.makeUnsafe("assistant-1"),
+        completedAt: "2026-02-27T00:00:04.000Z",
+      }),
+    );
+
+    expect(next.threads[0]?.turnDiffSummaries).toHaveLength(1);
+    expect(next.threads[0]?.latestTurn).toEqual(state.threads[0]?.latestTurn);
   });
 
   it("reverts messages, plans, activities, and checkpoints by retained turns", () => {
