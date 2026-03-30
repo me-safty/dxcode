@@ -230,6 +230,18 @@ function EventRouter() {
         const projects = useStore.getState().projects;
         syncProjects(projects.map((project) => ({ id: project.id, cwd: project.cwd })));
       }
+      const needsThreadUiSync = nextEvents.some(
+        (event) => event.type === "thread.created" || event.type === "thread.deleted",
+      );
+      if (needsThreadUiSync) {
+        const threads = useStore.getState().threads;
+        syncThreads(
+          threads.map((thread) => ({
+            id: thread.id,
+            seedVisitedAt: thread.updatedAt ?? thread.createdAt,
+          })),
+        );
+      }
       const draftStore = useComposerDraftStore.getState();
       for (const threadId of batchEffects.clearPromotedDraftThreadIds) {
         clearPromotedDraftThread(threadId);

@@ -436,8 +436,8 @@ function SortableProjectItem({
 }
 
 export default function Sidebar() {
-  const projects = useStore(useShallow((store) => store.projects));
-  const serverThreads = useStore(useShallow((store) => store.threads));
+  const projects = useStore((store) => store.projects);
+  const serverThreads = useStore((store) => store.threads);
   const { projectExpandedById, projectOrder, threadLastVisitedAtById } = useUiStateStore(
     useShallow((store) => ({
       projectExpandedById: store.projectExpandedById,
