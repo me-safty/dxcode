@@ -1,4 +1,4 @@
-import { ThreadId } from "@t3tools/contracts";
+import { OrchestrationEvent, ThreadId } from "@t3tools/contracts";
 import {
   Outlet,
   createRootRouteWithContext,
@@ -208,7 +208,7 @@ function EventRouter() {
       },
     );
 
-    const applyEventBatch = (events: Parameters<typeof applyOrchestrationEvents>[0]) => {
+    const applyEventBatch = (events: ReadonlyArray<OrchestrationEvent>) => {
       const nextEvents = recovery.markEventBatchApplied(events);
       if (nextEvents.length === 0) {
         return;
