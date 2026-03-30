@@ -628,10 +628,11 @@ function TerminalViewport({
   }, [cwd, runtimeEnv, terminalId, threadId]);
 
   useEffect(() => {
-    const terminal = terminalRef.current;
-    const fitAddon = fitAddonRef.current;
-    if (!terminal || !fitAddon) return;
+    if (!terminalRef.current || !fitAddonRef.current) return;
     const frame = window.requestAnimationFrame(() => {
+      const terminal = terminalRef.current;
+      const fitAddon = fitAddonRef.current;
+      if (!terminal || !fitAddon) return;
       applyTerminalFontFamily(terminal, fitAddon, terminalFontFamily);
     });
     return () => {
