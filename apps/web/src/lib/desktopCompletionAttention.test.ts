@@ -4,6 +4,7 @@ import {
   getCompletionAttentionState,
   getCompletionAttentionTurnId,
   shouldRequestCompletionAttention,
+  updateCompletionAttentionNotification,
 } from "./desktopCompletionAttention";
 import type { Thread } from "../types";
 import { ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
@@ -209,5 +210,34 @@ describe("shouldRequestCompletionAttention", () => {
 
     expect(getCompletionAttentionTurnId(running, sessionReady)).toBe("turn-1");
     expect(getCompletionAttentionTurnId(sessionReady, turnCompleted)).toBe("turn-1");
+  });
+
+  it("records later attention turn ids even after an earlier thread already triggered a bounce", () => {
+    const notifiedTurnIds = new Map<string, string>();
+    let shouldBounce = false;
+
+    const firstThreadShouldNotify = updateCompletionAttentionNotification(
+      notifiedTurnIds,
+      "thread-1",
+      undefined,
+      "turn-1",
+    );
+    if (!shouldBounce && firstThreadShouldNotify) {
+      shouldBounce = true;
+    }
+
+    const secondThreadShouldNotify = updateCompletionAttentionNotification(
+      notifiedTurnIds,
+      "thread-2",
+      undefined,
+      "turn-2",
+    );
+    if (!shouldBounce && secondThreadShouldNotify) {
+      shouldBounce = true;
+    }
+
+    expect(shouldBounce).toBe(true);
+    expect(notifiedTurnIds.get("thread-1")).toBe("turn-1");
+    expect(notifiedTurnIds.get("thread-2")).toBe("turn-2");
   });
 });

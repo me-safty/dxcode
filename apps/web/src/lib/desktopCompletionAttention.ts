@@ -56,6 +56,23 @@ export function getCompletionAttentionTurnId(
   return null;
 }
 
+export function updateCompletionAttentionNotification(
+  notifications: Map<string, string>,
+  threadId: string,
+  lastNotifiedTurnId: string | undefined,
+  attentionTurnId: string | null,
+): boolean {
+  if (attentionTurnId === null) {
+    if (lastNotifiedTurnId) {
+      notifications.set(threadId, lastNotifiedTurnId);
+    }
+    return false;
+  }
+
+  notifications.set(threadId, attentionTurnId);
+  return attentionTurnId !== lastNotifiedTurnId;
+}
+
 export function shouldRequestCompletionAttention(
   previous: CompletionAttentionState | undefined,
   next: CompletionAttentionState,

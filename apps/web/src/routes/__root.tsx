@@ -20,6 +20,7 @@ import { useSettings } from "../hooks/useSettings";
 import {
   getCompletionAttentionState,
   getCompletionAttentionTurnId,
+  updateCompletionAttentionNotification,
 } from "../lib/desktopCompletionAttention";
 import { isMacPlatform } from "../lib/utils";
 import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
@@ -91,12 +92,14 @@ function DesktopCompletionAttention() {
       const previousState = previousStates.get(thread.id);
       const attentionTurnId = getCompletionAttentionTurnId(previousState, nextState);
       const lastNotifiedTurnId = previousNotifiedTurnIds.get(thread.id);
-      if (lastNotifiedTurnId) {
-        nextNotifiedTurnIds.set(thread.id, lastNotifiedTurnId);
-      }
-      if (!shouldBounce && attentionTurnId !== null && attentionTurnId !== lastNotifiedTurnId) {
+      const shouldNotifyThread = updateCompletionAttentionNotification(
+        nextNotifiedTurnIds,
+        thread.id,
+        lastNotifiedTurnId,
+        attentionTurnId,
+      );
+      if (!shouldBounce && shouldNotifyThread) {
         shouldBounce = true;
-        nextNotifiedTurnIds.set(thread.id, attentionTurnId);
       }
     }
     previousStatesRef.current = nextStates;
