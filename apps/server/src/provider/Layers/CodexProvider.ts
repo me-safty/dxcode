@@ -314,7 +314,7 @@ const probeCodexCapabilities = (input: {
   readonly binaryPath: string;
   readonly homePath?: string;
 }) =>
-  Effect.tryPromise((signal) => probeCodexAccount({ ...input, signal: signal })).pipe(
+  Effect.tryPromise((signal) => probeCodexAccount({ ...input, signal })).pipe(
     Effect.timeoutOption(CAPABILITIES_PROBE_TIMEOUT_MS),
     Effect.result,
     Effect.map((result) => {
