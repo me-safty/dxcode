@@ -10,7 +10,7 @@ import {
   type TerminalRestartInput,
 } from "@t3tools/contracts";
 import { Effect, Encoding, Exit, Layer, ManagedRuntime, Ref, Scope, Stream } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TerminalManager } from "../Services/Manager";
 import {
@@ -110,25 +110,12 @@ class FakePtyAdapter implements PtyAdapterShape {
 }
 
 function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 800): Promise<void> {
-  const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const poll = () => {
-      Promise.resolve(predicate())
-        .then((done) => {
-          if (done) {
-            resolve();
-            return;
-          }
-          if (Date.now() - started > timeoutMs) {
-            reject(new Error("Timed out waiting for condition"));
-            return;
-          }
-          setTimeout(poll, 15);
-        })
-        .catch(reject);
-    };
-    void poll();
-  });
+  return vi.waitFor(
+    async () => {
+      expect(await predicate()).toBe(true);
+    },
+    { timeout: timeoutMs, interval: 15 },
+  );
 }
 
 function openInput(overrides: Partial<TerminalOpenInput> = {}): TerminalOpenInput {
@@ -453,6 +440,23 @@ describe("TerminalManager", () => {
         ),
       1_200,
     );
+  });
+
+  it("does not invoke subprocess polling until a terminal session is running", async () => {
+    let checks = 0;
+    const { manager, run } = await createManager(5, {
+      subprocessChecker: () => {
+        checks += 1;
+        return Effect.succeed(false);
+      },
+      subprocessPollIntervalMs: 20,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(checks).toBe(0);
+
+    await run(manager.open(openInput()));
+    await waitFor(() => checks > 0, 1_200);
   });
 
   it("caps persisted history to configured line limit", async () => {

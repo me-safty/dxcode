@@ -1377,6 +1377,10 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           session.status === "running" && Number.isInteger(session.pid),
       );
 
+      if (runningSessions.length === 0) {
+        return;
+      }
+
       yield* Effect.forEach(
         runningSessions,
         (session) =>
@@ -1434,8 +1438,22 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       );
     });
 
+    const hasRunningSessions = readManagerState.pipe(
+      Effect.map((state) =>
+        [...state.sessions.values()].some((session) => session.status === "running"),
+      ),
+    );
+
     yield* Effect.forever(
-      Effect.sleep(subprocessPollIntervalMs).pipe(Effect.flatMap(() => pollSubprocessActivity())),
+      hasRunningSessions.pipe(
+        Effect.flatMap((active) =>
+          active
+            ? pollSubprocessActivity().pipe(
+                Effect.flatMap(() => Effect.sleep(subprocessPollIntervalMs)),
+              )
+            : Effect.sleep(subprocessPollIntervalMs),
+        ),
+      ),
     ).pipe(Effect.forkIn(workerScope));
 
     yield* Effect.addFinalizer(() =>

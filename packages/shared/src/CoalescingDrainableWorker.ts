@@ -55,6 +55,25 @@ export const makeCoalescingDrainableWorker = <K, V, E, R>(options: {
         ),
       );
 
+    const cleanupFailedKey = (key: K): Effect.Effect<void> =>
+      TxRef.modify(stateRef, (state) => {
+        const activeKeys = new Set(state.activeKeys);
+        activeKeys.delete(key);
+
+        if (state.latestByKey.has(key) && !state.queuedKeys.has(key)) {
+          const queuedKeys = new Set(state.queuedKeys);
+          queuedKeys.add(key);
+          return [true, { ...state, activeKeys, queuedKeys }] as const;
+        }
+
+        return [false, { ...state, activeKeys }] as const;
+      }).pipe(
+        Effect.tx,
+        Effect.flatMap((shouldRequeue) =>
+          shouldRequeue ? TxQueue.offer(queue, key) : Effect.void,
+        ),
+      );
+
     yield* TxQueue.take(queue).pipe(
       Effect.flatMap((key) =>
         TxRef.modify(stateRef, (state) => {
@@ -77,7 +96,13 @@ export const makeCoalescingDrainableWorker = <K, V, E, R>(options: {
           ] as const;
         }).pipe(Effect.tx),
       ),
-      Effect.flatMap((item) => (item === null ? Effect.void : processKey(item.key, item.value))),
+      Effect.flatMap((item) =>
+        item === null
+          ? Effect.void
+          : processKey(item.key, item.value).pipe(
+              Effect.catchCause(() => cleanupFailedKey(item.key)),
+            ),
+      ),
       Effect.forever,
       Effect.forkScoped,
     );

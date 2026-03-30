@@ -55,4 +55,42 @@ describe("makeCoalescingDrainableWorker", () => {
       }),
     ),
   );
+
+  it.live("requeues pending work for a key after a processor failure and keeps draining", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const processed: string[] = [];
+        const firstStarted = yield* Deferred.make<void>();
+        const releaseFailure = yield* Deferred.make<void>();
+        const secondProcessed = yield* Deferred.make<void>();
+
+        const worker = yield* makeCoalescingDrainableWorker<string, string, string, never>({
+          merge: (_current, next) => next,
+          process: (key, value) =>
+            Effect.gen(function* () {
+              processed.push(`${key}:${value}`);
+
+              if (value === "first") {
+                yield* Deferred.succeed(firstStarted, undefined).pipe(Effect.orDie);
+                yield* Deferred.await(releaseFailure);
+                yield* Effect.fail("boom");
+              }
+
+              if (value === "second") {
+                yield* Deferred.succeed(secondProcessed, undefined).pipe(Effect.orDie);
+              }
+            }),
+        });
+
+        yield* worker.enqueue("terminal-1", "first");
+        yield* Deferred.await(firstStarted);
+        yield* worker.enqueue("terminal-1", "second");
+        yield* Deferred.succeed(releaseFailure, undefined);
+        yield* Deferred.await(secondProcessed);
+        yield* worker.drainKey("terminal-1");
+
+        expect(processed).toEqual(["terminal-1:first", "terminal-1:second"]);
+      }),
+    ),
+  );
 });
