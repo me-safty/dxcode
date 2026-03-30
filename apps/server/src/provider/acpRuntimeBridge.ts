@@ -47,6 +47,10 @@ function asTrimmedString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function inferAcpToolName(title: unknown, rawInput: unknown): string {
   const input = asRecord(rawInput);
   const candidates = [
@@ -112,7 +116,7 @@ function collectAcpToolOutputDeltas(
   content: ReadonlyArray<unknown> | undefined,
 ): string[] {
   const deltas: string[] = [];
-  const rawOutputText = asTrimmedString(asRecord(rawOutput)?.text);
+  const rawOutputText = asNonEmptyString(asRecord(rawOutput)?.text);
   if (rawOutputText) {
     deltas.push(rawOutputText);
   }
@@ -121,12 +125,12 @@ function collectAcpToolOutputDeltas(
     if (!chunkRecord) {
       continue;
     }
-    const directText = asTrimmedString(chunkRecord.text);
+    const directText = asNonEmptyString(chunkRecord.text);
     if (directText) {
       deltas.push(directText);
       continue;
     }
-    const nestedText = asTrimmedString(asRecord(chunkRecord.content)?.text);
+    const nestedText = asNonEmptyString(asRecord(chunkRecord.content)?.text);
     if (nestedText) {
       deltas.push(nestedText);
     }
@@ -348,8 +352,8 @@ export function makeAcpRuntimeBridge(input: {
       if (kind === "agent_message_chunk") {
         const content = asRecord(update.content);
         const contentType = asTrimmedString(content?.type);
-        const text = asTrimmedString(content?.text);
-        if (contentType === "text" && text) {
+        const text = asNonEmptyString(content?.text);
+        if (contentType === "text" && text !== undefined) {
           const key = `${threadId}:${turnId}:assistant`;
           let itemId = runtimeItemIds.get(key);
           if (!itemId) {
@@ -365,7 +369,7 @@ export function makeAcpRuntimeBridge(input: {
             );
           }
           yield* emitContentDelta(threadId, turnId, itemId, text, "assistant_text");
-        } else if (contentType === "thinking" && text) {
+        } else if (contentType === "thinking" && text !== undefined) {
           const key = `${threadId}:${turnId}:thinking`;
           let itemId = runtimeItemIds.get(key);
           if (!itemId) {
@@ -452,7 +456,7 @@ export function makeAcpRuntimeBridge(input: {
           update.rawOutput,
           Array.isArray(update.content) ? update.content : undefined,
         );
-        const summary = deltas.join("\n");
+        const summary = deltas.join("");
         if (summary.length > 0) {
           state.detail = summary;
           yield* emitItemEvent(
