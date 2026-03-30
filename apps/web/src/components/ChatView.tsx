@@ -94,6 +94,7 @@ import {
   ListTodoIcon,
   LockIcon,
   LockOpenIcon,
+  PenLineIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
@@ -244,6 +245,30 @@ interface PendingPullRequestSetupRequest {
   worktreePath: string;
   scriptId: string;
 }
+
+const runtimeModeConfig: Record<
+  RuntimeMode,
+  { label: string; title: string; icon: React.ReactNode; next: RuntimeMode }
+> = {
+  "approval-required": {
+    label: "Supervised",
+    title: "Supervised - click for auto-accept edits",
+    icon: <LockIcon />,
+    next: "auto-accept-edits",
+  },
+  "auto-accept-edits": {
+    label: "Auto-accept edits",
+    title: "Auto-accept edits - click for full access",
+    icon: <PenLineIcon />,
+    next: "full-access",
+  },
+  "full-access": {
+    label: "Full access",
+    title: "Full access - click for supervised",
+    icon: <LockOpenIcon />,
+    next: "approval-required",
+  },
+};
 
 export default function ChatView({ threadId }: ChatViewProps) {
   const threads = useStore((store) => store.threads);
@@ -1665,10 +1690,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const toggleInteractionMode = useCallback(() => {
     handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
   }, [handleInteractionModeChange, interactionMode]);
-  const toggleRuntimeMode = useCallback(() => {
-    void handleRuntimeModeChange(
-      runtimeMode === "full-access" ? "approval-required" : "full-access",
-    );
+  const cycleRuntimeMode = useCallback(() => {
+    void handleRuntimeModeChange(runtimeModeConfig[runtimeMode].next);
   }, [handleRuntimeModeChange, runtimeMode]);
   const togglePlanSidebar = useCallback(() => {
     setPlanSidebarOpen((open) => {
@@ -3907,7 +3930,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             traitsMenuContent={providerTraitsMenuContent}
                             onToggleInteractionMode={toggleInteractionMode}
                             onTogglePlanSidebar={togglePlanSidebar}
-                            onToggleRuntimeMode={toggleRuntimeMode}
+                            onRuntimeModeChange={handleRuntimeModeChange}
                           />
                         ) : (
                           <>
@@ -3954,22 +3977,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
                               size="sm"
                               type="button"
-                              onClick={() =>
-                                void handleRuntimeModeChange(
-                                  runtimeMode === "full-access"
-                                    ? "approval-required"
-                                    : "full-access",
-                                )
-                              }
-                              title={
-                                runtimeMode === "full-access"
-                                  ? "Full access — click to require approvals"
-                                  : "Approval required — click for full access"
-                              }
+                              onClick={cycleRuntimeMode}
+                              title={runtimeModeConfig[runtimeMode].title}
                             >
-                              {runtimeMode === "full-access" ? <LockOpenIcon /> : <LockIcon />}
+                              {runtimeModeConfig[runtimeMode].icon}
                               <span className="sr-only sm:not-sr-only">
-                                {runtimeMode === "full-access" ? "Full access" : "Supervised"}
+                                {runtimeModeConfig[runtimeMode].label}
                               </span>
                             </Button>
 

@@ -2493,57 +2493,62 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("restores base permission mode on sendTurn when interactionMode is default", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
+  for (const [runtimeMode, expectedBase] of [
+    ["full-access", "bypassPermissions"],
+    ["approval-required", "default"],
+    ["auto-accept-edits", "acceptEdits"],
+  ] as const) {
+    it.effect(`restores ${expectedBase} permission mode after plan turn (${runtimeMode})`, () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
 
-      const session = yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: "claudeAgent",
-        runtimeMode: "full-access",
-      });
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode,
+        });
 
-      // First turn in plan mode
-      yield* adapter.sendTurn({
-        threadId: session.threadId,
-        input: "plan this",
-        interactionMode: "plan",
-        attachments: [],
-      });
+        // First turn in plan mode
+        yield* adapter.sendTurn({
+          threadId: session.threadId,
+          input: "plan this",
+          interactionMode: "plan",
+          attachments: [],
+        });
 
-      // Complete the turn so we can send another
-      const turnCompletedFiber = yield* Stream.filter(
-        adapter.streamEvents,
-        (event) => event.type === "turn.completed",
-      ).pipe(Stream.runHead, Effect.forkChild);
+        // Complete the turn so we can send another
+        const turnCompletedFiber = yield* Stream.filter(
+          adapter.streamEvents,
+          (event) => event.type === "turn.completed",
+        ).pipe(Stream.runHead, Effect.forkChild);
 
-      harness.query.emit({
-        type: "result",
-        subtype: "success",
-        is_error: false,
-        errors: [],
-        session_id: "sdk-session-plan-restore",
-        uuid: "result-plan",
-      } as unknown as SDKMessage);
+        harness.query.emit({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          errors: [],
+          session_id: `sdk-session-${runtimeMode}`,
+          uuid: `result-${runtimeMode}`,
+        } as unknown as SDKMessage);
 
-      yield* Fiber.join(turnCompletedFiber);
+        yield* Fiber.join(turnCompletedFiber);
 
-      // Second turn back to default
-      yield* adapter.sendTurn({
-        threadId: session.threadId,
-        input: "now do it",
-        interactionMode: "default",
-        attachments: [],
-      });
+        // Second turn back to default
+        yield* adapter.sendTurn({
+          threadId: session.threadId,
+          input: "now do it",
+          interactionMode: "default",
+          attachments: [],
+        });
 
-      // First call sets "plan", second call restores "bypassPermissions" (the base for full-access)
-      assert.deepEqual(harness.query.setPermissionModeCalls, ["plan", "bypassPermissions"]);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
+        assert.deepEqual(harness.query.setPermissionModeCalls, ["plan", expectedBase]);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    });
+  }
 
   it.effect("does not call setPermissionMode when interactionMode is absent", () => {
     const harness = makeHarness();
