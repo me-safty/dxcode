@@ -62,6 +62,23 @@ describe("createOrchestrationRecoveryCoordinator", () => {
     expect(coordinator.completeReplayRecovery()).toBe(true);
   });
 
+  it("does not immediately replay again when replay returns no new events", () => {
+    const coordinator = createOrchestrationRecoveryCoordinator();
+
+    coordinator.beginSnapshotRecovery("bootstrap");
+    coordinator.completeSnapshotRecovery(3);
+    coordinator.classifyDomainEvent(5);
+    coordinator.beginReplayRecovery("sequence-gap");
+
+    expect(coordinator.completeReplayRecovery()).toBe(false);
+    expect(coordinator.getState()).toMatchObject({
+      latestSequence: 3,
+      highestObservedSequence: 5,
+      pendingReplay: false,
+      inFlight: null,
+    });
+  });
+
   it("marks replay failure as unbootstrapped so snapshot fallback is recovery-only", () => {
     const coordinator = createOrchestrationRecoveryCoordinator();
 

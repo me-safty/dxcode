@@ -23,6 +23,7 @@ export function createOrchestrationRecoveryCoordinator() {
     pendingReplay: false,
     inFlight: null,
   };
+  let replayStartSequence: number | null = null;
 
   const snapshotState = (): OrchestrationRecoveryState => ({
     ...state,
@@ -109,16 +110,25 @@ export function createOrchestrationRecoveryCoordinator() {
         return false;
       }
       state.pendingReplay = false;
+      replayStartSequence = state.latestSequence;
       state.inFlight = { kind: "replay", reason };
       return true;
     },
 
     completeReplayRecovery(): boolean {
+      const replayMadeProgress =
+        replayStartSequence !== null && state.latestSequence > replayStartSequence;
+      replayStartSequence = null;
       state.inFlight = null;
+      if (!replayMadeProgress) {
+        state.pendingReplay = false;
+        return false;
+      }
       return shouldReplayAfterRecovery();
     },
 
     failReplayRecovery(): void {
+      replayStartSequence = null;
       state.bootstrapped = false;
       state.inFlight = null;
     },

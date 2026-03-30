@@ -28,7 +28,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useShallow } from "zustand/react/shallow";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
@@ -246,6 +245,35 @@ function toThreadPlanCatalogEntry(thread: Thread): ThreadPlanCatalogEntry {
     estimateThreadPlanCatalogEntrySize(thread),
   );
   return entry;
+}
+
+function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalogEntry[] {
+  const selector = useMemo(() => {
+    let previousThreads: Array<Thread | undefined> | null = null;
+    let previousEntries: ThreadPlanCatalogEntry[] = [];
+
+    return (state: { threads: Thread[] }): ThreadPlanCatalogEntry[] => {
+      const nextThreads = threadIds.map((threadId) =>
+        state.threads.find((thread) => thread.id === threadId),
+      );
+      const cachedThreads = previousThreads;
+      if (
+        cachedThreads &&
+        nextThreads.length === cachedThreads.length &&
+        nextThreads.every((thread, index) => thread === cachedThreads[index])
+      ) {
+        return previousEntries;
+      }
+
+      previousThreads = nextThreads;
+      previousEntries = nextThreads.flatMap((thread) =>
+        thread ? [toThreadPlanCatalogEntry(thread)] : [],
+      );
+      return previousEntries;
+    };
+  }, [threadIds]);
+
+  return useStore(selector);
 }
 
 function formatOutgoingPrompt(params: {
@@ -591,9 +619,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
 
   const fallbackDraftProject = useProjectById(draftThread?.projectId);
-  const threadPlanCatalog = useStore(
-    useShallow((store) => store.threads.map(toThreadPlanCatalogEntry)),
-  );
   const localDraftError = serverThread ? null : (localDraftErrorsByThreadId[threadId] ?? null);
   const localDraftThread = useMemo(
     () =>
@@ -621,6 +646,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const diffOpen = rawSearch.diff === "1";
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
+  const threadPlanCatalog = useThreadPlanCatalog(
+    useMemo(() => {
+      const threadIds: ThreadId[] = [];
+      if (activeThread?.id) {
+        threadIds.push(activeThread.id);
+      }
+      const sourceThreadId = activeLatestTurn?.sourceProposedPlan?.threadId;
+      if (sourceThreadId && sourceThreadId !== activeThread?.id) {
+        threadIds.push(sourceThreadId);
+      }
+      return threadIds;
+    }, [activeLatestTurn?.sourceProposedPlan?.threadId, activeThread?.id]),
+  );
   const activeContextWindow = useMemo(
     () => deriveLatestContextWindowSnapshot(activeThread?.activities ?? []),
     [activeThread?.activities],
