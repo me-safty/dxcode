@@ -23,6 +23,7 @@ import {
   useComposerDraftStore,
 } from "../composerDraftStore";
 import { useStore } from "../store";
+import { useUiStateStore } from "../uiStateStore";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
 import { onServerConfigUpdated, onServerProvidersUpdated, onServerWelcome } from "../wsNativeApi";
@@ -142,7 +143,10 @@ function errorDetails(error: unknown): string {
 function EventRouter() {
   const applyOrchestrationEvents = useStore((store) => store.applyOrchestrationEvents);
   const syncServerReadModel = useStore((store) => store.syncServerReadModel);
-  const setProjectExpanded = useStore((store) => store.setProjectExpanded);
+  const setProjectExpanded = useUiStateStore((store) => store.setProjectExpanded);
+  const syncProjects = useUiStateStore((store) => store.syncProjects);
+  const syncThreads = useUiStateStore((store) => store.syncThreads);
+  const clearThreadUi = useUiStateStore((store) => store.clearThreadUi);
   const removeTerminalState = useTerminalStateStore((store) => store.removeTerminalState);
   const removeOrphanedTerminalStates = useTerminalStateStore(
     (store) => store.removeOrphanedTerminalStates,
@@ -171,6 +175,14 @@ function EventRouter() {
 
     const reconcileSnapshotDerivedState = () => {
       const threads = useStore.getState().threads;
+      const projects = useStore.getState().projects;
+      syncProjects(projects.map((project) => ({ id: project.id, cwd: project.cwd })));
+      syncThreads(
+        threads.map((thread) => ({
+          id: thread.id,
+          seedVisitedAt: thread.updatedAt ?? thread.createdAt,
+        })),
+      );
       clearPromotedDraftThreads(threads.map((thread) => thread.id));
       const draftThreadIds = Object.keys(
         useComposerDraftStore.getState().draftThreadsByThreadId,
@@ -212,6 +224,12 @@ function EventRouter() {
       highestObservedSequence = Math.max(highestObservedSequence, latestSequence);
 
       const batchEffects = deriveOrchestrationBatchEffects(nextEvents);
+      const needsProjectUiSync = nextEvents.some(
+        (event) =>
+          event.type === "project.created" ||
+          event.type === "project.meta-updated" ||
+          event.type === "project.deleted",
+      );
 
       if (batchEffects.needsProviderInvalidation) {
         needsProviderInvalidation = true;
@@ -219,12 +237,17 @@ function EventRouter() {
       }
 
       applyOrchestrationEvents(nextEvents);
+      if (needsProjectUiSync) {
+        const projects = useStore.getState().projects;
+        syncProjects(projects.map((project) => ({ id: project.id, cwd: project.cwd })));
+      }
       const draftStore = useComposerDraftStore.getState();
       for (const threadId of batchEffects.clearPromotedDraftThreadIds) {
         clearPromotedDraftThread(threadId);
       }
       for (const threadId of batchEffects.clearDeletedThreadIds) {
         draftStore.clearDraftThread(threadId);
+        clearThreadUi(threadId);
       }
       for (const threadId of batchEffects.removeTerminalStateThreadIds) {
         removeTerminalState(threadId);
@@ -421,8 +444,11 @@ function EventRouter() {
     queryClient,
     removeTerminalState,
     removeOrphanedTerminalStates,
+    clearThreadUi,
     setProjectExpanded,
+    syncProjects,
     syncServerReadModel,
+    syncThreads,
   ]);
 
   return null;

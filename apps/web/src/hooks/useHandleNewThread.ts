@@ -1,6 +1,6 @@
 import { DEFAULT_RUNTIME_MODE, type ProjectId, ThreadId } from "@t3tools/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import {
   type DraftThreadEnvMode,
   type DraftThreadState,
@@ -8,10 +8,12 @@ import {
 } from "../composerDraftStore";
 import { newThreadId } from "../lib/utils";
 import { useStore } from "../store";
+import { useUiStateStore } from "../uiStateStore";
 
 export function useHandleNewThread() {
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
+  const projectOrder = useUiStateStore((store) => store.projectOrder);
   const navigate = useNavigate();
   const routeThreadId = useParams({
     strict: false,
@@ -24,6 +26,18 @@ export function useHandleNewThread() {
   const activeThread = routeThreadId
     ? threads.find((thread) => thread.id === routeThreadId)
     : undefined;
+  const orderedProjects = useMemo(() => {
+    if (projectOrder.length === 0) {
+      return projects;
+    }
+    const projectsById = new Map(projects.map((project) => [project.id, project] as const));
+    const ordered = projectOrder.flatMap((projectId) => {
+      const project = projectsById.get(projectId);
+      return project ? [project] : [];
+    });
+    const remaining = projects.filter((project) => !projectOrder.includes(project.id));
+    return [...ordered, ...remaining];
+  }, [projectOrder, projects]);
 
   const handleNewThread = useCallback(
     (
@@ -112,7 +126,7 @@ export function useHandleNewThread() {
     activeDraftThread,
     activeThread,
     handleNewThread,
-    projects,
+    projects: orderedProjects,
     routeThreadId,
   };
 }

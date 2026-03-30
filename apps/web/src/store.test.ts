@@ -14,8 +14,6 @@ import { describe, expect, it } from "vitest";
 import {
   applyOrchestrationEvent,
   applyOrchestrationEvents,
-  markThreadUnread,
-  reorderProjects,
   syncServerReadModel,
   type AppState,
 } from "./store";
@@ -59,7 +57,6 @@ function makeState(thread: Thread): AppState {
           provider: "codex",
           model: "gpt-5-codex",
         },
-        expanded: true,
         scripts: [],
       },
     ],
@@ -164,96 +161,6 @@ function makeReadModelProject(
   };
 }
 
-describe("store pure functions", () => {
-  it("markThreadUnread moves lastVisitedAt before completion for a completed thread", () => {
-    const latestTurnCompletedAt = "2026-02-25T12:30:00.000Z";
-    const initialState = makeState(
-      makeThread({
-        latestTurn: {
-          turnId: TurnId.makeUnsafe("turn-1"),
-          state: "completed",
-          requestedAt: "2026-02-25T12:28:00.000Z",
-          startedAt: "2026-02-25T12:28:30.000Z",
-          completedAt: latestTurnCompletedAt,
-          assistantMessageId: null,
-        },
-        lastVisitedAt: "2026-02-25T12:35:00.000Z",
-      }),
-    );
-
-    const next = markThreadUnread(initialState, ThreadId.makeUnsafe("thread-1"));
-
-    const updatedThread = next.threads[0];
-    expect(updatedThread).toBeDefined();
-    expect(updatedThread?.lastVisitedAt).toBe("2026-02-25T12:29:59.999Z");
-    expect(Date.parse(updatedThread?.lastVisitedAt ?? "")).toBeLessThan(
-      Date.parse(latestTurnCompletedAt),
-    );
-  });
-
-  it("markThreadUnread does not change a thread without a completed turn", () => {
-    const initialState = makeState(
-      makeThread({
-        latestTurn: null,
-        lastVisitedAt: "2026-02-25T12:35:00.000Z",
-      }),
-    );
-
-    const next = markThreadUnread(initialState, ThreadId.makeUnsafe("thread-1"));
-
-    expect(next).toEqual(initialState);
-  });
-
-  it("reorderProjects moves a project to a target index", () => {
-    const project1 = ProjectId.makeUnsafe("project-1");
-    const project2 = ProjectId.makeUnsafe("project-2");
-    const project3 = ProjectId.makeUnsafe("project-3");
-    const state: AppState = {
-      projects: [
-        {
-          id: project1,
-          name: "Project 1",
-          cwd: "/tmp/project-1",
-          defaultModelSelection: {
-            provider: "codex",
-            model: DEFAULT_MODEL_BY_PROVIDER.codex,
-          },
-          expanded: true,
-          scripts: [],
-        },
-        {
-          id: project2,
-          name: "Project 2",
-          cwd: "/tmp/project-2",
-          defaultModelSelection: {
-            provider: "codex",
-            model: DEFAULT_MODEL_BY_PROVIDER.codex,
-          },
-          expanded: true,
-          scripts: [],
-        },
-        {
-          id: project3,
-          name: "Project 3",
-          cwd: "/tmp/project-3",
-          defaultModelSelection: {
-            provider: "codex",
-            model: DEFAULT_MODEL_BY_PROVIDER.codex,
-          },
-          expanded: true,
-          scripts: [],
-        },
-      ],
-      threads: [],
-      bootstrapComplete: true,
-    };
-
-    const next = reorderProjects(state, project1, project3);
-
-    expect(next.projects.map((project) => project.id)).toEqual([project2, project3, project1]);
-  });
-});
-
 describe("store read model sync", () => {
   it("marks bootstrap complete after snapshot sync", () => {
     const initialState: AppState = {
@@ -336,7 +243,7 @@ describe("store read model sync", () => {
     expect(next.threads[0]?.archivedAt).toBe(archivedAt);
   });
 
-  it("preserves the current project order when syncing incoming read model updates", () => {
+  it("replaces projects using snapshot order during recovery", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const project2 = ProjectId.makeUnsafe("project-2");
     const project3 = ProjectId.makeUnsafe("project-3");
@@ -350,7 +257,6 @@ describe("store read model sync", () => {
             provider: "codex",
             model: DEFAULT_MODEL_BY_PROVIDER.codex,
           },
-          expanded: true,
           scripts: [],
         },
         {
@@ -361,7 +267,6 @@ describe("store read model sync", () => {
             provider: "codex",
             model: DEFAULT_MODEL_BY_PROVIDER.codex,
           },
-          expanded: true,
           scripts: [],
         },
       ],
@@ -393,7 +298,7 @@ describe("store read model sync", () => {
 
     const next = syncServerReadModel(initialState, readModel);
 
-    expect(next.projects.map((project) => project.id)).toEqual([project2, project1, project3]);
+    expect(next.projects.map((project) => project.id)).toEqual([project1, project2, project3]);
   });
 });
 
@@ -437,6 +342,48 @@ describe("incremental orchestration updates", () => {
 
     expect(nextAfterProjectDelete).toBe(state);
     expect(nextAfterThreadDelete).toBe(state);
+  });
+
+  it("reuses an existing project row when project.created arrives with a new id for the same cwd", () => {
+    const originalProjectId = ProjectId.makeUnsafe("project-1");
+    const recreatedProjectId = ProjectId.makeUnsafe("project-2");
+    const state: AppState = {
+      projects: [
+        {
+          id: originalProjectId,
+          name: "Project",
+          cwd: "/tmp/project",
+          defaultModelSelection: {
+            provider: "codex",
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          },
+          scripts: [],
+        },
+      ],
+      threads: [],
+      bootstrapComplete: true,
+    };
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("project.created", {
+        projectId: recreatedProjectId,
+        title: "Project Recreated",
+        workspaceRoot: "/tmp/project",
+        defaultModelSelection: {
+          provider: "codex",
+          model: DEFAULT_MODEL_BY_PROVIDER.codex,
+        },
+        scripts: [],
+        createdAt: "2026-02-27T00:00:01.000Z",
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      }),
+    );
+
+    expect(next.projects).toHaveLength(1);
+    expect(next.projects[0]?.id).toBe(recreatedProjectId);
+    expect(next.projects[0]?.cwd).toBe("/tmp/project");
+    expect(next.projects[0]?.name).toBe("Project Recreated");
   });
 
   it("updates only the affected thread for message events", () => {
