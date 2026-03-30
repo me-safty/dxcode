@@ -272,6 +272,24 @@ describe("TerminalManager", () => {
     expect(ptyAdapter.spawnInputs).toHaveLength(1);
   });
 
+  it("preserves non-notFound cwd stat failures", async () => {
+    const { manager, run, baseDir } = await createManager();
+    const blockedRoot = path.join(baseDir, "blocked-root");
+    const blockedCwd = path.join(blockedRoot, "cwd");
+    fs.mkdirSync(blockedCwd, { recursive: true });
+    fs.chmodSync(blockedRoot, 0o000);
+
+    try {
+      await expect(run(manager.open(openInput({ cwd: blockedCwd })))).rejects.toMatchObject({
+        _tag: "TerminalCwdError",
+        cwd: blockedCwd,
+        reason: "statFailed",
+      });
+    } finally {
+      fs.chmodSync(blockedRoot, 0o755);
+    }
+  });
+
   it("supports asynchronous PTY spawn effects", async () => {
     const { manager, ptyAdapter, run } = await createManager(5, {
       ptyAdapter: new FakePtyAdapter("async"),

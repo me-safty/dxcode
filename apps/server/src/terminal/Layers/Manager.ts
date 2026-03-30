@@ -982,7 +982,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           (cause) =>
             new TerminalCwdError({
               cwd,
-              reason: "notFound",
+              reason: cause.reason._tag === "NotFound" ? "notFound" : "statFailed",
               cause,
             }),
         ),

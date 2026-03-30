@@ -22,14 +22,24 @@ export class TerminalCwdError extends Schema.TaggedErrorClass<TerminalCwdError>(
   "TerminalCwdError",
   {
     cwd: Schema.String,
-    reason: Schema.Literals(["notFound", "notDirectory"]),
+    reason: Schema.Literals(["notFound", "notDirectory", "statFailed"]),
     cause: Schema.optional(Schema.Defect),
   },
 ) {
   override get message() {
-    return this.reason === "notDirectory"
-      ? `Terminal cwd is not a directory: ${this.cwd}`
-      : `Terminal cwd does not exist: ${this.cwd}`;
+    if (this.reason === "notDirectory") {
+      return `Terminal cwd is not a directory: ${this.cwd}`;
+    }
+    if (this.reason === "notFound") {
+      return `Terminal cwd does not exist: ${this.cwd}`;
+    }
+    const causeMessage =
+      this.cause && typeof this.cause === "object" && "message" in this.cause
+        ? this.cause.message
+        : undefined;
+    return causeMessage
+      ? `Failed to access terminal cwd: ${this.cwd} (${causeMessage})`
+      : `Failed to access terminal cwd: ${this.cwd}`;
   }
 }
 
