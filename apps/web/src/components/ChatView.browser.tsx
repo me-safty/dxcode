@@ -21,7 +21,7 @@ import { page } from "vitest/browser";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
-import { useComposerDraftStore } from "../composerDraftStore";
+import { clearPromotedDraftThread, useComposerDraftStore } from "../composerDraftStore";
 import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   type TerminalContextDraft,
@@ -1800,21 +1800,20 @@ describe("ChatView timeline estimator parity (full app)", () => {
       // The composer editor should be present for the new draft thread.
       await waitForComposerEditor();
 
-      // Simulate the snapshot sync arriving from the server after the draft
-      // thread has been promoted to a server thread (thread.create + turn.start
-      // succeeded). The snapshot now includes the new thread, and the sync
-      // should clear the draft without disrupting the route.
+      // Simulate the server thread appearing after the draft promotion
+      // succeeds. Recovery/bootstrapping can still hydrate it via snapshot,
+      // and clearing the draft should not disrupt the route.
       const { syncServerReadModel } = useStore.getState();
       syncServerReadModel(addThreadToSnapshot(fixture.snapshot, newThreadId));
 
-      // Clear the draft now that the server thread exists (mirrors EventRouter behavior).
-      useComposerDraftStore.getState().clearDraftThread(newThreadId);
+      // Clear the draft now that the server thread exists.
+      clearPromotedDraftThread(newThreadId);
 
       // The route should still be on the new thread — not redirected away.
       await waitForURL(
         mounted.router,
         (path) => path === newThreadPath,
-        "New thread should remain selected after snapshot sync clears the draft.",
+        "New thread should remain selected after server thread promotion clears the draft.",
       );
 
       // The empty thread view and composer should still be visible.
@@ -2138,7 +2137,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       const { syncServerReadModel } = useStore.getState();
       syncServerReadModel(addThreadToSnapshot(fixture.snapshot, promotedThreadId));
-      useComposerDraftStore.getState().clearDraftThread(promotedThreadId);
+      clearPromotedDraftThread(promotedThreadId);
 
       const freshThreadPath = await triggerChatNewShortcutUntilPath(
         mounted.router,

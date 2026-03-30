@@ -17,7 +17,11 @@ import { AnchoredToastProvider, ToastProvider, toastManager } from "../component
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
-import { clearPromotedDraftThreads, useComposerDraftStore } from "../composerDraftStore";
+import {
+  clearPromotedDraftThread,
+  clearPromotedDraftThreads,
+  useComposerDraftStore,
+} from "../composerDraftStore";
 import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
@@ -167,7 +171,7 @@ function EventRouter() {
 
     const reconcileSnapshotDerivedState = () => {
       const threads = useStore.getState().threads;
-      clearPromotedDraftThreads(new Set(threads.map((thread) => thread.id)));
+      clearPromotedDraftThreads(threads.map((thread) => thread.id));
       const draftThreadIds = Object.keys(
         useComposerDraftStore.getState().draftThreadsByThreadId,
       ) as ThreadId[];
@@ -216,7 +220,10 @@ function EventRouter() {
 
       applyOrchestrationEvents(nextEvents);
       const draftStore = useComposerDraftStore.getState();
-      for (const threadId of batchEffects.clearDraftThreadIds) {
+      for (const threadId of batchEffects.clearPromotedDraftThreadIds) {
+        clearPromotedDraftThread(threadId);
+      }
+      for (const threadId of batchEffects.clearDeletedThreadIds) {
         draftStore.clearDraftThread(threadId);
       }
       for (const threadId of batchEffects.removeTerminalStateThreadIds) {

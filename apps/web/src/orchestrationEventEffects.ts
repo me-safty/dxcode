@@ -1,7 +1,8 @@
 import type { OrchestrationEvent, ThreadId } from "@t3tools/contracts";
 
 export interface OrchestrationBatchEffects {
-  clearDraftThreadIds: ThreadId[];
+  clearPromotedDraftThreadIds: ThreadId[];
+  clearDeletedThreadIds: ThreadId[];
   removeTerminalStateThreadIds: ThreadId[];
   needsProviderInvalidation: boolean;
 }
@@ -12,7 +13,8 @@ export function deriveOrchestrationBatchEffects(
   const threadLifecycleEffects = new Map<
     ThreadId,
     {
-      clearDraft: boolean;
+      clearPromotedDraft: boolean;
+      clearDeletedThread: boolean;
       removeTerminalState: boolean;
     }
   >();
@@ -28,7 +30,8 @@ export function deriveOrchestrationBatchEffects(
 
       case "thread.created": {
         threadLifecycleEffects.set(event.payload.threadId, {
-          clearDraft: true,
+          clearPromotedDraft: true,
+          clearDeletedThread: false,
           removeTerminalState: false,
         });
         break;
@@ -36,7 +39,8 @@ export function deriveOrchestrationBatchEffects(
 
       case "thread.deleted": {
         threadLifecycleEffects.set(event.payload.threadId, {
-          clearDraft: true,
+          clearPromotedDraft: false,
+          clearDeletedThread: true,
           removeTerminalState: true,
         });
         break;
@@ -48,11 +52,15 @@ export function deriveOrchestrationBatchEffects(
     }
   }
 
-  const clearDraftThreadIds: ThreadId[] = [];
+  const clearPromotedDraftThreadIds: ThreadId[] = [];
+  const clearDeletedThreadIds: ThreadId[] = [];
   const removeTerminalStateThreadIds: ThreadId[] = [];
   for (const [threadId, effect] of threadLifecycleEffects) {
-    if (effect.clearDraft) {
-      clearDraftThreadIds.push(threadId);
+    if (effect.clearPromotedDraft) {
+      clearPromotedDraftThreadIds.push(threadId);
+    }
+    if (effect.clearDeletedThread) {
+      clearDeletedThreadIds.push(threadId);
     }
     if (effect.removeTerminalState) {
       removeTerminalStateThreadIds.push(threadId);
@@ -60,7 +68,8 @@ export function deriveOrchestrationBatchEffects(
   }
 
   return {
-    clearDraftThreadIds,
+    clearPromotedDraftThreadIds,
+    clearDeletedThreadIds,
     removeTerminalStateThreadIds,
     needsProviderInvalidation,
   };
