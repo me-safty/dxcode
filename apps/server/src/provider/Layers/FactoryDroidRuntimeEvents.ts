@@ -18,11 +18,10 @@ const RAW_SOURCE = "factorydroid.jsonrpc.notification";
 
 const now = () => new Date().toISOString();
 const nextEventId = () => EventId.makeUnsafe(randomUUID());
-const asStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
-/** @internal */ export const asObj = (v: unknown): Record<string, unknown> | undefined =>
+
+/** @internal */
+export const asObj = (v: unknown): Record<string, unknown> | undefined =>
   v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
-const asNum = (v: unknown): number | undefined =>
-  typeof v === "number" && Number.isFinite(v) ? v : undefined;
 
 export function makeFactoryDroidBaseEvent(threadId: ThreadId) {
   return {
@@ -98,13 +97,13 @@ function toolNameToItemType(name: string) {
 }
 
 export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
-  const type = asStr(input.notif.type);
+  const type = input.notif.type as string;
   if (!type) return EMPTY;
 
   if (type === "create_message" && input.turnId) {
     const msg = asObj(input.notif.message);
     const content =
-      msg && asStr(msg.role) === "assistant" && Array.isArray(msg.content)
+      msg && (msg.role as string) === "assistant" && Array.isArray(msg.content)
         ? (msg.content as Array<Record<string, unknown>>)
         : undefined;
     if (!content) return EMPTY;
@@ -112,11 +111,11 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
     const events: ProviderRuntimeEvent[] = [];
     let fallbackText = "";
     for (const block of content) {
-      if (asStr(block.type) === "tool_use") {
-        const toolName = asStr(block.name) ?? "tool";
+      if ((block.type as string) === "tool_use") {
+        const toolName = (block.name as string) ?? "tool";
         const itemType = toolNameToItemType(toolName);
         const toolInput = asObj(block.input);
-        const itemId = asStr(block.id) ?? randomUUID();
+        const itemId = (block.id as string) ?? randomUUID();
 
         // Register the tool use so tool_result can look up the original itemType.
         if (input.toolUseRegistry) {
@@ -134,14 +133,14 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
         }
         const detail =
           itemType === "collab_agent_tool_call"
-            ? (asStr(toolInput?.description) ?? asStr(toolInput?.prompt) ?? toolName)
+            ? ((toolInput?.description as string) ?? (toolInput?.prompt as string) ?? toolName)
             : itemType === "file_change"
-              ? (asStr(toolInput?.file_path) ?? asStr(toolInput?.path))
+              ? ((toolInput?.file_path as string) ?? (toolInput?.path as string))
               : itemType === "command_execution"
-                ? (asStr(toolInput?.command) ?? toolName)
-                : (asStr(toolInput?.file_path) ??
-                  asStr(toolInput?.path) ??
-                  asStr(toolInput?.pattern));
+                ? ((toolInput?.command as string) ?? toolName)
+                : ((toolInput?.file_path as string) ??
+                  (toolInput?.path as string) ??
+                  (toolInput?.pattern as string));
         events.push({
           ...runtimeEventWithRaw(input.threadId, "create_message", msg!, {
             turnId: input.turnId,
@@ -162,16 +161,16 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
             ...(detail ? { detail } : {}),
           },
         } as unknown as ProviderRuntimeEvent);
-      } else if (!input.sawAssistantTextDelta && asStr(block.type) === "text") {
-        fallbackText += asStr(block.text) ?? "";
+      } else if (!input.sawAssistantTextDelta && (block.type as string) === "text") {
+        fallbackText += (block.text as string) ?? "";
       }
     }
     return { events, fallbackText };
   }
 
   if (type === "tool_result" && input.turnId) {
-    const itemId = asStr(input.notif.toolUseId) ?? randomUUID();
-    const detail = asStr(input.notif.content);
+    const itemId = (input.notif.toolUseId as string) ?? randomUUID();
+    const detail = input.notif.content as string;
     const registered = input.toolUseRegistry?.get(itemId);
     input.toolUseRegistry?.delete(itemId);
     const itemType = registered?.itemType ?? "dynamic_tool_call";
@@ -197,7 +196,7 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
   }
 
   if (type === "session_title_updated") {
-    const title = asStr(input.notif.title);
+    const title = input.notif.title as string;
     return title
       ? {
           events: [
@@ -215,10 +214,10 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
   if (type === "session_token_usage_changed") {
     const raw = asObj(input.notif.tokenUsage);
     if (!raw) return EMPTY;
-    const inp = asNum(raw.inputTokens) ?? 0;
-    const out = asNum(raw.outputTokens) ?? 0;
-    const cached = asNum(raw.cacheReadTokens) ?? 0;
-    const reasoning = asNum(raw.thinkingTokens) ?? 0;
+    const inp = (raw.inputTokens as number) ?? 0;
+    const out = (raw.outputTokens as number) ?? 0;
+    const cached = (raw.cacheReadTokens as number) ?? 0;
+    const reasoning = (raw.thinkingTokens as number) ?? 0;
     const used = inp + out + cached + reasoning;
     if (used <= 0) return EMPTY;
     const usage: ThreadTokenUsageSnapshot = {
@@ -241,7 +240,8 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
   }
 
   if (type === "task_started" && input.turnId) {
-    const taskId = asStr(input.notif.taskId) ?? asStr(input.notif.task_id) ?? randomUUID();
+    const taskId =
+      (input.notif.taskId as string) ?? (input.notif.task_id as string) ?? randomUUID();
     return {
       events: [
         {
@@ -249,11 +249,11 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
           type: "task.started",
           payload: {
             taskId: RuntimeTaskId.makeUnsafe(taskId),
-            ...(asStr(input.notif.description)
-              ? { description: asStr(input.notif.description) }
+            ...((input.notif.description as string)
+              ? { description: input.notif.description as string }
               : {}),
-            ...((asStr(input.notif.taskType) ?? asStr(input.notif.task_type))
-              ? { taskType: asStr(input.notif.taskType) ?? asStr(input.notif.task_type) }
+            ...(((input.notif.taskType as string) ?? (input.notif.task_type as string))
+              ? { taskType: (input.notif.taskType as string) ?? (input.notif.task_type as string) }
               : {}),
           },
         } as unknown as ProviderRuntimeEvent,
@@ -263,8 +263,10 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
   }
 
   if (type === "task_progress" && input.turnId) {
-    const taskId = asStr(input.notif.taskId) ?? asStr(input.notif.task_id) ?? randomUUID();
-    const desc = asStr(input.notif.description) ?? asStr(input.notif.summary) ?? "Working...";
+    const taskId =
+      (input.notif.taskId as string) ?? (input.notif.task_id as string) ?? randomUUID();
+    const desc =
+      (input.notif.description as string) ?? (input.notif.summary as string) ?? "Working...";
     return {
       events: [
         {
@@ -273,11 +275,11 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
           payload: {
             taskId: RuntimeTaskId.makeUnsafe(taskId),
             description: desc,
-            ...(asStr(input.notif.summary) ? { summary: asStr(input.notif.summary) } : {}),
-            ...((asStr(input.notif.lastToolName) ?? asStr(input.notif.last_tool_name))
+            ...((input.notif.summary as string) ? { summary: input.notif.summary as string } : {}),
+            ...(((input.notif.lastToolName as string) ?? (input.notif.last_tool_name as string))
               ? {
                   lastToolName:
-                    asStr(input.notif.lastToolName) ?? asStr(input.notif.last_tool_name),
+                    (input.notif.lastToolName as string) ?? (input.notif.last_tool_name as string),
                 }
               : {}),
           },
@@ -288,8 +290,9 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
   }
 
   if ((type === "task_completed" || type === "task_notification") && input.turnId) {
-    const taskId = asStr(input.notif.taskId) ?? asStr(input.notif.task_id) ?? randomUUID();
-    const status = asStr(input.notif.status) === "failed" ? "failed" : "completed";
+    const taskId =
+      (input.notif.taskId as string) ?? (input.notif.task_id as string) ?? randomUUID();
+    const status = (input.notif.status as string) === "failed" ? "failed" : "completed";
     return {
       events: [
         {
@@ -298,7 +301,7 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
           payload: {
             taskId: RuntimeTaskId.makeUnsafe(taskId),
             status,
-            ...(asStr(input.notif.summary) ? { summary: asStr(input.notif.summary) } : {}),
+            ...((input.notif.summary as string) ? { summary: input.notif.summary as string } : {}),
           },
         } as unknown as ProviderRuntimeEvent,
       ],
@@ -317,7 +320,7 @@ export function mapFactoryDroidNotification(input: NotifInput): NotifResult {
             input.turnId ? { turnId: input.turnId } : undefined,
           ),
           type: "runtime.error",
-          payload: { message: asStr(input.notif.message) ?? "Droid runtime error" },
+          payload: { message: (input.notif.message as string) ?? "Droid runtime error" },
         } as unknown as ProviderRuntimeEvent,
       ],
       fallbackText: "",

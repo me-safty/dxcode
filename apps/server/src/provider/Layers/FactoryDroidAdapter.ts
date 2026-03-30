@@ -9,7 +9,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
-import readline from "node:readline";
 import {
   ApprovalRequestId,
   type CanonicalRequestType,
@@ -25,7 +24,6 @@ import {
 import { Effect, Layer, Queue, Stream } from "effect";
 
 import {
-  ProviderAdapterProcessError,
   ProviderAdapterRequestError,
   ProviderAdapterSessionClosedError,
   ProviderAdapterSessionNotFoundError,
@@ -39,14 +37,13 @@ import {
   FACTORY_DROID_PROVIDER as PROVIDER,
   asObj,
   makeFactoryDroidBaseEvent,
-  makeFactoryDroidContentDeltaEvent,
   mapFactoryDroidNotification,
 } from "./FactoryDroidRuntimeEvents.ts";
+import { JsonRpcProcess } from "./FactoryDroidJsonRpc.ts";
+import { TokenCoalescer } from "./FactoryDroidTokenCoalescer.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────
 
-const API_VERSION = "1.0.0";
-const PROTOCOL_VERSION = "1.1.0";
 const DELTA_COALESCE_MS = 50;
 const IDLE_COMPLETION_MS = 200;
 
@@ -86,14 +83,14 @@ function mapDecisionToSelectedOption(
   decision: ProviderApprovalDecision,
   options: ReadonlyArray<string>,
 ): string {
-  const lower = options.map((o) => o.toLowerCase());
+  const lower = new Set(options.map((o) => o.toLowerCase()));
   if (decision === "accept" || decision === "acceptForSession") {
-    if (lower.includes("always_allow")) return "always_allow";
-    if (lower.includes("allow_once")) return "allow_once";
+    if (lower.has("always_allow")) return "always_allow";
+    if (lower.has("allow_once")) return "allow_once";
     return options[0] ?? "always_allow";
   }
-  if (lower.includes("deny")) return "deny";
-  if (lower.includes("reject")) return "reject";
+  if (lower.has("deny")) return "deny";
+  if (lower.has("reject")) return "reject";
   return options[options.length - 1] ?? "deny";
 }
 
@@ -113,16 +110,16 @@ function modelFromSelection(
 
 // ── Session context ───────────────────────────────────────────────────
 
-interface Ctx {
-  session: ProviderSession;
-  providerOptions: ProviderStartOptions | undefined;
-  child: ChildProcessWithoutNullStreams | null;
-  initialized: boolean;
-  stopped: boolean;
-  turns: Array<{ id: TurnId; items: unknown[] }>;
-  activeTurnId: TurnId | null;
-  rpc: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
-  pendingApprovals: Map<
+class SessionContext {
+  public initialized = false;
+  public stopped = false;
+  public turns: Array<{ id: TurnId; items: unknown[] }> = [];
+  public activeTurnId: TurnId | null = null;
+
+  public rpc: JsonRpcProcess | null = null;
+  public coalescer: TokenCoalescer;
+
+  public pendingApprovals = new Map<
     string,
     {
       readonly requestType: CanonicalRequestType;
@@ -130,78 +127,75 @@ interface Ctx {
       readonly resolve: (decision: ProviderApprovalDecision) => void;
       readonly reject: (e: Error) => void;
     }
-  >;
-  pendingUserInputs: Map<
+  >();
+
+  public pendingUserInputs = new Map<
     string,
     {
       readonly resolve: (answers: ProviderUserInputAnswers) => void;
       readonly reject: (e: Error) => void;
     }
-  >;
-  toolUseRegistry: Map<string, import("./FactoryDroidRuntimeEvents.ts").ToolUseEntry>;
-  assistantBuf: string;
-  reasoningBuf: string;
-  sawDelta: boolean;
-  segment: number;
-  flushTimer: ReturnType<typeof setTimeout> | null;
-  idleTimer: ReturnType<typeof setTimeout> | null;
-}
+  >();
 
-function clearTimers(c: Ctx) {
-  if (c.flushTimer !== null) {
-    clearTimeout(c.flushTimer);
-    c.flushTimer = null;
+  public toolUseRegistry = new Map<string, import("./FactoryDroidRuntimeEvents.ts").ToolUseEntry>();
+
+  constructor(
+    public session: ProviderSession,
+    public providerOptions: ProviderStartOptions | undefined,
+    public child: ChildProcessWithoutNullStreams | null,
+    emitSync: (e: ProviderRuntimeEvent) => void,
+  ) {
+    this.coalescer = new TokenCoalescer(DELTA_COALESCE_MS, IDLE_COMPLETION_MS, emitSync, () => {
+      const completedTurnId = this.activeTurnId;
+      this.activeTurnId = null;
+      this.session = {
+        ...this.session,
+        status: "ready",
+        activeTurnId: undefined,
+        updatedAt: now(),
+      };
+      if (!completedTurnId) {
+        return;
+      }
+      emitSync({
+        ...makeFactoryDroidBaseEvent(this.session.threadId),
+        type: "turn.completed",
+        turnId: completedTurnId,
+        payload: { state: "completed" },
+      } as unknown as ProviderRuntimeEvent);
+    });
   }
-  if (c.idleTimer !== null) {
-    clearTimeout(c.idleTimer);
-    c.idleTimer = null;
+
+  public stop(emitExit: boolean, emitSync: (e: ProviderRuntimeEvent) => void): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.coalescer.clearTimers();
+    if (this.rpc) this.rpc.stop();
+    if (this.child && !this.child.killed) this.child.kill();
+    this.session = {
+      ...this.session,
+      status: "closed",
+      activeTurnId: undefined,
+      updatedAt: now(),
+    };
+    for (const [, p] of this.pendingApprovals) p.reject(new Error("Session stopped"));
+    this.pendingApprovals.clear();
+    for (const [, p] of this.pendingUserInputs) p.reject(new Error("Session stopped"));
+    this.pendingUserInputs.clear();
+    this.toolUseRegistry.clear();
+    if (emitExit) {
+      emitSync({
+        ...makeFactoryDroidBaseEvent(this.session.threadId),
+        type: "session.exited",
+        payload: { reason: "stopped" },
+      } as unknown as ProviderRuntimeEvent);
+    }
   }
-}
-
-function resetBuffers(c: Ctx) {
-  c.assistantBuf = "";
-  c.reasoningBuf = "";
-  c.sawDelta = false;
-  c.segment = 0;
-}
-
-function makeCtx(session: ProviderSession, providerOptions?: ProviderStartOptions): Ctx {
-  return {
-    session,
-    providerOptions,
-    child: null,
-    initialized: false,
-    stopped: false,
-    turns: [],
-    activeTurnId: null,
-    rpc: new Map(),
-    pendingApprovals: new Map(),
-    pendingUserInputs: new Map(),
-    toolUseRegistry: new Map(),
-    assistantBuf: "",
-    reasoningBuf: "",
-    sawDelta: false,
-    segment: 0,
-    flushTimer: null,
-    idleTimer: null,
-  };
-}
-
-// ── JSON-RPC helpers ──────────────────────────────────────────────────
-
-function rpcMsg(type: string, extra: Record<string, unknown>) {
-  return JSON.stringify({
-    factoryApiVersion: API_VERSION,
-    factoryProtocolVersion: PROTOCOL_VERSION,
-    type,
-    jsonrpc: "2.0",
-    ...extra,
-  });
 }
 
 // ── Adapter factory ───────────────────────────────────────────────────
 
-const turnsSnapshot = (c: Ctx) =>
+const turnsSnapshot = (c: SessionContext) =>
   c.turns.map((t) => ({ id: t.id, items: t.items as ReadonlyArray<unknown> }));
 
 export interface FactoryDroidAdapterLiveOptions {
@@ -210,7 +204,7 @@ export interface FactoryDroidAdapterLiveOptions {
 
 const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
   Effect.gen(function* () {
-    const sessions = new Map<ThreadId, Ctx>();
+    const sessions = new Map<ThreadId, SessionContext>();
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
 
     const emit = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
@@ -229,104 +223,17 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
       Effect.gen(function* () {
         const c = sessions.get(threadId);
         if (!c)
-          return yield* new ProviderAdapterSessionNotFoundError({ provider: PROVIDER, threadId });
+          return yield* new ProviderAdapterSessionNotFoundError({
+            provider: PROVIDER,
+            threadId,
+          });
         if (c.stopped)
-          return yield* new ProviderAdapterSessionClosedError({ provider: PROVIDER, threadId });
+          return yield* new ProviderAdapterSessionClosedError({
+            provider: PROVIDER,
+            threadId,
+          });
         return c;
       });
-
-    function flushDeltas(c: Ctx, threadId: ThreadId) {
-      if (c.flushTimer !== null) {
-        clearTimeout(c.flushTimer);
-        c.flushTimer = null;
-      }
-      const turnId = c.activeTurnId;
-      if (!turnId) return;
-      if (c.assistantBuf.length > 0) {
-        const d = c.assistantBuf;
-        c.assistantBuf = "";
-        emitSync(
-          makeFactoryDroidContentDeltaEvent(
-            threadId,
-            turnId,
-            "assistant_text",
-            d,
-            `seg-${c.segment}-${turnId}`,
-          ),
-        );
-      }
-      if (c.reasoningBuf.length > 0) {
-        const d = c.reasoningBuf;
-        c.reasoningBuf = "";
-        emitSync(makeFactoryDroidContentDeltaEvent(threadId, turnId, "reasoning_text", d));
-      }
-    }
-
-    function scheduleFlush(c: Ctx, threadId: ThreadId) {
-      if (c.flushTimer !== null) return;
-      c.flushTimer = setTimeout(() => {
-        c.flushTimer = null;
-        flushDeltas(c, threadId);
-      }, DELTA_COALESCE_MS);
-    }
-
-    function scheduleIdle(c: Ctx, threadId: ThreadId, turnId: TurnId) {
-      if (c.idleTimer !== null) return;
-      c.idleTimer = setTimeout(() => {
-        c.idleTimer = null;
-        flushDeltas(c, threadId);
-        c.activeTurnId = null;
-        c.session = { ...c.session, status: "ready", activeTurnId: undefined, updatedAt: now() };
-        emitSync({
-          ...makeFactoryDroidBaseEvent(threadId),
-          type: "turn.completed",
-          turnId,
-          payload: { state: "completed" },
-        } as unknown as ProviderRuntimeEvent);
-      }, IDLE_COMPLETION_MS);
-    }
-
-    const stopInternal = (c: Ctx, emitExit: boolean): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        if (c.stopped) return;
-        c.stopped = true;
-        clearTimers(c);
-        if (c.child && !c.child.killed) c.child.kill();
-        c.session = { ...c.session, status: "closed", activeTurnId: undefined, updatedAt: now() };
-        for (const [, p] of c.rpc) p.reject(new Error("Session stopped"));
-        c.rpc.clear();
-        for (const [, p] of c.pendingApprovals) p.reject(new Error("Session stopped"));
-        c.pendingApprovals.clear();
-        for (const [, p] of c.pendingUserInputs) p.reject(new Error("Session stopped"));
-        c.pendingUserInputs.clear();
-        c.toolUseRegistry.clear();
-        sessions.delete(c.session.threadId);
-        if (emitExit) {
-          yield* emit({
-            ...makeFactoryDroidBaseEvent(c.session.threadId),
-            type: "session.exited",
-            payload: { reason: "stopped" },
-          } as unknown as ProviderRuntimeEvent);
-        }
-      });
-
-    function sendRpc(c: Ctx, method: string, params: Record<string, unknown>): Promise<unknown> {
-      return new Promise((resolve, reject) => {
-        if (!c.child || c.child.killed || c.stopped) {
-          reject(
-            new ProviderAdapterProcessError({
-              provider: PROVIDER,
-              threadId: c.session.threadId,
-              detail: "Child process not available",
-            }),
-          );
-          return;
-        }
-        const id = randomUUID();
-        c.rpc.set(id, { resolve, reject });
-        c.child.stdin.write(rpcMsg("request", { id, method, params }) + "\n");
-      });
-    }
 
     function hasToolUse(notif: Record<string, unknown>): boolean {
       const msg = asObj(notif.message);
@@ -334,70 +241,41 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
       return content?.some((b: unknown) => asObj(b)?.type === "tool_use") ?? false;
     }
 
-    function setupListener(c: Ctx, threadId: ThreadId) {
+    function setupListener(c: SessionContext, threadId: ThreadId) {
       if (!c.child) return;
       const child = c.child;
-      const rl = readline.createInterface({ input: child.stdout });
 
-      rl.on("line", (line) => {
-        let msg: Record<string, unknown>;
-        try {
-          msg = JSON.parse(line);
-        } catch {
-          return;
-        }
-        const t = msg.type as string | undefined;
-
-        if (t === "response") {
-          const id = msg.id as string | null;
-          const pending = id ? c.rpc.get(id) : undefined;
-          if (pending) {
-            c.rpc.delete(id!);
-            if (msg.error) {
-              pending.reject(
-                new ProviderAdapterRequestError({
-                  provider: PROVIDER,
-                  method: "jsonrpc",
-                  detail: (msg.error as { message?: string }).message ?? "JSON-RPC error",
-                }),
-              );
-            } else {
-              pending.resolve(msg.result);
-            }
-          }
-          return;
-        }
-
-        if (t === "notification") {
-          const notif = (msg.params as { notification?: Record<string, unknown> })?.notification;
-          if (!notif) return;
+      c.rpc = new JsonRpcProcess(
+        child,
+        (notif) => {
           const nt = notif.type as string;
           const turnId = c.activeTurnId;
 
           if ((nt === "assistant_text_delta" || nt === "thinking_text_delta") && turnId) {
             const delta = notif.textDelta as string;
-            if (delta) {
-              if (nt === "assistant_text_delta") {
-                c.sawDelta = true;
-                c.assistantBuf += delta;
-              } else c.reasoningBuf += delta;
-              scheduleFlush(c, threadId);
+            if (nt === "assistant_text_delta") {
+              c.coalescer.appendAssistantText(delta, threadId, turnId);
+            } else {
+              c.coalescer.appendReasoningText(delta, threadId, turnId);
             }
           } else if (nt === "droid_working_state_changed") {
             const st = notif.newState as string;
-            if (st === "idle" && turnId) scheduleIdle(c, threadId, turnId);
-            else if (st !== "idle" && c.idleTimer !== null) {
-              clearTimeout(c.idleTimer);
-              c.idleTimer = null;
+            if (st === "idle" && turnId) {
+              // Do not schedule idle completion while the droid is waiting for
+              // a user response to an ask_user or request_permission request.
+              // The "idle" state in those cases means "waiting for user" not
+              // "finished working".
+              if (c.pendingUserInputs.size === 0 && c.pendingApprovals.size === 0) {
+                c.coalescer.scheduleIdle(threadId, turnId);
+              }
+            } else if (st !== "idle") {
+              c.coalescer.clearIdleTimer();
             }
           } else {
             if (nt === "create_message") {
               if (hasToolUse(notif)) {
-                flushDeltas(c, threadId);
-                c.segment += 1;
-                c.sawDelta = false;
+                c.coalescer.flushDeltas(threadId, turnId);
               }
-              // Hydrate turn items from create_message notifications.
               const activeTurn = turnId ? c.turns.find((t) => t.id === turnId) : undefined;
               if (activeTurn) {
                 activeTurn.items.push(notif.message ?? notif);
@@ -405,33 +283,38 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
             }
             const { events, fallbackText } = mapFactoryDroidNotification({
               notif,
-              sawAssistantTextDelta: c.sawDelta,
+              sawAssistantTextDelta: c.coalescer.sawDelta,
               threadId,
               toolUseRegistry: c.toolUseRegistry,
               ...(turnId ? { turnId } : {}),
             });
             for (const e of events) emitSync(e);
-            if (fallbackText) {
-              c.sawDelta = true;
-              c.assistantBuf += fallbackText;
-              scheduleFlush(c, threadId);
+            if (fallbackText && turnId) {
+              c.coalescer.appendAssistantText(fallbackText, threadId, turnId);
+            }
+            // Increment segment AFTER mapFactoryDroidNotification so that
+            // sawDelta is still accurate when evaluating create_message text
+            // blocks. Previously this ran first, resetting sawDelta to false,
+            // which caused fallbackText to re-emit text that was already
+            // streamed via assistant_text_delta.
+            if (nt === "create_message" && hasToolUse(notif)) {
+              c.coalescer.incrementSegment();
             }
           }
-          return;
-        }
+        },
+        (method, id, params) => {
+          // Both ask_user and request_permission mean the droid is actively
+          // waiting for user interaction — clear any pending idle timer.
+          if (method === "droid.request_permission" || method === "droid.ask_user") {
+            c.coalescer.clearIdleTimer();
+          }
 
-        if (t === "request") {
-          const method = msg.method as string;
           if (method === "droid.request_permission") {
             if (c.session.runtimeMode === "full-access") {
-              child.stdin.write(
-                rpcMsg("response", { id: msg.id, result: { selectedOption: "always_allow" } }) +
-                  "\n",
-              );
+              c.rpc?.sendResponse(id, { selectedOption: "always_allow" });
               return;
             }
             const requestId = ApprovalRequestId.makeUnsafe(randomUUID());
-            const params = asObj(msg.params as Record<string, unknown>);
             const toolUses = Array.isArray(params?.toolUses) ? params.toolUses : [];
             const options = Array.isArray(params?.options)
               ? (params.options as string[])
@@ -445,7 +328,7 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
             const promise = new Promise<ProviderApprovalDecision>((resolve, reject) => {
               c.pendingApprovals.set(requestId, {
                 requestType,
-                rpcId: msg.id as string,
+                rpcId: id,
                 resolve,
                 reject,
               });
@@ -471,13 +354,9 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
                   requestId,
                   payload: { requestType, decision },
                 } as unknown as ProviderRuntimeEvent);
-
-                child.stdin.write(
-                  rpcMsg("response", {
-                    id: msg.id,
-                    result: { selectedOption: mapDecisionToSelectedOption(decision, options) },
-                  }) + "\n",
-                );
+                c.rpc?.sendResponse(id, {
+                  selectedOption: mapDecisionToSelectedOption(decision, options),
+                });
               },
               () => {
                 emitSync({
@@ -487,22 +366,18 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
                   requestId,
                   payload: { requestType, decision: "cancel" },
                 } as unknown as ProviderRuntimeEvent);
-                child.stdin.write(
-                  rpcMsg("response", {
-                    id: msg.id,
-                    result: { selectedOption: mapDecisionToSelectedOption("cancel", options) },
-                  }) + "\n",
-                );
+                c.rpc?.sendResponse(id, {
+                  selectedOption: mapDecisionToSelectedOption("cancel", options),
+                });
               },
             );
           } else if (method === "droid.ask_user") {
             const requestId = ApprovalRequestId.makeUnsafe(randomUUID());
-            const params = asObj(msg.params as Record<string, unknown>);
-            const rawQuestions = params && Array.isArray(params.questions) ? params.questions : [];
+            const rawQuestions = Array.isArray(params.questions) ? params.questions : [];
 
             const questions: UserInputQuestion[] = rawQuestions
               .map((q: Record<string, unknown>, idx: number) => {
-                const id = typeof q.id === "string" ? q.id : `q-${idx}`;
+                const qId = typeof q.id === "string" ? q.id : `q-${idx}`;
                 const index = typeof q.index === "number" ? q.index : idx + 1;
                 const header =
                   typeof q.header === "string"
@@ -525,14 +400,12 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
                       };
                     })
                   : [];
-                return { id, header, question, options };
+                return { id: qId, header, question, options };
               })
               .filter((q: UserInputQuestion) => q.question.length > 0);
 
             if (questions.length === 0 || c.stopped) {
-              child.stdin.write(
-                rpcMsg("response", { id: msg.id, result: { cancelled: true, answers: [] } }) + "\n",
-              );
+              c.rpc?.sendResponse(id, { cancelled: true, answers: [] });
               return;
             }
 
@@ -571,9 +444,11 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
                   },
                 } as unknown as ProviderRuntimeEvent);
 
-                // Build the response in the Droid CLI's expected format:
-                // { cancelled: false, answers: [{ index, question, answer }] }
-                const droidAnswers: Array<{ index: number; question: string; answer: string }> = [];
+                const droidAnswers: Array<{
+                  index: number;
+                  question: string;
+                  answer: string;
+                }> = [];
                 for (let i = 0; i < questions.length; i++) {
                   const q = questions[i]!;
                   const rawQ = rawQuestions[i] as Record<string, unknown> | undefined;
@@ -586,23 +461,18 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
                     });
                   }
                 }
-                child.stdin.write(
-                  rpcMsg("response", {
-                    id: msg.id,
-                    result: { cancelled: false, answers: droidAnswers },
-                  }) + "\n",
-                );
+                c.rpc?.sendResponse(id, {
+                  cancelled: false,
+                  answers: droidAnswers,
+                });
               },
               () => {
-                child.stdin.write(
-                  rpcMsg("response", { id: msg.id, result: { cancelled: true, answers: [] } }) +
-                    "\n",
-                );
+                c.rpc?.sendResponse(id, { cancelled: true, answers: [] });
               },
             );
           }
-        }
-      });
+        },
+      );
 
       child.stderr.on("data", (chunk: Buffer) => {
         const text = chunk.toString().trim();
@@ -618,8 +488,8 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
 
       child.on("exit", (code) => {
         if (c.child !== child) return;
-        clearTimers(c);
-        flushDeltas(c, threadId);
+        c.coalescer.clearTimers();
+        c.coalescer.flushDeltas(threadId, c.activeTurnId);
         const turnId = c.activeTurnId;
         c.child = null;
         c.initialized = false;
@@ -642,7 +512,7 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
       });
     }
 
-    async function ensureProcess(c: Ctx, threadId: ThreadId) {
+    async function ensureProcess(c: SessionContext, threadId: ThreadId) {
       if (c.initialized && c.child && !c.child.killed) return;
       const bin = resolveBinaryPath(c.providerOptions);
       const auto = c.session.runtimeMode === "approval-required" ? "low" : "high";
@@ -670,7 +540,7 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
         child.once("error", reject);
       });
       c.session = { ...c.session, status: "ready", updatedAt: now() };
-      await sendRpc(c, "droid.initialize_session", {
+      await c.rpc?.sendRequest("droid.initialize_session", {
         machineId: os.hostname(),
         sessionId: randomUUID(),
         cwd: c.session.cwd,
@@ -694,7 +564,10 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
           createdAt: t,
           updatedAt: t,
         };
-        sessions.set(input.threadId, makeCtx(session, input.providerOptions));
+        sessions.set(
+          input.threadId,
+          new SessionContext(session, input.providerOptions, null, emitSync),
+        );
         yield* emit({
           ...makeFactoryDroidBaseEvent(input.threadId),
           type: "session.started",
@@ -710,9 +583,14 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
         const turnModel = modelFromSelection(input.modelSelection);
         if (turnModel && turnModel !== c.session.model)
           c.session = { ...c.session, model: turnModel };
-        c.session = { ...c.session, status: "running", activeTurnId: turnId, updatedAt: now() };
+        c.session = {
+          ...c.session,
+          status: "running",
+          activeTurnId: turnId,
+          updatedAt: now(),
+        };
         c.activeTurnId = turnId;
-        resetBuffers(c);
+        c.coalescer.resetBuffers();
         c.turns.push({ id: turnId, items: [] });
         yield* emit({
           ...makeFactoryDroidBaseEvent(input.threadId),
@@ -722,15 +600,22 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
         } as unknown as ProviderRuntimeEvent);
         yield* Effect.promise(async () => {
           await ensureProcess(c, input.threadId);
-          await sendRpc(c, "droid.add_user_message", { text: input.input ?? "" });
+          // `interactionMode` is already sent during `initialize_session`.
+          // The current Droid CLI rejects `droid.set_interaction_mode` with an
+          // uncorrelated `id: null` error response, which leaves the awaited
+          // promise unresolved and prevents `add_user_message` from ever
+          // executing.
+          await c.rpc?.sendRequest("droid.add_user_message", {
+            text: input.input ?? "",
+          });
         });
         return { threadId: input.threadId, turnId };
       });
 
     yield* Effect.addFinalizer(() =>
-      Effect.forEach(sessions, ([, c]) => stopInternal(c, false), { discard: true }).pipe(
-        Effect.tap(() => Queue.shutdown(queue)),
-      ),
+      Effect.forEach(sessions, ([, c]) => Effect.sync(() => c.stop(false, emitSync)), {
+        discard: true,
+      }).pipe(Effect.tap(() => Queue.shutdown(queue))),
     );
 
     return {
@@ -746,10 +631,11 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
         Effect.gen(function* () {
           const c = yield* requireCtx(threadId);
           if (c.initialized && c.child && !c.child.killed) {
-            yield* Effect.promise(() =>
-              sendRpc(c, "droid.interrupt_session", {}).catch(() => {
-                c.child?.kill();
-              }),
+            yield* Effect.promise(
+              () =>
+                c.rpc?.sendRequest("droid.interrupt_session", {}).catch(() => {
+                  c.child?.kill();
+                }) ?? Promise.resolve(),
             );
           } else if (c.child && !c.child.killed) c.child.kill();
         }),
@@ -797,15 +683,18 @@ const makeAdapter = (options?: FactoryDroidAdapterLiveOptions) =>
           ),
         ),
       stopSession: (threadId) =>
-        requireCtx(threadId).pipe(Effect.flatMap((c) => stopInternal(c, true))),
+        requireCtx(threadId).pipe(Effect.map((c) => c.stop(true, emitSync))),
       listSessions: () =>
-        Effect.sync(() => Array.from(sessions.values(), ({ session }) => ({ ...session }))),
+        Effect.sync(() => Array.from(sessions.values(), (c) => ({ ...c.session }))),
       hasSession: (threadId) =>
         Effect.sync(() => {
           const c = sessions.get(threadId);
           return c !== undefined && !c.stopped;
         }),
-      stopAll: () => Effect.forEach(sessions, ([, c]) => stopInternal(c, true), { discard: true }),
+      stopAll: () =>
+        Effect.forEach(sessions, ([, c]) => Effect.sync(() => c.stop(true, emitSync)), {
+          discard: true,
+        }),
       streamEvents: Stream.fromQueue(queue),
     } satisfies FactoryDroidAdapterShape;
   });
