@@ -817,10 +817,22 @@ const make = Effect.gen(function* () {
       if (event.type !== "project.created") {
         return Effect.void;
       }
-      const payload = Schema.decodeUnknownSync(ProjectCreatedPayload)(event.payload);
-      return Effect.forkScoped(
-        discoverAndCacheSlashCommands(payload.projectId, payload.workspaceRoot),
-      ).pipe(Effect.asVoid);
+      return Effect.try({
+        try: () => Schema.decodeUnknownSync(ProjectCreatedPayload)(event.payload),
+        catch: (error) => error,
+      }).pipe(
+        Effect.flatMap((payload) =>
+          Effect.forkScoped(
+            discoverAndCacheSlashCommands(payload.projectId, payload.workspaceRoot),
+          ).pipe(Effect.asVoid),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.logWarning(
+            "provider command reactor failed to decode project.created payload for slash command discovery",
+            { cause: Cause.pretty(cause) },
+          ),
+        ),
+      );
     },
   );
 
