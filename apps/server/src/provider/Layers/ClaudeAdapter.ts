@@ -3040,47 +3040,53 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     ).pipe(Effect.tap(() => Queue.shutdown(runtimeEventQueue))),
   );
 
-  const discoverSlashCommands: ClaudeAdapterShape["discoverSlashCommands"] = (input) => {
-    async function* helloPrompt(): AsyncGenerator<SDKUserMessage> {
-      yield {
-        type: "user",
-        session_id: "",
-        parent_tool_use_id: null,
-        message: { role: "user", content: [{ type: "text", text: "hello" }] },
-      } as SDKUserMessage;
-    }
+  const discoverSlashCommands: ClaudeAdapterShape["discoverSlashCommands"] = (input) =>
+    Effect.gen(function* () {
+      const claudeSettings = yield* serverSettingsService.getSettings.pipe(
+        Effect.map((settings) => settings.providers.claudeAgent),
+      );
 
-    return Effect.tryPromise({
-      try: async () => {
-        const probeQuery = createQuery({
-          prompt: helloPrompt(),
-          options: {
-            cwd: input.cwd,
-            pathToClaudeCodeExecutable: "claude",
-            settingSources: [...CLAUDE_SETTING_SOURCES],
-            permissionMode: "plan",
-            env: process.env,
-          },
-        });
+      async function* helloPrompt(): AsyncGenerator<SDKUserMessage> {
+        yield {
+          type: "user",
+          session_id: "",
+          parent_tool_use_id: null,
+          message: { role: "user", content: [{ type: "text", text: "hello" }] },
+        } as SDKUserMessage;
+      }
 
-        try {
-          const commands = await probeQuery.supportedCommands();
-          return commands.map((cmd) => ({
-            name: cmd.name,
-            description: cmd.description,
-            argumentHint: cmd.argumentHint,
-          }));
-        } finally {
-          probeQuery.close();
-        }
-      },
-      catch: (cause) =>
-        new ProviderAdapterProcessError({
-          provider: PROVIDER,
-          threadId: "" as any,
-          detail: `Failed to discover slash commands: ${String(cause)}`,
-          cause,
-        }),
+      return yield* Effect.tryPromise({
+        try: async () => {
+          const probeQuery = createQuery({
+            prompt: helloPrompt(),
+            options: {
+              cwd: input.cwd,
+              pathToClaudeCodeExecutable: claudeSettings.binaryPath,
+              settingSources: [...CLAUDE_SETTING_SOURCES],
+              permissionMode: "plan",
+              env: process.env,
+            },
+          });
+
+          try {
+            const commands = await probeQuery.supportedCommands();
+            return commands.map((cmd) => ({
+              name: cmd.name,
+              description: cmd.description,
+              argumentHint: cmd.argumentHint,
+            }));
+          } finally {
+            probeQuery.close();
+          }
+        },
+        catch: (cause) =>
+          new ProviderAdapterProcessError({
+            provider: PROVIDER,
+            threadId: "" as any,
+            detail: `Failed to discover slash commands: ${String(cause)}`,
+            cause,
+          }),
+      });
     }).pipe(
       Effect.timeout(Duration.seconds(15)),
       Effect.map((option) => option ?? []),
@@ -3091,7 +3097,6 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         }).pipe(Effect.as([] as ReadonlyArray<{ name: string; description: string; argumentHint: string }>)),
       ),
     );
-  };
 
   return {
     provider: PROVIDER,
