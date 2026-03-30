@@ -43,6 +43,7 @@ import {
 import { serverConfigQueryOptions, serverQueryKeys } from "../../lib/serverReactQuery";
 import {
   MAX_CUSTOM_MODEL_LENGTH,
+  buildModelSelection,
   getCustomModelOptionsByProvider,
   resolveAppModelSelectionState,
 } from "../../modelSelection";
@@ -530,12 +531,17 @@ export function GeneralSettingsPanel() {
         DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath ||
       settings.providers.claudeAgent.customModels.length > 0,
     ),
+    droid: Boolean(
+      settings.providers.droid.binaryPath !== DEFAULT_UNIFIED_SETTINGS.providers.droid.binaryPath ||
+      settings.providers.droid.customModels.length > 0,
+    ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
   >({
     codex: "",
     claudeAgent: "",
+    droid: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -1014,11 +1020,11 @@ export function GeneralSettingsPanel() {
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: {
-                          provider: textGenProvider,
-                          model: textGenModel,
-                          ...(nextOptions ? { options: nextOptions } : {}),
-                        },
+                        textGenerationModelSelection: buildModelSelection(
+                          textGenProvider,
+                          textGenModel,
+                          nextOptions,
+                        ),
                       },
                       serverProviders,
                     ),

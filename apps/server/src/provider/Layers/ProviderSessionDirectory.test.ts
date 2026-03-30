@@ -163,6 +163,30 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
       }
     }));
 
+  it("reads persisted droid bindings", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const runtimeRepository = yield* ProviderSessionRuntimeRepository;
+      const threadId = ThreadId.makeUnsafe("thread-droid");
+
+      yield* runtimeRepository.upsert({
+        threadId,
+        providerName: "droid",
+        adapterKey: "droid",
+        runtimeMode: "full-access",
+        status: "running",
+        lastSeenAt: new Date().toISOString(),
+        resumeCursor: null,
+        runtimePayload: null,
+      });
+
+      const binding = yield* directory.getBinding(threadId);
+      assertSome(binding, {
+        threadId,
+        provider: "droid",
+      });
+    }));
+
   it("rehydrates persisted mappings across layer restart", () =>
     Effect.gen(function* () {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-directory-"));

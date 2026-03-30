@@ -4,6 +4,7 @@ import {
   type ClaudeCodeEffort,
   type ClaudeModelOptions,
   type CodexModelOptions,
+  type DroidModelOptions,
   type ModelCapabilities,
   type ModelSelection,
   type ProviderKind,
@@ -114,6 +115,15 @@ export function normalizeClaudeModelOptionsWithCapabilities(
     ...(fastMode !== undefined ? { fastMode } : {}),
     ...(contextWindow !== undefined ? { contextWindow } : {}),
   };
+  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
+
+export function normalizeDroidModelOptionsWithCapabilities(
+  caps: ModelCapabilities,
+  modelOptions: DroidModelOptions | null | undefined,
+): DroidModelOptions | undefined {
+  const effort = resolveEffort(caps, modelOptions?.effort);
+  const nextOptions: DroidModelOptions = effort ? { effort } : {};
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
 

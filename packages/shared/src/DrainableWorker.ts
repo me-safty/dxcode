@@ -9,7 +9,7 @@
  * @module DrainableWorker
  */
 import type { Scope } from "effect";
-import { Effect, TxQueue, TxRef } from "effect";
+import { Deferred, Effect, Queue, Ref } from "effect";
 
 export interface DrainableWorker<A> {
   /**
@@ -39,30 +39,45 @@ export const makeDrainableWorker = <A, E, R>(
   process: (item: A) => Effect.Effect<void, E, R>,
 ): Effect.Effect<DrainableWorker<A>, never, Scope.Scope | R> =>
   Effect.gen(function* () {
-    const queue = yield* Effect.acquireRelease(TxQueue.unbounded<A>(), TxQueue.shutdown);
-    const outstanding = yield* TxRef.make(0);
+    const queue = yield* Effect.acquireRelease(Queue.unbounded<A>(), Queue.shutdown);
+    const outstanding = yield* Ref.make(0);
+    const waiters = yield* Ref.make<Deferred.Deferred<void>[]>([]);
 
-    yield* TxQueue.take(queue).pipe(
+    const notifyWaiters = Effect.gen(function* () {
+      const n = yield* Ref.get(outstanding);
+      if (n <= 0) {
+        const pending = yield* Ref.getAndSet(waiters, []);
+        yield* Effect.forEach(pending, (d) => Deferred.succeed(d, undefined), {
+          discard: true,
+        });
+      }
+    });
+
+    yield* Queue.take(queue).pipe(
       Effect.tap((a) =>
         Effect.ensuring(
           process(a),
-          TxRef.update(outstanding, (n) => n - 1),
+          Ref.update(outstanding, (n) => n - 1).pipe(Effect.tap(() => notifyWaiters)),
         ),
       ),
       Effect.forever,
       Effect.forkScoped,
     );
 
-    const drain: DrainableWorker<A>["drain"] = TxRef.get(outstanding).pipe(
-      Effect.tap((n) => (n > 0 ? Effect.txRetry : Effect.void)),
-      Effect.tx,
-    );
+    const drain: DrainableWorker<A>["drain"] = Effect.gen(function* () {
+      const n = yield* Ref.get(outstanding);
+      if (n <= 0) return;
+      const d = yield* Deferred.make<void>();
+      yield* Ref.update(waiters, (ws) => [...ws, d]);
+      const currentN = yield* Ref.get(outstanding);
+      if (currentN <= 0) {
+        yield* Deferred.succeed(d, undefined);
+      }
+      yield* Deferred.await(d);
+    });
 
-    const enqueue = (element: A): Effect.Effect<boolean, never, never> =>
-      TxQueue.offer(queue, element).pipe(
-        Effect.tap(() => TxRef.update(outstanding, (n) => n + 1)),
-        Effect.tx,
-      );
+    const enqueue = (element: A): Effect.Effect<void> =>
+      Ref.update(outstanding, (n) => n + 1).pipe(Effect.tap(() => Queue.offer(queue, element)));
 
     return { enqueue, drain } satisfies DrainableWorker<A>;
   });

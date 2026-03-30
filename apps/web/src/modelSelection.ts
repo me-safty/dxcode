@@ -2,6 +2,7 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   type ModelSelection,
   type ProviderKind,
+  type ProviderModelOptions,
   type ServerProvider,
 } from "@t3tools/contracts";
 import { normalizeModelSlug, resolveSelectableModel } from "@t3tools/shared/model";
@@ -45,9 +46,55 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     placeholder: "your-claude-model-slug",
     example: "claude-sonnet-5-0",
   },
+  droid: {
+    provider: "droid",
+    title: "Droid",
+    description: "Save additional Droid model slugs for the picker and `/model` command.",
+    placeholder: "your-droid-model-slug",
+    example: "claude-opus-4-6",
+  },
 };
 
 export const MODEL_PROVIDER_SETTINGS = Object.values(PROVIDER_CUSTOM_MODEL_CONFIG);
+
+export function buildModelSelection(
+  provider: ProviderKind,
+  model: string,
+  options?: ProviderModelOptions[ProviderKind] | undefined,
+): ModelSelection {
+  switch (provider) {
+    case "codex":
+      return options
+        ? {
+            provider,
+            model,
+            options: options as NonNullable<
+              Extract<ModelSelection, { provider: "codex" }>["options"]
+            >,
+          }
+        : { provider, model };
+    case "claudeAgent":
+      return options
+        ? {
+            provider,
+            model,
+            options: options as NonNullable<
+              Extract<ModelSelection, { provider: "claudeAgent" }>["options"]
+            >,
+          }
+        : { provider, model };
+    case "droid":
+      return options
+        ? {
+            provider,
+            model,
+            options: options as NonNullable<
+              Extract<ModelSelection, { provider: "droid" }>["options"]
+            >,
+          }
+        : { provider, model };
+  }
+}
 
 export function normalizeCustomModelSlugs(
   models: Iterable<string | null | undefined>,
@@ -165,6 +212,12 @@ export function getCustomModelOptionsByProvider(
       "claudeAgent",
       selectedProvider === "claudeAgent" ? selectedModel : undefined,
     ),
+    droid: getAppModelOptions(
+      settings,
+      providers,
+      "droid",
+      selectedProvider === "droid" ? selectedModel : undefined,
+    ),
   };
 }
 
@@ -192,9 +245,5 @@ export function resolveAppModelSelectionState(
     },
   });
 
-  return {
-    provider,
-    model,
-    ...(modelOptionsForDispatch ? { options: modelOptionsForDispatch } : {}),
-  };
+  return buildModelSelection(provider, model, modelOptionsForDispatch);
 }

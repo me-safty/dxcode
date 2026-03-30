@@ -1,6 +1,7 @@
 import {
   type ClaudeModelOptions,
   type CodexModelOptions,
+  type DroidModelOptions,
   type ProviderKind,
   type ProviderModelOptions,
   type ServerProviderModel,
@@ -52,6 +53,9 @@ function getRawEffort(
   if (provider === "codex") {
     return trimOrNull((modelOptions as CodexModelOptions | undefined)?.reasoningEffort);
   }
+  if (provider === "droid") {
+    return trimOrNull((modelOptions as DroidModelOptions | undefined)?.effort);
+  }
   return trimOrNull((modelOptions as ClaudeModelOptions | undefined)?.effort);
 }
 
@@ -73,7 +77,28 @@ function buildNextOptions(
   if (provider === "codex") {
     return { ...(modelOptions as CodexModelOptions | undefined), ...patch } as CodexModelOptions;
   }
+  if (provider === "droid") {
+    return { ...(modelOptions as DroidModelOptions | undefined), ...patch } as DroidModelOptions;
+  }
   return { ...(modelOptions as ClaudeModelOptions | undefined), ...patch } as ClaudeModelOptions;
+}
+
+function hasVisibleTraitSections(input: {
+  effortLevels: ReadonlyArray<{ value: string; label: string; isDefault?: boolean | undefined }>;
+  thinkingEnabled: boolean | null;
+  supportsFastMode: boolean;
+  contextWindowOptions: ReadonlyArray<{
+    value: string;
+    label: string;
+    isDefault?: boolean | undefined;
+  }>;
+}): boolean {
+  return (
+    input.effortLevels.length > 0 ||
+    input.thinkingEnabled !== null ||
+    input.supportsFastMode ||
+    input.contextWindowOptions.length > 1
+  );
 }
 
 function getSelectedTraits(
@@ -136,6 +161,31 @@ function getSelectedTraits(
     ultrathinkPromptControlled,
     ultrathinkInBodyText,
   };
+}
+
+export function shouldRenderTraitsPicker(input: {
+  provider: ProviderKind;
+  models: ReadonlyArray<ServerProviderModel>;
+  model: string | null | undefined;
+  prompt: string;
+  modelOptions: ProviderOptions | null | undefined;
+  allowPromptInjectedEffort?: boolean;
+}): boolean {
+  const { effortLevels, thinkingEnabled, caps, contextWindowOptions } = getSelectedTraits(
+    input.provider,
+    input.models,
+    input.model,
+    input.prompt,
+    input.modelOptions,
+    input.allowPromptInjectedEffort ?? true,
+  );
+
+  return hasVisibleTraitSections({
+    effortLevels,
+    thinkingEnabled,
+    supportsFastMode: caps.supportsFastMode,
+    contextWindowOptions,
+  });
 }
 
 export interface TraitsMenuContentProps {
@@ -221,7 +271,14 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     ],
   );
 
-  if (effort === null && thinkingEnabled === null && contextWindowOptions.length <= 1) {
+  if (
+    !hasVisibleTraitSections({
+      effortLevels,
+      thinkingEnabled,
+      supportsFastMode: caps.supportsFastMode,
+      contextWindowOptions,
+    })
+  ) {
     return null;
   }
 
@@ -366,6 +423,16 @@ export const TraitsPicker = memo(function TraitsPicker({
     .join(" · ");
 
   const isCodexStyle = provider === "codex";
+  const hasVisibleTraits = hasVisibleTraitSections({
+    effortLevels,
+    thinkingEnabled,
+    supportsFastMode: caps.supportsFastMode,
+    contextWindowOptions,
+  });
+
+  if (!hasVisibleTraits) {
+    return null;
+  }
 
   return (
     <Menu
@@ -390,12 +457,12 @@ export const TraitsPicker = memo(function TraitsPicker({
       >
         {isCodexStyle ? (
           <span className="flex min-w-0 w-full items-center gap-2 overflow-hidden">
-            {triggerLabel}
+            {triggerLabel || "Traits"}
             <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
           </span>
         ) : (
           <>
-            <span>{triggerLabel}</span>
+            <span>{triggerLabel || "Traits"}</span>
             <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
           </>
         )}

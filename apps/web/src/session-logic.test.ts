@@ -824,6 +824,32 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
+  it("preserves subagent tool titles from tool lifecycle payloads", () => {
+    const entries = deriveWorkLogEntries(
+      [
+        makeActivity({
+          id: "subagent-complete",
+          createdAt: "2026-02-23T00:00:03.000Z",
+          kind: "tool.completed",
+          summary: "Subagent task",
+          payload: {
+            itemType: "collab_agent_tool_call",
+            title: "Subagent task",
+            detail: "Code reviewer checked migration edge cases.",
+          },
+        }),
+      ],
+      undefined,
+    );
+
+    expect(entries[0]).toMatchObject({
+      label: "Subagent task",
+      toolTitle: "Subagent task",
+      itemType: "collab_agent_tool_call",
+      detail: "Code reviewer checked migration edge cases.",
+    });
+  });
+
   it("keeps separate tool entries when an identical call starts after the prior one completed", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

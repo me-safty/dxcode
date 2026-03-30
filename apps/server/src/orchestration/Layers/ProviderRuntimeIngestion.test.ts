@@ -1967,7 +1967,9 @@ describe("ProviderRuntimeIngestion", () => {
         : undefined;
     expect(toolUpdate?.kind).toBe("tool.updated");
     expect(toolUpdatePayload?.itemType).toBe("command_execution");
+    expect(toolUpdatePayload?.title).toBe("Run tests");
     expect(toolUpdatePayload?.status).toBe("in_progress");
+    expect(toolUpdatePayload?.detail).toBe("bun test");
 
     const warning = thread.activities.find(
       (activity: ProviderRuntimeTestActivity) => activity.id === "evt-runtime-warning",

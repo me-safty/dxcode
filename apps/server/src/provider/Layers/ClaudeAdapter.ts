@@ -64,6 +64,7 @@ import {
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { classifyToolItemType, summarizeToolRequest, titleForTool } from "../toolCallMetadata.ts";
 import { getClaudeModelCapabilities } from "./ClaudeProvider.ts";
 import {
   ProviderAdapterProcessError,
@@ -394,50 +395,6 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
   };
 }
 
-function classifyToolItemType(toolName: string): CanonicalItemType {
-  const normalized = toolName.toLowerCase();
-  if (normalized.includes("agent")) {
-    return "collab_agent_tool_call";
-  }
-  if (
-    normalized === "task" ||
-    normalized === "agent" ||
-    normalized.includes("subagent") ||
-    normalized.includes("sub-agent")
-  ) {
-    return "collab_agent_tool_call";
-  }
-  if (
-    normalized.includes("bash") ||
-    normalized.includes("command") ||
-    normalized.includes("shell") ||
-    normalized.includes("terminal")
-  ) {
-    return "command_execution";
-  }
-  if (
-    normalized.includes("edit") ||
-    normalized.includes("write") ||
-    normalized.includes("file") ||
-    normalized.includes("patch") ||
-    normalized.includes("replace") ||
-    normalized.includes("create") ||
-    normalized.includes("delete")
-  ) {
-    return "file_change";
-  }
-  if (normalized.includes("mcp")) {
-    return "mcp_tool_call";
-  }
-  if (normalized.includes("websearch") || normalized.includes("web search")) {
-    return "web_search";
-  }
-  if (normalized.includes("image")) {
-    return "image_view";
-  }
-  return "dynamic_tool_call";
-}
-
 function isReadOnlyToolName(toolName: string): boolean {
   const normalized = toolName.toLowerCase();
   return (
@@ -460,41 +417,6 @@ function classifyRequestType(toolName: string): CanonicalRequestType {
     : itemType === "file_change"
       ? "file_change_approval"
       : "dynamic_tool_call";
-}
-
-function summarizeToolRequest(toolName: string, input: Record<string, unknown>): string {
-  const commandValue = input.command ?? input.cmd;
-  const command = typeof commandValue === "string" ? commandValue : undefined;
-  if (command && command.trim().length > 0) {
-    return `${toolName}: ${command.trim().slice(0, 400)}`;
-  }
-
-  const serialized = JSON.stringify(input);
-  if (serialized.length <= 400) {
-    return `${toolName}: ${serialized}`;
-  }
-  return `${toolName}: ${serialized.slice(0, 397)}...`;
-}
-
-function titleForTool(itemType: CanonicalItemType): string {
-  switch (itemType) {
-    case "command_execution":
-      return "Command run";
-    case "file_change":
-      return "File change";
-    case "mcp_tool_call":
-      return "MCP tool call";
-    case "collab_agent_tool_call":
-      return "Subagent task";
-    case "web_search":
-      return "Web search";
-    case "image_view":
-      return "Image view";
-    case "dynamic_tool_call":
-      return "Tool call";
-    default:
-      return "Item";
-  }
 }
 
 const SUPPORTED_CLAUDE_IMAGE_MIME_TYPES = new Set([
