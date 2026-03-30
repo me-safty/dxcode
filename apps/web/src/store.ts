@@ -858,9 +858,9 @@ export const selectProjectById =
     projectId ? state.projects.find((project) => project.id === projectId) : undefined;
 
 export const selectThreadById =
-  (threadId: ThreadId) =>
+  (threadId: ThreadId | null | undefined) =>
   (state: AppState): Thread | undefined =>
-    state.threads.find((thread) => thread.id === threadId);
+    threadId ? state.threads.find((thread) => thread.id === threadId) : undefined;
 
 export function setError(state: AppState, threadId: ThreadId, error: string | null): AppState {
   const threads = updateThread(state.threads, threadId, (t) => {
