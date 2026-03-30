@@ -19,7 +19,7 @@ import { isElectron } from "../env";
 import { useSettings } from "../hooks/useSettings";
 import {
   getCompletionAttentionState,
-  shouldRequestCompletionAttention,
+  getCompletionAttentionTurnId,
 } from "../lib/desktopCompletionAttention";
 import { isMacPlatform } from "../lib/utils";
 import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
@@ -77,19 +77,30 @@ function DesktopCompletionAttention() {
   const previousStatesRef = useRef<Map<string, ReturnType<typeof getCompletionAttentionState>>>(
     new Map(),
   );
+  const notifiedTurnIdsRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     const previousStates = previousStatesRef.current;
+    const previousNotifiedTurnIds = notifiedTurnIdsRef.current;
     const nextStates = new Map<string, ReturnType<typeof getCompletionAttentionState>>();
+    const nextNotifiedTurnIds = new Map<string, string>();
     let shouldBounce = false;
     for (const thread of threads) {
       const nextState = getCompletionAttentionState(thread);
       nextStates.set(thread.id, nextState);
-      if (!shouldBounce) {
-        shouldBounce = shouldRequestCompletionAttention(previousStates.get(thread.id), nextState);
+      const previousState = previousStates.get(thread.id);
+      const attentionTurnId = getCompletionAttentionTurnId(previousState, nextState);
+      const lastNotifiedTurnId = previousNotifiedTurnIds.get(thread.id);
+      if (lastNotifiedTurnId) {
+        nextNotifiedTurnIds.set(thread.id, lastNotifiedTurnId);
+      }
+      if (!shouldBounce && attentionTurnId !== null && attentionTurnId !== lastNotifiedTurnId) {
+        shouldBounce = true;
+        nextNotifiedTurnIds.set(thread.id, attentionTurnId);
       }
     }
     previousStatesRef.current = nextStates;
+    notifiedTurnIdsRef.current = nextNotifiedTurnIds;
 
     if (!dockBounceOnCompletion || !isElectron || !isMacPlatform(navigator.platform)) {
       return;

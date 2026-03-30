@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   getCompletionAttentionState,
+  getCompletionAttentionTurnId,
   shouldRequestCompletionAttention,
 } from "./desktopCompletionAttention";
 import type { Thread } from "../types";
@@ -163,5 +164,50 @@ describe("shouldRequestCompletionAttention", () => {
     );
 
     expect(shouldRequestCompletionAttention(previous, next)).toBe(true);
+  });
+
+  it("returns the same attention turn id for a session-ready lag and later turn completion", () => {
+    const running = getCompletionAttentionState(makeRunningThread());
+    const sessionReady = getCompletionAttentionState(
+      makeThread({
+        session: {
+          provider: "claudeAgent",
+          status: "ready",
+          orchestrationStatus: "ready",
+          createdAt: "2026-03-30T10:00:00.000Z",
+          updatedAt: "2026-03-30T10:00:03.000Z",
+        },
+        latestTurn: {
+          turnId: TurnId.makeUnsafe("turn-1"),
+          state: "running",
+          requestedAt: "2026-03-30T10:00:00.000Z",
+          startedAt: "2026-03-30T10:00:01.000Z",
+          completedAt: null,
+          assistantMessageId: null,
+        },
+      }),
+    );
+    const turnCompleted = getCompletionAttentionState(
+      makeThread({
+        session: {
+          provider: "claudeAgent",
+          status: "ready",
+          orchestrationStatus: "ready",
+          createdAt: "2026-03-30T10:00:00.000Z",
+          updatedAt: "2026-03-30T10:00:04.000Z",
+        },
+        latestTurn: {
+          turnId: TurnId.makeUnsafe("turn-1"),
+          state: "completed",
+          requestedAt: "2026-03-30T10:00:00.000Z",
+          startedAt: "2026-03-30T10:00:01.000Z",
+          completedAt: "2026-03-30T10:00:04.000Z",
+          assistantMessageId: null,
+        },
+      }),
+    );
+
+    expect(getCompletionAttentionTurnId(running, sessionReady)).toBe("turn-1");
+    expect(getCompletionAttentionTurnId(sessionReady, turnCompleted)).toBe("turn-1");
   });
 });

@@ -6,6 +6,7 @@ export interface CompletionAttentionState {
   completedAt: string | null;
   isWorking: boolean;
   lastError: string | null;
+  latestTurnId: string | null;
   latestTurnState: OrchestrationLatestTurnState | null;
   sessionStatus: OrchestrationSessionStatus | null;
 }
@@ -21,16 +22,18 @@ export function getCompletionAttentionState(
       thread?.session?.orchestrationStatus === "running" ||
       thread?.latestTurn?.state === "running",
     lastError: thread?.session?.lastError ?? null,
+    latestTurnId: thread?.latestTurn?.turnId ?? null,
     latestTurnState: thread?.latestTurn?.state ?? null,
     sessionStatus: thread?.session?.orchestrationStatus ?? null,
   };
 }
 
-export function shouldRequestCompletionAttention(
+export function getCompletionAttentionTurnId(
   previous: CompletionAttentionState | undefined,
   next: CompletionAttentionState,
-): boolean {
+): string | null {
   const completedTurnTransition =
+    next.latestTurnId !== null &&
     next.latestTurnState === "completed" &&
     next.completedAt !== null &&
     previous?.completedAt !== next.completedAt &&
@@ -44,5 +47,18 @@ export function shouldRequestCompletionAttention(
     next.activeTurnId === null &&
     next.lastError === null;
 
-  return completedTurnTransition || sessionReadyTransition;
+  if (completedTurnTransition) {
+    return next.latestTurnId;
+  }
+  if (sessionReadyTransition) {
+    return previous.activeTurnId;
+  }
+  return null;
+}
+
+export function shouldRequestCompletionAttention(
+  previous: CompletionAttentionState | undefined,
+  next: CompletionAttentionState,
+): boolean {
+  return getCompletionAttentionTurnId(previous, next) !== null;
 }
