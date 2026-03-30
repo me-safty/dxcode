@@ -6,7 +6,7 @@ import {
   type TerminalSessionSnapshot,
   type TerminalSessionStatus,
 } from "@t3tools/contracts";
-import { makeCoalescingDrainableWorker } from "@t3tools/shared/CoalescingDrainableWorker";
+import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
 import {
   Data,
   Effect,
@@ -804,7 +804,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       yield* registerKillFiber(process, fiber);
     });
 
-    const persistWorker = yield* makeCoalescingDrainableWorker<
+    const persistWorker = yield* makeKeyedCoalescingWorker<
       string,
       PersistHistoryRequest,
       never,

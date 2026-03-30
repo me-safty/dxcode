@@ -2,9 +2,9 @@ import { it } from "@effect/vitest";
 import { describe, expect } from "vitest";
 import { Deferred, Effect } from "effect";
 
-import { makeCoalescingDrainableWorker } from "./CoalescingDrainableWorker";
+import { makeKeyedCoalescingWorker } from "./KeyedCoalescingWorker";
 
-describe("makeCoalescingDrainableWorker", () => {
+describe("makeKeyedCoalescingWorker", () => {
   it.live("waits for latest work enqueued during active processing before draining the key", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -14,7 +14,7 @@ describe("makeCoalescingDrainableWorker", () => {
         const secondStarted = yield* Deferred.make<void>();
         const releaseSecond = yield* Deferred.make<void>();
 
-        const worker = yield* makeCoalescingDrainableWorker<string, string, never, never>({
+        const worker = yield* makeKeyedCoalescingWorker<string, string, never, never>({
           merge: (_current, next) => next,
           process: (key, value) =>
             Effect.gen(function* () {
@@ -64,7 +64,7 @@ describe("makeCoalescingDrainableWorker", () => {
         const releaseFailure = yield* Deferred.make<void>();
         const secondProcessed = yield* Deferred.make<void>();
 
-        const worker = yield* makeCoalescingDrainableWorker<string, string, string, never>({
+        const worker = yield* makeKeyedCoalescingWorker<string, string, string, never>({
           merge: (_current, next) => next,
           process: (key, value) =>
             Effect.gen(function* () {

@@ -1,34 +1,33 @@
 /**
- * CoalescingDrainableWorker - A keyed worker that keeps only the latest value per key.
+ * KeyedCoalescingWorker - A keyed worker that keeps only the latest value per key.
  *
  * Enqueues for an active or already-queued key are merged atomically instead of
  * creating duplicate queued items. `drainKey()` resolves only when that key has
  * no queued, pending, or active work left.
  *
- * @module CoalescingDrainableWorker
+ * @module KeyedCoalescingWorker
  */
 import type { Scope } from "effect";
 import { Effect, TxQueue, TxRef } from "effect";
 
-export interface CoalescingDrainableWorker<K, V> {
+export interface KeyedCoalescingWorker<K, V> {
   readonly enqueue: (key: K, value: V) => Effect.Effect<void>;
   readonly drainKey: (key: K) => Effect.Effect<void>;
-  readonly drain: Effect.Effect<void>;
 }
 
-interface CoalescingWorkerState<K, V> {
+interface KeyedCoalescingWorkerState<K, V> {
   readonly latestByKey: Map<K, V>;
   readonly queuedKeys: Set<K>;
   readonly activeKeys: Set<K>;
 }
 
-export const makeCoalescingDrainableWorker = <K, V, E, R>(options: {
+export const makeKeyedCoalescingWorker = <K, V, E, R>(options: {
   readonly merge: (current: V, next: V) => V;
   readonly process: (key: K, value: V) => Effect.Effect<void, E, R>;
-}): Effect.Effect<CoalescingDrainableWorker<K, V>, never, Scope.Scope | R> =>
+}): Effect.Effect<KeyedCoalescingWorker<K, V>, never, Scope.Scope | R> =>
   Effect.gen(function* () {
     const queue = yield* Effect.acquireRelease(TxQueue.unbounded<K>(), TxQueue.shutdown);
-    const stateRef = yield* TxRef.make<CoalescingWorkerState<K, V>>({
+    const stateRef = yield* TxRef.make<KeyedCoalescingWorkerState<K, V>>({
       latestByKey: new Map(),
       queuedKeys: new Set(),
       activeKeys: new Set(),
@@ -107,7 +106,7 @@ export const makeCoalescingDrainableWorker = <K, V, E, R>(options: {
       Effect.forkScoped,
     );
 
-    const enqueue: CoalescingDrainableWorker<K, V>["enqueue"] = (key, value) =>
+    const enqueue: KeyedCoalescingWorker<K, V>["enqueue"] = (key, value) =>
       TxRef.modify(stateRef, (state) => {
         const latestByKey = new Map(state.latestByKey);
         const existing = latestByKey.get(key);
@@ -126,17 +125,7 @@ export const makeCoalescingDrainableWorker = <K, V, E, R>(options: {
         Effect.asVoid,
       );
 
-    const drain: CoalescingDrainableWorker<K, V>["drain"] = TxRef.get(stateRef).pipe(
-      Effect.tap((state) =>
-        state.latestByKey.size > 0 || state.queuedKeys.size > 0 || state.activeKeys.size > 0
-          ? Effect.txRetry
-          : Effect.void,
-      ),
-      Effect.asVoid,
-      Effect.tx,
-    );
-
-    const drainKey: CoalescingDrainableWorker<K, V>["drainKey"] = (key) =>
+    const drainKey: KeyedCoalescingWorker<K, V>["drainKey"] = (key) =>
       TxRef.get(stateRef).pipe(
         Effect.tap((state) =>
           state.latestByKey.has(key) || state.queuedKeys.has(key) || state.activeKeys.has(key)
@@ -147,5 +136,5 @@ export const makeCoalescingDrainableWorker = <K, V, E, R>(options: {
         Effect.tx,
       );
 
-    return { enqueue, drainKey, drain } satisfies CoalescingDrainableWorker<K, V>;
+    return { enqueue, drainKey } satisfies KeyedCoalescingWorker<K, V>;
   });
