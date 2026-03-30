@@ -90,7 +90,7 @@ describe("shouldForceCompactComposerFooterForFit", () => {
     ).toBe(false);
   });
 
-  it("forces compact mode when content no longer fits on one line", () => {
+  it("stays expanded when minor overflow can be recovered by compacting primary actions", () => {
     expect(
       shouldForceCompactComposerFooterForFit({
         footerContentWidth: 500,
