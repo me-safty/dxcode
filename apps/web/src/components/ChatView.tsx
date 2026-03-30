@@ -2623,14 +2623,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
           // Keep local thread state in sync immediately so terminal drawer opens
           // with the worktree cwd/env instead of briefly using the project root.
           setStoreThreadBranch(threadIdForSend, result.worktree.branch, result.worktree.path);
-        } else {
-          // Keep the draft thread in sync immediately so the terminal drawer
-          // does not reopen the setup terminal at the project root.
-          setDraftThreadContext(threadIdForSend, {
-            branch: result.worktree.branch,
-            worktreePath: result.worktree.path,
-            envMode: "worktree",
-          });
         }
       }
 
@@ -2675,6 +2667,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
           worktreePath: nextThreadWorktreePath,
           createdAt: activeThread.createdAt,
         });
+        if (baseBranchForWorktree && nextThreadWorktreePath) {
+          // Sync the draft thread before opening the setup terminal so the
+          // terminal drawer resolves the same worktree cwd and env.
+          setDraftThreadContext(threadIdForSend, {
+            branch: nextThreadBranch,
+            worktreePath: nextThreadWorktreePath,
+            envMode: "worktree",
+          });
+        }
         createdServerThreadForLocalDraft = true;
       }
 
