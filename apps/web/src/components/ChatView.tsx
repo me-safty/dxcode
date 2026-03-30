@@ -746,6 +746,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
+  const planSidebarLabel = sidebarProposedPlan || interactionMode === "plan" ? "Plan" : "Tasks";
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
@@ -3909,6 +3910,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               activePlan || sidebarProposedPlan || planSidebarOpen,
                             )}
                             interactionMode={interactionMode}
+                            planSidebarLabel={planSidebarLabel}
                             planSidebarOpen={planSidebarOpen}
                             runtimeMode={runtimeMode}
                             traitsMenuContent={providerTraitsMenuContent}
@@ -3998,11 +4000,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   type="button"
                                   onClick={togglePlanSidebar}
                                   title={
-                                    planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"
+                                    planSidebarOpen
+                                      ? `Hide ${planSidebarLabel.toLowerCase()} sidebar`
+                                      : `Show ${planSidebarLabel.toLowerCase()} sidebar`
                                   }
                                 >
                                   <ListTodoIcon />
-                                  <span className="sr-only sm:not-sr-only">Plan</span>
+                                  <span className="sr-only sm:not-sr-only">{planSidebarLabel}</span>
                                 </Button>
                               </>
                             ) : null}
@@ -4214,6 +4218,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           <PlanSidebar
             activePlan={activePlan}
             activeProposedPlan={sidebarProposedPlan}
+            label={planSidebarLabel}
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeProject?.cwd ?? undefined}
             timestampFormat={timestampFormat}
