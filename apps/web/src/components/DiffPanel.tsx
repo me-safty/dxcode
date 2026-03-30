@@ -208,11 +208,16 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     [inferredCheckpointTurnCountByTurnId, turnDiffSummaries],
   );
   const latestTurnSummary = orderedTurnDiffSummaries[0] ?? null;
+  const olderTurnDiffSummaries = latestTurnSummary
+    ? orderedTurnDiffSummaries.slice(1)
+    : orderedTurnDiffSummaries;
 
-  const selectedTurnId = diffSearch.diffTurnId ?? null;
+  const isLatestTurnSelected = diffSearch.diffSelection === "latest";
+  const selectedTurnId = isLatestTurnSelected ? null : (diffSearch.diffTurnId ?? null);
   const selectedFilePath = selectedTurnId !== null ? (diffSearch.diffFilePath ?? null) : null;
-  const selectedTurn =
-    selectedTurnId === null
+  const selectedTurn = isLatestTurnSelected
+    ? (latestTurnSummary ?? undefined)
+    : selectedTurnId === null
       ? undefined
       : (orderedTurnDiffSummaries.find((summary) => summary.turnId === selectedTurnId) ??
         orderedTurnDiffSummaries[0]);
@@ -285,6 +290,10 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         : null;
 
   const selectedPatch = selectedTurn ? selectedTurnCheckpointDiff : conversationCheckpointDiff;
+  const isPinnedLatestTurnSelected =
+    !isLatestTurnSelected &&
+    latestTurnSummary !== null &&
+    selectedTurn?.turnId === latestTurnSummary.turnId;
   const hasResolvedPatch = typeof selectedPatch === "string";
   const hasNoNetChanges = hasResolvedPatch && selectedPatch.trim().length === 0;
   const renderablePatch = useMemo(
@@ -355,8 +364,15 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     });
   };
   const selectLatestTurn = () => {
-    if (!latestTurnSummary) return;
-    selectTurn(latestTurnSummary.turnId);
+    if (!activeThread || !latestTurnSummary) return;
+    void navigate({
+      to: "/$threadId",
+      params: { threadId: activeThread.id },
+      search: (previous) => {
+        const rest = stripDiffSearchParams(previous);
+        return { ...rest, diff: "1", diffSelection: "latest" };
+      },
+    });
   };
   const updateTurnStripScrollState = useCallback(() => {
     const element = turnStripRef.current;
@@ -409,7 +425,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [orderedTurnDiffSummaries, selectedTurnId, updateTurnStripScrollState]);
+  }, [isLatestTurnSelected, orderedTurnDiffSummaries, selectedTurnId, updateTurnStripScrollState]);
 
   useEffect(() => {
     const element = turnStripRef.current;
@@ -417,7 +433,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
 
     const selectedChip = element.querySelector<HTMLElement>("[data-turn-chip-selected='true']");
     selectedChip?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
-  }, [selectedTurn?.turnId, selectedTurnId]);
+  }, [isLatestTurnSelected, selectedTurn?.turnId, selectedTurnId]);
 
   const headerRow = (
     <>
@@ -465,12 +481,12 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
             type="button"
             className="shrink-0 rounded-md"
             onClick={selectWholeConversation}
-            data-turn-chip-selected={selectedTurnId === null}
+            data-turn-chip-selected={selectedTurnId === null && !isLatestTurnSelected}
           >
             <div
               className={cn(
                 "rounded-md border px-2 py-1 text-left transition-colors",
-                selectedTurnId === null
+                selectedTurnId === null && !isLatestTurnSelected
                   ? "border-border bg-accent text-accent-foreground"
                   : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
               )}
@@ -479,46 +495,63 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
             </div>
           </button>
           {latestTurnSummary ? (
-            <button
-              type="button"
-              className="shrink-0 rounded-md"
-              onClick={selectLatestTurn}
-              title={latestTurnSummary.turnId}
-              data-turn-chip-selected={selectedTurn?.turnId === latestTurnSummary.turnId}
-            >
-              <div
+            <div className="flex shrink-0 overflow-hidden rounded-md border border-border/70 bg-background/70">
+              <button
+                type="button"
                 className={cn(
-                  "rounded-md border px-2 py-1 text-left transition-colors",
-                  selectedTurn?.turnId === latestTurnSummary.turnId
-                    ? "border-border bg-accent text-accent-foreground"
-                    : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
+                  "flex items-center px-2 py-1 text-left leading-tight transition-colors focus-visible:outline-none",
+                  isLatestTurnSelected
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground/80 hover:bg-accent/40 hover:text-foreground/80",
                 )}
+                onClick={selectLatestTurn}
+                title={latestTurnSummary.turnId}
+                data-turn-chip-selected={isLatestTurnSelected}
+              >
+                <span className="text-[10px] leading-tight font-medium">Latest</span>
+              </button>
+              <div className="w-px bg-border/70" />
+              <button
+                type="button"
+                className={cn(
+                  "flex items-center px-2 py-1 text-left leading-tight transition-colors focus-visible:outline-none",
+                  isPinnedLatestTurnSelected
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground/80 hover:bg-accent/40 hover:text-foreground/80",
+                )}
+                onClick={() => selectTurn(latestTurnSummary.turnId)}
+                title={latestTurnSummary.turnId}
+                data-turn-chip-selected={isPinnedLatestTurnSelected}
               >
                 <div className="flex items-center gap-1">
-                  <span className="text-[10px] leading-tight font-medium">Latest</span>
-                  <span className="text-[9px] leading-tight opacity-70">
+                  <span className="text-[10px] leading-tight font-medium">
                     Turn{" "}
                     {latestTurnSummary.checkpointTurnCount ??
                       inferredCheckpointTurnCountByTurnId[latestTurnSummary.turnId] ??
                       "?"}
                   </span>
+                  <span className="text-[9px] leading-tight opacity-70">
+                    {formatShortTimestamp(latestTurnSummary.completedAt, settings.timestampFormat)}
+                  </span>
                 </div>
-              </div>
-            </button>
+              </button>
+            </div>
           ) : null}
-          {orderedTurnDiffSummaries.map((summary) => (
+          {olderTurnDiffSummaries.map((summary) => (
             <button
               key={summary.turnId}
               type="button"
               className="shrink-0 rounded-md"
               onClick={() => selectTurn(summary.turnId)}
               title={summary.turnId}
-              data-turn-chip-selected={summary.turnId === selectedTurn?.turnId}
+              data-turn-chip-selected={
+                !isLatestTurnSelected && summary.turnId === selectedTurn?.turnId
+              }
             >
               <div
                 className={cn(
                   "rounded-md border px-2 py-1 text-left transition-colors",
-                  summary.turnId === selectedTurn?.turnId
+                  !isLatestTurnSelected && summary.turnId === selectedTurn?.turnId
                     ? "border-border bg-accent text-accent-foreground"
                     : "border-border/70 bg-background/70 text-muted-foreground/80 hover:border-border hover:text-foreground/80",
                 )}

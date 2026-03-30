@@ -317,6 +317,38 @@ function createSnapshotWithTurnDiffCheckpoints(): OrchestrationReadModel {
   };
 }
 
+function appendCheckpointToStore(
+  state: ReturnType<typeof useStore.getState>,
+  checkpoint: {
+    turnId: TurnId;
+    checkpointTurnCount: number;
+    checkpointRef: string;
+    completedAt: string;
+  },
+): ReturnType<typeof useStore.getState> {
+  return {
+    ...state,
+    threads: state.threads.map((thread) =>
+      thread.id === THREAD_ID
+        ? {
+            ...thread,
+            turnDiffSummaries: [
+              ...thread.turnDiffSummaries,
+              {
+                turnId: checkpoint.turnId,
+                checkpointTurnCount: checkpoint.checkpointTurnCount,
+                checkpointRef: CheckpointRef.makeUnsafe(checkpoint.checkpointRef),
+                status: "ready" as const,
+                files: [],
+                completedAt: checkpoint.completedAt,
+              },
+            ],
+          }
+        : thread,
+    ),
+  };
+}
+
 function buildFixture(snapshot: OrchestrationReadModel): TestFixture {
   return {
     snapshot,
@@ -921,21 +953,96 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const latestTurnButton = await waitForElement(
         () =>
           Array.from(document.querySelectorAll("button")).find(
-            (button) =>
-              button.textContent?.includes("Latest") && button.textContent?.includes("Turn 2"),
+            (button) => button.textContent?.trim() === "Latest",
           ) as HTMLButtonElement | null,
         "Unable to find the Latest diff chip.",
       );
 
+      await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find((button) =>
+            button.textContent?.includes("Turn 2"),
+          ) as HTMLButtonElement | null,
+        "Unable to find the grouped latest turn chip.",
+      );
+
+      expect(mounted.router.state.location.search.diffSelection).toBeUndefined();
       expect(mounted.router.state.location.search.diffTurnId).toBeUndefined();
 
       latestTurnButton.click();
 
       await waitForSearch(
         mounted.router,
-        (search) => search.diff === "1" && search.diffTurnId === "turn-2",
-        "Latest diff chip should select the newest turn checkpoint.",
+        (search) =>
+          search.diff === "1" &&
+          search.diffSelection === "latest" &&
+          search.diffTurnId === undefined,
+        "Latest diff chip should switch the diff panel into follow-latest mode.",
       );
+
+      expect(
+        document.querySelectorAll("[data-turn-chip-selected='true']"),
+        "Latest mode should only mark a single chip as selected.",
+      ).toHaveLength(1);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps following the newest checkpoint while Latest mode is selected", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithTurnDiffCheckpoints(),
+      initialEntry: `/${THREAD_ID}?diff=1&diffSelection=latest`,
+    });
+
+    try {
+      await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Latest",
+          ) as HTMLButtonElement | null,
+        "Unable to find the initial Latest diff chip state.",
+      );
+
+      await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find((button) =>
+            button.textContent?.includes("Turn 2"),
+          ) as HTMLButtonElement | null,
+        "Unable to find the initial grouped latest turn chip.",
+      );
+
+      useStore.setState((state) =>
+        appendCheckpointToStore(state, {
+          turnId: "turn-3" as TurnId,
+          checkpointTurnCount: 3,
+          checkpointRef: "refs/t3/checkpoints/checkpoint-3",
+          completedAt: isoAt(360),
+        }),
+      );
+
+      await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find((button) =>
+            button.textContent?.includes("Turn 3"),
+          ) as HTMLButtonElement | null,
+        "Latest diff chip should update to the newest checkpoint turn.",
+      );
+
+      await waitForSearch(
+        mounted.router,
+        (search) =>
+          search.diff === "1" &&
+          search.diffSelection === "latest" &&
+          search.diffTurnId === undefined,
+        "Latest mode should keep routing state in follow-latest mode after new checkpoints arrive.",
+      );
+
+      expect(
+        document.querySelectorAll("[data-turn-chip-selected='true']"),
+        "Latest mode should still have exactly one selected chip after new checkpoints arrive.",
+      ).toHaveLength(1);
     } finally {
       await mounted.cleanup();
     }
