@@ -66,16 +66,13 @@ function splitPatch(patch: Partial<UnifiedSettings>): {
 }
 
 function normalizeClientPatch(clientPatch: Partial<ClientSettings>): Partial<ClientSettings> {
-  if (!Object.hasOwn(clientPatch, "terminalFontFamily")) {
+  if (typeof clientPatch.terminalFontFamily !== "string") {
     return clientPatch;
   }
 
   return {
     ...clientPatch,
-    terminalFontFamily:
-      typeof clientPatch.terminalFontFamily === "string"
-        ? normalizeTerminalFontFamily(clientPatch.terminalFontFamily)
-        : clientPatch.terminalFontFamily,
+    terminalFontFamily: normalizeTerminalFontFamily(clientPatch.terminalFontFamily),
   };
 }
 
