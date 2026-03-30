@@ -86,9 +86,17 @@ export function orderItemsByPreferredIds<TItem, TId>(input: {
 
   const itemsById = new Map(items.map((item) => [getId(item), item] as const));
   const preferredIdSet = new Set(preferredIds);
+  const emittedPreferredIds = new Set<TId>();
   const ordered = preferredIds.flatMap((id) => {
+    if (emittedPreferredIds.has(id)) {
+      return [];
+    }
     const item = itemsById.get(id);
-    return item ? [item] : [];
+    if (!item) {
+      return [];
+    }
+    emittedPreferredIds.add(id);
+    return [item];
   });
   const remaining = items.filter((item) => !preferredIdSet.has(getId(item)));
   return [...ordered, ...remaining];

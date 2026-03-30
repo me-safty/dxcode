@@ -122,6 +122,26 @@ describe("orderItemsByPreferredIds", () => {
       ProjectId.makeUnsafe("project-2"),
     ]);
   });
+
+  it("does not duplicate items when preferred ids repeat", () => {
+    const ordered = orderItemsByPreferredIds({
+      items: [
+        { id: ProjectId.makeUnsafe("project-1"), name: "One" },
+        { id: ProjectId.makeUnsafe("project-2"), name: "Two" },
+      ],
+      preferredIds: [
+        ProjectId.makeUnsafe("project-2"),
+        ProjectId.makeUnsafe("project-1"),
+        ProjectId.makeUnsafe("project-2"),
+      ],
+      getId: (project) => project.id,
+    });
+
+    expect(ordered.map((project) => project.id)).toEqual([
+      ProjectId.makeUnsafe("project-2"),
+      ProjectId.makeUnsafe("project-1"),
+    ]);
+  });
 });
 
 describe("resolveAdjacentThreadId", () => {
