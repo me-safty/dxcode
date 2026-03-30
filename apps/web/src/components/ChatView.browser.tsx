@@ -2,12 +2,14 @@
 import "../index.css";
 
 import {
+  CheckpointRef,
   ORCHESTRATION_WS_METHODS,
   type MessageId,
   type OrchestrationReadModel,
   type ProjectId,
   type ServerConfig,
   type ThreadId,
+  type TurnId,
   type WsWelcomePayload,
   WS_CHANNELS,
   WS_METHODS,
@@ -265,6 +267,53 @@ function createSnapshotForTargetUser(options: {
       },
     ],
     updatedAt: NOW_ISO,
+  };
+}
+
+function createSnapshotWithTurnDiffCheckpoints(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-diff-panel-latest-chip-test" as MessageId,
+    targetText: "diff panel latest chip test",
+  });
+  const threads = [...snapshot.threads];
+  const threadIndex = threads.findIndex((thread) => thread.id === THREAD_ID);
+
+  if (threadIndex < 0) {
+    return snapshot;
+  }
+
+  const thread = threads[threadIndex];
+  if (!thread) {
+    return snapshot;
+  }
+
+  threads[threadIndex] = {
+    ...thread,
+    checkpoints: [
+      {
+        turnId: "turn-1" as TurnId,
+        checkpointTurnCount: 1,
+        checkpointRef: CheckpointRef.makeUnsafe("refs/t3/checkpoints/checkpoint-1"),
+        status: "ready" as const,
+        files: [],
+        assistantMessageId: null,
+        completedAt: isoAt(120),
+      },
+      {
+        turnId: "turn-2" as TurnId,
+        checkpointTurnCount: 2,
+        checkpointRef: CheckpointRef.makeUnsafe("refs/t3/checkpoints/checkpoint-2"),
+        status: "ready" as const,
+        files: [],
+        assistantMessageId: null,
+        completedAt: isoAt(240),
+      },
+    ],
+  };
+
+  return {
+    ...snapshot,
+    threads,
   };
 }
 
@@ -572,6 +621,22 @@ async function waitForURL(
   return pathname;
 }
 
+async function waitForSearch(
+  router: ReturnType<typeof getRouter>,
+  predicate: (search: Record<string, unknown>) => boolean,
+  errorMessage: string,
+): Promise<Record<string, unknown>> {
+  let search: Record<string, unknown> = {};
+  await vi.waitFor(
+    () => {
+      search = router.state.location.search as Record<string, unknown>;
+      expect(predicate(search), errorMessage).toBe(true);
+    },
+    { timeout: 8_000, interval: 16 },
+  );
+  return search;
+}
+
 async function waitForComposerEditor(): Promise<HTMLElement> {
   return waitForElement(
     () => document.querySelector<HTMLElement>('[contenteditable="true"]'),
@@ -739,6 +804,7 @@ async function mountChatView(options: {
   viewport: ViewportSpec;
   snapshot: OrchestrationReadModel;
   configureFixture?: (fixture: TestFixture) => void;
+  initialEntry?: string;
 }): Promise<MountedChatView> {
   fixture = buildFixture(options.snapshot);
   options.configureFixture?.(fixture);
@@ -756,7 +822,7 @@ async function mountChatView(options: {
 
   const router = getRouter(
     createMemoryHistory({
-      initialEntries: [`/${THREAD_ID}`],
+      initialEntries: [options.initialEntry ?? `/${THREAD_ID}`],
     }),
   );
 
@@ -842,6 +908,37 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
   afterEach(() => {
     document.body.innerHTML = "";
+  });
+
+  it("selects the newest checkpoint when the Latest diff chip is clicked", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithTurnDiffCheckpoints(),
+      initialEntry: `/${THREAD_ID}?diff=1`,
+    });
+
+    try {
+      const latestTurnButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) =>
+              button.textContent?.includes("Latest") && button.textContent?.includes("Turn 2"),
+          ) as HTMLButtonElement | null,
+        "Unable to find the Latest diff chip.",
+      );
+
+      expect(mounted.router.state.location.search.diffTurnId).toBeUndefined();
+
+      latestTurnButton.click();
+
+      await waitForSearch(
+        mounted.router,
+        (search) => search.diff === "1" && search.diffTurnId === "turn-2",
+        "Latest diff chip should select the newest turn checkpoint.",
+      );
+    } finally {
+      await mounted.cleanup();
+    }
   });
 
   it.each(TEXT_VIEWPORT_MATRIX)(
