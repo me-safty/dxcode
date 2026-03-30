@@ -170,7 +170,6 @@ export const DroidAdapterLive = Layer.effect(
           ...(input.modelSelection?.model ? { model: input.modelSelection.model } : {}),
         });
 
-        sessions.set(input.threadId, session);
         wireAcpProcessMessages({
           session,
           onNotification: (_method, params) => handleSessionUpdate(session, toParamsRecord(params)),
@@ -188,14 +187,25 @@ export const DroidAdapterLive = Layer.effect(
           onExit: () => finalizeSession(session),
         });
 
-        yield* initializeAcpSession({
-          provider: PROVIDER,
-          session,
-          clientName: "t3-code",
-          clientVersion: "0.1.0",
-        });
-        yield* createAcpRemoteSession({ provider: PROVIDER, session, cwd });
+        yield* Effect.gen(function* () {
+          yield* initializeAcpSession({
+            provider: PROVIDER,
+            session,
+            clientName: "t3-code",
+            clientVersion: "0.1.0",
+          });
+          yield* createAcpRemoteSession({ provider: PROVIDER, session, cwd });
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.gen(function* () {
+              stopAcpProcessSession(session);
+              yield* clearSessionState(session.threadId);
+              return yield* error;
+            }),
+          ),
+        );
 
+        sessions.set(input.threadId, session);
         session.status = "ready";
         yield* emitSessionStarted(input.threadId);
 

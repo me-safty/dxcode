@@ -100,8 +100,8 @@ export function spawnAcpProcessSession(input: {
   runtimeMode: ProviderSession["runtimeMode"];
   model?: string;
 }): Effect.Effect<AcpSessionState, ProviderAdapterProcessError> {
-  return Effect.try({
-    try: () => {
+  return Effect.tryPromise({
+    try: async () => {
       const child = ChildProcess.spawn(input.binaryPath, [...input.args], {
         stdio: ["pipe", "pipe", "pipe"],
         cwd: input.cwd,
@@ -116,6 +116,20 @@ export function spawnAcpProcessSession(input: {
           detail: "Failed to spawn ACP process: missing stdio",
         });
       }
+
+      await new Promise<void>((resolve, reject) => {
+        const onError = (cause: Error) => {
+          child.off("spawn", onSpawn);
+          reject(cause);
+        };
+        const onSpawn = () => {
+          child.off("error", onError);
+          resolve();
+        };
+
+        child.once("error", onError);
+        child.once("spawn", onSpawn);
+      });
 
       return {
         threadId: input.threadId,
