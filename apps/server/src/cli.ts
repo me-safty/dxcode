@@ -262,7 +262,7 @@ export const resolveServerConfig = (
             Option.fromUndefinedOr(bootstrap.autoBootstrapProjectFromCwd),
           ),
         ),
-        () => mode === "web",
+        () => false,
       ),
     );
     const logWebSocketEvents = resolveBooleanFlag(
