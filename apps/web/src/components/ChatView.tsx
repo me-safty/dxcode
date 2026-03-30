@@ -229,6 +229,8 @@ import {
   readFileAsDataUrl,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
+  threadHasStarted,
+  waitForStartedServerThread,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 
@@ -737,12 +739,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
   const threadProvider =
     activeThread?.modelSelection.provider ?? activeProject?.defaultModelSelection?.provider ?? null;
-  const hasThreadStarted = Boolean(
-    activeThread &&
-    (activeThread.latestTurn !== null ||
-      activeThread.messages.length > 0 ||
-      activeThread.session !== null),
-  );
+  const hasThreadStarted = threadHasStarted(activeThread);
   const lockedProvider: ProviderKind | null = hasThreadStarted
     ? (sessionProvider ?? threadProvider ?? selectedProviderByThreadId ?? null)
     : null;
@@ -3232,6 +3229,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
           interactionMode: "default",
           createdAt,
         });
+      })
+      .then(() => {
+        return waitForStartedServerThread(nextThreadId);
       })
       .then(() => {
         // Signal that the plan sidebar should open on the new thread.

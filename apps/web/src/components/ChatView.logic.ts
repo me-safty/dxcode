@@ -3,6 +3,7 @@ import { type ChatMessage, type SessionPhase, type Thread, type ThreadSession } 
 import { randomUUID } from "~/lib/utils";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import { Schema } from "effect";
+import { useStore } from "../store";
 import {
   filterTerminalContextsWithText,
   stripInlineTerminalContextPlaceholders,
@@ -157,6 +158,47 @@ export function buildExpiredTerminalContextToastCopy(
     title: `${noun} omitted from message`,
     description: "Re-add it if you want that terminal output included.",
   };
+}
+
+export function threadHasStarted(thread: Thread | null | undefined): boolean {
+  return Boolean(
+    thread && (thread.latestTurn !== null || thread.messages.length > 0 || thread.session !== null),
+  );
+}
+
+export async function waitForStartedServerThread(
+  threadId: ThreadId,
+  timeoutMs = 1_000,
+): Promise<boolean> {
+  const thread = useStore.getState().threads.find((thread) => thread.id === threadId);
+
+  if (threadHasStarted(thread)) {
+    return true;
+  }
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (result: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      globalThis.clearTimeout(timeoutId);
+      unsubscribe();
+      resolve(result);
+    };
+
+    const timeoutId = globalThis.setTimeout(() => {
+      finish(false);
+    }, timeoutMs);
+
+    const unsubscribe = useStore.subscribe((state) => {
+      if (!threadHasStarted(state.threads.find((thread) => thread.id === threadId))) {
+        return;
+      }
+      finish(true);
+    });
+  });
 }
 
 export interface LocalDispatchSnapshot {
