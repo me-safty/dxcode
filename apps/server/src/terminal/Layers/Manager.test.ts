@@ -20,7 +20,6 @@ import {
   Ref,
   Schedule,
   Scope,
-  Stream,
 } from "effect";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
@@ -237,10 +236,11 @@ const createManager = (
           : {}),
       });
       const eventsRef = yield* Ref.make<ReadonlyArray<TerminalEvent>>([]);
-
-      yield* Stream.runForEach(manager.streamEvents, (event) =>
+      const scope = yield* Effect.scope;
+      const unsubscribe = yield* manager.subscribe((event) =>
         Ref.update(eventsRef, (events) => [...events, event]),
-      ).pipe(Effect.forkScoped);
+      );
+      yield* Scope.addFinalizer(scope, Effect.sync(unsubscribe));
 
       return {
         baseDir,
@@ -870,6 +870,72 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
         ),
         "1200 millis",
       );
+    }),
+  );
+
+  it.effect("pushes PTY callbacks to direct event subscribers", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager(5, {
+        ptyAdapter: new FakePtyAdapter("async"),
+      });
+      const scope = yield* Effect.scope;
+      const subscriberEvents = yield* Ref.make<ReadonlyArray<TerminalEvent>>([]);
+      const unsubscribe = yield* manager.subscribe((event) =>
+        Ref.update(subscriberEvents, (events) => [...events, event]),
+      );
+      yield* Scope.addFinalizer(scope, Effect.sync(unsubscribe));
+
+      yield* manager.open(openInput());
+      const process = ptyAdapter.processes[0];
+      expect(process).toBeDefined();
+      if (!process) return;
+
+      process.emitData("hello from subscriber\n");
+
+      yield* waitFor(
+        Effect.map(Ref.get(subscriberEvents), (events) =>
+          events.some(
+            (event) => event.type === "output" && event.data === "hello from subscriber\n",
+          ),
+        ),
+        "1200 millis",
+      );
+    }),
+  );
+
+  it.effect("preserves queued PTY output ordering through exit callbacks", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter, getEvents } = yield* createManager(5, {
+        ptyAdapter: new FakePtyAdapter("async"),
+      });
+
+      yield* manager.open(openInput());
+      const process = ptyAdapter.processes[0];
+      expect(process).toBeDefined();
+      if (!process) return;
+
+      process.emitData("first\n");
+      process.emitData("second\n");
+      process.emitExit({ exitCode: 0, signal: 0 });
+
+      yield* waitFor(
+        Effect.map(getEvents, (events) => {
+          const relevant = events.filter(
+            (event) => event.type === "output" || event.type === "exited",
+          );
+          return relevant.length >= 3;
+        }),
+        "1200 millis",
+      );
+
+      const relevant = (yield* getEvents).filter(
+        (event) => event.type === "output" || event.type === "exited",
+      );
+      expect(relevant).toEqual([
+        expect.objectContaining({ type: "output", data: "first\n" }),
+        expect.objectContaining({ type: "output", data: "second\n" }),
+        expect.objectContaining({ type: "exited", exitCode: 0, exitSignal: 0 }),
+      ]);
     }),
   );
 

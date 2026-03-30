@@ -16,7 +16,7 @@ import {
   TerminalSessionSnapshot,
   TerminalWriteInput,
 } from "@t3tools/contracts";
-import { Effect, Schema, ServiceMap, Stream } from "effect";
+import { Effect, Schema, ServiceMap } from "effect";
 
 export class TerminalCwdError extends Schema.TaggedErrorClass<TerminalCwdError>()(
   "TerminalCwdError",
@@ -135,9 +135,13 @@ export interface TerminalManagerShape {
   readonly close: (input: TerminalCloseInput) => Effect.Effect<void, TerminalError>;
 
   /**
-   * Stream terminal runtime events.
+   * Subscribe to terminal runtime events with a direct callback.
+   *
+   * Returns an unsubscribe function.
    */
-  readonly streamEvents: Stream.Stream<TerminalEvent>;
+  readonly subscribe: (
+    listener: (event: TerminalEvent) => Effect.Effect<void>,
+  ) => Effect.Effect<() => void>;
 }
 
 /**

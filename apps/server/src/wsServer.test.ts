@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Effect, Exit, Layer, PlatformError, PubSub, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, Layer, PlatformError, PubSub, Scope, Stream } from "effect";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { createServer } from "./wsServer";
 import WebSocket from "ws";
@@ -207,20 +207,17 @@ class MockTerminalManager implements TerminalManagerShape {
       }
     });
 
-  get streamEvents(): TerminalManagerShape["streamEvents"] {
-    return Stream.unwrap(
-      Effect.acquireRelease(
-        Effect.sync(() => {
-          this.activeSubscriptions += 1;
-          return Stream.fromPubSub(this.eventPubSub);
-        }),
-        () =>
-          Effect.sync(() => {
-            this.activeSubscriptions -= 1;
-          }),
-      ),
-    ).pipe(Stream.scoped);
-  }
+  readonly subscribe: TerminalManagerShape["subscribe"] = (listener) =>
+    Effect.sync(() => {
+      this.activeSubscriptions += 1;
+      const fiber = Effect.runFork(
+        Stream.runForEach(Stream.fromPubSub(this.eventPubSub), (event) => listener(event)),
+      );
+      return () => {
+        this.activeSubscriptions -= 1;
+        Effect.runFork(Fiber.interrupt(fiber).pipe(Effect.ignore));
+      };
+    });
 }
 
 // ---------------------------------------------------------------------------

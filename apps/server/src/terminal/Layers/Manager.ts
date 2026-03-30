@@ -17,10 +17,8 @@ import {
   FileSystem,
   Layer,
   Option,
-  PubSub,
   Scope,
   Semaphore,
-  Stream,
   SynchronizedRef,
 } from "effect";
 
@@ -90,6 +88,9 @@ interface TerminalSessionState {
   pid: number | null;
   history: string;
   pendingHistoryControlSequence: string;
+  pendingProcessEvents: Array<PendingProcessEvent>;
+  pendingProcessEventIndex: number;
+  processEventDrainRunning: boolean;
   exitCode: number | null;
   exitSignal: number | null;
   updatedAt: string;
@@ -106,6 +107,26 @@ interface PersistHistoryRequest {
   history: string;
   immediate: boolean;
 }
+
+type PendingProcessEvent = { type: "output"; data: string } | { type: "exit"; event: PtyExitEvent };
+
+type DrainProcessEventAction =
+  | { type: "idle" }
+  | {
+      type: "output";
+      threadId: string;
+      terminalId: string;
+      history: string | null;
+      data: string;
+    }
+  | {
+      type: "exit";
+      process: PtyProcess | null;
+      threadId: string;
+      terminalId: string;
+      exitCode: number | null;
+      exitSignal: number | null;
+    };
 
 interface TerminalManagerState {
   sessions: Map<string, TerminalSessionState>;
@@ -131,6 +152,24 @@ function cleanupProcessHandles(session: TerminalSessionState): void {
   session.unsubscribeData = null;
   session.unsubscribeExit?.();
   session.unsubscribeExit = null;
+}
+
+function enqueueProcessEvent(
+  session: TerminalSessionState,
+  expectedPid: number,
+  event: PendingProcessEvent,
+): boolean {
+  if (!session.process || session.status !== "running" || session.pid !== expectedPid) {
+    return false;
+  }
+
+  session.pendingProcessEvents.push(event);
+  if (session.processEventDrainRunning) {
+    return false;
+  }
+
+  session.processEventDrainRunning = true;
+  return true;
 }
 
 function defaultShellResolver(): string {
@@ -637,15 +676,16 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       killFibers: new Map(),
     });
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
-    const terminalEvents = yield* Effect.acquireRelease(
-      PubSub.unbounded<TerminalEvent>(),
-      PubSub.shutdown,
-    );
+    const terminalEventListeners = new Set<(event: TerminalEvent) => Effect.Effect<void>>();
     const workerScope = yield* Scope.make("sequential");
     yield* Effect.addFinalizer(() => Scope.close(workerScope, Exit.void));
 
     const publishEvent = (event: TerminalEvent) =>
-      PubSub.publish(terminalEvents, event).pipe(Effect.asVoid);
+      Effect.gen(function* () {
+        for (const listener of terminalEventListeners) {
+          yield* listener(event).pipe(Effect.ignoreCause({ log: true }));
+        }
+      });
 
     const historyPath = (threadId: string, terminalId: string) => {
       const threadPart = toSafeThreadId(threadId);
@@ -1055,107 +1095,115 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       },
     );
 
-    const handleProcessData = Effect.fn("terminal.handleProcessData")(function* (
-      sessionKey: string,
+    const drainProcessEvents = Effect.fn("terminal.drainProcessEvents")(function* (
+      session: TerminalSessionState,
       expectedPid: number,
-      data: string,
     ) {
-      const update = yield* modifyManagerState((state) => {
-        const session = state.sessions.get(sessionKey);
-        if (
-          !session ||
-          !session.process ||
-          session.status !== "running" ||
-          session.pid !== expectedPid
-        ) {
-          return [null, state] as const;
-        }
+      while (true) {
+        const action: DrainProcessEventAction = yield* Effect.sync(() => {
+          if (session.pid !== expectedPid || !session.process || session.status !== "running") {
+            session.pendingProcessEvents = [];
+            session.pendingProcessEventIndex = 0;
+            session.processEventDrainRunning = false;
+            return { type: "idle" } as const;
+          }
 
-        const sanitized = sanitizeTerminalHistoryChunk(session.pendingHistoryControlSequence, data);
-        session.pendingHistoryControlSequence = sanitized.pendingControlSequence;
-        if (sanitized.visibleText.length > 0) {
-          session.history = capHistory(
-            `${session.history}${sanitized.visibleText}`,
-            historyLineLimit,
-          );
-        }
-        session.updatedAt = new Date().toISOString();
+          const nextEvent = session.pendingProcessEvents[session.pendingProcessEventIndex];
+          if (!nextEvent) {
+            session.pendingProcessEvents = [];
+            session.pendingProcessEventIndex = 0;
+            session.processEventDrainRunning = false;
+            return { type: "idle" } as const;
+          }
 
-        return [
-          {
-            threadId: session.threadId,
-            terminalId: session.terminalId,
-            history: sanitized.visibleText.length > 0 ? session.history : null,
-          },
-          state,
-        ] as const;
-      });
+          session.pendingProcessEventIndex += 1;
+          if (session.pendingProcessEventIndex >= session.pendingProcessEvents.length) {
+            session.pendingProcessEvents = [];
+            session.pendingProcessEventIndex = 0;
+          }
 
-      if (!update) {
-        return;
-      }
+          if (nextEvent.type === "output") {
+            const sanitized = sanitizeTerminalHistoryChunk(
+              session.pendingHistoryControlSequence,
+              nextEvent.data,
+            );
+            session.pendingHistoryControlSequence = sanitized.pendingControlSequence;
+            if (sanitized.visibleText.length > 0) {
+              session.history = capHistory(
+                `${session.history}${sanitized.visibleText}`,
+                historyLineLimit,
+              );
+            }
+            session.updatedAt = new Date().toISOString();
 
-      if (update.history !== null) {
-        yield* queuePersist(update.threadId, update.terminalId, update.history);
-      }
+            return {
+              type: "output",
+              threadId: session.threadId,
+              terminalId: session.terminalId,
+              history: sanitized.visibleText.length > 0 ? session.history : null,
+              data: nextEvent.data,
+            } as const;
+          }
 
-      yield* publishEvent({
-        type: "output",
-        threadId: update.threadId,
-        terminalId: update.terminalId,
-        createdAt: new Date().toISOString(),
-        data,
-      });
-    });
+          const process = session.process;
+          cleanupProcessHandles(session);
+          session.process = null;
+          session.pid = null;
+          session.hasRunningSubprocess = false;
+          session.status = "exited";
+          session.pendingHistoryControlSequence = "";
+          session.pendingProcessEvents = [];
+          session.pendingProcessEventIndex = 0;
+          session.processEventDrainRunning = false;
+          session.exitCode = Number.isInteger(nextEvent.event.exitCode)
+            ? nextEvent.event.exitCode
+            : null;
+          session.exitSignal = Number.isInteger(nextEvent.event.signal)
+            ? nextEvent.event.signal
+            : null;
+          session.updatedAt = new Date().toISOString();
 
-    const handleProcessExit = Effect.fn("terminal.handleProcessExit")(function* (
-      sessionKey: string,
-      expectedPid: number,
-      event: PtyExitEvent,
-    ) {
-      const update = yield* modifyManagerState((state) => {
-        const session = state.sessions.get(sessionKey);
-        if (!session || session.pid !== expectedPid) {
-          return [null, state] as const;
-        }
-
-        const process = session.process;
-        cleanupProcessHandles(session);
-        session.process = null;
-        session.pid = null;
-        session.hasRunningSubprocess = false;
-        session.status = "exited";
-        session.pendingHistoryControlSequence = "";
-        session.exitCode = Number.isInteger(event.exitCode) ? event.exitCode : null;
-        session.exitSignal = Number.isInteger(event.signal) ? event.signal : null;
-        session.updatedAt = new Date().toISOString();
-
-        return [
-          {
+          return {
+            type: "exit",
             process,
             threadId: session.threadId,
             terminalId: session.terminalId,
             exitCode: session.exitCode,
             exitSignal: session.exitSignal,
-          },
-          state,
-        ] as const;
-      });
+          } as const;
+        });
 
-      if (!update) {
+        if (action.type === "idle") {
+          return;
+        }
+
+        if (action.type === "output") {
+          if (action.history !== null) {
+            yield* queuePersist(action.threadId, action.terminalId, action.history);
+          }
+
+          yield* publishEvent({
+            type: "output",
+            threadId: action.threadId,
+            terminalId: action.terminalId,
+            createdAt: new Date().toISOString(),
+            data: action.data,
+          });
+          continue;
+        }
+
+        yield* clearKillFiber(action.process);
+        yield* publishEvent({
+          type: "exited",
+          threadId: action.threadId,
+          terminalId: action.terminalId,
+          createdAt: new Date().toISOString(),
+          exitCode: action.exitCode,
+          exitSignal: action.exitSignal,
+        });
+        yield* evictInactiveSessionsIfNeeded();
         return;
       }
-
-      yield* clearKillFiber(update.process);
-      yield* publishEvent({
-        type: "exited",
-        threadId: update.threadId,
-        terminalId: update.terminalId,
-        createdAt: new Date().toISOString(),
-        exitCode: update.exitCode,
-        exitSignal: update.exitSignal,
-      });
-      yield* evictInactiveSessionsIfNeeded();
     });
 
     const stopProcess = Effect.fn("terminal.stopProcess")(function* (
@@ -1171,6 +1219,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         session.hasRunningSubprocess = false;
         session.status = "exited";
         session.pendingHistoryControlSequence = "";
+        session.pendingProcessEvents = [];
+        session.pendingProcessEventIndex = 0;
+        session.processEventDrainRunning = false;
         session.updatedAt = new Date().toISOString();
         return [undefined, state] as const;
       });
@@ -1252,14 +1303,15 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         session.exitCode = null;
         session.exitSignal = null;
         session.hasRunningSubprocess = false;
+        session.pendingProcessEvents = [];
+        session.pendingProcessEventIndex = 0;
+        session.processEventDrainRunning = false;
         session.updatedAt = new Date().toISOString();
         return [undefined, state] as const;
       });
 
       let ptyProcess: PtyProcess | null = null;
       let startedShell: string | null = null;
-
-      const sessionKey = toSessionKey(session.threadId, session.terminalId);
 
       const startResult = yield* Effect.result(
         Effect.gen(function* () {
@@ -1271,10 +1323,16 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
           const processPid = ptyProcess.pid;
           const unsubscribeData = ptyProcess.onData((data) => {
-            runFork(handleProcessData(sessionKey, processPid, data));
+            if (!enqueueProcessEvent(session, processPid, { type: "output", data })) {
+              return;
+            }
+            runFork(drainProcessEvents(session, processPid));
           });
           const unsubscribeExit = ptyProcess.onExit((event) => {
-            runFork(handleProcessExit(sessionKey, processPid, event));
+            if (!enqueueProcessEvent(session, processPid, { type: "exit", event })) {
+              return;
+            }
+            runFork(drainProcessEvents(session, processPid));
           });
 
           yield* modifyManagerState((state) => {
@@ -1314,6 +1372,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           session.unsubscribeData = null;
           session.unsubscribeExit = null;
           session.hasRunningSubprocess = false;
+          session.pendingProcessEvents = [];
+          session.pendingProcessEventIndex = 0;
+          session.processEventDrainRunning = false;
           session.updatedAt = new Date().toISOString();
           return [undefined, state] as const;
         });
@@ -1505,6 +1566,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               pid: null,
               history,
               pendingHistoryControlSequence: "",
+              pendingProcessEvents: [],
+              pendingProcessEventIndex: 0,
+              processEventDrainRunning: false,
               exitCode: null,
               exitSignal: null,
               updatedAt: new Date().toISOString(),
@@ -1553,6 +1617,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             liveSession.runtimeEnv = nextRuntimeEnv;
             liveSession.history = "";
             liveSession.pendingHistoryControlSequence = "";
+            liveSession.pendingProcessEvents = [];
+            liveSession.pendingProcessEventIndex = 0;
+            liveSession.processEventDrainRunning = false;
             yield* persistHistory(
               liveSession.threadId,
               liveSession.terminalId,
@@ -1562,6 +1629,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             liveSession.runtimeEnv = nextRuntimeEnv;
             liveSession.history = "";
             liveSession.pendingHistoryControlSequence = "";
+            liveSession.pendingProcessEvents = [];
+            liveSession.pendingProcessEventIndex = 0;
+            liveSession.processEventDrainRunning = false;
             yield* persistHistory(
               liveSession.threadId,
               liveSession.terminalId,
@@ -1634,6 +1704,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           const session = yield* requireSession(input.threadId, terminalId);
           session.history = "";
           session.pendingHistoryControlSequence = "";
+          session.pendingProcessEvents = [];
+          session.pendingProcessEventIndex = 0;
+          session.processEventDrainRunning = false;
           session.updatedAt = new Date().toISOString();
           yield* persistHistory(input.threadId, terminalId, session.history);
           yield* publishEvent({
@@ -1666,6 +1739,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               pid: null,
               history: "",
               pendingHistoryControlSequence: "",
+              pendingProcessEvents: [],
+              pendingProcessEventIndex: 0,
+              processEventDrainRunning: false,
               exitCode: null,
               exitSignal: null,
               updatedAt: new Date().toISOString(),
@@ -1696,6 +1772,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
           session.history = "";
           session.pendingHistoryControlSequence = "";
+          session.pendingProcessEvents = [];
+          session.pendingProcessEventIndex = 0;
+          session.processEventDrainRunning = false;
           yield* persistHistory(input.threadId, terminalId, session.history);
           yield* startSession(
             session,
@@ -1742,9 +1821,13 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       clear,
       restart,
       close,
-      get streamEvents(): TerminalManagerShape["streamEvents"] {
-        return Stream.fromPubSub(terminalEvents);
-      },
+      subscribe: (listener) =>
+        Effect.sync(() => {
+          terminalEventListeners.add(listener);
+          return () => {
+            terminalEventListeners.delete(listener);
+          };
+        }),
     } satisfies TerminalManagerShape;
   },
 );
