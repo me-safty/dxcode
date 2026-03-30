@@ -140,7 +140,9 @@ import {
 } from "../lib/terminalContext";
 import { deriveLatestContextWindowSnapshot } from "../lib/contextWindow";
 import {
+  resolveComposerFooterContentWidth,
   shouldForceCompactComposerFooterForFit,
+  shouldUseCompactComposerPrimaryActions,
   shouldUseCompactComposerFooter,
 } from "./composerFooterLayout";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
@@ -349,6 +351,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, boolean>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
   const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
+  const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
@@ -1921,29 +1924,55 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!composerForm) return;
     const measureComposerFormWidth = () => composerForm.clientWidth;
     const measureFooterCompactness = () => {
-      const heuristicCompact = shouldUseCompactComposerFooter(measureComposerFormWidth(), {
+      const composerFormWidth = measureComposerFormWidth();
+      const heuristicFooterCompact = shouldUseCompactComposerFooter(composerFormWidth, {
         hasWideActions: composerFooterHasWideActions,
       });
-      if (heuristicCompact) {
-        return true;
-      }
-      return shouldForceCompactComposerFooterForFit({
-        footerWidth: composerFooterRef.current?.clientWidth ?? null,
+      const footer = composerFooterRef.current;
+      const footerStyle = footer ? window.getComputedStyle(footer) : null;
+      const footerContentWidth = resolveComposerFooterContentWidth({
+        footerWidth: footer?.clientWidth ?? null,
+        paddingLeft: footerStyle ? Number.parseFloat(footerStyle.paddingLeft) : null,
+        paddingRight: footerStyle ? Number.parseFloat(footerStyle.paddingRight) : null,
+      });
+      const fitInput = {
+        footerContentWidth,
         leadingContentWidth: composerFooterLeadingRef.current?.scrollWidth ?? null,
         actionsWidth: composerFooterActionsRef.current?.scrollWidth ?? null,
-      });
+      };
+      const nextFooterCompact =
+        heuristicFooterCompact || shouldForceCompactComposerFooterForFit(fitInput);
+      const nextPrimaryActionsCompact =
+        nextFooterCompact &&
+        shouldUseCompactComposerPrimaryActions(composerFormWidth, {
+          hasWideActions: composerFooterHasWideActions,
+        });
+
+      return {
+        primaryActionsCompact: nextPrimaryActionsCompact,
+        footerCompact: nextFooterCompact,
+      };
     };
 
     composerFormHeightRef.current = composerForm.getBoundingClientRect().height;
-    setIsComposerFooterCompact(measureFooterCompactness());
+    const initialCompactness = measureFooterCompactness();
+    setIsComposerPrimaryActionsCompact(initialCompactness.primaryActionsCompact);
+    setIsComposerFooterCompact(initialCompactness.footerCompact);
     if (typeof ResizeObserver === "undefined") return;
 
     const observer = new ResizeObserver((entries) => {
       const [entry] = entries;
       if (!entry) return;
 
-      const nextCompact = measureFooterCompactness();
-      setIsComposerFooterCompact((previous) => (previous === nextCompact ? previous : nextCompact));
+      const nextCompactness = measureFooterCompactness();
+      setIsComposerPrimaryActionsCompact((previous) =>
+        previous === nextCompactness.primaryActionsCompact
+          ? previous
+          : nextCompactness.primaryActionsCompact,
+      );
+      setIsComposerFooterCompact((previous) =>
+        previous === nextCompactness.footerCompact ? previous : nextCompactness.footerCompact,
+      );
 
       const nextHeight = entry.contentRect.height;
       const previousHeight = composerFormHeightRef.current;
@@ -4058,7 +4087,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           </span>
                         ) : null}
                         <ComposerPrimaryActions
-                          compact={isComposerFooterCompact}
+                          compact={isComposerPrimaryActionsCompact}
                           pendingAction={
                             activePendingProgress
                               ? {
