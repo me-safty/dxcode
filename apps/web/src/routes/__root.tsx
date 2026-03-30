@@ -32,6 +32,7 @@ import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
+import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -165,12 +166,7 @@ function EventRouter() {
     const api = readNativeApi();
     if (!api) return;
     let disposed = false;
-    let latestSequence = 0;
-    let highestObservedSequence = 0;
-    let bootstrapped = false;
-    let snapshotSyncInFlight = false;
-    let replayInFlight = false;
-    let pendingReplay = false;
+    const recovery = createOrchestrationRecoveryCoordinator();
     let needsProviderInvalidation = false;
 
     const reconcileSnapshotDerivedState = () => {
@@ -213,15 +209,10 @@ function EventRouter() {
     );
 
     const applyEventBatch = (events: Parameters<typeof applyOrchestrationEvents>[0]) => {
-      const nextEvents = events
-        .filter((event) => event.sequence > latestSequence)
-        .toSorted((left, right) => left.sequence - right.sequence);
+      const nextEvents = recovery.markEventBatchApplied(events);
       if (nextEvents.length === 0) {
         return;
       }
-
-      latestSequence = nextEvents.at(-1)?.sequence ?? latestSequence;
-      highestObservedSequence = Math.max(highestObservedSequence, latestSequence);
 
       const batchEffects = deriveOrchestrationBatchEffects(nextEvents);
       const needsProjectUiSync = nextEvents.some(
@@ -254,83 +245,64 @@ function EventRouter() {
       }
     };
 
-    const replayFromLatest = async (): Promise<void> => {
-      if (!bootstrapped || snapshotSyncInFlight) {
-        pendingReplay = true;
-        return;
-      }
-      if (replayInFlight) {
-        pendingReplay = true;
+    const recoverFromSequenceGap = async (): Promise<void> => {
+      if (!recovery.beginReplayRecovery("sequence-gap")) {
         return;
       }
 
-      replayInFlight = true;
-      pendingReplay = false;
       try {
-        const events = await api.orchestration.replayEvents(latestSequence);
+        const events = await api.orchestration.replayEvents(recovery.getState().latestSequence);
         if (!disposed) {
           applyEventBatch(events);
         }
       } catch {
-        bootstrapped = false;
-        void bootstrapSnapshot();
-      }
-
-      replayInFlight = false;
-      if (
-        !disposed &&
-        bootstrapped &&
-        (pendingReplay || highestObservedSequence > latestSequence)
-      ) {
-        void replayFromLatest();
-      }
-    };
-
-    const bootstrapSnapshot = async (): Promise<void> => {
-      if (snapshotSyncInFlight) {
-        pendingReplay = true;
+        recovery.failReplayRecovery();
+        void fallbackToSnapshotRecovery();
         return;
       }
 
-      snapshotSyncInFlight = true;
+      if (!disposed && recovery.completeReplayRecovery()) {
+        void recoverFromSequenceGap();
+      }
+    };
+
+    const runSnapshotRecovery = async (reason: "bootstrap" | "replay-failed"): Promise<void> => {
+      if (!recovery.beginSnapshotRecovery(reason)) {
+        return;
+      }
+
       try {
         const snapshot = await api.orchestration.getSnapshot();
         if (!disposed) {
-          latestSequence = Math.max(latestSequence, snapshot.snapshotSequence);
-          highestObservedSequence = Math.max(highestObservedSequence, latestSequence);
           syncServerReadModel(snapshot);
-          bootstrapped = true;
           reconcileSnapshotDerivedState();
+          if (recovery.completeSnapshotRecovery(snapshot.snapshotSequence)) {
+            void recoverFromSequenceGap();
+          }
         }
       } catch {
         // Keep prior state and wait for welcome or a later replay attempt.
-      }
-
-      snapshotSyncInFlight = false;
-      if (
-        !disposed &&
-        bootstrapped &&
-        (pendingReplay || highestObservedSequence > latestSequence)
-      ) {
-        void replayFromLatest();
+        recovery.failSnapshotRecovery();
       }
     };
 
+    const bootstrapFromSnapshot = async (): Promise<void> => {
+      await runSnapshotRecovery("bootstrap");
+    };
+
+    const fallbackToSnapshotRecovery = async (): Promise<void> => {
+      await runSnapshotRecovery("replay-failed");
+    };
+
     const unsubDomainEvent = api.orchestration.onDomainEvent((event) => {
-      highestObservedSequence = Math.max(highestObservedSequence, event.sequence);
-      if (event.sequence <= latestSequence) {
+      const action = recovery.classifyDomainEvent(event.sequence);
+      if (action === "apply") {
+        applyEventBatch([event]);
         return;
       }
-      if (!bootstrapped || snapshotSyncInFlight || replayInFlight) {
-        pendingReplay = true;
-        return;
+      if (action === "recover") {
+        void recoverFromSequenceGap();
       }
-      if (event.sequence !== latestSequence + 1) {
-        pendingReplay = true;
-        void replayFromLatest();
-        return;
-      }
-      applyEventBatch([event]);
     });
     const unsubTerminalEvent = api.terminal.onEvent((event) => {
       const hasRunningSubprocess = terminalRunningSubprocessFromEvent(event);
@@ -349,7 +321,7 @@ function EventRouter() {
       // Migrate old localStorage settings to server on first connect
       migrateLocalSettingsToServer();
       void (async () => {
-        await bootstrapSnapshot();
+        await bootstrapFromSnapshot();
         if (disposed) {
           return;
         }
