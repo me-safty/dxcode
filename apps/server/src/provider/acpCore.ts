@@ -1,5 +1,5 @@
 import type { ProviderKind, ProviderSession, ThreadId, TurnId } from "@t3tools/contracts";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import * as ChildProcess from "node:child_process";
 import * as readline from "node:readline";
 
@@ -44,9 +44,16 @@ export interface AcpSessionState {
   acpSessionId: string | null;
   activeTurnId: TurnId | null;
   status: ProviderSession["status"];
+  runtimeMode: ProviderSession["runtimeMode"];
   cwd: string | undefined;
   readonly model?: string;
   createdAt: string;
+}
+
+function runDetachedEffect(effect: Effect.Effect<void>, label: string): void {
+  Effect.runPromise(effect).catch((cause) => {
+    console.error(`[acpCore] ${label} failed`, cause);
+  });
 }
 
 function isResponse(message: JsonRpcMessage): message is JsonRpcResponse {
@@ -90,6 +97,7 @@ export function spawnAcpProcessSession(input: {
   binaryPath: string;
   args: ReadonlyArray<string>;
   cwd: string;
+  runtimeMode: ProviderSession["runtimeMode"];
   model?: string;
 }): Effect.Effect<AcpSessionState, ProviderAdapterProcessError> {
   return Effect.try({
@@ -118,13 +126,14 @@ export function spawnAcpProcessSession(input: {
         acpSessionId: null,
         activeTurnId: null,
         status: "connecting",
+        runtimeMode: input.runtimeMode,
         cwd: input.cwd,
         ...(input.model ? { model: input.model } : {}),
         createdAt: new Date().toISOString(),
       } satisfies AcpSessionState;
     },
     catch: (cause) =>
-      cause instanceof ProviderAdapterProcessError
+      Schema.is(ProviderAdapterProcessError)(cause)
         ? cause
         : new ProviderAdapterProcessError({
             provider: input.provider,
@@ -170,17 +179,17 @@ export function wireAcpProcessMessages(input: {
 
     if (isNotification(message)) {
       if (message.method === "session/update") {
-        Effect.runPromise(input.onNotification(message.method, message.params)).catch(() => {});
+        runDetachedEffect(input.onNotification(message.method, message.params), "session/update");
         return;
       }
       if (input.onUnhandledNotification) {
-        Effect.runPromise(input.onUnhandledNotification(message.method)).catch(() => {});
+        runDetachedEffect(input.onUnhandledNotification(message.method), "unhandled notification");
       }
       return;
     }
 
     if (input.onUnhandledMessage) {
-      Effect.runPromise(input.onUnhandledMessage(message)).catch(() => {});
+      runDetachedEffect(input.onUnhandledMessage(message), "unhandled message");
     }
   });
 
@@ -191,7 +200,7 @@ export function wireAcpProcessMessages(input: {
     }
     input.session.pendingRequests.clear();
     if (input.onExit) {
-      Effect.runPromise(input.onExit()).catch(() => {});
+      runDetachedEffect(input.onExit(), "process exit");
     }
   });
 

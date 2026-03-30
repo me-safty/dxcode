@@ -237,6 +237,42 @@ describe("TraitsPicker (Claude)", () => {
     });
   });
 
+  it("hides the trigger when no trait section can render", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <TraitsPicker
+        provider="claudeAgent"
+        models={[
+          {
+            slug: "claude-no-default-effort",
+            name: "Claude No Default Effort",
+            isCustom: false,
+            capabilities: {
+              reasoningEffortLevels: [{ value: "high", label: "High" }],
+              supportsFastMode: false,
+              supportsThinkingToggle: false,
+              contextWindowOptions: [],
+              promptInjectedEffortLevels: [],
+            },
+          },
+        ]}
+        threadId={ThreadId.makeUnsafe("thread-hidden-claude-traits")}
+        model="claude-no-default-effort"
+        prompt=""
+        onPromptChange={() => {}}
+      />,
+      { container: host },
+    );
+
+    try {
+      expect(document.querySelector("button")).toBeNull();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
   it("shows fast mode controls for Opus", async () => {
     await using _ = await mountClaudePicker();
 

@@ -277,6 +277,21 @@ export function makeAcpRuntimeBridge(input: {
       { discard: true },
     );
 
+  const clearSessionState = (threadId: ThreadId) =>
+    Effect.sync(() => {
+      const prefix = `${threadId}:`;
+      for (const key of runtimeItemIds.keys()) {
+        if (key.startsWith(prefix)) {
+          runtimeItemIds.delete(key);
+        }
+      }
+      for (const [key, state] of toolCalls.entries()) {
+        if (state.threadId === threadId) {
+          toolCalls.delete(key);
+        }
+      }
+    });
+
   const completeOpenStreamItemsForTurn = (threadId: ThreadId, turnId: TurnId) =>
     Effect.gen(function* () {
       const keys = [
@@ -590,5 +605,6 @@ export function makeAcpRuntimeBridge(input: {
     handleSessionUpdate,
     closeOpenToolCallsForTurn,
     completeOpenStreamItemsForTurn,
+    clearSessionState,
   };
 }

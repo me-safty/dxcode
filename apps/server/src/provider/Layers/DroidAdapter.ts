@@ -18,7 +18,11 @@ import {
 } from "@t3tools/contracts";
 import { DateTime, Effect, Layer, Queue, Random, Stream } from "effect";
 
-import { ProviderAdapterSessionNotFoundError, type ProviderAdapterError } from "../Errors.ts";
+import {
+  ProviderAdapterRequestError,
+  ProviderAdapterSessionNotFoundError,
+  type ProviderAdapterError,
+} from "../Errors.ts";
 import { DroidAdapter, type DroidAdapterShape } from "../Services/DroidAdapter.ts";
 import {
   type AcpSessionState,
@@ -101,7 +105,34 @@ export const DroidAdapterLive = Layer.effect(
       handleSessionUpdate,
       closeOpenToolCallsForTurn,
       completeOpenStreamItemsForTurn,
+      clearSessionState,
     } = acpRuntimeBridge;
+
+    const runDetachedEffect = (
+      effect: Effect.Effect<void>,
+      label: string,
+      metadata: Record<string, unknown>,
+    ): void => {
+      Effect.runPromise(effect).catch((cause) => {
+        console.error(`[DroidAdapter] ${label} failed`, { ...metadata, cause });
+      });
+    };
+
+    const finalizeSession = (session: AcpSessionState) =>
+      Effect.gen(function* () {
+        if (sessions.get(session.threadId) !== session) {
+          return;
+        }
+        if (session.activeTurnId) {
+          yield* completeOpenStreamItemsForTurn(session.threadId, session.activeTurnId);
+          yield* closeOpenToolCallsForTurn(session.threadId, session.activeTurnId, "failed");
+        }
+        session.activeTurnId = null;
+        session.status = "closed";
+        yield* clearSessionState(session.threadId);
+        sessions.delete(session.threadId);
+        yield* emitSessionExited(session.threadId);
+      });
 
     // ── Adapter interface ───────────────────────────────────────────
 
@@ -110,11 +141,12 @@ export const DroidAdapterLive = Layer.effect(
         const settings = yield* serverSettingsService.getSettings.pipe(Effect.orDie);
         const binaryPath = settings.providers.droid.binaryPath;
         const cwd = input.cwd ?? process.cwd();
+        const runtimeMode = input.runtimeMode ?? "full-access";
 
         const model =
           input.modelSelection?.provider === PROVIDER ? input.modelSelection.model : undefined;
         const reasoningEffort = getDroidReasoningEffort(input);
-        const autoLevel = getDroidAutoLevel(input.runtimeMode);
+        const autoLevel = getDroidAutoLevel(runtimeMode);
         const args = ["exec", "--output-format", "acp"];
         if (model) {
           args.push("--model", model);
@@ -134,6 +166,7 @@ export const DroidAdapterLive = Layer.effect(
           binaryPath,
           args,
           cwd,
+          runtimeMode,
           ...(input.modelSelection?.model ? { model: input.modelSelection.model } : {}),
         });
 
@@ -152,7 +185,7 @@ export const DroidAdapterLive = Layer.effect(
               hasId: "id" in message,
               threadId: session.threadId,
             }),
-          onExit: () => emitSessionExited(session.threadId),
+          onExit: () => finalizeSession(session),
         });
 
         yield* initializeAcpSession({
@@ -169,7 +202,7 @@ export const DroidAdapterLive = Layer.effect(
         return {
           provider: PROVIDER,
           status: "ready",
-          runtimeMode: input.runtimeMode ?? "full-access",
+          runtimeMode,
           cwd,
           model: input.modelSelection?.model,
           threadId: input.threadId,
@@ -198,47 +231,52 @@ export const DroidAdapterLive = Layer.effect(
           promptBlocks.push({ type: "text", text: input.input });
         }
 
-        // Fire session/prompt asynchronously -- the response signals turn completion
-        Effect.runPromise(
-          Effect.tryPromise({
-            try: async () => {
-              const promptStart = Date.now();
-              await sendAcpRequest(session, "session/prompt", {
-                sessionId: session.acpSessionId,
-                prompt: promptBlocks,
-              });
-              const elapsed = ((Date.now() - promptStart) / 1000).toFixed(1);
-              await Effect.runPromise(
-                Effect.logDebug("[DroidAdapter] session/prompt resolved", {
-                  threadId: session.threadId,
-                  turnId,
-                  elapsedSec: elapsed,
+        // Fire session/prompt asynchronously -- the ACP response closes the turn.
+        runDetachedEffect(
+          Effect.gen(function* () {
+            const promptStart = Date.now();
+            yield* Effect.tryPromise({
+              try: () =>
+                sendAcpRequest(session, "session/prompt", {
+                  sessionId: session.acpSessionId,
+                  prompt: promptBlocks,
                 }),
-              );
+              catch: (cause) =>
+                new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "session/prompt",
+                  detail: cause instanceof Error ? cause.message : String(cause),
+                  cause,
+                }),
+            });
 
-              await Effect.runPromise(completeOpenStreamItemsForTurn(session.threadId, turnId));
-              await Effect.runPromise(
-                closeOpenToolCallsForTurn(session.threadId, turnId, "completed"),
-              );
+            yield* Effect.logDebug("[DroidAdapter] session/prompt resolved", {
+              threadId: session.threadId,
+              turnId,
+              elapsedSec: ((Date.now() - promptStart) / 1000).toFixed(1),
+            });
 
-              session.activeTurnId = null;
-              session.status = "ready";
-              await Effect.runPromise(emitTurnCompleted(session.threadId, turnId, "completed"));
-            },
-            catch: async (cause) => {
-              await Effect.runPromise(
-                closeOpenToolCallsForTurn(session.threadId, turnId, "failed"),
-              );
-              session.activeTurnId = null;
-              session.status = "ready";
-              const message = cause instanceof Error ? cause.message : String(cause);
-              await Effect.runPromise(emitRuntimeError(session.threadId, turnId, message));
-              await Effect.runPromise(
-                emitTurnCompleted(session.threadId, turnId, "failed", message),
-              );
-            },
-          }),
-        ).catch(() => {});
+            yield* completeOpenStreamItemsForTurn(session.threadId, turnId);
+            yield* closeOpenToolCallsForTurn(session.threadId, turnId, "completed");
+
+            session.activeTurnId = null;
+            session.status = "ready";
+            yield* emitTurnCompleted(session.threadId, turnId, "completed");
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.gen(function* () {
+                yield* completeOpenStreamItemsForTurn(session.threadId, turnId);
+                yield* closeOpenToolCallsForTurn(session.threadId, turnId, "failed");
+                session.activeTurnId = null;
+                session.status = "ready";
+                yield* emitRuntimeError(session.threadId, turnId, error.message);
+                yield* emitTurnCompleted(session.threadId, turnId, "failed", error.message);
+              }),
+            ),
+          ),
+          "session/prompt",
+          { threadId: session.threadId, turnId },
+        );
 
         return {
           threadId: input.threadId,
@@ -269,8 +307,7 @@ export const DroidAdapterLive = Layer.effect(
         const session = sessions.get(threadId);
         if (!session) return;
         stopAcpProcessSession(session);
-        sessions.delete(threadId);
-        yield* emitSessionExited(threadId);
+        yield* finalizeSession(session);
       });
 
     const listSessions: DroidAdapterShape["listSessions"] = () =>
@@ -282,7 +319,7 @@ export const DroidAdapterLive = Layer.effect(
               {
                 provider: PROVIDER,
                 status: s.status,
-                runtimeMode: "full-access" as const,
+                runtimeMode: s.runtimeMode,
                 cwd: s.cwd,
                 model: s.model,
                 threadId: s.threadId,
@@ -304,11 +341,15 @@ export const DroidAdapterLive = Layer.effect(
       Effect.succeed({ threadId, turns: [] });
 
     const stopAll: DroidAdapterShape["stopAll"] = () =>
-      Effect.sync(() => {
-        for (const [, session] of sessions) {
+      Effect.gen(function* () {
+        for (const threadId of Array.from(sessions.keys())) {
+          const session = sessions.get(threadId);
+          if (!session) {
+            continue;
+          }
           stopAcpProcessSession(session);
+          yield* finalizeSession(session);
         }
-        sessions.clear();
       });
 
     return {

@@ -84,7 +84,7 @@ function buildNextOptions(
 }
 
 function hasVisibleTraitSections(input: {
-  effortLevels: ReadonlyArray<{ value: string; label: string; isDefault?: boolean | undefined }>;
+  effort: string | null;
   thinkingEnabled: boolean | null;
   supportsFastMode: boolean;
   contextWindowOptions: ReadonlyArray<{
@@ -94,7 +94,7 @@ function hasVisibleTraitSections(input: {
   }>;
 }): boolean {
   return (
-    input.effortLevels.length > 0 ||
+    input.effort !== null ||
     input.thinkingEnabled !== null ||
     input.supportsFastMode ||
     input.contextWindowOptions.length > 1
@@ -171,7 +171,7 @@ export function shouldRenderTraitsPicker(input: {
   modelOptions: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
 }): boolean {
-  const { effortLevels, thinkingEnabled, caps, contextWindowOptions } = getSelectedTraits(
+  const { effort, thinkingEnabled, caps, contextWindowOptions } = getSelectedTraits(
     input.provider,
     input.models,
     input.model,
@@ -181,7 +181,7 @@ export function shouldRenderTraitsPicker(input: {
   );
 
   return hasVisibleTraitSections({
-    effortLevels,
+    effort,
     thinkingEnabled,
     supportsFastMode: caps.supportsFastMode,
     contextWindowOptions,
@@ -273,7 +273,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
 
   if (
     !hasVisibleTraitSections({
-      effortLevels,
+      effort,
       thinkingEnabled,
       supportsFastMode: caps.supportsFastMode,
       contextWindowOptions,
@@ -424,7 +424,7 @@ export const TraitsPicker = memo(function TraitsPicker({
 
   const isCodexStyle = provider === "codex";
   const hasVisibleTraits = hasVisibleTraitSections({
-    effortLevels,
+    effort,
     thinkingEnabled,
     supportsFastMode: caps.supportsFastMode,
     contextWindowOptions,
