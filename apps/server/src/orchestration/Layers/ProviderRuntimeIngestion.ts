@@ -1000,6 +1000,54 @@ const make = Effect.fn("make")(function* () {
     const proposedPlanDelta =
       event.type === "turn.proposed.delta" ? event.payload.delta : undefined;
 
+    // Handle session.configured to extract provider slash commands from the init message.
+    if (event.type === "session.configured") {
+      const config = event.payload?.config as Record<string, unknown> | undefined;
+      const rawSlashCommands = config?.slash_commands;
+      const providerSlashCommands = Array.isArray(rawSlashCommands)
+        ? (rawSlashCommands.filter((cmd): cmd is string => typeof cmd === "string"))
+        : [];
+      if (providerSlashCommands.length > 0) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.session.set",
+          commandId: providerCommandId(event, "thread-session-configured"),
+          threadId: thread.id,
+          session: {
+            threadId: thread.id,
+            status: thread.session?.status ?? "ready",
+            providerName: thread.session?.providerName ?? event.provider,
+            runtimeMode: thread.session?.runtimeMode ?? "full-access",
+            activeTurnId: thread.session?.activeTurnId ?? null,
+            lastError: thread.session?.lastError ?? null,
+            providerSlashCommands,
+            updatedAt: now,
+          },
+          createdAt: now,
+        });
+
+        // Also update the project-level cached slash commands.
+        yield* orchestrationEngine.dispatch({
+          type: "project.provider-slash-commands.set",
+          commandId: providerCommandId(event, "project-slash-commands-cache"),
+          projectId: thread.projectId as any,
+          provider: event.provider,
+          commands: providerSlashCommands.map((name) => ({
+            name,
+            description: "",
+            argumentHint: "",
+          })),
+          createdAt: now,
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning(
+              "provider runtime ingestion failed to update project slash commands cache",
+              { cause: Cause.pretty(cause) },
+            ),
+          ),
+        );
+      }
+    }
+
     if (assistantDelta && assistantDelta.length > 0) {
       const assistantMessageId = MessageId.makeUnsafe(
         `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
@@ -1007,54 +1055,6 @@ const make = Effect.fn("make")(function* () {
       const turnId = toTurnId(event.turnId);
       if (turnId) {
         yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
-      }
-
-      // Handle session.configured to extract provider slash commands from the init message.
-      if (event.type === "session.configured") {
-        const config = event.payload?.config as Record<string, unknown> | undefined;
-        const rawSlashCommands = config?.slash_commands;
-        const providerSlashCommands = Array.isArray(rawSlashCommands)
-          ? (rawSlashCommands.filter((cmd): cmd is string => typeof cmd === "string"))
-          : [];
-        if (providerSlashCommands.length > 0) {
-          yield* orchestrationEngine.dispatch({
-            type: "thread.session.set",
-            commandId: providerCommandId(event, "thread-session-configured"),
-            threadId: thread.id,
-            session: {
-              threadId: thread.id,
-              status: thread.session?.status ?? "ready",
-              providerName: thread.session?.providerName ?? event.provider,
-              runtimeMode: thread.session?.runtimeMode ?? "full-access",
-              activeTurnId: thread.session?.activeTurnId ?? null,
-              lastError: thread.session?.lastError ?? null,
-              providerSlashCommands,
-              updatedAt: now,
-            },
-            createdAt: now,
-          });
-
-          // Also update the project-level cached slash commands.
-          yield* orchestrationEngine.dispatch({
-            type: "project.provider-slash-commands.set",
-            commandId: providerCommandId(event, "project-slash-commands-cache"),
-            projectId: thread.projectId as any,
-            provider: event.provider,
-            commands: providerSlashCommands.map((name) => ({
-              name,
-              description: "",
-              argumentHint: "",
-            })),
-            createdAt: now,
-          }).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning(
-                "provider runtime ingestion failed to update project slash commands cache",
-                { cause: Cause.pretty(cause) },
-              ),
-            ),
-          );
-        }
       }
 
       const assistantDeliveryMode: AssistantDeliveryMode = yield* Effect.map(
