@@ -3934,6 +3934,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     <div
                       ref={composerFooterRef}
                       data-chat-composer-footer="true"
+                      data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
                       className={cn(
                         "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-hidden px-2.5 pb-2.5 sm:px-3 sm:pb-3",
                         isComposerFooterCompact ? "gap-1.5" : "gap-2 sm:gap-0",
@@ -4076,6 +4077,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       <div
                         ref={composerFooterActionsRef}
                         data-chat-composer-actions="right"
+                        data-chat-composer-primary-actions-compact={
+                          isComposerPrimaryActionsCompact ? "true" : "false"
+                        }
                         className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                       >
                         {activeContextWindow ? (
