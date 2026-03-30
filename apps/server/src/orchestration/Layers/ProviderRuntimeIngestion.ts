@@ -83,6 +83,58 @@ function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string
   return trimmed;
 }
 
+function hasUnclosedInlineCodeFence(value: string): boolean {
+  return (value.match(/`/g)?.length ?? 0) % 2 === 1;
+}
+
+function normalizeAssistantDelta(input: {
+  provider: ProviderRuntimeEvent["provider"];
+  previousText: string;
+  delta: string;
+}): string {
+  if (input.provider !== "droid") {
+    return input.delta;
+  }
+  if (input.previousText.length === 0 || input.delta.length === 0) {
+    return input.delta;
+  }
+  if (/\s$/.test(input.previousText) || /^\s/.test(input.delta)) {
+    return input.delta;
+  }
+  if (hasUnclosedInlineCodeFence(input.previousText)) {
+    return input.delta;
+  }
+
+  const previousLast = input.previousText.at(-1) ?? "";
+  const nextFirst = input.delta[0] ?? "";
+
+  if (["'", '"', ",", ".", ";", ":", "!", "?", "%", ")", "]", "}", "/"].includes(nextFirst)) {
+    return input.delta;
+  }
+  if (["(", "[", "{", "/", "-", "_"].includes(previousLast)) {
+    return input.delta;
+  }
+
+  const previousEndsWordLike = /[\p{L}\p{N}]$/u.test(input.previousText);
+  const nextStartsWordLike = /^[\p{L}\p{N}]/u.test(input.delta);
+
+  if (previousEndsWordLike && (nextStartsWordLike || nextFirst === "`")) {
+    return ` ${input.delta}`;
+  }
+  if ([".", "!", "?", ":", ";"].includes(previousLast) && nextStartsWordLike) {
+    return ` ${input.delta}`;
+  }
+  if (
+    previousLast === "`" &&
+    !hasUnclosedInlineCodeFence(input.previousText) &&
+    nextStartsWordLike
+  ) {
+    return ` ${input.delta}`;
+  }
+
+  return input.delta;
+}
+
 function proposedPlanIdForTurn(threadId: ThreadId, turnId: TurnId): string {
   return `plan:${threadId}:turn:${turnId}`;
 }
@@ -622,6 +674,11 @@ const make = Effect.fn("make")(function* () {
   const clearBufferedAssistantText = (messageId: MessageId) =>
     Cache.invalidate(bufferedAssistantTextByMessageId, messageId);
 
+  const peekBufferedAssistantText = (messageId: MessageId) =>
+    Cache.getOption(bufferedAssistantTextByMessageId, messageId).pipe(
+      Effect.map((existingText) => Option.getOrElse(existingText, () => "")),
+    );
+
   const appendBufferedProposedPlan = (planId: string, delta: string, createdAt: string) =>
     Cache.getOption(bufferedProposedPlanById, planId).pipe(
       Effect.flatMap((existingEntry) => {
@@ -1008,6 +1065,15 @@ const make = Effect.fn("make")(function* () {
       const assistantMessageId = MessageId.makeUnsafe(
         `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
       );
+      const existingAssistantMessage = thread.messages.find(
+        (entry) => entry.id === assistantMessageId,
+      );
+      const bufferedAssistantText = yield* peekBufferedAssistantText(assistantMessageId);
+      const normalizedAssistantDelta = normalizeAssistantDelta({
+        provider: event.provider,
+        previousText: `${existingAssistantMessage?.text ?? ""}${bufferedAssistantText}`,
+        delta: assistantDelta,
+      });
       const turnId = toTurnId(event.turnId);
       if (turnId) {
         yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
@@ -1018,7 +1084,10 @@ const make = Effect.fn("make")(function* () {
         (settings) => (settings.enableAssistantStreaming ? "streaming" : "buffered"),
       );
       if (assistantDeliveryMode === "buffered") {
-        const spillChunk = yield* appendBufferedAssistantText(assistantMessageId, assistantDelta);
+        const spillChunk = yield* appendBufferedAssistantText(
+          assistantMessageId,
+          normalizedAssistantDelta,
+        );
         if (spillChunk.length > 0) {
           yield* orchestrationEngine.dispatch({
             type: "thread.message.assistant.delta",
@@ -1036,7 +1105,7 @@ const make = Effect.fn("make")(function* () {
           commandId: providerCommandId(event, "assistant-delta"),
           threadId: thread.id,
           messageId: assistantMessageId,
-          delta: assistantDelta,
+          delta: normalizedAssistantDelta,
           ...(turnId ? { turnId } : {}),
           createdAt: now,
         });

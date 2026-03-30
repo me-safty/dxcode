@@ -1325,7 +1325,7 @@ describe("ProviderRuntimeIngestion", () => {
   });
 
   it("buffers assistant deltas by default until completion", async () => {
-    const harness = await createHarness();
+    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: false } });
     const now = new Date().toISOString();
 
     harness.emit({
@@ -1483,6 +1483,157 @@ describe("ProviderRuntimeIngestion", () => {
       (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-streaming-mode",
     );
     expect(finalMessage?.text).toBe("hello live");
+    expect(finalMessage?.streaming).toBe(false);
+  });
+
+  it("stitches Droid assistant token fragments back into spaced text", async () => {
+    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-droid-spacing"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-spacing"),
+    });
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-droid-spacing",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-droid-spacing-1"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-spacing"),
+      itemId: asItemId("item-droid-spacing"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "I'm",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-droid-spacing-2"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-spacing"),
+      itemId: asItemId("item-droid-spacing"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "Droid, an AI software engineering agent",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-droid-spacing-3"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-spacing"),
+      itemId: asItemId("item-droid-spacing"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "built by Factory.",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-droid-spacing-4"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-spacing"),
+      itemId: asItemId("item-droid-spacing"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "Right",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-droid-spacing-5"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-spacing"),
+      itemId: asItemId("item-droid-spacing"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "now I'm sitting in your",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-droid-spacing-6"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-spacing"),
+      itemId: asItemId("item-droid-spacing"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "`apps",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-droid-spacing-7"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-spacing"),
+      itemId: asItemId("item-droid-spacing"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "/server` directory.",
+      },
+    });
+
+    const liveThread = await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-droid-spacing" && message.streaming,
+      ),
+    );
+    const liveMessage = liveThread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-droid-spacing",
+    );
+    expect(liveMessage?.streaming).toBe(true);
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-message-completed-droid-spacing"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-spacing"),
+      itemId: asItemId("item-droid-spacing"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    const finalThread = await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-droid-spacing" && !message.streaming,
+      ),
+    );
+    const finalMessage = finalThread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-droid-spacing",
+    );
+    expect(finalMessage?.text).toBe(
+      "I'm Droid, an AI software engineering agent built by Factory. Right now I'm sitting in your `apps/server` directory.",
+    );
     expect(finalMessage?.streaming).toBe(false);
   });
 

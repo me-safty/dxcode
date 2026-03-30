@@ -265,6 +265,7 @@ export function makeAcpRuntimeBridge(input: {
             : {}),
         });
       }
+      runtimeItemIds.delete(state.key);
       toolCalls.delete(state.key);
     });
 
@@ -436,7 +437,6 @@ export function makeAcpRuntimeBridge(input: {
 
         if (update.status === "completed" || update.status === "failed") {
           yield* emitToolCallCompletion(state, update.status);
-          runtimeItemIds.delete(key);
         }
         return;
       }
@@ -484,7 +484,6 @@ export function makeAcpRuntimeBridge(input: {
 
         if (update.status === "completed" || update.status === "failed") {
           yield* emitToolCallCompletion(state, update.status, summary || undefined);
-          runtimeItemIds.delete(key);
         }
         return;
       }
