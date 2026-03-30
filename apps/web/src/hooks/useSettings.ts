@@ -65,17 +65,6 @@ function splitPatch(patch: Partial<UnifiedSettings>): {
   };
 }
 
-function normalizeClientPatch(clientPatch: Partial<ClientSettings>): Partial<ClientSettings> {
-  if (typeof clientPatch.terminalFontFamily !== "string") {
-    return clientPatch;
-  }
-
-  return {
-    ...clientPatch,
-    terminalFontFamily: normalizeTerminalFontFamily(clientPatch.terminalFontFamily),
-  };
-}
-
 // ── Hooks ────────────────────────────────────────────────────────────
 
 /**
@@ -136,8 +125,7 @@ export function useUpdateSettings() {
       }
 
       if (Object.keys(clientPatch).length > 0) {
-        const normalizedClientPatch = normalizeClientPatch(clientPatch);
-        setClientSettings((prev) => ({ ...prev, ...normalizedClientPatch }));
+        setClientSettings((prev) => ({ ...prev, ...clientPatch }));
       }
     },
     [queryClient, setClientSettings],
