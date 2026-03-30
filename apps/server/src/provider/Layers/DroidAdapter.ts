@@ -19,6 +19,7 @@ import {
 import { DateTime, Effect, Layer, Queue, Random, Stream } from "effect";
 
 import {
+  ProviderAdapterValidationError,
   ProviderAdapterRequestError,
   ProviderAdapterSessionNotFoundError,
   type ProviderAdapterError,
@@ -134,6 +135,19 @@ export const DroidAdapterLive = Layer.effect(
         yield* emitSessionExited(session.threadId);
       });
 
+    const settleTurnState = (
+      session: AcpSessionState,
+      turnId: TurnId,
+      status: ProviderSession["status"],
+    ): Effect.Effect<void> =>
+      Effect.sync(() => {
+        if (session.activeTurnId !== turnId) {
+          return;
+        }
+        session.activeTurnId = null;
+        session.status = status;
+      });
+
     // ── Adapter interface ───────────────────────────────────────────
 
     const startSession: DroidAdapterShape["startSession"] = (input) =>
@@ -224,6 +238,13 @@ export const DroidAdapterLive = Layer.effect(
     const sendTurn: DroidAdapterShape["sendTurn"] = (input) =>
       Effect.gen(function* () {
         const session = yield* getSession(input.threadId);
+        if (session.activeTurnId) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "sendTurn",
+            issue: "Cannot start a new Droid turn while another turn is still running.",
+          });
+        }
         const turnId = yield* nextTurnId;
         session.activeTurnId = turnId;
         session.status = "running";
@@ -269,16 +290,14 @@ export const DroidAdapterLive = Layer.effect(
             yield* completeOpenStreamItemsForTurn(session.threadId, turnId);
             yield* closeOpenToolCallsForTurn(session.threadId, turnId, "completed");
 
-            session.activeTurnId = null;
-            session.status = "ready";
+            yield* settleTurnState(session, turnId, "ready");
             yield* emitTurnCompleted(session.threadId, turnId, "completed");
           }).pipe(
             Effect.catch((error) =>
               Effect.gen(function* () {
                 yield* completeOpenStreamItemsForTurn(session.threadId, turnId);
                 yield* closeOpenToolCallsForTurn(session.threadId, turnId, "failed");
-                session.activeTurnId = null;
-                session.status = "ready";
+                yield* settleTurnState(session, turnId, "ready");
                 yield* emitRuntimeError(session.threadId, turnId, error.message);
                 yield* emitTurnCompleted(session.threadId, turnId, "failed", error.message);
               }),
