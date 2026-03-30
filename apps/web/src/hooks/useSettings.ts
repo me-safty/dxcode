@@ -22,8 +22,10 @@ import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import {
   type ClientSettings,
   ClientSettingsSchema,
+  DEFAULT_TERMINAL_FONT_FAMILY,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
+  normalizeTerminalFontFamily,
   SidebarProjectSortOrder,
   SidebarThreadSortOrder,
   TimestampFormat,
@@ -60,6 +62,20 @@ function splitPatch(patch: Partial<UnifiedSettings>): {
   return {
     serverPatch: serverPatch as ServerSettingsPatch,
     clientPatch: clientPatch as Partial<ClientSettings>,
+  };
+}
+
+function normalizeClientPatch(clientPatch: Partial<ClientSettings>): Partial<ClientSettings> {
+  if (!Object.hasOwn(clientPatch, "terminalFontFamily")) {
+    return clientPatch;
+  }
+
+  return {
+    ...clientPatch,
+    terminalFontFamily:
+      typeof clientPatch.terminalFontFamily === "string"
+        ? normalizeTerminalFontFamily(clientPatch.terminalFontFamily)
+        : clientPatch.terminalFontFamily,
   };
 }
 
@@ -123,7 +139,8 @@ export function useUpdateSettings() {
       }
 
       if (Object.keys(clientPatch).length > 0) {
-        setClientSettings((prev) => ({ ...prev, ...clientPatch }));
+        const normalizedClientPatch = normalizeClientPatch(clientPatch);
+        setClientSettings((prev) => ({ ...prev, ...normalizedClientPatch }));
       }
     },
     [queryClient, setClientSettings],
@@ -226,6 +243,12 @@ export function buildLegacyClientSettingsMigrationPatch(
     patch.timestampFormat = legacySettings.timestampFormat;
   }
 
+  if (Predicate.isString(legacySettings.terminalFontFamily)) {
+    patch.terminalFontFamily = normalizeTerminalFontFamily(
+      legacySettings.terminalFontFamily || DEFAULT_TERMINAL_FONT_FAMILY,
+    );
+  }
+
   return patch;
 }
 
@@ -256,10 +279,11 @@ export function migrateLocalSettingsToServer(): void {
     if (Object.keys(clientPatch).length > 0) {
       const existing = localStorage.getItem(CLIENT_SETTINGS_STORAGE_KEY);
       const current = existing ? (JSON.parse(existing) as Record<string, unknown>) : {};
-      localStorage.setItem(
-        CLIENT_SETTINGS_STORAGE_KEY,
-        JSON.stringify({ ...current, ...clientPatch }),
-      );
+      const normalizedClientSettings = Schema.decodeSync(ClientSettingsSchema)({
+        ...current,
+        ...clientPatch,
+      });
+      localStorage.setItem(CLIENT_SETTINGS_STORAGE_KEY, JSON.stringify(normalizedClientSettings));
     }
   } catch (error) {
     console.error("[MIGRATION] Error migrating local settings:", error);

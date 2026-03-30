@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  applyTerminalFontFamily,
   resolveTerminalSelectionActionPosition,
   shouldHandleTerminalSelectionMouseUp,
   terminalSelectionActionDelayForClickCount,
@@ -71,5 +72,28 @@ describe("resolveTerminalSelectionActionPosition", () => {
     expect(shouldHandleTerminalSelectionMouseUp(true, 0)).toBe(true);
     expect(shouldHandleTerminalSelectionMouseUp(false, 0)).toBe(false);
     expect(shouldHandleTerminalSelectionMouseUp(true, 1)).toBe(false);
+  });
+
+  it("applies terminal font changes with a reflow refresh", () => {
+    const terminal = {
+      options: {
+        fontFamily: '"SF Mono", monospace',
+      },
+      rows: 24,
+      refresh: vi.fn(),
+    };
+    const fitAddon = {
+      fit: vi.fn(),
+    };
+
+    applyTerminalFontFamily(
+      terminal,
+      fitAddon,
+      '"MesloLGS NF", "JetBrainsMono Nerd Font", monospace',
+    );
+
+    expect(terminal.options.fontFamily).toBe('"MesloLGS NF", "JetBrainsMono Nerd Font", monospace');
+    expect(fitAddon.fit).toHaveBeenCalledTimes(1);
+    expect(terminal.refresh).toHaveBeenCalledWith(0, 23);
   });
 });

@@ -26,6 +26,7 @@ import {
   MAX_TERMINALS_PER_GROUP,
   type ThreadTerminalGroup,
 } from "../types";
+import { useSettings } from "../hooks/useSettings";
 import { readNativeApi } from "~/nativeApi";
 
 const MIN_DRAWER_HEIGHT = 180;
@@ -180,6 +181,28 @@ export function shouldHandleTerminalSelectionMouseUp(
   return selectionGestureActive && button === 0;
 }
 
+interface TerminalFontTarget {
+  options: {
+    fontFamily?: string;
+  };
+  rows: number;
+  refresh: (start: number, end: number) => void;
+}
+
+interface TerminalFitTarget {
+  fit: () => void;
+}
+
+export function applyTerminalFontFamily(
+  terminal: TerminalFontTarget,
+  fitAddon: TerminalFitTarget,
+  fontFamily: string,
+): void {
+  terminal.options.fontFamily = fontFamily;
+  fitAddon.fit();
+  terminal.refresh(0, Math.max(terminal.rows - 1, 0));
+}
+
 interface TerminalViewportProps {
   threadId: ThreadId;
   terminalId: string;
@@ -207,6 +230,8 @@ function TerminalViewport({
   resizeEpoch,
   drawerHeight,
 }: TerminalViewportProps) {
+  const settings = useSettings();
+  const terminalFontFamily = settings.terminalFontFamily;
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -244,7 +269,7 @@ function TerminalViewport({
       lineHeight: 1.2,
       fontSize: 12,
       scrollback: 5_000,
-      fontFamily: '"SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
+      fontFamily: terminalFontFamily,
       theme: terminalThemeFromApp(),
     });
     terminal.loadAddon(fitAddon);
@@ -601,6 +626,18 @@ function TerminalViewport({
     // it is only read at mount time and must not trigger terminal teardown/recreation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, runtimeEnv, terminalId, threadId]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    const fitAddon = fitAddonRef.current;
+    if (!terminal || !fitAddon) return;
+    const frame = window.requestAnimationFrame(() => {
+      applyTerminalFontFamily(terminal, fitAddon, terminalFontFamily);
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [terminalFontFamily]);
 
   useEffect(() => {
     if (!autoFocus) return;

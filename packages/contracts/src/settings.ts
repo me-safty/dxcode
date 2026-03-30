@@ -22,6 +22,24 @@ export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "upda
 export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at"]);
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
+export const DEFAULT_TERMINAL_FONT_FAMILY =
+  '"SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace';
+
+const TerminalFontFamilySetting = TrimmedString.pipe(
+  Schema.decodeTo(
+    Schema.String,
+    SchemaTransformation.transformOrFail({
+      decode: (value) => Effect.succeed(value || DEFAULT_TERMINAL_FONT_FAMILY),
+      encode: (value) => Effect.succeed(value),
+    }),
+  ),
+)
+  .check(Schema.isMaxLength(1024))
+  .pipe(Schema.withDecodingDefault(() => DEFAULT_TERMINAL_FONT_FAMILY));
+
+export function normalizeTerminalFontFamily(value: string): string {
+  return Schema.decodeSync(TerminalFontFamilySetting)(value);
+}
 
 export const ClientSettingsSchema = Schema.Struct({
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
@@ -34,6 +52,7 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(() => DEFAULT_SIDEBAR_THREAD_SORT_ORDER),
   ),
   timestampFormat: TimestampFormat.pipe(Schema.withDecodingDefault(() => DEFAULT_TIMESTAMP_FORMAT)),
+  terminalFontFamily: TerminalFontFamilySetting,
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
