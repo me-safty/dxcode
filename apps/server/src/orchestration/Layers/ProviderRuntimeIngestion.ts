@@ -84,7 +84,20 @@ function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string
 }
 
 function hasUnclosedInlineCodeFence(value: string): boolean {
-  return (value.match(/`/g)?.length ?? 0) % 2 === 1;
+  let openFenceLength: number | null = null;
+
+  for (const match of value.matchAll(/`+/g)) {
+    const fenceLength = match[0].length;
+    if (openFenceLength === null) {
+      openFenceLength = fenceLength;
+      continue;
+    }
+    if (fenceLength === openFenceLength) {
+      openFenceLength = null;
+    }
+  }
+
+  return openFenceLength !== null;
 }
 
 function normalizeAssistantDelta(input: {

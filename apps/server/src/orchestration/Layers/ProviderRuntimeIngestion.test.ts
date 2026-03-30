@@ -1637,6 +1637,92 @@ describe("ProviderRuntimeIngestion", () => {
     expect(finalMessage?.streaming).toBe(false);
   });
 
+  it("does not inject spaces into open double-backtick Droid inline code spans", async () => {
+    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-droid-double-backtick"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-double-backtick"),
+    });
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-droid-double-backtick",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-droid-double-backtick-1"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-double-backtick"),
+      itemId: asItemId("item-droid-double-backtick"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "Here is ``",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-droid-double-backtick-2"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-double-backtick"),
+      itemId: asItemId("item-droid-double-backtick"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "code span",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-droid-double-backtick-3"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-double-backtick"),
+      itemId: asItemId("item-droid-double-backtick"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "`` done",
+      },
+    });
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-message-completed-droid-double-backtick"),
+      provider: "droid",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-droid-double-backtick"),
+      itemId: asItemId("item-droid-double-backtick"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    const finalThread = await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-droid-double-backtick" && !message.streaming,
+      ),
+    );
+    const finalMessage = finalThread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-droid-double-backtick",
+    );
+    expect(finalMessage?.text).toBe("Here is ``code span`` done");
+    expect(finalMessage?.streaming).toBe(false);
+  });
+
   it("spills oversized buffered deltas and still finalizes full assistant text", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
