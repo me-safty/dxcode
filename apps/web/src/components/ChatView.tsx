@@ -82,13 +82,32 @@ import {
   type Thread,
   type TurnDiffSummary,
 } from "../types";
+import { LRUCache } from "../lib/lruCache";
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
 
-const threadPlanCatalogCache = new Map<
-  ThreadId,
-  { proposedPlans: Thread["proposedPlans"]; entry: ThreadPlanCatalogEntry }
->();
+const MAX_THREAD_PLAN_CATALOG_CACHE_ENTRIES = 500;
+const MAX_THREAD_PLAN_CATALOG_CACHE_MEMORY_BYTES = 512 * 1024;
+const threadPlanCatalogCache = new LRUCache<{
+  proposedPlans: Thread["proposedPlans"];
+  entry: ThreadPlanCatalogEntry;
+}>(MAX_THREAD_PLAN_CATALOG_CACHE_ENTRIES, MAX_THREAD_PLAN_CATALOG_CACHE_MEMORY_BYTES);
+
+function estimateThreadPlanCatalogEntrySize(thread: Thread): number {
+  return Math.max(
+    64,
+    thread.id.length +
+      thread.proposedPlans.reduce(
+        (total, plan) =>
+          total +
+          plan.id.length +
+          plan.planMarkdown.length +
+          plan.updatedAt.length +
+          (plan.turnId?.length ?? 0),
+        0,
+      ),
+  );
+}
 
 function toThreadPlanCatalogEntry(thread: Thread): ThreadPlanCatalogEntry {
   const cached = threadPlanCatalogCache.get(thread.id);
@@ -100,10 +119,14 @@ function toThreadPlanCatalogEntry(thread: Thread): ThreadPlanCatalogEntry {
     id: thread.id,
     proposedPlans: thread.proposedPlans,
   };
-  threadPlanCatalogCache.set(thread.id, {
-    proposedPlans: thread.proposedPlans,
-    entry,
-  });
+  threadPlanCatalogCache.set(
+    thread.id,
+    {
+      proposedPlans: thread.proposedPlans,
+      entry,
+    },
+    estimateThreadPlanCatalogEntrySize(thread),
+  );
   return entry;
 }
 import { basenameOfPath } from "../vscode-icons";
