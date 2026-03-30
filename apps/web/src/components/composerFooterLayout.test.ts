@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX,
   COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX,
+  shouldForceCompactComposerFooterForFit,
   shouldUseCompactComposerFooter,
 } from "./composerFooterLayout";
 
@@ -29,6 +30,38 @@ describe("shouldUseCompactComposerFooter", () => {
     expect(
       shouldUseCompactComposerFooter(COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX, {
         hasWideActions: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldForceCompactComposerFooterForFit", () => {
+  it("stays expanded when content widths fit within the footer", () => {
+    expect(
+      shouldForceCompactComposerFooterForFit({
+        footerWidth: 500,
+        leadingContentWidth: 320,
+        actionsWidth: 160,
+      }),
+    ).toBe(false);
+  });
+
+  it("forces compact mode when content no longer fits on one line", () => {
+    expect(
+      shouldForceCompactComposerFooterForFit({
+        footerWidth: 500,
+        leadingContentWidth: 340,
+        actionsWidth: 180,
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores incomplete measurements", () => {
+    expect(
+      shouldForceCompactComposerFooterForFit({
+        footerWidth: null,
+        leadingContentWidth: 340,
+        actionsWidth: 180,
       }),
     ).toBe(false);
   });

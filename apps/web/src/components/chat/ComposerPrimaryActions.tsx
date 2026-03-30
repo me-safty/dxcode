@@ -57,7 +57,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
 }: ComposerPrimaryActionsProps) {
   if (pendingAction) {
     return (
-      <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+      <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
         {pendingAction.questionIndex > 0 ? (
           compact ? (
             <Button
@@ -131,7 +131,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     }
 
     return compact ? (
-      <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+      <div className="flex items-center justify-end gap-1.5">
         <Button
           type="submit"
           size="sm"
@@ -165,7 +165,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         </Menu>
       </div>
     ) : (
-      <div className="flex min-w-0 max-w-full items-center">
+      <div className="flex items-center">
         <Button
           type="submit"
           size="sm"
