@@ -17,30 +17,33 @@ npx t3
 
 Install the desktop app using whichever method fits your platform:
 
-- Direct download: [GitHub Releases](https://github.com/pingdotgg/t3code/releases)
-- Windows (`winget`):
+#### Direct download
+
+[GitHub Releases](https://github.com/pingdotgg/t3code/releases)
+
+#### Windows (`winget`)
+
+Reference: [pingdotgg/t3code#1544](https://github.com/pingdotgg/t3code/issues/1544), [winget-pkgs manifest](https://github.com/microsoft/winget-pkgs/tree/master/manifests/t/T3Tools/T3Code/)
 
 ```bash
 winget install T3Tools.T3Code
 ```
 
-- macOS (Homebrew):
+#### macOS (Homebrew)
+
+Reference: [t3-code cask](https://formulae.brew.sh/cask/t3-code#default)
 
 ```bash
 brew install --cask t3-code
 ```
 
-- Arch Linux (AUR, with an AUR helper such as `yay`):
+#### Arch Linux (AUR)
+
+Reference: [t3code-bin](https://aur.archlinux.org/packages/t3code-bin)
 
 ```bash
 yay -S t3code-bin
 ```
-
-Package references:
-
-- `winget`: [pingdotgg/t3code#1544](https://github.com/pingdotgg/t3code/issues/1544), [winget-pkgs manifest](https://github.com/microsoft/winget-pkgs/tree/master/manifests/t/T3Tools/T3Code/)
-- Homebrew: [t3-code cask](https://formulae.brew.sh/cask/t3-code#default)
-- AUR: [t3code-bin](https://aur.archlinux.org/packages/t3code-bin)
 
 ## Some notes
 
