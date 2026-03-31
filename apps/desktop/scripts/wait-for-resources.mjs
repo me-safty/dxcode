@@ -17,8 +17,14 @@ async function fileExists(filePath) {
 function tcpPortIsReady({ host, port, connectTimeoutMs = 500 }) {
   return new Promise((resolveReady) => {
     const socket = Net.createConnection({ host, port });
+    let settled = false;
 
     const finish = (ready) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
       socket.removeAllListeners();
       socket.destroy();
       resolveReady(ready);
@@ -74,6 +80,10 @@ export async function waitForResources({
   tcpPort,
   connectTimeoutMs = 500,
 }) {
+  if (!Number.isInteger(tcpPort) || tcpPort <= 0) {
+    throw new TypeError("waitForResources requires a positive integer tcpPort");
+  }
+
   const startedAt = Date.now();
   const tcpHosts = tcpHost ? [tcpHost] : defaultTcpHosts;
 
