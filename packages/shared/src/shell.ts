@@ -1,5 +1,10 @@
 import { execFileSync } from "node:child_process";
 
+export const escapeArgForWindowsShell = (
+  arg: string,
+  platform: NodeJS.Platform = process.platform,
+): string => (platform === "win32" ? arg.replace(/"/g, '\\"') : arg);
+
 const PATH_CAPTURE_START = "__T3CODE_PATH_START__";
 const PATH_CAPTURE_END = "__T3CODE_PATH_END__";
 const SHELL_ENV_NAME_PATTERN = /^[A-Z0-9_]+$/;

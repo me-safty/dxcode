@@ -1,10 +1,33 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  escapeArgForWindowsShell,
   extractPathFromShellOutput,
   readEnvironmentFromLoginShell,
   readPathFromLoginShell,
 } from "./shell";
+
+describe("escapeArgForWindowsShell", () => {
+  it("escapes double quotes on win32", () => {
+    expect(escapeArgForWindowsShell('{"fastMode":true}', "win32")).toBe('{\\"fastMode\\":true}');
+  });
+
+  it("escapes double quotes in key=value config args on win32", () => {
+    expect(escapeArgForWindowsShell('model_reasoning_effort="high"', "win32")).toBe(
+      'model_reasoning_effort=\\"high\\"',
+    );
+  });
+
+  it("returns the argument unchanged on non-Windows platforms", () => {
+    const json = '{"alwaysThinkingEnabled":false}';
+    expect(escapeArgForWindowsShell(json, "linux")).toBe(json);
+    expect(escapeArgForWindowsShell(json, "darwin")).toBe(json);
+  });
+
+  it("returns args without quotes unchanged on win32", () => {
+    expect(escapeArgForWindowsShell("--version", "win32")).toBe("--version");
+  });
+});
 
 describe("extractPathFromShellOutput", () => {
   it("extracts the path between capture markers", () => {
