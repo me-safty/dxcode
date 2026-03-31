@@ -40,6 +40,7 @@ import type {
 import type { ServerUpsertKeybindingInput } from "./server";
 import type {
   ClientOrchestrationCommand,
+  OrchestrationGetBootstrapSnapshotResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetTurnDiffInput,
@@ -173,6 +174,7 @@ export interface NativeApi {
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
   };
   orchestration: {
+    getBootstrapSnapshot: () => Promise<OrchestrationGetBootstrapSnapshotResult>;
     getSnapshot: () => Promise<OrchestrationReadModel>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;

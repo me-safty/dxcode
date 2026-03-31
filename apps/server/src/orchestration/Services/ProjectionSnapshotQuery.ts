@@ -17,6 +17,17 @@ import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
  */
 export interface ProjectionSnapshotQueryShape {
   /**
+   * Read a lightweight bootstrap snapshot for initial UI hydration.
+   *
+   * Omits heavyweight per-thread history collections that are not needed for
+   * the first shell/sidebar paint.
+   */
+  readonly getBootstrapSnapshot: () => Effect.Effect<
+    OrchestrationReadModel,
+    ProjectionRepositoryError
+  >;
+
+  /**
    * Read the latest orchestration projection snapshot.
    *
    * Rehydrates from projection tables and derives snapshot sequence from

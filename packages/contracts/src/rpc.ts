@@ -29,6 +29,7 @@ import { KeybindingsConfigError } from "./keybindings";
 import {
   ClientOrchestrationCommand,
   OrchestrationEvent,
+  OrchestrationGetBootstrapSnapshotInput,
   ORCHESTRATION_WS_METHODS,
   OrchestrationDispatchCommandError,
   OrchestrationGetFullThreadDiffError,
@@ -263,6 +264,15 @@ export const WsOrchestrationGetSnapshotRpc = Rpc.make(ORCHESTRATION_WS_METHODS.g
   error: OrchestrationGetSnapshotError,
 });
 
+export const WsOrchestrationGetBootstrapSnapshotRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getBootstrapSnapshot,
+  {
+    payload: OrchestrationGetBootstrapSnapshotInput,
+    success: OrchestrationRpcSchemas.getBootstrapSnapshot.output,
+    error: OrchestrationGetSnapshotError,
+  },
+);
+
 export const WsOrchestrationDispatchCommandRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.dispatchCommand,
   {
@@ -351,6 +361,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeTerminalEventsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
+  WsOrchestrationGetBootstrapSnapshotRpc,
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,

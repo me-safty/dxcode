@@ -72,6 +72,16 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     });
 
     return WsRpcGroup.of({
+      [ORCHESTRATION_WS_METHODS.getBootstrapSnapshot]: (_input) =>
+        projectionSnapshotQuery.getBootstrapSnapshot().pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationGetSnapshotError({
+                message: "Failed to load orchestration bootstrap snapshot",
+                cause,
+              }),
+          ),
+        ),
       [ORCHESTRATION_WS_METHODS.getSnapshot]: (_input) =>
         projectionSnapshotQuery.getSnapshot().pipe(
           Effect.mapError(
