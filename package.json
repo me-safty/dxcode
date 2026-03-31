@@ -36,6 +36,7 @@
     "build:desktop": "turbo run build --filter=@t3tools/desktop --filter=t3",
     "typecheck": "turbo run typecheck",
     "lint": "oxlint --report-unused-disable-directives",
+    "knip": "knip",
     "test": "turbo run test",
     "test:desktop-smoke": "turbo run smoke-test --filter=@t3tools/desktop",
     "fmt": "oxfmt",
@@ -53,6 +54,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "knip": "^6.1.1",
     "oxfmt": "^0.40.0",
     "oxlint": "^1.55.0",
     "turbo": "^2.3.3",
