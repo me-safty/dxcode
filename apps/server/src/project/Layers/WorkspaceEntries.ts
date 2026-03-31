@@ -1,13 +1,9 @@
-import fsPromises from "node:fs/promises";
+import * as fsp from "node:fs/promises";
 import type { Dirent } from "node:fs";
 
-import { Cache, Duration, Effect, Exit, Layer, Path } from "effect";
+import { Cache, Duration, Effect, Exit, Layer, Option, Path } from "effect";
 
-import {
-  type ProjectEntry,
-  type ProjectSearchEntriesInput,
-  type ProjectSearchEntriesResult,
-} from "@t3tools/contracts";
+import { type ProjectEntry } from "@t3tools/contracts";
 
 import { GitCore } from "../../git/Services/GitCore.ts";
 import {
@@ -222,27 +218,37 @@ const processErrorDetail = (cause: unknown): string =>
 
 export const makeWorkspaceEntries = Effect.gen(function* () {
   const path = yield* Path.Path;
-  const git = yield* GitCore;
+  const gitOption = yield* Effect.serviceOption(GitCore);
 
   const isInsideGitWorkTree = (cwd: string): Effect.Effect<boolean> =>
-    git.isInsideWorkTree(cwd).pipe(Effect.catch(() => Effect.succeed(false)));
+    Option.match(gitOption, {
+      onSome: (git) => git.isInsideWorkTree(cwd).pipe(Effect.catch(() => Effect.succeed(false))),
+      onNone: () => Effect.succeed(false),
+    });
 
   const filterGitIgnoredPaths = (
     cwd: string,
     relativePaths: string[],
   ): Effect.Effect<string[], never> =>
-    git.filterIgnoredPaths(cwd, relativePaths).pipe(
-      Effect.map((paths) => [...paths]),
-      Effect.catch(() => Effect.succeed(relativePaths)),
-    );
+    Option.match(gitOption, {
+      onSome: (git) =>
+        git.filterIgnoredPaths(cwd, relativePaths).pipe(
+          Effect.map((paths) => [...paths]),
+          Effect.catch(() => Effect.succeed(relativePaths)),
+        ),
+      onNone: () => Effect.succeed(relativePaths),
+    });
 
-  const buildWorkspaceIndexFromGit = (cwd: string): Effect.Effect<WorkspaceIndex | null, never> =>
-    Effect.gen(function* () {
+  const buildWorkspaceIndexFromGit = Effect.fn("WorkspaceEntries.buildWorkspaceIndexFromGit")(
+    function* (cwd: string) {
+      if (Option.isNone(gitOption)) {
+        return null;
+      }
       if (!(yield* isInsideGitWorkTree(cwd))) {
         return null;
       }
 
-      const listedFiles = yield* git
+      const listedFiles = yield* gitOption.value
         .listWorkspaceFiles(cwd)
         .pipe(Effect.catch(() => Effect.succeed(null)));
 
@@ -291,19 +297,20 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
         entries: entries.slice(0, WORKSPACE_INDEX_MAX_ENTRIES),
         truncated: listedFiles.truncated || entries.length > WORKSPACE_INDEX_MAX_ENTRIES,
       };
-    });
+    },
+  );
 
-  const readDirectoryEntries = (
+  const readDirectoryEntries = Effect.fn("WorkspaceEntries.readDirectoryEntries")(function* (
     cwd: string,
     relativeDir: string,
-  ): Effect.Effect<
+  ): Effect.fn.Return<
     { readonly relativeDir: string; readonly dirents: Dirent[] | null },
     WorkspaceEntriesError
-  > =>
-    Effect.tryPromise({
+  > {
+    return yield* Effect.tryPromise({
       try: async () => {
         const absoluteDir = relativeDir ? path.join(cwd, relativeDir) : cwd;
-        const dirents = await fsPromises.readdir(absoluteDir, { withFileTypes: true });
+        const dirents = await fsp.readdir(absoluteDir, { withFileTypes: true });
         return { relativeDir, dirents };
       },
       catch: (cause) =>
@@ -319,106 +326,107 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
         () => Effect.succeed({ relativeDir, dirents: null }),
       ),
     );
+  });
 
-  const buildWorkspaceIndexFromFilesystem = (
-    cwd: string,
-  ): Effect.Effect<WorkspaceIndex, WorkspaceEntriesError> =>
-    Effect.gen(function* () {
-      const shouldFilterWithGitIgnore = yield* isInsideGitWorkTree(cwd);
+  const buildWorkspaceIndexFromFilesystem = Effect.fn(
+    "WorkspaceEntries.buildWorkspaceIndexFromFilesystem",
+  )(function* (cwd: string): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
+    const shouldFilterWithGitIgnore = yield* isInsideGitWorkTree(cwd);
 
-      let pendingDirectories: string[] = [""];
-      const entries: SearchableWorkspaceEntry[] = [];
-      let truncated = false;
+    let pendingDirectories: string[] = [""];
+    const entries: SearchableWorkspaceEntry[] = [];
+    let truncated = false;
 
-      while (pendingDirectories.length > 0 && !truncated) {
-        const currentDirectories = pendingDirectories;
-        pendingDirectories = [];
+    while (pendingDirectories.length > 0 && !truncated) {
+      const currentDirectories = pendingDirectories;
+      pendingDirectories = [];
 
-        const directoryEntries = yield* Effect.forEach(
-          currentDirectories,
-          (relativeDir) => readDirectoryEntries(cwd, relativeDir),
-          { concurrency: WORKSPACE_SCAN_READDIR_CONCURRENCY },
-        );
+      const directoryEntries = yield* Effect.forEach(
+        currentDirectories,
+        (relativeDir) => readDirectoryEntries(cwd, relativeDir),
+        { concurrency: WORKSPACE_SCAN_READDIR_CONCURRENCY },
+      );
 
-        const candidateEntriesByDirectory = directoryEntries.map((directoryEntry) => {
-          const { relativeDir, dirents } = directoryEntry;
-          if (!dirents) return [] as Array<{ dirent: Dirent; relativePath: string }>;
+      const candidateEntriesByDirectory = directoryEntries.map((directoryEntry) => {
+        const { relativeDir, dirents } = directoryEntry;
+        if (!dirents) return [] as Array<{ dirent: Dirent; relativePath: string }>;
 
-          dirents.sort((left, right) => left.name.localeCompare(right.name));
-          const candidates: Array<{ dirent: Dirent; relativePath: string }> = [];
-          for (const dirent of dirents) {
-            if (!dirent.name || dirent.name === "." || dirent.name === "..") {
-              continue;
-            }
-            if (dirent.isDirectory() && IGNORED_DIRECTORY_NAMES.has(dirent.name)) {
-              continue;
-            }
-            if (!dirent.isDirectory() && !dirent.isFile()) {
-              continue;
-            }
-
-            const relativePath = toPosixPath(
-              relativeDir ? path.join(relativeDir, dirent.name) : dirent.name,
-            );
-            if (isPathInIgnoredDirectory(relativePath)) {
-              continue;
-            }
-            candidates.push({ dirent, relativePath });
+        dirents.sort((left, right) => left.name.localeCompare(right.name));
+        const candidates: Array<{ dirent: Dirent; relativePath: string }> = [];
+        for (const dirent of dirents) {
+          if (!dirent.name || dirent.name === "." || dirent.name === "..") {
+            continue;
           }
-          return candidates;
-        });
-
-        const candidatePaths = candidateEntriesByDirectory.flatMap((candidateEntries) =>
-          candidateEntries.map((entry) => entry.relativePath),
-        );
-        const allowedPathSet = shouldFilterWithGitIgnore
-          ? new Set(yield* filterGitIgnoredPaths(cwd, candidatePaths))
-          : null;
-
-        for (const candidateEntries of candidateEntriesByDirectory) {
-          for (const candidate of candidateEntries) {
-            if (allowedPathSet && !allowedPathSet.has(candidate.relativePath)) {
-              continue;
-            }
-
-            const entry = toSearchableWorkspaceEntry({
-              path: candidate.relativePath,
-              kind: candidate.dirent.isDirectory() ? "directory" : "file",
-              parentPath: parentPathOf(candidate.relativePath),
-            });
-            entries.push(entry);
-
-            if (candidate.dirent.isDirectory()) {
-              pendingDirectories.push(candidate.relativePath);
-            }
-
-            if (entries.length >= WORKSPACE_INDEX_MAX_ENTRIES) {
-              truncated = true;
-              break;
-            }
+          if (dirent.isDirectory() && IGNORED_DIRECTORY_NAMES.has(dirent.name)) {
+            continue;
+          }
+          if (!dirent.isDirectory() && !dirent.isFile()) {
+            continue;
           }
 
-          if (truncated) {
+          const relativePath = toPosixPath(
+            relativeDir ? path.join(relativeDir, dirent.name) : dirent.name,
+          );
+          if (isPathInIgnoredDirectory(relativePath)) {
+            continue;
+          }
+          candidates.push({ dirent, relativePath });
+        }
+        return candidates;
+      });
+
+      const candidatePaths = candidateEntriesByDirectory.flatMap((candidateEntries) =>
+        candidateEntries.map((entry) => entry.relativePath),
+      );
+      const allowedPathSet = shouldFilterWithGitIgnore
+        ? new Set(yield* filterGitIgnoredPaths(cwd, candidatePaths))
+        : null;
+
+      for (const candidateEntries of candidateEntriesByDirectory) {
+        for (const candidate of candidateEntries) {
+          if (allowedPathSet && !allowedPathSet.has(candidate.relativePath)) {
+            continue;
+          }
+
+          const entry = toSearchableWorkspaceEntry({
+            path: candidate.relativePath,
+            kind: candidate.dirent.isDirectory() ? "directory" : "file",
+            parentPath: parentPathOf(candidate.relativePath),
+          });
+          entries.push(entry);
+
+          if (candidate.dirent.isDirectory()) {
+            pendingDirectories.push(candidate.relativePath);
+          }
+
+          if (entries.length >= WORKSPACE_INDEX_MAX_ENTRIES) {
+            truncated = true;
             break;
           }
         }
-      }
 
-      return {
-        scannedAt: Date.now(),
-        entries,
-        truncated,
-      };
-    });
-
-  const buildWorkspaceIndex = (cwd: string): Effect.Effect<WorkspaceIndex, WorkspaceEntriesError> =>
-    Effect.gen(function* () {
-      const gitIndexed = yield* buildWorkspaceIndexFromGit(cwd);
-      if (gitIndexed) {
-        return gitIndexed;
+        if (truncated) {
+          break;
+        }
       }
-      return yield* buildWorkspaceIndexFromFilesystem(cwd);
-    });
+    }
+
+    return {
+      scannedAt: Date.now(),
+      entries,
+      truncated,
+    };
+  });
+
+  const buildWorkspaceIndex = Effect.fn("WorkspaceEntries.buildWorkspaceIndex")(function* (
+    cwd: string,
+  ): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
+    const gitIndexed = yield* buildWorkspaceIndexFromGit(cwd);
+    if (gitIndexed) {
+      return gitIndexed;
+    }
+    return yield* buildWorkspaceIndexFromFilesystem(cwd);
+  });
 
   const workspaceIndexCache = yield* Cache.makeWith<string, WorkspaceIndex, WorkspaceEntriesError>({
     capacity: WORKSPACE_CACHE_MAX_KEYS,
@@ -427,12 +435,15 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       Exit.isSuccess(exit) ? Duration.millis(WORKSPACE_CACHE_TTL_MS) : Duration.zero,
   });
 
-  return {
-    invalidate: (cwd: string) => Cache.invalidate(workspaceIndexCache, cwd),
-    search: (
-      input: ProjectSearchEntriesInput,
-    ): Effect.Effect<ProjectSearchEntriesResult, WorkspaceEntriesError> =>
-      Cache.get(workspaceIndexCache, input.cwd).pipe(
+  const invalidate: WorkspaceEntriesShape["invalidate"] = Effect.fn("WorkspaceEntries.invalidate")(
+    function* (cwd) {
+      return yield* Cache.invalidate(workspaceIndexCache, cwd);
+    },
+  );
+
+  const search: WorkspaceEntriesShape["search"] = Effect.fn("WorkspaceEntries.search")(
+    function* (input) {
+      return yield* Cache.get(workspaceIndexCache, input.cwd).pipe(
         Effect.map((index) => {
           const normalizedQuery = normalizeQuery(input.query);
           const limit = Math.max(0, Math.floor(input.limit));
@@ -454,7 +465,13 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
             truncated: index.truncated || matchedEntryCount > limit,
           };
         }),
-      ),
+      );
+    },
+  );
+
+  return {
+    invalidate,
+    search,
   } satisfies WorkspaceEntriesShape;
 });
 

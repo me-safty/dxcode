@@ -34,7 +34,9 @@ import { GitHubCliLive } from "./git/Layers/GitHubCli";
 import { RoutingTextGenerationLive } from "./git/Layers/RoutingTextGeneration";
 import { PtyAdapter } from "./terminal/Services/PTY";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
+import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import { WorkspaceEntriesLive } from "./project/Layers/WorkspaceEntries.ts";
+import { WorkspaceFilesLive } from "./project/Layers/WorkspaceFiles.ts";
 
 type RuntimePtyAdapterLoader = {
   layer: Layer.Layer<PtyAdapter, never, FileSystem.FileSystem | Path.Path>;
@@ -138,10 +140,14 @@ export function makeServerRuntimeServicesLayer() {
   );
 
   const workspaceEntriesLayer = WorkspaceEntriesLive;
+  const workspaceFilesLayer = WorkspaceFilesLive.pipe(Layer.provide(workspaceEntriesLayer));
+  const projectFaviconResolverLayer = ProjectFaviconResolverLive;
 
   return Layer.mergeAll(
     orchestrationReactorLayer,
     workspaceEntriesLayer,
+    workspaceFilesLayer,
+    projectFaviconResolverLayer,
     gitManagerLayer,
     terminalLayer,
     KeybindingsLive,
