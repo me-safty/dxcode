@@ -69,6 +69,10 @@ type ProjectionSnapshotInstrumentation = {
   readonly onStage?: (sample: ProjectionSnapshotStageSample) => void;
 };
 
+type ProjectionSnapshotQueryOptions = {
+  readonly includeActivities?: boolean;
+};
+
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
@@ -176,9 +180,13 @@ function nowMs() {
   return performance.now();
 }
 
-export const makeProjectionSnapshotQuery = (instrumentation?: ProjectionSnapshotInstrumentation) =>
+export const makeProjectionSnapshotQuery = (
+  instrumentation?: ProjectionSnapshotInstrumentation,
+  options?: ProjectionSnapshotQueryOptions,
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const includeActivities = options?.includeActivities ?? true;
 
     const listProjectRows = SqlSchema.findAll({
       Request: Schema.Void,
@@ -435,14 +443,16 @@ export const makeProjectionSnapshotQuery = (instrumentation?: ProjectionSnapshot
               ),
               timed(
                 "listThreadActivities",
-                listThreadActivityRows(undefined).pipe(
-                  Effect.mapError(
-                    toPersistenceSqlOrDecodeError(
-                      "ProjectionSnapshotQuery.getSnapshot:listThreadActivities:query",
-                      "ProjectionSnapshotQuery.getSnapshot:listThreadActivities:decodeRows",
-                    ),
-                  ),
-                ),
+                includeActivities
+                  ? listThreadActivityRows(undefined).pipe(
+                      Effect.mapError(
+                        toPersistenceSqlOrDecodeError(
+                          "ProjectionSnapshotQuery.getSnapshot:listThreadActivities:query",
+                          "ProjectionSnapshotQuery.getSnapshot:listThreadActivities:decodeRows",
+                        ),
+                      ),
+                    )
+                  : Effect.succeed([]),
               ),
               timed(
                 "listThreadSessions",
@@ -542,20 +552,22 @@ export const makeProjectionSnapshotQuery = (instrumentation?: ProjectionSnapshot
               proposedPlansByThread.set(row.threadId, threadProposedPlans);
             }
 
-            for (const row of activityRows) {
-              updatedAt = maxIso(updatedAt, row.createdAt);
-              const threadActivities = activitiesByThread.get(row.threadId) ?? [];
-              threadActivities.push({
-                id: row.activityId,
-                tone: row.tone,
-                kind: row.kind,
-                summary: row.summary,
-                payload: row.payload,
-                turnId: row.turnId,
-                ...(row.sequence !== null ? { sequence: row.sequence } : {}),
-                createdAt: row.createdAt,
-              });
-              activitiesByThread.set(row.threadId, threadActivities);
+            if (includeActivities) {
+              for (const row of activityRows) {
+                updatedAt = maxIso(updatedAt, row.createdAt);
+                const threadActivities = activitiesByThread.get(row.threadId) ?? [];
+                threadActivities.push({
+                  id: row.activityId,
+                  tone: row.tone,
+                  kind: row.kind,
+                  summary: row.summary,
+                  payload: row.payload,
+                  turnId: row.turnId,
+                  ...(row.sequence !== null ? { sequence: row.sequence } : {}),
+                  createdAt: row.createdAt,
+                });
+                activitiesByThread.set(row.threadId, threadActivities);
+              }
             }
 
             for (const row of checkpointRows) {

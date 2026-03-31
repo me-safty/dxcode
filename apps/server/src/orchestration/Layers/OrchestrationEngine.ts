@@ -55,7 +55,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const eventStore = yield* OrchestrationEventStore;
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository;
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
-  const projectionSnapshotQuery = yield* makeProjectionSnapshotQuery();
+  const projectionSnapshotQuery = yield* makeProjectionSnapshotQuery(undefined, {
+    includeActivities: false,
+  });
 
   let readModel = createEmptyReadModel(new Date().toISOString());
 
@@ -216,14 +218,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         );
       }
     }
-    return {
-      ...snapshot,
-      threads: snapshot.threads.map((thread) =>
-        Object.assign({}, thread, {
-          activities: [],
-        }),
-      ),
-    };
+    return snapshot;
   });
 
   yield* projectionPipeline.bootstrap;
