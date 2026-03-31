@@ -2,12 +2,7 @@ import { Effect, Layer } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 
 import { ServerConfig } from "./config";
-import {
-  attachmentsRouteLayer,
-  healthRouteLayer,
-  projectFaviconRouteLayer,
-  staticAndDevRouteLayer,
-} from "./http";
+import { attachmentsRouteLayer, projectFaviconRouteLayer, staticAndDevRouteLayer } from "./http";
 import { fixPath } from "./os-jank";
 import { websocketRpcRouteLayer } from "./ws";
 import { OpenLive } from "./open";
@@ -163,10 +158,10 @@ const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive)
 
 const WorkspaceLayerLive = Layer.mergeAll(
   WorkspacePathsLive,
-  WorkspaceEntriesLive,
+  WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive)),
   WorkspaceFileSystemLive.pipe(
     Layer.provide(WorkspacePathsLive),
-    Layer.provide(WorkspaceEntriesLive),
+    Layer.provide(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
   ),
 );
 
@@ -194,7 +189,6 @@ const RuntimeServicesLive = Layer.empty.pipe(
 );
 
 export const makeRoutesLayer = Layer.mergeAll(
-  healthRouteLayer,
   attachmentsRouteLayer,
   projectFaviconRouteLayer,
   staticAndDevRouteLayer,

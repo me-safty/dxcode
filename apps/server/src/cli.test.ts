@@ -1,27 +1,19 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NetService } from "@t3tools/shared/Net";
 import { assert, it } from "@effect/vitest";
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { Layer as LayerShape } from "effect/Layer";
 import * as CliError from "effect/unstable/cli/CliError";
 import { Command } from "effect/unstable/cli";
 
 import { cli } from "./cli.ts";
 
-const CliRuntimeLayer: LayerShape<
-  Layer.Success<typeof NodeServices.layer> | Layer.Success<typeof NetService.layer>,
-  never,
-  never
-> = Layer.mergeAll(NodeServices.layer, NetService.layer);
-
-const provideCliRuntime = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  effect.pipe(Effect.provide(CliRuntimeLayer));
+const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
 it.layer(NodeServices.layer)("cli log-level parsing", (it) => {
   it.effect("accepts the built-in lowercase log-level flag values", () =>
     Command.runWith(cli, { version: "0.0.0" })(["--log-level", "debug", "--version"]).pipe(
-      provideCliRuntime,
+      Effect.provide(CliRuntimeLayer),
     ),
   );
 
@@ -30,13 +22,13 @@ it.layer(NodeServices.layer)("cli log-level parsing", (it) => {
       const error = yield* Command.runWith(cli, { version: "0.0.0" })([
         "--log-level",
         "Debug",
-      ]).pipe(provideCliRuntime, Effect.flip);
+      ]).pipe(Effect.provide(CliRuntimeLayer), Effect.flip);
 
       if (!CliError.isCliError(error)) {
-        throw new Error(`Expected CliError, got ${String(error)}`);
+        assert.fail(`Expected CliError, got ${String(error)}`);
       }
       if (error._tag !== "InvalidValue") {
-        throw new Error(`Expected InvalidValue, got ${error._tag}`);
+        assert.fail(`Expected InvalidValue, got ${error._tag}`);
       }
       assert.equal(error.option, "log-level");
       assert.equal(error.value, "Debug");

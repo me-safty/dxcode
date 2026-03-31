@@ -108,10 +108,10 @@ const makeDefaultOrchestrationReadModel = () => {
 
 const workspaceAndProjectServicesLayer = Layer.mergeAll(
   WorkspacePathsLive,
-  WorkspaceEntriesLive,
+  WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive)),
   WorkspaceFileSystemLive.pipe(
     Layer.provide(WorkspacePathsLive),
-    Layer.provide(WorkspaceEntriesLive),
+    Layer.provide(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
   ),
   ProjectFaviconResolverLive,
 );
@@ -293,16 +293,6 @@ const getWsServerUrl = (pathname = "") =>
   });
 
 it.layer(NodeServices.layer)("server router seam", (it) => {
-  it.effect("routes GET /health through HttpRouter", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const response = yield* HttpClient.get("/health");
-      assert.equal(response.status, 200);
-      assert.deepEqual(yield* response.json, { ok: true });
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
   it.effect("serves static index content for GET / when staticDir is configured", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -355,6 +345,26 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assert.equal(response.status, 200);
       assert.equal(yield* response.text, "<svg>router-project-favicon</svg>");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves the fallback project favicon when no icon exists", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const projectDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-router-project-favicon-fallback-",
+      });
+
+      yield* buildAppUnderTest({
+        config: { devUrl: new URL("http://127.0.0.1:5173") },
+      });
+
+      const response = yield* HttpClient.get(
+        `/api/project-favicon?cwd=${encodeURIComponent(projectDir)}`,
+      );
+
+      assert.equal(response.status, 200);
+      assert.include(yield* response.text, 'data-fallback="project-favicon"');
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -672,7 +682,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertTrue(result.failure._tag === "ProjectSearchEntriesError");
       assertInclude(
         result.failure.message,
-        "ENOENT: no such file or directory, scandir '/definitely/not/a/real/workspace/path'",
+        "Workspace root does not exist: /definitely/not/a/real/workspace/path",
       );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

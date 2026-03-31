@@ -9,32 +9,24 @@ import {
 import { createAttachmentId, resolveAttachmentPath } from "../attachmentStore";
 import { ServerConfig } from "../config";
 import { parseBase64DataUrl } from "../imageMime";
-import { expandHomePath } from "../os-jank";
+import { WorkspacePaths } from "../workspace/Services/WorkspacePaths";
 
 export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const serverConfig = yield* ServerConfig;
+    const workspacePaths = yield* WorkspacePaths;
 
     const normalizeProjectWorkspaceRoot = (workspaceRoot: string) =>
-      Effect.gen(function* () {
-        const normalizedWorkspaceRoot = path.resolve(yield* expandHomePath(workspaceRoot.trim()));
-        const workspaceStat = yield* fileSystem
-          .stat(normalizedWorkspaceRoot)
-          .pipe(Effect.catch(() => Effect.succeed(null)));
-        if (!workspaceStat) {
-          return yield* new OrchestrationDispatchCommandError({
-            message: `Project directory does not exist: ${normalizedWorkspaceRoot}`,
-          });
-        }
-        if (workspaceStat.type !== "Directory") {
-          return yield* new OrchestrationDispatchCommandError({
-            message: `Project path is not a directory: ${normalizedWorkspaceRoot}`,
-          });
-        }
-        return normalizedWorkspaceRoot;
-      });
+      workspacePaths.normalizeWorkspaceRoot(workspaceRoot).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationDispatchCommandError({
+              message: cause.message,
+            }),
+        ),
+      );
 
     if (command.type === "project.create") {
       return {
