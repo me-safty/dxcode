@@ -818,6 +818,13 @@ async function waitForComposerEditor(): Promise<HTMLElement> {
   );
 }
 
+async function waitForComposerMenuItem(itemId: string): Promise<HTMLElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLElement>(`[data-composer-item-id="${itemId}"]`),
+    `Unable to find composer menu item "${itemId}".`,
+  );
+}
+
 async function waitForSendButton(): Promise<HTMLButtonElement> {
   return waitForElement(
     () => document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]'),
@@ -2560,6 +2567,46 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await mounted.setContainerSize(COMPACT_FOOTER_VIEWPORT);
       await expectComposerActionsContained();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the slash-command menu visible above the composer", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-command-menu-target" as MessageId,
+        targetText: "command menu thread",
+      }),
+    });
+
+    try {
+      await waitForComposerEditor();
+      await page.getByTestId("composer-editor").fill("/");
+
+      const menuItem = await waitForComposerMenuItem("slash:model");
+      const composerForm = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-form="true"]'),
+        "Unable to find composer form.",
+      );
+
+      await vi.waitFor(
+        () => {
+          const menuRect = menuItem.getBoundingClientRect();
+          const composerRect = composerForm.getBoundingClientRect();
+          const hitTarget = document.elementFromPoint(
+            menuRect.left + menuRect.width / 2,
+            menuRect.top + menuRect.height / 2,
+          );
+
+          expect(menuRect.width).toBeGreaterThan(0);
+          expect(menuRect.height).toBeGreaterThan(0);
+          expect(menuRect.bottom).toBeLessThanOrEqual(composerRect.bottom);
+          expect(hitTarget instanceof Element && menuItem.contains(hitTarget)).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
     }
