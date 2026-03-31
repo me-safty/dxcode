@@ -216,7 +216,14 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         );
       }
     }
-    return snapshot;
+    return {
+      ...snapshot,
+      threads: snapshot.threads.map((thread) =>
+        Object.assign({}, thread, {
+          activities: [],
+        }),
+      ),
+    };
   });
 
   yield* projectionPipeline.bootstrap;
