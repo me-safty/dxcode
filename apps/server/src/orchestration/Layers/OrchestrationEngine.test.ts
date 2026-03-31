@@ -9,18 +9,21 @@ import {
   type OrchestrationEvent,
 } from "@t3tools/contracts";
 import { Effect, Layer, ManagedRuntime, Queue, Stream } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { describe, expect, it } from "vitest";
 
 import { PersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import {
   OrchestrationEventStore,
   type OrchestrationEventStoreShape,
 } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
+import { makeProjectionSnapshotQuery } from "./ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
   OrchestrationProjectionPipeline,
@@ -28,6 +31,8 @@ import {
 } from "../Services/ProjectionPipeline.ts";
 import { ServerConfig } from "../../config.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+import * as NodePath from "@effect/platform-node/NodePath";
 
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asMessageId = (value: string): MessageId => MessageId.makeUnsafe(value);
@@ -38,19 +43,48 @@ async function createOrchestrationSystem() {
   const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
     prefix: "t3-orchestration-engine-test-",
   });
-  const orchestrationLayer = OrchestrationEngineLive.pipe(
-    Layer.provide(OrchestrationProjectionPipelineLive),
-    Layer.provide(OrchestrationEventStoreLive),
-    Layer.provide(OrchestrationCommandReceiptRepositoryLive),
-    Layer.provide(SqlitePersistenceMemory),
-    Layer.provideMerge(ServerConfigLayer),
-    Layer.provideMerge(NodeServices.layer),
+  const envLayer = Layer.merge(
+    ServerConfigLayer,
+    Layer.merge(NodeServices.layer, Layer.merge(NodeFileSystem.layer, NodePath.layer)),
   );
-  const runtime = ManagedRuntime.make(orchestrationLayer);
+  const sqlLayer = SqlitePersistenceMemory.pipe(Layer.provideMerge(envLayer));
+  const runtimeDependencies = Layer.merge(envLayer, sqlLayer);
+  const eventStoreLayer = OrchestrationEventStoreLive.pipe(Layer.provideMerge(sqlLayer));
+  const commandReceiptLayer = OrchestrationCommandReceiptRepositoryLive.pipe(
+    Layer.provideMerge(sqlLayer),
+  );
+  const projectionPipelineLayer = OrchestrationProjectionPipelineLive.pipe(
+    Layer.provideMerge(eventStoreLayer),
+    Layer.provideMerge(runtimeDependencies),
+  );
+  const orchestrationLayer = OrchestrationEngineLive.pipe(
+    Layer.provideMerge(projectionPipelineLayer),
+    Layer.provideMerge(eventStoreLayer),
+    Layer.provideMerge(commandReceiptLayer),
+    Layer.provideMerge(sqlLayer),
+  );
+  const runtimeLayer = Layer.merge(orchestrationLayer, Layer.merge(eventStoreLayer, sqlLayer)).pipe(
+    Layer.provideMerge(envLayer),
+  );
+  const runtime = ManagedRuntime.make(
+    runtimeLayer as Layer.Layer<
+      Layer.Success<typeof runtimeLayer>,
+      Layer.Error<typeof runtimeLayer>,
+      never
+    >,
+  );
   const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+  const eventStore = await runtime.runPromise(Effect.service(OrchestrationEventStore));
   return {
     engine,
-    run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
+    eventStore,
+    run: <A, E>(
+      effect: Effect.Effect<
+        A,
+        E,
+        OrchestrationEngineService | OrchestrationEventStore | SqlClient.SqlClient
+      >,
+    ) => runtime.runPromise(effect),
     dispose: () => runtime.dispose(),
   };
 }
@@ -242,6 +276,80 @@ describe("OrchestrationEngine", () => {
       "thread.created",
       "thread.deleted",
     ]);
+    await system.dispose();
+  });
+
+  it("hydrates the same read model from projections as full replay", async () => {
+    const system = await createOrchestrationSystem();
+    const { engine, eventStore } = system;
+    const createdAt = now();
+
+    await system.run(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe("cmd-project-snapshot-create"),
+        projectId: asProjectId("project-snapshot"),
+        title: "Snapshot Project",
+        workspaceRoot: "/tmp/project-snapshot",
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        createdAt,
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe("cmd-thread-snapshot-create"),
+        threadId: ThreadId.makeUnsafe("thread-snapshot"),
+        projectId: asProjectId("project-snapshot"),
+        title: "Snapshot Thread",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-thread-snapshot-turn-start"),
+        threadId: ThreadId.makeUnsafe("thread-snapshot"),
+        message: {
+          messageId: asMessageId("msg-snapshot-1"),
+          role: "user",
+          text: "hello snapshot",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt,
+      }),
+    );
+
+    let replayedReadModel = createEmptyReadModel(new Date().toISOString());
+    const replayedEvents = await system.run(
+      Stream.runCollect(eventStore.readAll()).pipe(
+        Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)),
+      ),
+    );
+    for (const event of replayedEvents) {
+      replayedReadModel = await system.run(projectEvent(replayedReadModel, event));
+    }
+
+    const snapshotReadModel = await system.run(
+      Effect.flatMap(makeProjectionSnapshotQuery(), (snapshotQuery) => snapshotQuery.getSnapshot()),
+    );
+    const engineReadModel = await system.run(engine.getReadModel());
+
+    expect(snapshotReadModel).toEqual(replayedReadModel);
+    expect(engineReadModel).toEqual(replayedReadModel);
     await system.dispose();
   });
 
