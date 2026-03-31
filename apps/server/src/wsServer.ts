@@ -49,12 +49,12 @@ import { createLogger } from "./logger";
 import { GitManager } from "./git/Services/GitManager.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { Keybindings } from "./keybindings";
-import { searchWorkspaceEntries } from "./workspaceEntries";
+import { ServerSettingsService } from "./serverSettings";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
 import { ProviderService } from "./provider/Services/ProviderService";
-import { ProviderHealth } from "./provider/Services/ProviderHealth";
+import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery";
 import { clamp } from "effect/Number";
 import { Open, resolveAvailableEditors } from "./open";
@@ -74,10 +74,13 @@ import {
 } from "./attachmentStore.ts";
 import { parseBase64DataUrl } from "./imageMime.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
-import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
+import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
+import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
+import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -153,48 +156,6 @@ function websocketRawToString(raw: unknown): string | null {
   return null;
 }
 
-function toPosixRelativePath(input: string): string {
-  return input.replaceAll("\\", "/");
-}
-
-function resolveWorkspaceWritePath(params: {
-  workspaceRoot: string;
-  relativePath: string;
-  path: Path.Path;
-}): Effect.Effect<{ absolutePath: string; relativePath: string }, RouteRequestError> {
-  const normalizedInputPath = params.relativePath.trim();
-  if (params.path.isAbsolute(normalizedInputPath)) {
-    return Effect.fail(
-      new RouteRequestError({
-        message: "Workspace file path must be relative to the project root.",
-      }),
-    );
-  }
-
-  const absolutePath = params.path.resolve(params.workspaceRoot, normalizedInputPath);
-  const relativeToRoot = toPosixRelativePath(
-    params.path.relative(params.workspaceRoot, absolutePath),
-  );
-  if (
-    relativeToRoot.length === 0 ||
-    relativeToRoot === "." ||
-    relativeToRoot.startsWith("../") ||
-    relativeToRoot === ".." ||
-    params.path.isAbsolute(relativeToRoot)
-  ) {
-    return Effect.fail(
-      new RouteRequestError({
-        message: "Workspace file path must stay within the project root.",
-      }),
-    );
-  }
-
-  return Effect.succeed({
-    absolutePath,
-    relativePath: relativeToRoot,
-  });
-}
-
 function stripRequestTag<T extends { _tag: string }>(body: T) {
   return Struct.omit(body, ["_tag"]);
 }
@@ -208,7 +169,7 @@ export type ServerCoreRuntimeServices =
   | CheckpointDiffQuery
   | OrchestrationReactor
   | ProviderService
-  | ProviderHealth;
+  | ProviderRegistry;
 
 export type ServerRuntimeServices =
   | ServerCoreRuntimeServices
@@ -216,6 +177,11 @@ export type ServerRuntimeServices =
   | GitCore
   | TerminalManager
   | Keybindings
+  | ServerSettingsService
+  | ProjectFaviconResolver
+  | WorkspaceEntries
+  | WorkspaceFileSystem
+  | WorkspacePaths
   | Open
   | AnalyticsService;
 
@@ -250,11 +216,20 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   } = serverConfig;
   const availableEditors = resolveAvailableEditors();
 
+  const runtimeServices = yield* Effect.services<
+    ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path
+  >();
+  const runPromise = Effect.runPromiseWith(runtimeServices);
+
   const gitManager = yield* GitManager;
   const terminalManager = yield* TerminalManager;
   const keybindingsManager = yield* Keybindings;
-  const providerHealth = yield* ProviderHealth;
+  const serverSettingsManager = yield* ServerSettingsService;
+  const providerRegistry = yield* ProviderRegistry;
   const git = yield* GitCore;
+  const workspaceEntries = yield* WorkspaceEntries;
+  const workspaceFileSystem = yield* WorkspaceFileSystem;
+  const workspacePaths = yield* WorkspacePaths;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -268,7 +243,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     ),
   );
 
-  const providerStatuses = yield* providerHealth.getStatuses;
+  const providersRef = yield* Ref.make(yield* providerRegistry.getProviders);
 
   const clients = yield* Ref.make(new Set<WebSocket>());
   const logger = createLogger("ws");
@@ -295,39 +270,30 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     ),
   );
   yield* readiness.markKeybindingsReady;
+  yield* serverSettingsManager.start.pipe(
+    Effect.mapError(
+      (cause) => new ServerLifecycleError({ operation: "serverSettingsRuntimeStart", cause }),
+    ),
+  );
 
   const normalizeDispatchCommand = Effect.fnUntraced(function* (input: {
     readonly command: ClientOrchestrationCommand;
   }) {
-    const normalizeProjectWorkspaceRoot = Effect.fnUntraced(function* (workspaceRoot: string) {
-      const normalizedWorkspaceRoot = path.resolve(yield* expandHomePath(workspaceRoot.trim()));
-      const workspaceStat = yield* fileSystem
-        .stat(normalizedWorkspaceRoot)
-        .pipe(Effect.catch(() => Effect.succeed(null)));
-      if (!workspaceStat) {
-        return yield* new RouteRequestError({
-          message: `Project directory does not exist: ${normalizedWorkspaceRoot}`,
-        });
-      }
-      if (workspaceStat.type !== "Directory") {
-        return yield* new RouteRequestError({
-          message: `Project path is not a directory: ${normalizedWorkspaceRoot}`,
-        });
-      }
-      return normalizedWorkspaceRoot;
-    });
-
     if (input.command.type === "project.create") {
       return {
         ...input.command,
-        workspaceRoot: yield* normalizeProjectWorkspaceRoot(input.command.workspaceRoot),
+        workspaceRoot: yield* workspacePaths
+          .normalizeWorkspaceRoot(input.command.workspaceRoot)
+          .pipe(Effect.mapError((cause) => new RouteRequestError({ message: cause.message }))),
       } satisfies OrchestrationCommand;
     }
 
     if (input.command.type === "project.meta.update" && input.command.workspaceRoot !== undefined) {
       return {
         ...input.command,
-        workspaceRoot: yield* normalizeProjectWorkspaceRoot(input.command.workspaceRoot),
+        workspaceRoot: yield* workspacePaths
+          .normalizeWorkspaceRoot(input.command.workspaceRoot)
+          .pipe(Effect.mapError((cause) => new RouteRequestError({ message: cause.message }))),
       } satisfies OrchestrationCommand;
     }
 
@@ -421,10 +387,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       res.end(body);
     };
 
-    void Effect.runPromise(
+    void runPromise(
       Effect.gen(function* () {
         const url = new URL(req.url ?? "/", `http://localhost:${port}`);
-        if (tryHandleProjectFaviconRequest(url, res)) {
+        if (yield* tryHandleProjectFaviconRequest(url, res)) {
           return;
         }
 
@@ -614,11 +580,26 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   yield* Stream.runForEach(keybindingsManager.streamChanges, (event) =>
     pushBus.publishAll(WS_CHANNELS.serverConfigUpdated, {
       issues: event.issues,
-      providers: providerStatuses,
     }),
   ).pipe(Effect.forkIn(subscriptionsScope));
 
-  yield* Scope.provide(orchestrationReactor.start, subscriptionsScope);
+  yield* Stream.runForEach(serverSettingsManager.streamChanges, (settings) =>
+    pushBus.publishAll(WS_CHANNELS.serverConfigUpdated, {
+      issues: [],
+      settings,
+    }),
+  ).pipe(Effect.forkIn(subscriptionsScope));
+
+  yield* Stream.runForEach(providerRegistry.streamChanges, (providers) =>
+    Effect.gen(function* () {
+      yield* Ref.set(providersRef, providers);
+      yield* pushBus.publishAll(WS_CHANNELS.serverProvidersUpdated, {
+        providers,
+      });
+    }),
+  ).pipe(Effect.forkIn(subscriptionsScope));
+
+  yield* Scope.provide(orchestrationReactor.start(), subscriptionsScope);
   yield* readiness.markOrchestrationSubscriptionsReady;
 
   let welcomeBootstrapProjectId: ProjectId | undefined;
@@ -631,25 +612,31 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         (project) => project.workspaceRoot === cwd && project.deletedAt === null,
       );
       let bootstrapProjectId: ProjectId;
-      let bootstrapProjectDefaultModel: string;
+      let bootstrapProjectDefaultModelSelection;
 
       if (!existingProject) {
         const createdAt = new Date().toISOString();
         bootstrapProjectId = ProjectId.makeUnsafe(crypto.randomUUID());
         const bootstrapProjectTitle = path.basename(cwd) || "project";
-        bootstrapProjectDefaultModel = "gpt-5-codex";
+        bootstrapProjectDefaultModelSelection = {
+          provider: "codex" as const,
+          model: "gpt-5-codex",
+        };
         yield* orchestrationEngine.dispatch({
           type: "project.create",
           commandId: CommandId.makeUnsafe(crypto.randomUUID()),
           projectId: bootstrapProjectId,
           title: bootstrapProjectTitle,
           workspaceRoot: cwd,
-          defaultModel: bootstrapProjectDefaultModel,
+          defaultModelSelection: bootstrapProjectDefaultModelSelection,
           createdAt,
         });
       } else {
         bootstrapProjectId = existingProject.id;
-        bootstrapProjectDefaultModel = existingProject.defaultModel ?? "gpt-5-codex";
+        bootstrapProjectDefaultModelSelection = existingProject.defaultModelSelection ?? {
+          provider: "codex" as const,
+          model: "gpt-5-codex",
+        };
       }
 
       const existingThread = snapshot.threads.find(
@@ -664,7 +651,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           threadId,
           projectId: bootstrapProjectId,
           title: "New thread",
-          model: bootstrapProjectDefaultModel,
+          modelSelection: bootstrapProjectDefaultModelSelection,
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           runtimeMode: "full-access",
           branch: null,
@@ -684,15 +671,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     );
   }
 
-  const runtimeServices = yield* Effect.services<
-    ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path
-  >();
-  const runPromise = Effect.runPromiseWith(runtimeServices);
-
-  const unsubscribeTerminalEvents = yield* terminalManager.subscribe(
-    (event) => void Effect.runPromise(pushBus.publishAll(WS_CHANNELS.terminalEvent, event)),
+  const unsubscribeTerminalEvents = yield* terminalManager.subscribe((event) =>
+    pushBus.publishAll(WS_CHANNELS.terminalEvent, event),
   );
-  yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeTerminalEvents()));
+  yield* Scope.addFinalizer(subscriptionsScope, Effect.sync(unsubscribeTerminalEvents));
   yield* readiness.markTerminalSubscriptionsReady;
 
   yield* NodeHttpServer.make(() => httpServer, listenOptions).pipe(
@@ -704,7 +686,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     Effect.all([closeAllClients, closeWebSocketServer.pipe(Effect.ignoreCause({ log: true }))]),
   );
 
-  const routeRequest = Effect.fnUntraced(function* (request: WebSocketRequest) {
+  const routeRequest = Effect.fnUntraced(function* (ws: WebSocket, request: WebSocketRequest) {
     switch (request.body._tag) {
       case ORCHESTRATION_WS_METHODS.getSnapshot:
         return yield* projectionReadModelQuery.getSnapshot();
@@ -739,41 +721,26 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.projectsSearchEntries: {
         const body = stripRequestTag(request.body);
-        return yield* Effect.tryPromise({
-          try: () => searchWorkspaceEntries(body),
-          catch: (cause) =>
-            new RouteRequestError({
-              message: `Failed to search workspace entries: ${String(cause)}`,
-            }),
-        });
+        return yield* workspaceEntries.search(body).pipe(
+          Effect.mapError(
+            (cause) =>
+              new RouteRequestError({
+                message: `Failed to search workspace entries: ${cause.detail}`,
+              }),
+          ),
+        );
       }
 
       case WS_METHODS.projectsWriteFile: {
         const body = stripRequestTag(request.body);
-        const target = yield* resolveWorkspaceWritePath({
-          workspaceRoot: body.cwd,
-          relativePath: body.relativePath,
-          path,
-        });
-        yield* fileSystem
-          .makeDirectory(path.dirname(target.absolutePath), { recursive: true })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new RouteRequestError({
-                  message: `Failed to prepare workspace path: ${String(cause)}`,
-                }),
-            ),
-          );
-        yield* fileSystem.writeFileString(target.absolutePath, body.contents).pipe(
+        return yield* workspaceFileSystem.writeFile(body).pipe(
           Effect.mapError(
             (cause) =>
               new RouteRequestError({
-                message: `Failed to write workspace file: ${String(cause)}`,
+                message: `Failed to write workspace file: ${cause.message}`,
               }),
           ),
         );
-        return { relativePath: target.relativePath };
       }
 
       case WS_METHODS.shellOpenInEditor: {
@@ -793,7 +760,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.gitRunStackedAction: {
         const body = stripRequestTag(request.body);
-        return yield* gitManager.runStackedAction(body);
+        return yield* gitManager.runStackedAction(body, {
+          actionId: body.actionId,
+          progressReporter: {
+            publish: (event) =>
+              pushBus.publishClient(ws, WS_CHANNELS.gitActionProgress, event).pipe(Effect.asVoid),
+          },
+        });
       }
 
       case WS_METHODS.gitResolvePullRequest: {
@@ -866,21 +839,40 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* terminalManager.close(body);
       }
 
-      case WS_METHODS.serverGetConfig:
+      case WS_METHODS.serverGetConfig: {
         const keybindingsConfig = yield* keybindingsManager.loadConfigState;
+        const settings = yield* serverSettingsManager.getSettings;
+        const providers = yield* Ref.get(providersRef);
         return {
           cwd,
           keybindingsConfigPath,
           keybindings: keybindingsConfig.keybindings,
           issues: keybindingsConfig.issues,
-          providers: providerStatuses,
+          providers,
           availableEditors,
+          settings,
         };
+      }
+
+      case WS_METHODS.serverRefreshProviders: {
+        const providers = yield* providerRegistry.refresh();
+        yield* Ref.set(providersRef, providers);
+        return { providers };
+      }
 
       case WS_METHODS.serverUpsertKeybinding: {
         const body = stripRequestTag(request.body);
         const keybindingsConfig = yield* keybindingsManager.upsertKeybindingRule(body);
         return { keybindings: keybindingsConfig, issues: [] };
+      }
+
+      case WS_METHODS.serverGetSettings: {
+        return yield* serverSettingsManager.getSettings;
+      }
+
+      case WS_METHODS.serverUpdateSettings: {
+        const body = stripRequestTag(request.body);
+        return yield* serverSettingsManager.updateSettings(body.patch);
       }
 
       default: {
@@ -915,7 +907,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       });
     }
 
-    const result = yield* Effect.exit(routeRequest(request.success));
+    const result = yield* Effect.exit(routeRequest(ws, request.success));
     if (Exit.isFailure(result)) {
       return yield* sendWsResponse({
         id: request.success.id,
