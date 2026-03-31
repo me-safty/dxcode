@@ -52,6 +52,7 @@ import { Keybindings } from "./keybindings";
 import { ServerSettingsService } from "./serverSettings";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
+import { ProjectionStartupQuery } from "./orchestration/Services/ProjectionStartupQuery";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
 import { ProviderService } from "./provider/Services/ProviderService";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
@@ -166,6 +167,7 @@ const decodeWebSocketRequest = decodeJsonResult(WebSocketRequest);
 export type ServerCoreRuntimeServices =
   | OrchestrationEngineService
   | ProjectionSnapshotQuery
+  | ProjectionStartupQuery
   | CheckpointDiffQuery
   | OrchestrationReactor
   | ProviderService
@@ -566,6 +568,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
+  const projectionStartupQuery = yield* ProjectionStartupQuery;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
   const orchestrationReactor = yield* OrchestrationReactor;
   const { openInEditor } = yield* Open;
@@ -607,10 +610,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   if (autoBootstrapProjectFromCwd) {
     yield* Effect.gen(function* () {
-      const snapshot = yield* projectionReadModelQuery.getSnapshot();
-      const existingProject = snapshot.projects.find(
-        (project) => project.workspaceRoot === cwd && project.deletedAt === null,
-      );
+      const autoBootstrapState = yield* projectionStartupQuery.getAutoBootstrapState({
+        workspaceRoot: cwd,
+      });
+      const existingProject = autoBootstrapState.project;
       let bootstrapProjectId: ProjectId;
       let bootstrapProjectDefaultModelSelection;
 
@@ -639,10 +642,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         };
       }
 
-      const existingThread = snapshot.threads.find(
-        (thread) => thread.projectId === bootstrapProjectId && thread.deletedAt === null,
-      );
-      if (!existingThread) {
+      const existingThreadId =
+        existingProject && existingProject.id === bootstrapProjectId
+          ? autoBootstrapState.threadId
+          : null;
+      if (existingThreadId === null) {
         const createdAt = new Date().toISOString();
         const threadId = ThreadId.makeUnsafe(crypto.randomUUID());
         yield* orchestrationEngine.dispatch({
@@ -662,7 +666,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         welcomeBootstrapThreadId = threadId;
       } else {
         welcomeBootstrapProjectId = bootstrapProjectId;
-        welcomeBootstrapThreadId = existingThread.id;
+        welcomeBootstrapThreadId = existingThreadId;
       }
     }).pipe(
       Effect.mapError(

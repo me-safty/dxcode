@@ -21,7 +21,7 @@ import { fixPath, resolveBaseDir } from "./os-jank";
 import { Open } from "./open";
 import * as SqlitePersistence from "./persistence/Layers/Sqlite";
 import { makeServerProviderLayer, makeServerRuntimeServicesLayer } from "./serverLayers";
-import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
+import { ProjectionStartupQuery } from "./orchestration/Services/ProjectionStartupQuery";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry";
 import { Server } from "./wsServer";
 import { ServerLoggerLive } from "./serverLogger";
@@ -310,15 +310,11 @@ const formatHostForUrl = (host: string): string =>
 
 export const recordStartupHeartbeat = Effect.gen(function* () {
   const analytics = yield* AnalyticsService;
-  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const projectionStartupQuery = yield* ProjectionStartupQuery;
 
-  const { threadCount, projectCount } = yield* projectionSnapshotQuery.getSnapshot().pipe(
-    Effect.map((snapshot) => ({
-      threadCount: snapshot.threads.length,
-      projectCount: snapshot.projects.length,
-    })),
+  const { threadCount, projectCount } = yield* projectionStartupQuery.getStartupCounts().pipe(
     Effect.catch((cause) =>
-      Effect.logWarning("failed to gather startup snapshot for telemetry", { cause }).pipe(
+      Effect.logWarning("failed to gather startup counts for telemetry", { cause }).pipe(
         Effect.as({
           threadCount: 0,
           projectCount: 0,

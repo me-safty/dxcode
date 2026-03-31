@@ -14,6 +14,7 @@ import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationRe
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor";
 import { OrchestrationProjectionPipelineLive } from "./orchestration/Layers/ProjectionPipeline";
 import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers/ProjectionSnapshotQuery";
+import { OrchestrationProjectionStartupQueryLive } from "./orchestration/Layers/ProjectionStartupQuery";
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus";
 import { ProviderUnsupportedError } from "./provider/Errors";
@@ -112,6 +113,7 @@ export function makeServerRuntimeServicesLayer() {
   const runtimeServicesBaseLayer = Layer.mergeAll(
     orchestrationLayer,
     OrchestrationProjectionSnapshotQueryLive,
+    OrchestrationProjectionStartupQueryLive,
     checkpointStoreLayer,
     RuntimeReceiptBusLive,
   );
