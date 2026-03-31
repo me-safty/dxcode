@@ -1274,6 +1274,32 @@ describe("WebSocket Server", () => {
     expect(response.error?.message).toContain("exceeds current turn count");
   });
 
+  it("rejects project.create when the workspace root does not exist", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const missingWorkspaceRoot = path.join(makeTempDir("t3code-ws-project-missing-"), "missing");
+    const response = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: "cmd-ws-project-create-missing",
+      projectId: "project-missing",
+      title: "Missing Project",
+      workspaceRoot: missingWorkspaceRoot,
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      createdAt: new Date().toISOString(),
+    });
+
+    expect(response.result).toBeUndefined();
+    expect(response.error?.message).toContain("Project directory does not exist:");
+  });
+
   it("keeps orchestration domain push behavior for provider runtime events", async () => {
     const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
     const emitRuntimeEvent = (event: ProviderRuntimeEvent) => {

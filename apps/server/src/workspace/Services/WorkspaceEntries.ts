@@ -21,5 +21,5 @@ export interface WorkspaceEntriesShape {
 }
 
 export class WorkspaceEntries extends ServiceMap.Service<WorkspaceEntries, WorkspaceEntriesShape>()(
-  "t3/project/Services/WorkspaceEntries",
+  "t3/workspace/Services/WorkspaceEntries",
 ) {}

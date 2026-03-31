@@ -74,13 +74,13 @@ import {
 } from "./attachmentStore.ts";
 import { parseBase64DataUrl } from "./imageMime.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
-import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
-import { WorkspaceEntries } from "./project/Services/WorkspaceEntries.ts";
-import { WorkspaceFiles } from "./project/Services/WorkspaceFiles.ts";
+import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
+import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
+import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -180,7 +180,8 @@ export type ServerRuntimeServices =
   | ServerSettingsService
   | ProjectFaviconResolver
   | WorkspaceEntries
-  | WorkspaceFiles
+  | WorkspaceFileSystem
+  | WorkspacePaths
   | Open
   | AnalyticsService;
 
@@ -227,7 +228,8 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const providerRegistry = yield* ProviderRegistry;
   const git = yield* GitCore;
   const workspaceEntries = yield* WorkspaceEntries;
-  const workspaceFiles = yield* WorkspaceFiles;
+  const workspaceFileSystem = yield* WorkspaceFileSystem;
+  const workspacePaths = yield* WorkspacePaths;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -277,35 +279,21 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const normalizeDispatchCommand = Effect.fnUntraced(function* (input: {
     readonly command: ClientOrchestrationCommand;
   }) {
-    const normalizeProjectWorkspaceRoot = Effect.fnUntraced(function* (workspaceRoot: string) {
-      const normalizedWorkspaceRoot = path.resolve(yield* expandHomePath(workspaceRoot.trim()));
-      const workspaceStat = yield* fileSystem
-        .stat(normalizedWorkspaceRoot)
-        .pipe(Effect.catch(() => Effect.succeed(null)));
-      if (!workspaceStat) {
-        return yield* new RouteRequestError({
-          message: `Project directory does not exist: ${normalizedWorkspaceRoot}`,
-        });
-      }
-      if (workspaceStat.type !== "Directory") {
-        return yield* new RouteRequestError({
-          message: `Project path is not a directory: ${normalizedWorkspaceRoot}`,
-        });
-      }
-      return normalizedWorkspaceRoot;
-    });
-
     if (input.command.type === "project.create") {
       return {
         ...input.command,
-        workspaceRoot: yield* normalizeProjectWorkspaceRoot(input.command.workspaceRoot),
+        workspaceRoot: yield* workspacePaths
+          .normalizeWorkspaceRoot(input.command.workspaceRoot)
+          .pipe(Effect.mapError((cause) => new RouteRequestError({ message: cause.detail }))),
       } satisfies OrchestrationCommand;
     }
 
     if (input.command.type === "project.meta.update" && input.command.workspaceRoot !== undefined) {
       return {
         ...input.command,
-        workspaceRoot: yield* normalizeProjectWorkspaceRoot(input.command.workspaceRoot),
+        workspaceRoot: yield* workspacePaths
+          .normalizeWorkspaceRoot(input.command.workspaceRoot)
+          .pipe(Effect.mapError((cause) => new RouteRequestError({ message: cause.detail }))),
       } satisfies OrchestrationCommand;
     }
 
@@ -745,7 +733,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.projectsWriteFile: {
         const body = stripRequestTag(request.body);
-        return yield* workspaceFiles.writeFile(body).pipe(
+        return yield* workspaceFileSystem.writeFile(body).pipe(
           Effect.mapError(
             (cause) =>
               new RouteRequestError({

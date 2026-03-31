@@ -5,11 +5,15 @@ import { Effect, FileSystem, Layer, Path } from "effect";
 import { ServerConfig } from "../../config.ts";
 import { GitCoreLive } from "../../git/Layers/GitCore.ts";
 import { WorkspaceEntries } from "../Services/WorkspaceEntries.ts";
-import { WorkspaceFiles } from "../Services/WorkspaceFiles.ts";
+import { WorkspaceFileSystem } from "../Services/WorkspaceFileSystem.ts";
 import { WorkspaceEntriesLive } from "./WorkspaceEntries.ts";
-import { WorkspaceFilesLive } from "./WorkspaceFiles.ts";
+import { WorkspaceFileSystemLive } from "./WorkspaceFileSystem.ts";
+import { WorkspacePathsLive } from "./WorkspacePaths.ts";
 
-const ProjectLayer = WorkspaceFilesLive.pipe(Layer.provide(WorkspaceEntriesLive));
+const ProjectLayer = WorkspaceFileSystemLive.pipe(
+  Layer.provide(WorkspacePathsLive),
+  Layer.provide(WorkspaceEntriesLive),
+);
 
 const TestLayer = Layer.empty.pipe(
   Layer.provideMerge(ProjectLayer),
@@ -44,15 +48,15 @@ const writeTextFile = Effect.fn("writeTextFile")(function* (
   yield* fileSystem.writeFileString(absolutePath, contents).pipe(Effect.orDie);
 });
 
-it.layer(TestLayer)("WorkspaceFilesLive", (it) => {
+it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
   describe("writeFile", () => {
     it.effect("writes files relative to the workspace root", () =>
       Effect.gen(function* () {
-        const workspaceFiles = yield* WorkspaceFiles;
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
         const cwd = yield* makeTempDir;
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const result = yield* workspaceFiles.writeFile({
+        const result = yield* workspaceFileSystem.writeFile({
           cwd,
           relativePath: "plans/effect-rpc.md",
           contents: "# Plan\n",
@@ -69,7 +73,7 @@ it.layer(TestLayer)("WorkspaceFilesLive", (it) => {
     it.effect("invalidates workspace entry search cache after writes", () =>
       Effect.gen(function* () {
         const workspaceEntries = yield* WorkspaceEntries;
-        const workspaceFiles = yield* WorkspaceFiles;
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
         const cwd = yield* makeTempDir;
         yield* writeTextFile(cwd, "src/existing.ts", "export {};\n");
 
@@ -83,7 +87,7 @@ it.layer(TestLayer)("WorkspaceFilesLive", (it) => {
           truncated: false,
         });
 
-        yield* workspaceFiles.writeFile({
+        yield* workspaceFileSystem.writeFile({
           cwd,
           relativePath: "plans/effect-rpc.md",
           contents: "# Plan\n",
@@ -103,12 +107,12 @@ it.layer(TestLayer)("WorkspaceFilesLive", (it) => {
 
     it.effect("rejects writes outside the workspace root", () =>
       Effect.gen(function* () {
-        const workspaceFiles = yield* WorkspaceFiles;
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
         const cwd = yield* makeTempDir;
         const path = yield* Path.Path;
         const fileSystem = yield* FileSystem.FileSystem;
 
-        const error = yield* workspaceFiles
+        const error = yield* workspaceFileSystem
           .writeFile({
             cwd,
             relativePath: "../escape.md",

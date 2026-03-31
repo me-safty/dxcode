@@ -1,4 +1,4 @@
-import * as fsp from "node:fs/promises";
+import fsPromises from "node:fs/promises";
 import type { Dirent } from "node:fs";
 
 import { Cache, Duration, Effect, Exit, Layer, Option, Path } from "effect";
@@ -310,7 +310,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     return yield* Effect.tryPromise({
       try: async () => {
         const absoluteDir = relativeDir ? path.join(cwd, relativeDir) : cwd;
-        const dirents = await fsp.readdir(absoluteDir, { withFileTypes: true });
+        const dirents = await fsPromises.readdir(absoluteDir, { withFileTypes: true });
         return { relativeDir, dirents };
       },
       catch: (cause) =>

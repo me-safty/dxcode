@@ -35,8 +35,9 @@ import { RoutingTextGenerationLive } from "./git/Layers/RoutingTextGeneration";
 import { PtyAdapter } from "./terminal/Services/PTY";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
-import { WorkspaceEntriesLive } from "./project/Layers/WorkspaceEntries.ts";
-import { WorkspaceFilesLive } from "./project/Layers/WorkspaceFiles.ts";
+import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
+import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
+import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 
 type RuntimePtyAdapterLoader = {
   layer: Layer.Layer<PtyAdapter, never, FileSystem.FileSystem | Path.Path>;
@@ -139,14 +140,19 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provideMerge(textGenerationLayer),
   );
 
+  const workspacePathsLayer = WorkspacePathsLive;
   const workspaceEntriesLayer = WorkspaceEntriesLive;
-  const workspaceFilesLayer = WorkspaceFilesLive.pipe(Layer.provide(workspaceEntriesLayer));
+  const workspaceFileSystemLayer = WorkspaceFileSystemLive.pipe(
+    Layer.provide(workspacePathsLayer),
+    Layer.provide(workspaceEntriesLayer),
+  );
   const projectFaviconResolverLayer = ProjectFaviconResolverLive;
 
   return Layer.mergeAll(
     orchestrationReactorLayer,
+    workspacePathsLayer,
     workspaceEntriesLayer,
-    workspaceFilesLayer,
+    workspaceFileSystemLayer,
     projectFaviconResolverLayer,
     gitManagerLayer,
     terminalLayer,
