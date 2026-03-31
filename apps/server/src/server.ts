@@ -22,6 +22,7 @@ import { OrchestrationEventStoreLive } from "./persistence/Layers/OrchestrationE
 import { OrchestrationCommandReceiptRepositoryLive } from "./persistence/Layers/OrchestrationCommandReceipts";
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
 import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers/ProjectionSnapshotQuery";
+import { OrchestrationProjectionStartupQueryLive } from "./orchestration/Layers/ProjectionStartupQuery";
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
 import { GitCoreLive } from "./git/Layers/GitCore";
 import { GitHubCliLive } from "./git/Layers/GitHubCli";
@@ -100,6 +101,7 @@ const ReactorLayerLive = Layer.empty.pipe(
 );
 
 const OrchestrationLayerLive = Layer.empty.pipe(
+  Layer.provideMerge(OrchestrationProjectionStartupQueryLive),
   Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
   Layer.provideMerge(OrchestrationEngineLive),
   Layer.provideMerge(OrchestrationProjectionPipelineLive),

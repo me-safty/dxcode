@@ -11,7 +11,7 @@ import { ServerConfig } from "./config";
 import { Keybindings } from "./keybindings";
 import { Open } from "./open";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
-import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
+import { ProjectionStartupQuery } from "./orchestration/Services/ProjectionStartupQuery";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerSettingsService } from "./serverSettings";
@@ -107,15 +107,11 @@ export const makeCommandGate = Effect.gen(function* () {
 
 const recordStartupHeartbeat = Effect.gen(function* () {
   const analytics = yield* AnalyticsService;
-  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const projectionStartupQuery = yield* ProjectionStartupQuery;
 
-  const { threadCount, projectCount } = yield* projectionSnapshotQuery.getSnapshot().pipe(
-    Effect.map((snapshot) => ({
-      threadCount: snapshot.threads.length,
-      projectCount: snapshot.projects.length,
-    })),
+  const { threadCount, projectCount } = yield* projectionStartupQuery.getStartupCounts().pipe(
     Effect.catch((cause) =>
-      Effect.logWarning("failed to gather startup snapshot for telemetry", { cause }).pipe(
+      Effect.logWarning("failed to gather startup counts for telemetry", { cause }).pipe(
         Effect.as({
           threadCount: 0,
           projectCount: 0,
@@ -132,7 +128,7 @@ const recordStartupHeartbeat = Effect.gen(function* () {
 
 const autoBootstrapWelcome = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
-  const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
+  const projectionStartupQuery = yield* ProjectionStartupQuery;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const path = yield* Path.Path;
 
@@ -141,10 +137,10 @@ const autoBootstrapWelcome = Effect.gen(function* () {
 
   if (serverConfig.autoBootstrapProjectFromCwd) {
     yield* Effect.gen(function* () {
-      const snapshot = yield* projectionReadModelQuery.getSnapshot();
-      const existingProject = snapshot.projects.find(
-        (project) => project.workspaceRoot === serverConfig.cwd && project.deletedAt === null,
-      );
+      const autoBootstrapState = yield* projectionStartupQuery.getAutoBootstrapState({
+        workspaceRoot: serverConfig.cwd,
+      });
+      const existingProject = autoBootstrapState.project;
       let nextProjectId: ProjectId;
       let nextProjectDefaultModelSelection: ModelSelection;
 
@@ -173,10 +169,11 @@ const autoBootstrapWelcome = Effect.gen(function* () {
         };
       }
 
-      const existingThread = snapshot.threads.find(
-        (thread) => thread.projectId === nextProjectId && thread.deletedAt === null,
-      );
-      if (!existingThread) {
+      const existingThreadId =
+        existingProject && existingProject.id === nextProjectId
+          ? autoBootstrapState.threadId
+          : null;
+      if (existingThreadId === null) {
         const createdAt = new Date().toISOString();
         const createdThreadId = ThreadId.makeUnsafe(crypto.randomUUID());
         yield* orchestrationEngine.dispatch({
@@ -196,7 +193,7 @@ const autoBootstrapWelcome = Effect.gen(function* () {
         bootstrapThreadId = createdThreadId;
       } else {
         bootstrapProjectId = nextProjectId;
-        bootstrapThreadId = existingThread.id;
+        bootstrapThreadId = existingThreadId;
       }
     });
   }
