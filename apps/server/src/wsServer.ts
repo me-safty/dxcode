@@ -692,6 +692,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   const routeRequest = Effect.fnUntraced(function* (ws: WebSocket, request: WebSocketRequest) {
     switch (request.body._tag) {
+      case ORCHESTRATION_WS_METHODS.getBootstrapSnapshot:
+        return yield* projectionReadModelQuery.getBootstrapSnapshot();
+
       case ORCHESTRATION_WS_METHODS.getSnapshot:
         return yield* projectionReadModelQuery.getSnapshot();
 

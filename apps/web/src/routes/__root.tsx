@@ -1,4 +1,4 @@
-import { OrchestrationEvent, ThreadId } from "@t3tools/contracts";
+import { OrchestrationEvent, type OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
 import {
   Outlet,
   createRootRouteWithContext,
@@ -166,6 +166,8 @@ function EventRouter() {
     let disposed = false;
     const recovery = createOrchestrationRecoveryCoordinator();
     let needsProviderInvalidation = false;
+    let fullSnapshotHydrationQueued = false;
+    let fullSnapshotHydrationTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
 
     const reconcileSnapshotDerivedState = () => {
       const threads = useStore.getState().threads;
@@ -276,13 +278,23 @@ function EventRouter() {
       }
     };
 
-    const runSnapshotRecovery = async (reason: "bootstrap" | "replay-failed"): Promise<void> => {
+    const clearFullSnapshotHydrationTimer = () => {
+      if (fullSnapshotHydrationTimer !== null) {
+        globalThis.clearTimeout(fullSnapshotHydrationTimer);
+        fullSnapshotHydrationTimer = null;
+      }
+    };
+
+    const runSnapshotRecovery = async (
+      reason: "bootstrap" | "replay-failed",
+      fetchSnapshot: () => Promise<OrchestrationReadModel>,
+    ): Promise<"applied" | "deferred" | "failed"> => {
       if (!recovery.beginSnapshotRecovery(reason)) {
-        return;
+        return "deferred";
       }
 
       try {
-        const snapshot = await api.orchestration.getSnapshot();
+        const snapshot = await fetchSnapshot();
         if (!disposed) {
           syncServerReadModel(snapshot);
           reconcileSnapshotDerivedState();
@@ -293,15 +305,61 @@ function EventRouter() {
       } catch {
         // Keep prior state and wait for welcome or a later replay attempt.
         recovery.failSnapshotRecovery();
+        return "failed";
       }
+      return "applied";
+    };
+
+    const drainFullSnapshotHydration = async (): Promise<void> => {
+      if (disposed || !fullSnapshotHydrationQueued) {
+        return;
+      }
+
+      const result = await runSnapshotRecovery("bootstrap", () => api.orchestration.getSnapshot());
+      if (disposed) {
+        return;
+      }
+
+      if (result === "applied") {
+        fullSnapshotHydrationQueued = false;
+        clearFullSnapshotHydrationTimer();
+        return;
+      }
+
+      if (result === "failed") {
+        fullSnapshotHydrationQueued = false;
+        clearFullSnapshotHydrationTimer();
+        return;
+      }
+
+      clearFullSnapshotHydrationTimer();
+      fullSnapshotHydrationTimer = globalThis.setTimeout(() => {
+        void drainFullSnapshotHydration();
+      }, 50);
+    };
+
+    const scheduleFullSnapshotHydration = () => {
+      if (disposed || fullSnapshotHydrationQueued) {
+        return;
+      }
+      fullSnapshotHydrationQueued = true;
+      clearFullSnapshotHydrationTimer();
+      fullSnapshotHydrationTimer = globalThis.setTimeout(() => {
+        void drainFullSnapshotHydration();
+      }, 0);
     };
 
     const bootstrapFromSnapshot = async (): Promise<void> => {
-      await runSnapshotRecovery("bootstrap");
+      const result = await runSnapshotRecovery("bootstrap", () =>
+        api.orchestration.getBootstrapSnapshot(),
+      );
+      if (result === "applied" && !disposed) {
+        scheduleFullSnapshotHydration();
+      }
     };
 
     const fallbackToSnapshotRecovery = async (): Promise<void> => {
-      await runSnapshotRecovery("replay-failed");
+      await runSnapshotRecovery("replay-failed", () => api.orchestration.getSnapshot());
     };
 
     const unsubDomainEvent = api.orchestration.onDomainEvent((event) => {
@@ -413,6 +471,8 @@ function EventRouter() {
     return () => {
       disposed = true;
       needsProviderInvalidation = false;
+      fullSnapshotHydrationQueued = false;
+      clearFullSnapshotHydrationTimer();
       queryInvalidationThrottler.cancel();
       unsubDomainEvent();
       unsubTerminalEvent();

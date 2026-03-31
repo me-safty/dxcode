@@ -125,6 +125,7 @@ describe("CheckpointDiffQueryLive", () => {
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(
         Layer.succeed(ProjectionSnapshotQuery, {
+          getBootstrapSnapshot: () => Effect.succeed(snapshot),
           getSnapshot: () => Effect.succeed(snapshot),
         }),
       ),
@@ -174,6 +175,13 @@ describe("CheckpointDiffQueryLive", () => {
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(
         Layer.succeed(ProjectionSnapshotQuery, {
+          getBootstrapSnapshot: () =>
+            Effect.succeed({
+              snapshotSequence: 0,
+              projects: [],
+              threads: [],
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            } satisfies OrchestrationReadModel),
           getSnapshot: () =>
             Effect.succeed({
               snapshotSequence: 0,

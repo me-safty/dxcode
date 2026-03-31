@@ -216,6 +216,7 @@ export function createWsNativeApi(): NativeApi {
       updateSettings: (patch) => transport.request(WS_METHODS.serverUpdateSettings, { patch }),
     },
     orchestration: {
+      getBootstrapSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getBootstrapSnapshot),
       getSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot),
       dispatchCommand: (command) =>
         transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, { command }),

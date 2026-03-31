@@ -70,6 +70,7 @@ type ProjectionSnapshotInstrumentation = {
 };
 
 type ProjectionSnapshotQueryOptions = {
+  readonly includeMessages?: boolean;
   readonly includeActivities?: boolean;
 };
 
@@ -186,7 +187,6 @@ export const makeProjectionSnapshotQuery = (
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const includeActivities = options?.includeActivities ?? true;
 
     const listProjectRows = SqlSchema.findAll({
       Request: Schema.Void,
@@ -380,8 +380,11 @@ export const makeProjectionSnapshotQuery = (
         return result;
       });
 
-    const getSnapshot: ProjectionSnapshotQueryShape["getSnapshot"] = () =>
-      sql
+    const runSnapshotQuery = (queryOptions?: ProjectionSnapshotQueryOptions) => {
+      const includeMessages = queryOptions?.includeMessages ?? true;
+      const includeActivities = queryOptions?.includeActivities ?? true;
+
+      return sql
         .withTransaction(
           Effect.gen(function* () {
             const totalStartedAt = nowMs();
@@ -421,14 +424,16 @@ export const makeProjectionSnapshotQuery = (
               ),
               timed(
                 "listThreadMessages",
-                listThreadMessageRows(undefined).pipe(
-                  Effect.mapError(
-                    toPersistenceSqlOrDecodeError(
-                      "ProjectionSnapshotQuery.getSnapshot:listThreadMessages:query",
-                      "ProjectionSnapshotQuery.getSnapshot:listThreadMessages:decodeRows",
-                    ),
-                  ),
-                ),
+                includeMessages
+                  ? listThreadMessageRows(undefined).pipe(
+                      Effect.mapError(
+                        toPersistenceSqlOrDecodeError(
+                          "ProjectionSnapshotQuery.getSnapshot:listThreadMessages:query",
+                          "ProjectionSnapshotQuery.getSnapshot:listThreadMessages:decodeRows",
+                        ),
+                      ),
+                    )
+                  : Effect.succeed([]),
               ),
               timed(
                 "listThreadProposedPlans",
@@ -521,20 +526,22 @@ export const makeProjectionSnapshotQuery = (
               updatedAt = maxIso(updatedAt, row.updatedAt);
             }
 
-            for (const row of messageRows) {
-              updatedAt = maxIso(updatedAt, row.updatedAt);
-              const threadMessages = messagesByThread.get(row.threadId) ?? [];
-              threadMessages.push({
-                id: row.messageId,
-                role: row.role,
-                text: row.text,
-                ...(row.attachments !== null ? { attachments: row.attachments } : {}),
-                turnId: row.turnId,
-                streaming: row.isStreaming === 1,
-                createdAt: row.createdAt,
-                updatedAt: row.updatedAt,
-              });
-              messagesByThread.set(row.threadId, threadMessages);
+            if (includeMessages) {
+              for (const row of messageRows) {
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+                const threadMessages = messagesByThread.get(row.threadId) ?? [];
+                threadMessages.push({
+                  id: row.messageId,
+                  role: row.role,
+                  text: row.text,
+                  ...(row.attachments !== null ? { attachments: row.attachments } : {}),
+                  turnId: row.turnId,
+                  streaming: row.isStreaming === 1,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
+                });
+                messagesByThread.set(row.threadId, threadMessages);
+              }
             }
 
             for (const row of proposedPlanRows) {
@@ -698,8 +705,19 @@ export const makeProjectionSnapshotQuery = (
             return toPersistenceSqlError("ProjectionSnapshotQuery.getSnapshot:query")(error);
           }),
         );
+    };
+
+    const getSnapshot: ProjectionSnapshotQueryShape["getSnapshot"] = () =>
+      runSnapshotQuery(options);
+
+    const getBootstrapSnapshot: ProjectionSnapshotQueryShape["getBootstrapSnapshot"] = () =>
+      runSnapshotQuery({
+        includeMessages: false,
+        includeActivities: false,
+      });
 
     return {
+      getBootstrapSnapshot,
       getSnapshot,
     } satisfies ProjectionSnapshotQueryShape;
   });

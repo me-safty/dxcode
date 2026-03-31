@@ -16,6 +16,7 @@ import {
 } from "./baseSchemas";
 
 export const ORCHESTRATION_WS_METHODS = {
+  getBootstrapSnapshot: "orchestration.getBootstrapSnapshot",
   getSnapshot: "orchestration.getSnapshot",
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
@@ -989,6 +990,13 @@ export type OrchestrationGetSnapshotInput = typeof OrchestrationGetSnapshotInput
 const OrchestrationGetSnapshotResult = OrchestrationReadModel;
 export type OrchestrationGetSnapshotResult = typeof OrchestrationGetSnapshotResult.Type;
 
+export const OrchestrationGetBootstrapSnapshotInput = Schema.Struct({});
+export type OrchestrationGetBootstrapSnapshotInput =
+  typeof OrchestrationGetBootstrapSnapshotInput.Type;
+const OrchestrationGetBootstrapSnapshotResult = OrchestrationReadModel;
+export type OrchestrationGetBootstrapSnapshotResult =
+  typeof OrchestrationGetBootstrapSnapshotResult.Type;
+
 export const OrchestrationGetTurnDiffInput = TurnCountRange.mapFields(
   Struct.assign({ threadId: ThreadId }),
   { unsafePreserveChecks: true },
@@ -1016,6 +1024,10 @@ const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
 export const OrchestrationRpcSchemas = {
+  getBootstrapSnapshot: {
+    input: OrchestrationGetBootstrapSnapshotInput,
+    output: OrchestrationGetBootstrapSnapshotResult,
+  },
   getSnapshot: {
     input: OrchestrationGetSnapshotInput,
     output: OrchestrationGetSnapshotResult,
