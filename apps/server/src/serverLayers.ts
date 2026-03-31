@@ -109,12 +109,15 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provideMerge(checkpointStoreLayer),
   );
 
-  const runtimeServicesLayer = Layer.mergeAll(
+  const runtimeServicesBaseLayer = Layer.mergeAll(
     orchestrationLayer,
     OrchestrationProjectionSnapshotQueryLive,
     checkpointStoreLayer,
-    checkpointDiffQueryLayer,
     RuntimeReceiptBusLive,
+  );
+  const runtimeServicesLayer = Layer.merge(
+    runtimeServicesBaseLayer,
+    checkpointDiffQueryLayer.pipe(Layer.provideMerge(runtimeServicesBaseLayer)),
   );
   const runtimeIngestionLayer = ProviderRuntimeIngestionLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),

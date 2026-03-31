@@ -23,6 +23,7 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
+import { makeProjectionSnapshotQuery } from "./ProjectionSnapshotQuery.ts";
 
 interface CommandEnvelope {
   command: OrchestrationCommand;
@@ -54,6 +55,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const eventStore = yield* OrchestrationEventStore;
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository;
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
+  const projectionSnapshotQuery = yield* makeProjectionSnapshotQuery();
 
   let readModel = createEmptyReadModel(new Date().toISOString());
 
@@ -194,13 +196,44 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     );
   };
 
+  const bootstrapReadModelFromReplay = Effect.gen(function* () {
+    let replayedReadModel = createEmptyReadModel(new Date().toISOString());
+    yield* Stream.runForEach(eventStore.readAll(), (event) =>
+      Effect.gen(function* () {
+        replayedReadModel = yield* projectEvent(replayedReadModel, event);
+      }),
+    );
+    return replayedReadModel;
+  });
+
+  const bootstrapReadModelFromProjectionSnapshot = Effect.gen(function* () {
+    const snapshot = yield* projectionSnapshotQuery.getSnapshot();
+    if (snapshot.snapshotSequence === 0) {
+      const firstPersistedEvent = yield* Stream.runHead(eventStore.readFromSequence(0, 1));
+      if (Option.isSome(firstPersistedEvent)) {
+        return yield* Effect.fail(
+          new Error("Projection snapshot is incomplete despite persisted orchestration events."),
+        );
+      }
+    }
+    return snapshot;
+  });
+
   yield* projectionPipeline.bootstrap;
 
-  // bootstrap in-memory read model from event store
-  yield* Stream.runForEach(eventStore.readAll(), (event) =>
-    Effect.gen(function* () {
-      readModel = yield* projectEvent(readModel, event);
-    }),
+  readModel = yield* bootstrapReadModelFromProjectionSnapshot.pipe(
+    Effect.catch((error) =>
+      Effect.gen(function* () {
+        yield* Effect.logWarning(
+          "failed to bootstrap orchestration read model from projection snapshot; falling back to event replay",
+        ).pipe(
+          Effect.annotateLogs({
+            detail: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return yield* bootstrapReadModelFromReplay;
+      }),
+    ),
   );
 
   const worker = Effect.forever(Queue.take(commandQueue).pipe(Effect.flatMap(processEnvelope)));
