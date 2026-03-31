@@ -13,6 +13,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { ClaudeModelSelection } from "@t3tools/contracts";
 import { resolveApiModelId } from "@t3tools/shared/model";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import { escapeArgForWindowsShell } from "@t3tools/shared/shell";
 
 import { TextGenerationError } from "../Errors.ts";
 import { type TextGenerationShape, TextGeneration } from "../Services/TextGeneration.ts";
@@ -109,11 +110,13 @@ const makeClaudeTextGeneration = Effect.gen(function* () {
             "--output-format",
             "json",
             "--json-schema",
-            jsonSchemaStr,
+            escapeArgForWindowsShell(jsonSchemaStr),
             "--model",
             resolveApiModelId(modelSelection),
             ...(normalizedOptions?.effort ? ["--effort", normalizedOptions.effort] : []),
-            ...(Object.keys(settings).length > 0 ? ["--settings", JSON.stringify(settings)] : []),
+            ...(Object.keys(settings).length > 0
+              ? ["--settings", escapeArgForWindowsShell(JSON.stringify(settings))]
+              : []),
             "--dangerously-skip-permissions",
           ],
           {

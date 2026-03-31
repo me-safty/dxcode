@@ -5,6 +5,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { CodexModelSelection } from "@t3tools/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import { escapeArgForWindowsShell } from "@t3tools/shared/shell";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -173,8 +174,10 @@ const makeCodexTextGeneration = Effect.gen(function* () {
             "--model",
             modelSelection.model,
             "--config",
-            `model_reasoning_effort="${reasoningEffort}"`,
-            ...(normalizedOptions?.fastMode ? ["--config", `service_tier="fast"`] : []),
+            escapeArgForWindowsShell(`model_reasoning_effort="${reasoningEffort}"`),
+            ...(normalizedOptions?.fastMode
+              ? ["--config", escapeArgForWindowsShell(`service_tier="fast"`)]
+              : []),
             "--output-schema",
             schemaPath,
             "--output-last-message",

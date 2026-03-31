@@ -1,5 +1,10 @@
 import { execFileSync } from "node:child_process";
 
+export const escapeArgForWindowsShell = (
+  arg: string,
+  platform: NodeJS.Platform = process.platform,
+): string => (platform === "win32" ? arg.replace(/"/g, '\\"') : arg);
+
 const PATH_CAPTURE_START = "__T3CODE_PATH_START__";
 const PATH_CAPTURE_END = "__T3CODE_PATH_END__";
 const SHELL_ENV_NAME_PATTERN = /^[A-Z0-9_]+$/;
@@ -73,7 +78,10 @@ function buildEnvironmentCaptureCommand(names: ReadonlyArray<string>): string {
     .join("; ");
 }
 
-function extractEnvironmentValue(output: string, name: string): string | undefined {
+function extractEnvironmentValue(
+  output: string,
+  name: string,
+): string | undefined {
   const startMarker = envCaptureStart(name);
   const endMarker = envCaptureEnd(name);
   const startIndex = output.indexOf(startMarker);
@@ -109,10 +117,14 @@ export const readEnvironmentFromLoginShell: ShellEnvironmentReader = (
     return {};
   }
 
-  const output = execFile(shell, ["-ilc", buildEnvironmentCaptureCommand(names)], {
-    encoding: "utf8",
-    timeout: 5000,
-  });
+  const output = execFile(
+    shell,
+    ["-ilc", buildEnvironmentCaptureCommand(names)],
+    {
+      encoding: "utf8",
+      timeout: 5000,
+    },
+  );
 
   const environment: Partial<Record<string, string>> = {};
   for (const name of names) {
