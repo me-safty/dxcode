@@ -279,7 +279,7 @@ describe("OrchestrationEngine", () => {
     await system.dispose();
   });
 
-  it("hydrates the same read model from projections as full replay", async () => {
+  it("hydrates engine bootstrap state from projections without thread activities", async () => {
     const system = await createOrchestrationSystem();
     const { engine, eventStore } = system;
     const createdAt = now();
@@ -347,9 +347,16 @@ describe("OrchestrationEngine", () => {
       Effect.flatMap(makeProjectionSnapshotQuery(), (snapshotQuery) => snapshotQuery.getSnapshot()),
     );
     const engineReadModel = await system.run(engine.getReadModel());
+    const replayedReadModelWithoutActivities = {
+      ...replayedReadModel,
+      threads: replayedReadModel.threads.map((thread) => ({
+        ...thread,
+        activities: [],
+      })),
+    };
 
     expect(snapshotReadModel).toEqual(replayedReadModel);
-    expect(engineReadModel).toEqual(replayedReadModel);
+    expect(engineReadModel).toEqual(replayedReadModelWithoutActivities);
     await system.dispose();
   });
 
