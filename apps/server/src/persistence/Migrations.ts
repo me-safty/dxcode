@@ -9,6 +9,7 @@
  */
 
 import * as Migrator from "effect/unstable/sql/Migrator";
+import * as Layer from "effect/Layer";
 import * as Effect from "effect/Effect";
 
 // Import all migrations statically
@@ -41,7 +42,7 @@ import Migration0018 from "./Migrations/018_ProjectionThreadsArchivedAtIndex.ts"
  * Uses Migrator.fromRecord which parses the key format and
  * returns migrations sorted by ID.
  */
-const migrationEntries = [
+export const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
   [3, "CheckpointDiffBlobs", Migration0003],
@@ -62,7 +63,7 @@ const migrationEntries = [
   [18, "ProjectionThreadsArchivedAtIndex", Migration0018],
 ] as const;
 
-const makeMigrationLoader = (throughId?: number) =>
+export const makeMigrationLoader = (throughId?: number) =>
   Migrator.fromRecord(
     Object.fromEntries(
       migrationEntries
@@ -77,7 +78,7 @@ const makeMigrationLoader = (throughId?: number) =>
  */
 const run = Migrator.make({});
 
-interface RunMigrationsOptions {
+export interface RunMigrationsOptions {
   readonly toMigrationInclusive?: number | undefined;
 }
 
@@ -91,16 +92,36 @@ interface RunMigrationsOptions {
  *
  * @returns Effect containing array of executed migrations
  */
-export const runMigrations = ({ toMigrationInclusive }: RunMigrationsOptions = {}) =>
-  Effect.gen(function* () {
-    yield* Effect.log(
-      toMigrationInclusive === undefined
-        ? "Running all migrations..."
-        : `Running migrations 1 through ${toMigrationInclusive}...`,
-    );
-    const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
-    yield* Effect.log("Migrations ran successfully").pipe(
-      Effect.annotateLogs({ migrations: executedMigrations.map(([id, name]) => `${id}_${name}`) }),
-    );
-    return executedMigrations;
-  });
+export const runMigrations = Effect.fn("runMigrations")(function* ({
+  toMigrationInclusive,
+}: RunMigrationsOptions = {}) {
+  yield* Effect.log(
+    toMigrationInclusive === undefined
+      ? "Running all migrations..."
+      : `Running migrations 1 through ${toMigrationInclusive}...`,
+  );
+  const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
+  yield* Effect.log("Migrations ran successfully").pipe(
+    Effect.annotateLogs({ migrations: executedMigrations.map(([id, name]) => `${id}_${name}`) }),
+  );
+  return executedMigrations;
+});
+
+/**
+ * Layer that runs migrations when the layer is built.
+ *
+ * Use this to ensure migrations run before your application starts.
+ * Migrations are run automatically - no separate script is needed.
+ *
+ * @example
+ * ```typescript
+ * import { MigrationsLive } from "@acme/db/Migrations"
+ * import * as SqliteClient from "@acme/db/SqliteClient"
+ *
+ * // Migrations run automatically when SqliteClient is provided
+ * const AppLayer = MigrationsLive.pipe(
+ *   Layer.provideMerge(SqliteClient.layer({ filename: "database.sqlite" }))
+ * )
+ * ```
+ */
+export const MigrationsLive = Layer.effectDiscard(runMigrations());

@@ -7,13 +7,13 @@ import { ServerConfig } from "./config";
 
 import {
   DEFAULT_KEYBINDINGS,
-  KeybindingsConfigError,
   ResolvedKeybindingFromConfig,
+  compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
   parseKeybindingShortcut,
-  compileResolvedKeybindingRule,
 } from "./keybindings.logic";
 import { Keybindings, KeybindingsLive } from "./keybindings";
+import { KeybindingsConfigError } from "@t3tools/contracts";
 
 const KeybindingsConfigJson = Schema.fromJsonString(KeybindingsConfig);
 const makeKeybindingsLayer = () => {
