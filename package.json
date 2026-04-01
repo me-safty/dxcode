@@ -54,12 +54,14 @@
     "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules apps/*/dist apps/*/dist-electron packages/*/dist .turbo apps/*/.turbo packages/*/.turbo",
     "sync:vscode-icons": "node scripts/sync-vscode-icons.mjs"
   },
+  "dependencies": {
+    "turbo": "^2.3.3"
+  },
   "devDependencies": {
     "@types/node": "catalog:",
     "knip": "^6.3.0",
     "oxfmt": "^0.40.0",
     "oxlint": "^1.55.0",
-    "turbo": "^2.3.3",
     "vitest": "catalog:"
   },
   "overrides": {
