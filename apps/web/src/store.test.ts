@@ -395,6 +395,70 @@ describe("incremental orchestration updates", () => {
     expect(next.projects[0]?.name).toBe("Project Recreated");
   });
 
+  it("removes stale project index entries when thread.created recreates a thread under a new project", () => {
+    const originalProjectId = ProjectId.makeUnsafe("project-1");
+    const recreatedProjectId = ProjectId.makeUnsafe("project-2");
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const thread = makeThread({
+      id: threadId,
+      projectId: originalProjectId,
+    });
+    const state: AppState = {
+      projects: [
+        {
+          id: originalProjectId,
+          name: "Project 1",
+          cwd: "/tmp/project-1",
+          defaultModelSelection: {
+            provider: "codex",
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          },
+          scripts: [],
+        },
+        {
+          id: recreatedProjectId,
+          name: "Project 2",
+          cwd: "/tmp/project-2",
+          defaultModelSelection: {
+            provider: "codex",
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          },
+          scripts: [],
+        },
+      ],
+      threads: [thread],
+      sidebarThreadsById: {},
+      threadIdsByProjectId: {
+        [originalProjectId]: [threadId],
+      },
+      bootstrapComplete: true,
+    };
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.created", {
+        threadId,
+        projectId: recreatedProjectId,
+        title: "Recovered thread",
+        modelSelection: {
+          provider: "codex",
+          model: DEFAULT_MODEL_BY_PROVIDER.codex,
+        },
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: DEFAULT_INTERACTION_MODE,
+        branch: null,
+        worktreePath: null,
+        createdAt: "2026-02-27T00:00:01.000Z",
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      }),
+    );
+
+    expect(next.threads).toHaveLength(1);
+    expect(next.threads[0]?.projectId).toBe(recreatedProjectId);
+    expect(next.threadIdsByProjectId[originalProjectId]).toBeUndefined();
+    expect(next.threadIdsByProjectId[recreatedProjectId]).toEqual([threadId]);
+  });
+
   it("updates only the affected thread for message events", () => {
     const thread1 = makeThread({
       id: ThreadId.makeUnsafe("thread-1"),

@@ -1,11 +1,10 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
-import { Effect, Layer, Option, Schema, Struct } from "effect";
+import { Effect, Layer, Schema, Struct } from "effect";
 import { ChatAttachment } from "@t3tools/contracts";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
-  GetProjectionThreadMessageInput,
   ProjectionThreadMessageRepository,
   type ProjectionThreadMessageRepositoryShape,
   DeleteProjectionThreadMessagesInput,
@@ -19,22 +18,6 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
     attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
   }),
 );
-
-function toProjectionThreadMessage(
-  row: Schema.Schema.Type<typeof ProjectionThreadMessageDbRowSchema>,
-): ProjectionThreadMessage {
-  return {
-    messageId: row.messageId,
-    threadId: row.threadId,
-    turnId: row.turnId,
-    role: row.role,
-    text: row.text,
-    isStreaming: row.isStreaming === 1,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    ...(row.attachments !== null ? { attachments: row.attachments } : {}),
-  };
-}
 
 const makeProjectionThreadMessageRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -91,27 +74,6 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
     },
   });
 
-  const getProjectionThreadMessageRow = SqlSchema.findOneOption({
-    Request: GetProjectionThreadMessageInput,
-    Result: ProjectionThreadMessageDbRowSchema,
-    execute: ({ messageId }) =>
-      sql`
-        SELECT
-          message_id AS "messageId",
-          thread_id AS "threadId",
-          turn_id AS "turnId",
-          role,
-          text,
-          attachments_json AS "attachments",
-          is_streaming AS "isStreaming",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM projection_thread_messages
-        WHERE message_id = ${messageId}
-        LIMIT 1
-      `,
-  });
-
   const listProjectionThreadMessageRows = SqlSchema.findAll({
     Request: ListProjectionThreadMessagesInput,
     Result: ProjectionThreadMessageDbRowSchema,
@@ -147,20 +109,24 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionThreadMessageRepository.upsert:query")),
     );
 
-  const getByMessageId: ProjectionThreadMessageRepositoryShape["getByMessageId"] = (input) =>
-    getProjectionThreadMessageRow(input).pipe(
-      Effect.mapError(
-        toPersistenceSqlError("ProjectionThreadMessageRepository.getByMessageId:query"),
-      ),
-      Effect.map(Option.map(toProjectionThreadMessage)),
-    );
-
   const listByThreadId: ProjectionThreadMessageRepositoryShape["listByThreadId"] = (input) =>
     listProjectionThreadMessageRows(input).pipe(
       Effect.mapError(
         toPersistenceSqlError("ProjectionThreadMessageRepository.listByThreadId:query"),
       ),
-      Effect.map((rows) => rows.map(toProjectionThreadMessage)),
+      Effect.map((rows) =>
+        rows.map((row) => ({
+          messageId: row.messageId,
+          threadId: row.threadId,
+          turnId: row.turnId,
+          role: row.role,
+          text: row.text,
+          isStreaming: row.isStreaming === 1,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          ...(row.attachments !== null ? { attachments: row.attachments } : {}),
+        })),
+      ),
     );
 
   const deleteByThreadId: ProjectionThreadMessageRepositoryShape["deleteByThreadId"] = (input) =>
@@ -172,7 +138,6 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
 
   return {
     upsert,
-    getByMessageId,
     listByThreadId,
     deleteByThreadId,
   } satisfies ProjectionThreadMessageRepositoryShape;

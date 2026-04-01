@@ -5,19 +5,7 @@ import {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
-import {
-  Data,
-  Deferred,
-  Effect,
-  Exit,
-  Layer,
-  Option,
-  Path,
-  Queue,
-  Ref,
-  Scope,
-  ServiceMap,
-} from "effect";
+import { Data, Deferred, Effect, Exit, Layer, Path, Queue, Ref, Scope, ServiceMap } from "effect";
 
 import { ServerConfig } from "./config";
 import { Keybindings } from "./keybindings";
@@ -117,15 +105,17 @@ export const makeCommandGate = Effect.gen(function* () {
   } satisfies CommandGate;
 });
 
-export const recordStartupHeartbeat = Effect.gen(function* () {
+const recordStartupHeartbeat = Effect.gen(function* () {
   const analytics = yield* AnalyticsService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
 
-  const { threadCount, projectCount } = yield* projectionSnapshotQuery.getCounts().pipe(
+  const { threadCount, projectCount } = yield* projectionSnapshotQuery.getSnapshot().pipe(
+    Effect.map((snapshot) => ({
+      threadCount: snapshot.threads.length,
+      projectCount: snapshot.projects.length,
+    })),
     Effect.catch((cause) =>
-      Effect.logWarning("failed to gather startup projection counts for telemetry", {
-        cause,
-      }).pipe(
+      Effect.logWarning("failed to gather startup snapshot for telemetry", { cause }).pipe(
         Effect.as({
           threadCount: 0,
           projectCount: 0,
@@ -140,12 +130,6 @@ export const recordStartupHeartbeat = Effect.gen(function* () {
   });
 });
 
-export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
-  Effect.ignoreCause({ log: true }),
-  Effect.forkScoped,
-  Effect.asVoid,
-);
-
 const autoBootstrapWelcome = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
@@ -157,13 +141,14 @@ const autoBootstrapWelcome = Effect.gen(function* () {
 
   if (serverConfig.autoBootstrapProjectFromCwd) {
     yield* Effect.gen(function* () {
-      const existingProject = yield* projectionReadModelQuery.getActiveProjectByWorkspaceRoot(
-        serverConfig.cwd,
+      const snapshot = yield* projectionReadModelQuery.getSnapshot();
+      const existingProject = snapshot.projects.find(
+        (project) => project.workspaceRoot === serverConfig.cwd && project.deletedAt === null,
       );
       let nextProjectId: ProjectId;
       let nextProjectDefaultModelSelection: ModelSelection;
 
-      if (Option.isNone(existingProject)) {
+      if (!existingProject) {
         const createdAt = new Date().toISOString();
         nextProjectId = ProjectId.makeUnsafe(crypto.randomUUID());
         const bootstrapProjectTitle = path.basename(serverConfig.cwd) || "project";
@@ -181,16 +166,17 @@ const autoBootstrapWelcome = Effect.gen(function* () {
           createdAt,
         });
       } else {
-        nextProjectId = existingProject.value.id;
-        nextProjectDefaultModelSelection = existingProject.value.defaultModelSelection ?? {
+        nextProjectId = existingProject.id;
+        nextProjectDefaultModelSelection = existingProject.defaultModelSelection ?? {
           provider: "codex",
           model: "gpt-5-codex",
         };
       }
 
-      const existingThreadId =
-        yield* projectionReadModelQuery.getFirstActiveThreadIdByProjectId(nextProjectId);
-      if (Option.isNone(existingThreadId)) {
+      const existingThread = snapshot.threads.find(
+        (thread) => thread.projectId === nextProjectId && thread.deletedAt === null,
+      );
+      if (!existingThread) {
         const createdAt = new Date().toISOString();
         const createdThreadId = ThreadId.makeUnsafe(crypto.randomUUID());
         yield* orchestrationEngine.dispatch({
@@ -210,7 +196,7 @@ const autoBootstrapWelcome = Effect.gen(function* () {
         bootstrapThreadId = createdThreadId;
       } else {
         bootstrapProjectId = nextProjectId;
-        bootstrapThreadId = existingThreadId.value;
+        bootstrapThreadId = existingThread.id;
       }
     });
   }
@@ -328,7 +314,7 @@ const makeServerRuntimeStartup = Effect.gen(function* () {
       });
 
       yield* Effect.logDebug("startup phase: recording startup heartbeat");
-      yield* launchStartupHeartbeat;
+      yield* recordStartupHeartbeat;
       yield* Effect.logDebug("startup phase: browser open check");
       yield* maybeOpenBrowser;
       yield* Effect.logDebug("startup phase: complete");

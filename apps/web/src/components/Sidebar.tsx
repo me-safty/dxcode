@@ -115,7 +115,6 @@ import {
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
-  resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
@@ -692,7 +691,7 @@ export default function Sidebar() {
   const isOnSettings = pathname.startsWith("/settings");
   const appSettings = useSettings();
   const { updateSettings } = useUpdateSettings();
-  const { activeDraftThread, activeThread, handleNewThread } = useHandleNewThread();
+  const { handleNewThread } = useHandleNewThread();
   const { archiveThread, deleteThread } = useThreadActions();
   const routeThreadId = useParams({
     strict: false,
@@ -1657,35 +1656,10 @@ export default function Sidebar() {
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    const seedContext = resolveSidebarNewThreadSeedContext({
-                      projectId: project.id,
-                      defaultEnvMode: resolveSidebarNewThreadEnvMode({
+                    void handleNewThread(project.id, {
+                      envMode: resolveSidebarNewThreadEnvMode({
                         defaultEnvMode: appSettings.defaultThreadEnvMode,
                       }),
-                      activeThread:
-                        activeThread && activeThread.projectId === project.id
-                          ? {
-                              projectId: activeThread.projectId,
-                              branch: activeThread.branch,
-                              worktreePath: activeThread.worktreePath,
-                            }
-                          : null,
-                      activeDraftThread:
-                        activeDraftThread && activeDraftThread.projectId === project.id
-                          ? {
-                              projectId: activeDraftThread.projectId,
-                              branch: activeDraftThread.branch,
-                              worktreePath: activeDraftThread.worktreePath,
-                              envMode: activeDraftThread.envMode,
-                            }
-                          : null,
-                    });
-                    void handleNewThread(project.id, {
-                      ...(seedContext.branch !== undefined ? { branch: seedContext.branch } : {}),
-                      ...(seedContext.worktreePath !== undefined
-                        ? { worktreePath: seedContext.worktreePath }
-                        : {}),
-                      envMode: seedContext.envMode,
                     });
                   }}
                 >

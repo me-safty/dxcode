@@ -25,7 +25,6 @@ import {
   ORCHESTRATION_PROJECTOR_NAMES,
   OrchestrationProjectionPipelineLive,
 } from "./ProjectionPipeline.ts";
-import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
 import { ServerConfig } from "../../config.ts";
@@ -1842,7 +1841,6 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
 
 const engineLayer = it.layer(
   OrchestrationEngineLive.pipe(
-    Layer.provide(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),

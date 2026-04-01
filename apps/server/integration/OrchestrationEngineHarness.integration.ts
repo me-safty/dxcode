@@ -289,10 +289,9 @@ export const makeOrchestrationIntegrationHarness = (
         );
 
     const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(GitCoreLive));
-    const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive;
     const runtimeServicesLayer = Layer.mergeAll(
-      projectionSnapshotQueryLayer,
-      orchestrationLayer.pipe(Layer.provide(projectionSnapshotQueryLayer)),
+      orchestrationLayer,
+      OrchestrationProjectionSnapshotQueryLive,
       ProjectionCheckpointRepositoryLive,
       ProjectionPendingApprovalRepositoryLive,
       checkpointStoreLayer,
@@ -334,9 +333,7 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(providerCommandReactorLayer),
       Layer.provideMerge(checkpointReactorLayer),
     );
-    const layer = Layer.empty.pipe(
-      Layer.provideMerge(runtimeServicesLayer),
-      Layer.provideMerge(orchestrationReactorLayer),
+    const layer = orchestrationReactorLayer.pipe(
       Layer.provide(persistenceLayer),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),

@@ -674,8 +674,12 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
             ...state.sidebarThreadsById,
             [nextThread.id]: nextSummary,
           };
+      const nextThreadIdsByProjectId =
+        existing !== undefined && existing.projectId !== nextThread.projectId
+          ? removeThreadIdByProjectId(state.threadIdsByProjectId, existing.projectId, existing.id)
+          : state.threadIdsByProjectId;
       const threadIdsByProjectId = appendThreadIdByProjectId(
-        state.threadIdsByProjectId,
+        nextThreadIdsByProjectId,
         nextThread.projectId,
         nextThread.id,
       );
