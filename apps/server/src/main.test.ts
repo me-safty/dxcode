@@ -1,7 +1,6 @@
 import * as Http from "node:http";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, vi } from "@effect/vitest";
-import type { OrchestrationReadModel } from "@t3tools/contracts";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -14,7 +13,7 @@ import { NetService } from "@t3tools/shared/Net";
 import { CliConfig, recordStartupHeartbeat, t3Cli, type CliConfigShape } from "./main";
 import { ServerConfig, type ServerConfigShape } from "./config";
 import { Open, type OpenShape } from "./open";
-import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
+import { ProjectionStartupQuery } from "./orchestration/Services/ProjectionStartupQuery";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 import { Server, type ServerShape } from "./wsServer";
 import { ServerSettingsService } from "./serverSettings";
@@ -351,21 +350,18 @@ it.layer(testLayer)("server CLI command", (it) => {
       const recordTelemetry = vi.fn(
         (_event: string, _properties?: Readonly<Record<string, unknown>>) => Effect.void,
       );
-      const getSnapshot = vi.fn(() =>
+      const getStartupCounts = vi.fn(() =>
         Effect.succeed({
-          snapshotSequence: 2,
-          projects: [{} as OrchestrationReadModel["projects"][number]],
-          threads: [
-            {} as OrchestrationReadModel["threads"][number],
-            {} as OrchestrationReadModel["threads"][number],
-          ],
-          updatedAt: new Date(1).toISOString(),
-        } satisfies OrchestrationReadModel),
+          threadCount: 2,
+          projectCount: 1,
+        }),
       );
 
       yield* recordStartupHeartbeat.pipe(
-        Effect.provideService(ProjectionSnapshotQuery, {
-          getSnapshot,
+        Effect.provideService(ProjectionStartupQuery, {
+          getStartupCounts,
+          getAutoBootstrapState: () =>
+            Effect.die("getAutoBootstrapState should not be called by recordStartupHeartbeat"),
         }),
         Effect.provideService(AnalyticsService, {
           record: recordTelemetry,
