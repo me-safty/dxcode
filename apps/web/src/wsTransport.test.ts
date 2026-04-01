@@ -2,7 +2,6 @@ import { WS_METHODS } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WsTransport } from "./wsTransport";
-import { Option } from "effect";
 
 type WsEventType = "open" | "message" | "close" | "error";
 type WsEvent = { code?: number; data?: unknown; reason?: string; type?: string };
@@ -317,22 +316,24 @@ describe("WsTransport", () => {
     transport.dispose();
   });
 
-  it("accepts request options for long-running RPCs", async () => {
+  it("streams finite request events without re-subscribing", async () => {
     const transport = new WsTransport("ws://localhost:3020");
+    const listener = vi.fn();
+
     await waitFor(() => {
       expect(sockets).toHaveLength(1);
     });
     const socket = getSocket();
     socket.open();
 
-    const requestPromise = transport.request(
+    const requestPromise = transport.requestStream(
       (client) =>
         client[WS_METHODS.gitRunStackedAction]({
           actionId: "action-1",
           cwd: "/repo",
           action: "commit",
         }),
-      { timeout: Option.none() },
+      listener,
     );
 
     await waitFor(() => {
@@ -340,30 +341,41 @@ describe("WsTransport", () => {
     });
 
     const requestMessage = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    const progressEvent = {
+      actionId: "action-1",
+      cwd: "/repo",
+      action: "commit",
+      kind: "phase_started",
+      phase: "commit",
+      label: "Committing...",
+    } as const;
+
+    socket.serverMessage(
+      JSON.stringify({
+        _tag: "Chunk",
+        requestId: requestMessage.id,
+        values: [progressEvent],
+      }),
+    );
     socket.serverMessage(
       JSON.stringify({
         _tag: "Exit",
         requestId: requestMessage.id,
         exit: {
           _tag: "Success",
-          value: {
-            action: "commit",
-            branch: { status: "skipped_not_requested" },
-            commit: { status: "created", commitSha: "abc123", subject: "feat: demo" },
-            push: { status: "skipped_not_requested" },
-            pr: { status: "skipped_not_requested" },
-          },
+          value: null,
         },
       }),
     );
 
-    await expect(requestPromise).resolves.toEqual({
-      action: "commit",
-      branch: { status: "skipped_not_requested" },
-      commit: { status: "created", commitSha: "abc123", subject: "feat: demo" },
-      push: { status: "skipped_not_requested" },
-      pr: { status: "skipped_not_requested" },
-    });
+    await expect(requestPromise).resolves.toBeUndefined();
+    expect(listener).toHaveBeenCalledWith(progressEvent);
+    expect(
+      socket.sent.filter((message) => {
+        const parsed = JSON.parse(message) as { _tag?: string; tag?: string };
+        return parsed._tag === "Request" && parsed.tag === WS_METHODS.gitRunStackedAction;
+      }),
+    ).toHaveLength(1);
     transport.dispose();
   });
 });

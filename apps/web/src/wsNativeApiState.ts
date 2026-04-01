@@ -1,5 +1,4 @@
 import {
-  type GitActionProgressEvent,
   type ServerConfig,
   type ServerConfigStreamEvent,
   type ServerConfigUpdatedPayload,
@@ -14,10 +13,6 @@ export type ServerConfigUpdateSource = ServerConfigStreamEvent["type"];
 export interface ServerConfigUpdatedNotification {
   readonly payload: ServerConfigUpdatedPayload;
   readonly source: ServerConfigUpdateSource;
-}
-
-export interface GitActionProgressNotification {
-  readonly event: GitActionProgressEvent;
 }
 
 function makeStateAtom<A>(label: string, initialValue: A) {
@@ -42,10 +37,6 @@ export const serverConfigUpdatedAtom = makeStateAtom<ServerConfigUpdatedNotifica
 );
 export const providersUpdatedAtom = makeStateAtom<ServerProviderUpdatedPayload | null>(
   "ws-server-providers-updated",
-  null,
-);
-export const gitActionProgressAtom = makeStateAtom<GitActionProgressNotification | null>(
-  "ws-git-action-progress",
   null,
 );
 
@@ -123,10 +114,6 @@ export function emitWelcome(payload: WsWelcomePayload): void {
   wsNativeApiRegistry.set(wsWelcomeAtom, payload);
 }
 
-export function emitGitActionProgress(event: GitActionProgressEvent): void {
-  wsNativeApiRegistry.set(gitActionProgressAtom, { event });
-}
-
 export function onWelcome(listener: (payload: WsWelcomePayload) => void): () => void {
   return subscribeLatest(wsWelcomeAtom, listener);
 }
@@ -143,15 +130,6 @@ export function onProvidersUpdated(
   listener: (payload: ServerProviderUpdatedPayload) => void,
 ): () => void {
   return subscribeLatest(providersUpdatedAtom, listener);
-}
-
-export function onGitActionProgress(listener: (event: GitActionProgressEvent) => void): () => void {
-  return wsNativeApiRegistry.subscribe(gitActionProgressAtom, (notification) => {
-    if (!notification) {
-      return;
-    }
-    listener(notification.event);
-  });
 }
 
 export function resetWsNativeApiStateForTests() {

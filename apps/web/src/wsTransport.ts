@@ -63,6 +63,28 @@ export class WsTransport {
     return await this.runtime.runPromise(Effect.suspend(() => execute(client)));
   }
 
+  async requestStream<TValue>(
+    connect: (client: WsRpcProtocolClient) => Stream.Stream<TValue, Error, never>,
+    listener: (value: TValue) => void,
+  ): Promise<void> {
+    if (this.disposed) {
+      throw new Error("Transport disposed");
+    }
+
+    const client = await this.clientPromise;
+    await this.runtime.runPromise(
+      Stream.runForEach(connect(client), (value) =>
+        Effect.sync(() => {
+          try {
+            listener(value);
+          } catch {
+            // Swallow listener errors so the stream can finish cleanly.
+          }
+        }),
+      ),
+    );
+  }
+
   subscribe<TValue>(
     connect: (client: WsRpcProtocolClient) => Stream.Stream<TValue, Error, never>,
     listener: (value: TValue) => void,

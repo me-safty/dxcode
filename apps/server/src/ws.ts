@@ -1,6 +1,7 @@
-import { Effect, Layer, Option, PubSub, Queue, Ref, Schema, Stream } from "effect";
+import { Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
 import {
   type GitActionProgressEvent,
+  type GitManagerServiceError,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
   OrchestrationGetFullThreadDiffError,
@@ -53,10 +54,6 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const startup = yield* ServerRuntimeStartup;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
-    const gitActionProgressPubSub = yield* Effect.acquireRelease(
-      PubSub.unbounded<GitActionProgressEvent>(),
-      PubSub.shutdown,
-    );
 
     const loadServerConfig = Effect.gen(function* () {
       const keybindingsConfig = yield* keybindings.loadConfigState;
@@ -227,12 +224,21 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       [WS_METHODS.gitStatus]: (input) => gitManager.status(input),
       [WS_METHODS.gitPull]: (input) => git.pullCurrentBranch(input.cwd),
       [WS_METHODS.gitRunStackedAction]: (input) =>
-        gitManager.runStackedAction(input, {
-          actionId: input.actionId,
-          progressReporter: {
-            publish: (event) => PubSub.publish(gitActionProgressPubSub, event).pipe(Effect.asVoid),
-          },
-        }),
+        Stream.callback<GitActionProgressEvent, GitManagerServiceError>((queue) =>
+          gitManager
+            .runStackedAction(input, {
+              actionId: input.actionId,
+              progressReporter: {
+                publish: (event) => Queue.offer(queue, event).pipe(Effect.asVoid),
+              },
+            })
+            .pipe(
+              Effect.matchCauseEffect({
+                onFailure: (cause) => Queue.failCause(queue, cause),
+                onSuccess: () => Queue.end(queue).pipe(Effect.asVoid),
+              }),
+            ),
+        ),
       [WS_METHODS.gitResolvePullRequest]: (input) => gitManager.resolvePullRequest(input),
       [WS_METHODS.gitPreparePullRequestThread]: (input) =>
         gitManager.preparePullRequestThread(input),
@@ -255,8 +261,6 @@ const WsRpcLayer = WsRpcGroup.toLayer(
             (unsubscribe) => Effect.sync(unsubscribe),
           ),
         ),
-      [WS_METHODS.subscribeGitActionProgress]: (_input) =>
-        Stream.fromPubSub(gitActionProgressPubSub),
       [WS_METHODS.subscribeServerConfig]: (_input) =>
         Stream.unwrap(
           Effect.gen(function* () {

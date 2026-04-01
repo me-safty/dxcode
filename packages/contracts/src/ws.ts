@@ -12,7 +12,6 @@ import {
   OrchestrationReplayEventsInput,
 } from "./orchestration";
 import {
-  GitActionProgressEvent,
   GitCheckoutInput,
   GitCreateBranchInput,
   GitPreparePullRequestThreadInput,
@@ -86,13 +85,11 @@ export const WS_METHODS = {
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
-  subscribeGitActionProgress: "subscribeGitActionProgress",
 } as const;
 
 // ── Push Event Channels ──────────────────────────────────────────────
 
 export const WS_CHANNELS = {
-  gitActionProgress: "git.actionProgress",
   terminalEvent: "terminal.event",
   serverWelcome: "server.welcome",
   serverConfigUpdated: "server.configUpdated",
@@ -162,7 +159,6 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.subscribeTerminalEvents, Schema.Struct({})),
   tagRequestBody(WS_METHODS.subscribeServerConfig, Schema.Struct({})),
   tagRequestBody(WS_METHODS.subscribeServerLifecycle, Schema.Struct({})),
-  tagRequestBody(WS_METHODS.subscribeGitActionProgress, Schema.Struct({})),
 ]);
 
 export const WebSocketRequest = Schema.Struct({
@@ -197,7 +193,6 @@ export interface WsPushPayloadByChannel {
   readonly [WS_CHANNELS.serverWelcome]: WsWelcomePayload;
   readonly [WS_CHANNELS.serverConfigUpdated]: typeof ServerConfigUpdatedPayload.Type;
   readonly [WS_CHANNELS.serverProvidersUpdated]: typeof ServerProviderUpdatedPayload.Type;
-  readonly [WS_CHANNELS.gitActionProgress]: typeof GitActionProgressEvent.Type;
   readonly [WS_CHANNELS.terminalEvent]: typeof TerminalEvent.Type;
   readonly [ORCHESTRATION_WS_CHANNELS.domainEvent]: OrchestrationEvent;
 }
@@ -225,10 +220,6 @@ export const WsPushServerProvidersUpdated = makeWsPushSchema(
   WS_CHANNELS.serverProvidersUpdated,
   ServerProviderUpdatedPayload,
 );
-export const WsPushGitActionProgress = makeWsPushSchema(
-  WS_CHANNELS.gitActionProgress,
-  GitActionProgressEvent,
-);
 export const WsPushTerminalEvent = makeWsPushSchema(WS_CHANNELS.terminalEvent, TerminalEvent);
 export const WsPushOrchestrationDomainEvent = makeWsPushSchema(
   ORCHESTRATION_WS_CHANNELS.domainEvent,
@@ -236,7 +227,6 @@ export const WsPushOrchestrationDomainEvent = makeWsPushSchema(
 );
 
 export const WsPushChannelSchema = Schema.Literals([
-  WS_CHANNELS.gitActionProgress,
   WS_CHANNELS.serverWelcome,
   WS_CHANNELS.serverConfigUpdated,
   WS_CHANNELS.serverProvidersUpdated,
@@ -249,7 +239,6 @@ export const WsPush = Schema.Union([
   WsPushServerWelcome,
   WsPushServerConfigUpdated,
   WsPushServerProvidersUpdated,
-  WsPushGitActionProgress,
   WsPushTerminalEvent,
   WsPushOrchestrationDomainEvent,
 ]);
@@ -277,9 +266,6 @@ export type SubscribeServerConfigInput = typeof SubscribeServerConfigInput.Type;
 
 export const SubscribeServerLifecycleInput = Schema.Struct({});
 export type SubscribeServerLifecycleInput = typeof SubscribeServerLifecycleInput.Type;
-
-export const SubscribeGitActionProgressInput = Schema.Struct({});
-export type SubscribeGitActionProgressInput = typeof SubscribeGitActionProgressInput.Type;
 
 // ── Union of all server → client messages ─────────────────────────────
 

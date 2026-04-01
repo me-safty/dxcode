@@ -1,5 +1,7 @@
 import {
   type GitActionProgressEvent,
+  type GitRunStackedActionInput,
+  type GitRunStackedActionResult,
   type NativeApi,
   ORCHESTRATION_WS_METHODS,
   type ServerSettingsPatch,
@@ -28,6 +30,10 @@ type RpcStreamMethod<TTag extends RpcTag> =
     ? (listener: (event: TEvent) => void) => () => void
     : never;
 
+interface GitRunStackedActionOptions {
+  readonly onProgress?: (event: GitActionProgressEvent) => void;
+}
+
 export interface WsRpcClient {
   readonly dispose: () => void;
   readonly terminal: {
@@ -52,7 +58,10 @@ export interface WsRpcClient {
   readonly git: {
     readonly pull: RpcUnaryMethod<typeof WS_METHODS.gitPull>;
     readonly status: RpcUnaryMethod<typeof WS_METHODS.gitStatus>;
-    readonly runStackedAction: RpcUnaryMethod<typeof WS_METHODS.gitRunStackedAction>;
+    readonly runStackedAction: (
+      input: GitRunStackedActionInput,
+      options?: GitRunStackedActionOptions,
+    ) => Promise<GitRunStackedActionResult>;
     readonly listBranches: RpcUnaryMethod<typeof WS_METHODS.gitListBranches>;
     readonly createWorktree: RpcUnaryMethod<typeof WS_METHODS.gitCreateWorktree>;
     readonly removeWorktree: RpcUnaryMethod<typeof WS_METHODS.gitRemoveWorktree>;
@@ -63,10 +72,6 @@ export interface WsRpcClient {
     readonly preparePullRequestThread: RpcUnaryMethod<
       typeof WS_METHODS.gitPreparePullRequestThread
     >;
-    readonly onActionProgress: RpcStreamMethod<typeof WS_METHODS.subscribeGitActionProgress>;
-    readonly subscribeActionProgress: (
-      listener: (event: GitActionProgressEvent) => void,
-    ) => () => void;
   };
   readonly server: {
     readonly getConfig: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetConfig>;
@@ -87,6 +92,21 @@ export interface WsRpcClient {
     readonly replayEvents: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.replayEvents>;
     readonly onDomainEvent: RpcStreamMethod<typeof WS_METHODS.subscribeOrchestrationDomainEvents>;
   };
+}
+
+let sharedWsRpcClient: WsRpcClient | null = null;
+
+export function getWsRpcClient(): WsRpcClient {
+  if (sharedWsRpcClient) {
+    return sharedWsRpcClient;
+  }
+  sharedWsRpcClient = createWsRpcClient();
+  return sharedWsRpcClient;
+}
+
+export function __resetWsRpcClientForTests() {
+  sharedWsRpcClient?.dispose();
+  sharedWsRpcClient = null;
 }
 
 export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
@@ -115,8 +135,25 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
     git: {
       pull: (input) => transport.request((client) => client[WS_METHODS.gitPull](input)),
       status: (input) => transport.request((client) => client[WS_METHODS.gitStatus](input)),
-      runStackedAction: (input) =>
-        transport.request((client) => client[WS_METHODS.gitRunStackedAction](input)),
+      runStackedAction: async (input, options) => {
+        let result: GitRunStackedActionResult | null = null;
+
+        await transport.requestStream(
+          (client) => client[WS_METHODS.gitRunStackedAction](input),
+          (event) => {
+            options?.onProgress?.(event);
+            if (event.kind === "action_finished") {
+              result = event.result;
+            }
+          },
+        );
+
+        if (result) {
+          return result;
+        }
+
+        throw new Error("Git action stream completed without a final result.");
+      },
       listBranches: (input) =>
         transport.request((client) => client[WS_METHODS.gitListBranches](input)),
       createWorktree: (input) =>
@@ -131,16 +168,6 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.request((client) => client[WS_METHODS.gitResolvePullRequest](input)),
       preparePullRequestThread: (input) =>
         transport.request((client) => client[WS_METHODS.gitPreparePullRequestThread](input)),
-      onActionProgress: (listener) =>
-        transport.subscribe(
-          (client) => client[WS_METHODS.subscribeGitActionProgress]({}),
-          listener,
-        ),
-      subscribeActionProgress: (listener) =>
-        transport.subscribe(
-          (client) => client[WS_METHODS.subscribeGitActionProgress]({}),
-          listener,
-        ),
     },
     server: {
       getConfig: () => transport.request((client) => client[WS_METHODS.serverGetConfig]({})),

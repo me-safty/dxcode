@@ -22,7 +22,6 @@ import {
   GitRemoveWorktreeInput,
   GitResolvePullRequestResult,
   GitRunStackedActionInput,
-  GitRunStackedActionResult,
   GitStatusInput,
   GitStatusResult,
 } from "./git";
@@ -71,7 +70,6 @@ import {
 } from "./server";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings";
 import {
-  SubscribeGitActionProgressInput,
   SubscribeOrchestrationDomainEventsInput,
   SubscribeServerConfigInput,
   SubscribeServerLifecycleInput,
@@ -139,8 +137,9 @@ export const WsGitPullRpc = Rpc.make(WS_METHODS.gitPull, {
 
 export const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction, {
   payload: GitRunStackedActionInput,
-  success: GitRunStackedActionResult,
+  success: GitActionProgressEvent,
   error: GitManagerServiceError,
+  stream: true,
 });
 
 export const WsGitResolvePullRequestRpc = Rpc.make(WS_METHODS.gitResolvePullRequest, {
@@ -283,12 +282,6 @@ export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServer
   stream: true,
 });
 
-export const WsSubscribeGitActionProgressRpc = Rpc.make(WS_METHODS.subscribeGitActionProgress, {
-  payload: SubscribeGitActionProgressInput,
-  success: GitActionProgressEvent,
-  stream: true,
-});
-
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -319,7 +312,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeTerminalEventsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
-  WsSubscribeGitActionProgressRpc,
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,

@@ -33,7 +33,6 @@ function registerListener<T>(listeners: Set<(event: T) => void>, listener: (even
 
 const lifecycleListeners = new Set<(event: ServerLifecycleStreamEvent) => void>();
 const configListeners = new Set<(event: ServerConfigStreamEvent) => void>();
-const gitProgressListeners = new Set<(event: unknown) => void>();
 const terminalEventListeners = new Set<(event: TerminalEvent) => void>();
 const orchestrationEventListeners = new Set<(event: OrchestrationEvent) => void>();
 
@@ -69,12 +68,6 @@ const rpcClientMock = {
     init: vi.fn(),
     resolvePullRequest: vi.fn(),
     preparePullRequestThread: vi.fn(),
-    onActionProgress: vi.fn((listener: (event: unknown) => void) =>
-      registerListener(gitProgressListeners, listener),
-    ),
-    subscribeActionProgress: vi.fn((listener: (event: unknown) => void) =>
-      registerListener(gitProgressListeners, listener),
-    ),
   },
   server: {
     getConfig: vi.fn(),
@@ -103,7 +96,8 @@ const rpcClientMock = {
 
 vi.mock("./wsRpcClient", () => {
   return {
-    createWsRpcClient: () => rpcClientMock,
+    getWsRpcClient: () => rpcClientMock,
+    __resetWsRpcClientForTests: vi.fn(),
   };
 });
 
@@ -190,7 +184,6 @@ beforeEach(() => {
   showContextMenuFallbackMock.mockReset();
   lifecycleListeners.clear();
   configListeners.clear();
-  gitProgressListeners.clear();
   terminalEventListeners.clear();
   orchestrationEventListeners.clear();
   Reflect.deleteProperty(getWindowForTest(), "desktopBridge");
@@ -414,17 +407,15 @@ describe("wsNativeApi", () => {
     expect(wsNativeApiRegistry.get(providersUpdatedAtom)).toEqual({ providers: nextProviders });
   });
 
-  it("forwards terminal, orchestration, and git progress stream events", async () => {
+  it("forwards terminal and orchestration stream events", async () => {
     const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
     const onTerminalEvent = vi.fn();
     const onDomainEvent = vi.fn();
-    const onActionProgress = vi.fn();
 
     api.terminal.onEvent(onTerminalEvent);
     api.orchestration.onDomainEvent(onDomainEvent);
-    api.git.onActionProgress(onActionProgress);
 
     const terminalEvent = {
       threadId: "thread-1",
@@ -461,19 +452,8 @@ describe("wsNativeApi", () => {
     } satisfies Extract<OrchestrationEvent, { type: "project.created" }>;
     emitEvent(orchestrationEventListeners, orchestrationEvent);
 
-    const progressEvent = {
-      actionId: "action-1",
-      cwd: "/repo",
-      action: "commit",
-      kind: "phase_started",
-      phase: "commit",
-      label: "Committing...",
-    } as const;
-    emitEvent(gitProgressListeners, progressEvent);
-
     expect(onTerminalEvent).toHaveBeenCalledWith(terminalEvent);
     expect(onDomainEvent).toHaveBeenCalledWith(orchestrationEvent);
-    expect(onActionProgress).toHaveBeenCalledWith(progressEvent);
   });
 
   it("sends orchestration dispatch commands as the direct RPC payload", async () => {
@@ -513,30 +493,6 @@ describe("wsNativeApi", () => {
       cwd: "/tmp/project",
       relativePath: "plan.md",
       contents: "# Plan\n",
-    });
-  });
-
-  it("uses no client timeout for git.runStackedAction", async () => {
-    rpcClientMock.git.runStackedAction.mockResolvedValue({
-      action: "commit",
-      branch: { status: "skipped_not_requested" },
-      commit: { status: "created", commitSha: "abc1234", subject: "Test" },
-      push: { status: "skipped_not_requested" },
-      pr: { status: "skipped_not_requested" },
-    });
-    const { createWsNativeApi } = await import("./wsNativeApi");
-
-    const api = createWsNativeApi();
-    await api.git.runStackedAction({
-      actionId: "action-1",
-      cwd: "/repo",
-      action: "commit",
-    });
-
-    expect(rpcClientMock.git.runStackedAction).toHaveBeenCalledWith({
-      actionId: "action-1",
-      cwd: "/repo",
-      action: "commit",
     });
   });
 

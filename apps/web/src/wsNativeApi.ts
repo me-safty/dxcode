@@ -1,5 +1,4 @@
 import {
-  type GitActionProgressEvent,
   type ContextMenuItem,
   type NativeApi,
   type ServerProviderUpdatedPayload,
@@ -7,15 +6,13 @@ import {
 } from "@t3tools/contracts";
 
 import { showContextMenuFallback } from "./contextMenuFallback";
-import { createWsRpcClient, type WsRpcClient } from "./wsRpcClient";
+import { __resetWsRpcClientForTests, getWsRpcClient, type WsRpcClient } from "./wsRpcClient";
 import {
   applyProvidersUpdated,
   applyServerConfigEvent,
   applySettingsUpdated,
-  emitGitActionProgress,
   emitWelcome,
   getServerConfig,
-  onGitActionProgress,
   onProvidersUpdated,
   onServerConfigUpdated as onServerConfigUpdatedState,
   onWelcome,
@@ -24,16 +21,16 @@ import {
   setServerConfigSnapshot,
 } from "./wsNativeApiState";
 
-let instance: { api: NativeApi; rpcClient: WsRpcClient; cleanups: Array<() => void> } | null = null;
+let instance: { api: NativeApi; cleanups: Array<() => void> } | null = null;
 
 export function __resetWsNativeApiForTests() {
   if (instance) {
     for (const cleanup of instance.cleanups) {
       cleanup();
     }
-    instance.rpcClient.dispose();
     instance = null;
   }
+  __resetWsRpcClientForTests();
   resetWsNativeApiStateForTests();
 }
 
@@ -80,7 +77,7 @@ export function createWsNativeApi(): NativeApi {
     return instance.api;
   }
 
-  const rpcClient = createWsRpcClient();
+  const rpcClient = getWsRpcClient();
   const cleanups = [
     rpcClient.server.subscribeLifecycle((event) => {
       if (event.type === "welcome") {
@@ -89,9 +86,6 @@ export function createWsNativeApi(): NativeApi {
     }),
     rpcClient.server.subscribeConfig((event) => {
       applyServerConfigEvent(event);
-    }),
-    rpcClient.git.subscribeActionProgress((event: GitActionProgressEvent) => {
-      emitGitActionProgress(event);
     }),
   ];
 
@@ -138,7 +132,6 @@ export function createWsNativeApi(): NativeApi {
     git: {
       pull: rpcClient.git.pull,
       status: rpcClient.git.status,
-      runStackedAction: rpcClient.git.runStackedAction,
       listBranches: rpcClient.git.listBranches,
       createWorktree: rpcClient.git.createWorktree,
       removeWorktree: rpcClient.git.removeWorktree,
@@ -147,7 +140,6 @@ export function createWsNativeApi(): NativeApi {
       init: rpcClient.git.init,
       resolvePullRequest: rpcClient.git.resolvePullRequest,
       preparePullRequestThread: rpcClient.git.preparePullRequestThread,
-      onActionProgress: (callback) => onGitActionProgress(callback),
     },
     contextMenu: {
       show: async <T extends string>(
@@ -188,6 +180,6 @@ export function createWsNativeApi(): NativeApi {
     },
   };
 
-  instance = { api, rpcClient, cleanups };
+  instance = { api, cleanups };
   return api;
 }

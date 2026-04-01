@@ -807,13 +807,42 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 behindCount: 0,
                 pr: null,
               }),
-            runStackedAction: () =>
-              Effect.succeed({
-                action: "commit",
-                branch: { status: "skipped_not_requested" },
-                commit: { status: "created", commitSha: "abc123", subject: "feat: demo" },
-                push: { status: "skipped_not_requested" },
-                pr: { status: "skipped_not_requested" },
+            runStackedAction: (input, options) =>
+              Effect.gen(function* () {
+                const result = {
+                  action: "commit" as const,
+                  branch: { status: "skipped_not_requested" as const },
+                  commit: {
+                    status: "created" as const,
+                    commitSha: "abc123",
+                    subject: "feat: demo",
+                  },
+                  push: { status: "skipped_not_requested" as const },
+                  pr: { status: "skipped_not_requested" as const },
+                };
+
+                yield* (
+                  options?.progressReporter?.publish({
+                    actionId: options.actionId ?? input.actionId,
+                    cwd: input.cwd,
+                    action: input.action,
+                    kind: "phase_started",
+                    phase: "commit",
+                    label: "Committing...",
+                  }) ?? Effect.void
+                );
+
+                yield* (
+                  options?.progressReporter?.publish({
+                    actionId: options.actionId ?? input.actionId,
+                    cwd: input.cwd,
+                    action: input.action,
+                    kind: "action_finished",
+                    result,
+                  }) ?? Effect.void
+                );
+
+                return result;
               }),
             resolvePullRequest: () =>
               Effect.succeed({
@@ -884,16 +913,23 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
       assert.equal(pull.status, "pulled");
 
-      const stacked = yield* Effect.scoped(
+      const stackedEvents = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
           client[WS_METHODS.gitRunStackedAction]({
             actionId: "action-1",
             cwd: "/tmp/repo",
             action: "commit",
-          }),
+          }).pipe(
+            Stream.runCollect,
+            Effect.map((events) => Array.from(events)),
+          ),
         ),
       );
-      assert.equal(stacked.action, "commit");
+      const lastStackedEvent = stackedEvents.at(-1);
+      assert.equal(lastStackedEvent?.kind, "action_finished");
+      if (lastStackedEvent?.kind === "action_finished") {
+        assert.equal(lastStackedEvent.result.action, "commit");
+      }
 
       const resolvedPr = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
