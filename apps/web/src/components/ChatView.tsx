@@ -843,8 +843,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [runtimeToolOutputByItemIdRaw],
   );
   const workLogEntries = useMemo(
-    () => deriveWorkLogEntries(threadActivities, undefined, runtimeToolOutputByItemId),
-    [runtimeToolOutputByItemId, threadActivities],
+    () =>
+      deriveWorkLogEntries(
+        threadActivities,
+        activeLatestTurn?.turnId ?? undefined,
+        runtimeToolOutputByItemId,
+      ),
+    [activeLatestTurn?.turnId, runtimeToolOutputByItemId, threadActivities],
   );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),

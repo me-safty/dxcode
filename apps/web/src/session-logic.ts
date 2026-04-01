@@ -472,7 +472,7 @@ export function deriveWorkLogEntries(
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .map(toDerivedWorkLogEntry);
   return collapseDerivedWorkLogEntries(entries).map(
-    ({ activityKind: _activityKind, collapseKey: _collapseKey, itemId, ...entry }) => {
+    ({ activityKind: _activityKind, collapseKey: _collapseKey, groupKey: _groupKey, itemId, ...entry }) => {
       if (!itemId || !runtimeOutputByItemId.has(itemId)) {
         return entry;
       }
