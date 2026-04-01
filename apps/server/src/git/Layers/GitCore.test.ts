@@ -1882,7 +1882,7 @@ it.layer(TestLayer)("git integration", (it) => {
         let didFailRemoteBranches = false;
         let didFailRemoteNames = false;
         const core = yield* makeIsolatedGitCore((input) => {
-          if (input.args.join(" ") === "branch --no-color --remotes") {
+          if (input.args.join(" ") === "branch --no-color --no-column --remotes") {
             didFailRemoteBranches = true;
             return Effect.fail(
               new GitCommandError({
