@@ -633,8 +633,8 @@ const make = Effect.gen(function* () {
         decision: event.payload.decision,
       })
       .pipe(
-        Effect.catchCause(
-          Effect.fn("processApprovalResponseRequested.handleCause")(function* (cause) {
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
             yield* appendProviderFailureActivity({
               threadId: event.payload.threadId,
               kind: "provider.approval.respond.failed",
