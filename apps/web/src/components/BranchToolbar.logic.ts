@@ -1,6 +1,8 @@
 import type { GitBranch } from "@t3tools/contracts";
+import { Schema } from "effect";
 
-export type EnvMode = "local" | "worktree";
+export const EnvMode = Schema.Literals(["local", "worktree"]);
+export type EnvMode = typeof EnvMode.Type;
 
 export function resolveEffectiveEnvMode(input: {
   activeWorktreePath: string | null;
@@ -120,4 +122,27 @@ export function resolveBranchSelectionTarget(input: {
     nextWorktreePath,
     reuseExistingWorktree: false,
   };
+}
+
+export function shouldIncludeBranchPickerItem(input: {
+  itemValue: string;
+  normalizedQuery: string;
+  createBranchItemValue: string | null;
+  checkoutPullRequestItemValue: string | null;
+}): boolean {
+  const { itemValue, normalizedQuery, createBranchItemValue, checkoutPullRequestItemValue } = input;
+
+  if (normalizedQuery.length === 0) {
+    return true;
+  }
+
+  if (createBranchItemValue && itemValue === createBranchItemValue) {
+    return true;
+  }
+
+  if (checkoutPullRequestItemValue && itemValue === checkoutPullRequestItemValue) {
+    return true;
+  }
+
+  return itemValue.toLowerCase().includes(normalizedQuery);
 }
