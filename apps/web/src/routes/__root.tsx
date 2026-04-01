@@ -42,6 +42,7 @@ import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
+import { useRuntimeToolOutputStore } from "../runtimeToolOutputStore";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -430,6 +431,18 @@ function EventRouter() {
           hasRunningSubprocess,
         );
     });
+    const runtimeToolOutputStore = useRuntimeToolOutputStore.getState();
+    runtimeToolOutputStore.clearAll();
+    const unsubRuntimeToolOutputEvent = api.orchestration.onRuntimeToolOutputEvent((event) => {
+      if (
+        event.type !== "content.delta" ||
+        event.payload.streamKind !== "command_output" ||
+        !event.itemId
+      ) {
+        return;
+      }
+      runtimeToolOutputStore.appendOutput(event.threadId, event.itemId, event.payload.delta);
+    });
     return () => {
       disposed = true;
       disposedRef.current = true;
@@ -437,6 +450,7 @@ function EventRouter() {
       queryInvalidationThrottler.cancel();
       unsubDomainEvent();
       unsubTerminalEvent();
+      unsubRuntimeToolOutputEvent();
     };
   }, [
     applyOrchestrationEvents,

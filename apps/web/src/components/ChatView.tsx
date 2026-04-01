@@ -65,6 +65,7 @@ import {
 import { useStore } from "../store";
 import { useProjectById, useThreadById } from "../storeSelectors";
 import { useUiStateStore } from "../uiStateStore";
+import { useRuntimeToolOutputStore } from "../runtimeToolOutputStore";
 import {
   buildPlanImplementationThreadTitle,
   buildPlanImplementationPrompt,
@@ -834,9 +835,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const selectedModelForPicker = selectedModel;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const runtimeToolOutputByItemIdRaw = useRuntimeToolOutputStore((state) =>
+    activeThread ? (state.outputsByThreadId[activeThread.id] ?? null) : null,
+  );
+  const runtimeToolOutputByItemId = useMemo(
+    () => new Map(Object.entries(runtimeToolOutputByItemIdRaw ?? {})),
+    [runtimeToolOutputByItemIdRaw],
+  );
   const workLogEntries = useMemo(
-    () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
-    [activeLatestTurn?.turnId, threadActivities],
+    () => deriveWorkLogEntries(threadActivities, undefined, runtimeToolOutputByItemId),
+    [runtimeToolOutputByItemId, threadActivities],
   );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),
