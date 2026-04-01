@@ -20,7 +20,7 @@ import { useComposerDraftStore } from "../composerDraftStore";
 import { __resetNativeApiForTests } from "../nativeApi";
 import { getRouter } from "../router";
 import { useStore } from "../store";
-import { BrowserWsRpcHarness } from "../test/wsRpcHarness";
+import { BrowserWsRpcHarness } from "../../test/wsRpcHarness";
 
 const THREAD_ID = "thread-kb-toast-test" as ThreadId;
 const PROJECT_ID = "project-1" as ProjectId;
