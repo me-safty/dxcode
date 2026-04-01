@@ -14,7 +14,7 @@ export type WsRpcProtocolClient =
 export function createWsRpcProtocolLayer(url?: string) {
   const resolvedUrl = resolveServerUrl({
     url,
-    protocol: "ws",
+    protocol: window.location.protocol === "https:" ? "wss" : "ws",
     pathname: "/ws",
   });
   const socketLayer = Socket.layerWebSocket(resolvedUrl).pipe(

@@ -93,7 +93,12 @@ beforeEach(() => {
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: {
-      location: { hostname: "localhost", port: "3020", protocol: "ws:" },
+      location: {
+        origin: "http://localhost:3020",
+        hostname: "localhost",
+        port: "3020",
+        protocol: "http:",
+      },
       desktopBridge: undefined,
     },
   });
@@ -115,7 +120,25 @@ describe("WsTransport", () => {
     });
 
     expect(getSocket().url).toBe("ws://localhost:3020/ws?token=secret-token");
-    transport.dispose();
+    await transport.dispose();
+  });
+
+  it("uses wss when falling back to an https page origin", async () => {
+    Object.assign(window.location, {
+      origin: "https://app.example.com",
+      hostname: "app.example.com",
+      port: "",
+      protocol: "https:",
+    });
+
+    const transport = new WsTransport();
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    expect(getSocket().url).toBe("wss://app.example.com/ws");
+    await transport.dispose();
   });
 
   it("sends unary RPC requests and resolves successful exits", async () => {
@@ -173,7 +196,7 @@ describe("WsTransport", () => {
       issues: [],
     });
 
-    transport.dispose();
+    await transport.dispose();
   });
 
   it("delivers stream chunks to subscribers", async () => {
@@ -221,7 +244,7 @@ describe("WsTransport", () => {
     });
 
     unsubscribe();
-    transport.dispose();
+    await transport.dispose();
   });
 
   it("re-subscribes stream listeners after the stream exits", async () => {
@@ -313,7 +336,7 @@ describe("WsTransport", () => {
     });
 
     unsubscribe();
-    transport.dispose();
+    await transport.dispose();
   });
 
   it("streams finite request events without re-subscribing", async () => {
@@ -376,6 +399,52 @@ describe("WsTransport", () => {
         return parsed._tag === "Request" && parsed.tag === WS_METHODS.gitRunStackedAction;
       }),
     ).toHaveLength(1);
-    transport.dispose();
+    await transport.dispose();
+  });
+
+  it("closes the client scope on the transport runtime before disposing the runtime", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const runtime = (
+      transport as unknown as {
+        runtime: {
+          dispose: () => Promise<void>;
+          runPromise: (...args: Array<unknown>) => Promise<unknown>;
+        };
+      }
+    ).runtime;
+
+    const callOrder: string[] = [];
+    let resolveClose!: () => void;
+    const closePromise = new Promise<void>((resolve) => {
+      resolveClose = resolve;
+    });
+
+    const runPromiseSpy = vi.spyOn(runtime, "runPromise").mockImplementation(async () => {
+      callOrder.push("close:start");
+      await closePromise;
+      callOrder.push("close:done");
+      return undefined;
+    });
+    const disposeSpy = vi.spyOn(runtime, "dispose").mockImplementation(async () => {
+      callOrder.push("runtime:dispose");
+    });
+
+    await transport.dispose();
+
+    expect(runPromiseSpy).toHaveBeenCalledTimes(1);
+    expect(disposeSpy).not.toHaveBeenCalled();
+
+    resolveClose();
+
+    await waitFor(() => {
+      expect(disposeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    expect(callOrder).toEqual(["close:start", "close:done", "runtime:dispose"]);
   });
 });

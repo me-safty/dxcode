@@ -26,8 +26,8 @@ export function runRpc<TSuccess, TError = never>(
   return getRuntime().runPromise(WsRpcAtomClient.use(execute));
 }
 
-export function __resetWsRpcAtomClientForTests() {
+export async function __resetWsRpcAtomClientForTests() {
   const runtime = sharedRuntime;
   sharedRuntime = null;
-  void runtime?.dispose();
+  await runtime?.dispose();
 }

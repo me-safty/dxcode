@@ -36,7 +36,7 @@ interface GitRunStackedActionOptions {
 }
 
 export interface WsRpcClient {
-  readonly dispose: () => void;
+  readonly dispose: () => Promise<void>;
   readonly terminal: {
     readonly open: RpcUnaryMethod<typeof WS_METHODS.terminalOpen>;
     readonly write: RpcUnaryMethod<typeof WS_METHODS.terminalWrite>;
@@ -105,8 +105,8 @@ export function getWsRpcClient(): WsRpcClient {
   return sharedWsRpcClient;
 }
 
-export function __resetWsRpcClientForTests() {
-  sharedWsRpcClient?.dispose();
+export async function __resetWsRpcClientForTests() {
+  await sharedWsRpcClient?.dispose();
   sharedWsRpcClient = null;
 }
 

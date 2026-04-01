@@ -119,12 +119,13 @@ export class WsTransport {
     };
   }
 
-  dispose() {
+  async dispose() {
     if (this.disposed) {
       return;
     }
     this.disposed = true;
-    void Effect.runPromise(Scope.close(this.clientScope, Exit.void));
-    void this.runtime.dispose();
+    await this.runtime.runPromise(Scope.close(this.clientScope, Exit.void)).finally(() => {
+      this.runtime.dispose();
+    });
   }
 }
