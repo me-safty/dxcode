@@ -86,7 +86,10 @@ const makeWithDatabase = (
 
     const makeConnection = Effect.gen(function* () {
       const scope = yield* Effect.scope;
-      const db = openDatabase();
+      const db = yield* Effect.try({
+        try: () => openDatabase(),
+        catch: (cause) => new SqlError({ cause, message: "Failed to open database" }),
+      }).pipe(Effect.orDie);
       yield* Scope.addFinalizer(
         scope,
         Effect.sync(() => db.close()),
