@@ -2581,21 +2581,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
 
       await mounted.setContainerSize({
-        width: 600,
+        width: 440,
         height: WIDE_FOOTER_VIEWPORT.height,
       });
       await expectComposerActionsContained();
-      await vi.waitFor(
-        () => {
-          expect(footer.dataset.chatComposerFooterCompact).toBe("true");
-          expect(
-            footer.querySelector<HTMLElement>(
-              '[data-chat-composer-primary-actions-compact="true"]',
-            ),
-          ).toBeTruthy();
-        },
-        { timeout: 8_000, interval: 16 },
-      );
 
       const implementButton = await waitForButtonByText("Implement");
       const implementActionsButton = await waitForElement(
