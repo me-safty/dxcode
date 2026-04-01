@@ -36,7 +36,8 @@ import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
-import { migrateLocalSettingsToServer } from "../hooks/useSettings";
+import { migrateLocalSettingsToServer, useSettings } from "../hooks/useSettings";
+import { useThreadNotifications } from "../hooks/useThreadNotifications";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
@@ -72,6 +73,7 @@ function RootRouteView() {
       <ToastProvider>
         <AnchoredToastProvider>
           <EventRouter />
+          <ThreadNotificationWatcher />
           <DesktopProjectBootstrap />
           <AppSidebarLayout>
             <Outlet />
@@ -454,6 +456,12 @@ function EventRouter() {
   useServerWelcomeSubscription(handleWelcome);
   useServerConfigUpdatedSubscription(handleServerConfigUpdated);
 
+  return null;
+}
+
+function ThreadNotificationWatcher() {
+  const settings = useSettings();
+  useThreadNotifications(settings.notificationsEnabled);
   return null;
 }
 

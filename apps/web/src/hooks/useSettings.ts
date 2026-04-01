@@ -218,6 +218,10 @@ export function buildLegacyClientSettingsMigrationPatch(
     patch.timestampFormat = legacySettings.timestampFormat;
   }
 
+  if (Predicate.isBoolean(legacySettings.notificationsEnabled)) {
+    patch.notificationsEnabled = legacySettings.notificationsEnabled;
+  }
+
   return patch;
 }
 

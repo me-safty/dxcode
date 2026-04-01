@@ -35,6 +35,10 @@ import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
 import { isElectron } from "../../env";
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import {
+  getNotificationPermissionState,
+  requestNotificationPermission,
+} from "../../hooks/useThreadNotifications";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import {
   setDesktopUpdateStateQueryData,
@@ -462,6 +466,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
+      ...(settings.notificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.notificationsEnabled
+        ? ["Notifications"]
+        : []),
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
@@ -488,6 +495,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.notificationsEnabled,
       settings.timestampFormat,
       theme,
     ],
@@ -768,6 +776,46 @@ export function GeneralSettingsPanel() {
                 ))}
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Notifications"
+          description="Get notified when a task completes, or needs approval or input while the app is in the background."
+          status={
+            settings.notificationsEnabled && getNotificationPermissionState() === "unsupported" ? (
+              <span className="text-warning">Notifications are not supported in this browser.</span>
+            ) : settings.notificationsEnabled && getNotificationPermissionState() === "denied" ? (
+              <span className="text-warning">
+                Browser notifications are blocked. Allow them in your browser settings to receive
+                alerts.
+              </span>
+            ) : null
+          }
+          resetAction={
+            settings.notificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.notificationsEnabled ? (
+              <SettingResetButton
+                label="notifications"
+                onClick={() =>
+                  updateSettings({
+                    notificationsEnabled: DEFAULT_UNIFIED_SETTINGS.notificationsEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.notificationsEnabled}
+              onCheckedChange={(checked) => {
+                const enabled = Boolean(checked);
+                updateSettings({ notificationsEnabled: enabled });
+                if (enabled) {
+                  void requestNotificationPermission();
+                }
+              }}
+              aria-label="Enable notifications"
+            />
           }
         />
 
