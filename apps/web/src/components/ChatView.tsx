@@ -171,6 +171,8 @@ import {
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import {
+  buildDefaultComposerPlaceholder,
+  buildDisconnectedComposerPlaceholder,
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
   buildTemporaryWorktreeBranchName,
@@ -3951,8 +3953,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             : showPlanFollowUpPrompt && activeProposedPlan
                               ? "Add feedback to refine the plan, or leave this blank to implement it"
                               : phase === "disconnected"
-                                ? "Ask for follow-up changes or attach images"
-                                : "Ask anything, @tag files/folders, or use / to show available commands"
+                                ? buildDisconnectedComposerPlaceholder(selectedProvider)
+                                : buildDefaultComposerPlaceholder(selectedProvider)
                       }
                       disabled={isConnecting || isComposerApprovalState}
                     />

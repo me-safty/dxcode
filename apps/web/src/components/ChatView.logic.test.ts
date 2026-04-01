@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../store";
 
 import {
+  buildDefaultComposerPlaceholder,
+  buildDisconnectedComposerPlaceholder,
   buildExpiredTerminalContextToastCopy,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -72,6 +74,34 @@ describe("buildExpiredTerminalContextToastCopy", () => {
       title: "Expired terminal contexts omitted from message",
       description: "Re-add it if you want that terminal output included.",
     });
+  });
+});
+
+describe("buildDefaultComposerPlaceholder", () => {
+  it("mentions skills for Codex threads", () => {
+    expect(buildDefaultComposerPlaceholder("codex")).toBe(
+      "Ask anything, @tag files/folders, type $ to mention skills, or use / to show available commands",
+    );
+  });
+
+  it("keeps non-Codex placeholders focused on supported composer commands", () => {
+    expect(buildDefaultComposerPlaceholder("claudeAgent")).toBe(
+      "Ask anything, @tag files/folders, or use / to show available commands",
+    );
+  });
+});
+
+describe("buildDisconnectedComposerPlaceholder", () => {
+  it("mentions skills for disconnected Codex threads", () => {
+    expect(buildDisconnectedComposerPlaceholder("codex")).toBe(
+      "Ask for follow-up changes, type $ to mention skills, or attach images",
+    );
+  });
+
+  it("keeps disconnected non-Codex placeholders unchanged", () => {
+    expect(buildDisconnectedComposerPlaceholder("claudeAgent")).toBe(
+      "Ask for follow-up changes or attach images",
+    );
   });
 });
 

@@ -1,4 +1,10 @@
-import { ProjectId, type ModelSelection, type ThreadId, type TurnId } from "@t3tools/contracts";
+import {
+  ProjectId,
+  type ModelSelection,
+  type ProviderKind,
+  type ThreadId,
+  type TurnId,
+} from "@t3tools/contracts";
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadSession } from "../types";
 import { randomUUID } from "~/lib/utils";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
@@ -158,6 +164,20 @@ export function buildExpiredTerminalContextToastCopy(
     title: `${noun} omitted from message`,
     description: "Re-add it if you want that terminal output included.",
   };
+}
+
+export function buildDefaultComposerPlaceholder(provider: ProviderKind): string {
+  if (provider === "codex") {
+    return "Ask anything, @tag files/folders, type $ to mention skills, or use / to show available commands";
+  }
+  return "Ask anything, @tag files/folders, or use / to show available commands";
+}
+
+export function buildDisconnectedComposerPlaceholder(provider: ProviderKind): string {
+  if (provider === "codex") {
+    return "Ask for follow-up changes, type $ to mention skills, or attach images";
+  }
+  return "Ask for follow-up changes or attach images";
 }
 
 export function threadHasStarted(thread: Thread | null | undefined): boolean {
