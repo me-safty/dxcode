@@ -9,8 +9,8 @@ import {
   type OrchestrationReadModel,
   type ProjectId,
   type ServerConfig,
+  type ServerLifecycleWelcomePayload,
   type ThreadId,
-  type WsWelcomePayload,
   WS_METHODS,
   OrchestrationSessionStatus,
   DEFAULT_SERVER_SETTINGS,
@@ -46,7 +46,7 @@ const ATTACHMENT_SVG = "<svg xmlns='http://www.w3.org/2000/svg' width='120' heig
 interface TestFixture {
   snapshot: OrchestrationReadModel;
   serverConfig: ServerConfig;
-  welcome: WsWelcomePayload;
+  welcome: ServerLifecycleWelcomePayload;
 }
 
 let fixture: TestFixture;

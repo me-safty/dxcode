@@ -69,13 +69,52 @@ import {
   ServerUpsertKeybindingResult,
 } from "./server";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings";
-import {
-  SubscribeOrchestrationDomainEventsInput,
-  SubscribeServerConfigInput,
-  SubscribeServerLifecycleInput,
-  SubscribeTerminalEventsInput,
-  WS_METHODS,
-} from "./ws";
+
+export const WS_METHODS = {
+  // Project registry methods
+  projectsList: "projects.list",
+  projectsAdd: "projects.add",
+  projectsRemove: "projects.remove",
+  projectsSearchEntries: "projects.searchEntries",
+  projectsWriteFile: "projects.writeFile",
+
+  // Shell methods
+  shellOpenInEditor: "shell.openInEditor",
+
+  // Git methods
+  gitPull: "git.pull",
+  gitStatus: "git.status",
+  gitRunStackedAction: "git.runStackedAction",
+  gitListBranches: "git.listBranches",
+  gitCreateWorktree: "git.createWorktree",
+  gitRemoveWorktree: "git.removeWorktree",
+  gitCreateBranch: "git.createBranch",
+  gitCheckout: "git.checkout",
+  gitInit: "git.init",
+  gitResolvePullRequest: "git.resolvePullRequest",
+  gitPreparePullRequestThread: "git.preparePullRequestThread",
+
+  // Terminal methods
+  terminalOpen: "terminal.open",
+  terminalWrite: "terminal.write",
+  terminalResize: "terminal.resize",
+  terminalClear: "terminal.clear",
+  terminalRestart: "terminal.restart",
+  terminalClose: "terminal.close",
+
+  // Server meta
+  serverGetConfig: "server.getConfig",
+  serverRefreshProviders: "server.refreshProviders",
+  serverUpsertKeybinding: "server.upsertKeybinding",
+  serverGetSettings: "server.getSettings",
+  serverUpdateSettings: "server.updateSettings",
+
+  // Streaming subscriptions
+  subscribeOrchestrationDomainEvents: "subscribeOrchestrationDomainEvents",
+  subscribeTerminalEvents: "subscribeTerminalEvents",
+  subscribeServerConfig: "subscribeServerConfig",
+  subscribeServerLifecycle: "subscribeServerLifecycle",
+} as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
   payload: ServerUpsertKeybindingInput,
@@ -257,27 +296,27 @@ export const WsOrchestrationReplayEventsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.
 export const WsSubscribeOrchestrationDomainEventsRpc = Rpc.make(
   WS_METHODS.subscribeOrchestrationDomainEvents,
   {
-    payload: SubscribeOrchestrationDomainEventsInput,
+    payload: Schema.Struct({}),
     success: OrchestrationEvent,
     stream: true,
   },
 );
 
 export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
-  payload: SubscribeTerminalEventsInput,
+  payload: Schema.Struct({}),
   success: TerminalEvent,
   stream: true,
 });
 
 export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerConfig, {
-  payload: SubscribeServerConfigInput,
+  payload: Schema.Struct({}),
   success: ServerConfigStreamEvent,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError]),
   stream: true,
 });
 
 export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecycle, {
-  payload: SubscribeServerLifecycleInput,
+  payload: Schema.Struct({}),
   success: ServerLifecycleStreamEvent,
   stream: true,
 });

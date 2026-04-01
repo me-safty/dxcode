@@ -4,9 +4,9 @@ import {
   type EditorId,
   type ResolvedKeybindingsConfig,
   type ServerConfig,
+  type ServerLifecycleWelcomePayload,
   type ServerProvider,
   type ServerSettings,
-  type WsWelcomePayload,
 } from "@t3tools/contracts";
 import { type ReactNode, useEffect } from "react";
 
@@ -101,7 +101,9 @@ export function useServerKeybindingsConfigPath(): string | null {
   return useAtomValue(serverConfigAtom, selectKeybindingsConfigPath);
 }
 
-export function useServerWelcomeSubscription(listener: (payload: WsWelcomePayload) => void): void {
+export function useServerWelcomeSubscription(
+  listener: (payload: ServerLifecycleWelcomePayload) => void,
+): void {
   useLatestAtomSubscription(wsWelcomeAtom, listener);
 }
 

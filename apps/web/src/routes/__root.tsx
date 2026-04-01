@@ -1,4 +1,8 @@
-import { OrchestrationEvent, ThreadId, type WsWelcomePayload } from "@t3tools/contracts";
+import {
+  OrchestrationEvent,
+  ThreadId,
+  type ServerLifecycleWelcomePayload,
+} from "@t3tools/contracts";
 import {
   Outlet,
   createRootRouteWithContext,
@@ -170,7 +174,7 @@ function EventRouter() {
 
   pathnameRef.current = pathname;
 
-  const handleWelcome = useEffectEvent((payload: WsWelcomePayload) => {
+  const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload) => {
     migrateLocalSettingsToServer();
     void (async () => {
       await bootstrapFromSnapshotRef.current();

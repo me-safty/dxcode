@@ -159,16 +159,19 @@ export const ServerLifecycleReadyPayload = Schema.Struct({
 });
 export type ServerLifecycleReadyPayload = typeof ServerLifecycleReadyPayload.Type;
 
+export const ServerLifecycleWelcomePayload = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  projectName: TrimmedNonEmptyString,
+  bootstrapProjectId: Schema.optional(ProjectId),
+  bootstrapThreadId: Schema.optional(ThreadId),
+});
+export type ServerLifecycleWelcomePayload = typeof ServerLifecycleWelcomePayload.Type;
+
 export const ServerLifecycleStreamWelcomeEvent = Schema.Struct({
   version: Schema.Literal(1),
   sequence: NonNegativeInt,
   type: Schema.Literal("welcome"),
-  payload: Schema.Struct({
-    cwd: TrimmedNonEmptyString,
-    projectName: TrimmedNonEmptyString,
-    bootstrapProjectId: Schema.optional(ProjectId),
-    bootstrapThreadId: Schema.optional(ThreadId),
-  }),
+  payload: ServerLifecycleWelcomePayload,
 });
 export type ServerLifecycleStreamWelcomeEvent = typeof ServerLifecycleStreamWelcomeEvent.Type;
 

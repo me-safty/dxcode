@@ -1,8 +1,8 @@
 import {
   type ContextMenuItem,
   type NativeApi,
+  type ServerLifecycleWelcomePayload,
   type ServerProviderUpdatedPayload,
-  type WsWelcomePayload,
 } from "@t3tools/contracts";
 
 import { showContextMenuFallback } from "./contextMenuFallback";
@@ -49,7 +49,9 @@ async function getServerConfigSnapshot(rpcClient: WsRpcClient) {
  * Subscribe to the server welcome message. If a welcome was already received
  * before this call, the listener fires synchronously with the cached payload.
  */
-export function onServerWelcome(listener: (payload: WsWelcomePayload) => void): () => void {
+export function onServerWelcome(
+  listener: (payload: ServerLifecycleWelcomePayload) => void,
+): () => void {
   return onWelcome(listener);
 }
 

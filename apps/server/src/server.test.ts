@@ -390,6 +390,29 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("serves attachment files for URL-encoded paths", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+
+      const config = yield* buildAppUnderTest();
+      const attachmentPath = resolveAttachmentRelativePath({
+        attachmentsDir: config.attachmentsDir,
+        relativePath: "thread%20folder/message%20folder/file%20name.png",
+      });
+      assert.isNotNull(attachmentPath, "Attachment path should be resolvable");
+
+      yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true });
+      yield* fileSystem.writeFileString(attachmentPath, "attachment-encoded-ok");
+
+      const response = yield* HttpClient.get(
+        "/attachments/thread%20folder/message%20folder/file%20name.png",
+      );
+      assert.equal(response.status, 200);
+      assert.equal(yield* response.text, "attachment-encoded-ok");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("returns 404 for missing attachment id lookups", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();

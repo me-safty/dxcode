@@ -6,8 +6,8 @@ import {
   type OrchestrationReadModel,
   type ProjectId,
   type ServerConfig,
+  type ServerLifecycleWelcomePayload,
   type ThreadId,
-  type WsWelcomePayload,
   WS_METHODS,
 } from "@t3tools/contracts";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
@@ -29,7 +29,7 @@ const NOW_ISO = "2026-03-04T12:00:00.000Z";
 interface TestFixture {
   snapshot: OrchestrationReadModel;
   serverConfig: ServerConfig;
-  welcome: WsWelcomePayload;
+  welcome: ServerLifecycleWelcomePayload;
 }
 
 let fixture: TestFixture;

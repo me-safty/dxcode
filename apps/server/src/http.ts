@@ -56,21 +56,16 @@ export const attachmentsRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
 
-    const contentType = Mime.getType(filePath) ?? "application/octet-stream";
-    const data = yield* fileSystem
-      .readFile(filePath)
-      .pipe(Effect.catch(() => Effect.succeed(null)));
-    if (!data) {
-      return HttpServerResponse.text("Internal Server Error", { status: 500 });
-    }
-
-    return HttpServerResponse.uint8Array(data, {
+    return yield* HttpServerResponse.file(filePath, {
       status: 200,
-      contentType,
       headers: {
         "Cache-Control": "public, max-age=31536000, immutable",
       },
-    });
+    }).pipe(
+      Effect.catch(() =>
+        Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
+      ),
+    );
   }),
 );
 

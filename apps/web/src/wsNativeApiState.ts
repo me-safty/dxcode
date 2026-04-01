@@ -2,9 +2,9 @@ import {
   type ServerConfig,
   type ServerConfigStreamEvent,
   type ServerConfigUpdatedPayload,
+  type ServerLifecycleWelcomePayload,
   type ServerProviderUpdatedPayload,
   type ServerSettings,
-  type WsWelcomePayload,
 } from "@t3tools/contracts";
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 
@@ -29,7 +29,10 @@ function toServerConfigUpdatedPayload(config: ServerConfig): ServerConfigUpdated
 
 export let wsNativeApiRegistry = AtomRegistry.make();
 
-export const wsWelcomeAtom = makeStateAtom<WsWelcomePayload | null>("ws-server-welcome", null);
+export const wsWelcomeAtom = makeStateAtom<ServerLifecycleWelcomePayload | null>(
+  "ws-server-welcome",
+  null,
+);
 export const serverConfigAtom = makeStateAtom<ServerConfig | null>("ws-server-config", null);
 export const serverConfigUpdatedAtom = makeStateAtom<ServerConfigUpdatedNotification | null>(
   "ws-server-config-updated",
@@ -110,11 +113,11 @@ export function applySettingsUpdated(settings: ServerSettings): void {
   emitServerConfigUpdated(toServerConfigUpdatedPayload(nextConfig), "settingsUpdated");
 }
 
-export function emitWelcome(payload: WsWelcomePayload): void {
+export function emitWelcome(payload: ServerLifecycleWelcomePayload): void {
   wsNativeApiRegistry.set(wsWelcomeAtom, payload);
 }
 
-export function onWelcome(listener: (payload: WsWelcomePayload) => void): () => void {
+export function onWelcome(listener: (payload: ServerLifecycleWelcomePayload) => void): () => void {
   return subscribeLatest(wsWelcomeAtom, listener);
 }
 
