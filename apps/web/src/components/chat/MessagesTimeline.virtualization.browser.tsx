@@ -166,7 +166,10 @@ function createFillerMessages(input: {
   return messages;
 }
 
-function createChangedFilesSummary(targetMessageId: MessageId): Map<MessageId, TurnDiffSummary> {
+function createChangedFilesSummary(
+  targetMessageId: MessageId,
+  files: TurnDiffSummary["files"],
+): Map<MessageId, TurnDiffSummary> {
   return new Map([
     [
       targetMessageId,
@@ -174,47 +177,47 @@ function createChangedFilesSummary(targetMessageId: MessageId): Map<MessageId, T
         turnId: "turn-changed-files" as TurnId,
         completedAt: isoAt(10),
         assistantMessageId: targetMessageId,
-        files: [
-          { path: ".plans/effect-atom.md", additions: 89, deletions: 0 },
-          {
-            path: "apps/server/src/checkpointing/Layers/CheckpointDiffQuery.ts",
-            additions: 4,
-            deletions: 3,
-          },
-          {
-            path: "apps/server/src/checkpointing/Layers/CheckpointStore.ts",
-            additions: 131,
-            deletions: 128,
-          },
-          {
-            path: "apps/server/src/checkpointing/Layers/CheckpointStore.test.ts",
-            additions: 1,
-            deletions: 1,
-          },
-          { path: "apps/server/src/checkpointing/Errors.ts", additions: 1, deletions: 1 },
-          {
-            path: "apps/server/src/git/Layers/ClaudeTextGeneration.ts",
-            additions: 106,
-            deletions: 112,
-          },
-          { path: "apps/server/src/git/Layers/GitCore.ts", additions: 44, deletions: 38 },
-          { path: "apps/server/src/git/Layers/GitCore.test.ts", additions: 18, deletions: 9 },
-          {
-            path: "apps/web/src/components/chat/MessagesTimeline.tsx",
-            additions: 52,
-            deletions: 7,
-          },
-          {
-            path: "apps/web/src/components/chat/ChangedFilesTree.tsx",
-            additions: 32,
-            deletions: 4,
-          },
-          { path: "packages/contracts/src/orchestration.ts", additions: 13, deletions: 3 },
-          { path: "packages/shared/src/git.ts", additions: 8, deletions: 2 },
-        ],
+        files,
       },
     ],
   ]);
+}
+
+function createChangedFilesScenario(input: {
+  name: string;
+  rowId: string;
+  files: TurnDiffSummary["files"];
+  maxEstimateDeltaPx?: number;
+}): VirtualizationScenario {
+  const beforeMessages = createFillerMessages({
+    prefix: `${input.rowId}-before`,
+    startOffsetSeconds: 0,
+    pairCount: 2,
+  });
+  const afterMessages = createFillerMessages({
+    prefix: `${input.rowId}-after`,
+    startOffsetSeconds: 40,
+    pairCount: 8,
+  });
+  const changedFilesMessage = createMessage({
+    id: input.rowId,
+    role: "assistant",
+    text: "Validation passed on the merged tree.",
+    offsetSeconds: 12,
+  });
+
+  return {
+    name: input.name,
+    targetRowId: changedFilesMessage.id,
+    props: createBaseTimelineProps({
+      messages: [...beforeMessages, changedFilesMessage, ...afterMessages],
+      turnDiffSummaryByAssistantMessageId: createChangedFilesSummary(
+        changedFilesMessage.id,
+        input.files,
+      ),
+    }),
+    maxEstimateDeltaPx: input.maxEstimateDeltaPx ?? 72,
+  };
 }
 
 function buildStaticScenarios(): VirtualizationScenario[] {
@@ -255,13 +258,6 @@ function buildStaticScenarios(): VirtualizationScenario[] {
       "- Re-run lint and typecheck",
     ].join("\n"),
   });
-  const changedFilesMessage = createMessage({
-    id: "target-assistant-changed-files",
-    role: "assistant",
-    text: "Validation passed on the merged tree.",
-    offsetSeconds: 12,
-  });
-
   return [
     {
       name: "long user message",
@@ -289,15 +285,45 @@ function buildStaticScenarios(): VirtualizationScenario[] {
       }),
       maxEstimateDeltaPx: 96,
     },
-    {
-      name: "assistant changed-files row",
-      targetRowId: changedFilesMessage.id,
-      props: createBaseTimelineProps({
-        messages: [...beforeMessages, changedFilesMessage, ...afterMessages],
-        turnDiffSummaryByAssistantMessageId: createChangedFilesSummary(changedFilesMessage.id),
-      }),
-      maxEstimateDeltaPx: 72,
-    },
+    createChangedFilesScenario({
+      name: "assistant changed-files row with a compacted single-chain directory",
+      rowId: "target-assistant-changed-files-single-chain",
+      files: [
+        { path: "apps/web/src/components/chat/ChangedFilesTree.tsx", additions: 37, deletions: 45 },
+        {
+          path: "apps/web/src/components/chat/ChangedFilesTree.test.tsx",
+          additions: 0,
+          deletions: 26,
+        },
+      ],
+    }),
+    createChangedFilesScenario({
+      name: "assistant changed-files row with a branch after compaction",
+      rowId: "target-assistant-changed-files-branch-point",
+      files: [
+        { path: "apps/server/src/git/Layers/GitCore.ts", additions: 44, deletions: 38 },
+        { path: "apps/server/src/git/Layers/GitCore.test.ts", additions: 18, deletions: 9 },
+        {
+          path: "apps/server/src/provider/Layers/CodexAdapter.ts",
+          additions: 27,
+          deletions: 8,
+        },
+        {
+          path: "apps/server/src/provider/Layers/CodexAdapter.test.ts",
+          additions: 36,
+          deletions: 0,
+        },
+      ],
+    }),
+    createChangedFilesScenario({
+      name: "assistant changed-files row with mixed root and nested entries",
+      rowId: "target-assistant-changed-files-mixed-root",
+      files: [
+        { path: "README.md", additions: 5, deletions: 1 },
+        { path: "packages/contracts/src/orchestration.ts", additions: 13, deletions: 3 },
+        { path: "packages/shared/src/git.ts", additions: 8, deletions: 2 },
+      ],
+    }),
   ];
 }
 
@@ -494,7 +520,44 @@ describe("MessagesTimeline virtualization harness", () => {
     });
     const props = createBaseTimelineProps({
       messages: [...beforeMessages, targetMessage, ...afterMessages],
-      turnDiffSummaryByAssistantMessageId: createChangedFilesSummary(targetMessage.id),
+      turnDiffSummaryByAssistantMessageId: createChangedFilesSummary(targetMessage.id, [
+        { path: ".plans/effect-atom.md", additions: 89, deletions: 0 },
+        {
+          path: "apps/server/src/checkpointing/Layers/CheckpointDiffQuery.ts",
+          additions: 4,
+          deletions: 3,
+        },
+        {
+          path: "apps/server/src/checkpointing/Layers/CheckpointStore.ts",
+          additions: 131,
+          deletions: 128,
+        },
+        {
+          path: "apps/server/src/checkpointing/Layers/CheckpointStore.test.ts",
+          additions: 1,
+          deletions: 1,
+        },
+        { path: "apps/server/src/checkpointing/Errors.ts", additions: 1, deletions: 1 },
+        {
+          path: "apps/server/src/git/Layers/ClaudeTextGeneration.ts",
+          additions: 106,
+          deletions: 112,
+        },
+        { path: "apps/server/src/git/Layers/GitCore.ts", additions: 44, deletions: 38 },
+        { path: "apps/server/src/git/Layers/GitCore.test.ts", additions: 18, deletions: 9 },
+        {
+          path: "apps/web/src/components/chat/MessagesTimeline.tsx",
+          additions: 52,
+          deletions: 7,
+        },
+        {
+          path: "apps/web/src/components/chat/ChangedFilesTree.tsx",
+          additions: 32,
+          deletions: 4,
+        },
+        { path: "packages/contracts/src/orchestration.ts", additions: 13, deletions: 3 },
+        { path: "packages/shared/src/git.ts", additions: 8, deletions: 2 },
+      ]),
     });
     const mounted = await mountMessagesTimeline({ props });
 
