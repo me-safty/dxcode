@@ -54,7 +54,7 @@ export class ServerSettingsError extends Schema.TaggedErrorClass<ServerSettingsE
   }
 }
 
-export interface ServerSettingsShape {
+interface ServerSettingsShape {
   /** Start the settings runtime and attach file watching. */
   readonly start: Effect.Effect<void, ServerSettingsError>;
 

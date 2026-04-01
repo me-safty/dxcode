@@ -168,7 +168,7 @@ export function getCodexModelCapabilities(model: string | null | undefined): Mod
   );
 }
 
-export function parseAuthStatusFromOutput(result: CommandResult): {
+function parseAuthStatusFromOutput(result: CommandResult): {
   readonly status: Exclude<ServerProviderState, "disabled">;
   readonly auth: Pick<ServerProviderAuth, "status">;
   readonly message?: string;
@@ -248,7 +248,7 @@ export function parseAuthStatusFromOutput(result: CommandResult): {
   };
 }
 
-export const readCodexConfigModelProvider = Effect.fn("readCodexConfigModelProvider")(function* () {
+const readCodexConfigModelProvider = Effect.fn("readCodexConfigModelProvider")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const settingsService = yield* ServerSettingsService;
@@ -285,7 +285,7 @@ export const readCodexConfigModelProvider = Effect.fn("readCodexConfigModelProvi
   return undefined;
 });
 
-export const hasCustomModelProvider = readCodexConfigModelProvider().pipe(
+const hasCustomModelProvider = readCodexConfigModelProvider().pipe(
   Effect.map((provider) => provider !== undefined && !OPENAI_AUTH_PROVIDERS.has(provider)),
   Effect.orElseSucceed(() => false),
 );
@@ -321,7 +321,7 @@ const runCodexCommand = (args: ReadonlyArray<string>) =>
     return yield* spawnAndCollect(codexSettings.binaryPath, command);
   });
 
-export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(function* (
+const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(function* (
   resolveAccount?: (input: {
     readonly binaryPath: string;
     readonly homePath?: string;

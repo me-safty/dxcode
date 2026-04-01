@@ -85,7 +85,7 @@ import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 /**
  * ServerShape - Service API for server lifecycle control.
  */
-export interface ServerShape {
+interface ServerShape {
   /**
    * Start HTTP and WebSocket listeners.
    */
@@ -163,7 +163,7 @@ function stripRequestTag<T extends { _tag: string }>(body: T) {
 const encodeWsResponse = Schema.encodeEffect(Schema.fromJsonString(WsResponse));
 const decodeWebSocketRequest = decodeJsonResult(WebSocketRequest);
 
-export type ServerCoreRuntimeServices =
+type ServerCoreRuntimeServices =
   | OrchestrationEngineService
   | ProjectionSnapshotQuery
   | CheckpointDiffQuery
@@ -171,7 +171,7 @@ export type ServerCoreRuntimeServices =
   | ProviderService
   | ProviderRegistry;
 
-export type ServerRuntimeServices =
+type ServerRuntimeServices =
   | ServerCoreRuntimeServices
   | GitManager
   | GitCore
@@ -185,7 +185,7 @@ export type ServerRuntimeServices =
   | Open
   | AnalyticsService;
 
-export class ServerLifecycleError extends Schema.TaggedErrorClass<ServerLifecycleError>()(
+class ServerLifecycleError extends Schema.TaggedErrorClass<ServerLifecycleError>()(
   "ServerLifecycleError",
   {
     operation: Schema.String,
@@ -197,7 +197,7 @@ class RouteRequestError extends Schema.TaggedErrorClass<RouteRequestError>()("Ro
   message: Schema.String,
 }) {}
 
-export const createServer = Effect.fn(function* (): Effect.fn.Return<
+const createServer = Effect.fn(function* (): Effect.fn.Return<
   http.Server,
   ServerLifecycleError,
   Scope.Scope | ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path

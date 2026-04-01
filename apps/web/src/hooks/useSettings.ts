@@ -24,9 +24,6 @@ import {
   ClientSettingsSchema,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
-  SidebarProjectSortOrder,
-  SidebarThreadSortOrder,
-  TimestampFormat,
   UnifiedSettings,
 } from "@t3tools/contracts/settings";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
@@ -36,6 +33,7 @@ import { normalizeCustomModelSlugs } from "~/modelSelection";
 import { Predicate, Schema, Struct } from "effect";
 import { DeepMutable } from "effect/Types";
 import { deepMerge } from "@t3tools/shared/Struct";
+import { buildLegacyClientSettingsMigrationPatch } from "./useSettings.shared";
 
 const CLIENT_SETTINGS_STORAGE_KEY = "t3code:client-settings:v1";
 const OLD_SETTINGS_KEY = "t3code:app-settings:v1";
@@ -192,38 +190,6 @@ function buildLegacyServerSettingsMigrationPatch(legacySettings: Record<string, 
       new Set<string>(),
       "claudeAgent",
     );
-  }
-
-  return patch;
-}
-
-export function buildLegacyClientSettingsMigrationPatch(
-  legacySettings: Record<string, unknown>,
-): Partial<DeepMutable<ClientSettings>> {
-  const patch: Partial<DeepMutable<ClientSettings>> = {};
-
-  if (Predicate.isBoolean(legacySettings.confirmThreadArchive)) {
-    patch.confirmThreadArchive = legacySettings.confirmThreadArchive;
-  }
-
-  if (Predicate.isBoolean(legacySettings.confirmThreadDelete)) {
-    patch.confirmThreadDelete = legacySettings.confirmThreadDelete;
-  }
-
-  if (Predicate.isBoolean(legacySettings.diffWordWrap)) {
-    patch.diffWordWrap = legacySettings.diffWordWrap;
-  }
-
-  if (Schema.is(SidebarProjectSortOrder)(legacySettings.sidebarProjectSortOrder)) {
-    patch.sidebarProjectSortOrder = legacySettings.sidebarProjectSortOrder;
-  }
-
-  if (Schema.is(SidebarThreadSortOrder)(legacySettings.sidebarThreadSortOrder)) {
-    patch.sidebarThreadSortOrder = legacySettings.sidebarThreadSortOrder;
-  }
-
-  if (Schema.is(TimestampFormat)(legacySettings.timestampFormat)) {
-    patch.timestampFormat = legacySettings.timestampFormat;
   }
 
   return patch;

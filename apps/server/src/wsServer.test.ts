@@ -16,7 +16,7 @@ import {
   Stream,
 } from "effect";
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { createServer } from "./wsServer";
+import { Server, ServerLive } from "./wsServer";
 import WebSocket from "ws";
 import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "./config";
 import { makeServerProviderLayer, makeServerRuntimeServicesLayer } from "./serverLayers";
@@ -54,7 +54,10 @@ import type {
   TerminalWriteInput,
 } from "@t3tools/contracts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager";
-import { makeSqlitePersistenceLive, SqlitePersistenceMemory } from "./persistence/Layers/Sqlite";
+import {
+  makeSqlitePersistenceLive,
+  SqlitePersistenceMemory,
+} from "./persistence/Layers/Sqlite.testing";
 import { SqlClient, SqlError } from "effect/unstable/sql";
 import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService";
 import { ProviderRegistry, type ProviderRegistryShape } from "./provider/Services/ProviderRegistry";
@@ -589,9 +592,14 @@ describe("WebSocket Server", () => {
       serverConfigLayer,
       nodeServicesLayer,
     );
-    const runtime = ManagedRuntime.make(dependenciesLayer);
+    const runtime = ManagedRuntime.make(Layer.merge(dependenciesLayer, ServerLive));
     try {
-      const httpServer = await runtime.runPromise(createServer().pipe(Scope.provide(scope)));
+      const httpServer = await runtime.runPromise(
+        Effect.gen(function* () {
+          const server = yield* Server;
+          return yield* server.start;
+        }).pipe(Scope.provide(scope)),
+      );
       disposeServerRuntime = () => runtime.dispose();
       serverScope = scope;
       return httpServer;

@@ -18,7 +18,7 @@ import { Open } from "./open";
 import type { OpenShape } from "./open.logic";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
-import { Server, type ServerShape } from "./wsServer";
+import { Server } from "./wsServer";
 import { ServerSettingsService } from "./serverSettings";
 
 const start = vi.fn(() => undefined);
@@ -51,7 +51,7 @@ const testLayer = Layer.mergeAll(
   Layer.succeed(Server, {
     start: serverStart,
     stopSignal: Effect.void,
-  } satisfies ServerShape),
+  }),
   Layer.succeed(Open, {
     openBrowser: (_target: string) => Effect.void,
     openInEditor: () => Effect.void,
