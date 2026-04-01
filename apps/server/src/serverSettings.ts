@@ -36,6 +36,7 @@ import {
   Scope,
   ServiceMap,
   Stream,
+  Cause,
 } from "effect";
 import * as Semaphore from "effect/Semaphore";
 import { ServerConfig } from "./config";
@@ -203,6 +204,7 @@ const makeServerSettings = Effect.gen(function* () {
     if (decoded._tag === "Failure") {
       yield* Effect.logWarning("failed to parse settings.json, using defaults", {
         path: settingsPath,
+        issues: Cause.pretty(decoded.cause),
       });
       return DEFAULT_SERVER_SETTINGS;
     }

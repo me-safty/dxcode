@@ -302,7 +302,7 @@ const makeServerRuntimeStartup = Effect.gen(function* () {
         return;
       }
 
-      yield* Effect.logInfo("Accepting commands");
+      yield* Effect.logDebug("Accepting commands");
       yield* commandGate.signalCommandReady;
       yield* Effect.logDebug("startup phase: waiting for http listener");
       yield* Deferred.await(httpListening);
@@ -323,7 +323,7 @@ const makeServerRuntimeStartup = Effect.gen(function* () {
 
   return {
     awaitCommandReady: commandGate.awaitCommandReady,
-    markHttpListening: Deferred.succeed(httpListening, undefined).pipe(Effect.orDie),
+    markHttpListening: Deferred.succeed(httpListening, undefined),
     enqueueCommand: commandGate.enqueueCommand,
   } satisfies ServerRuntimeStartupShape;
 });
