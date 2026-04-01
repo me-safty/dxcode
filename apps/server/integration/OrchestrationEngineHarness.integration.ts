@@ -29,11 +29,9 @@ import { GitCore, type GitCoreShape } from "../src/git/Services/GitCore.ts";
 import { TextGeneration, type TextGenerationShape } from "../src/git/Services/TextGeneration.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../src/persistence/Layers/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../src/persistence/Layers/OrchestrationEventStore.ts";
-import { ProjectionCheckpointRepositoryLive } from "../src/persistence/Layers/ProjectionCheckpoints.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../src/persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../src/persistence/Layers/ProviderSessionRuntime.ts";
 import { makeSqlitePersistenceLive } from "../src/persistence/Layers/Sqlite.ts";
-import { ProjectionCheckpointRepository } from "../src/persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionPendingApprovalRepository } from "../src/persistence/Services/ProjectionPendingApprovals.ts";
 import { ProviderUnsupportedError } from "../src/provider/Errors.ts";
 import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapterRegistry.ts";
@@ -69,7 +67,10 @@ import {
 } from "./TestProviderAdapter.integration.ts";
 import { deriveServerPaths, ServerConfig } from "../src/config.ts";
 import { WorkspaceEntriesLive } from "../src/workspace/Layers/WorkspaceEntries.ts";
-import { WorkspacePathsLive } from "../src/workspace/Layers/WorkspacePaths.ts";
+import {
+  ProjectionCheckpointRepository,
+  ProjectionCheckpointRepositoryLive,
+} from "./support/ProjectionCheckpoints.ts";
 
 function runGit(cwd: string, args: ReadonlyArray<string>) {
   return execFileSync("git", args, {
@@ -126,7 +127,7 @@ function waitFor<A, E>(
   read: Effect.Effect<A, E>,
   predicate: (value: A) => boolean,
   description: string,
-  timeoutMs = 40_000,
+  timeoutMs = 10_000,
 ): Effect.Effect<A, never> {
   const RETRY_SIGNAL = "wait_for_retry";
   const retryIntervalMs = 10;
@@ -289,10 +290,9 @@ export const makeOrchestrationIntegrationHarness = (
         );
 
     const checkpointStoreLayer = CheckpointStoreLive.pipe(Layer.provide(GitCoreLive));
-    const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive;
     const runtimeServicesLayer = Layer.mergeAll(
-      projectionSnapshotQueryLayer,
-      orchestrationLayer.pipe(Layer.provide(projectionSnapshotQueryLayer)),
+      orchestrationLayer,
+      OrchestrationProjectionSnapshotQueryLive,
       ProjectionCheckpointRepositoryLive,
       ProjectionPendingApprovalRepositoryLive,
       checkpointStoreLayer,
@@ -322,21 +322,17 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(
         WorkspaceEntriesLive.pipe(
-          Layer.provide(WorkspacePathsLive),
           Layer.provideMerge(gitCoreLayer),
           Layer.provide(NodeServices.layer),
         ),
       ),
-      Layer.provideMerge(WorkspacePathsLive),
     );
     const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
       Layer.provideMerge(runtimeIngestionLayer),
       Layer.provideMerge(providerCommandReactorLayer),
       Layer.provideMerge(checkpointReactorLayer),
     );
-    const layer = Layer.empty.pipe(
-      Layer.provideMerge(runtimeServicesLayer),
-      Layer.provideMerge(orchestrationReactorLayer),
+    const layer = orchestrationReactorLayer.pipe(
       Layer.provide(persistenceLayer),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),
@@ -499,7 +495,7 @@ export const makeOrchestrationIntegrationHarness = (
       yield* shutdown;
     });
 
-    return {
+    const harness: OrchestrationIntegrationHarness = {
       rootDir,
       workspaceDir,
       dbPath,
@@ -515,5 +511,7 @@ export const makeOrchestrationIntegrationHarness = (
       waitForPendingApproval,
       waitForReceipt,
       dispose,
-    } satisfies OrchestrationIntegrationHarness;
+    };
+
+    return harness;
   });
