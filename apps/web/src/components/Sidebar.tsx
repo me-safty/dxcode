@@ -270,7 +270,9 @@ export default function Sidebar() {
     (store) => store.clearProjectDraftThreadById,
   );
   const navigate = useNavigate();
-  const isOnSettings = useLocation({ select: (loc) => loc.pathname === "/settings" });
+  const pathname = useLocation({ select: (loc) => loc.pathname });
+  const isOnSettings = pathname === "/settings";
+  const isOnThreadsHome = pathname === "/";
   const { settings: appSettings } = useAppSettings();
   const { handleNewThread } = useHandleNewThread();
   const routeThreadId = useParams({
@@ -1106,13 +1108,23 @@ export default function Sidebar() {
     });
   }, []);
 
+  const handleWordmarkClick = useCallback(() => {
+    if (isOnThreadsHome) return;
+    void navigate({ to: "/" });
+  }, [isOnThreadsHome, navigate]);
+
   const wordmark = (
     <div className="flex items-center gap-2">
       <SidebarTrigger className="shrink-0 md:hidden" />
       <Tooltip>
         <TooltipTrigger
           render={
-            <div className="flex min-w-0 flex-1 items-center gap-1 ml-1 cursor-pointer">
+            <button
+              type="button"
+              aria-label="Go to threads"
+              className="ml-1 flex min-w-0 flex-1 items-center gap-1 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
+              onClick={handleWordmarkClick}
+            >
               <T3Wordmark />
               <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
                 Code
@@ -1120,7 +1132,7 @@ export default function Sidebar() {
               <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
                 {APP_STAGE_LABEL}
               </span>
-            </div>
+            </button>
           }
         />
         <TooltipPopup side="bottom" sideOffset={2}>
