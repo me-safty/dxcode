@@ -403,46 +403,39 @@ describe("WsTransport", () => {
   });
 
   it("closes the client scope on the transport runtime before disposing the runtime", async () => {
-    const transport = new WsTransport("ws://localhost:3020");
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
-    const runtime = (
-      transport as unknown as {
-        runtime: {
-          dispose: () => Promise<void>;
-          runPromise: (...args: Array<unknown>) => Promise<unknown>;
-        };
-      }
-    ).runtime;
-
     const callOrder: string[] = [];
     let resolveClose!: () => void;
     const closePromise = new Promise<void>((resolve) => {
       resolveClose = resolve;
     });
 
-    const runPromiseSpy = vi.spyOn(runtime, "runPromise").mockImplementation(async () => {
-      callOrder.push("close:start");
-      await closePromise;
-      callOrder.push("close:done");
-      return undefined;
-    });
-    const disposeSpy = vi.spyOn(runtime, "dispose").mockImplementation(async () => {
-      callOrder.push("runtime:dispose");
-    });
+    const runtime = {
+      runPromise: vi.fn(async () => {
+        callOrder.push("close:start");
+        await closePromise;
+        callOrder.push("close:done");
+        return undefined;
+      }),
+      dispose: vi.fn(async () => {
+        callOrder.push("runtime:dispose");
+      }),
+    };
+    const transport = {
+      disposed: false,
+      clientScope: {} as never,
+      runtime,
+    } as unknown as WsTransport;
 
-    await transport.dispose();
+    WsTransport.prototype.dispose.call(transport);
 
-    expect(runPromiseSpy).toHaveBeenCalledTimes(1);
-    expect(disposeSpy).not.toHaveBeenCalled();
+    expect(runtime.runPromise).toHaveBeenCalledTimes(1);
+    expect(runtime.dispose).not.toHaveBeenCalled();
+    expect((transport as unknown as { disposed: boolean }).disposed).toBe(true);
 
     resolveClose();
 
     await waitFor(() => {
-      expect(disposeSpy).toHaveBeenCalledTimes(1);
+      expect(runtime.dispose).toHaveBeenCalledTimes(1);
     });
 
     expect(callOrder).toEqual(["close:start", "close:done", "runtime:dispose"]);
