@@ -47,6 +47,9 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 }
 
 function makeState(thread: Thread): AppState {
+  const threadIdsByProjectId: AppState["threadIdsByProjectId"] = {
+    [thread.projectId]: [thread.id],
+  };
   return {
     projects: [
       {
@@ -61,6 +64,8 @@ function makeState(thread: Thread): AppState {
       },
     ],
     threads: [thread],
+    sidebarThreadsById: {},
+    threadIdsByProjectId,
     bootstrapComplete: true,
   };
 }
@@ -271,6 +276,8 @@ describe("store read model sync", () => {
         },
       ],
       threads: [],
+      sidebarThreadsById: {},
+      threadIdsByProjectId: {},
       bootstrapComplete: true,
     };
     const readModel: OrchestrationReadModel = {
@@ -361,6 +368,8 @@ describe("incremental orchestration updates", () => {
         },
       ],
       threads: [],
+      sidebarThreadsById: {},
+      threadIdsByProjectId: {},
       bootstrapComplete: true,
     };
 
