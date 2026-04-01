@@ -46,7 +46,7 @@ import {
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import {
   type SidebarProjectSortOrder,
   type SidebarThreadSortOrder,
@@ -461,7 +461,6 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
   const isOnSettings = pathname.startsWith("/settings");
-  const isOnThreadsHome = pathname === "/";
   const appSettings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const { handleNewThread } = useHandleNewThread();
@@ -1939,22 +1938,16 @@ export default function Sidebar() {
     });
   }, []);
 
-  const handleWordmarkClick = useCallback(() => {
-    if (isOnThreadsHome) return;
-    void navigate({ to: "/" });
-  }, [isOnThreadsHome, navigate]);
-
   const wordmark = (
     <div className="flex items-center gap-2">
       <SidebarTrigger className="shrink-0 md:hidden" />
       <Tooltip>
         <TooltipTrigger
           render={
-            <button
-              type="button"
+            <Link
               aria-label="Go to threads"
               className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
-              onClick={handleWordmarkClick}
+              to="/"
             >
               <T3Wordmark />
               <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
@@ -1963,7 +1956,7 @@ export default function Sidebar() {
               <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
                 {APP_STAGE_LABEL}
               </span>
-            </button>
+            </Link>
           }
         />
         <TooltipPopup side="bottom" sideOffset={2}>
