@@ -9,15 +9,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@effect/platform-node": "catalog:",
-    "@t3tools/shared": "workspace:*",
-    "effect": "catalog:"
-  },
   "devDependencies": {
     "@effect/language-service": "catalog:",
+    "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
+    "@t3tools/shared": "workspace:*",
     "@types/bun": "catalog:",
+    "effect": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

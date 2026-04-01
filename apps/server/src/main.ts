@@ -30,7 +30,7 @@ import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 import { readBootstrapEnvelope } from "./bootstrap";
 import { ServerSettingsLive } from "./serverSettings";
 
-export class StartupError extends Data.TaggedError("StartupError")<{
+class StartupError extends Data.TaggedError("StartupError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
