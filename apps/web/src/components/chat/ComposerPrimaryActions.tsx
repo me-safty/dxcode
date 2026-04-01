@@ -130,46 +130,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       );
     }
 
-    return compact ? (
-      <div className="flex items-center justify-end gap-1.5">
+    return (
+      <div data-chat-composer-implement-actions="true" className="flex items-center justify-end">
         <Button
           type="submit"
           size="sm"
-          className="h-9 rounded-full px-3 sm:h-8"
-          disabled={isSendBusy || isConnecting}
-        >
-          {isConnecting || isSendBusy ? "Sending..." : "Implement"}
-        </Button>
-        <Menu>
-          <MenuTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant="default"
-                className="rounded-full"
-                aria-label="Implementation actions"
-                disabled={isSendBusy || isConnecting}
-              />
-            }
-          >
-            <ChevronDownIcon className="size-3.5" />
-          </MenuTrigger>
-          <MenuPopup align="end" side="top">
-            <MenuItem
-              disabled={isSendBusy || isConnecting}
-              onClick={() => void onImplementPlanInNewThread()}
-            >
-              Implement in a new thread
-            </MenuItem>
-          </MenuPopup>
-        </Menu>
-      </div>
-    ) : (
-      <div className="flex items-center">
-        <Button
-          type="submit"
-          size="sm"
-          className="h-9 rounded-l-full rounded-r-none px-4 sm:h-8"
+          className={cn("h-9 rounded-l-full rounded-r-none sm:h-8", compact ? "px-3" : "px-4")}
           disabled={isSendBusy || isConnecting}
         >
           {isConnecting || isSendBusy ? "Sending..." : "Implement"}
