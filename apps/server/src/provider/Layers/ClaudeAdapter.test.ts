@@ -14,6 +14,7 @@ import {
   ApprovalRequestId,
   ProviderItemId,
   ProviderRuntimeEvent,
+  type RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
@@ -2493,12 +2494,13 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  for (const [runtimeMode, expectedBase] of [
-    ["full-access", "bypassPermissions"],
-    ["approval-required", "default"],
-    ["auto-accept-edits", "acceptEdits"],
-  ] as const) {
-    it.effect(`restores ${expectedBase} permission mode after plan turn (${runtimeMode})`, () => {
+  it.effect.each<{ runtimeMode: RuntimeMode; expectedBase: PermissionMode }>([
+    { runtimeMode: "full-access", expectedBase: "bypassPermissions" },
+    { runtimeMode: "approval-required", expectedBase: "default" },
+    { runtimeMode: "auto-accept-edits", expectedBase: "acceptEdits" },
+  ])(
+    "restores $expectedBase permission mode after plan turn ($runtimeMode)",
+    ({ runtimeMode, expectedBase }) => {
       const harness = makeHarness();
       return Effect.gen(function* () {
         const adapter = yield* ClaudeAdapter;
@@ -2547,8 +2549,8 @@ describe("ClaudeAdapterLive", () => {
         Effect.provideService(Random.Random, makeDeterministicRandomService()),
         Effect.provide(harness.layer),
       );
-    });
-  }
+    },
+  );
 
   it.effect("does not call setPermissionMode when interactionMode is absent", () => {
     const harness = makeHarness();
