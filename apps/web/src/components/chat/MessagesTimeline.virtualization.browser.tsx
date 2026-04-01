@@ -407,7 +407,10 @@ async function measureTimelineRow(input: {
 
   return {
     actualHeightPx,
-    estimatedHeightPx: estimateMessagesTimelineRowHeight(targetRow!, { timelineWidthPx }),
+    estimatedHeightPx: estimateMessagesTimelineRowHeight(targetRow!, {
+      timelineWidthPx,
+      turnDiffSummaryByAssistantMessageId: input.props.turnDiffSummaryByAssistantMessageId,
+    }),
     timelineWidthPx,
     virtualizerSizePx,
     renderedInVirtualizedRegion,

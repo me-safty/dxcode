@@ -200,7 +200,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     estimateSize: (index: number) => {
       const row = rows[index];
       if (!row) return 96;
-      return estimateMessagesTimelineRowHeight(row, { timelineWidthPx });
+      return estimateMessagesTimelineRowHeight(row, {
+        timelineWidthPx,
+        turnDiffSummaryByAssistantMessageId,
+      });
     },
     measureElement: measureVirtualElement,
     useAnimationFrameWithResizeObserver: true,
