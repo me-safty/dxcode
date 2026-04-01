@@ -2,14 +2,16 @@
 import "../index.css";
 
 import {
+  EventId,
   ORCHESTRATION_WS_METHODS,
   type MessageId,
+  type OrchestrationEvent,
   type OrchestrationReadModel,
   type ProjectId,
   type ServerConfig,
+  type ServerLifecycleWelcomePayload,
   type ThreadId,
-  type WsWelcomePayload,
-  WS_CHANNELS,
+  type TurnId,
   WS_METHODS,
   OrchestrationSessionStatus,
   DEFAULT_SERVER_SETTINGS,
@@ -28,8 +30,10 @@ import {
   removeInlineTerminalContextPlaceholder,
 } from "../lib/terminalContext";
 import { isMacPlatform } from "../lib/utils";
+import { __resetNativeApiForTests } from "../nativeApi";
 import { getRouter } from "../router";
 import { useStore } from "../store";
+import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
@@ -39,25 +43,17 @@ const PROJECT_ID = "project-1" as ProjectId;
 const NOW_ISO = "2026-03-04T12:00:00.000Z";
 const BASE_TIME_MS = Date.parse(NOW_ISO);
 const ATTACHMENT_SVG = "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='300'></svg>";
-const CLIENT_SETTINGS_STORAGE_KEY = "t3code:client-settings:v1";
-
-interface WsRequestEnvelope {
-  id: string;
-  body: {
-    _tag: string;
-    [key: string]: unknown;
-  };
-}
 
 interface TestFixture {
   snapshot: OrchestrationReadModel;
   serverConfig: ServerConfig;
-  welcome: WsWelcomePayload;
+  welcome: ServerLifecycleWelcomePayload;
 }
 
 let fixture: TestFixture;
-const wsRequests: WsRequestEnvelope["body"][] = [];
-let customWsRpcResolver: ((body: WsRequestEnvelope["body"]) => unknown | undefined) | null = null;
+const rpcHarness = new BrowserWsRpcHarness();
+const wsRequests = rpcHarness.requests;
+let customWsRpcResolver: ((body: NormalizedWsRpcRequestBody) => unknown | undefined) | null = null;
 const wsLink = ws.link(/ws(s)?:\/\/.*/);
 
 interface ViewportSpec {
@@ -75,6 +71,20 @@ const DEFAULT_VIEWPORT: ViewportSpec = {
   textTolerancePx: 44,
   attachmentTolerancePx: 56,
 };
+const WIDE_FOOTER_VIEWPORT: ViewportSpec = {
+  name: "wide-footer",
+  width: 1_400,
+  height: 1_100,
+  textTolerancePx: 44,
+  attachmentTolerancePx: 56,
+};
+const COMPACT_FOOTER_VIEWPORT: ViewportSpec = {
+  name: "compact-footer",
+  width: 430,
+  height: 932,
+  textTolerancePx: 56,
+  attachmentTolerancePx: 56,
+};
 const TEXT_VIEWPORT_MATRIX = [
   DEFAULT_VIEWPORT,
   { name: "tablet", width: 720, height: 1_024, textTolerancePx: 44, attachmentTolerancePx: 56 },
@@ -87,7 +97,7 @@ const ATTACHMENT_VIEWPORT_MATRIX = [
   { name: "narrow", width: 320, height: 700, textTolerancePx: 84, attachmentTolerancePx: 56 },
 ] as const satisfies readonly ViewportSpec[];
 
-interface MessageRowMeasurement {
+interface UserRowMeasurement {
   measuredRowHeightPx: number;
   timelineWidthMeasuredPx: number;
   renderedInVirtualizedRegion: boolean;
@@ -96,11 +106,9 @@ interface MessageRowMeasurement {
 interface MountedChatView {
   [Symbol.asyncDispose]: () => Promise<void>;
   cleanup: () => Promise<void>;
-  measureMessageRow: (
-    targetMessageId: MessageId,
-    role: "user" | "assistant",
-  ) => Promise<MessageRowMeasurement>;
+  measureUserRow: (targetMessageId: MessageId) => Promise<UserRowMeasurement>;
   setViewport: (viewport: ViewportSpec) => Promise<void>;
+  setContainerSize: (viewport: Pick<ViewportSpec, "width" | "height">) => Promise<void>;
   router: ReturnType<typeof getRouter>;
 }
 
@@ -121,7 +129,7 @@ function createBaseServerConfig(): ServerConfig {
         installed: true,
         version: "0.116.0",
         status: "ready",
-        authStatus: "authenticated",
+        auth: { status: "authenticated" },
         checkedAt: NOW_ISO,
         models: [],
       },
@@ -265,7 +273,6 @@ function createSnapshotForTargetUser(options: {
         archivedAt: null,
         deletedAt: null,
         messages,
-        queuedFollowUps: [],
         activities: [],
         proposedPlans: [],
         checkpoints: [],
@@ -281,29 +288,6 @@ function createSnapshotForTargetUser(options: {
       },
     ],
     updatedAt: NOW_ISO,
-  };
-}
-
-function createSnapshotForTargetAssistantMessage(options: {
-  targetAssistantId: MessageId;
-  targetText: string;
-}): OrchestrationReadModel {
-  const snapshot = createSnapshotForTargetUser({
-    targetMessageId: "msg-user-assistant-copy-target" as MessageId,
-    targetText: "assistant copy target",
-  });
-
-  return {
-    ...snapshot,
-    threads: snapshot.threads.map((thread) =>
-      Object.assign({}, thread, {
-        messages: thread.messages.map((message) =>
-          message.id === options.targetAssistantId
-            ? Object.assign({}, message, { text: options.targetText })
-            : message,
-        ),
-      }),
-    ),
   };
 }
 
@@ -347,7 +331,6 @@ function addThreadToSnapshot(
         archivedAt: null,
         deletedAt: null,
         messages: [],
-        queuedFollowUps: [],
         activities: [],
         proposedPlans: [],
         checkpoints: [],
@@ -363,6 +346,67 @@ function addThreadToSnapshot(
       },
     ],
   };
+}
+
+function createThreadCreatedEvent(threadId: ThreadId, sequence: number): OrchestrationEvent {
+  return {
+    sequence,
+    eventId: EventId.makeUnsafe(`event-thread-created-${sequence}`),
+    aggregateKind: "thread",
+    aggregateId: threadId,
+    occurredAt: NOW_ISO,
+    commandId: null,
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    type: "thread.created",
+    payload: {
+      threadId,
+      projectId: PROJECT_ID,
+      title: "New thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: "main",
+      worktreePath: null,
+      createdAt: NOW_ISO,
+      updatedAt: NOW_ISO,
+    },
+  };
+}
+
+function sendOrchestrationDomainEvent(event: OrchestrationEvent): void {
+  rpcHarness.emitStreamValue(WS_METHODS.subscribeOrchestrationDomainEvents, event);
+}
+
+async function waitForWsClient(): Promise<void> {
+  await vi.waitFor(
+    () => {
+      expect(
+        wsRequests.some(
+          (request) => request._tag === WS_METHODS.subscribeOrchestrationDomainEvents,
+        ),
+      ).toBe(true);
+    },
+    { timeout: 8_000, interval: 16 },
+  );
+}
+
+async function promoteDraftThreadViaDomainEvent(threadId: ThreadId): Promise<void> {
+  await waitForWsClient();
+  fixture.snapshot = addThreadToSnapshot(fixture.snapshot, threadId);
+  sendOrchestrationDomainEvent(
+    createThreadCreatedEvent(threadId, fixture.snapshot.snapshotSequence),
+  );
+  await vi.waitFor(
+    () => {
+      expect(useComposerDraftStore.getState().draftThreadsByThreadId[threadId]).toBeUndefined();
+    },
+    { timeout: 8_000, interval: 16 },
+  );
 }
 
 function createDraftOnlySnapshot(): OrchestrationReadModel {
@@ -464,46 +508,115 @@ function createSnapshotWithLongProposedPlan(): OrchestrationReadModel {
   };
 }
 
-function updateFixtureThread(
-  updater: (
-    thread: OrchestrationReadModel["threads"][number],
-  ) => OrchestrationReadModel["threads"][number],
-): void {
-  fixture.snapshot = {
-    ...fixture.snapshot,
-    threads: fixture.snapshot.threads.map((thread) =>
-      thread.id === THREAD_ID ? updater(thread) : thread,
+function createSnapshotWithPendingUserInput(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-pending-input-target" as MessageId,
+    targetText: "question thread",
+  });
+
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === THREAD_ID
+        ? Object.assign({}, thread, {
+            interactionMode: "plan",
+            activities: [
+              {
+                id: EventId.makeUnsafe("activity-user-input-requested"),
+                tone: "info",
+                kind: "user-input.requested",
+                summary: "User input requested",
+                payload: {
+                  requestId: "req-browser-user-input",
+                  questions: [
+                    {
+                      id: "scope",
+                      header: "Scope",
+                      question: "What should this change cover?",
+                      options: [
+                        {
+                          label: "Tight",
+                          description: "Touch only the footer layout logic.",
+                        },
+                        {
+                          label: "Broad",
+                          description: "Also adjust the related composer controls.",
+                        },
+                      ],
+                    },
+                    {
+                      id: "risk",
+                      header: "Risk",
+                      question: "How aggressive should the imaginary plan be?",
+                      options: [
+                        {
+                          label: "Conservative",
+                          description: "Favor reliability and low-risk changes.",
+                        },
+                        {
+                          label: "Balanced",
+                          description: "Mix quick wins with one structural improvement.",
+                        },
+                      ],
+                    },
+                  ],
+                },
+                turnId: null,
+                sequence: 1,
+                createdAt: isoAt(1_000),
+              },
+            ],
+            updatedAt: isoAt(1_000),
+          })
+        : thread,
     ),
   };
-  useStore.getState().syncServerReadModel(fixture.snapshot);
 }
 
-function getQueuedFollowUpPrompts(): string[] {
-  return (
-    useStore
-      .getState()
-      .threads.find((thread) => thread.id === THREAD_ID)
-      ?.queuedFollowUps?.map((followUp) => followUp.prompt) ?? []
-  );
-}
-
-function getQueuedFollowUpEnqueueRequests(): Array<
-  WsRequestEnvelope["body"] & { command: { type: string } }
-> {
-  return wsRequests.flatMap((request) => {
-    const command = (request as { command?: { type?: string } }).command;
-    if (
-      request._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand ||
-      !command ||
-      command.type !== "thread.queued-follow-up.enqueue"
-    ) {
-      return [];
-    }
-    return [request as WsRequestEnvelope["body"] & { command: { type: string } }];
+function createSnapshotWithPlanFollowUpPrompt(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-plan-follow-up-target" as MessageId,
+    targetText: "plan follow-up thread",
   });
+
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === THREAD_ID
+        ? Object.assign({}, thread, {
+            interactionMode: "plan",
+            latestTurn: {
+              turnId: "turn-plan-follow-up" as TurnId,
+              state: "completed",
+              requestedAt: isoAt(1_000),
+              startedAt: isoAt(1_001),
+              completedAt: isoAt(1_010),
+              assistantMessageId: null,
+            },
+            proposedPlans: [
+              {
+                id: "plan-follow-up-browser-test",
+                turnId: "turn-plan-follow-up" as TurnId,
+                planMarkdown: "# Follow-up plan\n\n- Keep the composer footer stable on resize.",
+                implementedAt: null,
+                implementationThreadId: null,
+                createdAt: isoAt(1_002),
+                updatedAt: isoAt(1_003),
+              },
+            ],
+            session: {
+              ...thread.session,
+              status: "ready",
+              updatedAt: isoAt(1_010),
+            },
+            updatedAt: isoAt(1_010),
+          })
+        : thread,
+    ),
+  };
 }
 
-function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
+function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
   const customResult = customWsRpcResolver?.(body);
   if (customResult !== undefined) {
     return customResult;
@@ -511,123 +624,6 @@ function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
   const tag = body._tag;
   if (tag === ORCHESTRATION_WS_METHODS.getSnapshot) {
     return fixture.snapshot;
-  }
-  if (tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
-    const command = (body as { command?: Record<string, unknown> }).command;
-    switch (command?.type) {
-      case "thread.queued-follow-up.enqueue": {
-        const followUp =
-          command.followUp as OrchestrationReadModel["threads"][number]["queuedFollowUps"][number];
-        const rawTargetIndex =
-          typeof command.targetIndex === "number" ? command.targetIndex : undefined;
-        updateFixtureThread((thread) => {
-          const withoutExisting = thread.queuedFollowUps.filter(
-            (entry) => entry.id !== followUp.id,
-          );
-          const targetIndex =
-            rawTargetIndex === undefined
-              ? withoutExisting.length
-              : Math.max(0, Math.min(rawTargetIndex, withoutExisting.length));
-          return {
-            ...thread,
-            queuedFollowUps: [
-              ...withoutExisting.slice(0, targetIndex),
-              { ...followUp, lastSendError: followUp.lastSendError ?? null },
-              ...withoutExisting.slice(targetIndex),
-            ],
-          };
-        });
-        return { sequence: 1 };
-      }
-      case "thread.queued-follow-up.remove": {
-        const followUpId = typeof command.followUpId === "string" ? command.followUpId : null;
-        if (followUpId) {
-          updateFixtureThread((thread) => ({
-            ...thread,
-            queuedFollowUps: thread.queuedFollowUps.filter((entry) => entry.id !== followUpId),
-          }));
-        }
-        return { sequence: 1 };
-      }
-      case "thread.queued-follow-up.reorder": {
-        const followUpId = typeof command.followUpId === "string" ? command.followUpId : null;
-        const rawTargetIndex =
-          typeof command.targetIndex === "number" ? Math.floor(command.targetIndex) : null;
-        if (followUpId !== null && rawTargetIndex !== null) {
-          updateFixtureThread((thread) => {
-            const currentIndex = thread.queuedFollowUps.findIndex(
-              (entry) => entry.id === followUpId,
-            );
-            if (currentIndex < 0) {
-              return thread;
-            }
-            const boundedTargetIndex = Math.max(
-              0,
-              Math.min(rawTargetIndex, thread.queuedFollowUps.length - 1),
-            );
-            if (boundedTargetIndex === currentIndex) {
-              return thread;
-            }
-            const nextQueuedFollowUps = [...thread.queuedFollowUps];
-            const [movedFollowUp] = nextQueuedFollowUps.splice(currentIndex, 1);
-            if (!movedFollowUp) {
-              return thread;
-            }
-            nextQueuedFollowUps.splice(boundedTargetIndex, 0, movedFollowUp);
-            return {
-              ...thread,
-              queuedFollowUps: nextQueuedFollowUps,
-            };
-          });
-        }
-        return { sequence: 1 };
-      }
-      case "thread.queued-follow-up.update": {
-        const followUp =
-          command.followUp as OrchestrationReadModel["threads"][number]["queuedFollowUps"][number];
-        if (followUp?.id) {
-          updateFixtureThread((thread) => ({
-            ...thread,
-            queuedFollowUps: thread.queuedFollowUps.map((entry) =>
-              entry.id === followUp.id
-                ? { ...entry, ...followUp, lastSendError: followUp.lastSendError ?? null }
-                : entry,
-            ),
-          }));
-        }
-        return { sequence: 1 };
-      }
-      case "thread.turn.start":
-      case "thread.meta.update":
-      case "thread.create":
-      case "thread.delete":
-      case "thread.interaction-mode.set":
-      case "thread.runtime-mode.set":
-      case "thread.approval.respond":
-      case "thread.user-input.respond":
-      case "thread.checkpoint.revert":
-      case "thread.session.stop":
-      case "project.create":
-      case "project.meta.update":
-      case "project.delete":
-        return { sequence: 1 };
-      case "thread.turn.interrupt": {
-        updateFixtureThread((thread) => ({
-          ...thread,
-          session: thread.session
-            ? {
-                ...thread.session,
-                status: "ready",
-                activeTurnId: null,
-                updatedAt: isoAt(9_999),
-              }
-            : null,
-        }));
-        return { sequence: 1 };
-      }
-      default:
-        break;
-    }
   }
   if (tag === WS_METHODS.serverGetConfig) {
     return fixture.serverConfig;
@@ -667,6 +663,9 @@ function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
       truncated: false,
     };
   }
+  if (tag === WS_METHODS.shellOpenInEditor) {
+    return null;
+  }
   if (tag === WS_METHODS.terminalOpen) {
     return {
       threadId: typeof body.threadId === "string" ? body.threadId : THREAD_ID,
@@ -685,43 +684,11 @@ function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
 
 const worker = setupWorker(
   wsLink.addEventListener("connection", ({ client }) => {
-    client.send(
-      JSON.stringify({
-        type: "push",
-        sequence: 1,
-        channel: WS_CHANNELS.serverWelcome,
-        data: fixture.welcome,
-      }),
-    );
+    void rpcHarness.connect(client);
     client.addEventListener("message", (event) => {
       const rawData = event.data;
       if (typeof rawData !== "string") return;
-      let request: WsRequestEnvelope;
-      try {
-        request = JSON.parse(rawData) as WsRequestEnvelope;
-      } catch {
-        return;
-      }
-      const method = request.body?._tag;
-      if (typeof method !== "string") return;
-      wsRequests.push(request.body);
-      try {
-        client.send(
-          JSON.stringify({
-            id: request.id,
-            result: resolveWsRpc(request.body),
-          }),
-        );
-      } catch (error) {
-        client.send(
-          JSON.stringify({
-            id: request.id,
-            error: {
-              message: error instanceof Error ? error.message : String(error),
-            },
-          }),
-        );
-      }
+      void rpcHarness.onMessage(rawData);
     });
   }),
   http.get("*/attachments/:attachmentId", () =>
@@ -810,6 +777,13 @@ async function waitForComposerEditor(): Promise<HTMLElement> {
   );
 }
 
+async function waitForComposerMenuItem(itemId: string): Promise<HTMLElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLElement>(`[data-composer-item-id="${itemId}"]`),
+    `Unable to find composer menu item "${itemId}".`,
+  );
+}
+
 async function waitForSendButton(): Promise<HTMLButtonElement> {
   return waitForElement(
     () => document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]'),
@@ -817,195 +791,59 @@ async function waitForSendButton(): Promise<HTMLButtonElement> {
   );
 }
 
-async function waitForComposerSubmitButton(label: string): Promise<HTMLButtonElement> {
+function findComposerProviderModelPicker(): HTMLButtonElement | null {
+  return document.querySelector<HTMLButtonElement>('[data-chat-provider-model-picker="true"]');
+}
+
+function findButtonByText(text: string): HTMLButtonElement | null {
+  return (Array.from(document.querySelectorAll("button")).find(
+    (button) => button.textContent?.trim() === text,
+  ) ?? null) as HTMLButtonElement | null;
+}
+
+async function waitForButtonByText(text: string): Promise<HTMLButtonElement> {
+  return waitForElement(() => findButtonByText(text), `Unable to find "${text}" button.`);
+}
+
+function findButtonContainingText(text: string): HTMLButtonElement | null {
+  return (Array.from(document.querySelectorAll("button")).find((button) =>
+    button.textContent?.includes(text),
+  ) ?? null) as HTMLButtonElement | null;
+}
+
+async function waitForButtonContainingText(text: string): Promise<HTMLButtonElement> {
   return waitForElement(
-    () =>
-      document.querySelector<HTMLButtonElement>(`button[type="submit"][aria-label="${label}"]`) ??
-      Array.from(document.querySelectorAll<HTMLButtonElement>('button[type="submit"]')).find(
-        (button) => button.textContent?.trim() === label,
-      ) ??
-      null,
-    `Unable to find ${label} composer submit button.`,
+    () => findButtonContainingText(text),
+    `Unable to find button containing "${text}".`,
   );
 }
 
-async function waitForQueuedFollowUpsPanel(): Promise<HTMLElement> {
-  return waitForElement(
-    () => document.querySelector<HTMLElement>('[data-testid="queued-follow-ups-panel"]'),
-    "Unable to find queued follow-ups panel.",
+async function expectComposerActionsContained(): Promise<void> {
+  const footer = await waitForElement(
+    () => document.querySelector<HTMLElement>('[data-chat-composer-footer="true"]'),
+    "Unable to find composer footer.",
   );
-}
+  const actions = await waitForElement(
+    () => document.querySelector<HTMLElement>('[data-chat-composer-actions="right"]'),
+    "Unable to find composer actions container.",
+  );
 
-async function openQueuedFollowUpActionsMenu(index: number): Promise<HTMLButtonElement> {
-  const button = await waitForElement(
-    () =>
-      document.querySelectorAll<HTMLButtonElement>(
-        'button[aria-label^="More queued follow-up actions"]',
-      )[index] ?? null,
-    `Unable to find queued follow-up actions button at index ${index}.`,
-  );
-  button.click();
-  return button;
-}
-
-async function dragQueuedFollowUp(options: {
-  fromPrompt: string;
-  toPrompt: string;
-  position: "before" | "after";
-}): Promise<void> {
-  const fromItem = await waitForElement(
-    () =>
-      Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="queued-follow-up-"]')).find(
-        (element) => element.textContent?.includes(options.fromPrompt),
-      ) ?? null,
-    `Unable to find queued follow-up row for ${options.fromPrompt}.`,
-  );
-  const toItem = await waitForElement(
-    () =>
-      Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="queued-follow-up-"]')).find(
-        (element) => element.textContent?.includes(options.toPrompt),
-      ) ?? null,
-    `Unable to find queued follow-up row for ${options.toPrompt}.`,
-  );
-  const dragHandle = fromItem.querySelector<HTMLButtonElement>('[draggable="true"]');
-  if (!dragHandle) {
-    throw new Error(`Unable to find drag handle for queued follow-up ${options.fromPrompt}.`);
-  }
-
-  const dataTransfer = new DataTransfer();
-  const targetBounds = toItem.getBoundingClientRect();
-  const clientY = options.position === "before" ? targetBounds.top + 2 : targetBounds.bottom - 2;
-
-  dragHandle.dispatchEvent(
-    new DragEvent("dragstart", {
-      bubbles: true,
-      cancelable: true,
-      dataTransfer,
-    }),
-  );
-  await waitForLayout();
-  toItem.dispatchEvent(
-    new DragEvent("dragover", {
-      bubbles: true,
-      cancelable: true,
-      dataTransfer,
-      clientY,
-    }),
-  );
-  await waitForLayout();
-  toItem.dispatchEvent(
-    new DragEvent("drop", {
-      bubbles: true,
-      cancelable: true,
-      dataTransfer,
-      clientY,
-    }),
-  );
-  await waitForLayout();
-  dragHandle.dispatchEvent(
-    new DragEvent("dragend", {
-      bubbles: true,
-      cancelable: true,
-      dataTransfer,
-    }),
-  );
-}
-
-async function waitForDraftPrompt(prompt: string): Promise<void> {
   await vi.waitFor(
     () => {
-      expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt ?? "").toBe(
-        prompt,
-      );
+      const footerRect = footer.getBoundingClientRect();
+      const actionButtons = Array.from(actions.querySelectorAll<HTMLButtonElement>("button"));
+      expect(actionButtons.length).toBeGreaterThanOrEqual(1);
+
+      const buttonRects = actionButtons.map((button) => button.getBoundingClientRect());
+      const firstTop = buttonRects[0]?.top ?? 0;
+
+      for (const rect of buttonRects) {
+        expect(rect.right).toBeLessThanOrEqual(footerRect.right + 0.5);
+        expect(rect.bottom).toBeLessThanOrEqual(footerRect.bottom + 0.5);
+        expect(Math.abs(rect.top - firstTop)).toBeLessThanOrEqual(1.5);
+      }
     },
     { timeout: 8_000, interval: 16 },
-  );
-}
-
-async function setComposerPrompt(prompt: string): Promise<void> {
-  useComposerDraftStore.getState().setPrompt(THREAD_ID, prompt);
-  await waitForDraftPrompt(prompt);
-  await vi.waitFor(
-    () => {
-      expect(document.body.textContent ?? "").toContain(prompt);
-    },
-    { timeout: 8_000, interval: 16 },
-  );
-  await waitForLayout();
-}
-
-async function queueFollowUpFromComposer(prompt: string): Promise<void> {
-  await setComposerPrompt(prompt);
-  const submitButton = await waitForComposerSubmitButton("Queue follow-up");
-  await vi.waitFor(
-    () => {
-      expect(submitButton.disabled).toBe(false);
-    },
-    { timeout: 8_000, interval: 16 },
-  );
-  submitButton.click();
-  await waitForDraftPrompt("");
-  await waitForLayout();
-}
-
-function setClientSettings(settings: Partial<typeof DEFAULT_CLIENT_SETTINGS>): void {
-  localStorage.setItem("t3code:client-settings:v1", JSON.stringify(settings));
-}
-
-function getTurnStartRequests(): Array<WsRequestEnvelope["body"] & { command: { type: string } }> {
-  return wsRequests.flatMap((request) => {
-    const command = (request as { command?: { type?: string } }).command;
-    if (
-      request._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand ||
-      !command ||
-      command.type !== "thread.turn.start"
-    ) {
-      return [];
-    }
-    return [request as WsRequestEnvelope["body"] & { command: { type: string } }];
-  });
-}
-
-function getInterruptRequests(): Array<WsRequestEnvelope["body"] & { command: { type: string } }> {
-  return wsRequests.flatMap((request) => {
-    const command = (request as { command?: { type?: string } }).command;
-    if (
-      request._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand ||
-      !command ||
-      command.type !== "thread.turn.interrupt"
-    ) {
-      return [];
-    }
-    return [request as WsRequestEnvelope["body"] & { command: { type: string } }];
-  });
-}
-
-function getDispatchCommandTypes(): string[] {
-  return wsRequests.flatMap((request) => {
-    if (request._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
-      return [];
-    }
-    const command = (request as { command?: { type?: unknown } }).command;
-    return typeof command?.type === "string" ? [command.type] : [];
-  });
-}
-
-function installClipboardWriteTextSpy() {
-  const writeText = vi.fn<(value: string) => Promise<void>>().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, "clipboard", {
-    configurable: true,
-    value: { writeText },
-  });
-  return writeText;
-}
-
-function setAssistantResponseCopyFormat(format: "markdown" | "plain-text"): void {
-  localStorage.setItem(
-    CLIENT_SETTINGS_STORAGE_KEY,
-    JSON.stringify({
-      ...DEFAULT_CLIENT_SETTINGS,
-      assistantResponseCopyFormat: format,
-    }),
   );
 }
 
@@ -1024,7 +862,9 @@ async function waitForInteractionModeButton(
 async function waitForServerConfigToApply(): Promise<void> {
   await vi.waitFor(
     () => {
-      expect(wsRequests.some((request) => request._tag === WS_METHODS.serverGetConfig)).toBe(true);
+      expect(wsRequests.some((request) => request._tag === WS_METHODS.subscribeServerConfig)).toBe(
+        true,
+      );
     },
     { timeout: 8_000, interval: 16 },
   );
@@ -1094,13 +934,12 @@ async function waitForImagesToLoad(scope: ParentNode): Promise<void> {
   await waitForLayout();
 }
 
-async function measureMessageRow(options: {
+async function measureUserRow(options: {
   host: HTMLElement;
   targetMessageId: MessageId;
-  role: "user" | "assistant";
-}): Promise<MessageRowMeasurement> {
-  const { host, targetMessageId, role } = options;
-  const rowSelector = `[data-message-id="${targetMessageId}"][data-message-role="${role}"]`;
+}): Promise<UserRowMeasurement> {
+  const { host, targetMessageId } = options;
+  const rowSelector = `[data-message-id="${targetMessageId}"][data-message-role="user"]`;
 
   const scrollContainer = await waitForElement(
     () => host.querySelector<HTMLDivElement>("div.overflow-y-auto.overscroll-y-contain"),
@@ -1114,7 +953,7 @@ async function measureMessageRow(options: {
       scrollContainer.dispatchEvent(new Event("scroll"));
       await waitForLayout();
       row = host.querySelector<HTMLElement>(rowSelector);
-      expect(row, `Unable to locate targeted ${role} message row.`).toBeTruthy();
+      expect(row, "Unable to locate targeted user message row.").toBeTruthy();
     },
     {
       timeout: 8_000,
@@ -1143,14 +982,12 @@ async function measureMessageRow(options: {
       scrollContainer.dispatchEvent(new Event("scroll"));
       await nextFrame();
       const measuredRow = host.querySelector<HTMLElement>(rowSelector);
-      expect(measuredRow, `Unable to measure targeted ${role} row height.`).toBeTruthy();
+      expect(measuredRow, "Unable to measure targeted user row height.").toBeTruthy();
       timelineWidthMeasuredPx = timelineRoot.getBoundingClientRect().width;
       measuredRowHeightPx = measuredRow!.getBoundingClientRect().height;
       renderedInVirtualizedRegion = measuredRow!.closest("[data-index]") instanceof HTMLElement;
       expect(timelineWidthMeasuredPx, "Unable to measure timeline width.").toBeGreaterThan(0);
-      expect(measuredRowHeightPx, `Unable to measure targeted ${role} row height.`).toBeGreaterThan(
-        0,
-      );
+      expect(measuredRowHeightPx, "Unable to measure targeted user row height.").toBeGreaterThan(0);
     },
     {
       timeout: 4_000,
@@ -1165,7 +1002,7 @@ async function mountChatView(options: {
   viewport: ViewportSpec;
   snapshot: OrchestrationReadModel;
   configureFixture?: (fixture: TestFixture) => void;
-  resolveRpc?: (body: WsRequestEnvelope["body"]) => unknown | undefined;
+  resolveRpc?: (body: NormalizedWsRpcRequestBody) => unknown | undefined;
 }): Promise<MountedChatView> {
   fixture = buildFixture(options.snapshot);
   options.configureFixture?.(fixture);
@@ -1175,7 +1012,8 @@ async function mountChatView(options: {
 
   const host = document.createElement("div");
   host.style.position = "fixed";
-  host.style.inset = "0";
+  host.style.top = "0";
+  host.style.left = "0";
   host.style.width = "100vw";
   host.style.height = "100vh";
   host.style.display = "grid";
@@ -1203,11 +1041,15 @@ async function mountChatView(options: {
   return {
     [Symbol.asyncDispose]: cleanup,
     cleanup,
-    measureMessageRow: async (targetMessageId: MessageId, role: "user" | "assistant") =>
-      measureMessageRow({ host, targetMessageId, role }),
+    measureUserRow: async (targetMessageId: MessageId) => measureUserRow({ host, targetMessageId }),
     setViewport: async (viewport: ViewportSpec) => {
       await setViewport(viewport);
       await waitForProductionStyles();
+    },
+    setContainerSize: async (viewport) => {
+      host.style.width = `${viewport.width}px`;
+      host.style.height = `${viewport.height}px`;
+      await waitForLayout();
     },
     router,
   };
@@ -1217,14 +1059,14 @@ async function measureUserRowAtViewport(options: {
   snapshot: OrchestrationReadModel;
   targetMessageId: MessageId;
   viewport: ViewportSpec;
-}): Promise<MessageRowMeasurement> {
+}): Promise<UserRowMeasurement> {
   const mounted = await mountChatView({
     viewport: options.viewport,
     snapshot: options.snapshot,
   });
 
   try {
-    return await mounted.measureMessageRow(options.targetMessageId, "user");
+    return await mounted.measureUserRow(options.targetMessageId);
   } finally {
     await mounted.cleanup();
   }
@@ -1248,10 +1090,37 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   afterAll(async () => {
+    await rpcHarness.disconnect();
     await worker.stop();
   });
 
   beforeEach(async () => {
+    await rpcHarness.reset({
+      resolveUnary: resolveWsRpc,
+      getInitialStreamValues: (request) => {
+        if (request._tag === WS_METHODS.subscribeServerLifecycle) {
+          return [
+            {
+              version: 1,
+              sequence: 1,
+              type: "welcome",
+              payload: fixture.welcome,
+            },
+          ];
+        }
+        if (request._tag === WS_METHODS.subscribeServerConfig) {
+          return [
+            {
+              version: 1,
+              type: "snapshot",
+              config: fixture.serverConfig,
+            },
+          ];
+        }
+        return [];
+      },
+    });
+    __resetNativeApiForTests();
     await setViewport(DEFAULT_VIEWPORT);
     localStorage.clear();
     document.body.innerHTML = "";
@@ -1267,7 +1136,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     useStore.setState({
       projects: [],
       threads: [],
-      threadsHydrated: false,
+      bootstrapComplete: false,
     });
   });
 
@@ -1291,7 +1160,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       try {
         const { measuredRowHeightPx, timelineWidthMeasuredPx, renderedInVirtualizedRegion } =
-          await mounted.measureMessageRow(targetMessageId, "user");
+          await mounted.measureUserRow(targetMessageId);
 
         expect(renderedInVirtualizedRegion).toBe(true);
 
@@ -1322,12 +1191,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       const measurements: Array<
-        MessageRowMeasurement & { viewport: ViewportSpec; estimatedHeightPx: number }
+        UserRowMeasurement & { viewport: ViewportSpec; estimatedHeightPx: number }
       > = [];
 
       for (const viewport of TEXT_VIEWPORT_MATRIX) {
         await mounted.setViewport(viewport);
-        const measurement = await mounted.measureMessageRow(targetMessageId, "user");
+        const measurement = await mounted.measureUserRow(targetMessageId);
         const estimatedHeightPx = estimateTimelineMessageHeight(
           { role: "user", text: userText, attachments: [] },
           { timelineWidthPx: measurement.timelineWidthMeasuredPx },
@@ -1411,7 +1280,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       try {
         const { measuredRowHeightPx, timelineWidthMeasuredPx, renderedInVirtualizedRegion } =
-          await mounted.measureMessageRow(targetMessageId, "user");
+          await mounted.measureUserRow(targetMessageId);
 
         expect(renderedInVirtualizedRegion).toBe(true);
 
@@ -1433,6 +1302,19 @@ describe("ChatView timeline estimator parity (full app)", () => {
     },
   );
 
+  it("shows an explicit empty state for projects without threads in the sidebar", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+    });
+
+    try {
+      await expect.element(page.getByText("No threads yet")).toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("opens the project cwd for draft threads without a worktree path", async () => {
     setDraftThreadWithoutWorktree();
 
@@ -1448,6 +1330,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
+      await waitForServerConfigToApply();
       const openButton = await waitForElement(
         () =>
           Array.from(document.querySelectorAll("button")).find(
@@ -1455,6 +1338,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
           ) as HTMLButtonElement | null,
         "Unable to find Open button.",
       );
+      await vi.waitFor(() => {
+        expect(openButton.disabled).toBe(false);
+      });
       openButton.click();
 
       await vi.waitFor(
@@ -1490,6 +1376,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
+      await waitForServerConfigToApply();
       const openButton = await waitForElement(
         () =>
           Array.from(document.querySelectorAll("button")).find(
@@ -1497,6 +1384,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
           ) as HTMLButtonElement | null,
         "Unable to find Open button.",
       );
+      await vi.waitFor(() => {
+        expect(openButton.disabled).toBe(false);
+      });
       openButton.click();
 
       await vi.waitFor(
@@ -1508,6 +1398,52 @@ describe("ChatView timeline estimator parity (full app)", () => {
             _tag: WS_METHODS.shellOpenInEditor,
             cwd: "/repo/project",
             editor: "vscode-insiders",
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens the project cwd with Trae when it is the only available editor", async () => {
+    setDraftThreadWithoutWorktree();
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          availableEditors: ["trae"],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      const openButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Open",
+          ) as HTMLButtonElement | null,
+        "Unable to find Open button.",
+      );
+      await vi.waitFor(() => {
+        expect(openButton.disabled).toBe(false);
+      });
+      openButton.click();
+
+      await vi.waitFor(
+        () => {
+          const openRequest = wsRequests.find(
+            (request) => request._tag === WS_METHODS.shellOpenInEditor,
+          );
+          expect(openRequest).toMatchObject({
+            _tag: WS_METHODS.shellOpenInEditor,
+            cwd: "/repo/project",
+            editor: "trae",
           });
         },
         { timeout: 8_000, interval: 16 },
@@ -1532,6 +1468,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
+      await waitForServerConfigToApply();
       const menuButton = await waitForElement(
         () => document.querySelector('button[aria-label="Copy options"]'),
         "Unable to find Open picker button.",
@@ -1580,7 +1517,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   it("falls back to the first installed editor when the stored favorite is unavailable", async () => {
-    localStorage.setItem("t3code:last-editor", "vscodium");
+    localStorage.setItem("t3code:last-editor", JSON.stringify("vscodium"));
     setDraftThreadWithoutWorktree();
 
     const mounted = await mountChatView({
@@ -1595,6 +1532,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
+      await waitForServerConfigToApply();
       const openButton = await waitForElement(
         () =>
           Array.from(document.querySelectorAll("button")).find(
@@ -1602,6 +1540,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
           ) as HTMLButtonElement | null,
         "Unable to find Open button.",
       );
+      await vi.waitFor(() => {
+        expect(openButton.disabled).toBe(false);
+      });
       openButton.click();
 
       await vi.waitFor(
@@ -1614,149 +1555,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
             cwd: "/repo/project",
             editor: "vscode-insiders",
           });
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("copies the raw assistant markdown by default", async () => {
-    const assistantMessageId = "msg-assistant-21" as MessageId;
-    const assistantText = [
-      "# Copy me",
-      "",
-      "Paragraph with [docs](https://example.com/docs).",
-      "",
-      "```ts",
-      "const value = 1;",
-      "```",
-    ].join("\n");
-    const writeText = installClipboardWriteTextSpy();
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetAssistantMessage({
-        targetAssistantId: assistantMessageId,
-        targetText: assistantText,
-      }),
-    });
-
-    try {
-      const assistantRow = await waitForElement(
-        () =>
-          document.querySelector<HTMLElement>(
-            `[data-message-id="${assistantMessageId}"][data-message-role="assistant"]`,
-          ),
-        "Unable to find assistant response row.",
-      );
-      const copyButton = await waitForElement(
-        () => assistantRow.querySelector<HTMLButtonElement>('button[aria-label="Copy response"]'),
-        "Unable to find assistant copy button.",
-      );
-
-      copyButton.click();
-
-      await vi.waitFor(
-        () => {
-          expect(writeText).toHaveBeenCalledWith(assistantText);
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("copies assistant responses as plain text when the setting is enabled", async () => {
-    const assistantMessageId = "msg-assistant-21" as MessageId;
-    const assistantText = [
-      "# Copy me",
-      "",
-      "Paragraph with [docs](https://example.com/docs).",
-      "",
-      "```ts",
-      "const value = 1;",
-      "```",
-    ].join("\n");
-    const writeText = installClipboardWriteTextSpy();
-    setAssistantResponseCopyFormat("plain-text");
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetAssistantMessage({
-        targetAssistantId: assistantMessageId,
-        targetText: assistantText,
-      }),
-    });
-
-    try {
-      const assistantRow = await waitForElement(
-        () =>
-          document.querySelector<HTMLElement>(
-            `[data-message-id="${assistantMessageId}"][data-message-role="assistant"]`,
-          ),
-        "Unable to find assistant response row.",
-      );
-      const copyButton = await waitForElement(
-        () => assistantRow.querySelector<HTMLButtonElement>('button[aria-label="Copy response"]'),
-        "Unable to find assistant copy button.",
-      );
-
-      copyButton.click();
-
-      await vi.waitFor(
-        () => {
-          expect(writeText).toHaveBeenCalledWith(
-            ["Copy me", "", "Paragraph with docs.", "", "const value = 1;"].join("\n"),
-          );
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("keeps markdown code-block copy scoped to the code block", async () => {
-    const assistantMessageId = "msg-assistant-21" as MessageId;
-    const assistantText = [
-      "# Copy me",
-      "",
-      "Paragraph with [docs](https://example.com/docs).",
-      "",
-      "```ts",
-      "const value = 1;",
-      "```",
-    ].join("\n");
-    const writeText = installClipboardWriteTextSpy();
-    setAssistantResponseCopyFormat("plain-text");
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetAssistantMessage({
-        targetAssistantId: assistantMessageId,
-        targetText: assistantText,
-      }),
-    });
-
-    try {
-      const assistantRow = await waitForElement(
-        () =>
-          document.querySelector<HTMLElement>(
-            `[data-message-id="${assistantMessageId}"][data-message-role="assistant"]`,
-          ),
-        "Unable to find assistant response row.",
-      );
-      const codeCopyButton = await waitForElement(
-        () => assistantRow.querySelector<HTMLButtonElement>('button[aria-label="Copy code"]'),
-        "Unable to find code-block copy button.",
-      );
-
-      codeCopyButton.click();
-
-      await vi.waitFor(
-        () => {
-          expect(writeText).toHaveBeenCalled();
-          expect(writeText.mock.calls.at(-1)?.[0].trim()).toBe("const value = 1;");
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -2295,736 +2093,83 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("keeps the running stop button available while drafting a follow-up", async () => {
+  it("hides the archive action when the pointer leaves a thread row", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-stop-while-followup" as MessageId,
-        targetText: "stop while follow-up target",
-        sessionStatus: "running",
+        targetMessageId: "msg-user-archive-hover-test" as MessageId,
+        targetText: "archive hover target",
       }),
     });
 
     try {
-      await setComposerPrompt("draft a follow-up");
-      await waitForComposerSubmitButton("Steer follow-up");
+      const threadRow = page.getByTestId(`thread-row-${THREAD_ID}`);
 
-      const stopButton = await waitForElement(
-        () => document.querySelector<HTMLButtonElement>('button[aria-label="Stop generation"]'),
-        "Unable to find stop generation button while drafting a follow-up.",
-      );
-
-      expect(getComputedStyle(stopButton).cursor).toBe("pointer");
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("persists the running follow-up behavior setting across remounts", async () => {
-    setClientSettings({
-      followUpBehavior: "queue",
-    });
-    const snapshot = createSnapshotForTargetUser({
-      targetMessageId: "msg-user-follow-up-setting-persist" as MessageId,
-      targetText: "follow-up setting persist target",
-      sessionStatus: "running",
-    });
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot,
-    });
-
-    try {
-      await vi.waitFor(
-        () => {
-          expect(getQueuedFollowUpPrompts()).toHaveLength(0);
-          expect(
-            JSON.parse(localStorage.getItem("t3code:client-settings:v1") ?? "{}").followUpBehavior,
-          ).toBe("queue");
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-      await setComposerPrompt("queued setting persists");
-      await waitForComposerSubmitButton("Queue follow-up");
-    } finally {
-      await mounted.cleanup();
-    }
-
-    const remounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot,
-    });
-
-    try {
-      await setComposerPrompt("queued setting persists");
-      await waitForComposerSubmitButton("Queue follow-up");
-    } finally {
-      await remounted.cleanup();
-    }
-  });
-
-  it("steers follow-ups by default while a turn is running", async () => {
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-follow-up-steer-default" as MessageId,
-        targetText: "follow-up steer default target",
-        sessionStatus: "running",
-      }),
-    });
-
-    try {
-      await setComposerPrompt("steer this run");
-      const submitButton = await waitForComposerSubmitButton("Steer follow-up");
-      submitButton.click();
-
-      await vi.waitFor(
-        () => {
-          expect(getTurnStartRequests()).toHaveLength(1);
-          expect(document.body.textContent ?? "").toContain("steer this run");
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-      expect(getQueuedFollowUpPrompts()).toEqual([]);
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("interrupts the active run before sending a steered follow-up", async () => {
-    let sawInterrupt = false;
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-follow-up-steer-interrupt" as MessageId,
-        targetText: "follow-up steer interrupt target",
-        sessionStatus: "running",
-      }),
-      resolveRpc: (body) => {
-        if (body._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
-          return undefined;
-        }
-        const command = (body as { command?: { type?: string } }).command;
-        if (!command) {
-          return undefined;
-        }
-        if (command.type === "thread.turn.interrupt") {
-          sawInterrupt = true;
-          updateFixtureThread((thread) => ({
-            ...thread,
-            session: thread.session
-              ? {
-                  ...thread.session,
-                  status: "ready",
-                  activeTurnId: null,
-                  updatedAt: isoAt(9_999),
-                }
-              : null,
-          }));
-          return { sequence: 1 };
-        }
-        if (command.type === "thread.turn.start") {
-          expect(sawInterrupt).toBe(true);
-          return { sequence: 1 };
-        }
-        return undefined;
-      },
-    });
-
-    try {
-      await setComposerPrompt("please steer now");
-      const submitButton = await waitForComposerSubmitButton("Steer follow-up");
-      submitButton.click();
-
-      await vi.waitFor(
-        () => {
-          expect(getInterruptRequests()).toHaveLength(1);
-          expect(getTurnStartRequests()).toHaveLength(1);
-          const commandTypes = getDispatchCommandTypes();
-          expect(commandTypes).toEqual(
-            expect.arrayContaining(["thread.turn.interrupt", "thread.turn.start"]),
-          );
-          expect(commandTypes.indexOf("thread.turn.interrupt")).toBeLessThan(
-            commandTypes.indexOf("thread.turn.start"),
-          );
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("renders queued follow-ups from the server-backed thread snapshot", async () => {
-    setClientSettings({
-      followUpBehavior: "queue",
-    });
-    const runningSnapshot = createSnapshotForTargetUser({
-      targetMessageId: "msg-user-follow-up-auto-send" as MessageId,
-      targetText: "follow-up auto-send target",
-      sessionStatus: "running",
-    });
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: runningSnapshot,
-    });
-
-    try {
-      await setComposerPrompt("queued head");
-      await waitForComposerSubmitButton("Queue follow-up");
-
-      await queueFollowUpFromComposer("queued head");
-      await queueFollowUpFromComposer("queued tail");
-
-      await vi.waitFor(
-        () => {
-          expect(getQueuedFollowUpPrompts()).toEqual(["queued head", "queued tail"]);
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-      expect(getTurnStartRequests()).toHaveLength(0);
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("does not enqueue duplicate follow-ups on rapid repeated submit", async () => {
-    setClientSettings({
-      followUpBehavior: "queue",
-    });
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-follow-up-no-duplicate-queue" as MessageId,
-        targetText: "follow-up duplicate queue target",
-        sessionStatus: "running",
-      }),
-    });
-
-    try {
-      await setComposerPrompt("rapid queue");
-      const submitButton = await waitForComposerSubmitButton("Queue follow-up");
-
-      submitButton.click();
-      submitButton.click();
-
-      await vi.waitFor(
-        () => {
-          expect(getQueuedFollowUpPrompts()).toEqual(["rapid queue"]);
-          expect(getQueuedFollowUpEnqueueRequests()).toHaveLength(1);
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("supports steering and deleting queued follow-ups from the panel", async () => {
-    setClientSettings({
-      followUpBehavior: "queue",
-    });
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-follow-up-panel-actions" as MessageId,
-        targetText: "follow-up panel actions target",
-        sessionStatus: "ready",
-      }),
-    });
-
-    try {
-      updateFixtureThread((thread) => ({
-        ...thread,
-        queuedFollowUps: [
-          {
-            id: "panel-first",
-            createdAt: isoAt(8_700),
-            prompt: "panel first",
-            attachments: [],
-            terminalContexts: [],
-            modelSelection: {
-              provider: "codex",
-              model: "gpt-5",
-            },
-            runtimeMode: "full-access",
-            interactionMode: "default",
-            lastSendError: null,
-          },
-          {
-            id: "panel-second",
-            createdAt: isoAt(8_800),
-            prompt: "panel second",
-            attachments: [],
-            terminalContexts: [],
-            modelSelection: {
-              provider: "codex",
-              model: "gpt-5",
-            },
-            runtimeMode: "full-access",
-            interactionMode: "default",
-            lastSendError: null,
-          },
-        ],
-      }));
-
-      const panel = await waitForQueuedFollowUpsPanel();
-      const steerButton = Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).find(
-        (button) => button.textContent?.trim() === "Steer",
-      );
-      expect(steerButton).toBeTruthy();
-      steerButton?.click();
-
-      await vi.waitFor(
-        () => {
-          expect(getTurnStartRequests()).toHaveLength(1);
-          expect(getQueuedFollowUpPrompts()).toEqual(["panel second"]);
-          expect(document.body.textContent ?? "").toContain("panel first");
-          const commandTypes = getDispatchCommandTypes();
-          expect(commandTypes).toEqual(
-            expect.arrayContaining(["thread.queued-follow-up.remove", "thread.turn.start"]),
-          );
-          expect(commandTypes.indexOf("thread.queued-follow-up.remove")).toBeLessThan(
-            commandTypes.indexOf("thread.turn.start"),
-          );
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-
-      const deleteButton = await waitForElement(
+      await expect.element(threadRow).toBeInTheDocument();
+      const archiveButton = await waitForElement(
         () =>
-          document.querySelector<HTMLButtonElement>(
-            'button[aria-label^="Delete queued follow-up"]',
-          ),
-        "Unable to find delete queued follow-up button.",
+          document.querySelector<HTMLButtonElement>(`[data-testid="thread-archive-${THREAD_ID}"]`),
+        "Unable to find archive button.",
       );
-      deleteButton.click();
+      const archiveAction = archiveButton.parentElement;
+      expect(
+        archiveAction,
+        "Archive button should render inside a visibility wrapper.",
+      ).not.toBeNull();
+      expect(getComputedStyle(archiveAction!).opacity).toBe("0");
 
+      await threadRow.hover();
       await vi.waitFor(
         () => {
-          expect(getQueuedFollowUpPrompts()).toEqual([]);
+          expect(getComputedStyle(archiveAction!).opacity).toBe("1");
         },
-        { timeout: 8_000, interval: 16 },
+        { timeout: 4_000, interval: 16 },
+      );
+
+      await page.getByTestId("composer-editor").hover();
+      await vi.waitFor(
+        () => {
+          expect(getComputedStyle(archiveAction!).opacity).toBe("0");
+        },
+        { timeout: 4_000, interval: 16 },
       );
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("lets the server claim a queued head after steering interrupts the active run", async () => {
-    setClientSettings({
-      followUpBehavior: "queue",
-    });
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-follow-up-panel-steer-interrupt" as MessageId,
-        targetText: "follow-up panel steer interrupt target",
-        sessionStatus: "running",
+  it("shows the confirm archive action after clicking the archive button", async () => {
+    localStorage.setItem(
+      "t3code:client-settings:v1",
+      JSON.stringify({
+        ...DEFAULT_CLIENT_SETTINGS,
+        confirmThreadArchive: true,
       }),
-      resolveRpc: (body) => {
-        if (body._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
-          return undefined;
-        }
-        const command = (body as { command?: { type?: string; followUpId?: string } }).command;
-        if (!command) {
-          return undefined;
-        }
-        if (command.type === "thread.turn.interrupt") {
-          updateFixtureThread((thread) => ({
-            ...thread,
-            session: thread.session
-              ? {
-                  ...thread.session,
-                  status: "ready",
-                  activeTurnId: null,
-                  updatedAt: isoAt(9_998),
-                }
-              : null,
-          }));
-          return { sequence: 1 };
-        }
-        return undefined;
-      },
-    });
+    );
 
-    try {
-      await queueFollowUpFromComposer("interrupt queued steer");
-
-      const panel = await waitForQueuedFollowUpsPanel();
-      const steerButton = Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).find(
-        (button) => button.textContent?.trim() === "Steer",
-      );
-      expect(steerButton).toBeTruthy();
-      steerButton?.click();
-
-      await vi.waitFor(
-        () => {
-          expect(getInterruptRequests()).toHaveLength(1);
-          expect(getTurnStartRequests()).toHaveLength(0);
-          const commandTypes = getDispatchCommandTypes();
-          expect(commandTypes).toEqual(expect.arrayContaining(["thread.turn.interrupt"]));
-          expect(commandTypes).not.toContain("thread.turn.start");
-          expect(commandTypes).not.toContain("thread.queued-follow-up.remove");
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("does not issue duplicate steer interrupts while the first interrupt request is in flight", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-follow-up-steer-in-flight-guard" as MessageId,
-        targetText: "follow-up steer in-flight guard target",
-        sessionStatus: "running",
-      }),
-      resolveRpc: (body) => {
-        if (body._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
-          return undefined;
-        }
-        const command = (body as { command?: { type?: string } }).command;
-        if (!command || command.type !== "thread.turn.interrupt") {
-          return undefined;
-        }
-        return new Promise((resolve) => {
-          window.setTimeout(() => resolve({ sequence: 1 }), 100);
-        });
-      },
-    });
-
-    try {
-      await setComposerPrompt("steer only once");
-      const submitButton = await waitForComposerSubmitButton("Steer follow-up");
-      submitButton.click();
-      submitButton.click();
-
-      await vi.waitFor(
-        () => {
-          expect(getInterruptRequests()).toHaveLength(1);
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("restores a ready-state steered queued follow-up with an error when send fails after claim", async () => {
-    setClientSettings({
-      followUpBehavior: "queue",
-    });
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-follow-up-panel-steer-remove-failure" as MessageId,
-        targetText: "follow-up panel steer remove failure target",
-        sessionStatus: "ready",
-      }),
-      resolveRpc: (body) => {
-        if (body._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
-          return undefined;
-        }
-        const command = (body as { command?: { type?: string } }).command;
-        if (!command) {
-          return undefined;
-        }
-        if (command.type === "thread.turn.start") {
-          throw new Error("steered send failed");
-        }
-        return undefined;
-      },
-    });
-
-    try {
-      updateFixtureThread((thread) => ({
-        ...thread,
-        queuedFollowUps: [
-          {
-            id: "queued-ready-steer-failure",
-            createdAt: isoAt(8_500),
-            prompt: "ready steer failure",
-            attachments: [],
-            terminalContexts: [],
-            modelSelection: {
-              provider: "codex",
-              model: "gpt-5",
-            },
-            runtimeMode: "full-access",
-            interactionMode: "default",
-            lastSendError: null,
-          },
-        ],
-      }));
-
-      const panel = await waitForQueuedFollowUpsPanel();
-      const steerButton = Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).find(
-        (button) => button.textContent?.trim() === "Steer",
-      );
-      expect(steerButton).toBeTruthy();
-      steerButton?.click();
-
-      await vi.waitFor(
-        () => {
-          expect(getTurnStartRequests()).toHaveLength(1);
-          expect(getDispatchCommandTypes()).toEqual(
-            expect.arrayContaining([
-              "thread.queued-follow-up.remove",
-              "thread.turn.start",
-              "thread.queued-follow-up.enqueue",
-            ]),
-          );
-          expect(getQueuedFollowUpPrompts()).toEqual(["ready steer failure"]);
-          const restoredFollowUp = fixture.snapshot.threads
-            .find((thread) => thread.id === THREAD_ID)
-            ?.queuedFollowUps.find((followUp) => followUp.id === "queued-ready-steer-failure");
-          expect(restoredFollowUp?.lastSendError).toBe("Failed to steer queued follow-up.");
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("restores a queued follow-up into the composer from the panel", async () => {
-    setClientSettings({
-      followUpBehavior: "queue",
-    });
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-follow-up-panel-edit" as MessageId,
-        targetText: "follow-up panel edit target",
-        sessionStatus: "running",
+        targetMessageId: "msg-user-archive-confirm-test" as MessageId,
+        targetText: "archive confirm target",
       }),
     });
 
     try {
-      await setComposerPrompt("queued edit item");
-      await waitForComposerSubmitButton("Queue follow-up");
-      await queueFollowUpFromComposer("queued edit item");
+      const threadRow = page.getByTestId(`thread-row-${THREAD_ID}`);
 
-      await openQueuedFollowUpActionsMenu(0);
-      const editButton = await waitForElement(
-        () =>
-          document.querySelector<HTMLButtonElement>('button[aria-label^="Edit queued follow-up"]'),
-        "Unable to find edit queued follow-up button.",
-      );
-      editButton.dispatchEvent(
-        new MouseEvent("click", {
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
+      await expect.element(threadRow).toBeInTheDocument();
+      await threadRow.hover();
 
-      await vi.waitFor(
-        () => {
-          expect(getQueuedFollowUpPrompts()).toEqual([]);
-          expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt).toBe(
-            "queued edit item",
-          );
-        },
-        { timeout: 8_000, interval: 16 },
-      );
+      const archiveButton = page.getByTestId(`thread-archive-${THREAD_ID}`);
+      await expect.element(archiveButton).toBeInTheDocument();
+      await archiveButton.click();
+
+      const confirmButton = page.getByTestId(`thread-archive-confirm-${THREAD_ID}`);
+      await expect.element(confirmButton).toBeInTheDocument();
+      await expect.element(confirmButton).toBeVisible();
     } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("requeues an edited follow-up back near its original queued position", async () => {
-    setClientSettings({
-      followUpBehavior: "queue",
-    });
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-follow-up-panel-edit-position" as MessageId,
-        targetText: "follow-up panel edit order target",
-        sessionStatus: "running",
-      }),
-    });
-
-    try {
-      await queueFollowUpFromComposer("queue first");
-      await queueFollowUpFromComposer("queue second");
-      await queueFollowUpFromComposer("queue third");
-
-      await openQueuedFollowUpActionsMenu(1);
-      const editButton = await waitForElement(
-        () =>
-          document.querySelector<HTMLButtonElement>('button[aria-label^="Edit queued follow-up"]'),
-        "Unable to find the queued follow-up edit button.",
-      );
-      editButton.click();
-
-      await vi.waitFor(
-        () => {
-          expect(getQueuedFollowUpPrompts()).toEqual(["queue first", "queue third"]);
-          expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt).toBe(
-            "queue second",
-          );
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-
-      await queueFollowUpFromComposer("queue second edited");
-
-      await vi.waitFor(
-        () => {
-          expect(getQueuedFollowUpPrompts()).toEqual([
-            "queue first",
-            "queue second edited",
-            "queue third",
-          ]);
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("appends a new queued follow-up after requeueing an edited item", async () => {
-    setClientSettings({
-      followUpBehavior: "queue",
-    });
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-follow-up-panel-edit-append" as MessageId,
-        targetText: "follow-up panel edit append target",
-        sessionStatus: "running",
-      }),
-    });
-
-    try {
-      await queueFollowUpFromComposer("queue first");
-      await queueFollowUpFromComposer("queue second");
-      await queueFollowUpFromComposer("queue third");
-
-      await openQueuedFollowUpActionsMenu(1);
-      const editButton = await waitForElement(
-        () =>
-          document.querySelector<HTMLButtonElement>('button[aria-label^="Edit queued follow-up"]'),
-        "Unable to find the queued follow-up edit button.",
-      );
-      editButton.click();
-
-      await vi.waitFor(
-        () => {
-          expect(getQueuedFollowUpPrompts()).toEqual(["queue first", "queue third"]);
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-
-      await queueFollowUpFromComposer("queue second edited");
-      await queueFollowUpFromComposer("queue fourth");
-
-      await vi.waitFor(
-        () => {
-          expect(getQueuedFollowUpPrompts()).toEqual([
-            "queue first",
-            "queue second edited",
-            "queue third",
-            "queue fourth",
-          ]);
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("lets queued follow-ups reorder by dragging from the panel handle", async () => {
-    setClientSettings({
-      followUpBehavior: "queue",
-    });
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-follow-up-panel-move" as MessageId,
-        targetText: "follow-up panel move target",
-        sessionStatus: "running",
-      }),
-    });
-
-    try {
-      await queueFollowUpFromComposer("move first");
-      await queueFollowUpFromComposer("move second");
-      await queueFollowUpFromComposer("move third");
-
-      await dragQueuedFollowUp({
-        fromPrompt: "move second",
-        toPrompt: "move first",
-        position: "before",
-      });
-
-      await vi.waitFor(
-        () => {
-          expect(getQueuedFollowUpPrompts()).toEqual(["move second", "move first", "move third"]);
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-
-      await dragQueuedFollowUp({
-        fromPrompt: "move first",
-        toPrompt: "move third",
-        position: "after",
-      });
-
-      await vi.waitFor(
-        () => {
-          expect(getQueuedFollowUpPrompts()).toEqual(["move second", "move third", "move first"]);
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("uses Ctrl+Shift+Enter to submit the opposite follow-up behavior once", async () => {
-    setClientSettings({
-      followUpBehavior: "queue",
-    });
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-follow-up-shortcut-opposite" as MessageId,
-        targetText: "follow-up shortcut target",
-        sessionStatus: "running",
-      }),
-    });
-
-    try {
-      await setComposerPrompt("shortcut steer once");
-      await waitForComposerSubmitButton("Queue follow-up");
-
-      const composerEditor = await waitForComposerEditor();
-      composerEditor.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "Enter",
-          ctrlKey: true,
-          shiftKey: true,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-
-      await vi.waitFor(
-        () => {
-          expect(getTurnStartRequests()).toHaveLength(1);
-          expect(getQueuedFollowUpPrompts()).toEqual([]);
-          expect(document.body.textContent ?? "").toContain("shortcut steer once");
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-    } finally {
+      localStorage.removeItem("t3code:client-settings:v1");
       await mounted.cleanup();
     }
   });
@@ -3056,21 +2201,16 @@ describe("ChatView timeline estimator parity (full app)", () => {
       // The composer editor should be present for the new draft thread.
       await waitForComposerEditor();
 
-      // Simulate the snapshot sync arriving from the server after the draft
-      // thread has been promoted to a server thread (thread.create + turn.start
-      // succeeded). The snapshot now includes the new thread, and the sync
-      // should clear the draft without disrupting the route.
-      const { syncServerReadModel } = useStore.getState();
-      syncServerReadModel(addThreadToSnapshot(fixture.snapshot, newThreadId));
-
-      // Clear the draft now that the server thread exists (mirrors EventRouter behavior).
-      useComposerDraftStore.getState().clearDraftThread(newThreadId);
+      // Simulate the steady-state promotion path: the server emits
+      // `thread.created`, the client materializes the thread incrementally,
+      // and the draft is cleared by live batch effects.
+      await promoteDraftThreadViaDomainEvent(newThreadId);
 
       // The route should still be on the new thread — not redirected away.
       await waitForURL(
         mounted.router,
         (path) => path === newThreadPath,
-        "New thread should remain selected after snapshot sync clears the draft.",
+        "New thread should remain selected after server thread promotion clears the draft.",
       );
 
       // The empty thread view and composer should still be visible.
@@ -3392,9 +2532,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
       const promotedThreadId = promotedThreadPath.slice(1) as ThreadId;
 
-      const { syncServerReadModel } = useStore.getState();
-      syncServerReadModel(addThreadToSnapshot(fixture.snapshot, promotedThreadId));
-      useComposerDraftStore.getState().clearDraftThread(promotedThreadId);
+      await promoteDraftThreadViaDomainEvent(promotedThreadId);
 
       const freshThreadPath = await triggerChatNewShortcutUntilPath(
         mounted.router,
@@ -3436,6 +2574,127 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         () => {
           expect(document.body.textContent).toContain("deep hidden detail only after expand");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps pending-question footer actions inside the composer after a real resize", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotWithPendingUserInput(),
+    });
+
+    try {
+      const firstOption = await waitForButtonContainingText("Tight");
+      firstOption.click();
+
+      await waitForButtonByText("Previous");
+      await waitForButtonByText("Submit answers");
+
+      await mounted.setContainerSize(COMPACT_FOOTER_VIEWPORT);
+      await expectComposerActionsContained();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps plan follow-up footer actions fused and aligned after a real resize", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotWithPlanFollowUpPrompt(),
+    });
+
+    try {
+      const footer = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-footer="true"]'),
+        "Unable to find composer footer.",
+      );
+      const initialModelPicker = await waitForElement(
+        findComposerProviderModelPicker,
+        "Unable to find provider model picker.",
+      );
+      const initialModelPickerOffset =
+        initialModelPicker.getBoundingClientRect().left - footer.getBoundingClientRect().left;
+
+      await waitForButtonByText("Implement");
+      await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('button[aria-label="Implementation actions"]'),
+        "Unable to find implementation actions trigger.",
+      );
+
+      await mounted.setContainerSize({
+        width: 440,
+        height: WIDE_FOOTER_VIEWPORT.height,
+      });
+      await expectComposerActionsContained();
+
+      const implementButton = await waitForButtonByText("Implement");
+      const implementActionsButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('button[aria-label="Implementation actions"]'),
+        "Unable to find implementation actions trigger.",
+      );
+
+      await vi.waitFor(
+        () => {
+          const implementRect = implementButton.getBoundingClientRect();
+          const implementActionsRect = implementActionsButton.getBoundingClientRect();
+          const compactModelPicker = findComposerProviderModelPicker();
+          expect(compactModelPicker).toBeTruthy();
+
+          const compactModelPickerOffset =
+            compactModelPicker!.getBoundingClientRect().left - footer.getBoundingClientRect().left;
+
+          expect(Math.abs(implementRect.right - implementActionsRect.left)).toBeLessThanOrEqual(1);
+          expect(Math.abs(implementRect.top - implementActionsRect.top)).toBeLessThanOrEqual(1);
+          expect(Math.abs(compactModelPickerOffset - initialModelPickerOffset)).toBeLessThanOrEqual(
+            1,
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the slash-command menu visible above the composer", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-command-menu-target" as MessageId,
+        targetText: "command menu thread",
+      }),
+    });
+
+    try {
+      await waitForComposerEditor();
+      await page.getByTestId("composer-editor").fill("/");
+
+      const menuItem = await waitForComposerMenuItem("slash:model");
+      const composerForm = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-form="true"]'),
+        "Unable to find composer form.",
+      );
+
+      await vi.waitFor(
+        () => {
+          const menuRect = menuItem.getBoundingClientRect();
+          const composerRect = composerForm.getBoundingClientRect();
+          const hitTarget = document.elementFromPoint(
+            menuRect.left + menuRect.width / 2,
+            menuRect.top + menuRect.height / 2,
+          );
+
+          expect(menuRect.width).toBeGreaterThan(0);
+          expect(menuRect.height).toBeGreaterThan(0);
+          expect(menuRect.bottom).toBeLessThanOrEqual(composerRect.bottom);
+          expect(hitTarget instanceof Element && menuItem.contains(hitTarget)).toBe(true);
         },
         { timeout: 8_000, interval: 16 },
       );

@@ -9,7 +9,7 @@ import {
   Undo2Icon,
   XIcon,
 } from "lucide-react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PROVIDER_DISPLAY_NAMES,
@@ -22,13 +22,24 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
+import {
+  canCheckForUpdate,
+  getDesktopUpdateButtonTooltip,
+  getDesktopUpdateInstallConfirmationMessage,
+  isDesktopUpdateButtonDisabled,
+  resolveDesktopUpdateButtonAction,
+} from "../../components/desktopUpdate.logic";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
+import { isElectron } from "../../env";
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
-import { serverConfigQueryOptions, serverQueryKeys } from "../../lib/serverReactQuery";
+import {
+  setDesktopUpdateStateQueryData,
+  useDesktopUpdateState,
+} from "../../lib/desktopUpdateReactQuery";
 import {
   MAX_CUSTOM_MODEL_LENGTH,
   getCustomModelOptionsByProvider,
@@ -47,6 +58,11 @@ import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProjectFavicon } from "../ProjectFavicon";
+import {
+  useServerAvailableEditors,
+  useServerKeybindingsConfigPath,
+  useServerProviders,
+} from "../../rpc/serverState";
 
 const THEME_OPTIONS = [
   {
@@ -80,7 +96,6 @@ const ASSISTANT_RESPONSE_COPY_FORMAT_LABELS = {
 } as const;
 
 const EMPTY_SERVER_PROVIDERS: ReadonlyArray<ServerProvider> = [];
-
 type InstallProviderSettings = {
   provider: ProviderKind;
   title: string;
@@ -144,13 +159,14 @@ function getProviderSummary(provider: ServerProvider | undefined) {
       detail: provider.message ?? "CLI not detected on PATH.",
     };
   }
-  if (provider.authStatus === "authenticated") {
+  if (provider.auth.status === "authenticated") {
+    const authLabel = provider.auth.label ?? provider.auth.type;
     return {
-      headline: "Authenticated",
+      headline: authLabel ? `Authenticated · ${authLabel}` : "Authenticated",
       detail: provider.message ?? null,
     };
   }
-  if (provider.authStatus === "unauthenticated") {
+  if (provider.auth.status === "unauthenticated") {
     return {
       headline: "Not authenticated",
       detail: provider.message ?? null,
@@ -246,7 +262,7 @@ function SettingsRow({
   control,
   children,
 }: {
-  title: string;
+  title: ReactNode;
   description: string;
   status?: ReactNode;
   resetAction?: ReactNode;
@@ -306,6 +322,133 @@ function SettingsPageContainer({ children }: { children: ReactNode }) {
     <div className="flex-1 overflow-y-auto p-6">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">{children}</div>
     </div>
+  );
+}
+
+function AboutVersionTitle() {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span>Version</span>
+      <code className="text-[11px] font-medium text-muted-foreground">{APP_VERSION}</code>
+    </span>
+  );
+}
+
+function AboutVersionSection() {
+  const queryClient = useQueryClient();
+  const updateStateQuery = useDesktopUpdateState();
+
+  const updateState = updateStateQuery.data ?? null;
+
+  const handleButtonClick = useCallback(() => {
+    const bridge = window.desktopBridge;
+    if (!bridge) return;
+
+    const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
+
+    if (action === "download") {
+      void bridge
+        .downloadUpdate()
+        .then((result) => {
+          setDesktopUpdateStateQueryData(queryClient, result.state);
+        })
+        .catch((error: unknown) => {
+          toastManager.add({
+            type: "error",
+            title: "Could not download update",
+            description: error instanceof Error ? error.message : "Download failed.",
+          });
+        });
+      return;
+    }
+
+    if (action === "install") {
+      const confirmed = window.confirm(
+        getDesktopUpdateInstallConfirmationMessage(
+          updateState ?? { availableVersion: null, downloadedVersion: null },
+        ),
+      );
+      if (!confirmed) return;
+      void bridge
+        .installUpdate()
+        .then((result) => {
+          setDesktopUpdateStateQueryData(queryClient, result.state);
+        })
+        .catch((error: unknown) => {
+          toastManager.add({
+            type: "error",
+            title: "Could not install update",
+            description: error instanceof Error ? error.message : "Install failed.",
+          });
+        });
+      return;
+    }
+
+    if (typeof bridge.checkForUpdate !== "function") return;
+    void bridge
+      .checkForUpdate()
+      .then((result) => {
+        setDesktopUpdateStateQueryData(queryClient, result.state);
+        if (!result.checked) {
+          toastManager.add({
+            type: "error",
+            title: "Could not check for updates",
+            description:
+              result.state.message ?? "Automatic updates are not available in this build.",
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        toastManager.add({
+          type: "error",
+          title: "Could not check for updates",
+          description: error instanceof Error ? error.message : "Update check failed.",
+        });
+      });
+  }, [queryClient, updateState]);
+
+  const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
+  const buttonTooltip = updateState ? getDesktopUpdateButtonTooltip(updateState) : null;
+  const buttonDisabled =
+    action === "none"
+      ? !canCheckForUpdate(updateState)
+      : isDesktopUpdateButtonDisabled(updateState);
+
+  const actionLabel: Record<string, string> = { download: "Download", install: "Install" };
+  const statusLabel: Record<string, string> = {
+    checking: "Checking…",
+    downloading: "Downloading…",
+    "up-to-date": "Up to Date",
+  };
+  const buttonLabel =
+    actionLabel[action] ?? statusLabel[updateState?.status ?? ""] ?? "Check for Updates";
+  const description =
+    action === "download" || action === "install"
+      ? "Update available."
+      : "Current version of the application.";
+
+  return (
+    <SettingsRow
+      title={<AboutVersionTitle />}
+      description={description}
+      control={
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="xs"
+                variant={action === "install" ? "default" : "outline"}
+                disabled={buttonDisabled}
+                onClick={handleButtonClick}
+              >
+                {buttonLabel}
+              </Button>
+            }
+          />
+          {buttonTooltip ? <TooltipPopup>{buttonTooltip}</TooltipPopup> : null}
+        </Tooltip>
+      }
+    />
   );
 }
 
@@ -395,7 +538,6 @@ export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
-  const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
   const [openProviderDetails, setOpenProviderDetails] = useState<Record<ProviderKind, boolean>>({
@@ -421,7 +563,6 @@ export function GeneralSettingsPanel() {
   >({});
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
   const refreshingRef = useRef(false);
-  const queryClient = useQueryClient();
   const modelListRefs = useRef<Partial<Record<ProviderKind, HTMLDivElement | null>>>({});
   const refreshProviders = useCallback(() => {
     if (refreshingRef.current) return;
@@ -429,7 +570,6 @@ export function GeneralSettingsPanel() {
     setIsRefreshingProviders(true);
     void ensureNativeApi()
       .server.refreshProviders()
-      .then(() => queryClient.invalidateQueries({ queryKey: serverQueryKeys.config() }))
       .catch((error: unknown) => {
         console.warn("Failed to refresh providers", error);
       })
@@ -437,11 +577,11 @@ export function GeneralSettingsPanel() {
         refreshingRef.current = false;
         setIsRefreshingProviders(false);
       });
-  }, [queryClient]);
+  }, []);
 
-  const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
-  const availableEditors = serverConfigQuery.data?.availableEditors;
-  const serverProviders = serverConfigQuery.data?.providers ?? EMPTY_SERVER_PROVIDERS;
+  const keybindingsConfigPath = useServerKeybindingsConfigPath();
+  const availableEditors = useServerAvailableEditors();
+  const serverProviders = useServerProviders();
   const codexHomePath = settings.providers.codex.homePath;
 
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
@@ -1359,12 +1499,17 @@ export function GeneralSettingsPanel() {
             </Button>
           }
         />
+      </SettingsSection>
 
-        <SettingsRow
-          title="Version"
-          description="Current application version."
-          control={<code className="text-xs font-medium text-muted-foreground">{APP_VERSION}</code>}
-        />
+      <SettingsSection title="About">
+        {isElectron ? (
+          <AboutVersionSection />
+        ) : (
+          <SettingsRow
+            title={<AboutVersionTitle />}
+            description="Current version of the application."
+          />
+        )}
       </SettingsSection>
     </SettingsPageContainer>
   );
@@ -1426,7 +1571,7 @@ export function ArchivedThreadsPanel() {
     <SettingsPageContainer>
       {archivedGroups.length === 0 ? (
         <SettingsSection title="Archived threads">
-          <Empty className="min-h-[22rem]">
+          <Empty className="min-h-88">
             <EmptyMedia variant="icon">
               <ArchiveIcon />
             </EmptyMedia>

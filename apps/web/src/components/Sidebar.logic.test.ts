@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createThreadJumpHintVisibilityController,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
@@ -8,15 +9,18 @@ import {
   getProjectSortTimestamp,
   hasUnseenCompletion,
   isContextMenuPointerDown,
+  orderItemsByPreferredIds,
   resolveProjectStatusIndicator,
+  resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   sortThreadsForSidebar,
+  THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import { OrchestrationLatestTurn, ProjectId, ThreadId } from "@t3tools/contracts";
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -27,7 +31,7 @@ import {
 function makeLatestTurn(overrides?: {
   completedAt?: string | null;
   startedAt?: string | null;
-}): Parameters<typeof hasUnseenCompletion>[0]["latestTurn"] {
+}): OrchestrationLatestTurn {
   return {
     turnId: "turn-1" as never,
     state: "completed",
@@ -49,6 +53,68 @@ describe("hasUnseenCompletion", () => {
         session: null,
       }),
     ).toBe(true);
+  });
+});
+
+describe("createThreadJumpHintVisibilityController", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("delays showing jump hints until the configured delay elapses", () => {
+    const visibilityChanges: boolean[] = [];
+    const controller = createThreadJumpHintVisibilityController({
+      delayMs: THREAD_JUMP_HINT_SHOW_DELAY_MS,
+      onVisibilityChange: (visible) => {
+        visibilityChanges.push(visible);
+      },
+    });
+
+    controller.sync(true);
+    vi.advanceTimersByTime(THREAD_JUMP_HINT_SHOW_DELAY_MS - 1);
+
+    expect(visibilityChanges).toEqual([]);
+
+    vi.advanceTimersByTime(1);
+
+    expect(visibilityChanges).toEqual([true]);
+  });
+
+  it("hides immediately when the modifiers are released", () => {
+    const visibilityChanges: boolean[] = [];
+    const controller = createThreadJumpHintVisibilityController({
+      delayMs: THREAD_JUMP_HINT_SHOW_DELAY_MS,
+      onVisibilityChange: (visible) => {
+        visibilityChanges.push(visible);
+      },
+    });
+
+    controller.sync(true);
+    vi.advanceTimersByTime(THREAD_JUMP_HINT_SHOW_DELAY_MS);
+    controller.sync(false);
+
+    expect(visibilityChanges).toEqual([true, false]);
+  });
+
+  it("cancels a pending reveal when the modifier is released early", () => {
+    const visibilityChanges: boolean[] = [];
+    const controller = createThreadJumpHintVisibilityController({
+      delayMs: THREAD_JUMP_HINT_SHOW_DELAY_MS,
+      onVisibilityChange: (visible) => {
+        visibilityChanges.push(visible);
+      },
+    });
+
+    controller.sync(true);
+    vi.advanceTimersByTime(Math.floor(THREAD_JUMP_HINT_SHOW_DELAY_MS / 2));
+    controller.sync(false);
+    vi.advanceTimersByTime(THREAD_JUMP_HINT_SHOW_DELAY_MS);
+
+    expect(visibilityChanges).toEqual([]);
   });
 });
 
@@ -96,6 +162,112 @@ describe("resolveSidebarNewThreadEnvMode", () => {
         defaultEnvMode: "worktree",
       }),
     ).toBe("local");
+  });
+});
+
+describe("resolveSidebarNewThreadSeedContext", () => {
+  it("inherits the active server thread context when creating a new thread in the same project", () => {
+    expect(
+      resolveSidebarNewThreadSeedContext({
+        projectId: "project-1",
+        defaultEnvMode: "local",
+        activeThread: {
+          projectId: "project-1",
+          branch: "effect-atom",
+          worktreePath: null,
+        },
+        activeDraftThread: null,
+      }),
+    ).toEqual({
+      branch: "effect-atom",
+      worktreePath: null,
+      envMode: "local",
+    });
+  });
+
+  it("prefers the active draft thread context when it matches the target project", () => {
+    expect(
+      resolveSidebarNewThreadSeedContext({
+        projectId: "project-1",
+        defaultEnvMode: "local",
+        activeThread: {
+          projectId: "project-1",
+          branch: "effect-atom",
+          worktreePath: null,
+        },
+        activeDraftThread: {
+          projectId: "project-1",
+          branch: "feature/new-draft",
+          worktreePath: "/repo/worktree",
+          envMode: "worktree",
+        },
+      }),
+    ).toEqual({
+      branch: "feature/new-draft",
+      worktreePath: "/repo/worktree",
+      envMode: "worktree",
+    });
+  });
+
+  it("falls back to the default env mode when there is no matching active thread context", () => {
+    expect(
+      resolveSidebarNewThreadSeedContext({
+        projectId: "project-2",
+        defaultEnvMode: "worktree",
+        activeThread: {
+          projectId: "project-1",
+          branch: "effect-atom",
+          worktreePath: null,
+        },
+        activeDraftThread: null,
+      }),
+    ).toEqual({
+      envMode: "worktree",
+    });
+  });
+});
+
+describe("orderItemsByPreferredIds", () => {
+  it("keeps preferred ids first, skips stale ids, and preserves the relative order of remaining items", () => {
+    const ordered = orderItemsByPreferredIds({
+      items: [
+        { id: ProjectId.makeUnsafe("project-1"), name: "One" },
+        { id: ProjectId.makeUnsafe("project-2"), name: "Two" },
+        { id: ProjectId.makeUnsafe("project-3"), name: "Three" },
+      ],
+      preferredIds: [
+        ProjectId.makeUnsafe("project-3"),
+        ProjectId.makeUnsafe("project-missing"),
+        ProjectId.makeUnsafe("project-1"),
+      ],
+      getId: (project) => project.id,
+    });
+
+    expect(ordered.map((project) => project.id)).toEqual([
+      ProjectId.makeUnsafe("project-3"),
+      ProjectId.makeUnsafe("project-1"),
+      ProjectId.makeUnsafe("project-2"),
+    ]);
+  });
+
+  it("does not duplicate items when preferred ids repeat", () => {
+    const ordered = orderItemsByPreferredIds({
+      items: [
+        { id: ProjectId.makeUnsafe("project-1"), name: "One" },
+        { id: ProjectId.makeUnsafe("project-2"), name: "Two" },
+      ],
+      preferredIds: [
+        ProjectId.makeUnsafe("project-2"),
+        ProjectId.makeUnsafe("project-1"),
+        ProjectId.makeUnsafe("project-2"),
+      ],
+      getId: (project) => project.id,
+    });
+
+    expect(ordered.map((project) => project.id)).toEqual([
+      ProjectId.makeUnsafe("project-2"),
+      ProjectId.makeUnsafe("project-1"),
+    ]);
   });
 });
 
@@ -170,6 +342,27 @@ describe("getVisibleSidebarThreadIds", () => {
       ThreadId.makeUnsafe("thread-8"),
       ThreadId.makeUnsafe("thread-6"),
     ]);
+  });
+
+  it("skips threads from collapsed projects whose thread panels are not shown", () => {
+    expect(
+      getVisibleSidebarThreadIds([
+        {
+          shouldShowThreadPanel: false,
+          renderedThreads: [
+            { id: ThreadId.makeUnsafe("thread-hidden-2") },
+            { id: ThreadId.makeUnsafe("thread-hidden-1") },
+          ],
+        },
+        {
+          shouldShowThreadPanel: true,
+          renderedThreads: [
+            { id: ThreadId.makeUnsafe("thread-12") },
+            { id: ThreadId.makeUnsafe("thread-11") },
+          ],
+        },
+      ]),
+    ).toEqual([ThreadId.makeUnsafe("thread-12"), ThreadId.makeUnsafe("thread-11")]);
   });
 });
 
@@ -429,6 +622,9 @@ describe("getVisibleThreadsForProject", () => {
       ThreadId.makeUnsafe("thread-6"),
       ThreadId.makeUnsafe("thread-8"),
     ]);
+    expect(result.hiddenThreads.map((thread) => thread.id)).toEqual([
+      ThreadId.makeUnsafe("thread-7"),
+    ]);
   });
 
   it("returns all threads when the list is expanded", () => {
@@ -449,6 +645,7 @@ describe("getVisibleThreadsForProject", () => {
     expect(result.visibleThreads.map((thread) => thread.id)).toEqual(
       threads.map((thread) => thread.id),
     );
+    expect(result.hiddenThreads).toEqual([]);
   });
 });
 
@@ -463,7 +660,6 @@ function makeProject(overrides: Partial<Project> = {}): Project {
       model: "gpt-5.4",
       ...defaultModelSelection,
     },
-    expanded: true,
     createdAt: "2026-03-09T10:00:00.000Z",
     updatedAt: "2026-03-09T10:00:00.000Z",
     scripts: [],
