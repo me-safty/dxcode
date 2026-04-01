@@ -163,6 +163,40 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
       }),
     );
 
+    it.effect("includes gitignored paths when Claude disables gitignore filtering", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({
+          prefix: "t3code-workspace-include-gitignored-",
+          git: true,
+        });
+        const homeDir = yield* makeTempDir({ prefix: "t3code-claude-home-" });
+        const previousHome = process.env.HOME;
+        process.env.HOME = homeDir;
+        try {
+          yield* writeTextFile(homeDir, ".claude/settings.json", '{"respectGitignore":false}');
+          yield* writeTextFile(cwd, ".gitignore", ".agent/\nignored.txt\n");
+          yield* writeTextFile(cwd, "src/keep.ts", "export {};");
+          yield* writeTextFile(cwd, ".agent/local-instructions.md", "# secret");
+          yield* writeTextFile(cwd, "ignored.txt", "ignore me");
+
+          const result = yield* searchWorkspaceEntries({ cwd, query: "", limit: 100 });
+          const paths = result.entries.map((entry) => entry.path);
+
+          expect(paths).toContain("src");
+          expect(paths).toContain("src/keep.ts");
+          expect(paths).toContain(".agent");
+          expect(paths).toContain(".agent/local-instructions.md");
+          expect(paths).toContain("ignored.txt");
+        } finally {
+          if (previousHome === undefined) {
+            delete process.env.HOME;
+          } else {
+            process.env.HOME = previousHome;
+          }
+        }
+      }),
+    );
+
     it.effect("excludes tracked paths that match ignore rules", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTempDir({

@@ -1,11 +1,12 @@
 import fsPromises from "node:fs/promises";
 import type { Dirent } from "node:fs";
 
-import { Cache, Duration, Effect, Exit, Layer, Option, Path } from "effect";
+import { Cache, Data, Duration, Effect, Exit, FileSystem, Layer, Option, Path } from "effect";
 
 import { type ProjectEntry } from "@t3tools/contracts";
 
 import { GitCore } from "../../git/Services/GitCore.ts";
+import { resolveClaudeRespectGitignore } from "../../provider/claudeSettings.ts";
 import {
   WorkspaceEntries,
   WorkspaceEntriesError,
@@ -17,6 +18,7 @@ const WORKSPACE_CACHE_TTL_MS = 15_000;
 const WORKSPACE_CACHE_MAX_KEYS = 4;
 const WORKSPACE_INDEX_MAX_ENTRIES = 25_000;
 const WORKSPACE_SCAN_READDIR_CONCURRENCY = 32;
+const CLAUDE_SETTINGS_CACHE_TTL_MS = 5_000;
 const IGNORED_DIRECTORY_NAMES = new Set([
   ".git",
   ".convex",
@@ -44,6 +46,11 @@ interface RankedWorkspaceEntry {
   entry: SearchableWorkspaceEntry;
   score: number;
 }
+
+class WorkspaceIndexCacheKey extends Data.Class<{
+  cwd: string;
+  respectGitignore: boolean;
+}> {}
 
 function toPosixPath(input: string): string {
   return input.replaceAll("\\", "/");
@@ -219,8 +226,17 @@ const processErrorDetail = (cause: unknown): string =>
 
 export const makeWorkspaceEntries = Effect.gen(function* () {
   const path = yield* Path.Path;
+  const fileSystem = yield* FileSystem.FileSystem;
   const gitOption = yield* Effect.serviceOption(GitCore);
   const workspacePaths = yield* WorkspacePaths;
+  const resolveClaudeRespectGitignoreWithServices = (
+    cwd: string,
+    options?: { homeDirectory?: string },
+  ) =>
+    resolveClaudeRespectGitignore(cwd, options).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+    );
 
   const isInsideGitWorkTree = (cwd: string): Effect.Effect<boolean> =>
     Option.match(gitOption, {
@@ -242,8 +258,11 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     });
 
   const buildWorkspaceIndexFromGit = Effect.fn("WorkspaceEntries.buildWorkspaceIndexFromGit")(
-    function* (cwd: string) {
+    function* (cwd: string, respectGitignore: boolean) {
       if (Option.isNone(gitOption)) {
+        return null;
+      }
+      if (!respectGitignore) {
         return null;
       }
       if (!(yield* isInsideGitWorkTree(cwd))) {
@@ -332,8 +351,11 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
 
   const buildWorkspaceIndexFromFilesystem = Effect.fn(
     "WorkspaceEntries.buildWorkspaceIndexFromFilesystem",
-  )(function* (cwd: string): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
-    const shouldFilterWithGitIgnore = yield* isInsideGitWorkTree(cwd);
+  )(function* (
+    cwd: string,
+    respectGitignore: boolean,
+  ): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
+    const shouldFilterWithGitIgnore = respectGitignore && (yield* isInsideGitWorkTree(cwd));
 
     let pendingDirectories: string[] = [""];
     const entries: SearchableWorkspaceEntry[] = [];
@@ -421,16 +443,22 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
   });
 
   const buildWorkspaceIndex = Effect.fn("WorkspaceEntries.buildWorkspaceIndex")(function* (
-    cwd: string,
+    key: WorkspaceIndexCacheKey,
   ): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
-    const gitIndexed = yield* buildWorkspaceIndexFromGit(cwd);
+    const gitIndexed = yield* buildWorkspaceIndexFromGit(key.cwd, key.respectGitignore);
     if (gitIndexed) {
       return gitIndexed;
     }
-    return yield* buildWorkspaceIndexFromFilesystem(cwd);
+    // `git ls-files --exclude-standard` cannot produce the mixed tracked/untracked/ignored
+    // set the picker needs when Claude disables `.gitignore` filtering.
+    return yield* buildWorkspaceIndexFromFilesystem(key.cwd, key.respectGitignore);
   });
 
-  const workspaceIndexCache = yield* Cache.makeWith<string, WorkspaceIndex, WorkspaceEntriesError>({
+  const workspaceIndexCache = yield* Cache.makeWith<
+    WorkspaceIndexCacheKey,
+    WorkspaceIndex,
+    WorkspaceEntriesError
+  >({
     capacity: WORKSPACE_CACHE_MAX_KEYS,
     lookup: buildWorkspaceIndex,
     timeToLive: (exit) =>
@@ -458,17 +486,41 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       const normalizedCwd = yield* normalizeWorkspaceRoot(cwd).pipe(
         Effect.catch(() => Effect.succeed(cwd)),
       );
-      yield* Cache.invalidate(workspaceIndexCache, cwd);
+      yield* Cache.invalidate(
+        workspaceIndexCache,
+        new WorkspaceIndexCacheKey({ cwd, respectGitignore: true }),
+      );
+      yield* Cache.invalidate(
+        workspaceIndexCache,
+        new WorkspaceIndexCacheKey({ cwd, respectGitignore: false }),
+      );
       if (normalizedCwd !== cwd) {
-        yield* Cache.invalidate(workspaceIndexCache, normalizedCwd);
+        yield* Cache.invalidate(
+          workspaceIndexCache,
+          new WorkspaceIndexCacheKey({ cwd: normalizedCwd, respectGitignore: true }),
+        );
+        yield* Cache.invalidate(
+          workspaceIndexCache,
+          new WorkspaceIndexCacheKey({ cwd: normalizedCwd, respectGitignore: false }),
+        );
       }
     },
   );
 
+  const claudeRespectGitignoreCache = yield* Cache.makeWith<string, boolean, never>({
+    capacity: WORKSPACE_CACHE_MAX_KEYS,
+    lookup: resolveClaudeRespectGitignoreWithServices,
+    timeToLive: () => Duration.millis(CLAUDE_SETTINGS_CACHE_TTL_MS),
+  });
+
   const search: WorkspaceEntriesShape["search"] = Effect.fn("WorkspaceEntries.search")(
     function* (input) {
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
-      return yield* Cache.get(workspaceIndexCache, normalizedCwd).pipe(
+      const respectGitignore = yield* Cache.get(claudeRespectGitignoreCache, normalizedCwd);
+      return yield* Cache.get(
+        workspaceIndexCache,
+        new WorkspaceIndexCacheKey({ cwd: normalizedCwd, respectGitignore }),
+      ).pipe(
         Effect.map((index) => {
           const normalizedQuery = normalizeQuery(input.query);
           const limit = Math.max(0, Math.floor(input.limit));

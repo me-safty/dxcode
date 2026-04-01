@@ -1307,6 +1307,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
         description: `${providerLabel} · ${slug}`,
       }));
   }, [composerTrigger, searchableModelOptions, workspaceEntries]);
+  const workspaceEntriesPartialResultsHint =
+    !workspaceEntriesQuery.isLoading &&
+    composerTrigger?.kind === "path" &&
+    workspaceEntriesQuery.data?.truncated
+      ? workspaceEntries.length === 0
+        ? "Workspace results are partial. Refine your query to search more precisely."
+        : "Showing partial results. Refine your query to narrow the file search."
+      : null;
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -3919,6 +3927,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           resolvedTheme={resolvedTheme}
                           isLoading={isComposerMenuLoading}
                           triggerKind={composerTriggerKind}
+                          partialResultsHint={workspaceEntriesPartialResultsHint}
                           activeItemId={activeComposerMenuItem?.id ?? null}
                           onHighlightedItemChange={onComposerMenuItemHighlighted}
                           onSelect={onSelectComposerItem}

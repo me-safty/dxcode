@@ -37,6 +37,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   resolvedTheme: "light" | "dark";
   isLoading: boolean;
   triggerKind: ComposerTriggerKind | null;
+  partialResultsHint?: string | null;
   activeItemId: string | null;
   onHighlightedItemChange: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
@@ -77,15 +78,24 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
             />
           ))}
         </CommandList>
-        {props.items.length === 0 && (
-          <p className="px-3 py-2 text-muted-foreground/70 text-xs">
-            {props.isLoading
-              ? "Searching workspace files..."
-              : props.triggerKind === "path"
-                ? "No matching files or folders."
-                : "No matching command."}
-          </p>
-        )}
+        {props.items.length === 0 ? (
+          <div className="space-y-1 px-3 py-2">
+            <p className="text-muted-foreground/70 text-xs">
+              {props.isLoading
+                ? "Searching workspace files..."
+                : props.triggerKind === "path"
+                  ? "No matching files or folders."
+                  : "No matching command."}
+            </p>
+            {props.partialResultsHint ? (
+              <p className="text-[11px] text-muted-foreground/65">{props.partialResultsHint}</p>
+            ) : null}
+          </div>
+        ) : props.partialResultsHint ? (
+          <div className="border-t border-border/70 px-3 py-2">
+            <p className="text-[11px] text-muted-foreground/65">{props.partialResultsHint}</p>
+          </div>
+        ) : null}
       </div>
     </Command>
   );
