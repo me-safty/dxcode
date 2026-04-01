@@ -119,7 +119,6 @@ import { Button } from "./ui/button";
 import { Separator } from "./ui/separator";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { cn, isMacPlatform, randomUUID } from "~/lib/utils";
-import { cn, isMacPlatform, randomUUID } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
@@ -1092,7 +1091,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [beginLocalDispatch],
   );
   const resetSendPhase = resetLocalDispatch;
-  const sendStartedAt = localDispatchStartedAt;
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
   const nowIso = new Date(nowTick).toISOString();
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
@@ -2563,7 +2561,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setThreadSearchOpen(false);
     setThreadSearchQuery("");
     setActiveThreadSearchResultIndex(-1);
-  }, [resetLocalDispatch, threadId]);
   }, [resetLocalDispatch, threadId]);
 
   useEffect(() => {

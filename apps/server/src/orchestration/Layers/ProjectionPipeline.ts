@@ -404,7 +404,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
-    const projectionThreadQueuedFollowUpRepository = yield* ProjectionThreadQueuedFollowUpRepository;
+    const projectionThreadQueuedFollowUpRepository =
+      yield* ProjectionThreadQueuedFollowUpRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
 
     const fileSystem = yield* FileSystem.FileSystem;

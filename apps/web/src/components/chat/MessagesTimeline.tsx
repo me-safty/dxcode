@@ -370,95 +370,95 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             );
           })()}
 
-      {row.kind === "message" &&
-        row.message.role === "user" &&
-        (() => {
-          const userImages = row.message.attachments ?? [];
-          const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
-          const terminalContexts = displayedUserMessage.contexts;
-          const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
-          return (
-            <div className="flex justify-end">
-              <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
-                <div data-thread-search-content="true">
-                  {userImages.length > 0 && (
-                    <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-                      {userImages.map(
-                        (image: NonNullable<TimelineMessage["attachments"]>[number]) => (
-                          <div
-                            key={image.id}
-                            className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-                          >
-                            {image.previewUrl ? (
-                              <button
-                                type="button"
-                                className="h-full w-full cursor-zoom-in"
-                                aria-label={`Preview ${image.name}`}
-                                onClick={() => {
-                                  const preview = buildExpandedImagePreview(userImages, image.id);
-                                  if (!preview) return;
-                                  onImageExpand(preview);
-                                }}
-                              >
-                                <img
-                                  src={image.previewUrl}
-                                  alt={image.name}
-                                  className="h-full max-h-[220px] w-full object-cover"
-                                  onLoad={onTimelineImageLoad}
-                                  onError={onTimelineImageLoad}
-                                />
-                              </button>
-                            ) : (
-                              <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                                {renderHighlightedText(
-                                  image.name,
-                                  rowSearchQuery,
-                                  `user-image-name:${row.id}:${image.id}`,
-                                  { active: rowSearchActive },
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        ),
-                      )}
-                    </div>
-                  )}
-                  {(displayedUserMessage.visibleText.trim().length > 0 ||
-                    terminalContexts.length > 0) && (
-                    <UserMessageBody
-                      text={displayedUserMessage.visibleText}
-                      terminalContexts={terminalContexts}
-                      searchQuery={rowSearchQuery}
-                      searchActive={rowSearchActive}
-                    />
-                  )}
-                </div>
-                <div className="mt-1.5 flex items-center justify-end gap-2">
-                  <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
-                    {displayedUserMessage.copyText && (
-                      <MessageCopyButton text={displayedUserMessage.copyText} />
+        {row.kind === "message" &&
+          row.message.role === "user" &&
+          (() => {
+            const userImages = row.message.attachments ?? [];
+            const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
+            const terminalContexts = displayedUserMessage.contexts;
+            const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
+            return (
+              <div className="flex justify-end">
+                <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+                  <div data-thread-search-content="true">
+                    {userImages.length > 0 && (
+                      <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
+                        {userImages.map(
+                          (image: NonNullable<TimelineMessage["attachments"]>[number]) => (
+                            <div
+                              key={image.id}
+                              className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                            >
+                              {image.previewUrl ? (
+                                <button
+                                  type="button"
+                                  className="h-full w-full cursor-zoom-in"
+                                  aria-label={`Preview ${image.name}`}
+                                  onClick={() => {
+                                    const preview = buildExpandedImagePreview(userImages, image.id);
+                                    if (!preview) return;
+                                    onImageExpand(preview);
+                                  }}
+                                >
+                                  <img
+                                    src={image.previewUrl}
+                                    alt={image.name}
+                                    className="h-full max-h-[220px] w-full object-cover"
+                                    onLoad={onTimelineImageLoad}
+                                    onError={onTimelineImageLoad}
+                                  />
+                                </button>
+                              ) : (
+                                <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                                  {renderHighlightedText(
+                                    image.name,
+                                    rowSearchQuery,
+                                    `user-image-name:${row.id}:${image.id}`,
+                                    { active: rowSearchActive },
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ),
+                        )}
+                      </div>
                     )}
-                    {canRevertAgentWork && (
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        disabled={isRevertingCheckpoint || isWorking}
-                        onClick={() => onRevertUserMessage(row.message.id)}
-                        title="Revert to this message"
-                      >
-                        <Undo2Icon className="size-3" />
-                      </Button>
+                    {(displayedUserMessage.visibleText.trim().length > 0 ||
+                      terminalContexts.length > 0) && (
+                      <UserMessageBody
+                        text={displayedUserMessage.visibleText}
+                        terminalContexts={terminalContexts}
+                        searchQuery={rowSearchQuery}
+                        searchActive={rowSearchActive}
+                      />
                     )}
                   </div>
-                  <p className="text-right text-[10px] text-muted-foreground/30">
-                    {formatTimestamp(row.message.createdAt, timestampFormat)}
-                  </p>
+                  <div className="mt-1.5 flex items-center justify-end gap-2">
+                    <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+                      {displayedUserMessage.copyText && (
+                        <MessageCopyButton text={displayedUserMessage.copyText} />
+                      )}
+                      {canRevertAgentWork && (
+                        <Button
+                          type="button"
+                          size="xs"
+                          variant="outline"
+                          disabled={isRevertingCheckpoint || isWorking}
+                          onClick={() => onRevertUserMessage(row.message.id)}
+                          title="Revert to this message"
+                        >
+                          <Undo2Icon className="size-3" />
+                        </Button>
+                      )}
+                    </div>
+                    <p className="text-right text-[10px] text-muted-foreground/30">
+                      {formatTimestamp(row.message.createdAt, timestampFormat)}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })()}
+            );
+          })()}
 
         {row.kind === "message" &&
           row.message.role === "assistant" &&

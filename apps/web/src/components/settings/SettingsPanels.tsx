@@ -94,8 +94,6 @@ const ASSISTANT_RESPONSE_COPY_FORMAT_LABELS = {
   markdown: "Raw markdown",
   "plain-text": "Rendered plain text",
 } as const;
-
-const EMPTY_SERVER_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 type InstallProviderSettings = {
   provider: ProviderKind;
   title: string;

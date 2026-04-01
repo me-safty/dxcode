@@ -119,6 +119,7 @@ describe("OrchestrationEngine", () => {
           archivedAt: null,
           deletedAt: null,
           messages: [],
+          queuedFollowUps: [],
           proposedPlans: [],
           activities: [],
           checkpoints: [],

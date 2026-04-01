@@ -499,6 +499,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         archivedAt: null,
         deletedAt: null,
         messages: [],
+        queuedFollowUps: [],
         proposedPlans: [],
         activities: [],
         checkpoints: [],
