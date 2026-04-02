@@ -232,4 +232,13 @@ describe("terminalStateStore actions", () => {
 
     expect(entries).toEqual([]);
   });
+
+  it("is a no-op when clearing terminal state for a thread with no state or buffered events", () => {
+    const store = useTerminalStateStore.getState();
+    const before = useTerminalStateStore.getState();
+
+    store.clearTerminalState(THREAD_ID);
+
+    expect(useTerminalStateStore.getState()).toBe(before);
+  });
 });

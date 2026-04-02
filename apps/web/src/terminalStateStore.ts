@@ -588,14 +588,16 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
               () => createDefaultThreadTerminalState(),
             );
             const nextTerminalEventEntriesByKey = { ...state.terminalEventEntriesByKey };
+            let removedEventEntries = false;
             for (const key of Object.keys(nextTerminalEventEntriesByKey)) {
               if (key.startsWith(`${threadId}\u0000`)) {
                 delete nextTerminalEventEntriesByKey[key];
+                removedEventEntries = true;
               }
             }
             if (
               nextTerminalStateByThreadId === state.terminalStateByThreadId &&
-              nextTerminalEventEntriesByKey === state.terminalEventEntriesByKey
+              !removedEventEntries
             ) {
               return state;
             }
