@@ -388,6 +388,7 @@ function buildStaticScenarios(): VirtualizationScenario[] {
         "I was always passing `onVirtualizerSnapshot`, including `undefined`.",
         "I'm tightening that object construction and rerunning the checks.",
       ].join(" "),
+      maxEstimateDeltaPx: 28,
     }),
     createChangedFilesScenario({
       name: "assistant changed-files row with a compacted single-chain directory",
