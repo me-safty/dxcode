@@ -18,7 +18,12 @@ import {
   type ServerProviderModel,
   ThreadId,
 } from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_TERMINAL_BOTTOM_SCOPE,
+  DEFAULT_TERMINAL_POSITION,
+  DEFAULT_TERMINAL_RIGHT_RAIL_WIDTH_MODE,
+  DEFAULT_UNIFIED_SETTINGS,
+} from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
@@ -84,6 +89,21 @@ const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
   "12-hour": "12-hour",
   "24-hour": "24-hour",
+} as const;
+
+const TERMINAL_BOTTOM_SCOPE_LABELS = {
+  chat: "Match chat",
+  workspace: "Span workspace",
+} as const;
+
+const TERMINAL_POSITION_LABELS = {
+  bottom: "Bottom",
+  right: "Right",
+} as const;
+
+const TERMINAL_RIGHT_RAIL_WIDTH_MODE_LABELS = {
+  linked: "Share one width",
+  independent: "Remember separately",
 } as const;
 
 type InstallProviderSettings = {
@@ -463,6 +483,17 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
+      ...(settings.terminalPosition === "bottom" &&
+      settings.terminalBottomScope !== DEFAULT_UNIFIED_SETTINGS.terminalBottomScope
+        ? ["Terminal width"]
+        : []),
+      ...(settings.terminalPosition !== DEFAULT_UNIFIED_SETTINGS.terminalPosition
+        ? ["Terminal position"]
+        : []),
+      ...(settings.terminalPosition === "right" &&
+      settings.terminalRightRailWidthMode !== DEFAULT_UNIFIED_SETTINGS.terminalRightRailWidthMode
+        ? ["Right rail width"]
+        : []),
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
@@ -489,6 +520,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.terminalBottomScope,
+      settings.terminalPosition,
+      settings.terminalRightRailWidthMode,
       settings.timestampFormat,
       theme,
     ],
@@ -853,6 +887,132 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+
+        <SettingsRow
+          title="Terminal position"
+          description="Choose whether the terminal opens below the conversation or docks to one side."
+          resetAction={
+            settings.terminalPosition !== DEFAULT_UNIFIED_SETTINGS.terminalPosition ? (
+              <SettingResetButton
+                label="terminal position"
+                onClick={() =>
+                  updateSettings({
+                    terminalPosition: DEFAULT_TERMINAL_POSITION,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.terminalPosition}
+              onValueChange={(value) => {
+                if (value === "bottom" || value === "right") {
+                  updateSettings({ terminalPosition: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Terminal position">
+                <SelectValue>{TERMINAL_POSITION_LABELS[settings.terminalPosition]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="bottom">
+                  {TERMINAL_POSITION_LABELS.bottom}
+                </SelectItem>
+                <SelectItem hideIndicator value="right">
+                  {TERMINAL_POSITION_LABELS.right}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        {settings.terminalPosition === "bottom" ? (
+          <SettingsRow
+            title="Bottom terminal width"
+            description="Keep the bottom terminal aligned to the chat column, or let it span the full workspace under the diff area."
+            resetAction={
+              settings.terminalBottomScope !== DEFAULT_UNIFIED_SETTINGS.terminalBottomScope ? (
+                <SettingResetButton
+                  label="bottom terminal width"
+                  onClick={() =>
+                    updateSettings({
+                      terminalBottomScope: DEFAULT_TERMINAL_BOTTOM_SCOPE,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={settings.terminalBottomScope}
+                onValueChange={(value) => {
+                  if (value === "chat" || value === "workspace") {
+                    updateSettings({ terminalBottomScope: value });
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-44" aria-label="Bottom terminal width">
+                  <SelectValue>
+                    {TERMINAL_BOTTOM_SCOPE_LABELS[settings.terminalBottomScope]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="chat">
+                    {TERMINAL_BOTTOM_SCOPE_LABELS.chat}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="workspace">
+                    {TERMINAL_BOTTOM_SCOPE_LABELS.workspace}
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+        ) : null}
+
+        {settings.terminalPosition === "right" ? (
+          <SettingsRow
+            title="Right rail width"
+            description="Let the diff and terminal share one saved width, or remember a different width for each tool."
+            resetAction={
+              settings.terminalRightRailWidthMode !==
+              DEFAULT_UNIFIED_SETTINGS.terminalRightRailWidthMode ? (
+                <SettingResetButton
+                  label="right rail width"
+                  onClick={() =>
+                    updateSettings({
+                      terminalRightRailWidthMode: DEFAULT_TERMINAL_RIGHT_RAIL_WIDTH_MODE,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={settings.terminalRightRailWidthMode}
+                onValueChange={(value) => {
+                  if (value === "linked" || value === "independent") {
+                    updateSettings({ terminalRightRailWidthMode: value });
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-52" aria-label="Right rail width mode">
+                  <SelectValue>
+                    {TERMINAL_RIGHT_RAIL_WIDTH_MODE_LABELS[settings.terminalRightRailWidthMode]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="linked">
+                    {TERMINAL_RIGHT_RAIL_WIDTH_MODE_LABELS.linked}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="independent">
+                    {TERMINAL_RIGHT_RAIL_WIDTH_MODE_LABELS.independent}
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+        ) : null}
 
         <SettingsRow
           title="Diff line wrapping"

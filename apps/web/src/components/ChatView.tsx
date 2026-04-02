@@ -27,6 +27,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import { createPortal } from "react-dom";
+import type { TerminalBottomScope } from "@t3tools/contracts/settings";
 import { gitStatusQueryOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
@@ -90,7 +92,7 @@ import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import BranchToolbar from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
-import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
+import ThreadTerminalPanel from "./ThreadTerminalPanel";
 import {
   BotIcon,
   ChevronDownIcon,
@@ -124,6 +126,7 @@ import {
 } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelection } from "../modelSelection";
+import type { TerminalDockTarget } from "../workspacePanels";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
   type ComposerImageAttachment,
@@ -198,6 +201,7 @@ import {
   useServerKeybindings,
 } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
+import { useWorkspaceTerminalPortalTargets } from "~/workspaceTerminalPortal";
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
@@ -329,6 +333,11 @@ const terminalContextIdListsEqual = (
   contexts.length === ids.length && contexts.every((context, index) => context.id === ids[index]);
 
 interface ChatViewProps {
+  layoutState: {
+    diffToggleActive: boolean;
+    terminalDockTarget: TerminalDockTarget;
+    terminalToggleActive: boolean;
+  };
   threadId: ThreadId;
 }
 
@@ -407,7 +416,7 @@ function useLocalDispatchState(input: {
   };
 }
 
-interface PersistentThreadTerminalDrawerProps {
+interface PersistentThreadTerminalPanelProps {
   threadId: ThreadId;
   visible: boolean;
   launchContext: PersistentTerminalLaunchContext | null;
@@ -416,9 +425,13 @@ interface PersistentThreadTerminalDrawerProps {
   newShortcutLabel: string | undefined;
   closeShortcutLabel: string | undefined;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
+  bottomScope: TerminalBottomScope;
+  layout: "bottom" | "side";
+  portalTarget: HTMLElement | null;
+  renderInline: boolean;
 }
 
-function PersistentThreadTerminalDrawer({
+function PersistentThreadTerminalPanel({
   threadId,
   visible,
   launchContext,
@@ -427,7 +440,11 @@ function PersistentThreadTerminalDrawer({
   newShortcutLabel,
   closeShortcutLabel,
   onAddTerminalContext,
-}: PersistentThreadTerminalDrawerProps) {
+  bottomScope,
+  layout,
+  portalTarget,
+  renderInline,
+}: PersistentThreadTerminalPanelProps) {
   const serverThread = useThreadById(threadId);
   const draftThread = useComposerDraftStore(
     (store) => store.draftThreadsByThreadId[threadId] ?? null,
@@ -546,45 +563,60 @@ function PersistentThreadTerminalDrawer({
     return null;
   }
 
-  return (
-    <div className={visible ? undefined : "hidden"}>
-      <ThreadTerminalDrawer
-        threadId={threadId}
-        cwd={cwd}
-        worktreePath={effectiveWorktreePath}
-        runtimeEnv={runtimeEnv}
-        visible={visible}
-        height={terminalState.terminalHeight}
-        terminalIds={terminalState.terminalIds}
-        activeTerminalId={terminalState.activeTerminalId}
-        terminalGroups={terminalState.terminalGroups}
-        activeTerminalGroupId={terminalState.activeTerminalGroupId}
-        focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
-        onSplitTerminal={splitTerminal}
-        onNewTerminal={createNewTerminal}
-        splitShortcutLabel={visible ? splitShortcutLabel : undefined}
-        newShortcutLabel={visible ? newShortcutLabel : undefined}
-        closeShortcutLabel={visible ? closeShortcutLabel : undefined}
-        onActiveTerminalChange={activateTerminal}
-        onCloseTerminal={closeTerminal}
-        onHeightChange={setTerminalHeight}
-        onAddTerminalContext={handleAddTerminalContext}
-      />
-    </div>
+  const panel = (
+    <ThreadTerminalPanel
+      threadId={threadId}
+      cwd={cwd}
+      worktreePath={effectiveWorktreePath}
+      runtimeEnv={runtimeEnv}
+      visible={visible}
+      height={terminalState.terminalHeight}
+      bottomScope={bottomScope}
+      layout={layout}
+      terminalIds={terminalState.terminalIds}
+      activeTerminalId={terminalState.activeTerminalId}
+      terminalGroups={terminalState.terminalGroups}
+      activeTerminalGroupId={terminalState.activeTerminalGroupId}
+      focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
+      onSplitTerminal={splitTerminal}
+      onNewTerminal={createNewTerminal}
+      splitShortcutLabel={visible ? splitShortcutLabel : undefined}
+      newShortcutLabel={visible ? newShortcutLabel : undefined}
+      closeShortcutLabel={visible ? closeShortcutLabel : undefined}
+      onActiveTerminalChange={activateTerminal}
+      onCloseTerminal={closeTerminal}
+      onHeightChange={setTerminalHeight}
+      onAddTerminalContext={handleAddTerminalContext}
+    />
   );
+
+  if (!visible) {
+    return <div className="hidden">{panel}</div>;
+  }
+
+  if (!renderInline) {
+    if (!portalTarget) {
+      return <div className="hidden">{panel}</div>;
+    }
+    return createPortal(panel, portalTarget);
+  }
+
+  return panel;
 }
 
-export default function ChatView({ threadId }: ChatViewProps) {
+export default function ChatView({ layoutState, threadId }: ChatViewProps) {
   const serverThread = useThreadById(threadId);
   const setStoreThreadError = useStore((store) => store.setError);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const activeThreadLastVisitedAt = useUiStateStore(
     (store) => store.threadLastVisitedAtById[threadId],
   );
+  const workspaceTerminalPortalTargets = useWorkspaceTerminalPortalTargets();
   const settings = useSettings();
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
+  const terminalPosition = settings.terminalPosition;
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
   const rawSearch = useSearch({
@@ -1570,17 +1602,60 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
     [keybindings, nonTerminalShortcutLabelOptions],
   );
-  const onToggleDiff = useCallback(() => {
+  const terminalToggleActive = layoutState.terminalToggleActive;
+  const diffToggleActive = layoutState.diffToggleActive;
+  const closeDiffPanel = useCallback(() => {
+    void navigate({
+      to: "/$threadId",
+      params: { threadId },
+      replace: true,
+      search: (previous) => ({
+        ...stripDiffSearchParams(previous),
+        diff: undefined,
+      }),
+    });
+  }, [navigate, threadId]);
+  const openDiffPanel = useCallback(() => {
     void navigate({
       to: "/$threadId",
       params: { threadId },
       replace: true,
       search: (previous) => {
         const rest = stripDiffSearchParams(previous);
-        return diffOpen ? { ...rest, diff: undefined } : { ...rest, diff: "1" };
+        return { ...rest, diff: "1" };
       },
     });
-  }, [diffOpen, navigate, threadId]);
+  }, [navigate, threadId]);
+  const setTerminalOpen = useCallback(
+    (open: boolean) => {
+      if (!activeThreadId) return;
+      storeSetTerminalOpen(activeThreadId, open);
+    },
+    [activeThreadId, storeSetTerminalOpen],
+  );
+  const onToggleDiff = useCallback(() => {
+    if (terminalPosition === "right") {
+      if (diffToggleActive) {
+        closeDiffPanel();
+        return;
+      }
+      setTerminalOpen(false);
+      openDiffPanel();
+      return;
+    }
+    if (diffOpen) {
+      closeDiffPanel();
+      return;
+    }
+    openDiffPanel();
+  }, [
+    closeDiffPanel,
+    diffOpen,
+    diffToggleActive,
+    openDiffPanel,
+    setTerminalOpen,
+    terminalPosition,
+  ]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -1668,17 +1743,33 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [activeThread, composerCursor, composerTerminalContexts, insertComposerDraftTerminalContext],
   );
-  const setTerminalOpen = useCallback(
-    (open: boolean) => {
-      if (!activeThreadId) return;
-      storeSetTerminalOpen(activeThreadId, open);
-    },
-    [activeThreadId, storeSetTerminalOpen],
-  );
   const toggleTerminalVisibility = useCallback(() => {
     if (!activeThreadId) return;
+    if (terminalPosition === "right") {
+      if (terminalToggleActive) {
+        setTerminalOpen(false);
+        return;
+      }
+      if (diffOpen) {
+        setTerminalOpen(true);
+        closeDiffPanel();
+        return;
+      }
+      if (!terminalState.terminalOpen) {
+        setTerminalOpen(true);
+      }
+      return;
+    }
     setTerminalOpen(!terminalState.terminalOpen);
-  }, [activeThreadId, setTerminalOpen, terminalState.terminalOpen]);
+  }, [
+    activeThreadId,
+    closeDiffPanel,
+    diffOpen,
+    setTerminalOpen,
+    terminalToggleActive,
+    terminalPosition,
+    terminalState.terminalOpen,
+  ]);
   const splitTerminal = useCallback(() => {
     if (!activeThreadId || hasReachedSplitLimit) return;
     const terminalId = `terminal-${randomUUID()}`;
@@ -3917,6 +4008,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
     );
   }
 
+  const activeTerminalPortalTarget =
+    layoutState.terminalDockTarget === "bottom-workspace"
+      ? workspaceTerminalPortalTargets.bottom
+      : layoutState.terminalDockTarget === "right"
+        ? workspaceTerminalPortalTargets.right
+        : null;
+  const activeTerminalLayout = layoutState.terminalDockTarget?.startsWith("bottom")
+    ? "bottom"
+    : "side";
+  const activeTerminalBottomScope: TerminalBottomScope =
+    layoutState.terminalDockTarget === "bottom-workspace" ? "workspace" : "chat";
+  const renderActiveTerminalInline = layoutState.terminalDockTarget === "bottom-inline";
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
       {/* Top bar */}
@@ -3939,11 +4043,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
           keybindings={keybindings}
           availableEditors={availableEditors}
           terminalAvailable={activeProject !== undefined}
-          terminalOpen={terminalState.terminalOpen}
+          terminalOpen={terminalToggleActive}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
-          diffOpen={diffOpen}
+          diffOpen={diffToggleActive}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
           }}
@@ -4454,7 +4558,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {/* end horizontal flex container */}
 
       {mountedTerminalThreadIds.map((mountedThreadId) => (
-        <PersistentThreadTerminalDrawer
+        <PersistentThreadTerminalPanel
           key={mountedThreadId}
           threadId={mountedThreadId}
           visible={mountedThreadId === activeThreadId && terminalState.terminalOpen}
@@ -4466,6 +4570,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
           newShortcutLabel={newTerminalShortcutLabel ?? undefined}
           closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
           onAddTerminalContext={addTerminalContextToDraft}
+          bottomScope={activeTerminalBottomScope}
+          layout={activeTerminalLayout}
+          portalTarget={mountedThreadId === activeThreadId ? activeTerminalPortalTarget : null}
+          renderInline={renderActiveTerminalInline}
         />
       ))}
 

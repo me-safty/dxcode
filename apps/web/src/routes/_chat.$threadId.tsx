@@ -1,6 +1,15 @@
 import { ThreadId } from "@t3tools/contracts";
 import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
-import { Suspense, lazy, type ReactNode, useCallback, useEffect, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import ChatView from "../components/ChatView";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
@@ -10,23 +19,24 @@ import {
   DiffPanelShell,
   type DiffPanelMode,
 } from "../components/DiffPanelShell";
+import { WorkspaceRightSidebar } from "../components/WorkspaceRightSidebar";
 import { useComposerDraftStore } from "../composerDraftStore";
-import {
-  type DiffRouteSearch,
-  parseDiffRouteSearch,
-  stripDiffSearchParams,
-} from "../diffRouteSearch";
+import { type DiffRouteSearch, parseDiffRouteSearch } from "../diffRouteSearch";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useSettings } from "../hooks/useSettings";
 import { useStore } from "../store";
+import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { Sheet, SheetPopup } from "../components/ui/sheet";
-import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
+import { SidebarInset } from "~/components/ui/sidebar";
+import { WorkspaceTerminalPortalTargetsContext } from "../workspaceTerminalPortal";
+import { cn } from "~/lib/utils";
+import { resolveWorkspacePanels, WORKSPACE_PANEL_STORAGE_KEYS } from "../workspacePanels";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
+
 const DIFF_INLINE_LAYOUT_MEDIA_QUERY = "(max-width: 1180px)";
-const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
 const DIFF_INLINE_DEFAULT_WIDTH = "clamp(28rem,48vw,44rem)";
 const DIFF_INLINE_SIDEBAR_MIN_WIDTH = 26 * 16;
-const COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX = 208;
 
 const DiffPanelSheet = (props: {
   children: ReactNode;
@@ -42,6 +52,25 @@ const DiffPanelSheet = (props: {
         }
       }}
     >
+      <SheetPopup
+        side="right"
+        showCloseButton={false}
+        keepMounted
+        className="w-[min(88vw,820px)] max-w-[820px] p-0"
+      >
+        {props.children}
+      </SheetPopup>
+    </Sheet>
+  );
+};
+
+const TerminalPanelSheet = (props: {
+  children: ReactNode;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) => {
+  return (
+    <Sheet open={props.open} onOpenChange={props.onOpenChange}>
       <SheetPopup
         side="right"
         showCloseButton={false}
@@ -72,101 +101,89 @@ const LazyDiffPanel = (props: { mode: DiffPanelMode }) => {
   );
 };
 
-const DiffPanelInlineSidebar = (props: {
-  diffOpen: boolean;
-  onCloseDiff: () => void;
-  onOpenDiff: () => void;
-  renderDiffContent: boolean;
-}) => {
-  const { diffOpen, onCloseDiff, onOpenDiff, renderDiffContent } = props;
-  const onOpenChange = useCallback(
-    (open: boolean) => {
-      if (open) {
-        onOpenDiff();
-        return;
-      }
-      onCloseDiff();
-    },
-    [onCloseDiff, onOpenDiff],
-  );
-  const shouldAcceptInlineSidebarWidth = useCallback(
-    ({ nextWidth, wrapper }: { nextWidth: number; wrapper: HTMLElement }) => {
-      const composerForm = document.querySelector<HTMLElement>("[data-chat-composer-form='true']");
-      if (!composerForm) return true;
-      const composerViewport = composerForm.parentElement;
-      if (!composerViewport) return true;
-      const previousSidebarWidth = wrapper.style.getPropertyValue("--sidebar-width");
-      wrapper.style.setProperty("--sidebar-width", `${nextWidth}px`);
-
-      const viewportStyle = window.getComputedStyle(composerViewport);
-      const viewportPaddingLeft = Number.parseFloat(viewportStyle.paddingLeft) || 0;
-      const viewportPaddingRight = Number.parseFloat(viewportStyle.paddingRight) || 0;
-      const viewportContentWidth = Math.max(
-        0,
-        composerViewport.clientWidth - viewportPaddingLeft - viewportPaddingRight,
-      );
-      const formRect = composerForm.getBoundingClientRect();
-      const composerFooter = composerForm.querySelector<HTMLElement>(
-        "[data-chat-composer-footer='true']",
-      );
-      const composerRightActions = composerForm.querySelector<HTMLElement>(
-        "[data-chat-composer-actions='right']",
-      );
-      const composerRightActionsWidth = composerRightActions?.getBoundingClientRect().width ?? 0;
-      const composerFooterGap = composerFooter
-        ? Number.parseFloat(window.getComputedStyle(composerFooter).columnGap) ||
-          Number.parseFloat(window.getComputedStyle(composerFooter).gap) ||
-          0
-        : 0;
-      const minimumComposerWidth =
-        COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX + composerRightActionsWidth + composerFooterGap;
-      const hasComposerOverflow = composerForm.scrollWidth > composerForm.clientWidth + 0.5;
-      const overflowsViewport = formRect.width > viewportContentWidth + 0.5;
-      const violatesMinimumComposerWidth = composerForm.clientWidth + 0.5 < minimumComposerWidth;
-
-      if (previousSidebarWidth.length > 0) {
-        wrapper.style.setProperty("--sidebar-width", previousSidebarWidth);
-      } else {
-        wrapper.style.removeProperty("--sidebar-width");
-      }
-
-      return !hasComposerOverflow && !overflowsViewport && !violatesMinimumComposerWidth;
-    },
-    [],
-  );
+const DiffPanelInlineSidebar = (props: { open: boolean; renderDiffContent: boolean }) => {
+  const { open, renderDiffContent } = props;
 
   return (
-    <SidebarProvider
-      defaultOpen={false}
-      open={diffOpen}
-      onOpenChange={onOpenChange}
-      className="w-auto min-h-0 flex-none bg-transparent"
-      style={{ "--sidebar-width": DIFF_INLINE_DEFAULT_WIDTH } as React.CSSProperties}
+    <WorkspaceRightSidebar
+      defaultWidth={DIFF_INLINE_DEFAULT_WIDTH}
+      minWidth={DIFF_INLINE_SIDEBAR_MIN_WIDTH}
+      open={open}
+      storageKey={WORKSPACE_PANEL_STORAGE_KEYS.diffRight}
     >
-      <Sidebar
-        side="right"
-        collapsible="offcanvas"
-        className="border-l border-border bg-card text-foreground"
-        resizable={{
-          minWidth: DIFF_INLINE_SIDEBAR_MIN_WIDTH,
-          shouldAcceptWidth: shouldAcceptInlineSidebarWidth,
-          storageKey: DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
-        }}
-      >
-        {renderDiffContent ? <LazyDiffPanel mode="sidebar" /> : null}
-        <SidebarRail />
-      </Sidebar>
-    </SidebarProvider>
+      <div className="flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          {renderDiffContent ? <LazyDiffPanel mode="sidebar" /> : null}
+        </div>
+      </div>
+    </WorkspaceRightSidebar>
+  );
+};
+
+const SharedRightWorkspaceRail = (props: {
+  activePanel: "diff" | "terminal" | null;
+  fallbackPanel: "diff" | "terminal";
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  renderDiffContent: boolean;
+  setTerminalPortalTarget: (element: HTMLElement | null) => void;
+  storageKey: string;
+}) => {
+  const {
+    activePanel,
+    fallbackPanel,
+    onOpenChange,
+    open,
+    renderDiffContent,
+    setTerminalPortalTarget,
+    storageKey,
+  } = props;
+  const renderedPanel = activePanel ?? fallbackPanel;
+
+  return (
+    <WorkspaceRightSidebar
+      defaultWidth={DIFF_INLINE_DEFAULT_WIDTH}
+      minWidth={DIFF_INLINE_SIDEBAR_MIN_WIDTH}
+      onOpenChange={onOpenChange}
+      open={open}
+      storageKey={storageKey}
+    >
+      <div className="flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden">
+        <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <div
+            className={cn(
+              "min-h-0 min-w-0 flex-1 overflow-hidden",
+              renderedPanel === "diff" ? "flex" : "hidden",
+            )}
+          >
+            {renderDiffContent ? <LazyDiffPanel mode="sidebar" /> : null}
+          </div>
+          <div
+            ref={setTerminalPortalTarget}
+            className={cn(
+              "min-h-0 min-w-0 flex-1 overflow-hidden",
+              renderedPanel === "terminal" ? "flex" : "hidden",
+            )}
+            data-workspace-terminal-slot="right"
+          />
+        </div>
+      </div>
+    </WorkspaceRightSidebar>
   );
 };
 
 function ChatThreadRouteView() {
   const bootstrapComplete = useStore((store) => store.bootstrapComplete);
   const navigate = useNavigate();
+  const settings = useSettings();
   const threadId = Route.useParams({
     select: (params) => ThreadId.makeUnsafe(params.threadId),
   });
   const search = Route.useSearch();
+  const terminalState = useTerminalStateStore((state) =>
+    selectThreadTerminalState(state.terminalStateByThreadId, threadId),
+  );
+  const setTerminalOpen = useTerminalStateStore((state) => state.setTerminalOpen);
   const threadExists = useStore((store) => store.threads.some((thread) => thread.id === threadId));
   const draftThreadExists = useComposerDraftStore((store) =>
     Object.hasOwn(store.draftThreadsByThreadId, threadId),
@@ -174,24 +191,19 @@ function ChatThreadRouteView() {
   const routeThreadExists = threadExists || draftThreadExists;
   const diffOpen = search.diff === "1";
   const shouldUseDiffSheet = useMediaQuery(DIFF_INLINE_LAYOUT_MEDIA_QUERY);
-  // TanStack Router keeps active route components mounted across param-only navigations
-  // unless remountDeps are configured, so this stays warm across thread switches.
+  const [workspaceBottomTerminalPortalTarget, setWorkspaceBottomTerminalPortalTarget] =
+    useState<HTMLElement | null>(null);
+  const [workspaceRightTerminalPortalTarget, setWorkspaceRightTerminalPortalTarget] =
+    useState<HTMLElement | null>(null);
   const [hasOpenedDiff, setHasOpenedDiff] = useState(diffOpen);
+  const lastRightRailPanelRef = useRef<"diff" | "terminal">(
+    terminalState.terminalOpen ? "terminal" : "diff",
+  );
   const closeDiff = useCallback(() => {
     void navigate({
       to: "/$threadId",
       params: { threadId },
       search: { diff: undefined },
-    });
-  }, [navigate, threadId]);
-  const openDiff = useCallback(() => {
-    void navigate({
-      to: "/$threadId",
-      params: { threadId },
-      search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1" };
-      },
     });
   }, [navigate, threadId]);
 
@@ -208,41 +220,143 @@ function ChatThreadRouteView() {
 
     if (!routeThreadExists) {
       void navigate({ to: "/", replace: true });
+    }
+  }, [bootstrapComplete, navigate, routeThreadExists]);
+
+  const workspacePanels = resolveWorkspacePanels({
+    terminalPosition: settings.terminalPosition,
+    terminalBottomScope: settings.terminalBottomScope,
+    shouldUseDiffSheet,
+    diffOpen,
+    terminalOpen: terminalState.terminalOpen,
+  });
+  const activeRightRailPanel = workspacePanels.rightRailPanel;
+
+  useEffect(() => {
+    if (activeRightRailPanel === null) {
       return;
     }
-  }, [bootstrapComplete, navigate, routeThreadExists, threadId]);
+    lastRightRailPanelRef.current = activeRightRailPanel;
+  }, [activeRightRailPanel]);
+
+  const rightRailStorageKey =
+    settings.terminalRightRailWidthMode === "linked"
+      ? WORKSPACE_PANEL_STORAGE_KEYS.sharedRight
+      : (activeRightRailPanel ?? lastRightRailPanelRef.current) === "terminal"
+        ? WORKSPACE_PANEL_STORAGE_KEYS.terminalRight
+        : WORKSPACE_PANEL_STORAGE_KEYS.diffRight;
+  const chatViewLayoutState = useMemo(
+    () => ({
+      diffToggleActive: workspacePanels.diffToggleActive,
+      terminalDockTarget: workspacePanels.terminalDockTarget,
+      terminalToggleActive: workspacePanels.terminalToggleActive,
+    }),
+    [
+      workspacePanels.diffToggleActive,
+      workspacePanels.terminalDockTarget,
+      workspacePanels.terminalToggleActive,
+    ],
+  );
+  const portalTargets = useMemo(
+    () => ({
+      bottom: workspaceBottomTerminalPortalTarget,
+      right: workspaceRightTerminalPortalTarget,
+    }),
+    [workspaceBottomTerminalPortalTarget, workspaceRightTerminalPortalTarget],
+  );
 
   if (!bootstrapComplete || !routeThreadExists) {
     return null;
   }
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
+  const shouldMountInlineDiffRail = workspacePanels.supportsInlineDiffRail && hasOpenedDiff;
+  const chatWorkspace = (
+    <SidebarInset className="min-h-0 min-w-0 flex-1 overflow-hidden bg-background text-foreground">
+      <ChatView key={threadId} layoutState={chatViewLayoutState} threadId={threadId} />
+    </SidebarInset>
+  );
 
-  if (!shouldUseDiffSheet) {
-    return (
-      <>
-        <SidebarInset className="h-dvh  min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-          <ChatView threadId={threadId} />
-        </SidebarInset>
-        <DiffPanelInlineSidebar
-          diffOpen={diffOpen}
-          onCloseDiff={closeDiff}
-          onOpenDiff={openDiff}
-          renderDiffContent={shouldRenderDiffContent}
-        />
-      </>
-    );
-  }
+  const rightWorkspacePanel =
+    settings.terminalPosition === "right" && !workspacePanels.showTerminalSheet ? (
+      <SharedRightWorkspaceRail
+        activePanel={activeRightRailPanel}
+        fallbackPanel={lastRightRailPanelRef.current}
+        open={activeRightRailPanel !== null}
+        onOpenChange={(open) => {
+          if (open) {
+            if (lastRightRailPanelRef.current === "terminal") {
+              setTerminalOpen(threadId, true);
+              return;
+            }
+            void navigate({
+              to: "/$threadId",
+              params: { threadId },
+              search: (previous) => ({ ...previous, diff: "1" }),
+            });
+            return;
+          }
+
+          if (activeRightRailPanel === "terminal") {
+            setTerminalOpen(threadId, false);
+            return;
+          }
+
+          void closeDiff();
+        }}
+        renderDiffContent={shouldRenderDiffContent}
+        setTerminalPortalTarget={setWorkspaceRightTerminalPortalTarget}
+        storageKey={rightRailStorageKey}
+      />
+    ) : shouldMountInlineDiffRail ? (
+      <DiffPanelInlineSidebar
+        open={workspacePanels.showInlineDiffRail}
+        renderDiffContent={shouldRenderDiffContent}
+      />
+    ) : null;
+
+  const workspaceRow = (
+    <div className="flex min-h-0 min-w-0 flex-1">
+      {chatWorkspace}
+      {rightWorkspacePanel}
+    </div>
+  );
 
   return (
-    <>
-      <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-        <ChatView threadId={threadId} />
-      </SidebarInset>
-      <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
-        {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
-      </DiffPanelSheet>
-    </>
+    <WorkspaceTerminalPortalTargetsContext.Provider value={portalTargets}>
+      <div
+        className="flex h-dvh min-h-0 min-w-0 flex-1 flex-col overflow-hidden overscroll-y-none bg-background text-foreground"
+        data-workspace-shell="true"
+      >
+        {workspaceRow}
+        <div
+          ref={setWorkspaceBottomTerminalPortalTarget}
+          className="min-w-0 shrink-0"
+          data-workspace-bottom-terminal-slot="true"
+        />
+      </div>
+      {shouldUseDiffSheet ? (
+        <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
+          {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
+        </DiffPanelSheet>
+      ) : null}
+      {workspacePanels.showTerminalSheet ? (
+        <TerminalPanelSheet
+          open={workspacePanels.showTerminalSheet}
+          onOpenChange={(open) => {
+            if (!open) {
+              setTerminalOpen(threadId, false);
+            }
+          }}
+        >
+          <div
+            ref={setWorkspaceRightTerminalPortalTarget}
+            className="flex h-full min-h-0 min-w-0 overflow-hidden"
+            data-workspace-terminal-slot="right-sheet"
+          />
+        </TerminalPanelSheet>
+      ) : null}
+    </WorkspaceTerminalPortalTargetsContext.Provider>
   );
 }
 

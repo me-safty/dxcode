@@ -1,12 +1,51 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  clampTerminalPanelHeight,
+  resolveTerminalPanelMaxHeight,
   resolveTerminalSelectionActionPosition,
   selectPendingTerminalEventEntries,
   selectTerminalEventEntriesAfterSnapshot,
   shouldHandleTerminalSelectionMouseUp,
   terminalSelectionActionDelayForClickCount,
-} from "./ThreadTerminalDrawer";
+} from "./ThreadTerminalPanel";
+
+describe("resolveTerminalPanelMaxHeight", () => {
+  it("reserves room for the workspace row when the bottom terminal spans the workspace", () => {
+    expect(
+      resolveTerminalPanelMaxHeight({
+        layout: "bottom",
+        bottomScope: "workspace",
+        parentHeight: 480,
+        viewportHeight: 1200,
+      }),
+    ).toBe(260);
+  });
+
+  it("uses the viewport ratio for chat-scoped bottom terminals", () => {
+    expect(
+      resolveTerminalPanelMaxHeight({
+        layout: "bottom",
+        bottomScope: "chat",
+        parentHeight: 480,
+        viewportHeight: 1200,
+      }),
+    ).toBe(900);
+  });
+});
+
+describe("clampTerminalPanelHeight", () => {
+  it("clamps workspace-spanning bottom terminals to the available workspace height", () => {
+    expect(
+      clampTerminalPanelHeight(420, {
+        layout: "bottom",
+        bottomScope: "workspace",
+        parentHeight: 480,
+        viewportHeight: 1200,
+      }),
+    ).toBe(260);
+  });
+});
 
 describe("resolveTerminalSelectionActionPosition", () => {
   it("prefers the selection rect over the last pointer position", () => {

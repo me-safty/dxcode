@@ -5,6 +5,7 @@ import {
   type TerminalSessionSnapshot,
   type ThreadId,
 } from "@t3tools/contracts";
+import type { TerminalBottomScope } from "@t3tools/contracts/settings";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import {
   type PointerEvent as ReactPointerEvent,
@@ -36,16 +37,45 @@ import { selectTerminalEventEntries, useTerminalStateStore } from "../terminalSt
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
+const MIN_BOTTOM_WORKSPACE_CONTENT_HEIGHT = 220;
 const MULTI_CLICK_SELECTION_ACTION_DELAY_MS = 260;
+const MIN_TERMINAL_COLS = 20;
+const MIN_TERMINAL_ROWS = 5;
 
-function maxDrawerHeight(): number {
-  if (typeof window === "undefined") return DEFAULT_THREAD_TERMINAL_HEIGHT;
-  return Math.max(MIN_DRAWER_HEIGHT, Math.floor(window.innerHeight * MAX_DRAWER_HEIGHT_RATIO));
+interface TerminalPanelHeightBoundsInput {
+  bottomScope: TerminalBottomScope;
+  layout: "bottom" | "side";
+  parentHeight?: number | null;
+  viewportHeight?: number;
 }
 
-function clampDrawerHeight(height: number): number {
+export function resolveTerminalPanelMaxHeight(input: TerminalPanelHeightBoundsInput): number {
+  const viewportHeight =
+    input.viewportHeight ??
+    (typeof window === "undefined" ? DEFAULT_THREAD_TERMINAL_HEIGHT : window.innerHeight);
+  let maxHeight = Math.floor(viewportHeight * MAX_DRAWER_HEIGHT_RATIO);
+
+  if (
+    input.layout === "bottom" &&
+    input.bottomScope === "workspace" &&
+    typeof input.parentHeight === "number" &&
+    Number.isFinite(input.parentHeight)
+  ) {
+    maxHeight = Math.min(
+      maxHeight,
+      Math.floor(input.parentHeight - MIN_BOTTOM_WORKSPACE_CONTENT_HEIGHT),
+    );
+  }
+
+  return Math.max(MIN_DRAWER_HEIGHT, maxHeight);
+}
+
+export function clampTerminalPanelHeight(
+  height: number,
+  input: TerminalPanelHeightBoundsInput,
+): number {
   const safeHeight = Number.isFinite(height) ? height : DEFAULT_THREAD_TERMINAL_HEIGHT;
-  const maxHeight = maxDrawerHeight();
+  const maxHeight = resolveTerminalPanelMaxHeight(input);
   return Math.min(Math.max(Math.round(safeHeight), MIN_DRAWER_HEIGHT), maxHeight);
 }
 
@@ -72,6 +102,18 @@ export function selectPendingTerminalEventEntries(
   lastAppliedTerminalEventId: number,
 ): ReadonlyArray<{ id: number; event: TerminalEvent }> {
   return entries.filter((entry) => entry.id > lastAppliedTerminalEventId);
+}
+
+function resolveTerminalViewportSize(terminal: Terminal): { cols: number; rows: number } | null {
+  const cols = Math.round(terminal.cols);
+  const rows = Math.round(terminal.rows);
+  if (!Number.isFinite(cols) || !Number.isFinite(rows)) {
+    return null;
+  }
+  if (cols < MIN_TERMINAL_COLS || rows < MIN_TERMINAL_ROWS) {
+    return null;
+  }
+  return { cols, rows };
 }
 
 function terminalThemeFromApp(): ITheme {
@@ -220,6 +262,7 @@ interface TerminalViewportProps {
   autoFocus: boolean;
   resizeEpoch: number;
   drawerHeight: number;
+  layout: "bottom" | "side";
 }
 
 function TerminalViewport({
@@ -235,6 +278,7 @@ function TerminalViewport({
   autoFocus,
   resizeEpoch,
   drawerHeight,
+  layout,
 }: TerminalViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -254,6 +298,13 @@ function TerminalViewport({
     onAddTerminalContext(selection);
   });
   const readTerminalLabel = useEffectEvent(() => terminalLabel);
+  const sessionOpenRef = useRef(false);
+  const openingSessionRef = useRef(false);
+
+  useEffect(() => {
+    sessionOpenRef.current = false;
+    openingSessionRef.current = false;
+  }, [cwd, runtimeEnv, terminalId, threadId]);
 
   useEffect(() => {
     const mount = containerRef.current;
@@ -493,6 +544,8 @@ function TerminalViewport({
     });
 
     const applyTerminalEvent = (event: TerminalEvent) => {
+    const unsubscribe = api?.terminal.onEvent((event) => {
+      if (event.threadId !== threadId || event.terminalId !== terminalId) return;
       const activeTerminal = terminalRef.current;
       if (!activeTerminal) {
         return;
@@ -509,6 +562,7 @@ function TerminalViewport({
       }
 
       if (event.type === "started" || event.type === "restarted") {
+        sessionOpenRef.current = true;
         hasHandledExitRef.current = false;
         clearSelectionAction();
         writeTerminalSnapshot(activeTerminal, event.snapshot);
@@ -527,26 +581,29 @@ function TerminalViewport({
         return;
       }
 
-      const details = [
-        typeof event.exitCode === "number" ? `code ${event.exitCode}` : null,
-        typeof event.exitSignal === "number" ? `signal ${event.exitSignal}` : null,
-      ]
-        .filter((value): value is string => value !== null)
-        .join(", ");
-      writeSystemMessage(
-        activeTerminal,
-        details.length > 0 ? `Process exited (${details})` : "Process exited",
-      );
-      if (hasHandledExitRef.current) {
-        return;
-      }
-      hasHandledExitRef.current = true;
-      window.setTimeout(() => {
-        if (!hasHandledExitRef.current) {
+      if (event.type === "exited") {
+        sessionOpenRef.current = false;
+        const details = [
+          typeof event.exitCode === "number" ? `code ${event.exitCode}` : null,
+          typeof event.exitSignal === "number" ? `signal ${event.exitSignal}` : null,
+        ]
+          .filter((value): value is string => value !== null)
+          .join(", ");
+        writeSystemMessage(
+          activeTerminal,
+          details.length > 0 ? `Process exited (${details})` : "Process exited",
+        );
+        if (hasHandledExitRef.current) {
           return;
         }
-        handleSessionExited();
-      }, 0);
+        hasHandledExitRef.current = true;
+        window.setTimeout(() => {
+          if (!hasHandledExitRef.current) {
+            return;
+          }
+          handleSessionExited();
+        }, 0);
+      }
     };
     const applyPendingTerminalEvents = (
       terminalEventEntries: ReadonlyArray<{ id: number; event: TerminalEvent }>,
@@ -590,21 +647,31 @@ function TerminalViewport({
     });
 
     const openTerminal = async () => {
+      if (openingSessionRef.current || sessionOpenRef.current) {
+        return;
+      }
       try {
         const activeTerminal = terminalRef.current;
         const activeFitAddon = fitAddonRef.current;
         if (!activeTerminal || !activeFitAddon) return;
         activeFitAddon.fit();
+        const viewportSize = resolveTerminalViewportSize(activeTerminal);
+        if (!viewportSize) {
+          return;
+        }
+        openingSessionRef.current = true;
         const snapshot = await api.terminal.open({
           threadId,
           terminalId,
           cwd,
           ...(worktreePath !== undefined ? { worktreePath } : {}),
-          cols: activeTerminal.cols,
-          rows: activeTerminal.rows,
+          cols: viewportSize.cols,
+          rows: viewportSize.rows,
           ...(runtimeEnv ? { env: runtimeEnv } : {}),
         });
         if (disposed) return;
+        sessionOpenRef.current = true;
+        hasHandledExitRef.current = false;
         writeTerminalSnapshot(activeTerminal, snapshot);
         const bufferedEntries = selectTerminalEventEntries(
           useTerminalStateStore.getState().terminalEventEntriesByKey,
@@ -631,6 +698,8 @@ function TerminalViewport({
           terminal,
           err instanceof Error ? err.message : "Failed to open terminal",
         );
+      } finally {
+        openingSessionRef.current = false;
       }
     };
 
@@ -641,15 +710,23 @@ function TerminalViewport({
       const wasAtBottom =
         activeTerminal.buffer.active.viewportY >= activeTerminal.buffer.active.baseY;
       activeFitAddon.fit();
+      const viewportSize = resolveTerminalViewportSize(activeTerminal);
       if (wasAtBottom) {
         activeTerminal.scrollToBottom();
+      }
+      if (!viewportSize) {
+        return;
+      }
+      if (!sessionOpenRef.current) {
+        void openTerminal();
+        return;
       }
       void api.terminal
         .resize({
           threadId,
           terminalId,
-          cols: activeTerminal.cols,
-          rows: activeTerminal.rows,
+          cols: viewportSize.cols,
+          rows: viewportSize.rows,
         })
         .catch(() => undefined);
     }, 30);
@@ -659,6 +736,7 @@ function TerminalViewport({
       disposed = true;
       terminalHydratedRef.current = false;
       lastAppliedTerminalEventIdRef.current = 0;
+      unsubscribe?.();
       unsubscribeTerminalEvents();
       window.clearTimeout(fitTimer);
       inputDisposable.dispose();
@@ -670,6 +748,8 @@ function TerminalViewport({
       window.removeEventListener("mouseup", handleMouseUp);
       mount.removeEventListener("pointerdown", handlePointerDown);
       themeObserver.disconnect();
+      sessionOpenRef.current = false;
+      openingSessionRef.current = false;
       terminalRef.current = null;
       fitAddonRef.current = null;
       terminal.dispose();
@@ -692,6 +772,86 @@ function TerminalViewport({
   }, [autoFocus, focusRequestId]);
 
   useEffect(() => {
+    const container = containerRef.current;
+    const api = readNativeApi();
+    if (!container || !api || typeof ResizeObserver === "undefined") return;
+
+    let frame: number | null = null;
+
+    const fitToContainer = () => {
+      const terminal = terminalRef.current;
+      const fitAddon = fitAddonRef.current;
+      if (!terminal || !fitAddon) return;
+      const wasAtBottom = terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
+      fitAddon.fit();
+      const viewportSize = resolveTerminalViewportSize(terminal);
+      if (wasAtBottom) {
+        terminal.scrollToBottom();
+      }
+      if (!viewportSize) {
+        return;
+      }
+      if (!sessionOpenRef.current) {
+        void (async () => {
+          const activeTerminal = terminalRef.current;
+          const activeFitAddon = fitAddonRef.current;
+          if (!activeTerminal || !activeFitAddon) return;
+          activeFitAddon.fit();
+          const nextViewportSize = resolveTerminalViewportSize(activeTerminal);
+          if (!nextViewportSize || openingSessionRef.current || sessionOpenRef.current) {
+            return;
+          }
+          openingSessionRef.current = true;
+          try {
+            const snapshot = await api.terminal.open({
+              threadId,
+              terminalId,
+              cwd,
+              cols: nextViewportSize.cols,
+              rows: nextViewportSize.rows,
+              ...(runtimeEnv ? { env: runtimeEnv } : {}),
+            });
+            sessionOpenRef.current = true;
+            activeTerminal.write("\u001bc");
+            if (snapshot.history.length > 0) {
+              activeTerminal.write(snapshot.history);
+            }
+          } catch {
+            // Let the next valid resize retry opening the session.
+          } finally {
+            openingSessionRef.current = false;
+          }
+        })();
+        return;
+      }
+      void api.terminal
+        .resize({
+          threadId,
+          terminalId,
+          cols: viewportSize.cols,
+          rows: viewportSize.rows,
+        })
+        .catch(() => undefined);
+    };
+
+    const observer = new ResizeObserver(() => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        fitToContainer();
+      });
+    });
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, [cwd, runtimeEnv, terminalId, threadId]);
+
+  useEffect(() => {
     const api = readNativeApi();
     const terminal = terminalRef.current;
     const fitAddon = fitAddonRef.current;
@@ -699,34 +859,39 @@ function TerminalViewport({
     const wasAtBottom = terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
     const frame = window.requestAnimationFrame(() => {
       fitAddon.fit();
+      const viewportSize = resolveTerminalViewportSize(terminal);
       if (wasAtBottom) {
         terminal.scrollToBottom();
+      }
+      if (!viewportSize || !sessionOpenRef.current) {
+        return;
       }
       void api.terminal
         .resize({
           threadId,
           terminalId,
-          cols: terminal.cols,
-          rows: terminal.rows,
+          cols: viewportSize.cols,
+          rows: viewportSize.rows,
         })
         .catch(() => undefined);
     });
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [drawerHeight, resizeEpoch, terminalId, threadId]);
+  }, [drawerHeight, layout, resizeEpoch, terminalId, threadId]);
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-[4px]" />
   );
 }
 
-interface ThreadTerminalDrawerProps {
+interface ThreadTerminalPanelProps {
   threadId: ThreadId;
   cwd: string;
   worktreePath?: string | null;
   runtimeEnv?: Record<string, string>;
   visible?: boolean;
   height: number;
+  bottomScope?: TerminalBottomScope;
   terminalIds: string[];
   activeTerminalId: string;
   terminalGroups: ThreadTerminalGroup[];
@@ -741,6 +906,7 @@ interface ThreadTerminalDrawerProps {
   onCloseTerminal: (terminalId: string) => void;
   onHeightChange: (height: number) => void;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
+  layout?: "bottom" | "side";
 }
 
 interface TerminalActionButtonProps {
@@ -772,13 +938,14 @@ function TerminalActionButton({ label, className, onClick, children }: TerminalA
   );
 }
 
-export default function ThreadTerminalDrawer({
+export default function ThreadTerminalPanel({
   threadId,
   cwd,
   worktreePath,
   runtimeEnv,
   visible = true,
   height,
+  bottomScope = "chat",
   terminalIds,
   activeTerminalId,
   terminalGroups,
@@ -793,11 +960,30 @@ export default function ThreadTerminalDrawer({
   onCloseTerminal,
   onHeightChange,
   onAddTerminalContext,
-}: ThreadTerminalDrawerProps) {
-  const [drawerHeight, setDrawerHeight] = useState(() => clampDrawerHeight(height));
+  layout = "bottom",
+}: ThreadTerminalPanelProps) {
+  const isSideLayout = layout === "side";
+  const panelRef = useRef<HTMLElement | null>(null);
+  const resolveParentHeight = useCallback(
+    () =>
+      panelRef.current?.closest<HTMLElement>("[data-workspace-shell='true']")?.clientHeight ?? null,
+    [],
+  );
+  const clampPanelHeight = useCallback(
+    (nextHeight: number) =>
+      clampTerminalPanelHeight(nextHeight, {
+        bottomScope,
+        layout,
+        parentHeight: resolveParentHeight(),
+      }),
+    [bottomScope, layout, resolveParentHeight],
+  );
+  const [drawerHeight, setDrawerHeight] = useState(() =>
+    clampTerminalPanelHeight(height, { bottomScope, layout }),
+  );
   const [resizeEpoch, setResizeEpoch] = useState(0);
   const drawerHeightRef = useRef(drawerHeight);
-  const lastSyncedHeightRef = useRef(clampDrawerHeight(height));
+  const lastSyncedHeightRef = useRef(clampTerminalPanelHeight(height, { bottomScope, layout }));
   const onHeightChangeRef = useRef(onHeightChange);
   const resizeStateRef = useRef<{
     pointerId: number;
@@ -933,19 +1119,24 @@ export default function ThreadTerminalDrawer({
     drawerHeightRef.current = drawerHeight;
   }, [drawerHeight]);
 
-  const syncHeight = useCallback((nextHeight: number) => {
-    const clampedHeight = clampDrawerHeight(nextHeight);
-    if (lastSyncedHeightRef.current === clampedHeight) return;
-    lastSyncedHeightRef.current = clampedHeight;
-    onHeightChangeRef.current(clampedHeight);
-  }, []);
+  const syncHeight = useCallback(
+    (nextHeight: number) => {
+      if (isSideLayout) return;
+      const clampedHeight = clampPanelHeight(nextHeight);
+      if (lastSyncedHeightRef.current === clampedHeight) return;
+      lastSyncedHeightRef.current = clampedHeight;
+      onHeightChangeRef.current(clampedHeight);
+    },
+    [clampPanelHeight, isSideLayout],
+  );
 
   useEffect(() => {
-    const clampedHeight = clampDrawerHeight(height);
+    if (isSideLayout) return;
+    const clampedHeight = clampPanelHeight(height);
     setDrawerHeight(clampedHeight);
     drawerHeightRef.current = clampedHeight;
     lastSyncedHeightRef.current = clampedHeight;
-  }, [height, threadId]);
+  }, [clampPanelHeight, height, isSideLayout, threadId]);
 
   const handleResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -959,20 +1150,23 @@ export default function ThreadTerminalDrawer({
     };
   }, []);
 
-  const handleResizePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const resizeState = resizeStateRef.current;
-    if (!resizeState || resizeState.pointerId !== event.pointerId) return;
-    event.preventDefault();
-    const clampedHeight = clampDrawerHeight(
-      resizeState.startHeight + (resizeState.startY - event.clientY),
-    );
-    if (clampedHeight === drawerHeightRef.current) {
-      return;
-    }
-    didResizeDuringDragRef.current = true;
-    drawerHeightRef.current = clampedHeight;
-    setDrawerHeight(clampedHeight);
-  }, []);
+  const handleResizePointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const resizeState = resizeStateRef.current;
+      if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      const clampedHeight = clampPanelHeight(
+        resizeState.startHeight + (resizeState.startY - event.clientY),
+      );
+      if (clampedHeight === drawerHeightRef.current) {
+        return;
+      }
+      didResizeDuringDragRef.current = true;
+      drawerHeightRef.current = clampedHeight;
+      setDrawerHeight(clampedHeight);
+    },
+    [clampPanelHeight],
+  );
 
   const handleResizePointerEnd = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -992,12 +1186,11 @@ export default function ThreadTerminalDrawer({
   );
 
   useEffect(() => {
-    if (!visible) {
+    if (!visible || isSideLayout) {
       return;
     }
-
     const onWindowResize = () => {
-      const clampedHeight = clampDrawerHeight(drawerHeightRef.current);
+      const clampedHeight = clampPanelHeight(drawerHeightRef.current);
       const changed = clampedHeight !== drawerHeightRef.current;
       if (changed) {
         setDrawerHeight(clampedHeight);
@@ -1012,7 +1205,7 @@ export default function ThreadTerminalDrawer({
     return () => {
       window.removeEventListener("resize", onWindowResize);
     };
-  }, [syncHeight, visible]);
+  }, [clampPanelHeight, isSideLayout, syncHeight, visible]);
 
   useEffect(() => {
     if (!visible) {
@@ -1029,16 +1222,21 @@ export default function ThreadTerminalDrawer({
 
   return (
     <aside
-      className="thread-terminal-drawer relative flex min-w-0 shrink-0 flex-col overflow-hidden border-t border-border/80 bg-background"
-      style={{ height: `${drawerHeight}px` }}
+      ref={panelRef}
+      className={`thread-terminal-panel relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-background ${
+        isSideLayout ? "h-full flex-1" : "shrink-0 border-t border-border/80"
+      }`}
+      style={isSideLayout ? undefined : { height: `${drawerHeight}px` }}
     >
-      <div
-        className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize"
-        onPointerDown={handleResizePointerDown}
-        onPointerMove={handleResizePointerMove}
-        onPointerUp={handleResizePointerEnd}
-        onPointerCancel={handleResizePointerEnd}
-      />
+      {!isSideLayout ? (
+        <div
+          className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize"
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={handleResizePointerEnd}
+          onPointerCancel={handleResizePointerEnd}
+        />
+      ) : null}
 
       {!hasTerminalSidebar && (
         <div className="pointer-events-none absolute right-2 top-2 z-20">
@@ -1110,6 +1308,7 @@ export default function ThreadTerminalDrawer({
                         autoFocus={terminalId === resolvedActiveTerminalId}
                         resizeEpoch={resizeEpoch}
                         drawerHeight={drawerHeight}
+                        layout={layout}
                       />
                     </div>
                   </div>
@@ -1131,6 +1330,7 @@ export default function ThreadTerminalDrawer({
                   autoFocus
                   resizeEpoch={resizeEpoch}
                   drawerHeight={drawerHeight}
+                  layout={layout}
                 />
               </div>
             )}

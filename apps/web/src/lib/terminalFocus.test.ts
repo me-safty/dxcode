@@ -11,7 +11,7 @@ class MockHTMLElement {
   };
 
   closest(selector: string): MockHTMLElement | null {
-    return selector === ".thread-terminal-drawer .xterm" && this.isConnected ? this : null;
+    return selector === ".thread-terminal-panel .xterm" && this.isConnected ? this : null;
   }
 }
 

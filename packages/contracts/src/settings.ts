@@ -15,6 +15,29 @@ export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"])
 export type TimestampFormat = typeof TimestampFormat.Type;
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
 
+export const TerminalBottomScope = Schema.Literals(["chat", "workspace"]);
+export type TerminalBottomScope = typeof TerminalBottomScope.Type;
+export const DEFAULT_TERMINAL_BOTTOM_SCOPE: TerminalBottomScope = "chat";
+
+const LegacyTerminalPosition = Schema.Literals(["bottom", "left", "right"]);
+const CurrentTerminalPosition = Schema.Literals(["bottom", "right"]);
+export const TerminalPosition = LegacyTerminalPosition.pipe(
+  Schema.decodeTo(
+    CurrentTerminalPosition,
+    SchemaTransformation.transformOrFail({
+      decode: (value) =>
+        Effect.succeed((value === "left" ? "bottom" : value) as "bottom" | "right"),
+      encode: (value) => Effect.succeed(value),
+    }),
+  ),
+);
+export type TerminalPosition = typeof TerminalPosition.Type;
+export const DEFAULT_TERMINAL_POSITION: TerminalPosition = "bottom";
+
+export const TerminalRightRailWidthMode = Schema.Literals(["linked", "independent"]);
+export type TerminalRightRailWidthMode = typeof TerminalRightRailWidthMode.Type;
+export const DEFAULT_TERMINAL_RIGHT_RAIL_WIDTH_MODE: TerminalRightRailWidthMode = "linked";
+
 export const SidebarProjectSortOrder = Schema.Literals(["updated_at", "created_at", "manual"]);
 export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type;
 export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "updated_at";
@@ -32,6 +55,15 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   sidebarThreadSortOrder: SidebarThreadSortOrder.pipe(
     Schema.withDecodingDefault(() => DEFAULT_SIDEBAR_THREAD_SORT_ORDER),
+  ),
+  terminalBottomScope: TerminalBottomScope.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_TERMINAL_BOTTOM_SCOPE),
+  ),
+  terminalPosition: TerminalPosition.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_TERMINAL_POSITION),
+  ),
+  terminalRightRailWidthMode: TerminalRightRailWidthMode.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_TERMINAL_RIGHT_RAIL_WIDTH_MODE),
   ),
   timestampFormat: TimestampFormat.pipe(Schema.withDecodingDefault(() => DEFAULT_TIMESTAMP_FORMAT)),
 });
