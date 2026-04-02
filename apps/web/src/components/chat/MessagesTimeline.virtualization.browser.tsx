@@ -35,6 +35,18 @@ interface VirtualizationScenario {
   maxEstimateDeltaPx: number;
 }
 
+interface VirtualizerSnapshot {
+  totalSize: number;
+  measurements: ReadonlyArray<{
+    id: string;
+    kind: string;
+    index: number;
+    size: number;
+    start: number;
+    end: number;
+  }>;
+}
+
 function MessagesTimelineBrowserHarness(
   props: Omit<ComponentProps<typeof MessagesTimeline>, "scrollContainer">,
 ) {
@@ -78,11 +90,13 @@ function createMessage(input: {
   role: ChatMessage["role"];
   text: string;
   offsetSeconds: number;
+  attachments?: ChatMessage["attachments"];
 }): ChatMessage {
   return {
     id: MessageId.makeUnsafe(input.id),
     role: input.role,
     text: input.text,
+    ...(input.attachments ? { attachments: input.attachments } : {}),
     createdAt: isoAt(input.offsetSeconds),
     ...(input.role === "assistant" ? { completedAt: isoAt(input.offsetSeconds + 1) } : {}),
     streaming: false,
@@ -128,6 +142,7 @@ function createBaseTimelineProps(input: {
   expandedWorkGroups?: Record<string, boolean>;
   completionDividerBeforeEntryId?: string | null;
   turnDiffSummaryByAssistantMessageId?: Map<MessageId, TurnDiffSummary>;
+  onVirtualizerSnapshot?: ComponentProps<typeof MessagesTimeline>["onVirtualizerSnapshot"];
 }): Omit<ComponentProps<typeof MessagesTimeline>, "scrollContainer"> {
   return {
     hasMessages: true,
@@ -154,6 +169,7 @@ function createBaseTimelineProps(input: {
     resolvedTheme: "light",
     timestampFormat: "locale",
     workspaceRoot: MARKDOWN_CWD,
+    ...(input.onVirtualizerSnapshot ? { onVirtualizerSnapshot: input.onVirtualizerSnapshot } : {}),
   };
 }
 
@@ -236,6 +252,39 @@ function createChangedFilesScenario(input: {
       ),
     }),
     maxEstimateDeltaPx: input.maxEstimateDeltaPx ?? 72,
+  };
+}
+
+function createAssistantMessageScenario(input: {
+  name: string;
+  rowId: string;
+  text: string;
+  maxEstimateDeltaPx?: number;
+}): VirtualizationScenario {
+  const beforeMessages = createFillerMessages({
+    prefix: `${input.rowId}-before`,
+    startOffsetSeconds: 0,
+    pairCount: 2,
+  });
+  const afterMessages = createFillerMessages({
+    prefix: `${input.rowId}-after`,
+    startOffsetSeconds: 40,
+    pairCount: 8,
+  });
+  const assistantMessage = createMessage({
+    id: input.rowId,
+    role: "assistant",
+    text: input.text,
+    offsetSeconds: 12,
+  });
+
+  return {
+    name: input.name,
+    targetRowId: assistantMessage.id,
+    props: createBaseTimelineProps({
+      messages: [...beforeMessages, assistantMessage, ...afterMessages],
+    }),
+    maxEstimateDeltaPx: input.maxEstimateDeltaPx ?? 16,
   };
 }
 
@@ -322,6 +371,24 @@ function buildStaticScenarios(): VirtualizationScenario[] {
       }),
       maxEstimateDeltaPx: 96,
     },
+    createAssistantMessageScenario({
+      name: "assistant single-paragraph row with plain prose",
+      rowId: "target-assistant-plain-prose",
+      text: [
+        "The host is still expanding to content somewhere in the grid layout.",
+        "I'm stripping it back further to a plain block container so the test width",
+        "is actually the timeline width.",
+      ].join(" "),
+    }),
+    createAssistantMessageScenario({
+      name: "assistant single-paragraph row with inline code",
+      rowId: "target-assistant-inline-code",
+      text: [
+        "Typecheck found one exact-optional-property issue in the browser harness:",
+        "I was always passing `onVirtualizerSnapshot`, including `undefined`.",
+        "I'm tightening that object construction and rerunning the checks.",
+      ].join(" "),
+    }),
     createChangedFilesScenario({
       name: "assistant changed-files row with a compacted single-chain directory",
       rowId: "target-assistant-changed-files-single-chain",
@@ -483,16 +550,20 @@ async function measureTimelineRow(input: {
 
 async function mountMessagesTimeline(input: {
   props: Omit<ComponentProps<typeof MessagesTimeline>, "scrollContainer">;
+  viewport?: { width: number; height: number };
 }) {
-  await setViewport(DEFAULT_VIEWPORT);
+  const viewport = input.viewport ?? DEFAULT_VIEWPORT;
+  await setViewport(viewport);
   await waitForProductionStyles();
 
   const host = document.createElement("div");
-  host.style.position = "fixed";
-  host.style.inset = "0";
-  host.style.width = "100vw";
-  host.style.height = "100vh";
-  host.style.display = "grid";
+  host.style.width = `${viewport.width}px`;
+  host.style.minWidth = `${viewport.width}px`;
+  host.style.maxWidth = `${viewport.width}px`;
+  host.style.height = `${viewport.height}px`;
+  host.style.minHeight = `${viewport.height}px`;
+  host.style.maxHeight = `${viewport.height}px`;
+  host.style.display = "block";
   host.style.overflow = "hidden";
   document.body.append(host);
 
@@ -503,11 +574,38 @@ async function mountMessagesTimeline(input: {
 
   return {
     host,
+    rerender: async (
+      nextProps: Omit<ComponentProps<typeof MessagesTimeline>, "scrollContainer">,
+    ) => {
+      await screen.rerender(<MessagesTimelineBrowserHarness {...nextProps} />);
+      await waitForLayout();
+    },
+    setContainerSize: async (nextViewport: { width: number; height: number }) => {
+      await setViewport(nextViewport);
+      host.style.width = `${nextViewport.width}px`;
+      host.style.minWidth = `${nextViewport.width}px`;
+      host.style.maxWidth = `${nextViewport.width}px`;
+      host.style.height = `${nextViewport.height}px`;
+      host.style.minHeight = `${nextViewport.height}px`;
+      host.style.maxHeight = `${nextViewport.height}px`;
+      await waitForLayout();
+    },
     cleanup: async () => {
       await screen.unmount();
       host.remove();
     },
   };
+}
+
+async function measureRenderedRowActualHeight(input: {
+  host: HTMLElement;
+  targetRowId: string;
+}): Promise<number> {
+  const rowElement = await waitForElement(
+    () => input.host.querySelector<HTMLElement>(`[data-timeline-row-id="${input.targetRowId}"]`),
+    `Unable to locate rendered row ${input.targetRowId}.`,
+  );
+  return rowElement.getBoundingClientRect().height;
 }
 
 describe("MessagesTimeline virtualization harness", () => {
@@ -597,7 +695,10 @@ describe("MessagesTimeline virtualization harness", () => {
         { path: "packages/shared/src/git.ts", additions: 8, deletions: 2 },
       ]),
     });
-    const mounted = await mountMessagesTimeline({ props });
+    const mounted = await mountMessagesTimeline({
+      props,
+      viewport: { width: 320, height: 700 },
+    });
 
     try {
       const beforeCollapse = await measureTimelineRow({
@@ -706,6 +807,228 @@ describe("MessagesTimeline virtualization harness", () => {
       expect(
         Math.abs(afterExpand.actualHeightPx - afterExpand.virtualizerSizePx),
       ).toBeLessThanOrEqual(8);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("preserves measured tail row heights when rows transition into virtualization", async () => {
+    const beforeMessages = createFillerMessages({
+      prefix: "tail-transition-before",
+      startOffsetSeconds: 0,
+      pairCount: 1,
+    });
+    const afterMessages = createFillerMessages({
+      prefix: "tail-transition-after",
+      startOffsetSeconds: 40,
+      pairCount: 3,
+    });
+    const targetMessage = createMessage({
+      id: "target-tail-transition",
+      role: "assistant",
+      text: "Validation passed on the merged tree.",
+      offsetSeconds: 12,
+    });
+    let latestSnapshot: VirtualizerSnapshot | null = null;
+    const initialProps = createBaseTimelineProps({
+      messages: [...beforeMessages, targetMessage, ...afterMessages],
+      turnDiffSummaryByAssistantMessageId: createChangedFilesSummary(targetMessage.id, [
+        { path: ".plans/effect-atom.md", additions: 89, deletions: 0 },
+        {
+          path: "apps/server/src/checkpointing/Layers/CheckpointDiffQuery.ts",
+          additions: 4,
+          deletions: 3,
+        },
+        {
+          path: "apps/server/src/checkpointing/Layers/CheckpointStore.ts",
+          additions: 131,
+          deletions: 128,
+        },
+        {
+          path: "apps/server/src/checkpointing/Layers/CheckpointStore.test.ts",
+          additions: 1,
+          deletions: 1,
+        },
+        { path: "apps/server/src/checkpointing/Errors.ts", additions: 1, deletions: 1 },
+        {
+          path: "apps/server/src/git/Layers/ClaudeTextGeneration.ts",
+          additions: 106,
+          deletions: 112,
+        },
+        { path: "apps/server/src/git/Layers/GitCore.ts", additions: 44, deletions: 38 },
+        { path: "apps/server/src/git/Layers/GitCore.test.ts", additions: 18, deletions: 9 },
+        {
+          path: "apps/web/src/components/chat/MessagesTimeline.tsx",
+          additions: 52,
+          deletions: 7,
+        },
+        {
+          path: "apps/web/src/components/chat/ChangedFilesTree.tsx",
+          additions: 32,
+          deletions: 4,
+        },
+        { path: "packages/contracts/src/orchestration.ts", additions: 13, deletions: 3 },
+        { path: "packages/shared/src/git.ts", additions: 8, deletions: 2 },
+      ]),
+      onVirtualizerSnapshot: (snapshot) => {
+        latestSnapshot = {
+          totalSize: snapshot.totalSize,
+          measurements: snapshot.measurements,
+        };
+      },
+    });
+
+    const mounted = await mountMessagesTimeline({ props: initialProps });
+
+    try {
+      const initiallyRenderedHeight = await measureRenderedRowActualHeight({
+        host: mounted.host,
+        targetRowId: targetMessage.id,
+      });
+
+      const appendedProps = createBaseTimelineProps({
+        messages: [
+          ...beforeMessages,
+          targetMessage,
+          ...afterMessages,
+          ...createFillerMessages({
+            prefix: "tail-transition-extra",
+            startOffsetSeconds: 120,
+            pairCount: 8,
+          }),
+        ],
+        turnDiffSummaryByAssistantMessageId: initialProps.turnDiffSummaryByAssistantMessageId,
+        onVirtualizerSnapshot: initialProps.onVirtualizerSnapshot,
+      });
+      await mounted.rerender(appendedProps);
+
+      const scrollContainer = await waitForElement(
+        () =>
+          mounted.host.querySelector<HTMLDivElement>(
+            '[data-testid="messages-timeline-scroll-container"]',
+          ),
+        "Unable to find MessagesTimeline scroll container.",
+      );
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      await waitForLayout();
+
+      await vi.waitFor(
+        () => {
+          const measurement = latestSnapshot?.measurements.find(
+            (entry) => entry.id === targetMessage.id,
+          );
+          expect(
+            measurement,
+            "Expected target row to transition into virtualizer cache.",
+          ).toBeTruthy();
+          expect(Math.abs((measurement?.size ?? 0) - initiallyRenderedHeight)).toBeLessThanOrEqual(
+            8,
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("preserves measured tail image row heights when rows transition into virtualization", async () => {
+    const beforeMessages = createFillerMessages({
+      prefix: "tail-image-before",
+      startOffsetSeconds: 0,
+      pairCount: 1,
+    });
+    const afterMessages = createFillerMessages({
+      prefix: "tail-image-after",
+      startOffsetSeconds: 40,
+      pairCount: 3,
+    });
+    const targetMessage = createMessage({
+      id: "target-tail-image-transition",
+      role: "user",
+      text: "Here is a narrow screenshot.",
+      offsetSeconds: 12,
+      attachments: [
+        {
+          type: "image",
+          id: "target-tail-image",
+          name: "narrow.svg",
+          mimeType: "image/svg+xml",
+          sizeBytes: 512,
+          previewUrl:
+            "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='72'%3E%3Crect width='240' height='72' fill='%23dbeafe'/%3E%3C/svg%3E",
+        },
+      ],
+    });
+    let latestSnapshot: VirtualizerSnapshot | null = null;
+    const initialProps = createBaseTimelineProps({
+      messages: [...beforeMessages, targetMessage, ...afterMessages],
+      onVirtualizerSnapshot: (snapshot) => {
+        latestSnapshot = {
+          totalSize: snapshot.totalSize,
+          measurements: snapshot.measurements,
+        };
+      },
+    });
+    const mounted = await mountMessagesTimeline({ props: initialProps });
+
+    try {
+      await vi.waitFor(
+        () => {
+          const image = mounted.host.querySelector<HTMLImageElement>(
+            `[data-timeline-row-id="${targetMessage.id}"] img`,
+          );
+          expect(image?.naturalHeight ?? 0).toBeGreaterThan(0);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const initiallyRenderedHeight = await measureRenderedRowActualHeight({
+        host: mounted.host,
+        targetRowId: targetMessage.id,
+      });
+      const appendedProps = createBaseTimelineProps({
+        messages: [
+          ...beforeMessages,
+          targetMessage,
+          ...afterMessages,
+          ...createFillerMessages({
+            prefix: "tail-image-extra",
+            startOffsetSeconds: 120,
+            pairCount: 8,
+          }),
+        ],
+        onVirtualizerSnapshot: initialProps.onVirtualizerSnapshot,
+      });
+      await mounted.rerender(appendedProps);
+
+      const scrollContainer = await waitForElement(
+        () =>
+          mounted.host.querySelector<HTMLDivElement>(
+            '[data-testid="messages-timeline-scroll-container"]',
+          ),
+        "Unable to find MessagesTimeline scroll container.",
+      );
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+      await waitForLayout();
+
+      await vi.waitFor(
+        () => {
+          const measurement = latestSnapshot?.measurements.find(
+            (entry) => entry.id === targetMessage.id,
+          );
+          expect(
+            measurement,
+            "Expected target image row to transition into virtualizer cache.",
+          ).toBeTruthy();
+          expect(Math.abs((measurement?.size ?? 0) - initiallyRenderedHeight)).toBeLessThanOrEqual(
+            8,
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
     }

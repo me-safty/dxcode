@@ -85,6 +85,17 @@ interface MessagesTimelineProps {
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
+  onVirtualizerSnapshot?: (snapshot: {
+    totalSize: number;
+    measurements: ReadonlyArray<{
+      id: string;
+      kind: MessagesTimelineRow["kind"];
+      index: number;
+      size: number;
+      start: number;
+      end: number;
+    }>;
+  }) => void;
 }
 
 export const MessagesTimeline = memo(function MessagesTimeline({
@@ -109,6 +120,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   resolvedTheme,
   timestampFormat,
   workspaceRoot,
+  onVirtualizerSnapshot,
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
@@ -191,12 +203,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     minimum: 0,
     maximum: rows.length,
   });
+  const virtualMeasurementScopeKey =
+    timelineWidthPx === null ? "width:unknown" : `width:${Math.round(timelineWidthPx)}`;
 
   const rowVirtualizer = useVirtualizer({
     count: virtualizedRowCount,
     getScrollElement: () => scrollContainer,
-    // Use stable row ids so virtual measurements do not leak across thread switches.
-    getItemKey: (index: number) => rows[index]?.id ?? index,
+    // Scope cached row measurements to the current timeline width so offscreen
+    // rows do not keep stale heights after wrapping changes.
+    getItemKey: (index: number) => {
+      const rowId = rows[index]?.id ?? String(index);
+      return `${virtualMeasurementScopeKey}:${rowId}`;
+    },
     estimateSize: (index: number) => {
       const row = rows[index];
       if (!row) return 96;
@@ -246,6 +264,32 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       }
     };
   }, []);
+  useLayoutEffect(() => {
+    if (!onVirtualizerSnapshot) {
+      return;
+    }
+    onVirtualizerSnapshot({
+      totalSize: rowVirtualizer.getTotalSize(),
+      measurements: rowVirtualizer.measurementsCache
+        .slice(0, virtualizedRowCount)
+        .flatMap((measurement) => {
+          const row = rows[measurement.index];
+          if (!row) {
+            return [];
+          }
+          return [
+            {
+              id: row.id,
+              kind: row.kind,
+              index: measurement.index,
+              size: measurement.size,
+              start: measurement.start,
+              end: measurement.end,
+            },
+          ];
+        }),
+    });
+  }, [onVirtualizerSnapshot, rowVirtualizer, rows, virtualizedRowCount]);
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const nonVirtualizedRows = rows.slice(virtualizedRowCount);
