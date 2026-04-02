@@ -29,10 +29,12 @@ import {
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
+import { CopyValueButton } from "../../components/CopyValueButton";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
 import { isElectron } from "../../env";
+import { useDesktopRemote } from "../../hooks/useDesktopRemote";
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
@@ -597,6 +599,15 @@ export function GeneralSettingsPanel() {
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
+  const desktopRemote = useDesktopRemote();
+  const [remoteTokenDraft, setRemoteTokenDraft] = useState("");
+  const desktopRemoteState = desktopRemote.state;
+  const isDesktopRemoteSupported = desktopRemote.isSupported;
+  const canEditDesktopRemoteToken = isElectron && import.meta.env.DEV;
+
+  useEffect(() => {
+    setRemoteTokenDraft(desktopRemoteState?.token ?? "");
+  }, [desktopRemoteState?.token]);
 
   const openInPreferredEditor = useCallback(
     (target: "keybindings" | "logsDirectory", path: string | null, failureMessage: string) => {
@@ -1069,6 +1080,159 @@ export function GeneralSettingsPanel() {
           }
         />
       </SettingsSection>
+
+      {isDesktopRemoteSupported ? (
+        <SettingsSection title="Remote">
+          <SettingsRow
+            title="Enable remote"
+            description="Expose this desktop app to the Expo remote client over your LAN or Tailnet without restarting local sessions."
+            status={
+              desktopRemoteState ? (
+                desktopRemoteState.errorMessage ? (
+                  <span className="text-destructive">{desktopRemoteState.errorMessage}</span>
+                ) : desktopRemoteState.enabled && desktopRemoteState.listening ? (
+                  <>
+                    Share one of the URLs below with T3 Remote and paste the same auth token into
+                    the mobile app.
+                  </>
+                ) : (
+                  <>Remote access is off. The desktop backend stays local-only.</>
+                )
+              ) : desktopRemote.isLoading ? (
+                <>Loading remote access settings...</>
+              ) : (
+                <>Remote access settings are unavailable.</>
+              )
+            }
+            control={
+              <Switch
+                checked={desktopRemoteState?.enabled ?? false}
+                disabled={desktopRemote.isLoading || desktopRemote.isSaving}
+                onCheckedChange={(checked) => {
+                  void desktopRemote.setEnabled(Boolean(checked));
+                }}
+                aria-label="Enable remote access"
+              />
+            }
+          >
+            {desktopRemoteState ? (
+              <div className="mt-4 space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-foreground">Remote URLs</span>
+                    <code className="text-[11px] text-muted-foreground">
+                      Port {desktopRemoteState.port}
+                    </code>
+                  </div>
+                  {desktopRemoteState.enabled ? (
+                    desktopRemoteState.endpoints.length > 0 ? (
+                      <div className="space-y-2">
+                        {desktopRemoteState.endpoints.map((endpoint) => (
+                          <div
+                            key={`${endpoint.label}:${endpoint.host}`}
+                            className="rounded-xl border border-border/70 bg-background/70 p-3"
+                          >
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="min-w-0 space-y-1">
+                                <div className="text-xs font-medium text-foreground">
+                                  {endpoint.label}
+                                </div>
+                                <code className="block break-all text-[11px] text-muted-foreground">
+                                  {endpoint.url}
+                                </code>
+                              </div>
+                              <CopyValueButton
+                                label={`${endpoint.label} URL`}
+                                value={endpoint.url}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        No external IPv4 address is available yet. Bring up your LAN or Tailnet
+                        interface, then return here to connect the mobile app.
+                      </p>
+                    )
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      When enabled, the desktop app will listen on this port and show the reachable
+                      LAN or Tailnet URLs here.
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-medium text-foreground">Auth token</div>
+                    {canEditDesktopRemoteToken ? (
+                      <span className="text-[11px] text-muted-foreground">
+                        Editable in desktop dev mode
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      readOnly={!canEditDesktopRemoteToken}
+                      value={
+                        canEditDesktopRemoteToken ? remoteTokenDraft : desktopRemoteState.token
+                      }
+                      onChange={(event) => {
+                        if (!canEditDesktopRemoteToken) {
+                          return;
+                        }
+                        setRemoteTokenDraft(event.target.value);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") {
+                          return;
+                        }
+                        event.preventDefault();
+                        const nextToken = remoteTokenDraft.trim();
+                        if (nextToken.length === 0 || nextToken === desktopRemoteState.token) {
+                          return;
+                        }
+                        void desktopRemote.setToken(nextToken);
+                      }}
+                      className="font-mono text-xs"
+                      aria-label="Remote auth token"
+                      spellCheck={false}
+                    />
+                    {canEditDesktopRemoteToken ? (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        className="shrink-0"
+                        disabled={
+                          desktopRemote.isSaving ||
+                          remoteTokenDraft.trim().length === 0 ||
+                          remoteTokenDraft.trim() === desktopRemoteState.token
+                        }
+                        onClick={() => {
+                          const nextToken = remoteTokenDraft.trim();
+                          if (nextToken.length === 0 || nextToken === desktopRemoteState.token) {
+                            return;
+                          }
+                          void desktopRemote.setToken(nextToken);
+                        }}
+                      >
+                        Save token
+                      </Button>
+                    ) : null}
+                    <CopyValueButton label="auth token" value={desktopRemoteState.token} />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {canEditDesktopRemoteToken
+                      ? "Dev-only override. Set a short token here if you need to type it manually into the simulator."
+                      : "Use the same token in the Expo connection screen. Existing desktop chats continue running while remote access is enabled."}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+          </SettingsRow>
+        </SettingsSection>
+      ) : null}
 
       <SettingsSection
         title="Providers"

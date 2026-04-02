@@ -13,6 +13,10 @@ const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
+const REMOTE_GET_STATE_CHANNEL = "desktop:remote-get-state";
+const REMOTE_SET_ENABLED_CHANNEL = "desktop:remote-set-enabled";
+const REMOTE_SET_TOKEN_CHANNEL = "desktop:remote-set-token";
+const REMOTE_STATE_CHANNEL = "desktop:remote-state";
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: () => {
@@ -48,6 +52,20 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.on(UPDATE_STATE_CHANNEL, wrappedListener);
     return () => {
       ipcRenderer.removeListener(UPDATE_STATE_CHANNEL, wrappedListener);
+    };
+  },
+  getRemoteState: () => ipcRenderer.invoke(REMOTE_GET_STATE_CHANNEL),
+  setRemoteEnabled: (enabled: boolean) => ipcRenderer.invoke(REMOTE_SET_ENABLED_CHANNEL, enabled),
+  setRemoteToken: (token: string) => ipcRenderer.invoke(REMOTE_SET_TOKEN_CHANNEL, token),
+  onRemoteState: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+      if (typeof state !== "object" || state === null) return;
+      listener(state as Parameters<typeof listener>[0]);
+    };
+
+    ipcRenderer.on(REMOTE_STATE_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(REMOTE_STATE_CHANNEL, wrappedListener);
     };
   },
 } satisfies DesktopBridge);

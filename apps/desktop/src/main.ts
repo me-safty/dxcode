@@ -18,6 +18,7 @@ import {
 import type { MenuItemConstructorOptions } from "electron";
 import * as Effect from "effect/Effect";
 import type {
+  DesktopRemoteState,
   DesktopTheme,
   DesktopUpdateActionResult,
   DesktopUpdateCheckResult,
@@ -45,6 +46,7 @@ import {
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
+import { DesktopRemoteManager } from "./remoteAccess";
 
 syncShellEnvironment();
 
@@ -60,8 +62,13 @@ const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
+const REMOTE_GET_STATE_CHANNEL = "desktop:remote-get-state";
+const REMOTE_SET_ENABLED_CHANNEL = "desktop:remote-set-enabled";
+const REMOTE_SET_TOKEN_CHANNEL = "desktop:remote-set-token";
+const REMOTE_STATE_CHANNEL = "desktop:remote-state";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
+const REMOTE_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -73,6 +80,7 @@ const USER_DATA_DIR_NAME = isDevelopment ? "t3code-dev" : "t3code";
 const LEGACY_USER_DATA_DIR_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
+const shouldAutoOpenDevTools = process.env.T3_DESKTOP_OPEN_DEVTOOLS === "1";
 const LOG_DIR = Path.join(STATE_DIR, "logs");
 const LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const LOG_FILE_MAX_FILES = 10;
@@ -112,6 +120,7 @@ const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
 });
 const initialUpdateState = (): DesktopUpdateState =>
   createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo);
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 function logTimestamp(): string {
   return new Date().toISOString();
@@ -320,6 +329,21 @@ let updateDownloadInFlight = false;
 let updateInstallInFlight = false;
 let updaterConfigured = false;
 let updateState: DesktopUpdateState = initialUpdateState();
+let remoteManager: DesktopRemoteManager | null = null;
+
+function getRemoteManager(): DesktopRemoteManager {
+  if (!remoteManager) {
+    remoteManager = new DesktopRemoteManager({
+      settingsPath: REMOTE_SETTINGS_PATH,
+      getBackendPort: () => backendPort,
+      getBackendAuthToken: () => backendAuthToken,
+    });
+    remoteManager.subscribe((state) => {
+      broadcastRemoteState(state);
+    });
+  }
+  return remoteManager;
+}
 
 function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
   if (updateInstallInFlight) return "install";
@@ -486,6 +510,7 @@ function handleFatalStartupError(stage: string, error: unknown): void {
     isQuitting = true;
     dialog.showErrorBox("T3 Code failed to start", `Stage: ${stage}\n${message}${detail}`);
   }
+  void remoteManager?.close();
   stopBackend();
   restoreStdIoCapture?.();
   app.quit();
@@ -771,6 +796,17 @@ function emitUpdateState(): void {
     if (window.isDestroyed()) continue;
     window.webContents.send(UPDATE_STATE_CHANNEL, updateState);
   }
+}
+
+function broadcastRemoteState(remoteState: DesktopRemoteState): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue;
+    window.webContents.send(REMOTE_STATE_CHANNEL, remoteState);
+  }
+}
+
+function emitRemoteState(): void {
+  broadcastRemoteState(getRemoteManager().getState());
 }
 
 function setUpdateState(patch: Partial<DesktopUpdateState>): void {
@@ -1328,6 +1364,30 @@ function registerIpcHandlers(): void {
       state: updateState,
     } satisfies DesktopUpdateCheckResult;
   });
+
+  ipcMain.removeHandler(REMOTE_GET_STATE_CHANNEL);
+  ipcMain.handle(REMOTE_GET_STATE_CHANNEL, async () => getRemoteManager().getState());
+
+  ipcMain.removeHandler(REMOTE_SET_ENABLED_CHANNEL);
+  ipcMain.handle(REMOTE_SET_ENABLED_CHANNEL, async (_event, rawEnabled: unknown) => {
+    if (typeof rawEnabled !== "boolean") {
+      return getRemoteManager().getState();
+    }
+    const state = await getRemoteManager().setEnabled(rawEnabled);
+    emitRemoteState();
+    return state;
+  });
+
+  ipcMain.removeHandler(REMOTE_SET_TOKEN_CHANNEL);
+  ipcMain.handle(REMOTE_SET_TOKEN_CHANNEL, async (_event, rawToken: unknown) => {
+    if (!isDevelopment || typeof rawToken !== "string") {
+      return getRemoteManager().getState();
+    }
+
+    const state = await getRemoteManager().setToken(rawToken);
+    emitRemoteState();
+    return state;
+  });
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {
@@ -1407,7 +1467,9 @@ function createWindow(): BrowserWindow {
 
   if (isDevelopment) {
     void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
-    window.webContents.openDevTools({ mode: "detach" });
+    if (shouldAutoOpenDevTools) {
+      window.webContents.openDevTools({ mode: "detach" });
+    }
   } else {
     void window.loadURL(`${DESKTOP_SCHEME}://app/index.html`);
   }
@@ -1421,12 +1483,37 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
+function focusOrCreateMainWindow(): void {
+  const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+  if (existingWindow && !existingWindow.isDestroyed()) {
+    if (existingWindow.isMinimized()) {
+      existingWindow.restore();
+    }
+    if (!existingWindow.isVisible()) {
+      existingWindow.show();
+    }
+    existingWindow.focus();
+    mainWindow = existingWindow;
+    return;
+  }
+
+  mainWindow = createWindow();
+}
+
 // Override Electron's userData path before the `ready` event so that
 // Chromium session data uses a filesystem-friendly directory name.
 // Must be called synchronously at the top level — before `app.whenReady()`.
 app.setPath("userData", resolveUserDataPath());
 
 configureAppIdentity();
+
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    focusOrCreateMainWindow();
+  });
+}
 
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
@@ -1445,6 +1532,9 @@ async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap ipc handlers registered");
   startBackend();
   writeDesktopLogHeader("bootstrap backend start requested");
+  await getRemoteManager().startIfEnabled();
+  emitRemoteState();
+  writeDesktopLogHeader("bootstrap remote access reconciled");
   mainWindow = createWindow();
   writeDesktopLogHeader("bootstrap main window created");
 }
@@ -1454,31 +1544,34 @@ app.on("before-quit", () => {
   updateInstallInFlight = false;
   writeDesktopLogHeader("before-quit received");
   clearUpdatePollTimer();
+  void remoteManager?.close();
   stopBackend();
   restoreStdIoCapture?.();
 });
 
-app
-  .whenReady()
-  .then(() => {
-    writeDesktopLogHeader("app ready");
-    configureAppIdentity();
-    configureApplicationMenu();
-    registerDesktopProtocol();
-    configureAutoUpdater();
-    void bootstrap().catch((error) => {
-      handleFatalStartupError("bootstrap", error);
-    });
+if (hasSingleInstanceLock) {
+  app
+    .whenReady()
+    .then(() => {
+      writeDesktopLogHeader("app ready");
+      configureAppIdentity();
+      configureApplicationMenu();
+      registerDesktopProtocol();
+      configureAutoUpdater();
+      void bootstrap().catch((error) => {
+        handleFatalStartupError("bootstrap", error);
+      });
 
-    app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        mainWindow = createWindow();
-      }
+      app.on("activate", () => {
+        if (BrowserWindow.getAllWindows().length === 0) {
+          focusOrCreateMainWindow();
+        }
+      });
+    })
+    .catch((error) => {
+      handleFatalStartupError("whenReady", error);
     });
-  })
-  .catch((error) => {
-    handleFatalStartupError("whenReady", error);
-  });
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin" && !isQuitting) {
@@ -1492,6 +1585,7 @@ if (process.platform !== "win32") {
     isQuitting = true;
     writeDesktopLogHeader("SIGINT received");
     clearUpdatePollTimer();
+    void remoteManager?.close();
     stopBackend();
     restoreStdIoCapture?.();
     app.quit();
@@ -1502,6 +1596,7 @@ if (process.platform !== "win32") {
     isQuitting = true;
     writeDesktopLogHeader("SIGTERM received");
     clearUpdatePollTimer();
+    void remoteManager?.close();
     stopBackend();
     restoreStdIoCapture?.();
     app.quit();

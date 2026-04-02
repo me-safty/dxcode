@@ -4,7 +4,7 @@
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "bun run --parallel dev:bundle dev:electron",
+    "dev": "bun run scripts/dev.mjs",
     "dev:bundle": "tsdown --watch",
     "dev:electron": "bun run scripts/dev-electron.mjs",
     "build": "tsdown",
@@ -16,12 +16,14 @@
   "dependencies": {
     "effect": "catalog:",
     "electron": "40.6.0",
-    "electron-updater": "^6.6.2"
+    "electron-updater": "^6.6.2",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "@types/node": "catalog:",
+    "@types/ws": "^8.18.1",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
