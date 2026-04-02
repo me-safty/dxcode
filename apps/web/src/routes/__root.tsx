@@ -22,9 +22,9 @@ import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { readNativeApi } from "../nativeApi";
 import {
   type ServerConfigUpdateSource,
+  subscribeServerConfigUpdated,
+  subscribeServerWelcome,
   useServerConfig,
-  useServerConfigUpdatedSubscription,
-  useServerWelcomeSubscription,
 } from "../rpc/serverState";
 import { ServerStateBootstrap } from "../rpc/serverStateBootstrap";
 import {
@@ -512,8 +512,8 @@ function EventRouter() {
     syncThreads,
   ]);
 
-  useServerWelcomeSubscription(handleWelcome);
-  useServerConfigUpdatedSubscription(handleServerConfigUpdated);
+  useEffect(() => subscribeServerWelcome(handleWelcome), []);
+  useEffect(() => subscribeServerConfigUpdated(handleServerConfigUpdated), []);
 
   return null;
 }

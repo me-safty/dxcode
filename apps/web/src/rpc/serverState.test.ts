@@ -9,12 +9,11 @@ import {
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resetAppAtomRegistryForTests } from "./atomRegistry.testing";
 import {
   getServerConfig,
-  onProvidersUpdated,
-  onServerConfigUpdated,
-  onWelcome,
-  resetServerStateForTests,
+  subscribeServerConfigUpdated,
+  subscribeServerWelcome,
   startServerStateSync,
 } from "./serverState";
 
@@ -101,11 +100,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   lifecycleListeners.clear();
   configListeners.clear();
-  resetServerStateForTests();
+  resetAppAtomRegistryForTests();
 });
 
 afterEach(() => {
-  resetServerStateForTests();
+  resetAppAtomRegistryForTests();
 });
 
 describe("serverState", () => {
@@ -114,7 +113,9 @@ describe("serverState", () => {
 
     const configListener = vi.fn();
     const stop = startServerStateSync(serverApi);
-    const unsubscribe = onServerConfigUpdated(configListener);
+    const unsubscribeConfig = subscribeServerConfigUpdated((notification) => {
+      configListener(notification.payload, notification.source);
+    });
 
     await waitFor(() => {
       expect(getServerConfig()).toEqual(baseServerConfig);
@@ -133,7 +134,9 @@ describe("serverState", () => {
     );
 
     const lateListener = vi.fn();
-    const unsubscribeLate = onServerConfigUpdated(lateListener);
+    const unsubscribeLate = subscribeServerConfigUpdated((notification) => {
+      lateListener(notification.payload, notification.source);
+    });
     expect(lateListener).toHaveBeenCalledWith(
       {
         issues: [],
@@ -144,7 +147,7 @@ describe("serverState", () => {
     );
 
     unsubscribeLate();
-    unsubscribe();
+    unsubscribeConfig();
     stop();
   });
 
@@ -180,7 +183,7 @@ describe("serverState", () => {
     const stop = startServerStateSync(serverApi);
 
     const listener = vi.fn();
-    const unsubscribe = onWelcome(listener);
+    const unsubscribeWelcome = subscribeServerWelcome(listener);
 
     emitLifecycleEvent({
       version: 1,
@@ -202,7 +205,7 @@ describe("serverState", () => {
     });
 
     const lateListener = vi.fn();
-    const unsubscribeLate = onWelcome(lateListener);
+    const unsubscribeLate = subscribeServerWelcome(lateListener);
     expect(lateListener).toHaveBeenCalledWith({
       cwd: "/tmp/workspace",
       projectName: "t3-code",
@@ -211,17 +214,17 @@ describe("serverState", () => {
     });
 
     unsubscribeLate();
-    unsubscribe();
+    unsubscribeWelcome();
     stop();
   });
 
   it("merges provider, settings, and keybinding updates into the cached config", async () => {
     serverApi.getConfig.mockResolvedValueOnce(baseServerConfig);
     const configListener = vi.fn();
-    const providersListener = vi.fn();
     const stop = startServerStateSync(serverApi);
-    const unsubscribeConfig = onServerConfigUpdated(configListener);
-    const unsubscribeProviders = onProvidersUpdated(providersListener);
+    const unsubscribeConfig = subscribeServerConfigUpdated((notification) => {
+      configListener(notification.payload, notification.source);
+    });
 
     await waitFor(() => {
       expect(getServerConfig()).toEqual(baseServerConfig);
@@ -273,7 +276,6 @@ describe("serverState", () => {
       });
     });
 
-    expect(providersListener).toHaveBeenLastCalledWith({ providers: nextProviders });
     expect(configListener).toHaveBeenNthCalledWith(
       2,
       {
@@ -304,7 +306,6 @@ describe("serverState", () => {
       "settingsUpdated",
     );
 
-    unsubscribeProviders();
     unsubscribeConfig();
     stop();
   });

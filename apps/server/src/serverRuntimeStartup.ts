@@ -5,19 +5,7 @@ import {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
-import {
-  Data,
-  Deferred,
-  Effect,
-  Exit,
-  Layer,
-  Option,
-  Path,
-  Queue,
-  Ref,
-  Scope,
-  ServiceMap,
-} from "effect";
+import { Deferred, Effect, Exit, Layer, Option, Path, Scope, ServiceMap } from "effect";
 
 import { ServerConfig } from "./config";
 import { Keybindings } from "./keybindings";
@@ -27,7 +15,11 @@ import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnap
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerSettingsService } from "./serverSettings";
-import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
+import {
+  launchStartupHeartbeat,
+  makeCommandGate,
+  ServerRuntimeStartupError,
+} from "./serverRuntimeStartup.logic";
 
 const isWildcardHost = (host: string | undefined): boolean =>
   host === "0.0.0.0" || host === "::" || host === "[::]";
@@ -35,12 +27,7 @@ const isWildcardHost = (host: string | undefined): boolean =>
 const formatHostForUrl = (host: string): string =>
   host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 
-export class ServerRuntimeStartupError extends Data.TaggedError("ServerRuntimeStartupError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
-
-export interface ServerRuntimeStartupShape {
+interface ServerRuntimeStartupShape {
   readonly awaitCommandReady: Effect.Effect<void, ServerRuntimeStartupError>;
   readonly markHttpListening: Effect.Effect<void>;
   readonly enqueueCommand: <A, E>(
@@ -52,99 +39,6 @@ export class ServerRuntimeStartup extends ServiceMap.Service<
   ServerRuntimeStartup,
   ServerRuntimeStartupShape
 >()("t3/serverRuntimeStartup") {}
-
-interface QueuedCommand {
-  readonly run: Effect.Effect<void, never>;
-}
-
-type CommandReadinessState = "pending" | "ready" | ServerRuntimeStartupError;
-
-interface CommandGate {
-  readonly awaitCommandReady: Effect.Effect<void, ServerRuntimeStartupError>;
-  readonly signalCommandReady: Effect.Effect<void>;
-  readonly failCommandReady: (error: ServerRuntimeStartupError) => Effect.Effect<void>;
-  readonly enqueueCommand: <A, E>(
-    effect: Effect.Effect<A, E>,
-  ) => Effect.Effect<A, E | ServerRuntimeStartupError>;
-}
-
-const settleQueuedCommand = <A, E>(deferred: Deferred.Deferred<A, E>, exit: Exit.Exit<A, E>) =>
-  Exit.isSuccess(exit)
-    ? Deferred.succeed(deferred, exit.value)
-    : Deferred.failCause(deferred, exit.cause);
-
-export const makeCommandGate = Effect.gen(function* () {
-  const commandReady = yield* Deferred.make<void, ServerRuntimeStartupError>();
-  const commandQueue = yield* Queue.unbounded<QueuedCommand>();
-  const commandReadinessState = yield* Ref.make<CommandReadinessState>("pending");
-
-  const commandWorker = Effect.forever(
-    Queue.take(commandQueue).pipe(Effect.flatMap((command) => command.run)),
-  );
-  yield* Effect.forkScoped(commandWorker);
-
-  return {
-    awaitCommandReady: Deferred.await(commandReady),
-    signalCommandReady: Effect.gen(function* () {
-      yield* Ref.set(commandReadinessState, "ready");
-      yield* Deferred.succeed(commandReady, undefined).pipe(Effect.orDie);
-    }),
-    failCommandReady: (error) =>
-      Effect.gen(function* () {
-        yield* Ref.set(commandReadinessState, error);
-        yield* Deferred.fail(commandReady, error).pipe(Effect.orDie);
-      }),
-    enqueueCommand: <A, E>(effect: Effect.Effect<A, E>) =>
-      Effect.gen(function* () {
-        const readinessState = yield* Ref.get(commandReadinessState);
-        if (readinessState === "ready") {
-          return yield* effect;
-        }
-        if (readinessState !== "pending") {
-          return yield* readinessState;
-        }
-
-        const result = yield* Deferred.make<A, E | ServerRuntimeStartupError>();
-        yield* Queue.offer(commandQueue, {
-          run: Deferred.await(commandReady).pipe(
-            Effect.flatMap(() => effect),
-            Effect.exit,
-            Effect.flatMap((exit) => settleQueuedCommand(result, exit)),
-          ),
-        });
-        return yield* Deferred.await(result);
-      }),
-  } satisfies CommandGate;
-});
-
-export const recordStartupHeartbeat = Effect.gen(function* () {
-  const analytics = yield* AnalyticsService;
-  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
-
-  const { threadCount, projectCount } = yield* projectionSnapshotQuery.getCounts().pipe(
-    Effect.catch((cause) =>
-      Effect.logWarning("failed to gather startup projection counts for telemetry", {
-        cause,
-      }).pipe(
-        Effect.as({
-          threadCount: 0,
-          projectCount: 0,
-        }),
-      ),
-    ),
-  );
-
-  yield* analytics.record("server.boot.heartbeat", {
-    threadCount,
-    projectCount,
-  });
-});
-
-export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
-  Effect.ignoreCause({ log: true }),
-  Effect.forkScoped,
-  Effect.asVoid,
-);
 
 const autoBootstrapWelcome = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
@@ -306,7 +200,7 @@ const makeServerRuntimeStartup = Effect.gen(function* () {
   yield* Effect.forkScoped(
     Effect.gen(function* () {
       const startupExit = yield* Effect.exit(startup);
-      if (Exit.isFailure(startupExit)) {
+      if (startupExit._tag === "Failure") {
         const error = new ServerRuntimeStartupError({
           message: "Server runtime startup failed before command readiness.",
           cause: startupExit.cause,
@@ -337,7 +231,7 @@ const makeServerRuntimeStartup = Effect.gen(function* () {
 
   return {
     awaitCommandReady: commandGate.awaitCommandReady,
-    markHttpListening: Deferred.succeed(httpListening, undefined),
+    markHttpListening: Deferred.succeed(httpListening, undefined).pipe(Effect.asVoid),
     enqueueCommand: commandGate.enqueueCommand,
   } satisfies ServerRuntimeStartupShape;
 });

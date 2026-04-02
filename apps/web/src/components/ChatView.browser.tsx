@@ -30,9 +30,9 @@ import {
   removeInlineTerminalContextPlaceholder,
 } from "../lib/terminalContext";
 import { isMacPlatform } from "../lib/utils";
-import { __resetNativeApiForTests } from "../nativeApi";
 import { getRouter } from "../router";
 import { useStore } from "../store";
+import { resetAppAtomRegistryForTests } from "../rpc/atomRegistry.testing";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
@@ -1120,7 +1120,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
         return [];
       },
     });
-    __resetNativeApiForTests();
+    resetAppAtomRegistryForTests();
+    const clientCache = globalThis as typeof globalThis & {
+      __t3WsRpcClient?: { dispose?: () => Promise<void> } | null;
+    };
+    await clientCache.__t3WsRpcClient?.dispose?.();
+    clientCache.__t3WsRpcClient = null;
     await setViewport(DEFAULT_VIEWPORT);
     localStorage.clear();
     document.body.innerHTML = "";

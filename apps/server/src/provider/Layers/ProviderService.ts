@@ -595,7 +595,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   } satisfies ProviderServiceShape;
 });
 
-export const ProviderServiceLive = Layer.effect(ProviderService, makeProviderService());
 export function makeProviderServiceLive(options?: ProviderServiceLiveOptions) {
   return Layer.effect(ProviderService, makeProviderService(options));
 }

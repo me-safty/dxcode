@@ -2,13 +2,12 @@ import { KeybindingCommand, KeybindingRule, KeybindingsConfig } from "@t3tools/c
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { assertFailure } from "@effect/vitest/utils";
-import { Effect, FileSystem, Layer, Logger, Path, Schema } from "effect";
+import { Effect, FileSystem, Layer, Logger, Option, Path, Schema } from "effect";
 import { ServerConfig } from "./config";
 
 import {
   DEFAULT_KEYBINDINGS,
   ResolvedKeybindingFromConfig,
-  compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
   parseKeybindingShortcut,
 } from "./keybindings.logic";
@@ -33,6 +32,9 @@ const toDetailResult = <A, R>(effect: Effect.Effect<A, KeybindingsConfigError, R
     Effect.mapError((error) => error.detail),
     Effect.result,
   );
+
+const compileResolvedKeybindingRule = (rule: KeybindingRule) =>
+  Option.getOrNull(Schema.decodeUnknownOption(ResolvedKeybindingFromConfig)(rule));
 
 const writeKeybindingsConfig = (configPath: string, rules: readonly KeybindingRule[]) =>
   Effect.gen(function* () {

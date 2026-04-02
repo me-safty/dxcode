@@ -1,13 +1,8 @@
 import { spawn } from "node:child_process";
 
-import { EDITORS, type EditorId } from "@t3tools/contracts";
-import { Effect, Schema } from "effect";
+import { EDITORS, OpenError, type EditorId } from "@t3tools/contracts";
+import { Effect } from "effect";
 import { isCommandAvailable } from "./open.shared";
-
-export class OpenError extends Schema.TaggedErrorClass<OpenError>()("OpenError", {
-  message: Schema.String,
-  cause: Schema.optional(Schema.Defect),
-}) {}
 
 export interface OpenInEditorInput {
   readonly cwd: string;
@@ -50,11 +45,6 @@ export function resolveAvailableEditors(
   }
 
   return available;
-}
-
-export interface OpenShape {
-  readonly openBrowser: (target: string) => Effect.Effect<void, OpenError>;
-  readonly openInEditor: (input: OpenInEditorInput) => Effect.Effect<void, OpenError>;
 }
 
 export const resolveEditorLaunch = Effect.fnUntraced(function* (

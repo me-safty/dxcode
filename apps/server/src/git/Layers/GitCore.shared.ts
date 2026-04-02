@@ -25,6 +25,11 @@ import {
   type ExecuteGitInput,
   type ExecuteGitResult,
 } from "../Services/GitCore.ts";
+import {
+  parseRemoteNames,
+  parseRemoteNamesInGitOrder,
+  parseRemoteRefWithRemoteNames,
+} from "../remoteRefs.ts";
 import { ServerConfig } from "../../config.ts";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 
@@ -39,6 +44,7 @@ const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
+const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
 
@@ -48,7 +54,7 @@ type TraceTailState = {
 };
 
 class StatusUpstreamRefreshCacheKey extends Data.Class<{
-  cwd: string;
+  gitCommonDir: string;
   upstreamRef: string;
   remoteName: string;
   upstreamBranch: string;
@@ -175,14 +181,6 @@ function parseBranchLine(line: string): { name: string; current: boolean } | nul
   };
 }
 
-function parseRemoteNames(stdout: string): ReadonlyArray<string> {
-  return stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .toSorted((a, b) => b.length - a.length);
-}
-
 function sanitizeRemoteName(value: string): string {
   const sanitized = value
     .trim()
@@ -215,30 +213,41 @@ function parseRemoteFetchUrls(stdout: string): Map<string, string> {
   return remotes;
 }
 
-function parseRemoteRefWithRemoteNames(
-  branchName: string,
+function parseUpstreamRefWithRemoteNames(
+  upstreamRef: string,
   remoteNames: ReadonlyArray<string>,
-): { remoteRef: string; remoteName: string; localBranch: string } | null {
-  const trimmedBranchName = branchName.trim();
-  if (trimmedBranchName.length === 0) return null;
-
-  for (const remoteName of remoteNames) {
-    const remotePrefix = `${remoteName}/`;
-    if (!trimmedBranchName.startsWith(remotePrefix)) {
-      continue;
-    }
-    const localBranch = trimmedBranchName.slice(remotePrefix.length).trim();
-    if (localBranch.length === 0) {
-      return null;
-    }
-    return {
-      remoteRef: trimmedBranchName,
-      remoteName,
-      localBranch,
-    };
+): { upstreamRef: string; remoteName: string; upstreamBranch: string } | null {
+  const parsed = parseRemoteRefWithRemoteNames(upstreamRef, remoteNames);
+  if (!parsed) {
+    return null;
   }
 
-  return null;
+  return {
+    upstreamRef,
+    remoteName: parsed.remoteName,
+    upstreamBranch: parsed.branchName,
+  };
+}
+
+function parseUpstreamRefByFirstSeparator(
+  upstreamRef: string,
+): { upstreamRef: string; remoteName: string; upstreamBranch: string } | null {
+  const separatorIndex = upstreamRef.indexOf("/");
+  if (separatorIndex <= 0 || separatorIndex === upstreamRef.length - 1) {
+    return null;
+  }
+
+  const remoteName = upstreamRef.slice(0, separatorIndex).trim();
+  const upstreamBranch = upstreamRef.slice(separatorIndex + 1).trim();
+  if (remoteName.length === 0 || upstreamBranch.length === 0) {
+    return null;
+  }
+
+  return {
+    upstreamRef,
+    remoteName,
+    upstreamBranch,
+  };
 }
 
 function parseTrackingBranchByUpstreamRef(stdout: string, upstreamRef: string): string | null {
@@ -790,45 +799,27 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       return null;
     }
 
-    const separatorIndex = upstreamRef.indexOf("/");
-    if (separatorIndex <= 0) {
-      return null;
-    }
-    const remoteName = upstreamRef.slice(0, separatorIndex);
-    const upstreamBranch = upstreamRef.slice(separatorIndex + 1);
-    if (remoteName.length === 0 || upstreamBranch.length === 0) {
-      return null;
-    }
-
-    return {
-      upstreamRef,
-      remoteName,
-      upstreamBranch,
-    };
+    const remoteNames = yield* runGitStdout("GitCore.listRemoteNames", cwd, ["remote"]).pipe(
+      Effect.map(parseRemoteNames),
+      Effect.catch(() => Effect.succeed<ReadonlyArray<string>>([])),
+    );
+    return (
+      parseUpstreamRefWithRemoteNames(upstreamRef, remoteNames) ??
+      parseUpstreamRefByFirstSeparator(upstreamRef)
+    );
   });
 
-  const fetchUpstreamRef = (
-    cwd: string,
-    upstream: { upstreamRef: string; remoteName: string; upstreamBranch: string },
-  ): Effect.Effect<void, GitCommandError> => {
-    const refspec = `+refs/heads/${upstream.upstreamBranch}:refs/remotes/${upstream.upstreamRef}`;
-    return runGit(
-      "GitCore.fetchUpstreamRef",
-      cwd,
-      ["fetch", "--quiet", "--no-tags", upstream.remoteName, refspec],
-      true,
-    );
-  };
-
   const fetchUpstreamRefForStatus = (
-    cwd: string,
+    gitCommonDir: string,
     upstream: { upstreamRef: string; remoteName: string; upstreamBranch: string },
   ): Effect.Effect<void, GitCommandError> => {
     const refspec = `+refs/heads/${upstream.upstreamBranch}:refs/remotes/${upstream.upstreamRef}`;
+    const fetchCwd =
+      path.basename(gitCommonDir) === ".git" ? path.dirname(gitCommonDir) : gitCommonDir;
     return executeGit(
       "GitCore.fetchUpstreamRefForStatus",
-      cwd,
-      ["fetch", "--quiet", "--no-tags", upstream.remoteName, refspec],
+      fetchCwd,
+      ["--git-dir", gitCommonDir, "fetch", "--quiet", "--no-tags", upstream.remoteName, refspec],
       {
         allowNonZeroExit: true,
         timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
@@ -836,10 +827,18 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     ).pipe(Effect.asVoid);
   };
 
+  const resolveGitCommonDir = Effect.fn("resolveGitCommonDir")(function* (cwd: string) {
+    const gitCommonDir = yield* runGitStdout("GitCore.resolveGitCommonDir", cwd, [
+      "rev-parse",
+      "--git-common-dir",
+    ]).pipe(Effect.map((stdout) => stdout.trim()));
+    return path.isAbsolute(gitCommonDir) ? gitCommonDir : path.resolve(cwd, gitCommonDir);
+  });
+
   const refreshStatusUpstreamCacheEntry = Effect.fn("refreshStatusUpstreamCacheEntry")(function* (
     cacheKey: StatusUpstreamRefreshCacheKey,
   ) {
-    yield* fetchUpstreamRefForStatus(cacheKey.cwd, {
+    yield* fetchUpstreamRefForStatus(cacheKey.gitCommonDir, {
       upstreamRef: cacheKey.upstreamRef,
       remoteName: cacheKey.remoteName,
       upstreamBranch: cacheKey.upstreamBranch,
@@ -850,8 +849,11 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   const statusUpstreamRefreshCache = yield* Cache.makeWith({
     capacity: STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY,
     lookup: refreshStatusUpstreamCacheEntry,
-    // Keep successful refreshes warm; drop failures immediately so next request can retry.
-    timeToLive: (exit) => (Exit.isSuccess(exit) ? STATUS_UPSTREAM_REFRESH_INTERVAL : Duration.zero),
+    // Keep successful refreshes warm and briefly back off failed refreshes to avoid retry storms.
+    timeToLive: (exit) =>
+      Exit.isSuccess(exit)
+        ? STATUS_UPSTREAM_REFRESH_INTERVAL
+        : STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN,
   });
 
   const refreshStatusUpstreamIfStale = Effect.fn("refreshStatusUpstreamIfStale")(function* (
@@ -859,23 +861,16 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   ) {
     const upstream = yield* resolveCurrentUpstream(cwd);
     if (!upstream) return;
+    const gitCommonDir = yield* resolveGitCommonDir(cwd);
     yield* Cache.get(
       statusUpstreamRefreshCache,
       new StatusUpstreamRefreshCacheKey({
-        cwd,
+        gitCommonDir,
         upstreamRef: upstream.upstreamRef,
         remoteName: upstream.remoteName,
         upstreamBranch: upstream.upstreamBranch,
       }),
     );
-  });
-
-  const refreshCheckedOutBranchUpstream = Effect.fn("refreshCheckedOutBranchUpstream")(function* (
-    cwd: string,
-  ) {
-    const upstream = yield* resolveCurrentUpstream(cwd);
-    if (!upstream) return;
-    yield* fetchUpstreamRef(cwd, upstream);
   });
 
   const resolveDefaultBranchName = (
@@ -917,7 +912,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
 
   const listRemoteNames = (cwd: string): Effect.Effect<ReadonlyArray<string>, GitCommandError> =>
     runGitStdout("GitCore.listRemoteNames", cwd, ["remote"]).pipe(
-      Effect.map((stdout) => parseRemoteNames(stdout).toReversed()),
+      Effect.map(parseRemoteNamesInGitOrder),
     );
 
   const resolvePrimaryRemoteName = Effect.fn("resolvePrimaryRemoteName")(function* (cwd: string) {
@@ -1937,11 +1932,6 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
         timeoutMs: 10_000,
         fallbackErrorMessage: "git checkout failed",
       });
-
-      // Refresh upstream refs in the background so checkout remains responsive.
-      yield* Effect.forkScoped(
-        refreshCheckedOutBranchUpstream(input.cwd).pipe(Effect.ignoreCause({ log: true })),
-      );
     },
   );
 
@@ -1955,6 +1945,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     runGitStdout("GitCore.listLocalBranchNames", cwd, [
       "branch",
       "--list",
+      "--no-column",
       "--format=%(refname:short)",
     ]).pipe(
       Effect.map((stdout) =>
