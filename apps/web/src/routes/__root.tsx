@@ -202,6 +202,7 @@ function EventRouter() {
   const removeOrphanedTerminalStates = useTerminalStateStore(
     (store) => store.removeOrphanedTerminalStates,
   );
+  const clearThreadRuntimeToolOutput = useRuntimeToolOutputStore((store) => store.clearThread);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
@@ -394,6 +395,9 @@ function EventRouter() {
         draftStore.clearDraftThread(threadId);
         clearThreadUi(threadId);
       }
+      for (const threadId of batchEffects.clearRuntimeToolOutputThreadIds) {
+        clearThreadRuntimeToolOutput(threadId);
+      }
       for (const threadId of batchEffects.removeTerminalStateThreadIds) {
         removeTerminalState(threadId);
       }
@@ -520,6 +524,7 @@ function EventRouter() {
     removeTerminalState,
     removeOrphanedTerminalStates,
     clearThreadUi,
+    clearThreadRuntimeToolOutput,
     setProjectExpanded,
     syncProjects,
     syncServerReadModel,
