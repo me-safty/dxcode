@@ -10,6 +10,8 @@ vi.mock("../wsRpcClient", () => ({
 }));
 
 import {
+  createGitBranchSearchInfiniteData,
+  gitBranchSearchInfiniteQueryOptions,
   gitBranchesQueryOptions,
   gitMutationKeys,
   gitQueryKeys,
@@ -20,6 +22,16 @@ import {
   gitStatusQueryOptions,
   invalidateGitQueries,
 } from "./gitReactQuery";
+
+const BRANCH_QUERY_RESULT = {
+  branches: [],
+  isRepo: true,
+  hasOriginRemote: true,
+  nextCursor: null,
+  totalCount: 0,
+};
+
+const BRANCH_SEARCH_RESULT = createGitBranchSearchInfiniteData(BRANCH_QUERY_RESULT);
 
 describe("gitMutationKeys", () => {
   it("scopes stacked action keys by cwd", () => {
@@ -64,14 +76,37 @@ describe("git mutation options", () => {
   });
 });
 
+describe("createGitBranchSearchInfiniteData", () => {
+  it("wraps a branch page as the initial infinite-query payload", () => {
+    expect(createGitBranchSearchInfiniteData(BRANCH_QUERY_RESULT)).toEqual({
+      pages: [BRANCH_QUERY_RESULT],
+      pageParams: [0],
+    });
+  });
+});
+
 describe("invalidateGitQueries", () => {
   it("can invalidate a single cwd without blasting other git query scopes", async () => {
     const queryClient = new QueryClient();
 
     queryClient.setQueryData(gitQueryKeys.status("/repo/a"), { ok: "a" });
-    queryClient.setQueryData(gitQueryKeys.branches("/repo/a"), { ok: "a-branches" });
+    queryClient.setQueryData(gitBranchesQueryOptions("/repo/a").queryKey, BRANCH_QUERY_RESULT);
+    queryClient.setQueryData(
+      gitBranchSearchInfiniteQueryOptions({
+        cwd: "/repo/a",
+        query: "feature",
+      }).queryKey,
+      BRANCH_SEARCH_RESULT,
+    );
     queryClient.setQueryData(gitQueryKeys.status("/repo/b"), { ok: "b" });
-    queryClient.setQueryData(gitQueryKeys.branches("/repo/b"), { ok: "b-branches" });
+    queryClient.setQueryData(gitBranchesQueryOptions("/repo/b").queryKey, BRANCH_QUERY_RESULT);
+    queryClient.setQueryData(
+      gitBranchSearchInfiniteQueryOptions({
+        cwd: "/repo/b",
+        query: "feature",
+      }).queryKey,
+      BRANCH_SEARCH_RESULT,
+    );
 
     await invalidateGitQueries(queryClient, { cwd: "/repo/a" });
 
@@ -82,10 +117,26 @@ describe("invalidateGitQueries", () => {
       queryClient.getQueryState(gitBranchesQueryOptions("/repo/a").queryKey)?.isInvalidated,
     ).toBe(true);
     expect(
+      queryClient.getQueryState(
+        gitBranchSearchInfiniteQueryOptions({
+          cwd: "/repo/a",
+          query: "feature",
+        }).queryKey,
+      )?.isInvalidated,
+    ).toBe(true);
+    expect(
       queryClient.getQueryState(gitStatusQueryOptions("/repo/b").queryKey)?.isInvalidated,
     ).toBe(false);
     expect(
       queryClient.getQueryState(gitBranchesQueryOptions("/repo/b").queryKey)?.isInvalidated,
+    ).toBe(false);
+    expect(
+      queryClient.getQueryState(
+        gitBranchSearchInfiniteQueryOptions({
+          cwd: "/repo/b",
+          query: "feature",
+        }).queryKey,
+      )?.isInvalidated,
     ).toBe(false);
   });
 });
@@ -95,7 +146,7 @@ describe("invalidateGitStatusQuery", () => {
     const queryClient = new QueryClient();
 
     queryClient.setQueryData(gitQueryKeys.status("/repo/a"), { ok: "a" });
-    queryClient.setQueryData(gitQueryKeys.branches("/repo/a"), { ok: "a-branches" });
+    queryClient.setQueryData(gitBranchesQueryOptions("/repo/a").queryKey, BRANCH_QUERY_RESULT);
     queryClient.setQueryData(gitQueryKeys.status("/repo/b"), { ok: "b" });
 
     await invalidateGitStatusQuery(queryClient, "/repo/a");

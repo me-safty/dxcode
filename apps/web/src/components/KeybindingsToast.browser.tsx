@@ -157,6 +157,8 @@ function resolveWsRpc(tag: string): unknown {
     return {
       isRepo: true,
       hasOriginRemote: true,
+      nextCursor: null,
+      totalCount: 1,
       branches: [{ name: "main", current: true, isDefault: true, worktreePath: null }],
     };
   }

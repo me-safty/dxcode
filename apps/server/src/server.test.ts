@@ -922,6 +922,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 ],
                 isRepo: true,
                 hasOriginRemote: true,
+                nextCursor: null,
+                totalCount: 1,
               }),
             createWorktree: () =>
               Effect.succeed({

@@ -632,6 +632,8 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
     return {
       isRepo: true,
       hasOriginRemote: true,
+      nextCursor: null,
+      totalCount: 1,
       branches: [
         {
           name: "main",

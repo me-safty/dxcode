@@ -1,5 +1,15 @@
-import { type GitActionProgressEvent, type GitStackedAction } from "@t3tools/contracts";
-import { mutationOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
+import {
+  type GitActionProgressEvent,
+  type GitListBranchesResult,
+  type GitStackedAction,
+} from "@t3tools/contracts";
+import {
+  type InfiniteData,
+  infiniteQueryOptions,
+  mutationOptions,
+  queryOptions,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { ensureNativeApi } from "../nativeApi";
 import { getWsRpcClient } from "../wsRpcClient";
 
@@ -7,11 +17,16 @@ const GIT_STATUS_STALE_TIME_MS = 5_000;
 const GIT_STATUS_REFETCH_INTERVAL_MS = 15_000;
 const GIT_BRANCHES_STALE_TIME_MS = 15_000;
 const GIT_BRANCHES_REFETCH_INTERVAL_MS = 60_000;
+const GIT_BRANCHES_PAGE_SIZE = 100;
+const GIT_BRANCH_OVERVIEW_LIMIT = GIT_BRANCHES_PAGE_SIZE;
 
 export const gitQueryKeys = {
   all: ["git"] as const,
   status: (cwd: string | null) => ["git", "status", cwd] as const,
   branches: (cwd: string | null) => ["git", "branches", cwd] as const,
+  branchesOverview: (cwd: string | null) => ["git", "branches", cwd, "overview"] as const,
+  branchSearch: (cwd: string | null, query: string) =>
+    ["git", "branches", cwd, "search", query] as const,
 };
 
 export const gitMutationKeys = {
@@ -61,11 +76,11 @@ export function gitStatusQueryOptions(cwd: string | null) {
 
 export function gitBranchesQueryOptions(cwd: string | null) {
   return queryOptions({
-    queryKey: gitQueryKeys.branches(cwd),
+    queryKey: gitQueryKeys.branchesOverview(cwd),
     queryFn: async () => {
       const api = ensureNativeApi();
       if (!cwd) throw new Error("Git branches are unavailable.");
-      return api.git.listBranches({ cwd });
+      return api.git.listBranches({ cwd, limit: GIT_BRANCH_OVERVIEW_LIMIT });
     },
     enabled: cwd !== null,
     staleTime: GIT_BRANCHES_STALE_TIME_MS,
@@ -73,6 +88,44 @@ export function gitBranchesQueryOptions(cwd: string | null) {
     refetchOnReconnect: true,
     refetchInterval: GIT_BRANCHES_REFETCH_INTERVAL_MS,
   });
+}
+
+export function gitBranchSearchInfiniteQueryOptions(input: {
+  cwd: string | null;
+  query: string;
+  enabled?: boolean;
+}) {
+  const normalizedQuery = input.query.trim();
+
+  return infiniteQueryOptions({
+    queryKey: gitQueryKeys.branchSearch(input.cwd, normalizedQuery),
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      const api = ensureNativeApi();
+      if (!input.cwd) throw new Error("Git branches are unavailable.");
+      return api.git.listBranches({
+        cwd: input.cwd,
+        ...(normalizedQuery.length > 0 ? { query: normalizedQuery } : {}),
+        cursor: pageParam,
+        limit: GIT_BRANCHES_PAGE_SIZE,
+      });
+    },
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: input.cwd !== null && (input.enabled ?? true),
+    staleTime: GIT_BRANCHES_STALE_TIME_MS,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    refetchInterval: GIT_BRANCHES_REFETCH_INTERVAL_MS,
+  });
+}
+
+export function createGitBranchSearchInfiniteData(
+  page: GitListBranchesResult,
+): InfiniteData<GitListBranchesResult, number> {
+  return {
+    pages: [page],
+    pageParams: [0],
+  };
 }
 
 export function gitResolvePullRequestQueryOptions(input: {
