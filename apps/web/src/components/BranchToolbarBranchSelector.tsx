@@ -16,7 +16,6 @@ import {
 
 import {
   gitBranchSearchInfiniteQueryOptions,
-  gitBranchesQueryOptions,
   gitQueryKeys,
   gitStatusQueryOptions,
   invalidateGitQueries,
@@ -92,7 +91,6 @@ export function BranchToolbarBranchSelector({
   const [branchQuery, setBranchQuery] = useState("");
   const deferredBranchQuery = useDeferredValue(branchQuery);
 
-  const branchesOverviewQuery = useQuery(gitBranchesQueryOptions(branchCwd));
   const branchStatusQuery = useQuery(gitStatusQueryOptions(branchCwd));
   const trimmedBranchQuery = branchQuery.trim();
   const deferredTrimmedBranchQuery = deferredBranchQuery.trim();
@@ -115,11 +113,8 @@ export function BranchToolbarBranchSelector({
     () => branchesSearchQuery.data?.pages.flatMap((page) => page.branches) ?? [],
     [branchesSearchQuery.data?.pages],
   );
-  const overviewBranches = branchesOverviewQuery.data?.branches ?? [];
   const currentGitBranch =
-    branchStatusQuery.data?.branch ??
-    overviewBranches.find((branch) => branch.current)?.name ??
-    null;
+    branchStatusQuery.data?.branch ?? branches.find((branch) => branch.current)?.name ?? null;
   const canonicalActiveBranch = resolveBranchToolbarValue({
     envMode: effectiveEnvMode,
     activeWorktreePath,
@@ -505,10 +500,7 @@ export function BranchToolbarBranchSelector({
       <ComboboxTrigger
         render={<Button variant="ghost" size="xs" />}
         className="text-muted-foreground/70 hover:text-foreground/80"
-        disabled={
-          (branchesOverviewQuery.isLoading && overviewBranches.length === 0) ||
-          isBranchActionPending
-        }
+        disabled={(branchesSearchQuery.isPending && branches.length === 0) || isBranchActionPending}
       >
         <span className="max-w-[240px] truncate">{triggerLabel}</span>
         <ChevronDownIcon />
