@@ -3,10 +3,7 @@ import type { Thread } from "../types";
 
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
 
-type ThreadStatusInput = Pick<
-  Thread,
-  "interactionMode" | "latestTurn" | "proposedPlans" | "session"
-> & {
+type ThreadStatusInput = Pick<Thread, "latestTurn"> & {
   lastVisitedAt?: string | undefined;
 };
 
