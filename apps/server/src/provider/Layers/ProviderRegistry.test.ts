@@ -30,7 +30,7 @@ import {
   parseAuthStatusFromOutput,
   readCodexConfigModelProvider,
 } from "./CodexProvider.testing";
-import { checkClaudeProviderStatus, parseClaudeAuthStatusFromOutput } from "./ClaudeProvider";
+import { checkClaudeProviderStatus } from "./ClaudeProvider.logic";
 import { ProviderRegistryLive } from "./ProviderRegistry";
 import { haveProvidersChanged } from "./ProviderRegistry.shared";
 import { ServerSettingsService } from "../../serverSettings";
@@ -1014,46 +1014,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           ),
         ),
       );
-    });
-
-    // ── parseClaudeAuthStatusFromOutput pure tests ────────────────────
-
-    describe("parseClaudeAuthStatusFromOutput", () => {
-      it("exit code 0 with no auth markers is ready", () => {
-        const parsed = parseClaudeAuthStatusFromOutput({ stdout: "OK\n", stderr: "", code: 0 });
-        assert.strictEqual(parsed.status, "ready");
-        assert.strictEqual(parsed.auth.status, "authenticated");
-      });
-
-      it("JSON with loggedIn=true is authenticated", () => {
-        const parsed = parseClaudeAuthStatusFromOutput({
-          stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
-          stderr: "",
-          code: 0,
-        });
-        assert.strictEqual(parsed.status, "ready");
-        assert.strictEqual(parsed.auth.status, "authenticated");
-      });
-
-      it("JSON with loggedIn=false is unauthenticated", () => {
-        const parsed = parseClaudeAuthStatusFromOutput({
-          stdout: '{"loggedIn":false}\n',
-          stderr: "",
-          code: 0,
-        });
-        assert.strictEqual(parsed.status, "error");
-        assert.strictEqual(parsed.auth.status, "unauthenticated");
-      });
-
-      it("JSON without auth marker is warning", () => {
-        const parsed = parseClaudeAuthStatusFromOutput({
-          stdout: '{"ok":true}\n',
-          stderr: "",
-          code: 0,
-        });
-        assert.strictEqual(parsed.status, "warning");
-        assert.strictEqual(parsed.auth.status, "unknown");
-      });
     });
   },
 );

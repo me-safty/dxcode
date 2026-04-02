@@ -1,27 +1,38 @@
-/**
- * Open - Browser/editor launch service interface.
- *
- * Owns process launch helpers for opening URLs in a browser and workspace
- * paths in a configured editor.
- *
- * @module Open
- */
+import { OpenError } from "@t3tools/contracts";
 import { ServiceMap, Effect, Layer } from "effect";
-
 import {
-  OpenError,
-  type OpenShape,
   launchDetached,
-  resolveAvailableEditors,
   resolveEditorLaunch,
+  resolveAvailableEditors,
+  type OpenInEditorInput,
 } from "./open.logic";
+export { resolveAvailableEditors };
+
+/**
+ * OpenShape - Service API for browser and editor launch actions.
+ */
+interface OpenShape {
+  /**
+   * Open a URL target in the default browser.
+   */
+  readonly openBrowser: (target: string) => Effect.Effect<void, OpenError>;
+
+  /**
+   * Open a workspace path in a selected editor integration.
+   *
+   * Launches the editor as a detached process so server startup is not blocked.
+   */
+  readonly openInEditor: (input: OpenInEditorInput) => Effect.Effect<void, OpenError>;
+}
 
 /**
  * Open - Service tag for browser/editor launch operations.
  */
 export class Open extends ServiceMap.Service<Open, OpenShape>()("t3/open") {}
 
-export { resolveAvailableEditors };
+// ==============================
+// Implementations
+// ==============================
 
 const make = Effect.gen(function* () {
   const open = yield* Effect.tryPromise({

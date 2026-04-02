@@ -1,16 +1,20 @@
 import { type OrchestrationEvent, type OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
 import { create } from "zustand";
+
 import {
-  type AppState,
   applyOrchestrationEvent,
   applyOrchestrationEvents,
   initialState,
   selectProjectById,
+  selectSidebarThreadSummaryById,
   selectThreadById,
   setError,
   setThreadBranch,
   syncServerReadModel,
+  type AppState,
 } from "./store.logic";
+
+export { selectProjectById, selectSidebarThreadSummaryById, selectThreadById };
 
 interface AppStore extends AppState {
   syncServerReadModel: (readModel: OrchestrationReadModel) => void;
@@ -29,5 +33,3 @@ export const useStore = create<AppStore>((set) => ({
   setThreadBranch: (threadId, branch, worktreePath) =>
     set((state) => setThreadBranch(state, threadId, branch, worktreePath)),
 }));
-
-export { selectProjectById, selectThreadById };

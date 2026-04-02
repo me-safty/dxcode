@@ -1,4 +1,7 @@
-import { Effect, FileSystem, Layer, Path } from "effect";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
+
+import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { runMigrations } from "../Migrations.ts";
@@ -37,14 +40,7 @@ const setup = Layer.effectDiscard(
 
 export const makeSqlitePersistenceLive = (dbPath: string) =>
   Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
+    yield* Effect.tryPromise(() => mkdir(dirname(dbPath), { recursive: true }));
 
     return Layer.provideMerge(setup, makeRuntimeSqliteLayer({ filename: dbPath }));
   }).pipe(Layer.unwrap);
-
-export const SqlitePersistenceMemory = Layer.provideMerge(
-  setup,
-  makeRuntimeSqliteLayer({ filename: ":memory:" }),
-);

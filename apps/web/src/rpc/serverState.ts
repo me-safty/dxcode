@@ -1,4 +1,4 @@
-import { useAtomSubscribe, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import {
   DEFAULT_SERVER_SETTINGS,
   type EditorId,
@@ -11,15 +11,13 @@ import {
   type ServerSettings,
 } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
-import { useCallback, useRef } from "react";
 
 import type { WsRpcClient } from "../wsRpcClient";
-import { appAtomRegistry, resetAppAtomRegistryForTests } from "./atomRegistry";
+import { getAppAtomRegistry } from "./atomRegistry";
 
 export type ServerConfigUpdateSource = ServerConfigStreamEvent["type"];
 
-export interface ServerConfigUpdatedNotification {
-  readonly id: number;
+interface ServerConfigUpdatedNotification {
   readonly payload: ServerConfigUpdatedPayload;
   readonly source: ServerConfigUpdateSource;
 }
@@ -50,41 +48,33 @@ const selectAvailableEditors = (config: ServerConfig | null): ReadonlyArray<Edit
 const selectKeybindings = (config: ServerConfig | null) => config?.keybindings ?? EMPTY_KEYBINDINGS;
 const selectKeybindingsConfigPath = (config: ServerConfig | null) =>
   config?.keybindingsConfigPath ?? null;
-const selectObservability = (config: ServerConfig | null) => config?.observability ?? null;
 const selectProviders = (config: ServerConfig | null) =>
   config?.providers ?? EMPTY_SERVER_PROVIDERS;
 const selectSettings = (config: ServerConfig | null): ServerSettings =>
   config?.settings ?? DEFAULT_SERVER_SETTINGS;
 
-export const welcomeAtom = makeStateAtom<ServerLifecycleWelcomePayload | null>(
-  "server-welcome",
-  null,
-);
-export const serverConfigAtom = makeStateAtom<ServerConfig | null>("server-config", null);
-export const serverConfigUpdatedAtom = makeStateAtom<ServerConfigUpdatedNotification | null>(
+const welcomeAtom = makeStateAtom<ServerLifecycleWelcomePayload | null>("server-welcome", null);
+const serverConfigAtom = makeStateAtom<ServerConfig | null>("server-config", null);
+const serverConfigUpdatedAtom = makeStateAtom<ServerConfigUpdatedNotification | null>(
   "server-config-updated",
   null,
 );
-export const providersUpdatedAtom = makeStateAtom<ServerProviderUpdatedPayload | null>(
+const providersUpdatedAtom = makeStateAtom<ServerProviderUpdatedPayload | null>(
   "server-providers-updated",
   null,
 );
 
 export function getServerConfig(): ServerConfig | null {
-  return appAtomRegistry.get(serverConfigAtom);
+  return getAppAtomRegistry().get(serverConfigAtom);
 }
 
-export function getServerConfigUpdatedNotification(): ServerConfigUpdatedNotification | null {
-  return appAtomRegistry.get(serverConfigUpdatedAtom);
-}
-
-export function setServerConfigSnapshot(config: ServerConfig): void {
+function setServerConfigSnapshot(config: ServerConfig): void {
   resolveServerConfig(config);
   emitProvidersUpdated({ providers: config.providers });
   emitServerConfigUpdated(toServerConfigUpdatedPayload(config), "snapshot");
 }
 
-export function applyServerConfigEvent(event: ServerConfigStreamEvent): void {
+function applyServerConfigEvent(event: ServerConfigStreamEvent): void {
   switch (event.type) {
     case "snapshot": {
       setServerConfigSnapshot(event.config);
@@ -114,7 +104,7 @@ export function applyServerConfigEvent(event: ServerConfigStreamEvent): void {
   }
 }
 
-export function applyProvidersUpdated(payload: ServerProviderUpdatedPayload): void {
+function applyProvidersUpdated(payload: ServerProviderUpdatedPayload): void {
   const latestServerConfig = getServerConfig();
   emitProvidersUpdated(payload);
 
@@ -144,26 +134,8 @@ export function applySettingsUpdated(settings: ServerSettings): void {
   emitServerConfigUpdated(toServerConfigUpdatedPayload(nextConfig), "settingsUpdated");
 }
 
-export function emitWelcome(payload: ServerLifecycleWelcomePayload): void {
-  appAtomRegistry.set(welcomeAtom, payload);
-}
-
-export function onWelcome(listener: (payload: ServerLifecycleWelcomePayload) => void): () => void {
-  return subscribeLatest(welcomeAtom, listener);
-}
-
-export function onServerConfigUpdated(
-  listener: (payload: ServerConfigUpdatedPayload, source: ServerConfigUpdateSource) => void,
-): () => void {
-  return subscribeLatest(serverConfigUpdatedAtom, (notification) => {
-    listener(notification.payload, notification.source);
-  });
-}
-
-export function onProvidersUpdated(
-  listener: (payload: ServerProviderUpdatedPayload) => void,
-): () => void {
-  return subscribeLatest(providersUpdatedAtom, listener);
+function emitWelcome(payload: ServerLifecycleWelcomePayload): void {
+  getAppAtomRegistry().set(welcomeAtom, payload);
 }
 
 export function startServerStateSync(client: ServerStateClient): () => void {
@@ -199,37 +171,26 @@ export function startServerStateSync(client: ServerStateClient): () => void {
   };
 }
 
-export function resetServerStateForTests() {
-  resetAppAtomRegistryForTests();
-  nextServerConfigUpdatedNotificationId = 1;
-}
-
-let nextServerConfigUpdatedNotificationId = 1;
-
 function resolveServerConfig(config: ServerConfig): void {
-  appAtomRegistry.set(serverConfigAtom, config);
+  getAppAtomRegistry().set(serverConfigAtom, config);
 }
 
 function emitProvidersUpdated(payload: ServerProviderUpdatedPayload): void {
-  appAtomRegistry.set(providersUpdatedAtom, payload);
+  getAppAtomRegistry().set(providersUpdatedAtom, payload);
 }
 
 function emitServerConfigUpdated(
   payload: ServerConfigUpdatedPayload,
   source: ServerConfigUpdateSource,
 ): void {
-  appAtomRegistry.set(serverConfigUpdatedAtom, {
-    id: nextServerConfigUpdatedNotificationId++,
-    payload,
-    source,
-  });
+  getAppAtomRegistry().set(serverConfigUpdatedAtom, { payload, source });
 }
 
 function subscribeLatest<A>(
   atom: Atom.Atom<A | null>,
   listener: (value: NonNullable<A>) => void,
 ): () => void {
-  return appAtomRegistry.subscribe(
+  return getAppAtomRegistry().subscribe(
     atom,
     (value) => {
       if (value === null) {
@@ -241,21 +202,16 @@ function subscribeLatest<A>(
   );
 }
 
-function useLatestAtomSubscription<A>(
-  atom: Atom.Atom<A | null>,
-  listener: (value: NonNullable<A>) => void,
-): void {
-  const listenerRef = useRef(listener);
-  listenerRef.current = listener;
+export function subscribeServerWelcome(
+  listener: (payload: ServerLifecycleWelcomePayload) => void,
+): () => void {
+  return subscribeLatest(welcomeAtom, listener);
+}
 
-  const stableListener = useCallback((value: A | null) => {
-    if (value === null) {
-      return;
-    }
-    listenerRef.current(value as NonNullable<A>);
-  }, []);
-
-  useAtomSubscribe(atom, stableListener, { immediate: true });
+export function subscribeServerConfigUpdated(
+  listener: (notification: ServerConfigUpdatedNotification) => void,
+): () => void {
+  return subscribeLatest(serverConfigUpdatedAtom, listener);
 }
 
 export function useServerConfig(): ServerConfig | null {
@@ -280,20 +236,4 @@ export function useServerAvailableEditors(): ReadonlyArray<EditorId> {
 
 export function useServerKeybindingsConfigPath(): string | null {
   return useAtomValue(serverConfigAtom, selectKeybindingsConfigPath);
-}
-
-export function useServerObservability(): ServerConfig["observability"] | null {
-  return useAtomValue(serverConfigAtom, selectObservability);
-}
-
-export function useServerWelcomeSubscription(
-  listener: (payload: ServerLifecycleWelcomePayload) => void,
-): void {
-  useLatestAtomSubscription(welcomeAtom, listener);
-}
-
-export function useServerConfigUpdatedSubscription(
-  listener: (notification: ServerConfigUpdatedNotification) => void,
-): void {
-  useLatestAtomSubscription(serverConfigUpdatedAtom, listener);
 }

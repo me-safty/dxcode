@@ -2,9 +2,7 @@ import { Effect, Layer } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 
 import { ServerConfig } from "./config";
-import { attachmentsRouteLayer, projectFaviconRouteLayer, staticAndDevRouteLayer } from "./http";
 import { fixPath } from "./os-jank";
-import { websocketRpcRouteLayer } from "./ws";
 import { OpenLive } from "./open";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents";
@@ -29,6 +27,7 @@ import { RoutingTextGenerationLive } from "./git/Layers/RoutingTextGeneration";
 import { TerminalManagerLive } from "./terminal/Layers/Manager";
 import { GitManagerLive } from "./git/Layers/GitManager";
 import { KeybindingsLive } from "./keybindings";
+import { ServerLoggerLive } from "./serverLogger";
 import { ServerRuntimeStartup, ServerRuntimeStartupLive } from "./serverRuntimeStartup";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus";
@@ -41,7 +40,7 @@ import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResol
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
-import { ObservabilityLive } from "./observability/Layers/Observability";
+import { makeRoutesLayer } from "./server.routes";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -200,14 +199,7 @@ const RuntimeServicesLive = Layer.empty.pipe(
   Layer.provideMerge(ServerLifecycleEventsLive),
 );
 
-export const makeRoutesLayer = Layer.mergeAll(
-  attachmentsRouteLayer,
-  projectFaviconRouteLayer,
-  staticAndDevRouteLayer,
-  websocketRpcRouteLayer,
-);
-
-export const makeServerLayer = Layer.unwrap(
+const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig;
 
@@ -231,7 +223,7 @@ export const makeServerLayer = Layer.unwrap(
     return serverApplicationLayer.pipe(
       Layer.provideMerge(RuntimeServicesLive),
       Layer.provideMerge(HttpServerLive),
-      Layer.provide(ObservabilityLive),
+      Layer.provide(ServerLoggerLive),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provideMerge(PlatformServicesLive),
     );
@@ -239,8 +231,6 @@ export const makeServerLayer = Layer.unwrap(
 );
 
 // Important: Only `ServerConfig` should be provided by the CLI layer!!! Don't let other requirements leak into the launch layer.
-export const runServer = Layer.launch(makeServerLayer) satisfies Effect.Effect<
-  never,
-  any,
-  ServerConfig
->;
+export const runServer: Effect.Effect<never, never, ServerConfig> = Layer.launch(
+  makeServerLayer,
+).pipe(Effect.orDie);

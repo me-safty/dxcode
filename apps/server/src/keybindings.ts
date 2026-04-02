@@ -9,7 +9,7 @@
 import {
   KeybindingRule,
   KeybindingsConfig,
-  KeybindingShortcut,
+  KeybindingsConfigError,
   MAX_KEYBINDINGS_COUNT,
   ResolvedKeybindingsConfig,
   type ServerConfigIssue,
@@ -38,13 +38,13 @@ import * as Semaphore from "effect/Semaphore";
 import { ServerConfig } from "./config";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import {
-  DEFAULT_KEYBINDINGS,
-  KeybindingsConfigError,
-  ResolvedKeybindingFromConfig,
-  compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
+  DEFAULT_KEYBINDINGS,
+  encodeShortcut,
   parseKeybindingShortcut,
+  ResolvedKeybindingFromConfig,
 } from "./keybindings.logic";
+
 function isSameKeybindingRule(left: KeybindingRule, right: KeybindingRule): boolean {
   return (
     left.command === right.command &&
@@ -68,23 +68,7 @@ function hasSameShortcutContext(left: KeybindingRule, right: KeybindingRule): bo
   return leftContext === rightContext;
 }
 
-function encodeShortcut(shortcut: KeybindingShortcut): string | null {
-  const modifiers: string[] = [];
-  if (shortcut.modKey) modifiers.push("mod");
-  if (shortcut.metaKey) modifiers.push("meta");
-  if (shortcut.ctrlKey) modifiers.push("ctrl");
-  if (shortcut.altKey) modifiers.push("alt");
-  if (shortcut.shiftKey) modifiers.push("shift");
-  if (!shortcut.key) return null;
-  if (shortcut.key !== "+" && shortcut.key.includes("+")) return null;
-  const key = shortcut.key === " " ? "space" : shortcut.key;
-  return [...modifiers, key].join("+");
-}
-
-const DEFAULT_RESOLVED_KEYBINDINGS = DEFAULT_KEYBINDINGS.flatMap((rule) => {
-  const compiled = compileResolvedKeybindingRule(rule);
-  return compiled ? [compiled] : [];
-});
+const DEFAULT_RESOLVED_KEYBINDINGS = compileResolvedKeybindingsConfig(DEFAULT_KEYBINDINGS);
 
 const RawKeybindingsEntries = fromLenientJson(Schema.Array(Schema.Unknown));
 const KeybindingsConfigJson = Schema.fromJsonString(KeybindingsConfig);
