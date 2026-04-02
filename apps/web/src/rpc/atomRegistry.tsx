@@ -19,5 +19,7 @@ export function AppAtomRegistryProvider({ children }: { readonly children: React
     registryRef.current = getAppAtomRegistry();
   }
 
-  return <RegistryContext.Provider value={registryRef.current}>{children}</RegistryContext.Provider>;
+  return (
+    <RegistryContext.Provider value={registryRef.current}>{children}</RegistryContext.Provider>
+  );
 }

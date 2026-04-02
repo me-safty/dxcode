@@ -1,5 +1,37 @@
+import { MessageId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
-import { computeMessageDurationStart, normalizeCompactToolLabel } from "./MessagesTimeline.logic";
+import { deriveTimelineEntries } from "../../session-logic";
+import { deriveMessagesTimelineRows, normalizeCompactToolLabel } from "./MessagesTimeline.logic";
+
+interface TimelineDurationMessageInput {
+  id: string;
+  role: "user" | "assistant" | "system";
+  createdAt: string;
+  completedAt?: string;
+}
+
+const computeMessageDurationStart = (messages: ReadonlyArray<TimelineDurationMessageInput>) =>
+  new Map(
+    deriveMessagesTimelineRows({
+      timelineEntries: deriveTimelineEntries(
+        messages.map((message) => ({
+          ...message,
+          id: MessageId.makeUnsafe(message.id),
+          text: "",
+          streaming: false,
+        })),
+        [],
+        [],
+      ),
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+    })
+      .flatMap((row) =>
+        row.kind === "message" ? [[String(row.message.id), row.durationStart]] : [],
+      )
+      .map(([messageId, durationStart]) => [messageId, durationStart] as const),
+  );
 
 describe("computeMessageDurationStart", () => {
   it("returns message createdAt when there is no preceding user message", () => {
