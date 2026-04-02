@@ -15,7 +15,6 @@ import {
 } from "react";
 
 import {
-  createGitBranchSearchInfiniteData,
   gitBranchSearchInfiniteQueryOptions,
   gitBranchesQueryOptions,
   gitQueryKeys,
@@ -99,16 +98,11 @@ export function BranchToolbarBranchSelector({
   const deferredTrimmedBranchQuery = deferredBranchQuery.trim();
 
   useEffect(() => {
-    if (!branchCwd || !branchesOverviewQuery.data) {
-      return;
-    }
-
-    queryClient.setQueryData(
-      gitQueryKeys.branchSearch(branchCwd, ""),
-      (currentData: ReturnType<typeof createGitBranchSearchInfiniteData> | undefined) =>
-        currentData ?? createGitBranchSearchInfiniteData(branchesOverviewQuery.data),
+    if (!branchCwd) return;
+    void queryClient.prefetchInfiniteQuery(
+      gitBranchSearchInfiniteQueryOptions({ cwd: branchCwd, query: "" }),
     );
-  }, [branchCwd, branchesOverviewQuery.data, queryClient]);
+  }, [branchCwd, queryClient]);
 
   const branchesSearchQuery = useInfiniteQuery(
     gitBranchSearchInfiniteQueryOptions({

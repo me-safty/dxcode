@@ -9,8 +9,10 @@ vi.mock("../wsRpcClient", () => ({
   getWsRpcClient: vi.fn(),
 }));
 
+import type { InfiniteData } from "@tanstack/react-query";
+import type { GitListBranchesResult } from "@t3tools/contracts";
+
 import {
-  createGitBranchSearchInfiniteData,
   gitBranchSearchInfiniteQueryOptions,
   gitBranchesQueryOptions,
   gitMutationKeys,
@@ -23,7 +25,7 @@ import {
   invalidateGitQueries,
 } from "./gitReactQuery";
 
-const BRANCH_QUERY_RESULT = {
+const BRANCH_QUERY_RESULT: GitListBranchesResult = {
   branches: [],
   isRepo: true,
   hasOriginRemote: true,
@@ -31,7 +33,10 @@ const BRANCH_QUERY_RESULT = {
   totalCount: 0,
 };
 
-const BRANCH_SEARCH_RESULT = createGitBranchSearchInfiniteData(BRANCH_QUERY_RESULT);
+const BRANCH_SEARCH_RESULT: InfiniteData<GitListBranchesResult, number> = {
+  pages: [BRANCH_QUERY_RESULT],
+  pageParams: [0],
+};
 
 describe("gitMutationKeys", () => {
   it("scopes stacked action keys by cwd", () => {
@@ -73,15 +78,6 @@ describe("git mutation options", () => {
       queryClient,
     });
     expect(options.mutationKey).toEqual(gitMutationKeys.preparePullRequestThread("/repo/a"));
-  });
-});
-
-describe("createGitBranchSearchInfiniteData", () => {
-  it("wraps a branch page as the initial infinite-query payload", () => {
-    expect(createGitBranchSearchInfiniteData(BRANCH_QUERY_RESULT)).toEqual({
-      pages: [BRANCH_QUERY_RESULT],
-      pageParams: [0],
-    });
   });
 });
 

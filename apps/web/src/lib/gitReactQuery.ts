@@ -1,10 +1,5 @@
+import { type GitActionProgressEvent, type GitStackedAction } from "@t3tools/contracts";
 import {
-  type GitActionProgressEvent,
-  type GitListBranchesResult,
-  type GitStackedAction,
-} from "@t3tools/contracts";
-import {
-  type InfiniteData,
   infiniteQueryOptions,
   mutationOptions,
   queryOptions,
@@ -117,15 +112,6 @@ export function gitBranchSearchInfiniteQueryOptions(input: {
     refetchOnReconnect: true,
     refetchInterval: GIT_BRANCHES_REFETCH_INTERVAL_MS,
   });
-}
-
-export function createGitBranchSearchInfiniteData(
-  page: GitListBranchesResult,
-): InfiniteData<GitListBranchesResult, number> {
-  return {
-    pages: [page],
-    pageParams: [0],
-  };
 }
 
 export function gitResolvePullRequestQueryOptions(input: {
