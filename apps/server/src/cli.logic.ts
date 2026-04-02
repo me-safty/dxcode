@@ -12,7 +12,7 @@ import {
 import { readBootstrapEnvelope } from "./bootstrap";
 import { resolveBaseDir } from "./os-jank";
 
-const PortSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }));
+export const PortSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }));
 
 const BootstrapEnvelopeSchema = Schema.Struct({
   mode: Schema.optional(RuntimeMode),
@@ -72,7 +72,7 @@ interface CliServerFlags {
 }
 
 const resolveBooleanFlag = (flag: Option.Option<boolean>, envValue: boolean) =>
-  Option.getOrElse(Option.filter(flag, Boolean), () => envValue);
+  Option.getOrElse(flag, () => envValue);
 
 const resolveOptionPrecedence = <Value>(
   ...values: ReadonlyArray<Option.Option<Value>>
