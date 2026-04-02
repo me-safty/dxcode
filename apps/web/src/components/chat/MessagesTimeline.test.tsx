@@ -186,7 +186,7 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("bun fmt");
+    expect(markup.match(/bun fmt/g)?.length).toBe(1);
     expect(markup).toContain("Show output");
     expect(markup).not.toContain("apps/web/src/session-logic.ts");
     expect(markup).not.toContain(

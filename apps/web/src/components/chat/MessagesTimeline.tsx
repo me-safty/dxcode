@@ -897,13 +897,6 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           </p>
         </div>
       </div>
-      {workEntry.command && (
-        <div className="mt-1 pl-6">
-          <pre className="overflow-x-auto rounded-md border border-border/55 bg-background/75 px-2 py-1 font-mono text-[10px] leading-relaxed text-foreground/80">
-            {workEntry.command}
-          </pre>
-        </div>
-      )}
       {hasOutput && (
         <div className="mt-1 pl-6">
           <button

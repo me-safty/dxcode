@@ -943,6 +943,7 @@ describe("deriveWorkLogEntries", () => {
         summary: "Ran command started",
         payload: {
           itemType: "command_execution",
+          itemId: "item-command-build",
           title: "Ran command",
           detail: "npm run build",
           data: {
@@ -959,6 +960,7 @@ describe("deriveWorkLogEntries", () => {
         summary: "Ran command completed",
         payload: {
           itemType: "command_execution",
+          itemId: "item-command-build",
           title: "Ran command",
           detail: "<exited with exit code 0>",
         },
@@ -1016,7 +1018,7 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
-  it("collapses replayed multi-command rows even when all started events sort before later lifecycle events", () => {
+  it("collapses replayed multi-command rows by itemId when all started events sort before later lifecycle events", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "command-1-start",
@@ -1025,6 +1027,7 @@ describe("deriveWorkLogEntries", () => {
         summary: "Ran command started",
         payload: {
           itemType: "command_execution",
+          itemId: "item-command-1",
           detail: "npm run build",
           data: {
             item: {
@@ -1040,6 +1043,7 @@ describe("deriveWorkLogEntries", () => {
         summary: "Ran command started",
         payload: {
           itemType: "command_execution",
+          itemId: "item-command-2",
           detail: "npm run lint",
           data: {
             item: {
@@ -1055,6 +1059,7 @@ describe("deriveWorkLogEntries", () => {
         summary: "Ran command",
         payload: {
           itemType: "command_execution",
+          itemId: "item-command-1",
           detail: "npm run build",
         },
       }),
@@ -1065,6 +1070,7 @@ describe("deriveWorkLogEntries", () => {
         summary: "Ran command completed",
         payload: {
           itemType: "command_execution",
+          itemId: "item-command-1",
           detail: "<exited with exit code 0>",
         },
       }),
@@ -1075,6 +1081,7 @@ describe("deriveWorkLogEntries", () => {
         summary: "Ran command",
         payload: {
           itemType: "command_execution",
+          itemId: "item-command-2",
           detail: "npm run lint",
         },
       }),
@@ -1085,6 +1092,7 @@ describe("deriveWorkLogEntries", () => {
         summary: "Ran command completed",
         payload: {
           itemType: "command_execution",
+          itemId: "item-command-2",
           detail: "<exited with exit code 0>",
         },
       }),

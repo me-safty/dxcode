@@ -472,7 +472,13 @@ export function deriveWorkLogEntries(
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .map(toDerivedWorkLogEntry);
   return collapseDerivedWorkLogEntries(entries).map(
-    ({ activityKind: _activityKind, collapseKey: _collapseKey, groupKey: _groupKey, itemId, ...entry }) => {
+    ({
+      activityKind: _activityKind,
+      collapseKey: _collapseKey,
+      groupKey: _groupKey,
+      itemId,
+      ...entry
+    }) => {
       if (!itemId || !runtimeOutputByItemId.has(itemId)) {
         return entry;
       }
@@ -621,7 +627,7 @@ function findOpenLifecycleIndex(
       }
     }
   }
-  return openIndices[0];
+  return undefined;
 }
 
 function shouldCollapseToolLifecycleEntries(

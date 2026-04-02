@@ -1858,6 +1858,11 @@ describe("ProviderRuntimeIngestion", () => {
         status: "in_progress",
         title: "Read file",
         detail: "/tmp/file.ts",
+        data: {
+          item: {
+            command: ["sed", "-n", "1,40p", "/tmp/file.ts"],
+          },
+        },
       },
     });
 
@@ -1877,6 +1882,18 @@ describe("ProviderRuntimeIngestion", () => {
         (activity: ProviderRuntimeTestActivity) => activity.kind === "tool.started",
       ),
     ).toBe(true);
+    const toolStarted = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-tool-started",
+    );
+    const toolStartedPayload =
+      toolStarted?.payload && typeof toolStarted.payload === "object"
+        ? (toolStarted.payload as Record<string, unknown>)
+        : undefined;
+    expect(toolStartedPayload?.data).toEqual({
+      item: {
+        command: ["sed", "-n", "1,40p", "/tmp/file.ts"],
+      },
+    });
   });
 
   it("consumes P1 runtime events into thread metadata, diff checkpoints, and activities", async () => {
