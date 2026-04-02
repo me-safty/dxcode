@@ -18,7 +18,7 @@ import {
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { GitCommandError } from "../Errors.ts";
+import { GitCommandError } from "@t3tools/contracts";
 import {
   GitCore,
   type ExecuteGitProgress,
@@ -27,6 +27,11 @@ import {
   type ExecuteGitInput,
   type ExecuteGitResult,
 } from "../Services/GitCore.ts";
+import {
+  parseRemoteNames,
+  parseRemoteNamesInGitOrder,
+  parseRemoteRefWithRemoteNames,
+} from "../remoteRefs.ts";
 import { ServerConfig } from "../../config.ts";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 
@@ -37,8 +42,11 @@ const PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES = 49_000;
 const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
+const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
+const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
 
@@ -48,13 +56,14 @@ type TraceTailState = {
 };
 
 class StatusUpstreamRefreshCacheKey extends Data.Class<{
-  cwd: string;
+  gitCommonDir: string;
   upstreamRef: string;
   remoteName: string;
   upstreamBranch: string;
 }> {}
 
 interface ExecuteGitOptions {
+  stdin?: string | undefined;
   timeoutMs?: number | undefined;
   allowNonZeroExit?: boolean | undefined;
   fallbackErrorMessage?: string | undefined;
@@ -96,6 +105,47 @@ function parseNumstatEntries(
   return entries;
 }
 
+function splitNullSeparatedPaths(input: string, truncated: boolean): string[] {
+  const parts = input.split("\0");
+  if (parts.length === 0) return [];
+
+  if (truncated && parts[parts.length - 1]?.length) {
+    parts.pop();
+  }
+
+  return parts.filter((value) => value.length > 0);
+}
+
+function chunkPathsForGitCheckIgnore(relativePaths: readonly string[]): string[][] {
+  const chunks: string[][] = [];
+  let chunk: string[] = [];
+  let chunkBytes = 0;
+
+  for (const relativePath of relativePaths) {
+    const relativePathBytes = Buffer.byteLength(relativePath) + 1;
+    if (chunk.length > 0 && chunkBytes + relativePathBytes > GIT_CHECK_IGNORE_MAX_STDIN_BYTES) {
+      chunks.push(chunk);
+      chunk = [];
+      chunkBytes = 0;
+    }
+
+    chunk.push(relativePath);
+    chunkBytes += relativePathBytes;
+
+    if (chunkBytes >= GIT_CHECK_IGNORE_MAX_STDIN_BYTES) {
+      chunks.push(chunk);
+      chunk = [];
+      chunkBytes = 0;
+    }
+  }
+
+  if (chunk.length > 0) {
+    chunks.push(chunk);
+  }
+
+  return chunks;
+}
+
 function parsePorcelainPath(line: string): string | null {
   if (line.startsWith("? ") || line.startsWith("! ")) {
     const simple = line.slice(2).trim();
@@ -133,14 +183,6 @@ function parseBranchLine(line: string): { name: string; current: boolean } | nul
   };
 }
 
-function parseRemoteNames(stdout: string): ReadonlyArray<string> {
-  return stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .toSorted((a, b) => b.length - a.length);
-}
-
 function sanitizeRemoteName(value: string): string {
   const sanitized = value
     .trim()
@@ -173,30 +215,41 @@ function parseRemoteFetchUrls(stdout: string): Map<string, string> {
   return remotes;
 }
 
-function parseRemoteRefWithRemoteNames(
-  branchName: string,
+function parseUpstreamRefWithRemoteNames(
+  upstreamRef: string,
   remoteNames: ReadonlyArray<string>,
-): { remoteRef: string; remoteName: string; localBranch: string } | null {
-  const trimmedBranchName = branchName.trim();
-  if (trimmedBranchName.length === 0) return null;
-
-  for (const remoteName of remoteNames) {
-    const remotePrefix = `${remoteName}/`;
-    if (!trimmedBranchName.startsWith(remotePrefix)) {
-      continue;
-    }
-    const localBranch = trimmedBranchName.slice(remotePrefix.length).trim();
-    if (localBranch.length === 0) {
-      return null;
-    }
-    return {
-      remoteRef: trimmedBranchName,
-      remoteName,
-      localBranch,
-    };
+): { upstreamRef: string; remoteName: string; upstreamBranch: string } | null {
+  const parsed = parseRemoteRefWithRemoteNames(upstreamRef, remoteNames);
+  if (!parsed) {
+    return null;
   }
 
-  return null;
+  return {
+    upstreamRef,
+    remoteName: parsed.remoteName,
+    upstreamBranch: parsed.branchName,
+  };
+}
+
+function parseUpstreamRefByFirstSeparator(
+  upstreamRef: string,
+): { upstreamRef: string; remoteName: string; upstreamBranch: string } | null {
+  const separatorIndex = upstreamRef.indexOf("/");
+  if (separatorIndex <= 0 || separatorIndex === upstreamRef.length - 1) {
+    return null;
+  }
+
+  const remoteName = upstreamRef.slice(0, separatorIndex).trim();
+  const upstreamBranch = upstreamRef.slice(separatorIndex + 1).trim();
+  if (remoteName.length === 0 || upstreamBranch.length === 0) {
+    return null;
+  }
+
+  return {
+    upstreamRef,
+    remoteName,
+    upstreamBranch,
+  };
 }
 
 function parseTrackingBranchByUpstreamRef(stdout: string, upstreamRef: string): string | null {
@@ -445,7 +498,7 @@ const collectOutput = Effect.fn("collectOutput")(function* <E>(
   maxOutputBytes: number,
   truncateOutputAtMaxBytes: boolean,
   onLine: ((line: string) => Effect.Effect<void, never>) | undefined,
-): Effect.fn.Return<string, GitCommandError> {
+): Effect.fn.Return<{ readonly text: string; readonly truncated: boolean }, GitCommandError> {
   const decoder = new TextDecoder();
   let bytes = 0;
   let text = "";
@@ -507,7 +560,10 @@ const collectOutput = Effect.fn("collectOutput")(function* <E>(
   text += remainder;
   lineBuffer += remainder;
   yield* emitCompleteLines(true);
-  return truncated ? `${text}${OUTPUT_TRUNCATED_MARKER}` : text;
+  return {
+    text,
+    truncated,
+  };
 });
 
 export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
@@ -571,13 +627,18 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
               Effect.map((value) => Number(value)),
               Effect.mapError(toGitCommandError(commandInput, "failed to report exit code.")),
             ),
+            input.stdin === undefined
+              ? Effect.void
+              : Stream.run(Stream.encodeText(Stream.make(input.stdin)), child.stdin).pipe(
+                  Effect.mapError(toGitCommandError(commandInput, "failed to write stdin.")),
+                ),
           ],
           { concurrency: "unbounded" },
-        );
+        ).pipe(Effect.map(([stdout, stderr, exitCode]) => [stdout, stderr, exitCode] as const));
         yield* trace2Monitor.flush;
 
         if (!input.allowNonZeroExit && exitCode !== 0) {
-          const trimmedStderr = stderr.trim();
+          const trimmedStderr = stderr.text.trim();
           return yield* new GitCommandError({
             operation: commandInput.operation,
             command: quoteGitCommand(commandInput.args),
@@ -589,7 +650,13 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
           });
         }
 
-        return { code: exitCode, stdout, stderr } satisfies ExecuteGitResult;
+        return {
+          code: exitCode,
+          stdout: stdout.text,
+          stderr: stderr.text,
+          stdoutTruncated: stdout.truncated,
+          stderrTruncated: stderr.truncated,
+        } satisfies ExecuteGitResult;
       });
 
       return yield* runGitCommand().pipe(
@@ -618,11 +685,12 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     cwd: string,
     args: readonly string[],
     options: ExecuteGitOptions = {},
-  ): Effect.Effect<{ code: number; stdout: string; stderr: string }, GitCommandError> =>
+  ): Effect.Effect<ExecuteGitResult, GitCommandError> =>
     execute({
       operation,
       cwd,
       args,
+      ...(options.stdin !== undefined ? { stdin: options.stdin } : {}),
       allowNonZeroExit: true,
       ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
       ...(options.maxOutputBytes !== undefined ? { maxOutputBytes: options.maxOutputBytes } : {}),
@@ -679,7 +747,11 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     args: readonly string[],
     options: ExecuteGitOptions = {},
   ): Effect.Effect<string, GitCommandError> =>
-    executeGit(operation, cwd, args, options).pipe(Effect.map((result) => result.stdout));
+    executeGit(operation, cwd, args, options).pipe(
+      Effect.map((result) =>
+        result.stdoutTruncated ? `${result.stdout}${OUTPUT_TRUNCATED_MARKER}` : result.stdout,
+      ),
+    );
 
   const branchExists = (cwd: string, branch: string): Effect.Effect<boolean, GitCommandError> =>
     executeGit(
@@ -729,45 +801,27 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       return null;
     }
 
-    const separatorIndex = upstreamRef.indexOf("/");
-    if (separatorIndex <= 0) {
-      return null;
-    }
-    const remoteName = upstreamRef.slice(0, separatorIndex);
-    const upstreamBranch = upstreamRef.slice(separatorIndex + 1);
-    if (remoteName.length === 0 || upstreamBranch.length === 0) {
-      return null;
-    }
-
-    return {
-      upstreamRef,
-      remoteName,
-      upstreamBranch,
-    };
+    const remoteNames = yield* runGitStdout("GitCore.listRemoteNames", cwd, ["remote"]).pipe(
+      Effect.map(parseRemoteNames),
+      Effect.catch(() => Effect.succeed<ReadonlyArray<string>>([])),
+    );
+    return (
+      parseUpstreamRefWithRemoteNames(upstreamRef, remoteNames) ??
+      parseUpstreamRefByFirstSeparator(upstreamRef)
+    );
   });
 
-  const fetchUpstreamRef = (
-    cwd: string,
-    upstream: { upstreamRef: string; remoteName: string; upstreamBranch: string },
-  ): Effect.Effect<void, GitCommandError> => {
-    const refspec = `+refs/heads/${upstream.upstreamBranch}:refs/remotes/${upstream.upstreamRef}`;
-    return runGit(
-      "GitCore.fetchUpstreamRef",
-      cwd,
-      ["fetch", "--quiet", "--no-tags", upstream.remoteName, refspec],
-      true,
-    );
-  };
-
   const fetchUpstreamRefForStatus = (
-    cwd: string,
+    gitCommonDir: string,
     upstream: { upstreamRef: string; remoteName: string; upstreamBranch: string },
   ): Effect.Effect<void, GitCommandError> => {
     const refspec = `+refs/heads/${upstream.upstreamBranch}:refs/remotes/${upstream.upstreamRef}`;
+    const fetchCwd =
+      path.basename(gitCommonDir) === ".git" ? path.dirname(gitCommonDir) : gitCommonDir;
     return executeGit(
       "GitCore.fetchUpstreamRefForStatus",
-      cwd,
-      ["fetch", "--quiet", "--no-tags", upstream.remoteName, refspec],
+      fetchCwd,
+      ["--git-dir", gitCommonDir, "fetch", "--quiet", "--no-tags", upstream.remoteName, refspec],
       {
         allowNonZeroExit: true,
         timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
@@ -775,10 +829,18 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     ).pipe(Effect.asVoid);
   };
 
+  const resolveGitCommonDir = Effect.fn("resolveGitCommonDir")(function* (cwd: string) {
+    const gitCommonDir = yield* runGitStdout("GitCore.resolveGitCommonDir", cwd, [
+      "rev-parse",
+      "--git-common-dir",
+    ]).pipe(Effect.map((stdout) => stdout.trim()));
+    return path.isAbsolute(gitCommonDir) ? gitCommonDir : path.resolve(cwd, gitCommonDir);
+  });
+
   const refreshStatusUpstreamCacheEntry = Effect.fn("refreshStatusUpstreamCacheEntry")(function* (
     cacheKey: StatusUpstreamRefreshCacheKey,
   ) {
-    yield* fetchUpstreamRefForStatus(cacheKey.cwd, {
+    yield* fetchUpstreamRefForStatus(cacheKey.gitCommonDir, {
       upstreamRef: cacheKey.upstreamRef,
       remoteName: cacheKey.remoteName,
       upstreamBranch: cacheKey.upstreamBranch,
@@ -789,8 +851,11 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   const statusUpstreamRefreshCache = yield* Cache.makeWith({
     capacity: STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY,
     lookup: refreshStatusUpstreamCacheEntry,
-    // Keep successful refreshes warm; drop failures immediately so next request can retry.
-    timeToLive: (exit) => (Exit.isSuccess(exit) ? STATUS_UPSTREAM_REFRESH_INTERVAL : Duration.zero),
+    // Keep successful refreshes warm and briefly back off failed refreshes to avoid retry storms.
+    timeToLive: (exit) =>
+      Exit.isSuccess(exit)
+        ? STATUS_UPSTREAM_REFRESH_INTERVAL
+        : STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN,
   });
 
   const refreshStatusUpstreamIfStale = Effect.fn("refreshStatusUpstreamIfStale")(function* (
@@ -798,23 +863,16 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   ) {
     const upstream = yield* resolveCurrentUpstream(cwd);
     if (!upstream) return;
+    const gitCommonDir = yield* resolveGitCommonDir(cwd);
     yield* Cache.get(
       statusUpstreamRefreshCache,
       new StatusUpstreamRefreshCacheKey({
-        cwd,
+        gitCommonDir,
         upstreamRef: upstream.upstreamRef,
         remoteName: upstream.remoteName,
         upstreamBranch: upstream.upstreamBranch,
       }),
     );
-  });
-
-  const refreshCheckedOutBranchUpstream = Effect.fn("refreshCheckedOutBranchUpstream")(function* (
-    cwd: string,
-  ) {
-    const upstream = yield* resolveCurrentUpstream(cwd);
-    if (!upstream) return;
-    yield* fetchUpstreamRef(cwd, upstream);
   });
 
   const resolveDefaultBranchName = (
@@ -856,7 +914,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
 
   const listRemoteNames = (cwd: string): Effect.Effect<ReadonlyArray<string>, GitCommandError> =>
     runGitStdout("GitCore.listRemoteNames", cwd, ["remote"]).pipe(
-      Effect.map((stdout) => parseRemoteNames(stdout).toReversed()),
+      Effect.map(parseRemoteNamesInGitOrder),
     );
 
   const resolvePrimaryRemoteName = Effect.fn("resolvePrimaryRemoteName")(function* (cwd: string) {
@@ -1416,6 +1474,86 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       Effect.map((trimmed) => (trimmed.length > 0 ? trimmed : null)),
     );
 
+  const isInsideWorkTree: GitCoreShape["isInsideWorkTree"] = (cwd) =>
+    executeGit("GitCore.isInsideWorkTree", cwd, ["rev-parse", "--is-inside-work-tree"], {
+      allowNonZeroExit: true,
+      timeoutMs: 5_000,
+      maxOutputBytes: 4_096,
+    }).pipe(Effect.map((result) => result.code === 0 && result.stdout.trim() === "true"));
+
+  const listWorkspaceFiles: GitCoreShape["listWorkspaceFiles"] = (cwd) =>
+    executeGit(
+      "GitCore.listWorkspaceFiles",
+      cwd,
+      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      {
+        allowNonZeroExit: true,
+        timeoutMs: 20_000,
+        maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+        truncateOutputAtMaxBytes: true,
+      },
+    ).pipe(
+      Effect.flatMap((result) =>
+        result.code === 0
+          ? Effect.succeed({
+              paths: splitNullSeparatedPaths(result.stdout, result.stdoutTruncated),
+              truncated: result.stdoutTruncated,
+            })
+          : Effect.fail(
+              createGitCommandError(
+                "GitCore.listWorkspaceFiles",
+                cwd,
+                ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+                result.stderr.trim().length > 0 ? result.stderr.trim() : "git ls-files failed",
+              ),
+            ),
+      ),
+    );
+
+  const filterIgnoredPaths: GitCoreShape["filterIgnoredPaths"] = (cwd, relativePaths) =>
+    Effect.gen(function* () {
+      if (relativePaths.length === 0) {
+        return relativePaths;
+      }
+
+      const ignoredPaths = new Set<string>();
+      const chunks = chunkPathsForGitCheckIgnore(relativePaths);
+
+      for (const chunk of chunks) {
+        const result = yield* executeGit(
+          "GitCore.filterIgnoredPaths",
+          cwd,
+          ["check-ignore", "--no-index", "-z", "--stdin"],
+          {
+            stdin: `${chunk.join("\0")}\0`,
+            allowNonZeroExit: true,
+            timeoutMs: 20_000,
+            maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+            truncateOutputAtMaxBytes: true,
+          },
+        );
+
+        if (result.code !== 0 && result.code !== 1) {
+          return yield* createGitCommandError(
+            "GitCore.filterIgnoredPaths",
+            cwd,
+            ["check-ignore", "--no-index", "-z", "--stdin"],
+            result.stderr.trim().length > 0 ? result.stderr.trim() : "git check-ignore failed",
+          );
+        }
+
+        for (const ignoredPath of splitNullSeparatedPaths(result.stdout, result.stdoutTruncated)) {
+          ignoredPaths.add(ignoredPath);
+        }
+      }
+
+      if (ignoredPaths.size === 0) {
+        return relativePaths;
+      }
+
+      return relativePaths.filter((relativePath) => !ignoredPaths.has(relativePath));
+    });
+
   const listBranches: GitCoreShape["listBranches"] = Effect.fn("listBranches")(function* (input) {
     const branchRecencyPromise = readBranchRecency(input.cwd).pipe(
       Effect.catch(() => Effect.succeed(new Map<string, number>())),
@@ -1423,7 +1561,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     const localBranchResult = yield* executeGit(
       "GitCore.listBranches.branchNoColor",
       input.cwd,
-      ["branch", "--no-color"],
+      ["branch", "--no-color", "--no-column"],
       {
         timeoutMs: 10_000,
         allowNonZeroExit: true,
@@ -1438,7 +1576,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       return yield* createGitCommandError(
         "GitCore.listBranches",
         input.cwd,
-        ["branch", "--no-color"],
+        ["branch", "--no-color", "--no-column"],
         stderr || "git branch failed",
       );
     }
@@ -1446,7 +1584,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     const remoteBranchResultEffect = executeGit(
       "GitCore.listBranches.remoteBranches",
       input.cwd,
-      ["branch", "--no-color", "--remotes"],
+      ["branch", "--no-color", "--no-column", "--remotes"],
       {
         timeoutMs: 10_000,
         allowNonZeroExit: true,
@@ -1796,11 +1934,6 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
         timeoutMs: 10_000,
         fallbackErrorMessage: "git checkout failed",
       });
-
-      // Refresh upstream refs in the background so checkout remains responsive.
-      yield* Effect.forkScoped(
-        refreshCheckedOutBranchUpstream(input.cwd).pipe(Effect.ignoreCause({ log: true })),
-      );
     },
   );
 
@@ -1814,6 +1947,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     runGitStdout("GitCore.listLocalBranchNames", cwd, [
       "branch",
       "--list",
+      "--no-column",
       "--format=%(refname:short)",
     ]).pipe(
       Effect.map((stdout) =>
@@ -1834,6 +1968,9 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     pullCurrentBranch,
     readRangeContext,
     readConfigValue,
+    isInsideWorkTree,
+    listWorkspaceFiles,
+    filterIgnoredPaths,
     listBranches,
     createWorktree,
     fetchPullRequestBranch,
