@@ -627,7 +627,11 @@ function findOpenLifecycleIndex(
       }
     }
   }
-  return undefined;
+  const fallbackCandidates = openIndices.filter((index) => {
+    const previous = collapsed[index];
+    return previous !== undefined && shouldCollapseToolLifecycleEntries(previous, next);
+  });
+  return fallbackCandidates.length === 1 ? fallbackCandidates[0] : undefined;
 }
 
 function shouldCollapseToolLifecycleEntries(

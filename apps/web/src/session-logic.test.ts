@@ -978,6 +978,48 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
+  it("collapses a single replayed command completion by group when itemId is absent", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-start-no-item-id",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Ran command started",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          detail: "npm run build",
+          data: {
+            item: {
+              command: ["npm", "run", "build"],
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-complete-no-item-id",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Ran command completed",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          detail: "<exited with exit code 0>",
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "command-complete-no-item-id",
+      command: "npm run build",
+      itemType: "command_execution",
+      toolTitle: "Ran command",
+    });
+  });
+
   it("collapses replayed command started and updated rows when only the summary differs by lifecycle suffix", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -1111,6 +1153,63 @@ describe("deriveWorkLogEntries", () => {
       command: "npm run lint",
       itemType: "command_execution",
     });
+  });
+
+  it("does not collapse ambiguous replayed command completions when multiple open commands share a group and itemId is absent", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-1-start-no-item-id",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Ran command started",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          detail: "npm run build",
+          data: {
+            item: {
+              command: ["npm", "run", "build"],
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-2-start-no-item-id",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.started",
+        summary: "Ran command started",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          detail: "npm run lint",
+          data: {
+            item: {
+              command: ["npm", "run", "lint"],
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-complete-ambiguous",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.completed",
+        summary: "Ran command completed",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          detail: "<exited with exit code 0>",
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+
+    expect(entries).toHaveLength(3);
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "command-1-start-no-item-id",
+      "command-2-start-no-item-id",
+      "command-complete-ambiguous",
+    ]);
   });
 
   it("preserves output on the first command when multiple replayed commands are present", () => {
