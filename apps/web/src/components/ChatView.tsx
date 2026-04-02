@@ -47,13 +47,14 @@ import {
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveBaseWorkLogEntries,
   findSidebarProposedPlan,
   findLatestProposedPlan,
-  deriveWorkLogEntries,
   hasActionableProposedPlan,
   hasToolActivityForTurn,
   isLatestTurnSettled,
   formatElapsed,
+  mergeRuntimeOutputIntoWorkLogEntries,
 } from "../session-logic";
 import { isScrollContainerNearBottom } from "../chat-scroll";
 import {
@@ -842,14 +843,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => new Map(Object.entries(runtimeToolOutputByItemIdRaw ?? {})),
     [runtimeToolOutputByItemIdRaw],
   );
+  const baseWorkLogEntries = useMemo(
+    () => deriveBaseWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
+    [activeLatestTurn?.turnId, threadActivities],
+  );
   const workLogEntries = useMemo(
-    () =>
-      deriveWorkLogEntries(
-        threadActivities,
-        activeLatestTurn?.turnId ?? undefined,
-        runtimeToolOutputByItemId,
-      ),
-    [activeLatestTurn?.turnId, runtimeToolOutputByItemId, threadActivities],
+    () => mergeRuntimeOutputIntoWorkLogEntries(baseWorkLogEntries, runtimeToolOutputByItemId),
+    [baseWorkLogEntries, runtimeToolOutputByItemId],
   );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),

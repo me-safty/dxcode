@@ -46,11 +46,14 @@ export interface WorkLogEntry {
   requestKind?: PendingApproval["requestKind"];
 }
 
-interface DerivedWorkLogEntry extends WorkLogEntry {
+export interface RuntimeAttachableWorkLogEntry extends WorkLogEntry {
+  itemId?: string;
+}
+
+interface DerivedWorkLogEntry extends RuntimeAttachableWorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
   collapseKey?: string;
   groupKey?: string;
-  itemId?: string;
 }
 
 export interface PendingApproval {
@@ -462,6 +465,16 @@ export function deriveWorkLogEntries(
   latestTurnId: TurnId | undefined,
   runtimeOutputByItemId: ReadonlyMap<string, string> = new Map(),
 ): WorkLogEntry[] {
+  return mergeRuntimeOutputIntoWorkLogEntries(
+    deriveBaseWorkLogEntries(activities, latestTurnId),
+    runtimeOutputByItemId,
+  );
+}
+
+export function deriveBaseWorkLogEntries(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  latestTurnId: TurnId | undefined,
+): RuntimeAttachableWorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const entries = ordered
     .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
@@ -472,19 +485,21 @@ export function deriveWorkLogEntries(
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .map(toDerivedWorkLogEntry);
   return collapseDerivedWorkLogEntries(entries).map(
-    ({
-      activityKind: _activityKind,
-      collapseKey: _collapseKey,
-      groupKey: _groupKey,
-      itemId,
-      ...entry
-    }) => {
-      if (!itemId || !runtimeOutputByItemId.has(itemId)) {
-        return entry;
-      }
-      return Object.assign(entry, { output: runtimeOutputByItemId.get(itemId) });
-    },
+    ({ activityKind: _activityKind, collapseKey: _collapseKey, groupKey: _groupKey, ...entry }) =>
+      entry,
   );
+}
+
+export function mergeRuntimeOutputIntoWorkLogEntries(
+  entries: ReadonlyArray<RuntimeAttachableWorkLogEntry>,
+  runtimeOutputByItemId: ReadonlyMap<string, string>,
+): WorkLogEntry[] {
+  return entries.map(({ itemId, ...entry }) => {
+    if (!itemId || !runtimeOutputByItemId.has(itemId)) {
+      return entry;
+    }
+    return Object.assign(entry, { output: runtimeOutputByItemId.get(itemId) });
+  });
 }
 
 function shouldIncludeWorkLogActivity(activity: OrchestrationThreadActivity): boolean {
