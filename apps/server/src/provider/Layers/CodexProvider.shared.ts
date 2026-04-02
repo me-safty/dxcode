@@ -1,5 +1,6 @@
 import * as OS from "node:os";
 import type {
+  ModelCapabilities,
   ServerProvider,
   ServerProviderAuth,
   ServerProviderModel,
@@ -31,8 +32,8 @@ import {
   type CodexAccountSnapshot,
 } from "../codexAccount";
 import { probeCodexAccount } from "../codexAppServer";
-import { ServerSettingsError } from "@t3tools/contracts";
 import { ServerSettingsService } from "../../serverSettings";
+import { ServerSettingsError } from "@t3tools/contracts";
 
 const PROVIDER = "codex" as const;
 const OPENAI_AUTH_PROVIDERS = new Set(["openai"]);
@@ -141,7 +142,20 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   },
 ];
 
-export function parseAuthStatusFromOutput(result: CommandResult): {
+export function getCodexModelCapabilities(model: string | null | undefined): ModelCapabilities {
+  const slug = model?.trim();
+  return (
+    BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ?? {
+      reasoningEffortLevels: [],
+      supportsFastMode: false,
+      supportsThinkingToggle: false,
+      contextWindowOptions: [],
+      promptInjectedEffortLevels: [],
+    }
+  );
+}
+
+function parseAuthStatusFromOutput(result: CommandResult): {
   readonly status: Exclude<ServerProviderState, "disabled">;
   readonly auth: Pick<ServerProviderAuth, "status">;
   readonly message?: string;
@@ -221,7 +235,7 @@ export function parseAuthStatusFromOutput(result: CommandResult): {
   };
 }
 
-export const readCodexConfigModelProvider = Effect.fn("readCodexConfigModelProvider")(function* () {
+const readCodexConfigModelProvider = Effect.fn("readCodexConfigModelProvider")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const settingsService = yield* ServerSettingsService;
@@ -258,14 +272,14 @@ export const readCodexConfigModelProvider = Effect.fn("readCodexConfigModelProvi
   return undefined;
 });
 
-export const hasCustomModelProvider = readCodexConfigModelProvider().pipe(
+const hasCustomModelProvider = readCodexConfigModelProvider().pipe(
   Effect.map((provider) => provider !== undefined && !OPENAI_AUTH_PROVIDERS.has(provider)),
   Effect.orElseSucceed(() => false),
 );
 
 const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
 
-const probeCodexCapabilities = (input: {
+export const probeCodexCapabilities = (input: {
   readonly binaryPath: string;
   readonly homePath?: string;
 }) =>
@@ -278,21 +292,20 @@ const probeCodexCapabilities = (input: {
     }),
   );
 
-const runCodexCommand = (args: ReadonlyArray<string>) =>
-  Effect.gen(function* () {
-    const settingsService = yield* ServerSettingsService;
-    const codexSettings = yield* settingsService.getSettings.pipe(
-      Effect.map((settings) => settings.providers.codex),
-    );
-    const command = ChildProcess.make(codexSettings.binaryPath, [...args], {
-      shell: process.platform === "win32",
-      env: {
-        ...process.env,
-        ...(codexSettings.homePath ? { CODEX_HOME: codexSettings.homePath } : {}),
-      },
-    });
-    return yield* spawnAndCollect(codexSettings.binaryPath, command);
+const runCodexCommand = Effect.fn("runCodexCommand")(function* (args: ReadonlyArray<string>) {
+  const settingsService = yield* ServerSettingsService;
+  const codexSettings = yield* settingsService.getSettings.pipe(
+    Effect.map((settings) => settings.providers.codex),
+  );
+  const command = ChildProcess.make(codexSettings.binaryPath, [...args], {
+    shell: process.platform === "win32",
+    env: {
+      ...process.env,
+      ...(codexSettings.homePath ? { CODEX_HOME: codexSettings.homePath } : {}),
+    },
   });
+  return yield* spawnAndCollect(codexSettings.binaryPath, command);
+});
 
 export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(function* (
   resolveAccount?: (input: {
@@ -494,5 +507,3 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     },
   });
 });
-
-export { probeCodexCapabilities };
