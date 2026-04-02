@@ -3,7 +3,7 @@ import {
   OrchestrationThread,
   OrchestrationThreadActivity,
 } from "@t3tools/contracts";
-import { NotificationLevel } from "../appSettings";
+import { NotificationLevel } from "@t3tools/contracts/settings";
 
 const IMPORTANT_ACTIVITY_KINDS = new Set(["approval.requested", "user-input.requested"]);
 const VERBOSE_ACTIVITY_KINDS = new Set([

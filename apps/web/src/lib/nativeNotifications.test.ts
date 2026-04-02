@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { OrchestrationThread, OrchestrationThreadActivity } from "@t3tools/contracts";
 
-import { NotificationLevel } from "../appSettings";
+import { NotificationLevel } from "@t3tools/contracts/settings";
 
 import {
   canShowNativeNotification,
