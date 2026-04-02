@@ -82,6 +82,7 @@ export function WorkspaceRightSidebar({
       defaultOpen={false}
       open={open}
       onOpenChange={handleOpenChange}
+      persistState={false}
       className="w-auto min-h-0 flex-none bg-transparent"
       style={{ "--sidebar-width": defaultWidth } as CSSProperties}
     >

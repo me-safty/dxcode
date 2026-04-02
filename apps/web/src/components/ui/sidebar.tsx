@@ -90,6 +90,7 @@ function SidebarProvider({
   defaultOpen = true,
   open: openProp,
   onOpenChange: setOpenProp,
+  persistState = true,
   className,
   style,
   children,
@@ -98,6 +99,7 @@ function SidebarProvider({
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  persistState?: boolean;
 }) {
   const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
@@ -115,6 +117,10 @@ function SidebarProvider({
         _setOpen(openState);
       }
 
+      if (!persistState) {
+        return;
+      }
+
       // This sets the cookie to keep the sidebar state.
       await cookieStore.set({
         expires: Date.now() + SIDEBAR_COOKIE_MAX_AGE * 1000,
@@ -123,7 +129,7 @@ function SidebarProvider({
         value: String(openState),
       });
     },
-    [setOpenProp, open],
+    [persistState, setOpenProp, open],
   );
 
   // Helper to toggle the sidebar.
