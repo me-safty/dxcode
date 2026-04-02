@@ -2,10 +2,8 @@ import { Effect, Schema } from "effect";
 import { Command, Flag, GlobalFlag } from "effect/unstable/cli";
 
 import { ServerConfig, RuntimeMode } from "./config";
-import { resolveServerConfig } from "./cli.logic";
+import { PortSchema, resolveServerConfig } from "./cli.logic";
 import { runServer } from "./server";
-
-const PortSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }));
 
 const modeFlag = Flag.choice("mode", RuntimeMode.literals).pipe(
   Flag.withDescription("Runtime mode. `desktop` keeps loopback defaults unless overridden."),
