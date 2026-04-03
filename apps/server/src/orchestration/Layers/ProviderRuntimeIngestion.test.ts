@@ -1638,6 +1638,14 @@ describe("ProviderRuntimeIngestion", () => {
   it("maps canonical request events into approval activities with requestKind", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
+    const detail = [
+      `/bin/zsh -lc "printf 'command line 1\\n'"`,
+      `printf 'command line 2\\n'`,
+      `printf 'command line 3\\n'`,
+      `printf 'command line 4\\n'`,
+      `printf 'command line 5\\n'`,
+      `printf 'command line 6\\n'"`,
+    ].join("\n");
 
     harness.emit({
       type: "request.opened",
@@ -1648,7 +1656,7 @@ describe("ProviderRuntimeIngestion", () => {
       requestId: ApprovalRequestId.makeUnsafe("req-open"),
       payload: {
         requestType: "command_execution_approval",
-        detail: "pwd",
+        detail,
       },
     });
 
@@ -1689,6 +1697,7 @@ describe("ProviderRuntimeIngestion", () => {
         : undefined;
     expect(requestedPayload?.requestKind).toBe("command");
     expect(requestedPayload?.requestType).toBe("command_execution_approval");
+    expect(requestedPayload?.detail).toBe(detail);
 
     const resolved = thread?.activities.find(
       (activity: ProviderRuntimeTestActivity) => activity.id === "evt-request-resolved",
