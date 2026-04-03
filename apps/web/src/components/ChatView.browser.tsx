@@ -683,6 +683,12 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
       threadId: typeof body.threadId === "string" ? body.threadId : THREAD_ID,
       terminalId: typeof body.terminalId === "string" ? body.terminalId : "default",
       cwd: typeof body.cwd === "string" ? body.cwd : "/repo/project",
+      worktreePath:
+        typeof body.worktreePath === "string"
+          ? body.worktreePath
+          : body.worktreePath === null
+            ? null
+            : null,
       status: "running",
       pid: 123,
       history: "",
