@@ -306,7 +306,10 @@ function useThreadMessageSync(
       const nextMessages = mergeThreadMessagesNewestFirst(
         existing.messagesNewestFirst,
         selectedThread.messages.filter((message) =>
-          newestLoadedCreatedAt === null ? true : message.createdAt >= newestLoadedCreatedAt,
+          newestLoadedCreatedAt === null
+            ? true
+            : message.createdAt >= newestLoadedCreatedAt ||
+              existing.messagesNewestFirst.some((m) => m.id === message.id),
         ),
       );
 
@@ -1106,6 +1109,7 @@ export function useRemoteAppState(): RemoteAppModel {
                 threadId: ThreadId.makeUnsafe(queuedMessage.threadId),
                 messageId: MessageId.makeUnsafe(queuedMessage.messageId),
                 text: queuedMessage.text,
+                attachments: queuedMessage.attachments,
                 createdAt: queuedMessage.createdAt,
               })
             : current,

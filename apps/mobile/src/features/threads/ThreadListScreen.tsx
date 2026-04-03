@@ -12,6 +12,7 @@ import { ErrorBanner } from "../../components/ErrorBanner";
 import { GlassSafeAreaView } from "../../components/GlassSafeAreaView";
 import { StatusPill } from "../../components/StatusPill";
 import { cx } from "../../lib/classNames";
+import { sortCopy } from "../../lib/arrayCompat";
 import type { RemoteClientConnectionState } from "../../lib/remoteClient";
 import { relativeTime } from "../../lib/time";
 import { ConnectionStatusDot } from "../connection/ConnectionStatusDot";
@@ -371,7 +372,7 @@ function SectionPanel(props: {
 }
 
 function orderThreadsByRecency(threads: ReadonlyArray<OrchestrationThread>) {
-  return threads.toSorted((left, right) => {
+  return sortCopy(threads, (left, right) => {
     const leftTime = new Date(left.updatedAt ?? left.createdAt).getTime();
     const rightTime = new Date(right.updatedAt ?? right.createdAt).getTime();
     return rightTime - leftTime;
