@@ -15,6 +15,7 @@ it.effect(
           version: 1,
           type: "welcome",
           payload: {
+            serverInstanceId: "server-1",
             cwd: "/tmp/project",
             projectName: "project",
           },

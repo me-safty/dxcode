@@ -193,6 +193,7 @@ describe("serverState", () => {
       sequence: 1,
       type: "welcome",
       payload: {
+        serverInstanceId: "server-1",
         cwd: "/tmp/workspace",
         projectName: "t3-code",
         bootstrapProjectId: ProjectId.makeUnsafe("project-1"),
@@ -201,6 +202,7 @@ describe("serverState", () => {
     });
 
     expect(listener).toHaveBeenCalledWith({
+      serverInstanceId: "server-1",
       cwd: "/tmp/workspace",
       projectName: "t3-code",
       bootstrapProjectId: ProjectId.makeUnsafe("project-1"),
@@ -210,6 +212,7 @@ describe("serverState", () => {
     const lateListener = vi.fn();
     const unsubscribeLate = onWelcome(lateListener);
     expect(lateListener).toHaveBeenCalledWith({
+      serverInstanceId: "server-1",
       cwd: "/tmp/workspace",
       projectName: "t3-code",
       bootstrapProjectId: ProjectId.makeUnsafe("project-1"),

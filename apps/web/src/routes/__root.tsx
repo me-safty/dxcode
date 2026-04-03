@@ -43,6 +43,7 @@ import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
+import { shouldReloadForServerInstanceChange } from "../serverLifecycle";
 import { getWsRpcClient } from "~/wsRpcClient";
 
 export const Route = createRootRouteWithContext<{
@@ -211,6 +212,7 @@ function EventRouter() {
   const pathname = useLocation({ select: (loc) => loc.pathname });
   const readPathname = useEffectEvent(() => pathname);
   const handledBootstrapThreadIdRef = useRef<string | null>(null);
+  const serverInstanceIdRef = useRef<string | null>(null);
   const seenServerConfigUpdateIdRef = useRef(getServerConfigUpdatedNotification()?.id ?? 0);
   const disposedRef = useRef(false);
   const bootstrapFromSnapshotRef = useRef<() => Promise<void>>(async () => undefined);
@@ -218,6 +220,14 @@ function EventRouter() {
 
   const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
     if (!payload) return;
+    if (serverInstanceIdRef.current === null) {
+      serverInstanceIdRef.current = payload.serverInstanceId;
+    } else if (
+      shouldReloadForServerInstanceChange(serverInstanceIdRef.current, payload.serverInstanceId)
+    ) {
+      window.location.reload();
+      return;
+    }
 
     migrateLocalSettingsToServer();
     void (async () => {

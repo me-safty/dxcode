@@ -148,6 +148,8 @@ export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
   Effect.asVoid,
 );
 
+const SERVER_INSTANCE_ID = crypto.randomUUID();
+
 const autoBootstrapWelcome = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
@@ -221,6 +223,7 @@ const autoBootstrapWelcome = Effect.gen(function* () {
   const projectName = segments[segments.length - 1] ?? "project";
 
   return {
+    serverInstanceId: SERVER_INSTANCE_ID,
     cwd: serverConfig.cwd,
     projectName,
     ...(bootstrapProjectId ? { bootstrapProjectId } : {}),

@@ -226,6 +226,7 @@ describe("WsTransport", () => {
       sequence: 1,
       type: "welcome",
       payload: {
+        serverInstanceId: "server-1",
         cwd: "/tmp/workspace",
         projectName: "workspace",
       },
@@ -277,6 +278,7 @@ describe("WsTransport", () => {
             sequence: 1,
             type: "welcome",
             payload: {
+              serverInstanceId: "server-1",
               cwd: "/tmp/one",
               projectName: "one",
             },
@@ -319,6 +321,7 @@ describe("WsTransport", () => {
       sequence: 2,
       type: "welcome",
       payload: {
+        serverInstanceId: "server-2",
         cwd: "/tmp/two",
         projectName: "two",
       },
