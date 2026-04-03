@@ -317,53 +317,14 @@ describe("waitForStartedServerThread", () => {
 });
 
 describe("hasServerAcknowledgedLocalDispatch", () => {
-  const projectId = ProjectId.makeUnsafe("project-1");
-  const previousLatestTurn = {
-    turnId: TurnId.makeUnsafe("turn-1"),
-    state: "completed" as const,
-    requestedAt: "2026-03-29T00:00:00.000Z",
-    startedAt: "2026-03-29T00:00:01.000Z",
-    completedAt: "2026-03-29T00:00:10.000Z",
-    assistantMessageId: null,
-  };
-
-  const previousSession = {
-    provider: "codex" as const,
-    status: "ready" as const,
-    createdAt: "2026-03-29T00:00:00.000Z",
-    updatedAt: "2026-03-29T00:00:10.000Z",
-    orchestrationStatus: "idle" as const,
-  };
-
   it("does not clear local dispatch before server state changes", () => {
-    const localDispatch = createLocalDispatchSnapshot({
-      id: ThreadId.makeUnsafe("thread-1"),
-      codexThreadId: null,
-      projectId,
-      title: "Thread",
-      modelSelection: { provider: "codex", model: "gpt-5.4" },
-      runtimeMode: "full-access",
-      interactionMode: "default",
-      session: previousSession,
-      messages: [],
-      proposedPlans: [],
-      error: null,
-      createdAt: "2026-03-29T00:00:00.000Z",
-      archivedAt: null,
-      updatedAt: "2026-03-29T00:00:10.000Z",
-      latestTurn: previousLatestTurn,
-      branch: null,
-      worktreePath: null,
-      turnDiffSummaries: [],
-      activities: [],
-    });
+    const localDispatch = createLocalDispatchSnapshot({ ackSequence: 5 });
 
     expect(
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
         phase: "ready",
-        latestTurn: previousLatestTurn,
-        session: previousSession,
+        latestAppliedOrchestrationSequence: 4,
         hasPendingApproval: false,
         hasPendingUserInput: false,
         threadError: null,
@@ -371,44 +332,14 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     ).toBe(false);
   });
 
-  it("clears local dispatch when a new turn is already settled", () => {
-    const localDispatch = createLocalDispatchSnapshot({
-      id: ThreadId.makeUnsafe("thread-1"),
-      codexThreadId: null,
-      projectId,
-      title: "Thread",
-      modelSelection: { provider: "codex", model: "gpt-5.4" },
-      runtimeMode: "full-access",
-      interactionMode: "default",
-      session: previousSession,
-      messages: [],
-      proposedPlans: [],
-      error: null,
-      createdAt: "2026-03-29T00:00:00.000Z",
-      archivedAt: null,
-      updatedAt: "2026-03-29T00:00:10.000Z",
-      latestTurn: previousLatestTurn,
-      branch: null,
-      worktreePath: null,
-      turnDiffSummaries: [],
-      activities: [],
-    });
+  it("clears local dispatch when the committed sequence has been applied", () => {
+    const localDispatch = createLocalDispatchSnapshot({ ackSequence: 5 });
 
     expect(
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
         phase: "ready",
-        latestTurn: {
-          ...previousLatestTurn,
-          turnId: TurnId.makeUnsafe("turn-2"),
-          requestedAt: "2026-03-29T00:01:00.000Z",
-          startedAt: "2026-03-29T00:01:01.000Z",
-          completedAt: "2026-03-29T00:01:30.000Z",
-        },
-        session: {
-          ...previousSession,
-          updatedAt: "2026-03-29T00:01:30.000Z",
-        },
+        latestAppliedOrchestrationSequence: 5,
         hasPendingApproval: false,
         hasPendingUserInput: false,
         threadError: null,
@@ -416,42 +347,33 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     ).toBe(true);
   });
 
-  it("clears local dispatch when the session changes without an observed running phase", () => {
-    const localDispatch = createLocalDispatchSnapshot({
-      id: ThreadId.makeUnsafe("thread-1"),
-      codexThreadId: null,
-      projectId,
-      title: "Thread",
-      modelSelection: { provider: "codex", model: "gpt-5.4" },
-      runtimeMode: "full-access",
-      interactionMode: "default",
-      session: previousSession,
-      messages: [],
-      proposedPlans: [],
-      error: null,
-      createdAt: "2026-03-29T00:00:00.000Z",
-      archivedAt: null,
-      updatedAt: "2026-03-29T00:00:10.000Z",
-      latestTurn: previousLatestTurn,
-      branch: null,
-      worktreePath: null,
-      turnDiffSummaries: [],
-      activities: [],
-    });
+  it("clears local dispatch once the session is running", () => {
+    const localDispatch = createLocalDispatchSnapshot();
 
     expect(
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
-        phase: "ready",
-        latestTurn: previousLatestTurn,
-        session: {
-          ...previousSession,
-          updatedAt: "2026-03-29T00:00:11.000Z",
-        },
+        phase: "running",
+        latestAppliedOrchestrationSequence: 0,
         hasPendingApproval: false,
         hasPendingUserInput: false,
         threadError: null,
       }),
     ).toBe(true);
+  });
+
+  it("does not clear local dispatch without an ack sequence while the session remains idle", () => {
+    const localDispatch = createLocalDispatchSnapshot();
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        localDispatch,
+        phase: "ready",
+        latestAppliedOrchestrationSequence: 99,
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+        threadError: null,
+      }),
+    ).toBe(false);
   });
 });

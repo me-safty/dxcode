@@ -66,6 +66,7 @@ function makeState(thread: Thread): AppState {
     threads: [thread],
     sidebarThreadsById: {},
     threadIdsByProjectId,
+    latestAppliedOrchestrationSequence: 0,
     bootstrapComplete: true,
   };
 }
@@ -178,6 +179,33 @@ describe("store read model sync", () => {
     expect(next.bootstrapComplete).toBe(true);
   });
 
+  it("tracks the latest applied orchestration sequence from snapshots", () => {
+    const initialState = makeState(makeThread());
+    const readModel = {
+      ...makeReadModel(makeReadModelThread({})),
+      snapshotSequence: 7,
+    };
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.latestAppliedOrchestrationSequence).toBe(7);
+  });
+
+  it("does not regress the latest applied orchestration sequence during snapshot sync", () => {
+    const initialState: AppState = {
+      ...makeState(makeThread()),
+      latestAppliedOrchestrationSequence: 10,
+    };
+    const readModel = {
+      ...makeReadModel(makeReadModelThread({})),
+      snapshotSequence: 7,
+    };
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.latestAppliedOrchestrationSequence).toBe(10);
+  });
+
   it("preserves claude model slugs without an active session", () => {
     const initialState = makeState(makeThread());
     const readModel = makeReadModel(
@@ -278,6 +306,7 @@ describe("store read model sync", () => {
       threads: [],
       sidebarThreadsById: {},
       threadIdsByProjectId: {},
+      latestAppliedOrchestrationSequence: 0,
       bootstrapComplete: true,
     };
     const readModel: OrchestrationReadModel = {
@@ -328,6 +357,30 @@ describe("incremental orchestration updates", () => {
     expect(next.bootstrapComplete).toBe(false);
   });
 
+  it("tracks the latest applied orchestration sequence from events", () => {
+    const state = makeState(makeThread());
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent(
+        "thread.message-sent",
+        {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          messageId: MessageId.makeUnsafe("msg-1"),
+          role: "assistant",
+          text: "done",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-02-27T00:00:01.000Z",
+          updatedAt: "2026-02-27T00:00:01.000Z",
+        },
+        { sequence: 4 },
+      ),
+    );
+
+    expect(next.latestAppliedOrchestrationSequence).toBe(4);
+  });
+
   it("preserves state identity for no-op project and thread deletes", () => {
     const thread = makeThread();
     const state = makeState(thread);
@@ -347,8 +400,18 @@ describe("incremental orchestration updates", () => {
       }),
     );
 
-    expect(nextAfterProjectDelete).toBe(state);
-    expect(nextAfterThreadDelete).toBe(state);
+    expect(nextAfterProjectDelete.projects).toEqual(state.projects);
+    expect(nextAfterProjectDelete.threads).toEqual(state.threads);
+    expect(nextAfterProjectDelete.sidebarThreadsById).toEqual(state.sidebarThreadsById);
+    expect(nextAfterProjectDelete.threadIdsByProjectId).toEqual(state.threadIdsByProjectId);
+    expect(nextAfterProjectDelete.bootstrapComplete).toBe(state.bootstrapComplete);
+    expect(nextAfterProjectDelete.latestAppliedOrchestrationSequence).toBe(1);
+    expect(nextAfterThreadDelete.projects).toEqual(state.projects);
+    expect(nextAfterThreadDelete.threads).toEqual(state.threads);
+    expect(nextAfterThreadDelete.sidebarThreadsById).toEqual(state.sidebarThreadsById);
+    expect(nextAfterThreadDelete.threadIdsByProjectId).toEqual(state.threadIdsByProjectId);
+    expect(nextAfterThreadDelete.bootstrapComplete).toBe(state.bootstrapComplete);
+    expect(nextAfterThreadDelete.latestAppliedOrchestrationSequence).toBe(1);
   });
 
   it("reuses an existing project row when project.created arrives with a new id for the same cwd", () => {
@@ -370,6 +433,7 @@ describe("incremental orchestration updates", () => {
       threads: [],
       sidebarThreadsById: {},
       threadIdsByProjectId: {},
+      latestAppliedOrchestrationSequence: 0,
       bootstrapComplete: true,
     };
 
@@ -431,6 +495,7 @@ describe("incremental orchestration updates", () => {
       threadIdsByProjectId: {
         [originalProjectId]: [threadId],
       },
+      latestAppliedOrchestrationSequence: 0,
       bootstrapComplete: true,
     };
 

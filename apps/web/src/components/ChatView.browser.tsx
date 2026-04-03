@@ -384,6 +384,31 @@ function createThreadCreatedEvent(threadId: ThreadId, sequence: number): Orchest
   };
 }
 
+function createThreadMessageSentEvent(threadId: ThreadId, sequence: number): OrchestrationEvent {
+  return {
+    sequence,
+    eventId: EventId.makeUnsafe(`event-thread-message-sent-${sequence}`),
+    aggregateKind: "thread",
+    aggregateId: threadId,
+    occurredAt: isoAt(30),
+    commandId: null,
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    type: "thread.message-sent",
+    payload: {
+      threadId,
+      messageId: "assistant-stuck-waiting-repro" as MessageId,
+      role: "assistant",
+      text: "done",
+      turnId: null,
+      streaming: false,
+      createdAt: isoAt(30),
+      updatedAt: isoAt(31),
+    },
+  };
+}
+
 function sendOrchestrationDomainEvent(event: OrchestrationEvent): void {
   rpcHarness.emitStreamValue(WS_METHODS.subscribeOrchestrationDomainEvents, event);
 }
@@ -799,6 +824,13 @@ async function waitForSendButton(): Promise<HTMLButtonElement> {
   return waitForElement(
     () => document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]'),
     "Unable to find send button.",
+  );
+}
+
+async function waitForComposerSubmitButton(): Promise<HTMLButtonElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLButtonElement>('button[type="submit"]'),
+    "Unable to find composer submit button.",
   );
 }
 
@@ -2077,6 +2109,58 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("unblocks the composer when thread state advances without a clean running lifecycle", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-stuck-waiting-target" as MessageId,
+        targetText: "stuck waiting target",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return { sequence: 2 };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, "first prompt");
+
+      const sendButton = await waitForSendButton();
+      expect(sendButton.disabled).toBe(false);
+      sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const submitButton = document.querySelector<HTMLButtonElement>('button[type="submit"]');
+          expect(submitButton?.getAttribute("aria-label")).toBe("Sending");
+          expect(submitButton?.disabled).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await waitForWsClient();
+      sendOrchestrationDomainEvent(createThreadMessageSentEvent(THREAD_ID, 2));
+
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, "second prompt");
+
+      await vi.waitFor(
+        () => {
+          const submitButton = document.querySelector<HTMLButtonElement>('button[type="submit"]');
+          expect(submitButton?.getAttribute("aria-label")).toBe("Send message");
+          expect(submitButton?.disabled).toBe(false);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const submitButton = await waitForComposerSubmitButton();
+      expect(submitButton.getAttribute("aria-label")).toBe("Send message");
     } finally {
       await mounted.cleanup();
     }

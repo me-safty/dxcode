@@ -881,7 +881,8 @@ const make = Effect.fn("make")(function* () {
 
     const now = event.createdAt;
     const eventTurnId = toTurnId(event.turnId);
-    const activeTurnId = thread.session?.activeTurnId ?? null;
+    const activeTurnId =
+      thread.session?.status === "running" ? (thread.session.activeTurnId ?? null) : null;
 
     const conflictsWithActiveTurn =
       activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
@@ -926,12 +927,6 @@ const make = Effect.fn("make")(function* () {
       event.type === "turn.started" ||
       event.type === "turn.completed"
     ) {
-      const nextActiveTurnId =
-        event.type === "turn.started"
-          ? (eventTurnId ?? null)
-          : event.type === "turn.completed" || event.type === "session.exited"
-            ? null
-            : activeTurnId;
       const status = (() => {
         switch (event.type) {
           case "session.state.changed":
@@ -949,6 +944,14 @@ const make = Effect.fn("make")(function* () {
             return activeTurnId !== null ? "running" : "ready";
         }
       })();
+      const nextActiveTurnId =
+        event.type === "turn.started"
+          ? (eventTurnId ?? null)
+          : event.type === "turn.completed" ||
+              event.type === "session.exited" ||
+              status !== "running"
+            ? null
+            : activeTurnId;
       const lastError =
         event.type === "session.state.changed" && event.payload.state === "error"
           ? (event.payload.reason ?? thread.session?.lastError ?? "Provider session error")
@@ -1158,7 +1161,7 @@ const make = Effect.fn("make")(function* () {
             status: "error",
             providerName: event.provider,
             runtimeMode: thread.session?.runtimeMode ?? "full-access",
-            activeTurnId: eventTurnId ?? null,
+            activeTurnId: null,
             lastError: runtimeErrorMessage,
             updatedAt: now,
           },

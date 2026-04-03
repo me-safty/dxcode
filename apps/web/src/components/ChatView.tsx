@@ -340,29 +340,33 @@ interface PendingPullRequestSetupRequest {
 }
 
 function useLocalDispatchState(input: {
-  activeThread: Thread | undefined;
-  activeLatestTurn: Thread["latestTurn"] | null;
   phase: SessionPhase;
   activePendingApproval: ApprovalRequestId | null;
   activePendingUserInput: ApprovalRequestId | null;
+  latestAppliedOrchestrationSequence: number;
   threadError: string | null | undefined;
 }) {
   const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(null);
 
-  const beginLocalDispatch = useCallback(
-    (options?: { preparingWorktree?: boolean }) => {
-      const preparingWorktree = Boolean(options?.preparingWorktree);
-      setLocalDispatch((current) => {
-        if (current) {
-          return current.preparingWorktree === preparingWorktree
-            ? current
-            : { ...current, preparingWorktree };
-        }
-        return createLocalDispatchSnapshot(input.activeThread, options);
-      });
-    },
-    [input.activeThread],
-  );
+  const beginLocalDispatch = useCallback((options?: { preparingWorktree?: boolean }) => {
+    const preparingWorktree = Boolean(options?.preparingWorktree);
+    setLocalDispatch((current) => {
+      if (current) {
+        return current.preparingWorktree === preparingWorktree
+          ? current
+          : { ...current, preparingWorktree };
+      }
+      return createLocalDispatchSnapshot(options);
+    });
+  }, []);
+
+  const setLocalDispatchAckSequence = useCallback((ackSequence: number) => {
+    setLocalDispatch((current) =>
+      current === null || current.ackSequence === ackSequence
+        ? current
+        : { ...current, ackSequence, preparingWorktree: false },
+    );
+  }, []);
 
   const resetLocalDispatch = useCallback(() => {
     setLocalDispatch(null);
@@ -373,17 +377,15 @@ function useLocalDispatchState(input: {
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
         phase: input.phase,
-        latestTurn: input.activeLatestTurn,
-        session: input.activeThread?.session ?? null,
+        latestAppliedOrchestrationSequence: input.latestAppliedOrchestrationSequence,
         hasPendingApproval: input.activePendingApproval !== null,
         hasPendingUserInput: input.activePendingUserInput !== null,
         threadError: input.threadError,
       }),
     [
-      input.activeLatestTurn,
       input.activePendingApproval,
       input.activePendingUserInput,
-      input.activeThread?.session,
+      input.latestAppliedOrchestrationSequence,
       input.phase,
       input.threadError,
       localDispatch,
@@ -400,6 +402,7 @@ function useLocalDispatchState(input: {
   return {
     beginLocalDispatch,
     resetLocalDispatch,
+    setLocalDispatchAckSequence,
     localDispatchStartedAt: localDispatch?.startedAt ?? null,
     isPreparingWorktree: localDispatch?.preparingWorktree ?? false,
     isSendBusy: localDispatch !== null && !serverAcknowledgedLocalDispatch,
@@ -565,6 +568,9 @@ function PersistentThreadTerminalDrawer({
 
 export default function ChatView({ threadId }: ChatViewProps) {
   const serverThread = useThreadById(threadId);
+  const latestAppliedOrchestrationSequence = useStore(
+    (store) => store.latestAppliedOrchestrationSequence,
+  );
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
@@ -1109,15 +1115,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const {
     beginLocalDispatch,
     resetLocalDispatch,
+    setLocalDispatchAckSequence,
     localDispatchStartedAt,
     isPreparingWorktree,
     isSendBusy,
   } = useLocalDispatchState({
-    activeThread,
-    activeLatestTurn,
     phase,
     activePendingApproval: activePendingApproval?.requestId ?? null,
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
+    latestAppliedOrchestrationSequence,
     threadError: activeThread?.error,
   });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
@@ -3067,7 +3073,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       beginLocalDispatch({ preparingWorktree: false });
       const turnAttachments = await turnAttachmentsPromise;
-      await api.orchestration.dispatchCommand({
+      const dispatchResult = await api.orchestration.dispatchCommand({
         type: "thread.turn.start",
         commandId: newCommandId(),
         threadId: threadIdForSend,
@@ -3083,6 +3089,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         interactionMode,
         createdAt: messageCreatedAt,
       });
+      setLocalDispatchAckSequence(dispatchResult.sequence);
       turnStartSucceeded = true;
     })().catch(async (err: unknown) => {
       if (createdServerThreadForLocalDraft && !turnStartSucceeded) {
@@ -3349,7 +3356,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         // while the same-thread implementation turn is starting.
         setComposerDraftInteractionMode(threadIdForSend, nextInteractionMode);
 
-        await api.orchestration.dispatchCommand({
+        const dispatchResult = await api.orchestration.dispatchCommand({
           type: "thread.turn.start",
           commandId: newCommandId(),
           threadId: threadIdForSend,
@@ -3373,6 +3380,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             : {}),
           createdAt: messageCreatedAt,
         });
+        setLocalDispatchAckSequence(dispatchResult.sequence);
         // Optimistically open the plan sidebar when implementing (not refining).
         // "default" mode here means the agent is executing the plan, which produces
         // step-tracking activities that the sidebar will display.
@@ -3409,6 +3417,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       selectedProvider,
       selectedProviderModels,
       setComposerDraftInteractionMode,
+      setLocalDispatchAckSequence,
       setThreadError,
       selectedModel,
     ],
@@ -3486,7 +3495,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           createdAt,
         });
       })
-      .then(() => {
+      .then((dispatchResult) => {
+        setLocalDispatchAckSequence(dispatchResult.sequence);
         return waitForStartedServerThread(nextThreadId);
       })
       .then(() => {
@@ -3528,6 +3538,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedModelSelection,
     selectedProvider,
     selectedProviderModels,
+    setLocalDispatchAckSequence,
     selectedModel,
   ]);
 
