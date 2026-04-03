@@ -19,10 +19,12 @@ describe("serverSettings helpers", () => {
       extractPersistedServerObservabilitySettings({
         observability: {
           otlpTracesUrl: "  http://localhost:4318/v1/traces  ",
+          otlpMetricsUrl: "  http://localhost:4318/v1/metrics  ",
         },
       }),
     ).toEqual({
       otlpTracesUrl: "http://localhost:4318/v1/traces",
+      otlpMetricsUrl: "http://localhost:4318/v1/metrics",
     });
   });
 
@@ -32,17 +34,20 @@ describe("serverSettings helpers", () => {
         JSON.stringify({
           observability: {
             otlpTracesUrl: "http://localhost:4318/v1/traces",
+            otlpMetricsUrl: "http://localhost:4318/v1/metrics",
           },
         }),
       ),
     ).toEqual({
       otlpTracesUrl: "http://localhost:4318/v1/traces",
+      otlpMetricsUrl: "http://localhost:4318/v1/metrics",
     });
   });
 
   it("falls back cleanly when persisted settings are invalid", () => {
     expect(parsePersistedServerObservabilitySettings("{")).toEqual({
       otlpTracesUrl: undefined,
+      otlpMetricsUrl: undefined,
     });
   });
 });

@@ -73,6 +73,7 @@ export type ClaudeSettings = typeof ClaudeSettings.Type;
 
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
@@ -167,6 +168,7 @@ export const ServerSettingsPatch = Schema.Struct({
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(Schema.String),
+      otlpMetricsUrl: Schema.optionalKey(Schema.String),
     }),
   ),
   providers: Schema.optionalKey(

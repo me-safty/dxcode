@@ -29,6 +29,7 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   autoBootstrapProjectFromCwd: Schema.optional(Schema.Boolean),
   logWebSocketEvents: Schema.optional(Schema.Boolean),
   otlpTracesUrl: Schema.optional(Schema.String),
+  otlpMetricsUrl: Schema.optional(Schema.String),
 });
 
 const modeFlag = Flag.choice("mode", RuntimeMode.literals).pipe(
@@ -302,7 +303,14 @@ export const resolveServerConfig = (
           ),
         ) ??
         persistedObservabilitySettings.otlpTracesUrl,
-      otlpMetricsUrl: env.otlpMetricsUrl,
+      otlpMetricsUrl:
+        env.otlpMetricsUrl ??
+        Option.getOrUndefined(
+          Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+            Option.fromUndefinedOr(bootstrap.otlpMetricsUrl),
+          ),
+        ) ??
+        persistedObservabilitySettings.otlpMetricsUrl,
       otlpExportIntervalMs: env.otlpExportIntervalMs,
       otlpServiceName: env.otlpServiceName,
       mode,

@@ -6,6 +6,7 @@ const ServerSettingsJson = fromLenientJson(ServerSettings);
 
 export interface PersistedServerObservabilitySettings {
   readonly otlpTracesUrl: string | undefined;
+  readonly otlpMetricsUrl: string | undefined;
 }
 
 export function normalizePersistedServerSettingString(
@@ -18,10 +19,12 @@ export function normalizePersistedServerSettingString(
 export function extractPersistedServerObservabilitySettings(input: {
   readonly observability?: {
     readonly otlpTracesUrl?: string;
+    readonly otlpMetricsUrl?: string;
   };
 }): PersistedServerObservabilitySettings {
   return {
     otlpTracesUrl: normalizePersistedServerSettingString(input.observability?.otlpTracesUrl),
+    otlpMetricsUrl: normalizePersistedServerSettingString(input.observability?.otlpMetricsUrl),
   };
 }
 
@@ -32,6 +35,6 @@ export function parsePersistedServerObservabilitySettings(
     const decoded = Schema.decodeUnknownSync(ServerSettingsJson)(raw);
     return extractPersistedServerObservabilitySettings(decoded);
   } catch {
-    return { otlpTracesUrl: undefined };
+    return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
   }
 }

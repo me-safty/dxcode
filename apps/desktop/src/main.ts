@@ -127,15 +127,16 @@ function sanitizeLogValue(value: string): string {
 
 function readPersistedBackendObservabilitySettings(): {
   readonly otlpTracesUrl: string | undefined;
+  readonly otlpMetricsUrl: string | undefined;
 } {
   try {
     if (!FS.existsSync(SERVER_SETTINGS_PATH)) {
-      return { otlpTracesUrl: undefined };
+      return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
     }
     return parsePersistedServerObservabilitySettings(FS.readFileSync(SERVER_SETTINGS_PATH, "utf8"));
   } catch (error) {
     console.warn("[desktop] failed to read persisted backend observability settings", error);
-    return { otlpTracesUrl: undefined };
+    return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
   }
 }
 
@@ -1038,6 +1039,9 @@ function startBackend(): void {
         authToken: backendAuthToken,
         ...(backendObservabilitySettings.otlpTracesUrl
           ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
+          : {}),
+        ...(backendObservabilitySettings.otlpMetricsUrl
+          ? { otlpMetricsUrl: backendObservabilitySettings.otlpMetricsUrl }
           : {}),
       })}\n`,
     );
