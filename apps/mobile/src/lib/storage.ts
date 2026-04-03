@@ -95,10 +95,13 @@ async function loadToken(): Promise<string> {
 
   const secureStore = await loadSecureStore();
   try {
-    return secureStore ? ((await secureStore.getItemAsync(CONNECTION_TOKEN_KEY)) ?? "") : "";
+    if (secureStore) {
+      return (await secureStore.getItemAsync(CONNECTION_TOKEN_KEY)) ?? "";
+    }
   } catch {
-    return (await readStorageItem(CONNECTION_TOKEN_KEY)) ?? "";
+    // fall through to async storage
   }
+  return (await readStorageItem(CONNECTION_TOKEN_KEY)) ?? "";
 }
 
 async function storeToken(token: string): Promise<void> {

@@ -214,6 +214,7 @@ export class RemoteClient {
     this.disposed = false;
     this.reconnectAttempt = 0;
     this.clearReconnectTimer();
+    this.rejectPendingRequests(new Error("Reconnecting."));
     this.closeSocket();
     this.openWebSocket();
   }

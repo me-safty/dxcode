@@ -393,6 +393,8 @@ export function requiresSnapshotRefresh(event: OrchestrationEvent): boolean {
     case "project.deleted":
     case "thread.created":
     case "thread.deleted":
+    case "thread.archived":
+    case "thread.unarchived":
     case "thread.meta-updated":
     case "thread.runtime-mode-set":
     case "thread.interaction-mode-set":
