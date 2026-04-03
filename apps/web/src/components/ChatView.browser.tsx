@@ -1156,6 +1156,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
       threads: [],
       bootstrapComplete: false,
     });
+    useTerminalStateStore.persist.clearStorage();
+    useTerminalStateStore.setState({
+      terminalStateByThreadId: {},
+      terminalLaunchContextByThreadId: {},
+      terminalEventEntriesByKey: {},
+      nextTerminalEventId: 1,
+    });
   });
 
   afterEach(() => {
