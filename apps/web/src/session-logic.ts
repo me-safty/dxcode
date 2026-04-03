@@ -636,10 +636,109 @@ function asTrimmedString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function trimMatchingOuterQuotes(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+  ) {
+    const unquoted = trimmed.slice(1, -1).trim();
+    return unquoted.length > 0 ? unquoted : trimmed;
+  }
+  return trimmed;
+}
+
+function executableBasename(value: string): string | null {
+  const trimmed = trimMatchingOuterQuotes(value);
+  if (trimmed.length === 0) {
+    return null;
+  }
+  const normalized = trimmed.replace(/\\/g, "/");
+  const segments = normalized.split("/");
+  const last = segments.at(-1)?.trim() ?? "";
+  return last.length > 0 ? last.toLowerCase() : null;
+}
+
+function splitExecutableAndRest(value: string): { executable: string; rest: string } | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  if (trimmed.startsWith('"') || trimmed.startsWith("'")) {
+    const quote = trimmed.charAt(0);
+    const closeIndex = trimmed.indexOf(quote, 1);
+    if (closeIndex <= 0) {
+      return null;
+    }
+    return {
+      executable: trimmed.slice(0, closeIndex + 1),
+      rest: trimmed.slice(closeIndex + 1).trim(),
+    };
+  }
+
+  const firstWhitespace = trimmed.search(/\s/);
+  if (firstWhitespace < 0) {
+    return {
+      executable: trimmed,
+      rest: "",
+    };
+  }
+
+  return {
+    executable: trimmed.slice(0, firstWhitespace),
+    rest: trimmed.slice(firstWhitespace).trim(),
+  };
+}
+
+function unwrapCommandRemainder(value: string, wrapperFlagPattern: RegExp): string {
+  const match = wrapperFlagPattern.exec(value);
+  if (!match) {
+    return value;
+  }
+
+  const command = value.slice(match.index + match[0].length).trim();
+  if (command.length === 0) {
+    return value;
+  }
+
+  const unwrapped = trimMatchingOuterQuotes(command);
+  return unwrapped.length > 0 ? unwrapped : value;
+}
+
+function unwrapKnownShellCommandWrapper(value: string): string {
+  const split = splitExecutableAndRest(value);
+  if (!split || split.rest.length === 0) {
+    return value;
+  }
+
+  const shell = executableBasename(split.executable);
+  if (!shell) {
+    return value;
+  }
+
+  switch (shell) {
+    case "pwsh":
+    case "pwsh.exe":
+    case "powershell":
+    case "powershell.exe":
+      return unwrapCommandRemainder(split.rest, /(?:^|\s)-command\s+/i);
+    case "cmd":
+    case "cmd.exe":
+      return unwrapCommandRemainder(split.rest, /(?:^|\s)\/c\s+/i);
+    case "bash":
+    case "sh":
+    case "zsh":
+      return unwrapCommandRemainder(split.rest, /(?:^|\s)-(?:l)?c\s+/i);
+    default:
+      return value;
+  }
+}
+
 function normalizeCommandValue(value: unknown): string | null {
   const direct = asTrimmedString(value);
   if (direct) {
-    return direct;
+    return unwrapKnownShellCommandWrapper(direct);
   }
   if (!Array.isArray(value)) {
     return null;
@@ -647,7 +746,29 @@ function normalizeCommandValue(value: unknown): string | null {
   const parts = value
     .map((entry) => asTrimmedString(entry))
     .filter((entry): entry is string => entry !== null);
-  return parts.length > 0 ? parts.join(" ") : null;
+  if (parts.length === 0) {
+    return null;
+  }
+  const shell = executableBasename(parts[0] ?? "");
+  if (shell) {
+    const powerShell =
+      shell === "pwsh" ||
+      shell === "pwsh.exe" ||
+      shell === "powershell" ||
+      shell === "powershell.exe";
+    const wrapperArgIndex = powerShell
+      ? parts.findIndex((part, index) => index > 0 && /^-command$/i.test(part))
+      : shell === "cmd" || shell === "cmd.exe"
+        ? parts.findIndex((part, index) => index > 0 && /^\/c$/i.test(part))
+        : shell === "bash" || shell === "sh" || shell === "zsh"
+          ? parts.findIndex((part, index) => index > 0 && /^-(?:l)?c$/i.test(part))
+          : -1;
+
+    if (wrapperArgIndex > 0 && parts.length > wrapperArgIndex + 1) {
+      return trimMatchingOuterQuotes(parts.slice(wrapperArgIndex + 1).join(" "));
+    }
+  }
+  return unwrapKnownShellCommandWrapper(parts.join(" "));
 }
 
 function extractToolCommand(payload: Record<string, unknown> | null): string | null {
@@ -655,11 +776,18 @@ function extractToolCommand(payload: Record<string, unknown> | null): string | n
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
   const itemInput = asRecord(item?.input);
+  const itemType = asTrimmedString(payload?.itemType);
+  const detail = asTrimmedString(payload?.detail);
+  const detailCommand =
+    itemType === "command_execution" && detail
+      ? normalizeCommandValue(stripTrailingExitCode(detail).output)
+      : null;
   const candidates = [
     normalizeCommandValue(item?.command),
     normalizeCommandValue(itemInput?.command),
     normalizeCommandValue(itemResult?.command),
     normalizeCommandValue(data?.command),
+    detailCommand,
   ];
   return candidates.find((candidate) => candidate !== null) ?? null;
 }
