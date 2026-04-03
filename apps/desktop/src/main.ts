@@ -148,8 +148,6 @@ function backendChildEnv(): NodeJS.ProcessEnv {
   delete env.T3CODE_NO_BROWSER;
   delete env.T3CODE_HOST;
   delete env.T3CODE_DESKTOP_WS_URL;
-  delete env.T3CODE_OTLP_TRACES_URL;
-  delete env.T3CODE_OTLP_METRICS_URL;
   return env;
 }
 
