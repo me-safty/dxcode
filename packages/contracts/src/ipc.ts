@@ -105,21 +105,6 @@ export interface DesktopUpdateCheckResult {
   state: DesktopUpdateState;
 }
 
-export interface DesktopRemoteAddress {
-  label: string;
-  host: string;
-  url: string;
-}
-
-export interface DesktopRemoteState {
-  enabled: boolean;
-  listening: boolean;
-  port: number;
-  token: string;
-  endpoints: ReadonlyArray<DesktopRemoteAddress>;
-  errorMessage: string | null;
-}
-
 export interface DesktopBridge {
   getWsUrl: () => string | null;
   pickFolder: () => Promise<string | null>;
@@ -136,10 +121,6 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
-  getRemoteState: () => Promise<DesktopRemoteState>;
-  setRemoteEnabled: (enabled: boolean) => Promise<DesktopRemoteState>;
-  setRemoteToken: (token: string) => Promise<DesktopRemoteState>;
-  onRemoteState: (listener: (state: DesktopRemoteState) => void) => () => void;
 }
 
 export interface NativeApi {

@@ -18,7 +18,6 @@ import {
 import type { MenuItemConstructorOptions } from "electron";
 import * as Effect from "effect/Effect";
 import type {
-  DesktopRemoteState,
   DesktopTheme,
   DesktopUpdateActionResult,
   DesktopUpdateCheckResult,
@@ -46,7 +45,6 @@ import {
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
-import { DesktopRemoteManager } from "./remoteAccess";
 
 syncShellEnvironment();
 
@@ -62,13 +60,8 @@ const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
-const REMOTE_GET_STATE_CHANNEL = "desktop:remote-get-state";
-const REMOTE_SET_ENABLED_CHANNEL = "desktop:remote-set-enabled";
-const REMOTE_SET_TOKEN_CHANNEL = "desktop:remote-set-token";
-const REMOTE_STATE_CHANNEL = "desktop:remote-state";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
-const REMOTE_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -329,21 +322,6 @@ let updateDownloadInFlight = false;
 let updateInstallInFlight = false;
 let updaterConfigured = false;
 let updateState: DesktopUpdateState = initialUpdateState();
-let remoteManager: DesktopRemoteManager | null = null;
-
-function getRemoteManager(): DesktopRemoteManager {
-  if (!remoteManager) {
-    remoteManager = new DesktopRemoteManager({
-      settingsPath: REMOTE_SETTINGS_PATH,
-      getBackendPort: () => backendPort,
-      getBackendAuthToken: () => backendAuthToken,
-    });
-    remoteManager.subscribe((state) => {
-      broadcastRemoteState(state);
-    });
-  }
-  return remoteManager;
-}
 
 function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
   if (updateInstallInFlight) return "install";
@@ -510,7 +488,6 @@ function handleFatalStartupError(stage: string, error: unknown): void {
     isQuitting = true;
     dialog.showErrorBox("T3 Code failed to start", `Stage: ${stage}\n${message}${detail}`);
   }
-  void remoteManager?.close();
   stopBackend();
   restoreStdIoCapture?.();
   app.quit();
@@ -796,17 +773,6 @@ function emitUpdateState(): void {
     if (window.isDestroyed()) continue;
     window.webContents.send(UPDATE_STATE_CHANNEL, updateState);
   }
-}
-
-function broadcastRemoteState(remoteState: DesktopRemoteState): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (window.isDestroyed()) continue;
-    window.webContents.send(REMOTE_STATE_CHANNEL, remoteState);
-  }
-}
-
-function emitRemoteState(): void {
-  broadcastRemoteState(getRemoteManager().getState());
 }
 
 function setUpdateState(patch: Partial<DesktopUpdateState>): void {
@@ -1364,30 +1330,6 @@ function registerIpcHandlers(): void {
       state: updateState,
     } satisfies DesktopUpdateCheckResult;
   });
-
-  ipcMain.removeHandler(REMOTE_GET_STATE_CHANNEL);
-  ipcMain.handle(REMOTE_GET_STATE_CHANNEL, async () => getRemoteManager().getState());
-
-  ipcMain.removeHandler(REMOTE_SET_ENABLED_CHANNEL);
-  ipcMain.handle(REMOTE_SET_ENABLED_CHANNEL, async (_event, rawEnabled: unknown) => {
-    if (typeof rawEnabled !== "boolean") {
-      return getRemoteManager().getState();
-    }
-    const state = await getRemoteManager().setEnabled(rawEnabled);
-    emitRemoteState();
-    return state;
-  });
-
-  ipcMain.removeHandler(REMOTE_SET_TOKEN_CHANNEL);
-  ipcMain.handle(REMOTE_SET_TOKEN_CHANNEL, async (_event, rawToken: unknown) => {
-    if (!isDevelopment || typeof rawToken !== "string") {
-      return getRemoteManager().getState();
-    }
-
-    const state = await getRemoteManager().setToken(rawToken);
-    emitRemoteState();
-    return state;
-  });
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {
@@ -1532,9 +1474,6 @@ async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap ipc handlers registered");
   startBackend();
   writeDesktopLogHeader("bootstrap backend start requested");
-  await getRemoteManager().startIfEnabled();
-  emitRemoteState();
-  writeDesktopLogHeader("bootstrap remote access reconciled");
   mainWindow = createWindow();
   writeDesktopLogHeader("bootstrap main window created");
 }
@@ -1544,7 +1483,6 @@ app.on("before-quit", () => {
   updateInstallInFlight = false;
   writeDesktopLogHeader("before-quit received");
   clearUpdatePollTimer();
-  void remoteManager?.close();
   stopBackend();
   restoreStdIoCapture?.();
 });
@@ -1585,7 +1523,6 @@ if (process.platform !== "win32") {
     isQuitting = true;
     writeDesktopLogHeader("SIGINT received");
     clearUpdatePollTimer();
-    void remoteManager?.close();
     stopBackend();
     restoreStdIoCapture?.();
     app.quit();
@@ -1596,7 +1533,6 @@ if (process.platform !== "win32") {
     isQuitting = true;
     writeDesktopLogHeader("SIGTERM received");
     clearUpdatePollTimer();
-    void remoteManager?.close();
     stopBackend();
     restoreStdIoCapture?.();
     app.quit();

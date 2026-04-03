@@ -57,15 +57,6 @@
           "imageWidth": 220
         }
       ],
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/android-icon-monochrome.png",
-          "color": "#E6F4FE",
-          "defaultChannel": "default",
-          "enableBackgroundRemoteNotifications": true
-        }
-      ],
       "expo-secure-store"
     ],
     "extra": {

@@ -25,20 +25,6 @@ The app derives the authenticated WebSocket URL automatically and lets you:
 - answer approval requests and pending user-input prompts
 - stop a running turn
 
-## Desktop app remote mode
-
-The Electron desktop app can now expose the same sessions to the Expo remote without rebinding the local backend.
-
-1. Open `Settings`.
-2. Turn on `Enable remote`.
-3. Copy one of the displayed LAN or Tailnet URLs plus the auth token into the Expo app.
-
-Notes:
-
-- The desktop app keeps its local backend on loopback and starts a separate authenticated remote proxy only when `Enable remote` is on.
-- Existing local chats keep running while remote access is enabled.
-- Remote image and attachment requests also use the same token.
-
 ## CLI ↔ Env option map
 
 The T3 Code CLI accepts the following configuration options, available either as CLI flags or environment variables:
@@ -111,40 +97,24 @@ You can also bind `--host 0.0.0.0` and connect through the Tailnet IP, but bindi
 
 ### Connection Establishment Sequence
 
-#### 1. Desktop — Remote Access Server (`apps/desktop/src/remoteAccess.ts`)
+#### 1. CLI server (`apps/server/src/cli.ts`)
 
-- Starts HTTP+WS server on port **3773** (configurable)
-- Generates a **48-byte hex auth token** (`Crypto.randomBytes(24).toString("hex")`)
-- Discovers all local IPv4 non-loopback network addresses for display
-- Stores settings (enabled, port, token) in a JSON config file
+- Binds the HTTP + WebSocket server directly on the selected host and port
+- Uses `--auth-token` / `T3CODE_AUTH_TOKEN` for authenticated remote access
+- Serves the same orchestration RPC surface the web app uses locally
 
-#### 2. Pairing — QR Code (`apps/web/src/components/DesktopRemoteQrCode.tsx`)
-
-- Web UI renders a QR code encoding a deep link: `t3remote://connect?serverUrl=http://192.168.x.x:3773&authToken=abc...`
-- Built using `buildRemoteAppConnectionUrl()` from `packages/shared/src/remote.ts`
-- Supports both `t3remote://` (production) and `exp+t3remote://` (Expo dev client)
-
-#### 3. Mobile — Connection Flow (`apps/mobile/src/app/useRemoteAppState.ts`)
+#### 2. Mobile — Connection Flow (`apps/mobile/src/app/useRemoteAppState.ts`)
 
 On app mount:
 
 1. **Load saved connection** from secure storage (`expo-secure-store` on native, `AsyncStorage` on web)
-2. **Check for deep link** — if user scanned QR, the URL scheme triggers the app with serverUrl + authToken
+2. **Check for deep link** — if a QR or deep link is used, the URL scheme triggers the app with `serverUrl` + `authToken`
 3. If neither exists, show the **connection editor sheet**
 4. Once credentials are available:
    - `resolveRemoteConnection()` normalizes the URL, infers ws/wss protocol, builds the WebSocket URL
    - `preflightRemoteConnection()` does HTTP GET to `/api/remote/health` (5s timeout)
    - Credentials saved to secure storage
    - Creates `RemoteClient` and calls `connect()`
-
-#### 4. WebSocket Proxy (`apps/desktop/src/remoteAccess.ts`)
-
-When the mobile client opens a WebSocket to `wss://host:3773/ws?token=...`:
-
-1. Desktop validates the token on upgrade
-2. Desktop opens an **upstream WebSocket** to the local backend (`ws://127.0.0.1:backendPort/ws?...`)
-3. **Bidirectional relay** — all messages forwarded transparently in both directions
-4. Client messages buffered while upstream socket is still connecting
 
 ### RPC Protocol (`apps/mobile/src/lib/remoteClient.ts`)
 
@@ -170,7 +140,6 @@ Custom RPC message protocol over WebSocket:
 Backend emits OrchestrationEvent
     -> Server's subscribeOrchestrationDomainEvents stream
     -> RPC Chunk message over WebSocket
-    -> Desktop proxy relays transparently
     -> Mobile RemoteClient.onChunk callback
     -> useRemoteAppState.applyRealtimeEvent()
     -> React state update -> UI re-renders
@@ -184,7 +153,7 @@ Backend emits OrchestrationEvent
 User taps Send
     -> enqueueThreadMessage() (optimistic UI update)
     -> client.dispatchCommand("thread.turn.start", payload)
-    -> RPC Request relayed through desktop proxy to backend
+    -> RPC Request sent directly to the CLI websocket server
     -> Backend processes, emits events back through stream
 ```
 
@@ -200,18 +169,17 @@ User taps Send
 
 - Token validated on every HTTP request and WebSocket upgrade
 - Mobile stores credentials in `expo-secure-store` (encrypted on native)
-- Desktop proxy strips hop-by-hop headers when proxying HTTP
 - Auth via query param on WebSocket URL
 
 ### Key Files
 
-| Layer   | File                                              | Role                                        |
-| ------- | ------------------------------------------------- | ------------------------------------------- |
-| Shared  | `packages/shared/src/remote.ts`                   | Deep link URL builder/parser                |
-| Desktop | `apps/desktop/src/remoteAccess.ts`                | HTTP+WS proxy server, token auth, discovery |
-| Web UI  | `apps/web/src/components/DesktopRemoteQrCode.tsx` | QR code generation                          |
-| Mobile  | `apps/mobile/src/lib/connection.ts`               | URL resolution, preflight check             |
-| Mobile  | `apps/mobile/src/lib/remoteClient.ts`             | WebSocket RPC client                        |
-| Mobile  | `apps/mobile/src/lib/storage.ts`                  | Secure credential persistence               |
-| Mobile  | `apps/mobile/src/app/useRemoteAppState.ts`        | Central state management                    |
-| Server  | `apps/server/src/ws.ts`                           | RPC server endpoints, event streaming       |
+| Layer  | File                                       | Role                                  |
+| ------ | ------------------------------------------ | ------------------------------------- |
+| Shared | `packages/shared/src/remote.ts`            | Deep link URL builder/parser          |
+| Mobile | `apps/mobile/src/lib/connection.ts`        | URL resolution, preflight check       |
+| Mobile | `apps/mobile/src/lib/remoteClient.ts`      | WebSocket RPC client                  |
+| Mobile | `apps/mobile/src/lib/storage.ts`           | Secure credential persistence         |
+| Mobile | `apps/mobile/src/app/useRemoteAppState.ts` | Central state management              |
+| Server | `apps/server/src/cli.ts`                   | Host/port/auth-token remote surface   |
+| Server | `apps/server/src/http.ts`                  | Remote health endpoint                |
+| Server | `apps/server/src/ws.ts`                    | RPC server endpoints, event streaming |

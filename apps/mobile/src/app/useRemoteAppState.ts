@@ -412,6 +412,7 @@ export function useRemoteAppState(): RemoteAppModel {
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectionSheetGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectionAttemptRef = useRef(0);
   const [isLoadingSavedConnection, setIsLoadingSavedConnection] = useState(true);
   const [connectionEditorVisible, setConnectionEditorVisible] = useState(false);
   const [connectionSheetGraceActive, setConnectionSheetGraceActive] = useState(false);
@@ -472,13 +473,20 @@ export function useRemoteAppState(): RemoteAppModel {
     }, CONNECTION_SHEET_GRACE_MS);
   }, [clearConnectionSheetGraceTimer]);
 
-  const disconnectClient = useCallback(() => {
-    clearRefreshTimer();
-    unsubscribeRef.current?.();
-    unsubscribeRef.current = null;
-    clientRef.current?.disconnect();
-    clientRef.current = null;
-  }, [clearRefreshTimer]);
+  const disconnectClient = useCallback(
+    (options?: { readonly invalidatePendingConnection?: boolean }) => {
+      if (options?.invalidatePendingConnection !== false) {
+        connectionAttemptRef.current += 1;
+      }
+
+      clearRefreshTimer();
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
+      clientRef.current?.disconnect();
+      clientRef.current = null;
+    },
+    [clearRefreshTimer],
+  );
 
   const refreshSnapshot = useCallback(async () => {
     const client = clientRef.current;
@@ -510,6 +518,9 @@ export function useRemoteAppState(): RemoteAppModel {
       input: RemoteConnectionInput,
       options?: { readonly persist?: boolean; readonly startSheetGrace?: boolean },
     ) => {
+      const attemptId = connectionAttemptRef.current + 1;
+      connectionAttemptRef.current = attemptId;
+
       if (options?.startSheetGrace) {
         startConnectionSheetGrace();
       } else {
@@ -530,13 +541,20 @@ export function useRemoteAppState(): RemoteAppModel {
       try {
         await preflightRemoteConnection(resolved);
       } catch (error) {
+        if (connectionAttemptRef.current !== attemptId) {
+          return;
+        }
         setConnectionError(
-          error instanceof Error ? error.message : "Failed to reach the desktop app.",
+          error instanceof Error ? error.message : "Failed to reach the T3 server.",
         );
         return;
       }
 
-      disconnectClient();
+      if (connectionAttemptRef.current !== attemptId) {
+        return;
+      }
+
+      disconnectClient({ invalidatePendingConnection: false });
       setSuppressAutoConnectionSheet(false);
       setConnectionError(null);
       setSnapshot(null);
@@ -557,6 +575,10 @@ export function useRemoteAppState(): RemoteAppModel {
           serverUrl: input.serverUrl.trim(),
           authToken: input.authToken.trim(),
         });
+      }
+
+      if (connectionAttemptRef.current !== attemptId) {
+        return;
       }
 
       const client = new RemoteClient(resolved);

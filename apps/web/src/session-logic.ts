@@ -20,13 +20,6 @@ import type {
   TurnDiffSummary,
 } from "./types";
 
-export {
-  deriveActiveWorkStartedAt,
-  formatDuration,
-  formatElapsed,
-  isLatestTurnSettled,
-} from "@t3tools/shared/orchestrationTiming";
-
 export type ProviderPickerKind = ProviderKind | "cursor";
 
 export const PROVIDER_OPTIONS: Array<{

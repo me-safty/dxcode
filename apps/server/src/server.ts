@@ -28,6 +28,7 @@ import { OrchestrationCommandReceiptRepositoryLive } from "./persistence/Layers/
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
 import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers/ProjectionSnapshotQuery";
 import { ThreadMessageHistoryQueryLive } from "./orchestration/Layers/ThreadMessageHistoryQuery";
+import { ProjectionThreadMessageRepositoryLive } from "./persistence/Layers/ProjectionThreadMessages";
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
 import { GitCoreLive } from "./git/Layers/GitCore";
 import { GitHubCliLive } from "./git/Layers/GitHubCli";
@@ -115,9 +116,13 @@ const OrchestrationProjectionPipelineLayerLive = OrchestrationProjectionPipeline
   Layer.provide(OrchestrationEventStoreLive),
 );
 
+const ThreadMessageHistoryLayerLive = ThreadMessageHistoryQueryLive.pipe(
+  Layer.provide(ProjectionThreadMessageRepositoryLive),
+);
+
 const OrchestrationInfrastructureLayerLive = Layer.mergeAll(
   OrchestrationProjectionSnapshotQueryLive,
-  ThreadMessageHistoryQueryLive,
+  ThreadMessageHistoryLayerLive,
   OrchestrationEventInfrastructureLayerLive,
   OrchestrationProjectionPipelineLayerLive,
 );

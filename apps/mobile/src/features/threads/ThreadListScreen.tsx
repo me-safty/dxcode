@@ -553,7 +553,7 @@ export function ThreadListScreen(props: ThreadListScreenProps) {
                 title={props.hasClient ? "No threads yet" : "No connection yet"}
                 detail={
                   props.hasClient
-                    ? "Create a thread below or resume one on desktop, then refresh this screen."
+                    ? "Create a thread below or resume one in another T3 client, then refresh this screen."
                     : "Connect this mobile app to your T3 server to load active threads."
                 }
               />
