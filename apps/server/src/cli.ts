@@ -159,7 +159,7 @@ const loadPersistedObservabilitySettings = Effect.fn(function* (settingsPath: st
   const fs = yield* FileSystem.FileSystem;
   const exists = yield* fs.exists(settingsPath).pipe(Effect.orElseSucceed(() => false));
   if (!exists) {
-    return { otlpTracesUrl: undefined };
+    return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
   }
 
   const raw = yield* fs.readFileString(settingsPath).pipe(Effect.orElseSucceed(() => ""));
