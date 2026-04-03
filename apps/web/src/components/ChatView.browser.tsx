@@ -1379,6 +1379,74 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("does not leak a server worktree path into drawer runtime env when launch context clears it", async () => {
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-launch-context-target" as MessageId,
+      targetText: "launch context worktree override",
+    });
+    const targetThread = snapshot.threads.find((thread) => thread.id === THREAD_ID);
+    if (targetThread) {
+      Object.assign(targetThread, {
+        branch: "feature/branch",
+        worktreePath: "/repo/worktrees/feature-branch",
+      });
+    }
+
+    useTerminalStateStore.setState({
+      terminalStateByThreadId: {
+        [THREAD_ID]: {
+          terminalOpen: true,
+          terminalHeight: 280,
+          terminalIds: ["default"],
+          runningTerminalIds: [],
+          activeTerminalId: "default",
+          terminalGroups: [{ id: "group-default", terminalIds: ["default"] }],
+          activeTerminalGroupId: "group-default",
+        },
+      },
+      terminalLaunchContextByThreadId: {
+        [THREAD_ID]: {
+          cwd: "/repo/project",
+          worktreePath: null,
+        },
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          const openRequest = wsRequests.find(
+            (request) => request._tag === WS_METHODS.terminalOpen,
+          ) as
+            | {
+                _tag: string;
+                cwd?: string;
+                worktreePath?: string | null;
+                env?: Record<string, string>;
+              }
+            | undefined;
+          expect(openRequest).toMatchObject({
+            _tag: WS_METHODS.terminalOpen,
+            cwd: "/repo/project",
+            worktreePath: null,
+            env: {
+              T3CODE_PROJECT_ROOT: "/repo/project",
+            },
+          });
+          expect(openRequest?.env?.T3CODE_WORKTREE_PATH).toBeUndefined();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("opens the project cwd with VS Code Insiders when it is the only available editor", async () => {
     setDraftThreadWithoutWorktree();
 

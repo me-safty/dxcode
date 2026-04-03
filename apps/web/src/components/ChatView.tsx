@@ -443,7 +443,7 @@ function PersistentThreadTerminalDrawer({
   const [localFocusRequestId, setLocalFocusRequestId] = useState(0);
   const worktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
   const effectiveWorktreePath = useMemo(() => {
-    if (launchContext?.worktreePath) {
+    if (launchContext !== null) {
       return launchContext.worktreePath;
     }
     return worktreePath;
