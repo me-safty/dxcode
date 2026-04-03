@@ -3072,6 +3072,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 : {}),
             }
           : undefined;
+      beginLocalDispatch({ preparingWorktree: false });
       await api.orchestration.dispatchCommand({
         type: "thread.turn.start",
         commandId: newCommandId(),
@@ -3089,7 +3090,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ...(bootstrap ? { bootstrap } : {}),
         createdAt: messageCreatedAt,
       });
-      beginLocalDispatch({ preparingWorktree: false });
       turnStartSucceeded = true;
     })().catch(async (err: unknown) => {
       if (

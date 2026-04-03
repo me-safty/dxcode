@@ -1669,6 +1669,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
                 threadId: input.threadId,
                 terminalId,
                 cwd: input.cwd,
+                worktreePath: liveSession.worktreePath,
                 cols: targetCols,
                 rows: targetRows,
                 ...(input.env ? { env: input.env } : {}),
