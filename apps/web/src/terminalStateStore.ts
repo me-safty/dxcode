@@ -26,7 +26,7 @@ interface ThreadTerminalState {
   activeTerminalGroupId: string;
 }
 
-export interface TerminalEventEntry {
+interface TerminalEventEntry {
   id: number;
   event: TerminalEvent;
 }

@@ -27,6 +27,8 @@ import {
 import { isTerminalClearShortcut, terminalNavigationShortcutData } from "../keybindings";
 import {
   resolveTerminalSelectionActionPosition,
+  selectPendingTerminalEventEntries,
+  selectTerminalEventEntriesAfterSnapshot,
   shouldHandleTerminalSelectionMouseUp,
   terminalSelectionActionDelayForClickCount,
 } from "./ThreadTerminalDrawer.logic";
@@ -62,20 +64,6 @@ function writeTerminalSnapshot(terminal: Terminal, snapshot: TerminalSessionSnap
   if (snapshot.history.length > 0) {
     terminal.write(snapshot.history);
   }
-}
-
-export function selectTerminalEventEntriesAfterSnapshot(
-  entries: ReadonlyArray<{ id: number; event: TerminalEvent }>,
-  snapshotUpdatedAt: string,
-): ReadonlyArray<{ id: number; event: TerminalEvent }> {
-  return entries.filter((entry) => entry.event.createdAt > snapshotUpdatedAt);
-}
-
-export function selectPendingTerminalEventEntries(
-  entries: ReadonlyArray<{ id: number; event: TerminalEvent }>,
-  lastAppliedTerminalEventId: number,
-): ReadonlyArray<{ id: number; event: TerminalEvent }> {
-  return entries.filter((entry) => entry.id > lastAppliedTerminalEventId);
 }
 
 function terminalThemeFromApp(): ITheme {

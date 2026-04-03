@@ -17,7 +17,8 @@ import {
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { GitCommandError } from "../Errors.ts";
+import { GitCommandError, type GitBranch } from "@t3tools/contracts";
+import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 import {
   type ExecuteGitProgress,
   type GitCommitOptions,
@@ -47,6 +48,7 @@ const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
+const GIT_LIST_BRANCHES_DEFAULT_LIMIT = 100;
 
 type TraceTailState = {
   processedChars: number;
@@ -178,6 +180,40 @@ function parseBranchLine(line: string): { name: string; current: boolean } | nul
   return {
     name,
     current: trimmed.startsWith("* "),
+  };
+}
+
+function filterBranchesForListQuery(
+  branches: ReadonlyArray<GitBranch>,
+  query?: string,
+): ReadonlyArray<GitBranch> {
+  if (!query) {
+    return branches;
+  }
+
+  const normalizedQuery = query.toLowerCase();
+  return branches.filter((branch) => branch.name.toLowerCase().includes(normalizedQuery));
+}
+
+function paginateBranches(input: {
+  branches: ReadonlyArray<GitBranch>;
+  cursor?: number | undefined;
+  limit?: number | undefined;
+}): {
+  branches: ReadonlyArray<GitBranch>;
+  nextCursor: number | null;
+  totalCount: number;
+} {
+  const cursor = input.cursor ?? 0;
+  const limit = input.limit ?? GIT_LIST_BRANCHES_DEFAULT_LIMIT;
+  const totalCount = input.branches.length;
+  const branches = input.branches.slice(cursor, cursor + limit);
+  const nextCursor = cursor + branches.length < totalCount ? cursor + branches.length : null;
+
+  return {
+    branches,
+    nextCursor,
+    totalCount,
   };
 }
 
@@ -1099,14 +1135,51 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   const statusDetails: GitCoreShape["statusDetails"] = Effect.fn("statusDetails")(function* (cwd) {
     yield* refreshStatusUpstreamIfStale(cwd).pipe(Effect.ignoreCause({ log: true }));
 
-    const [statusStdout, unstagedNumstatStdout, stagedNumstatStdout] = yield* Effect.all(
-      [
-        runGitStdout("GitCore.statusDetails.status", cwd, ["status", "--porcelain=2", "--branch"]),
-        runGitStdout("GitCore.statusDetails.unstagedNumstat", cwd, ["diff", "--numstat"]),
-        runGitStdout("GitCore.statusDetails.stagedNumstat", cwd, ["diff", "--cached", "--numstat"]),
-      ],
-      { concurrency: "unbounded" },
+    const statusResult = yield* executeGit(
+      "GitCore.statusDetails.status",
+      cwd,
+      ["status", "--porcelain=2", "--branch"],
+      {
+        allowNonZeroExit: true,
+      },
     );
+
+    if (statusResult.code !== 0) {
+      const stderr = statusResult.stderr.trim();
+      return yield* createGitCommandError(
+        "GitCore.statusDetails.status",
+        cwd,
+        ["status", "--porcelain=2", "--branch"],
+        stderr || "git status failed",
+      );
+    }
+
+    const [unstagedNumstatStdout, stagedNumstatStdout, defaultRefResult, hasOriginRemote] =
+      yield* Effect.all(
+        [
+          runGitStdout("GitCore.statusDetails.unstagedNumstat", cwd, ["diff", "--numstat"]),
+          runGitStdout("GitCore.statusDetails.stagedNumstat", cwd, [
+            "diff",
+            "--cached",
+            "--numstat",
+          ]),
+          executeGit(
+            "GitCore.statusDetails.defaultRef",
+            cwd,
+            ["symbolic-ref", "refs/remotes/origin/HEAD"],
+            {
+              allowNonZeroExit: true,
+            },
+          ),
+          originRemoteExists(cwd).pipe(Effect.catch(() => Effect.succeed(false))),
+        ],
+        { concurrency: "unbounded" },
+      );
+    const statusStdout = statusResult.stdout;
+    const defaultBranch =
+      defaultRefResult.code === 0
+        ? defaultRefResult.stdout.trim().replace(/^refs\/remotes\/origin\//, "")
+        : null;
 
     let branch: string | null = null;
     let upstreamRef: string | null = null;
@@ -1174,6 +1247,12 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     files.sort((a, b) => a.path.localeCompare(b.path));
 
     return {
+      isRepo: true,
+      hasOriginRemote,
+      isDefaultBranch:
+        branch !== null &&
+        (branch === defaultBranch ||
+          (defaultBranch === null && (branch === "main" || branch === "master"))),
       branch,
       upstreamRef,
       hasWorkingTreeChanges,
@@ -1191,6 +1270,9 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   const status: GitCoreShape["status"] = (input) =>
     statusDetails(input.cwd).pipe(
       Effect.map((details) => ({
+        isRepo: details.isRepo,
+        hasOriginRemote: details.hasOriginRemote,
+        isDefaultBranch: details.isDefaultBranch,
         branch: details.branch,
         hasWorkingTreeChanges: details.hasWorkingTreeChanges,
         workingTree: details.workingTree,
@@ -1569,7 +1651,13 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     if (localBranchResult.code !== 0) {
       const stderr = localBranchResult.stderr.trim();
       if (stderr.toLowerCase().includes("not a git repository")) {
-        return { branches: [], isRepo: false, hasOriginRemote: false };
+        return {
+          branches: [],
+          isRepo: false,
+          hasOriginRemote: false,
+          nextCursor: null,
+          totalCount: 0,
+        };
       }
       return yield* createGitCommandError(
         "GitCore.listBranches",
@@ -1733,9 +1821,22 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
             })
         : [];
 
-    const branches = [...localBranches, ...remoteBranches];
+    const branches = paginateBranches({
+      branches: filterBranchesForListQuery(
+        dedupeRemoteBranchesWithLocalMatches([...localBranches, ...remoteBranches]),
+        input.query,
+      ),
+      cursor: input.cursor,
+      limit: input.limit,
+    });
 
-    return { branches, isRepo: true, hasOriginRemote: remoteNames.includes("origin") };
+    return {
+      branches: [...branches.branches],
+      isRepo: true,
+      hasOriginRemote: remoteNames.includes("origin"),
+      nextCursor: branches.nextCursor,
+      totalCount: branches.totalCount,
+    };
   });
 
   const createWorktree: GitCoreShape["createWorktree"] = Effect.fn("createWorktree")(

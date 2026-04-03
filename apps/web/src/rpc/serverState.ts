@@ -48,6 +48,7 @@ const selectAvailableEditors = (config: ServerConfig | null): ReadonlyArray<Edit
 const selectKeybindings = (config: ServerConfig | null) => config?.keybindings ?? EMPTY_KEYBINDINGS;
 const selectKeybindingsConfigPath = (config: ServerConfig | null) =>
   config?.keybindingsConfigPath ?? null;
+const selectObservability = (config: ServerConfig | null) => config?.observability ?? null;
 const selectProviders = (config: ServerConfig | null) =>
   config?.providers ?? EMPTY_SERVER_PROVIDERS;
 const selectSettings = (config: ServerConfig | null): ServerSettings =>
@@ -236,4 +237,8 @@ export function useServerAvailableEditors(): ReadonlyArray<EditorId> {
 
 export function useServerKeybindingsConfigPath(): string | null {
   return useAtomValue(serverConfigAtom, selectKeybindingsConfigPath);
+}
+
+export function useServerObservability(): ServerConfig["observability"] | null {
+  return useAtomValue(serverConfigAtom, selectObservability);
 }

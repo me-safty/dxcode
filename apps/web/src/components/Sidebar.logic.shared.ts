@@ -1,12 +1,21 @@
 import type { SidebarProjectSortOrder } from "@t3tools/contracts/settings";
-import type { Thread } from "../types";
+import type { SidebarThreadSummary, Thread } from "../types";
 
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
 
 type ThreadStatusInput = Pick<
-  Thread,
-  "interactionMode" | "latestTurn" | "proposedPlans" | "session"
+  SidebarThreadSummary,
+  | "hasActionableProposedPlan"
+  | "hasPendingApprovals"
+  | "hasPendingUserInput"
+  | "interactionMode"
+  | "latestTurn"
+  | "session"
 > & {
+  lastVisitedAt?: string | undefined;
+};
+
+type ThreadCompletionInput = Pick<ThreadStatusInput, "latestTurn"> & {
   lastVisitedAt?: string | undefined;
 };
 
@@ -102,7 +111,7 @@ export function createThreadJumpHintVisibilityController(input: {
   };
 }
 
-export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
+export function hasUnseenCompletion(thread: ThreadCompletionInput): boolean {
   if (!thread.latestTurn?.completedAt) return false;
   const completedAt = Date.parse(thread.latestTurn.completedAt);
   if (Number.isNaN(completedAt)) return false;

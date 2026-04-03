@@ -215,6 +215,19 @@ function ComboboxClear({ className, ...props }: ComboboxPrimitive.Clear.Props) {
   return <ComboboxPrimitive.Clear className={className} data-slot="combobox-clear" {...props} />;
 }
 
+function ComboboxStatus({ className, ...props }: ComboboxPrimitive.Status.Props) {
+  return (
+    <ComboboxPrimitive.Status
+      className={cn(
+        "px-3 py-2 font-medium text-muted-foreground text-xs empty:m-0 empty:p-0",
+        className,
+      )}
+      data-slot="combobox-status"
+      {...props}
+    />
+  );
+}
+
 export {
   Combobox,
   ComboboxInput,
@@ -223,4 +236,5 @@ export {
   ComboboxItem,
   ComboboxEmpty,
   ComboboxList,
+  ComboboxStatus,
 };

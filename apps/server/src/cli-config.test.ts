@@ -198,6 +198,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
       expect(resolved).toEqual({
         logLevel: "Info",
+        ...defaultObservabilityConfig,
         mode: "web",
         port: 8788,
         cwd: process.cwd(),

@@ -1,4 +1,9 @@
-import { KeybindingCommand, KeybindingRule, KeybindingsConfig } from "@t3tools/contracts";
+import {
+  KeybindingCommand,
+  KeybindingRule,
+  KeybindingsConfig,
+  KeybindingsConfigError,
+} from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { assertFailure } from "@effect/vitest/utils";
@@ -7,11 +12,9 @@ import { ServerConfig } from "./config";
 
 import {
   DEFAULT_KEYBINDINGS,
-  KeybindingsConfigError,
   ResolvedKeybindingFromConfig,
   compileResolvedKeybindingsConfig,
   parseKeybindingShortcut,
-  compileResolvedKeybindingRule,
 } from "./keybindings.logic";
 import { Keybindings, KeybindingsLive } from "./keybindings";
 

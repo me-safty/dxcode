@@ -43,3 +43,16 @@ export function shouldHandleTerminalSelectionMouseUp(
 ): boolean {
   return selectionGestureActive && button === 0;
 }
+
+export function selectTerminalEventEntriesAfterSnapshot<
+  TEntry extends { id: number; event: { createdAt: string } },
+>(entries: ReadonlyArray<TEntry>, snapshotUpdatedAt: string): ReadonlyArray<TEntry> {
+  return entries.filter((entry) => entry.event.createdAt > snapshotUpdatedAt);
+}
+
+export function selectPendingTerminalEventEntries<TEntry extends { id: number }>(
+  entries: ReadonlyArray<TEntry>,
+  lastAppliedTerminalEventId: number,
+): ReadonlyArray<TEntry> {
+  return entries.filter((entry) => entry.id > lastAppliedTerminalEventId);
+}
