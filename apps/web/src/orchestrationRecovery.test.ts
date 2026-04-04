@@ -59,10 +59,13 @@ describe("createOrchestrationRecoveryCoordinator", () => {
     coordinator.classifyDomainEvent(7);
     coordinator.markEventBatchApplied([{ sequence: 4 }, { sequence: 5 }, { sequence: 6 }]);
 
-    expect(coordinator.completeReplayRecovery()).toBe(true);
+    expect(coordinator.completeReplayRecovery()).toEqual({
+      replayMadeProgress: true,
+      shouldReplay: true,
+    });
   });
 
-  it("does not immediately replay again when replay returns no new events", () => {
+  it("retries replay when no progress was made but higher live sequences were observed", () => {
     const coordinator = createOrchestrationRecoveryCoordinator();
 
     coordinator.beginSnapshotRecovery("bootstrap");
@@ -70,12 +73,28 @@ describe("createOrchestrationRecoveryCoordinator", () => {
     coordinator.classifyDomainEvent(5);
     coordinator.beginReplayRecovery("sequence-gap");
 
-    expect(coordinator.completeReplayRecovery()).toBe(false);
+    expect(coordinator.completeReplayRecovery()).toEqual({
+      replayMadeProgress: false,
+      shouldReplay: true,
+    });
     expect(coordinator.getState()).toMatchObject({
       latestSequence: 3,
       highestObservedSequence: 5,
       pendingReplay: false,
       inFlight: null,
+    });
+  });
+
+  it("does not request another replay when a replay made no progress and nothing newer was observed", () => {
+    const coordinator = createOrchestrationRecoveryCoordinator();
+
+    coordinator.beginSnapshotRecovery("bootstrap");
+    coordinator.completeSnapshotRecovery(3);
+    coordinator.beginReplayRecovery("sequence-gap");
+
+    expect(coordinator.completeReplayRecovery()).toEqual({
+      replayMadeProgress: false,
+      shouldReplay: false,
     });
   });
 

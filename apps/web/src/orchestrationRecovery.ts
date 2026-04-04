@@ -13,6 +13,11 @@ export interface OrchestrationRecoveryState {
   inFlight: OrchestrationRecoveryPhase | null;
 }
 
+export interface ReplayRecoveryCompletion {
+  replayMadeProgress: boolean;
+  shouldReplay: boolean;
+}
+
 type SequencedEvent = Readonly<{ sequence: number }>;
 
 export function createOrchestrationRecoveryCoordinator() {
@@ -120,16 +125,16 @@ export function createOrchestrationRecoveryCoordinator() {
       return true;
     },
 
-    completeReplayRecovery(): boolean {
+    completeReplayRecovery(): ReplayRecoveryCompletion {
       const replayMadeProgress =
         replayStartSequence !== null && state.latestSequence > replayStartSequence;
       replayStartSequence = null;
       state.inFlight = null;
-      if (!replayMadeProgress) {
-        state.pendingReplay = false;
-        return false;
-      }
-      return resolveReplayNeedAfterRecovery().shouldReplay;
+      const replayResolution = resolveReplayNeedAfterRecovery();
+      return {
+        replayMadeProgress,
+        shouldReplay: replayResolution.shouldReplay,
+      };
     },
 
     failReplayRecovery(): void {
