@@ -28,7 +28,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { gitStatusQueryOptions } from "~/lib/gitReactQuery";
-import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
+import {
+  projectListSkillsQueryOptions,
+  projectSearchEntriesQueryOptions,
+} from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
@@ -40,6 +43,8 @@ import {
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
 } from "../composer-logic";
+import { slashCommandRegistry, useSlashCommands } from "../slashCommandRegistry";
+import { registerProjectSkills } from "../slashCommandSkills";
 import {
   deriveCompletionDividerBeforeEntryId,
   derivePendingApprovals,
@@ -1399,6 +1404,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const effectivePathQuery = pathTriggerQuery.length > 0 ? debouncedPathQuery : "";
   const gitStatusQuery = useQuery(gitStatusQueryOptions(gitCwd));
+  const slashCommands = useSlashCommands();
+  const projectSkillsQuery = useQuery(projectListSkillsQueryOptions({ cwd: gitCwd }));
+  const projectSkills = projectSkillsQuery.data?.skills;
+  useEffect(() => registerProjectSkills(projectSkills), [projectSkills]);
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
   const modelOptionsByProvider = useMemo(
@@ -1455,36 +1464,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
 
     if (composerTrigger.kind === "slash-command") {
-      const slashCommandItems = [
-        {
-          id: "slash:model",
-          type: "slash-command",
-          command: "model",
-          label: "/model",
-          description: "Switch response model for this thread",
-        },
-        {
-          id: "slash:plan",
-          type: "slash-command",
-          command: "plan",
-          label: "/plan",
-          description: "Switch this thread into plan mode",
-        },
-        {
-          id: "slash:default",
-          type: "slash-command",
-          command: "default",
-          label: "/default",
-          description: "Switch this thread back to normal chat mode",
-        },
-      ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
-      const query = composerTrigger.query.trim().toLowerCase();
-      if (!query) {
-        return [...slashCommandItems];
-      }
-      return slashCommandItems.filter(
-        (item) => item.command.includes(query) || item.label.slice(1).includes(query),
-      );
+      const q = composerTrigger.query.trim().toLowerCase();
+      const matched = q ? slashCommands.filter((cmd) => cmd.name.includes(q)) : slashCommands;
+      return matched.map((cmd) => ({
+        id: `slash:${cmd.name}`,
+        type: "slash-command" as const,
+        command: cmd.name,
+        ...(cmd.icon ? { icon: cmd.icon } : {}),
+        label: `/${cmd.name}`,
+        description: cmd.description,
+      }));
     }
 
     return searchableModelOptions
@@ -1503,7 +1492,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         label: name,
         description: `${providerLabel} · ${slug}`,
       }));
-  }, [composerTrigger, searchableModelOptions, workspaceEntries]);
+  }, [composerTrigger, searchableModelOptions, slashCommands, workspaceEntries]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -2883,7 +2872,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
-      handleInteractionModeChange(standaloneSlashCommand);
+      const def = slashCommandRegistry.get(standaloneSlashCommand);
+      if (def?.action.type === "set-interaction-mode") {
+        handleInteractionModeChange(def.action.mode);
+      }
       promptRef.current = "";
       clearComposerDraftContent(activeThread.id);
       setComposerHighlightedItemId(null);
@@ -3708,8 +3700,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
       if (item.type === "slash-command") {
-        if (item.command === "model") {
-          const replacement = "/model ";
+        const def = slashCommandRegistry.get(item.command);
+        if (!def) return;
+        const action = def.action;
+        if (action.type === "trigger-transition") {
+          const replacement = action.replacement;
           const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
             snapshot.value,
             trigger.rangeEnd,
@@ -3726,12 +3721,37 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }
           return;
         }
-        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
-        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
-          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
-        });
-        if (applied) {
-          setComposerHighlightedItemId(null);
+        if (action.type === "set-interaction-mode") {
+          void handleInteractionModeChange(action.mode);
+          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          });
+          if (applied) {
+            setComposerHighlightedItemId(null);
+          }
+          return;
+        }
+        if (action.type === "prompt-prefix") {
+          const applied = applyPromptReplacement(
+            trigger.rangeStart,
+            trigger.rangeEnd,
+            action.prefix,
+            { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+          );
+          if (applied) {
+            setComposerHighlightedItemId(null);
+          }
+          return;
+        }
+        if (action.type === "callback") {
+          action.execute();
+          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          });
+          if (applied) {
+            setComposerHighlightedItemId(null);
+          }
+          return;
         }
         return;
       }

@@ -1,8 +1,8 @@
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
+import { slashCommandRegistry } from "./slashCommandRegistry";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "slash-model";
-export type ComposerSlashCommand = "model" | "plan" | "default";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -10,8 +10,6 @@ export interface ComposerTrigger {
   rangeStart: number;
   rangeEnd: number;
 }
-
-const SLASH_COMMANDS: readonly ComposerSlashCommand[] = ["model", "plan", "default"];
 const isInlineTokenSegment = (
   segment: { type: "text"; text: string } | { type: "mention" } | { type: "terminal-context" },
 ): boolean => segment.type !== "text";
@@ -184,10 +182,15 @@ export function isCollapsedCursorAdjacentToInlineToken(
 
 export const isCollapsedCursorAdjacentToMention = isCollapsedCursorAdjacentToInlineToken;
 
-export function detectComposerTrigger(text: string, cursorInput: number): ComposerTrigger | null {
+export function detectComposerTrigger(
+  text: string,
+  cursorInput: number,
+  commandNames?: readonly string[],
+): ComposerTrigger | null {
   const cursor = clampCursor(text, cursorInput);
   const lineStart = text.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
   const linePrefix = text.slice(lineStart, cursor);
+  const names = commandNames ?? slashCommandRegistry.getNames();
 
   if (linePrefix.startsWith("/")) {
     const commandMatch = /^\/(\S*)$/.exec(linePrefix);
@@ -201,7 +204,7 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
           rangeEnd: cursor,
         };
       }
-      if (SLASH_COMMANDS.some((command) => command.startsWith(commandQuery.toLowerCase()))) {
+      if (names.some((command) => command.startsWith(commandQuery.toLowerCase()))) {
         return {
           kind: "slash-command",
           query: commandQuery,
@@ -223,8 +226,21 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
     }
   }
 
+  // Mid-text slash detection: check for `/` preceded by whitespace
   const tokenStart = tokenStartForCursor(text, cursor);
   const token = text.slice(tokenStart, cursor);
+  if (token.startsWith("/")) {
+    const slashQuery = token.slice(1);
+    if (names.some((command) => command.startsWith(slashQuery.toLowerCase()))) {
+      return {
+        kind: "slash-command",
+        query: slashQuery,
+        rangeStart: tokenStart,
+        rangeEnd: cursor,
+      };
+    }
+  }
+
   if (!token.startsWith("@")) {
     return null;
   }
@@ -239,14 +255,16 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
 
 export function parseStandaloneComposerSlashCommand(
   text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
-  const match = /^\/(plan|default)\s*$/i.exec(text.trim());
+  standaloneNames?: readonly string[],
+): string | null {
+  const names = standaloneNames ?? slashCommandRegistry.getStandaloneNames();
+  const match = /^\/(\S+)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
   }
   const command = match[1]?.toLowerCase();
-  if (command === "plan") return "plan";
-  return "default";
+  if (command && names.includes(command)) return command;
+  return null;
 }
 
 export function replaceTextRange(

@@ -53,3 +53,32 @@ export class ProjectWriteFileError extends Schema.TaggedErrorClass<ProjectWriteF
     cause: Schema.optional(Schema.Defect),
   },
 ) {}
+
+// ---------------------------------------------------------------------------
+// Project skills (discovered from .agents/skills/ and .agent/skills/)
+// ---------------------------------------------------------------------------
+
+export const ProjectListSkillsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+});
+export type ProjectListSkillsInput = typeof ProjectListSkillsInput.Type;
+
+export const ProjectSkill = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  description: Schema.String,
+  userInvocable: Schema.Boolean,
+});
+export type ProjectSkill = typeof ProjectSkill.Type;
+
+export const ProjectListSkillsResult = Schema.Struct({
+  skills: Schema.Array(ProjectSkill),
+});
+export type ProjectListSkillsResult = typeof ProjectListSkillsResult.Type;
+
+export class ProjectListSkillsError extends Schema.TaggedErrorClass<ProjectListSkillsError>()(
+  "ProjectListSkillsError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}

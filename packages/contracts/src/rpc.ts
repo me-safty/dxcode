@@ -42,6 +42,9 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration";
 import {
+  ProjectListSkillsError,
+  ProjectListSkillsInput,
+  ProjectListSkillsResult,
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
@@ -77,6 +80,7 @@ export const WS_METHODS = {
   projectsRemove: "projects.remove",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
+  projectsListSkills: "projects.listSkills",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -155,6 +159,12 @@ export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
   success: ProjectWriteFileResult,
   error: ProjectWriteFileError,
+});
+
+export const WsProjectsListSkillsRpc = Rpc.make(WS_METHODS.projectsListSkills, {
+  payload: ProjectListSkillsInput,
+  success: ProjectListSkillsResult,
+  error: ProjectListSkillsError,
 });
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -329,6 +339,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerUpdateSettingsRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
+  WsProjectsListSkillsRpc,
   WsShellOpenInEditorRpc,
   WsGitStatusRpc,
   WsGitPullRpc,

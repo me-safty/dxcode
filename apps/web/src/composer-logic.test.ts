@@ -11,10 +11,13 @@ import {
 } from "./composer-logic";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
+const BUILTIN_NAMES = ["model", "plan", "default"] as const;
+const STANDALONE_NAMES = ["plan", "default"] as const;
+
 describe("detectComposerTrigger", () => {
   it("detects @path trigger at cursor", () => {
     const text = "Please check @src/com";
-    const trigger = detectComposerTrigger(text, text.length);
+    const trigger = detectComposerTrigger(text, text.length, BUILTIN_NAMES);
 
     expect(trigger).toEqual({
       kind: "path",
@@ -26,7 +29,7 @@ describe("detectComposerTrigger", () => {
 
   it("detects slash command token while typing command name", () => {
     const text = "/mo";
-    const trigger = detectComposerTrigger(text, text.length);
+    const trigger = detectComposerTrigger(text, text.length, BUILTIN_NAMES);
 
     expect(trigger).toEqual({
       kind: "slash-command",
@@ -38,7 +41,7 @@ describe("detectComposerTrigger", () => {
 
   it("detects slash model query after /model", () => {
     const text = "/model spark";
-    const trigger = detectComposerTrigger(text, text.length);
+    const trigger = detectComposerTrigger(text, text.length, BUILTIN_NAMES);
 
     expect(trigger).toEqual({
       kind: "slash-model",
@@ -50,7 +53,7 @@ describe("detectComposerTrigger", () => {
 
   it("detects non-model slash commands while typing", () => {
     const text = "/pl";
-    const trigger = detectComposerTrigger(text, text.length);
+    const trigger = detectComposerTrigger(text, text.length, BUILTIN_NAMES);
 
     expect(trigger).toEqual({
       kind: "slash-command",
@@ -65,7 +68,7 @@ describe("detectComposerTrigger", () => {
     const text = "Please inspect @in this sentence";
     const cursorAfterAt = "Please inspect @".length;
 
-    const trigger = detectComposerTrigger(text, cursorAfterAt);
+    const trigger = detectComposerTrigger(text, cursorAfterAt, BUILTIN_NAMES);
     expect(trigger).toEqual({
       kind: "path",
       query: "",
@@ -79,7 +82,7 @@ describe("detectComposerTrigger", () => {
     const text = "Please inspect @srin this sentence";
     const cursorAfterQuery = "Please inspect @sr".length;
 
-    const trigger = detectComposerTrigger(text, cursorAfterQuery);
+    const trigger = detectComposerTrigger(text, cursorAfterQuery, BUILTIN_NAMES);
     expect(trigger).toEqual({
       kind: "path",
       query: "sr",
@@ -94,7 +97,7 @@ describe("detectComposerTrigger", () => {
     const text = "Please inspect @in this sentence";
     const cursorAfterAt = "Please inspect @".length;
 
-    const trigger = detectComposerTrigger(text, cursorAfterAt);
+    const trigger = detectComposerTrigger(text, cursorAfterAt, BUILTIN_NAMES);
     expect(trigger).not.toBeNull();
     expect(trigger?.kind).toBe("path");
     expect(trigger?.query).toBe("");
@@ -131,7 +134,7 @@ describe("expandCollapsedComposerCursor", () => {
     const collapsedCursorAfterMention = "what's in my ".length + 2;
     const expandedCursor = expandCollapsedComposerCursor(text, collapsedCursorAfterMention);
 
-    expect(detectComposerTrigger(text, expandedCursor)).toBeNull();
+    expect(detectComposerTrigger(text, expandedCursor, BUILTIN_NAMES)).toBeNull();
   });
 });
 
@@ -237,14 +240,40 @@ describe("isCollapsedCursorAdjacentToInlineToken", () => {
 
 describe("parseStandaloneComposerSlashCommand", () => {
   it("parses standalone /plan command", () => {
-    expect(parseStandaloneComposerSlashCommand(" /plan ")).toBe("plan");
+    expect(parseStandaloneComposerSlashCommand(" /plan ", STANDALONE_NAMES)).toBe("plan");
   });
 
   it("parses standalone /default command", () => {
-    expect(parseStandaloneComposerSlashCommand("/default")).toBe("default");
+    expect(parseStandaloneComposerSlashCommand("/default", STANDALONE_NAMES)).toBe("default");
   });
 
   it("ignores slash commands with extra message text", () => {
-    expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+    expect(parseStandaloneComposerSlashCommand("/plan explain this", STANDALONE_NAMES)).toBeNull();
+  });
+});
+
+describe("mid-text slash detection", () => {
+  it("detects slash command after whitespace mid-text", () => {
+    const text = "hello /pl";
+    const trigger = detectComposerTrigger(text, text.length, BUILTIN_NAMES);
+    expect(trigger).toEqual({
+      kind: "slash-command",
+      query: "pl",
+      rangeStart: "hello ".length,
+      rangeEnd: text.length,
+    });
+  });
+});
+
+describe("custom command names", () => {
+  it("detects a custom command name when provided", () => {
+    const text = "/myskill";
+    const trigger = detectComposerTrigger(text, text.length, [...BUILTIN_NAMES, "myskill"]);
+    expect(trigger).toEqual({
+      kind: "slash-command",
+      query: "myskill",
+      rangeStart: 0,
+      rangeEnd: text.length,
+    });
   });
 });

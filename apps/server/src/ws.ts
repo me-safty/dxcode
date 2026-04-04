@@ -11,6 +11,7 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
+  ProjectListSkillsError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
@@ -44,6 +45,7 @@ import { ServerSettingsService } from "./serverSettings";
 import { TerminalManager } from "./terminal/Services/Manager";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
+import { scanProjectSkills } from "./workspace/skillScanner";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
 import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptRunner";
 
@@ -553,6 +555,19 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               });
             }),
           ),
+          { "rpc.aggregate": "workspace" },
+        ),
+      [WS_METHODS.projectsListSkills]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.projectsListSkills,
+          Effect.tryPromise({
+            try: () => scanProjectSkills(input.cwd),
+            catch: (cause) =>
+              new ProjectListSkillsError({
+                message: `Failed to scan project skills: ${String(cause)}`,
+                cause: cause instanceof Error ? cause : undefined,
+              }),
+          }),
           { "rpc.aggregate": "workspace" },
         ),
       [WS_METHODS.shellOpenInEditor]: (input) =>
