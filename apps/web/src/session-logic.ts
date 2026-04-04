@@ -636,6 +636,22 @@ function asTrimmedString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function isGenericToolTitle(value: string | null): boolean {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+  return (
+    normalized === "tool" ||
+    normalized === "tool call" ||
+    normalized === "tool update" ||
+    normalized === "tool completed" ||
+    normalized === "terminal" ||
+    normalized === "unknown tool" ||
+    normalized === "other"
+  );
+}
+
 function normalizeCommandValue(value: unknown): string | null {
   const direct = asTrimmedString(value);
   if (direct) {
@@ -650,22 +666,57 @@ function normalizeCommandValue(value: unknown): string | null {
   return parts.length > 0 ? parts.join(" ") : null;
 }
 
+function extractAcpRawInputCommand(rawInput: Record<string, unknown> | null): string | null {
+  if (!rawInput) {
+    return null;
+  }
+  const command = normalizeCommandValue(rawInput.command);
+  const args = normalizeCommandValue(rawInput.args);
+  if (command && args) {
+    return `${command} ${args}`;
+  }
+  return command;
+}
+
 function extractToolCommand(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
   const itemInput = asRecord(item?.input);
+  const rawInput = asRecord(data?.rawInput);
   const candidates = [
     normalizeCommandValue(item?.command),
     normalizeCommandValue(itemInput?.command),
     normalizeCommandValue(itemResult?.command),
     normalizeCommandValue(data?.command),
+    extractAcpRawInputCommand(rawInput),
   ];
   return candidates.find((candidate) => candidate !== null) ?? null;
 }
 
 function extractToolTitle(payload: Record<string, unknown> | null): string | null {
-  return asTrimmedString(payload?.title);
+  const title = asTrimmedString(payload?.title);
+  if (!isGenericToolTitle(title)) {
+    return title;
+  }
+
+  const command = extractToolCommand(payload);
+  if (command) {
+    return "Ran command";
+  }
+
+  const itemType =
+    typeof payload?.itemType === "string" && isToolLifecycleItemType(payload.itemType)
+      ? payload.itemType
+      : null;
+  if (itemType === "file_change") {
+    return "Changed files";
+  }
+  if (itemType === "command_execution") {
+    return "Ran command";
+  }
+
+  return title;
 }
 
 function stripTrailingExitCode(value: string): {

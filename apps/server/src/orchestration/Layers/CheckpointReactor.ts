@@ -647,13 +647,25 @@ const make = Effect.gen(function* () {
     // reflects the reverted filesystem state.
     yield* workspaceEntries.invalidate(sessionRuntime.value.cwd);
 
-    const rolledBackTurns = Math.max(0, currentTurnCount - event.payload.turnCount);
-    if (rolledBackTurns > 0) {
-      yield* providerService.rollbackConversation({
-        threadId: sessionRuntime.value.threadId,
-        numTurns: rolledBackTurns,
-      });
-    }
+    yield* providerService.stopSession({
+      threadId: sessionRuntime.value.threadId,
+    });
+
+    yield* orchestrationEngine.dispatch({
+      type: "thread.session.set",
+      commandId: serverCommandId("checkpoint-session-stop"),
+      threadId: event.payload.threadId,
+      session: {
+        threadId: event.payload.threadId,
+        status: "stopped",
+        providerName: thread.session?.providerName ?? null,
+        runtimeMode: thread.session?.runtimeMode ?? "full-access",
+        activeTurnId: null,
+        lastError: thread.session?.lastError ?? null,
+        updatedAt: now,
+      },
+      createdAt: now,
+    });
 
     const staleCheckpointRefs = thread.checkpoints
       .filter((checkpoint) => checkpoint.checkpointTurnCount > event.payload.turnCount)

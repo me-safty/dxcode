@@ -709,6 +709,35 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.command).toBe("bun run lint");
   });
 
+  it("extracts ACP rawInput commands and replaces generic tool titles", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "acp-command-tool",
+        kind: "tool.completed",
+        summary: "TOOL",
+        payload: {
+          itemType: "command_execution",
+          title: "TOOL",
+          detail: "bun run dev -- --host",
+          data: {
+            rawInput: {
+              command: "bun run dev",
+              args: ["--", "--host"],
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry).toMatchObject({
+      command: "bun run dev -- --host",
+      detail: "bun run dev -- --host",
+      itemType: "command_execution",
+      toolTitle: "Ran command",
+    });
+  });
+
   it("keeps compact Codex tool metadata used for icons and labels", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

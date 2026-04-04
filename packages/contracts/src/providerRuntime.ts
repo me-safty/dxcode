@@ -20,7 +20,11 @@ const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown);
 const RuntimeEventRawSource = Schema.Literals([
   "codex.app-server.notification",
   "codex.app-server.request",
+  "codex.acp.session-update",
+  "codex.acp.permission",
   "codex.eventmsg",
+  "claude.acp.session-update",
+  "claude.acp.permission",
   "claude.sdk.message",
   "claude.sdk.permission",
   "codex.sdk.thread-event",
