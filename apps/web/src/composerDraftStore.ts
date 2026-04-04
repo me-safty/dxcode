@@ -1749,6 +1749,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             nextStickyMap = { ...state.stickyModelSelectionByProvider };
             const stickyBase =
               nextStickyMap[normalizedProvider] ??
+              nextMap[normalizedProvider] ??
               base.modelSelectionByProvider[normalizedProvider] ??
               ({
                 provider: normalizedProvider,
