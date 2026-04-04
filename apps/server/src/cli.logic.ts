@@ -11,7 +11,7 @@ import {
   type ServerConfigShape,
 } from "./config";
 import { readBootstrapEnvelope } from "./bootstrap";
-import { resolveBaseDir } from "./os-jank";
+import { resolveBaseDir, resolveCliPath } from "./os-jank";
 
 export const PortSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }));
 
@@ -230,7 +230,9 @@ export const resolveServerConfig = (
       ),
       () => (mode === "desktop" ? "127.0.0.1" : undefined),
     );
-    const cwd = path.resolve(Option.getOrElse(flags.cwd ?? Option.none(), () => process.cwd()));
+    const cwd = yield* resolveCliPath(
+      Option.getOrElse(flags.cwd ?? Option.none(), () => process.cwd()),
+    );
     yield* fs.makeDirectory(cwd, { recursive: true });
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
 
