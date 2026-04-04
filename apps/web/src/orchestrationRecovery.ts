@@ -13,7 +13,7 @@ interface OrchestrationRecoveryState {
   inFlight: OrchestrationRecoveryPhase | null;
 }
 
-export interface ReplayRecoveryCompletion {
+interface ReplayRecoveryCompletion {
   replayMadeProgress: boolean;
   shouldReplay: boolean;
 }
@@ -24,7 +24,7 @@ export interface ReplayRetryTracker {
   highestObservedSequence: number;
 }
 
-export interface ReplayRetryDecision {
+interface ReplayRetryDecision {
   shouldRetry: boolean;
   delayMs: number;
   tracker: ReplayRetryTracker | null;

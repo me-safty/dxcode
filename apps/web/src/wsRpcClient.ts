@@ -110,7 +110,7 @@ export async function __resetWsRpcClientForTests() {
   sharedWsRpcClient = null;
 }
 
-export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
+function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
   return {
     dispose: () => transport.dispose(),
     terminal: {

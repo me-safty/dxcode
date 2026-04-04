@@ -5,14 +5,14 @@ import type { TraceRecord } from "./TraceRecord.ts";
 
 const FLUSH_BUFFER_THRESHOLD = 32;
 
-export interface TraceSinkOptions {
+interface TraceSinkOptions {
   readonly filePath: string;
   readonly maxBytes: number;
   readonly maxFiles: number;
   readonly batchWindowMs: number;
 }
 
-export interface TraceSink {
+interface TraceSink {
   readonly filePath: string;
   push: (record: TraceRecord) => void;
   flush: Effect.Effect<void>;

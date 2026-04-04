@@ -4,7 +4,7 @@ import { Effect, Option, Tracer } from "effect";
 import { spanToTraceRecord } from "./TraceRecord.ts";
 import { makeTraceSink } from "./TraceSink.ts";
 
-export interface LocalFileTracerOptions {
+interface LocalFileTracerOptions {
   readonly filePath: string;
   readonly maxBytes: number;
   readonly maxFiles: number;

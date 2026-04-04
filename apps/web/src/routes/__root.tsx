@@ -41,8 +41,11 @@ import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
-import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
-import { deriveReplayRetryDecision } from "../orchestrationRecovery";
+import {
+  createOrchestrationRecoveryCoordinator,
+  deriveReplayRetryDecision,
+  type ReplayRetryTracker,
+} from "../orchestrationRecovery";
 import { getWsRpcClient } from "~/wsRpcClient";
 
 export const Route = createRootRouteWithContext<{
@@ -313,7 +316,7 @@ function EventRouter() {
     let disposed = false;
     disposedRef.current = false;
     const recovery = createOrchestrationRecoveryCoordinator();
-    let replayRetryTracker: import("../orchestrationRecovery").ReplayRetryTracker | null = null;
+    let replayRetryTracker: ReplayRetryTracker | null = null;
     let needsProviderInvalidation = false;
     const pendingDomainEvents: OrchestrationEvent[] = [];
     let flushPendingDomainEventsScheduled = false;
