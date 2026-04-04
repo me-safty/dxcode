@@ -824,12 +824,10 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                       <PopoverTrigger
                         openOnHover
                         nativeButton={false}
-                        render={<span className="block w-max cursor-not-allowed" />}
+                        render={<MenuItem className="w-full cursor-not-allowed" disabled />}
                       >
-                        <MenuItem className="w-full" disabled>
-                          <GitActionItemIcon icon={item.icon} />
-                          {item.label}
-                        </MenuItem>
+                        <GitActionItemIcon icon={item.icon} />
+                        {item.label}
                       </PopoverTrigger>
                       <PopoverPopup tooltipStyle side="left" align="center">
                         {disabledReason}

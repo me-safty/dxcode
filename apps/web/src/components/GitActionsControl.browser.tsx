@@ -1,7 +1,11 @@
 import { ThreadId } from "@t3tools/contracts";
 import { useState } from "react";
+import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
+import { Button } from "./ui/button";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
+import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 
 const THREAD_A = ThreadId.makeUnsafe("thread-a");
 const THREAD_B = ThreadId.makeUnsafe("thread-b");
@@ -230,6 +234,48 @@ describe("GitActionsControl thread-scoped progress toast", () => {
           type: "loading",
         }),
       );
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+});
+
+describe("GitActionsControl menu composition", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("renders a disabled menu item through PopoverTrigger without breaking menu context", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <Menu>
+        <MenuTrigger render={<Button aria-label="Open menu" />}>Open</MenuTrigger>
+        <MenuPopup align="end">
+          <Popover>
+            <PopoverTrigger
+              openOnHover
+              nativeButton={false}
+              render={<MenuItem className="w-full cursor-not-allowed" disabled />}
+            >
+              Disabled action
+            </PopoverTrigger>
+            <PopoverPopup tooltipStyle side="left" align="center">
+              Disabled because a branch is missing.
+            </PopoverPopup>
+          </Popover>
+        </MenuPopup>
+      </Menu>,
+      { container: host },
+    );
+
+    try {
+      await page.getByRole("button", { name: "Open menu" }).click();
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Disabled action");
+      });
     } finally {
       await screen.unmount();
       host.remove();
