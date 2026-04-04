@@ -48,6 +48,7 @@ import {
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   deriveDisplayedUserMessageState,
   type ParsedTerminalContextEntry,
@@ -846,13 +847,11 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
 }) {
   const { workEntry } = props;
-  const [showRawCommand, setShowRawCommand] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
   const preview = workEntryPreview(workEntry);
   const rawCommand = workEntryRawCommand(workEntry);
-  const visiblePreview = showRawCommand && rawCommand ? rawCommand : preview;
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
@@ -878,22 +877,31 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
               <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
                 {heading}
               </span>
-              {visiblePreview &&
+              {preview &&
                 (rawCommand ? (
-                  <span
-                    className="max-w-full cursor-default text-muted-foreground/55 transition-colors hover:text-muted-foreground/75 focus-visible:text-muted-foreground/75"
-                    onBlur={() => setShowRawCommand(false)}
-                    onFocus={() => setShowRawCommand(true)}
-                    onMouseEnter={() => setShowRawCommand(true)}
-                    onMouseLeave={() => setShowRawCommand(false)}
-                    tabIndex={0}
-                    title={showRawCommand ? (rawCommand ?? undefined) : (preview ?? undefined)}
-                  >
-                    {" "}
-                    - {visiblePreview}
-                  </span>
+                  <Tooltip>
+                    <TooltipTrigger
+                      closeDelay={0}
+                      delay={75}
+                      render={
+                        <span className="max-w-full cursor-default text-muted-foreground/55 transition-colors hover:text-muted-foreground/75 focus-visible:text-muted-foreground/75">
+                          {" "}
+                          - {preview}
+                        </span>
+                      }
+                    />
+                    <TooltipPopup
+                      align="start"
+                      className="max-w-[min(56rem,calc(100vw-2rem))] px-0 py-0"
+                      side="top"
+                    >
+                      <div className="max-w-[min(56rem,calc(100vw-2rem))] overflow-x-auto px-1.5 py-1 font-mono text-[11px] leading-4 whitespace-nowrap">
+                        {rawCommand}
+                      </div>
+                    </TooltipPopup>
+                  </Tooltip>
                 ) : (
-                  <span className="text-muted-foreground/55"> - {visiblePreview}</span>
+                  <span className="text-muted-foreground/55"> - {preview}</span>
                 ))}
             </p>
           </div>
