@@ -37,6 +37,7 @@
     "build:marketing": "turbo run build --filter=@t3tools/marketing",
     "build:desktop": "turbo run build --filter=@t3tools/desktop --filter=t3",
     "typecheck": "turbo run typecheck",
+    "check": "concurrently -n fmt,lint,tc,knip -c auto \"bun run fmt:check\" \"bun run lint\" \"bun run typecheck\" \"bun run knip\"",
     "lint": "oxlint --report-unused-disable-directives",
     "knip": "knip",
     "test": "turbo run test",
@@ -59,6 +60,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "concurrently": "^9.2.1",
     "knip": "^6.3.0",
     "oxfmt": "^0.40.0",
     "oxlint": "^1.55.0",
