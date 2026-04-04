@@ -43,10 +43,7 @@
       "project": ["src/**/*.ts!", "!src/**/*.test.ts!"]
     },
     "packages/shared": {
-      "entry": [
-        "src/{model,git,logging,shell,Net,DrainableWorker,KeyedCoalescingWorker,schemaJson,Struct,serverSettings,String}.ts!",
-        "src/**/*.test.ts"
-      ],
+      "entry": ["src/*.ts!", "!src/*.test.ts!", "src/**/*.test.ts"],
       "project": ["src/**/*.ts!", "!src/**/*.test.ts!"]
     },
     "scripts": {
