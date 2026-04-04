@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   clampTerminalPanelHeight,
   resolveTerminalPanelMaxHeight,
+  resolveTerminalSplitViewGridStyle,
   resolveTerminalSelectionActionPosition,
   selectPendingTerminalEventEntries,
   selectTerminalEventEntriesAfterSnapshot,
@@ -44,6 +45,20 @@ describe("clampTerminalPanelHeight", () => {
         viewportHeight: 1200,
       }),
     ).toBe(260);
+  });
+});
+
+describe("resolveTerminalSplitViewGridStyle", () => {
+  it("uses columns for bottom-docked terminal splits", () => {
+    expect(resolveTerminalSplitViewGridStyle("bottom", 3)).toEqual({
+      gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    });
+  });
+
+  it("uses rows for right-docked terminal splits", () => {
+    expect(resolveTerminalSplitViewGridStyle("side", 3)).toEqual({
+      gridTemplateRows: "repeat(3, minmax(0, 1fr))",
+    });
   });
 });
 

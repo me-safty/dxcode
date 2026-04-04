@@ -79,6 +79,17 @@ export function clampTerminalPanelHeight(
   return Math.min(Math.max(Math.round(safeHeight), MIN_DRAWER_HEIGHT), maxHeight);
 }
 
+export function resolveTerminalSplitViewGridStyle(
+  layout: "bottom" | "side",
+  terminalCount: number,
+): {
+  gridTemplateColumns?: string;
+  gridTemplateRows?: string;
+} {
+  const template = `repeat(${terminalCount}, minmax(0, 1fr))`;
+  return layout === "side" ? { gridTemplateRows: template } : { gridTemplateColumns: template };
+}
+
 function writeSystemMessage(terminal: Terminal, message: string): void {
   terminal.write(`\r\n[terminal] ${message}\r\n`);
 }
@@ -1087,6 +1098,10 @@ export default function ThreadTerminalPanel({
     resolvedTerminalGroups.length > 1 ||
     resolvedTerminalGroups.some((terminalGroup) => terminalGroup.terminalIds.length > 1);
   const hasReachedSplitLimit = visibleTerminalIds.length >= MAX_TERMINALS_PER_GROUP;
+  const splitViewGridStyle = useMemo(
+    () => resolveTerminalSplitViewGridStyle(layout, visibleTerminalIds.length),
+    [layout, visibleTerminalIds.length],
+  );
   const terminalLabelById = useMemo(
     () =>
       new Map(
@@ -1105,6 +1120,7 @@ export default function ThreadTerminalPanel({
   const closeTerminalActionLabel = closeShortcutLabel
     ? `Close Terminal (${closeShortcutLabel})`
     : "Close Terminal";
+  const splitTerminalIconClassName = isSideLayout ? "size-3.25 rotate-90" : "size-3.25";
   const onSplitTerminalAction = useCallback(() => {
     if (hasReachedSplitLimit) return;
     onSplitTerminal();
@@ -1252,7 +1268,7 @@ export default function ThreadTerminalPanel({
               onClick={onSplitTerminalAction}
               label={splitTerminalActionLabel}
             >
-              <SquareSplitHorizontal className="size-3.25" />
+              <SquareSplitHorizontal className={splitTerminalIconClassName} />
             </TerminalActionButton>
             <div className="h-4 w-px bg-border/80" />
             <TerminalActionButton
@@ -1280,14 +1296,14 @@ export default function ThreadTerminalPanel({
             {isSplitView ? (
               <div
                 className="grid h-full w-full min-w-0 gap-0 overflow-hidden"
-                style={{
-                  gridTemplateColumns: `repeat(${visibleTerminalIds.length}, minmax(0, 1fr))`,
-                }}
+                style={splitViewGridStyle}
               >
                 {visibleTerminalIds.map((terminalId) => (
                   <div
                     key={terminalId}
-                    className={`min-h-0 min-w-0 border-l first:border-l-0 ${
+                    className={`min-h-0 min-w-0 ${
+                      isSideLayout ? "border-t first:border-t-0" : "border-l first:border-l-0"
+                    } ${
                       terminalId === resolvedActiveTerminalId ? "border-border" : "border-border/70"
                     }`}
                     onMouseDown={() => {
@@ -1351,7 +1367,7 @@ export default function ThreadTerminalPanel({
                     onClick={onSplitTerminalAction}
                     label={splitTerminalActionLabel}
                   >
-                    <SquareSplitHorizontal className="size-3.25" />
+                    <SquareSplitHorizontal className={splitTerminalIconClassName} />
                   </TerminalActionButton>
                   <TerminalActionButton
                     className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
