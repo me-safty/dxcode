@@ -1,4 +1,14 @@
-import { Cause, Duration, Effect, Exit, Layer, ManagedRuntime, Option, Scope, Stream } from "effect";
+import {
+  Cause,
+  Duration,
+  Effect,
+  Exit,
+  Layer,
+  ManagedRuntime,
+  Option,
+  Scope,
+  Stream,
+} from "effect";
 import { RpcClient } from "effect/unstable/rpc";
 
 import { ClientTracingLive, configureClientTracing } from "./observability/clientTracing";
