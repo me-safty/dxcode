@@ -38,6 +38,7 @@ export interface WorkLogEntry {
   label: string;
   detail?: string;
   command?: string;
+  rawCommand?: string;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
@@ -489,7 +490,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     activity.payload && typeof activity.payload === "object"
       ? (activity.payload as Record<string, unknown>)
       : null;
-  const command = extractToolCommand(payload);
+  const commandPreview = extractToolCommand(payload);
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
   const entry: DerivedWorkLogEntry = {
@@ -507,8 +508,11 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       entry.detail = detail;
     }
   }
-  if (command) {
-    entry.command = command;
+  if (commandPreview.command) {
+    entry.command = commandPreview.command;
+  }
+  if (commandPreview.rawCommand) {
+    entry.rawCommand = commandPreview.rawCommand;
   }
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
@@ -567,6 +571,7 @@ function mergeDerivedWorkLogEntries(
   const changedFiles = mergeChangedFiles(previous.changedFiles, next.changedFiles);
   const detail = next.detail ?? previous.detail;
   const command = next.command ?? previous.command;
+  const rawCommand = next.rawCommand ?? previous.rawCommand;
   const toolTitle = next.toolTitle ?? previous.toolTitle;
   const itemType = next.itemType ?? previous.itemType;
   const requestKind = next.requestKind ?? previous.requestKind;
@@ -576,6 +581,7 @@ function mergeDerivedWorkLogEntries(
     ...next,
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
+    ...(rawCommand ? { rawCommand } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
     ...(toolTitle ? { toolTitle } : {}),
     ...(itemType ? { itemType } : {}),
@@ -691,19 +697,40 @@ function splitExecutableAndRest(value: string): { executable: string; rest: stri
   };
 }
 
-function unwrapCommandRemainder(value: string, wrapperFlagPattern: RegExp): string {
+const SHELL_WRAPPER_SPECS = [
+  {
+    executables: ["pwsh", "pwsh.exe", "powershell", "powershell.exe"],
+    wrapperFlagPattern: /(?:^|\s)-command\s+/i,
+  },
+  {
+    executables: ["cmd", "cmd.exe"],
+    wrapperFlagPattern: /(?:^|\s)\/c\s+/i,
+  },
+  {
+    executables: ["bash", "sh", "zsh"],
+    wrapperFlagPattern: /(?:^|\s)-(?:l)?c\s+/i,
+  },
+] as const;
+
+function findShellWrapperSpec(shell: string) {
+  return SHELL_WRAPPER_SPECS.find((spec) =>
+    (spec.executables as ReadonlyArray<string>).includes(shell),
+  );
+}
+
+function unwrapCommandRemainder(value: string, wrapperFlagPattern: RegExp): string | null {
   const match = wrapperFlagPattern.exec(value);
   if (!match) {
-    return value;
+    return null;
   }
 
   const command = value.slice(match.index + match[0].length).trim();
   if (command.length === 0) {
-    return value;
+    return null;
   }
 
   const unwrapped = trimMatchingOuterQuotes(command);
-  return unwrapped.length > 0 ? unwrapped : value;
+  return unwrapped.length > 0 ? unwrapped : null;
 }
 
 function unwrapKnownShellCommandWrapper(value: string): string {
@@ -717,28 +744,22 @@ function unwrapKnownShellCommandWrapper(value: string): string {
     return value;
   }
 
-  switch (shell) {
-    case "pwsh":
-    case "pwsh.exe":
-    case "powershell":
-    case "powershell.exe":
-      return unwrapCommandRemainder(split.rest, /(?:^|\s)-command\s+/i);
-    case "cmd":
-    case "cmd.exe":
-      return unwrapCommandRemainder(split.rest, /(?:^|\s)\/c\s+/i);
-    case "bash":
-    case "sh":
-    case "zsh":
-      return unwrapCommandRemainder(split.rest, /(?:^|\s)-(?:l)?c\s+/i);
-    default:
-      return value;
+  const spec = findShellWrapperSpec(shell);
+  if (!spec) {
+    return value;
   }
+
+  return unwrapCommandRemainder(split.rest, spec.wrapperFlagPattern) ?? value;
 }
 
-function normalizeCommandValue(value: unknown): string | null {
+function formatCommandArrayPart(value: string): string {
+  return /[\s"'`]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+}
+
+function formatCommandValue(value: unknown): string | null {
   const direct = asTrimmedString(value);
   if (direct) {
-    return unwrapKnownShellCommandWrapper(direct);
+    return direct;
   }
   if (!Array.isArray(value)) {
     return null;
@@ -749,47 +770,55 @@ function normalizeCommandValue(value: unknown): string | null {
   if (parts.length === 0) {
     return null;
   }
-  const shell = executableBasename(parts[0] ?? "");
-  if (shell) {
-    const powerShell =
-      shell === "pwsh" ||
-      shell === "pwsh.exe" ||
-      shell === "powershell" ||
-      shell === "powershell.exe";
-    const wrapperArgIndex = powerShell
-      ? parts.findIndex((part, index) => index > 0 && /^-command$/i.test(part))
-      : shell === "cmd" || shell === "cmd.exe"
-        ? parts.findIndex((part, index) => index > 0 && /^\/c$/i.test(part))
-        : shell === "bash" || shell === "sh" || shell === "zsh"
-          ? parts.findIndex((part, index) => index > 0 && /^-(?:l)?c$/i.test(part))
-          : -1;
-
-    if (wrapperArgIndex > 0 && parts.length > wrapperArgIndex + 1) {
-      return trimMatchingOuterQuotes(parts.slice(wrapperArgIndex + 1).join(" "));
-    }
-  }
-  return unwrapKnownShellCommandWrapper(parts.join(" "));
+  return parts.map((part) => formatCommandArrayPart(part)).join(" ");
 }
 
-function extractToolCommand(payload: Record<string, unknown> | null): string | null {
+function normalizeCommandValue(value: unknown): string | null {
+  const formatted = formatCommandValue(value);
+  return formatted ? unwrapKnownShellCommandWrapper(formatted) : null;
+}
+
+function toRawToolCommand(value: unknown, normalizedCommand: string | null): string | null {
+  const formatted = formatCommandValue(value);
+  if (!formatted || normalizedCommand === null) {
+    return null;
+  }
+  return formatted === normalizedCommand ? null : formatted;
+}
+
+function extractToolCommand(payload: Record<string, unknown> | null): {
+  command: string | null;
+  rawCommand: string | null;
+} {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
   const itemInput = asRecord(item?.input);
   const itemType = asTrimmedString(payload?.itemType);
   const detail = asTrimmedString(payload?.detail);
-  const detailCommand =
-    itemType === "command_execution" && detail
-      ? normalizeCommandValue(stripTrailingExitCode(detail).output)
-      : null;
-  const candidates = [
-    normalizeCommandValue(item?.command),
-    normalizeCommandValue(itemInput?.command),
-    normalizeCommandValue(itemResult?.command),
-    normalizeCommandValue(data?.command),
-    detailCommand,
+  const candidates: unknown[] = [
+    item?.command,
+    itemInput?.command,
+    itemResult?.command,
+    data?.command,
+    itemType === "command_execution" && detail ? stripTrailingExitCode(detail).output : null,
   ];
-  return candidates.find((candidate) => candidate !== null) ?? null;
+
+  for (const candidate of candidates) {
+    const command = normalizeCommandValue(candidate);
+    if (!command) {
+      continue;
+    }
+    return {
+      command,
+      rawCommand: toRawToolCommand(candidate, command),
+    };
+  }
+
+  return {
+    command: null,
+    rawCommand: null,
+  };
 }
 
 function extractToolTitle(payload: Record<string, unknown> | null): string | null {

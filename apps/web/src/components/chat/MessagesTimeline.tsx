@@ -792,6 +792,16 @@ function workEntryPreview(
     : `${firstPath} +${workEntry.changedFiles!.length - 1} more`;
 }
 
+function workEntryRawCommand(
+  workEntry: Pick<TimelineWorkEntry, "command" | "rawCommand">,
+): string | null {
+  const rawCommand = workEntry.rawCommand?.trim();
+  if (!rawCommand || !workEntry.command) {
+    return null;
+  }
+  return rawCommand === workEntry.command.trim() ? null : rawCommand;
+}
+
 function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
   if (workEntry.requestKind === "command") return TerminalIcon;
   if (workEntry.requestKind === "file-read") return EyeIcon;
@@ -836,10 +846,13 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
 }) {
   const { workEntry } = props;
+  const [showRawCommand, setShowRawCommand] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
   const preview = workEntryPreview(workEntry);
+  const rawCommand = workEntryRawCommand(workEntry);
+  const visiblePreview = showRawCommand && rawCommand ? rawCommand : preview;
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
@@ -853,19 +866,37 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           <EntryIcon className="size-3" />
         </span>
         <div className="min-w-0 flex-1 overflow-hidden">
-          <p
-            className={cn(
-              "truncate text-[11px] leading-5",
-              workToneClass(workEntry.tone),
-              preview ? "text-muted-foreground/70" : "",
-            )}
-            title={displayText}
-          >
-            <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
-              {heading}
-            </span>
-            {preview && <span className="text-muted-foreground/55"> - {preview}</span>}
-          </p>
+          <div className="max-w-full">
+            <p
+              className={cn(
+                "truncate text-[11px] leading-5",
+                workToneClass(workEntry.tone),
+                preview ? "text-muted-foreground/70" : "",
+              )}
+              title={rawCommand ? undefined : displayText}
+            >
+              <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
+                {heading}
+              </span>
+              {visiblePreview &&
+                (rawCommand ? (
+                  <span
+                    className="max-w-full cursor-default text-muted-foreground/55 transition-colors hover:text-muted-foreground/75 focus-visible:text-muted-foreground/75"
+                    onBlur={() => setShowRawCommand(false)}
+                    onFocus={() => setShowRawCommand(true)}
+                    onMouseEnter={() => setShowRawCommand(true)}
+                    onMouseLeave={() => setShowRawCommand(false)}
+                    tabIndex={0}
+                    title={showRawCommand ? (rawCommand ?? undefined) : (preview ?? undefined)}
+                  >
+                    {" "}
+                    - {visiblePreview}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground/55"> - {visiblePreview}</span>
+                ))}
+            </p>
+          </div>
         </div>
       </div>
       {hasChangedFiles && !previewIsChangedFiles && (

@@ -728,6 +728,9 @@ describe("deriveWorkLogEntries", () => {
 
     const [entry] = deriveWorkLogEntries(activities, undefined);
     expect(entry?.command).toBe("bun run lint");
+    expect(entry?.rawCommand).toBe(
+      "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -Command 'bun run lint'",
+    );
   });
 
   it("unwraps PowerShell command wrappers from argv-style command payloads", () => {
@@ -749,6 +752,9 @@ describe("deriveWorkLogEntries", () => {
 
     const [entry] = deriveWorkLogEntries(activities, undefined);
     expect(entry?.command).toBe("rg -n foo .");
+    expect(entry?.rawCommand).toBe(
+      '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n foo ."',
+    );
   });
 
   it("extracts command text from command detail when structured command metadata is missing", () => {
@@ -767,6 +773,31 @@ describe("deriveWorkLogEntries", () => {
 
     const [entry] = deriveWorkLogEntries(activities, undefined);
     expect(entry?.command).toBe('rg -n -F "new Date()" .');
+    expect(entry?.rawCommand).toBe(
+      `"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoLogo -NoProfile -Command 'rg -n -F "new Date()" .'`,
+    );
+  });
+
+  it("does not unwrap shell commands when no wrapper flag is present", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-tool-shell-script",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          data: {
+            item: {
+              command: "bash script.sh",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.command).toBe("bash script.sh");
+    expect(entry?.rawCommand).toBeUndefined();
   });
 
   it("keeps compact Codex tool metadata used for icons and labels", () => {
