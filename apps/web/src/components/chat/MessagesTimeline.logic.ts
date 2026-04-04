@@ -59,6 +59,21 @@ export function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
 }
 
+export function resolveAssistantMessageCopyState({
+  text,
+  streaming,
+}: {
+  text: string | null;
+  streaming: boolean;
+}) {
+  const hasText = text !== null && text.trim().length > 0;
+  return {
+    disabled: streaming,
+    text: hasText ? text : null,
+    visible: streaming || hasText,
+  };
+}
+
 export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   completionDividerBeforeEntryId: string | null;

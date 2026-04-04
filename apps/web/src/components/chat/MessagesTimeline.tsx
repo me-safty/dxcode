@@ -45,6 +45,7 @@ import {
   deriveMessagesTimelineRows,
   estimateMessagesTimelineRowHeight,
   normalizeCompactToolLabel,
+  resolveAssistantMessageCopyState,
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";

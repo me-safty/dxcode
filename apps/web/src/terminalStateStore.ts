@@ -45,34 +45,6 @@ function createTerminalStateStorage() {
   return resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined);
 }
 
-function createMemoryStorage(): StateStorage {
-  const store = new Map<string, string>();
-  return {
-    getItem: (name) => store.get(name) ?? null,
-    setItem: (name, value) => {
-      store.set(name, value);
-    },
-    removeItem: (name) => {
-      store.delete(name);
-    },
-  };
-}
-
-function createTerminalStateStorage() {
-  if (
-    typeof localStorage !== "undefined" &&
-    typeof localStorage.getItem === "function" &&
-    typeof localStorage.setItem === "function" &&
-    typeof localStorage.removeItem === "function"
-  ) {
-    return localStorage;
-  }
-
-  return createMemoryStorage();
-}
-
-const terminalStateStorage = createTerminalStateStorage();
-
 function normalizeTerminalIds(terminalIds: string[]): string[] {
   const ids = [...new Set(terminalIds.map((id) => id.trim()).filter((id) => id.length > 0))];
   return ids.length > 0 ? ids : [DEFAULT_THREAD_TERMINAL_ID];
