@@ -27,7 +27,6 @@ import { RoutingTextGenerationLive } from "./git/Layers/RoutingTextGeneration";
 import { TerminalManagerLive } from "./terminal/Layers/Manager";
 import { GitManagerLive } from "./git/Layers/GitManager";
 import { KeybindingsLive } from "./keybindings";
-import { ServerLoggerLive } from "./serverLogger";
 import { ServerRuntimeStartup, ServerRuntimeStartupLive } from "./serverRuntimeStartup";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus";
@@ -37,6 +36,7 @@ import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor"
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry";
 import { ServerSettingsLive } from "./serverSettings";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver";
+import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
@@ -47,10 +47,9 @@ const PtyAdapterLive = Layer.unwrap(
     if (typeof Bun !== "undefined") {
       const BunPTY = yield* Effect.promise(() => import("./terminal/Layers/BunPTY"));
       return BunPTY.layer;
-    } else {
-      const NodePTY = yield* Effect.promise(() => import("./terminal/Layers/NodePTY"));
-      return NodePTY.layer;
     }
+    const NodePTY = yield* Effect.promise(() => import("./terminal/Layers/NodePTY"));
+    return NodePTY.layer;
   }),
 );
 
@@ -65,16 +64,15 @@ const HttpServerLive = Layer.unwrap(
         port: config.port,
         ...(config.host ? { hostname: config.host } : {}),
       });
-    } else {
-      const [NodeHttpServer, NodeHttp] = yield* Effect.all([
-        Effect.promise(() => import("@effect/platform-node/NodeHttpServer")),
-        Effect.promise(() => import("node:http")),
-      ]);
-      return NodeHttpServer.layer(NodeHttp.createServer, {
-        host: config.host,
-        port: config.port,
-      });
     }
+    const [NodeHttpServer, NodeHttp] = yield* Effect.all([
+      Effect.promise(() => import("@effect/platform-node/NodeHttpServer")),
+      Effect.promise(() => import("node:http")),
+    ]);
+    return NodeHttpServer.layer(NodeHttp.createServer, {
+      host: config.host,
+      port: config.port,
+    });
   }),
 );
 
@@ -83,10 +81,9 @@ const PlatformServicesLive = Layer.unwrap(
     if (typeof Bun !== "undefined") {
       const { layer } = yield* Effect.promise(() => import("@effect/platform-bun/BunServices"));
       return layer;
-    } else {
-      const { layer } = yield* Effect.promise(() => import("@effect/platform-node/NodeServices"));
-      return layer;
     }
+    const { layer } = yield* Effect.promise(() => import("@effect/platform-node/NodeServices"));
+    return layer;
   }),
 );
 
@@ -157,6 +154,7 @@ const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersisten
 const GitLayerLive = Layer.empty.pipe(
   Layer.provideMerge(
     GitManagerLive.pipe(
+      Layer.provideMerge(ProjectSetupScriptRunnerLive),
       Layer.provideMerge(GitCoreLive),
       Layer.provideMerge(GitHubCliLive),
       Layer.provideMerge(RoutingTextGenerationLive),
@@ -176,15 +174,11 @@ const WorkspaceLayerLive = Layer.mergeAll(
   ),
 );
 
-const RuntimeServicesLive = Layer.empty.pipe(
-  Layer.provideMerge(ServerRuntimeStartupLive),
-  Layer.provideMerge(ReactorLayerLive),
-
-  // Core Services
+const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(CheckpointingLayerLive),
+  Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
   Layer.provideMerge(ProviderLayerLive),
-  Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
@@ -192,14 +186,16 @@ const RuntimeServicesLive = Layer.empty.pipe(
   Layer.provideMerge(ServerSettingsLive),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLive),
-
-  // Misc.
   Layer.provideMerge(AnalyticsServiceLayerLive),
   Layer.provideMerge(OpenLive),
   Layer.provideMerge(ServerLifecycleEventsLive),
 );
 
-const makeServerLayer = Layer.unwrap(
+const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
+  Layer.provideMerge(RuntimeDependenciesLive),
+);
+
+export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig;
 
@@ -223,14 +219,14 @@ const makeServerLayer = Layer.unwrap(
     return serverApplicationLayer.pipe(
       Layer.provideMerge(RuntimeServicesLive),
       Layer.provideMerge(HttpServerLive),
-      Layer.provide(ServerLoggerLive),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provideMerge(PlatformServicesLive),
     );
   }),
 );
 
-// Important: Only `ServerConfig` should be provided by the CLI layer!!! Don't let other requirements leak into the launch layer.
-export const runServer: Effect.Effect<never, never, ServerConfig> = Layer.launch(
-  makeServerLayer,
-).pipe(Effect.orDie);
+export const runServer = Layer.launch(makeServerLayer) satisfies Effect.Effect<
+  never,
+  any,
+  ServerConfig
+>;

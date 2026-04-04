@@ -12,8 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetAppAtomRegistryForTests } from "./atomRegistry.testing";
 import {
   getServerConfig,
-  subscribeServerConfigUpdated,
-  subscribeServerWelcome,
+  onServerConfigUpdated,
+  onWelcome,
   startServerStateSync,
 } from "./serverState";
 
@@ -119,8 +119,8 @@ describe("serverState", () => {
 
     const configListener = vi.fn();
     const stop = startServerStateSync(serverApi);
-    const unsubscribeConfig = subscribeServerConfigUpdated((notification) => {
-      configListener(notification.payload, notification.source);
+    const unsubscribeConfig = onServerConfigUpdated((payload, source) => {
+      configListener(payload, source);
     });
 
     await waitFor(() => {
@@ -140,8 +140,8 @@ describe("serverState", () => {
     );
 
     const lateListener = vi.fn();
-    const unsubscribeLate = subscribeServerConfigUpdated((notification) => {
-      lateListener(notification.payload, notification.source);
+    const unsubscribeLate = onServerConfigUpdated((payload, source) => {
+      lateListener(payload, source);
     });
     expect(lateListener).toHaveBeenCalledWith(
       {
@@ -189,7 +189,7 @@ describe("serverState", () => {
     const stop = startServerStateSync(serverApi);
 
     const listener = vi.fn();
-    const unsubscribeWelcome = subscribeServerWelcome(listener);
+    const unsubscribeWelcome = onWelcome(listener);
 
     emitLifecycleEvent({
       version: 1,
@@ -211,7 +211,7 @@ describe("serverState", () => {
     });
 
     const lateListener = vi.fn();
-    const unsubscribeLate = subscribeServerWelcome(lateListener);
+    const unsubscribeLate = onWelcome(lateListener);
     expect(lateListener).toHaveBeenCalledWith({
       cwd: "/tmp/workspace",
       projectName: "t3-code",
@@ -228,8 +228,8 @@ describe("serverState", () => {
     serverApi.getConfig.mockResolvedValueOnce(baseServerConfig);
     const configListener = vi.fn();
     const stop = startServerStateSync(serverApi);
-    const unsubscribeConfig = subscribeServerConfigUpdated((notification) => {
-      configListener(notification.payload, notification.source);
+    const unsubscribeConfig = onServerConfigUpdated((payload, source) => {
+      configListener(payload, source);
     });
 
     await waitFor(() => {

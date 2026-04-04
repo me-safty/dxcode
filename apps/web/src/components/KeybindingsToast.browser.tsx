@@ -18,9 +18,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { render } from "vitest-browser-react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
+import { __resetNativeApiForTests } from "../nativeApi";
 import { getRouter } from "../router";
 import { useStore } from "../store";
-import { resetAppAtomRegistryForTests } from "../rpc/atomRegistry.testing";
 import { BrowserWsRpcHarness } from "../../test/wsRpcHarness";
 
 const THREAD_ID = "thread-kb-toast-test" as ThreadId;
@@ -322,12 +322,7 @@ describe("Keybindings update toast", () => {
         return [];
       },
     });
-    resetAppAtomRegistryForTests();
-    const clientCache = globalThis as typeof globalThis & {
-      __t3WsRpcClient?: { dispose?: () => Promise<void> } | null;
-    };
-    await clientCache.__t3WsRpcClient?.dispose?.();
-    clientCache.__t3WsRpcClient = null;
+    __resetNativeApiForTests();
     localStorage.clear();
     document.body.innerHTML = "";
     useComposerDraftStore.setState({

@@ -87,6 +87,7 @@ interface CliServerFlags {
   readonly port: Option.Option<number>;
   readonly host: Option.Option<string>;
   readonly baseDir: Option.Option<string>;
+  readonly cwd?: Option.Option<string>;
   readonly devUrl: Option.Option<URL>;
   readonly noBrowser: Option.Option<boolean>;
   readonly authToken: Option.Option<string>;
@@ -229,6 +230,8 @@ export const resolveServerConfig = (
       ),
       () => (mode === "desktop" ? "127.0.0.1" : undefined),
     );
+    const cwd = path.resolve(Option.getOrElse(flags.cwd ?? Option.none(), () => process.cwd()));
+    yield* fs.makeDirectory(cwd, { recursive: true });
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
 
     return {
@@ -258,7 +261,7 @@ export const resolveServerConfig = (
       otlpServiceName: env.otlpServiceName,
       mode,
       port,
-      cwd: process.cwd(),
+      cwd,
       baseDir,
       ...derivedPaths,
       serverTracePath,

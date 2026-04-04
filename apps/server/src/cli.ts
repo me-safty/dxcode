@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { Command, Flag, GlobalFlag } from "effect/unstable/cli";
+import { Argument, Command, Flag, GlobalFlag } from "effect/unstable/cli";
 
 import { ServerConfig, RuntimeMode } from "./config";
 import { PortSchema, resolveServerConfig } from "./cli.logic";
@@ -60,6 +60,12 @@ const commandFlags = {
   port: portFlag,
   host: hostFlag,
   baseDir: baseDirFlag,
+  cwd: Argument.string("cwd").pipe(
+    Argument.withDescription(
+      "Working directory for provider sessions (defaults to the current directory).",
+    ),
+    Argument.optional,
+  ),
   devUrl: devUrlFlag,
   noBrowser: noBrowserFlag,
   authToken: authTokenFlag,

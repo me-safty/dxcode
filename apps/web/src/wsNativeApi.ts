@@ -1,11 +1,25 @@
 import { type ContextMenuItem, type NativeApi } from "@t3tools/contracts";
 
 import { showContextMenuFallback } from "./contextMenuFallback";
-import { getWsRpcClient } from "./wsRpcClient";
+import { resetServerStateForTests } from "./rpc/serverState";
+import { __resetWsRpcClientForTests, getWsRpcClient } from "./wsRpcClient";
+
+let instance: { api: NativeApi } | null = null;
+
+export function __resetWsNativeApiForTests() {
+  instance = null;
+  __resetWsRpcClientForTests();
+  resetServerStateForTests();
+}
 
 export function createWsNativeApi(): NativeApi {
+  if (instance) {
+    return instance.api;
+  }
+
   const rpcClient = getWsRpcClient();
-  return {
+
+  const api: NativeApi = {
     dialogs: {
       pickFolder: async () => {
         if (!window.desktopBridge) return null;
@@ -87,4 +101,7 @@ export function createWsNativeApi(): NativeApi {
       onDomainEvent: (callback) => rpcClient.orchestration.onDomainEvent(callback),
     },
   };
+
+  instance = { api };
+  return api;
 }

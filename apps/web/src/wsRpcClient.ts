@@ -95,27 +95,22 @@ export interface WsRpcClient {
   };
 }
 
-type WsRpcClientGlobal = typeof globalThis & {
-  __t3WsRpcClient?: WsRpcClient | null;
-};
-
-const readCachedWsRpcClient = () => (globalThis as WsRpcClientGlobal).__t3WsRpcClient ?? null;
-
-const writeCachedWsRpcClient = (client: WsRpcClient | null) => {
-  (globalThis as WsRpcClientGlobal).__t3WsRpcClient = client;
-};
+let sharedWsRpcClient: WsRpcClient | null = null;
 
 export function getWsRpcClient(): WsRpcClient {
-  const cachedClient = readCachedWsRpcClient();
-  if (cachedClient) {
-    return cachedClient;
+  if (sharedWsRpcClient) {
+    return sharedWsRpcClient;
   }
-  const nextClient = createWsRpcClient();
-  writeCachedWsRpcClient(nextClient);
-  return nextClient;
+  sharedWsRpcClient = createWsRpcClient();
+  return sharedWsRpcClient;
 }
 
-function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
+export async function __resetWsRpcClientForTests() {
+  await sharedWsRpcClient?.dispose();
+  sharedWsRpcClient = null;
+}
+
+export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
   return {
     dispose: () => transport.dispose(),
     terminal: {
