@@ -13,7 +13,7 @@ export function UiScaleIndicator() {
         className={[
           "pointer-events-none fixed right-4 bottom-4 z-[60] rounded-full border border-border/80",
           "bg-popover/92 px-3 py-1.5 text-xs font-medium text-popover-foreground shadow-lg/10",
-          "backdrop-blur-sm transition-[opacity,transform] duration-150 ease-out sm:right-6 sm:bottom-6",
+          "backdrop-blur-sm will-change-[opacity,transform] transition-[opacity,transform] duration-300 ease-out sm:right-6 sm:bottom-6",
           indicatorVisible ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0",
         ].join(" ")}
         data-testid="ui-scale-indicator"
