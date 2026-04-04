@@ -544,8 +544,6 @@ function TerminalViewport({
     });
 
     const applyTerminalEvent = (event: TerminalEvent) => {
-    const unsubscribe = api?.terminal.onEvent((event) => {
-      if (event.threadId !== threadId || event.terminalId !== terminalId) return;
       const activeTerminal = terminalRef.current;
       if (!activeTerminal) {
         return;
@@ -605,6 +603,10 @@ function TerminalViewport({
         }, 0);
       }
     };
+    const unsubscribe = api?.terminal.onEvent((event) => {
+      if (event.threadId !== threadId || event.terminalId !== terminalId) return;
+      applyTerminalEvent(event);
+    });
     const applyPendingTerminalEvents = (
       terminalEventEntries: ReadonlyArray<{ id: number; event: TerminalEvent }>,
     ) => {
