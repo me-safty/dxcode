@@ -189,6 +189,8 @@ function coalesceOrchestrationUiEvents(
   return coalesced;
 }
 
+const REPLAY_RECOVERY_RETRY_DELAY_MS = 100;
+
 function ServerStateBootstrap() {
   useEffect(() => startServerStateSync(getWsRpcClient().server), []);
 
@@ -440,8 +442,19 @@ function EventRouter() {
         return;
       }
 
-      if (!disposed && recovery.completeReplayRecovery()) {
-        void recoverFromSequenceGap();
+      if (!disposed) {
+        const replayCompletion = recovery.completeReplayRecovery();
+        if (replayCompletion.shouldReplay) {
+          if (!replayCompletion.replayMadeProgress) {
+            await new Promise<void>((resolve) => {
+              setTimeout(resolve, REPLAY_RECOVERY_RETRY_DELAY_MS);
+            });
+            if (disposed) {
+              return;
+            }
+          }
+          void recoverFromSequenceGap();
+        }
       }
     };
 
