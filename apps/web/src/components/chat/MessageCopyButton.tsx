@@ -4,11 +4,6 @@ import { Button } from "../ui/button";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { cn } from "~/lib/utils";
 
-type CopyCallbacks = {
-  onCopy?: () => void;
-  onError?: (error: Error) => void;
-};
-
 export const MessageCopyButton = memo(function MessageCopyButton({
   text,
   label,
@@ -32,19 +27,11 @@ export const MessageCopyButton = memo(function MessageCopyButton({
   onCopy?: () => void;
   onError?: (error: Error) => void;
 }) {
-  const { copyToClipboard, isCopied } = useCopyToClipboard<CopyCallbacks>({
-    onCopy: (callbacks) => {
-      callbacks.onCopy?.();
-    },
-    onError: (error, callbacks) => {
-      callbacks.onError?.(error);
-    },
+  const { copyToClipboard, isCopied } = useCopyToClipboard<void>({
+    ...(onCopy ? { onCopy: () => onCopy() } : {}),
+    ...(onError ? { onError: (error: Error) => onError(error) } : {}),
   });
   const buttonTitle = disabled ? (disabledTitle ?? title) : isCopied ? "Copied" : title;
-  const copyCallbacks = {
-    ...(onCopy ? { onCopy } : {}),
-    ...(onError ? { onError } : {}),
-  };
 
   return (
     <Button
@@ -53,7 +40,7 @@ export const MessageCopyButton = memo(function MessageCopyButton({
       variant={variant}
       className={cn(className)}
       disabled={disabled}
-      onClick={() => copyToClipboard(text, copyCallbacks)}
+      onClick={() => copyToClipboard(text, undefined)}
       title={buttonTitle}
       aria-label={buttonTitle}
     >
