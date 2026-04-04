@@ -56,6 +56,11 @@ type WhenToken =
   | { type: "rparen" };
 
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
+  { key: "mod+=", command: "window.zoomIn" },
+  { key: "mod+shift+=", command: "window.zoomIn" },
+  { key: "mod++", command: "window.zoomIn" },
+  { key: "mod+-", command: "window.zoomOut" },
+  { key: "mod+0", command: "window.zoomReset" },
   { key: "mod+j", command: "terminal.toggle" },
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },

@@ -103,6 +103,14 @@ export interface DesktopUpdateCheckResult {
   state: DesktopUpdateState;
 }
 
+export interface DesktopZoomState {
+  level: number;
+  factor: number;
+  percent: number;
+}
+
+export type DesktopMenuAction = "open-settings" | "zoom-in" | "zoom-out" | "zoom-reset";
+
 export interface DesktopBridge {
   getWsUrl: () => string | null;
   pickFolder: () => Promise<string | null>;
@@ -113,7 +121,9 @@ export interface DesktopBridge {
     position?: { x: number; y: number },
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
-  onMenuAction: (listener: (action: string) => void) => () => void;
+  getZoomState: () => Promise<DesktopZoomState>;
+  setZoomLevel: (level: number) => Promise<DesktopZoomState>;
+  onMenuAction: (listener: (action: DesktopMenuAction) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;

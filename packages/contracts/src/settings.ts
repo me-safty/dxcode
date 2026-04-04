@@ -34,6 +34,7 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(() => DEFAULT_SIDEBAR_THREAD_SORT_ORDER),
   ),
   timestampFormat: TimestampFormat.pipe(Schema.withDecodingDefault(() => DEFAULT_TIMESTAMP_FORMAT)),
+  windowZoomLevel: Schema.Finite.pipe(Schema.withDecodingDefault(() => 0)),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 

@@ -28,6 +28,9 @@ export const THREAD_KEYBINDING_COMMANDS = [
 export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number];
 
 const STATIC_KEYBINDING_COMMANDS = [
+  "window.zoomIn",
+  "window.zoomOut",
+  "window.zoomReset",
   "terminal.toggle",
   "terminal.split",
   "terminal.new",
