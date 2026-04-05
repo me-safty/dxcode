@@ -16,6 +16,7 @@ import {
   type OrchestrationSession,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
+  ThreadHandoff,
   ModelSelection,
   ProjectId,
   ThreadId,
@@ -62,6 +63,7 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
+    handoff: Schema.NullOr(Schema.fromJsonString(ThreadHandoff)),
     modelSelection: Schema.fromJsonString(ModelSelection),
   }),
 );
@@ -198,6 +200,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           latest_turn_id AS "latestTurnId",
+          handoff_json AS "handoff",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
@@ -220,6 +223,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           text,
           attachments_json AS "attachments",
           is_streaming AS "isStreaming",
+          source,
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_messages
@@ -551,6 +555,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ...(row.attachments !== null ? { attachments: row.attachments } : {}),
               turnId: row.turnId,
               streaming: row.isStreaming === 1,
+              source: row.source,
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,
             });
@@ -677,6 +682,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             updatedAt: row.updatedAt,
             archivedAt: row.archivedAt,
             deletedAt: row.deletedAt,
+            handoff: row.handoff,
             messages: messagesByThread.get(row.threadId) ?? [],
             proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
             activities: activitiesByThread.get(row.threadId) ?? [],

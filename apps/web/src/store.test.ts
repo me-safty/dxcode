@@ -42,6 +42,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     latestTurn: null,
     branch: null,
     worktreePath: null,
+    handoff: null,
     ...overrides,
   };
 }
@@ -115,6 +116,7 @@ function makeReadModelThread(overrides: Partial<OrchestrationReadModel["threads"
     updatedAt: "2026-02-27T00:00:00.000Z",
     archivedAt: null,
     deletedAt: null,
+    handoff: null,
     messages: [],
     activities: [],
     proposedPlans: [],

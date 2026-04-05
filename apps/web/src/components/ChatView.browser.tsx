@@ -168,6 +168,7 @@ function createUserMessage(options: {
     ...(options.attachments ? { attachments: options.attachments } : {}),
     turnId: null,
     streaming: false,
+    source: "native" as const,
     createdAt: isoAt(options.offsetSeconds),
     updatedAt: isoAt(options.offsetSeconds + 1),
   };
@@ -180,6 +181,7 @@ function createAssistantMessage(options: { id: MessageId; text: string; offsetSe
     text: options.text,
     turnId: null,
     streaming: false,
+    source: "native" as const,
     createdAt: isoAt(options.offsetSeconds),
     updatedAt: isoAt(options.offsetSeconds + 1),
   };
@@ -279,6 +281,7 @@ function createSnapshotForTargetUser(options: {
         updatedAt: NOW_ISO,
         archivedAt: null,
         deletedAt: null,
+        handoff: null,
         messages,
         activities: [],
         proposedPlans: [],
@@ -337,6 +340,7 @@ function addThreadToSnapshot(
         updatedAt: NOW_ISO,
         archivedAt: null,
         deletedAt: null,
+        handoff: null,
         messages: [],
         activities: [],
         proposedPlans: [],
