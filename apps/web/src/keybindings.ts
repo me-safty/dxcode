@@ -55,6 +55,8 @@ const EVENT_CODE_KEY_ALIASES: Readonly<Record<string, readonly string[]>> = {
 function normalizeEventKey(key: string): string {
   const normalized = key.toLowerCase();
   if (normalized === "esc") return "escape";
+  if (normalized === "{") return "[";
+  if (normalized === "}") return "]";
   return normalized;
 }
 
