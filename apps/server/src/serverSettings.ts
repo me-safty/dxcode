@@ -91,7 +91,13 @@ export class ServerSettingsService extends ServiceMap.Service<
 
 const ServerSettingsJson = fromLenientJson(ServerSettings);
 
-const PROVIDER_ORDER: readonly ProviderKind[] = ["codex", "claudeAgent"];
+// Providers eligible for text generation fallback. OpenCode is excluded
+// because it lacks a dedicated text generation implementation and would
+// route to codex with an invalid "default" model slug.
+const TEXT_GENERATION_PROVIDER_ORDER: readonly ProviderKind[] = [
+  "codex",
+  "claudeAgent",
+];
 
 /**
  * Ensure the `textGenerationModelSelection` points to an enabled provider.
@@ -105,7 +111,7 @@ function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings
     return settings;
   }
 
-  const fallback = PROVIDER_ORDER.find((p) => settings.providers[p].enabled);
+  const fallback = TEXT_GENERATION_PROVIDER_ORDER.find((p) => settings.providers[p].enabled);
   if (!fallback) {
     // No providers enabled — return as-is; callers will report the error.
     return settings;

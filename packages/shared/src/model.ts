@@ -217,6 +217,7 @@ export function resolveApiModelId(modelSelection: ModelSelection): string {
           return modelSelection.model;
       }
     }
+    case "opencode":
     default: {
       return modelSelection.model;
     }

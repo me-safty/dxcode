@@ -412,14 +412,27 @@ export const IntelliJIdeaIcon: Icon = (props) => {
 };
 
 export const OpenCodeIcon: Icon = (props) => (
-  <svg {...props} viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <g clipPath="url(#opencode__clip0_1311_94969)">
-      <path d="M24 32H8V16H24V32Z" fill="#BCBBBB" />
-      <path d="M24 8H8V32H24V8ZM32 40H0V0H32V40Z" fill="#211E1E" />
+  <svg {...props} viewBox="0 0 240 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <g clipPath="url(#opencode__clip0)">
+      <mask
+        id="opencode__mask0"
+        style={{ maskType: "luminance" }}
+        maskUnits="userSpaceOnUse"
+        x="0"
+        y="0"
+        width="240"
+        height="300"
+      >
+        <path d="M240 0H0V300H240V0Z" fill="white" />
+      </mask>
+      <g mask="url(#opencode__mask0)">
+        <path d="M180 240H60V120H180V240Z" fill="#4B4646" />
+        <path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" fill="#F1ECEC" />
+      </g>
     </g>
     <defs>
-      <clipPath id="opencode__clip0_1311_94969">
-        <rect width="32" height="40" fill="white" />
+      <clipPath id="opencode__clip0">
+        <rect width="240" height="300" fill="white" />
       </clipPath>
     </defs>
   </svg>

@@ -41,6 +41,7 @@ const makeRoutingTextGeneration = Effect.gen(function* () {
 
   const route = (provider?: TextGenerationProvider): TextGenerationShape =>
     provider === "claudeAgent" ? claude : codex;
+  // Note: opencode falls through to codex for text generation.
 
   return {
     generateCommitMessage: (input) =>
