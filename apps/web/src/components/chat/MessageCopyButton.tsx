@@ -6,7 +6,6 @@ import { cn } from "~/lib/utils";
 
 export const MessageCopyButton = memo(function MessageCopyButton({
   text,
-  label,
   title = "Copy message",
   disabled = false,
   disabledTitle,
@@ -17,7 +16,6 @@ export const MessageCopyButton = memo(function MessageCopyButton({
   onError,
 }: {
   text: string;
-  label?: string;
   title?: string;
   disabled?: boolean;
   disabledTitle?: string;
@@ -45,7 +43,6 @@ export const MessageCopyButton = memo(function MessageCopyButton({
       aria-label={buttonTitle}
     >
       {isCopied ? <CheckIcon className="size-3 text-success" /> : <CopyIcon className="size-3" />}
-      {label ? <span>{label}</span> : null}
     </Button>
   );
 });
