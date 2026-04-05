@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WsConnectionStatus } from "../rpc/wsConnectionState";
-import { shouldAutoReconnect } from "./WebSocketConnectionSurface";
+import { getBlockingStateDescriptor, shouldAutoReconnect } from "./WebSocketConnectionSurface";
 
 function makeStatus(overrides: Partial<WsConnectionStatus> = {}): WsConnectionStatus {
   return {
@@ -25,6 +25,23 @@ function makeStatus(overrides: Partial<WsConnectionStatus> = {}): WsConnectionSt
 }
 
 describe("WebSocketConnectionSurface.logic", () => {
+  it("shows a waiting-for-network initial surface when the browser starts offline", () => {
+    expect(getBlockingStateDescriptor("connecting", makeStatus({ online: false }))).toMatchObject({
+      connectionLabel: "Waiting for network",
+      eyebrow: "Offline",
+      title: "Waiting for network",
+      tone: "offline",
+    });
+  });
+
+  it("keeps the normal connecting surface when the browser is online", () => {
+    expect(getBlockingStateDescriptor("connecting", makeStatus())).toMatchObject({
+      connectionLabel: "Opening WebSocket",
+      eyebrow: "Starting Session",
+      tone: "connecting",
+    });
+  });
+
   it("forces reconnect on online when the app was offline", () => {
     expect(
       shouldAutoReconnect(

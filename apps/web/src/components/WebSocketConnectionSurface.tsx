@@ -91,6 +91,14 @@ function describeSlowRpcAckToast(requests: ReadonlyArray<SlowRpcAckRequest>): Re
   return `${count} request${count === 1 ? "" : "s"} waiting longer than ${thresholdSeconds}s.`;
 }
 
+interface BlockingStateDescriptor {
+  readonly connectionLabel: string;
+  readonly description: string;
+  readonly eyebrow: string;
+  readonly title: string;
+  readonly tone: "connecting" | "error" | "offline";
+}
+
 export function shouldAutoReconnect(
   status: WsConnectionStatus,
   trigger: WsAutoReconnectTrigger,
@@ -113,44 +121,59 @@ export function shouldAutoReconnect(
   );
 }
 
-function buildBlockingCopy(
+export function getBlockingStateDescriptor(
   uiState: WsConnectionUiState,
   status: WsConnectionStatus,
-): {
-  readonly description: string;
-  readonly eyebrow: string;
-  readonly title: string;
-} {
+): BlockingStateDescriptor {
+  if (uiState === "connecting" && !status.online) {
+    return {
+      connectionLabel: "Waiting for network",
+      description:
+        "Your browser appears offline. The app will keep trying to open the initial WebSocket connection when network access returns.",
+      eyebrow: "Offline",
+      title: "Waiting for network",
+      tone: "offline",
+    };
+  }
+
   if (uiState === "connecting") {
     return {
+      connectionLabel: "Opening WebSocket",
       description: `Opening the WebSocket connection to the ${APP_DISPLAY_NAME} server and waiting for the initial config snapshot.`,
       eyebrow: "Starting Session",
       title: `Connecting to ${APP_DISPLAY_NAME}`,
+      tone: "connecting",
     };
   }
 
   if (uiState === "offline") {
     return {
+      connectionLabel: "Waiting for network",
       description:
         "Your browser is offline, so the web client cannot reach the T3 server. Reconnect to the network and the app will retry automatically.",
       eyebrow: "Offline",
       title: "WebSocket connection unavailable",
+      tone: "offline",
     };
   }
 
   if (status.lastError?.trim()) {
     return {
+      connectionLabel: "Retrying server connection",
       description: `${status.lastError} Verify that the T3 server is running and reachable, then reload the app if needed.`,
       eyebrow: "Connection Error",
       title: "Cannot reach the T3 server",
+      tone: "error",
     };
   }
 
   return {
+    connectionLabel: "Retrying server connection",
     description:
       "The web client could not complete its initial WebSocket connection to the T3 server. It will keep retrying in the background.",
     eyebrow: "Connection Error",
     title: "Cannot reach the T3 server",
+    tone: "error",
   };
 }
 
@@ -193,10 +216,10 @@ function WebSocketBlockingState({
   readonly status: WsConnectionStatus;
   readonly uiState: WsConnectionUiState;
 }) {
-  const copy = buildBlockingCopy(uiState, status);
+  const copy = getBlockingStateDescriptor(uiState, status);
   const disconnectedAt = formatConnectionMoment(status.disconnectedAt ?? status.lastErrorAt);
   const Icon =
-    uiState === "connecting" ? LoaderCircle : uiState === "offline" ? CloudOff : AlertTriangle;
+    copy.tone === "connecting" ? LoaderCircle : copy.tone === "offline" ? CloudOff : AlertTriangle;
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
@@ -214,7 +237,7 @@ function WebSocketBlockingState({
             <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">{copy.title}</h1>
           </div>
           <div className="rounded-2xl border border-border/70 bg-background/80 p-3 text-foreground shadow-sm">
-            <Icon className={uiState === "connecting" ? "size-5 animate-spin" : "size-5"} />
+            <Icon className={copy.tone === "connecting" ? "size-5 animate-spin" : "size-5"} />
           </div>
         </div>
 
@@ -225,13 +248,7 @@ function WebSocketBlockingState({
             <p className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
               Connection
             </p>
-            <p className="mt-1 font-medium text-foreground">
-              {uiState === "connecting"
-                ? "Opening WebSocket"
-                : uiState === "offline"
-                  ? "Waiting for network"
-                  : "Retrying server connection"}
-            </p>
+            <p className="mt-1 font-medium text-foreground">{copy.connectionLabel}</p>
           </div>
           <div>
             <p className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">

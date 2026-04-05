@@ -34,7 +34,15 @@ describe("wsConnectionState", () => {
     expect(getWsConnectionUiState(getWsConnectionStatus())).toBe("offline");
   });
 
-  it("treats an initial offline browser as offline before the first websocket attempt", () => {
+  it("keeps the initial state as connecting when the browser starts offline", () => {
+    setBrowserOnlineStatus(false);
+
+    expect(getWsConnectionUiState(getWsConnectionStatus())).toBe("connecting");
+  });
+
+  it("treats an initial failed websocket attempt as offline when the browser is offline", () => {
+    recordWsConnectionAttempt("ws://localhost:3020/ws");
+    recordWsConnectionClosed({ code: 1006, reason: "offline" });
     setBrowserOnlineStatus(false);
 
     expect(getWsConnectionUiState(getWsConnectionStatus())).toBe("offline");
