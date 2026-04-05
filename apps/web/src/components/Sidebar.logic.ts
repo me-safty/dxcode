@@ -521,6 +521,23 @@ export function getFallbackThreadIdAfterDelete<
   );
 }
 
+export function getFallbackThreadIdAfterBulkDelete<
+  T extends Pick<Thread, "id" | "createdAt" | "updatedAt" | "archivedAt"> & SidebarThreadSortInput,
+>(input: {
+  threads: readonly T[];
+  deletedThreadIds: ReadonlySet<T["id"]>;
+  sortOrder: SidebarThreadSortOrder;
+}): T["id"] | null {
+  const { deletedThreadIds, sortOrder, threads } = input;
+
+  return (
+    sortThreadsForSidebar(
+      threads.filter((thread) => !deletedThreadIds.has(thread.id) && thread.archivedAt === null),
+      sortOrder,
+    )[0]?.id ?? null
+  );
+}
+
 export function getProjectSortTimestamp(
   project: SidebarProject,
   projectThreads: readonly SidebarThreadSortInput[],
