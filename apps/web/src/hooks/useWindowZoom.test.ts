@@ -199,6 +199,48 @@ describe("window zoom controller", () => {
     });
   });
 
+  it("falls back to the requested zoom level when the desktop bridge returns no state", async () => {
+    const desktopBridge: NonNullable<Window["desktopBridge"]> = {
+      setZoomLevel: vi.fn((_level: number) => null as never),
+      getZoomState: vi.fn(() => ({
+        level: 0,
+        factor: 1,
+        percent: 100,
+      })),
+      getWsUrl: () => null,
+      pickFolder: async () => null,
+      confirm: async () => true,
+      setTheme: async () => undefined,
+      showContextMenu: async () => null,
+      openExternal: async () => true,
+      onMenuAction: () => () => undefined,
+      getUpdateState: async () => {
+        throw new Error("unused in zoom test");
+      },
+      checkForUpdate: async () => {
+        throw new Error("unused in zoom test");
+      },
+      downloadUpdate: async () => {
+        throw new Error("unused in zoom test");
+      },
+      installUpdate: async () => {
+        throw new Error("unused in zoom test");
+      },
+      onUpdateState: () => () => undefined,
+    };
+    window.desktopBridge = desktopBridge;
+
+    await expect(__applyWindowZoomLevelForTests(1)).resolves.toBe(1);
+
+    expect(desktopBridge.setZoomLevel).toHaveBeenCalledWith(1);
+    expect(__getWindowZoomSnapshotForTests()).toMatchObject({
+      zoomLevel: 1,
+      zoomPercent: 120,
+      indicatorVisible: true,
+      indicatorMessage: "UI scale 120%",
+    });
+  });
+
   it("applies repeated desktop zoom updates immediately without stale-state loss", async () => {
     const desktopBridge: NonNullable<Window["desktopBridge"]> = {
       setZoomLevel: vi.fn((level: number) => {

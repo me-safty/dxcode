@@ -70,6 +70,13 @@ function applySnapshotFromLevel(level: number) {
   });
 }
 
+function applyLocalZoomFallback(level: number) {
+  const clampedLevel = clampWindowZoomLevel(level);
+  applySnapshotFromLevel(clampedLevel);
+  lastAppliedZoomLevel = clampedLevel;
+  return clampedLevel;
+}
+
 function applySnapshotFromDesktopState(state: DesktopZoomState) {
   const level = clampWindowZoomLevel(state.level);
   const factor = Number.isFinite(state.factor) ? state.factor : zoomLevelToZoomFactor(level);
@@ -156,17 +163,17 @@ function applyDesktopZoom(level: number) {
 
 export function applyInitialWindowZoom() {
   const zoomLevel = readPersistedWindowZoomLevel();
-  applySnapshotFromLevel(zoomLevel);
-  lastAppliedZoomLevel = zoomLevel;
+  applyLocalZoomFallback(zoomLevel);
   committedPersistedZoomLevel = zoomLevel;
   pendingPersistedZoomLevel = null;
 
   if (window.desktopBridge?.setZoomLevel) {
     try {
-      applyDesktopZoom(zoomLevel);
+      if (applyDesktopZoom(zoomLevel) === null) {
+        applyLocalZoomFallback(zoomLevel);
+      }
     } catch {
-      applySnapshotFromLevel(zoomLevel);
-      lastAppliedZoomLevel = zoomLevel;
+      applyLocalZoomFallback(zoomLevel);
     }
     return;
   }
@@ -182,10 +189,10 @@ function applyWindowZoomLevel(level: number, showZoomIndicator: boolean) {
     let nextLevel = clampedLevel;
 
     try {
-      nextLevel = applyDesktopZoom(clampedLevel) ?? clampedLevel;
+      const desktopLevel = applyDesktopZoom(clampedLevel);
+      nextLevel = desktopLevel ?? applyLocalZoomFallback(clampedLevel);
     } catch (error) {
-      applySnapshotFromLevel(clampedLevel);
-      lastAppliedZoomLevel = clampedLevel;
+      applyLocalZoomFallback(clampedLevel);
       if (showZoomIndicator) {
         showIndicator(zoomLevelToPercent(clampedLevel));
       }
@@ -226,8 +233,7 @@ function syncPersistedWindowZoomLevel(level: number) {
   try {
     applyWindowZoomLevel(clampedLevel, false);
   } catch {
-    applySnapshotFromLevel(clampedLevel);
-    lastAppliedZoomLevel = clampedLevel;
+    applyLocalZoomFallback(clampedLevel);
   }
 
   return true;
