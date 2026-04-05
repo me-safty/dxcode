@@ -1,4 +1,7 @@
 ---
+import { Image } from "astro:assets";
+import navIcon from "../assets/app-icon.png";
+
 interface Props {
   title?: string;
   description?: string;
@@ -31,7 +34,14 @@ const {
     <div class="page">
       <nav class="nav">
         <a href="/" class="nav-brand">
-          <img src="/icon.png" alt="T3" class="nav-icon" />
+          <Image
+            src={navIcon}
+            alt="T3"
+            width={28}
+            height={28}
+            priority
+            class="nav-icon"
+          />
         </a>
         <a
           href="https://github.com/pingdotgg/t3code"
