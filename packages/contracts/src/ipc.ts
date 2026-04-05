@@ -121,8 +121,8 @@ export interface DesktopBridge {
     position?: { x: number; y: number },
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
-  getZoomState: () => Promise<DesktopZoomState>;
-  setZoomLevel: (level: number) => Promise<DesktopZoomState>;
+  getZoomState: () => DesktopZoomState;
+  setZoomLevel: (level: number) => DesktopZoomState;
   onMenuAction: (listener: (action: DesktopMenuAction) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;

@@ -1,4 +1,3 @@
-import type { BrowserWindow } from "electron";
 import type { DesktopZoomState } from "@t3tools/contracts";
 import {
   clampWindowZoomLevel,
@@ -6,22 +5,22 @@ import {
   zoomLevelToZoomFactor,
 } from "@t3tools/shared/zoom";
 
-type ZoomableWindow = Pick<BrowserWindow, "webContents">;
+type WritableZoomTarget = {
+  setZoomLevel: (level: number) => void;
+};
 
-export function getDesktopZoomState(targetWindow: ZoomableWindow): DesktopZoomState {
-  const level = clampWindowZoomLevel(targetWindow.webContents.getZoomLevel());
-  const rawFactor = targetWindow.webContents.getZoomFactor();
-  const factor = Number.isFinite(rawFactor) ? rawFactor : zoomLevelToZoomFactor(level);
+export function getDesktopZoomState(level: number): DesktopZoomState {
+  const clampedLevel = clampWindowZoomLevel(level);
 
   return {
-    level,
-    factor,
-    percent: zoomLevelToPercent(level),
+    level: clampedLevel,
+    factor: zoomLevelToZoomFactor(clampedLevel),
+    percent: zoomLevelToPercent(clampedLevel),
   };
 }
 
-export function setDesktopZoomLevel(targetWindow: ZoomableWindow, level: number): DesktopZoomState {
+export function setDesktopZoomLevel(target: WritableZoomTarget, level: number): DesktopZoomState {
   const clampedLevel = clampWindowZoomLevel(level);
-  targetWindow.webContents.setZoomLevel(clampedLevel);
-  return getDesktopZoomState(targetWindow);
+  target.setZoomLevel(clampedLevel);
+  return getDesktopZoomState(clampedLevel);
 }

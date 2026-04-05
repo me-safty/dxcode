@@ -31,8 +31,8 @@ let snapshot: WindowZoomSnapshot = {
 
 let indicatorTimer: number | null = null;
 let lastAppliedZoomLevel: number | null = null;
-let desktopZoomQueue: Promise<void> = Promise.resolve();
-let latestDesktopZoomRequestId = 0;
+let committedPersistedZoomLevel = 0;
+let pendingPersistedZoomLevel: number | null = null;
 const listeners = new Set<() => void>();
 
 function emitChange() {
@@ -71,10 +71,14 @@ function applySnapshotFromLevel(level: number) {
 }
 
 function applySnapshotFromDesktopState(state: DesktopZoomState) {
+  const level = clampWindowZoomLevel(state.level);
+  const factor = Number.isFinite(state.factor) ? state.factor : zoomLevelToZoomFactor(level);
+  const percent = Number.isFinite(state.percent) ? state.percent : zoomLevelToPercent(level);
+
   replaceSnapshot({
-    zoomLevel: clampWindowZoomLevel(state.level),
-    zoomFactor: state.factor,
-    zoomPercent: state.percent,
+    zoomLevel: level,
+    zoomFactor: factor,
+    zoomPercent: percent,
   });
 }
 
@@ -120,75 +124,78 @@ function readPersistedWindowZoomLevel() {
   }
 }
 
-async function resyncDesktopZoomState() {
-  if (!window.desktopBridge?.getZoomState) {
-    if (lastAppliedZoomLevel !== null) {
-      applySnapshotFromLevel(lastAppliedZoomLevel);
-    }
-    return lastAppliedZoomLevel ?? getWindowZoomSnapshot().zoomLevel;
+function requestPersistedWindowZoomLevel(
+  level: number,
+  updateSettings: (patch: { windowZoomLevel: number }) => void,
+) {
+  const clampedLevel = clampWindowZoomLevel(level);
+  if (pendingPersistedZoomLevel === clampedLevel) {
+    return false;
   }
 
-  const state = await window.desktopBridge.getZoomState();
+  if (pendingPersistedZoomLevel === null && committedPersistedZoomLevel === clampedLevel) {
+    return false;
+  }
+
+  pendingPersistedZoomLevel = clampedLevel;
+  updateSettings({ windowZoomLevel: clampedLevel });
+  return true;
+}
+
+function applyDesktopZoom(level: number) {
+  const state = window.desktopBridge?.setZoomLevel(level);
+  if (!state) {
+    return null;
+  }
+
   applySnapshotFromDesktopState(state);
-  lastAppliedZoomLevel = clampWindowZoomLevel(state.level);
-  return lastAppliedZoomLevel;
+  const nextLevel = clampWindowZoomLevel(state.level);
+  lastAppliedZoomLevel = nextLevel;
+  return nextLevel;
 }
 
 export function applyInitialWindowZoom() {
   const zoomLevel = readPersistedWindowZoomLevel();
   applySnapshotFromLevel(zoomLevel);
   lastAppliedZoomLevel = zoomLevel;
+  committedPersistedZoomLevel = zoomLevel;
+  pendingPersistedZoomLevel = null;
 
   if (window.desktopBridge?.setZoomLevel) {
-    void window.desktopBridge
-      .setZoomLevel(zoomLevel)
-      .then((state) => applySnapshotFromDesktopState(state))
-      .catch(() => undefined);
+    try {
+      applyDesktopZoom(zoomLevel);
+    } catch {
+      applySnapshotFromLevel(zoomLevel);
+      lastAppliedZoomLevel = zoomLevel;
+    }
     return;
   }
 
   applyBrowserZoom(zoomLevel);
 }
 
-async function applyWindowZoomLevel(level: number, showZoomIndicator: boolean) {
+function applyWindowZoomLevel(level: number, showZoomIndicator: boolean) {
   const clampedLevel = clampWindowZoomLevel(level);
   const desktopBridge = window.desktopBridge;
 
   if (desktopBridge?.setZoomLevel) {
-    const requestId = latestDesktopZoomRequestId + 1;
-    latestDesktopZoomRequestId = requestId;
-    applySnapshotFromLevel(clampedLevel);
-    if (showZoomIndicator) {
-      showIndicator(zoomLevelToPercent(clampedLevel));
+    let nextLevel = clampedLevel;
+
+    try {
+      nextLevel = applyDesktopZoom(clampedLevel) ?? clampedLevel;
+    } catch (error) {
+      applySnapshotFromLevel(clampedLevel);
+      lastAppliedZoomLevel = clampedLevel;
+      if (showZoomIndicator) {
+        showIndicator(zoomLevelToPercent(clampedLevel));
+      }
+      throw error;
     }
 
-    const operation = desktopZoomQueue
-      .catch(() => undefined)
-      .then(async () => {
-        try {
-          const state = await desktopBridge.setZoomLevel(clampedLevel);
-          const nextLevel = clampWindowZoomLevel(state.level);
-          lastAppliedZoomLevel = nextLevel;
-          if (requestId === latestDesktopZoomRequestId) {
-            applySnapshotFromDesktopState(state);
-            if (showZoomIndicator && state.percent !== zoomLevelToPercent(clampedLevel)) {
-              showIndicator(state.percent);
-            }
-          }
-          return nextLevel;
-        } catch (error) {
-          if (requestId === latestDesktopZoomRequestId) {
-            await resyncDesktopZoomState();
-          }
-          throw error;
-        }
-      });
-
-    desktopZoomQueue = operation.then(
-      () => undefined,
-      () => undefined,
-    );
-    return operation;
+    if (showZoomIndicator) {
+      showIndicator(getWindowZoomSnapshot().zoomPercent);
+    }
+    return nextLevel;
   }
 
   applyBrowserZoom(clampedLevel);
@@ -198,6 +205,32 @@ async function applyWindowZoomLevel(level: number, showZoomIndicator: boolean) {
     showIndicator(zoomLevelToPercent(clampedLevel));
   }
   return clampedLevel;
+}
+
+function syncPersistedWindowZoomLevel(level: number) {
+  const clampedLevel = clampWindowZoomLevel(level);
+
+  if (pendingPersistedZoomLevel !== null) {
+    if (clampedLevel !== pendingPersistedZoomLevel) {
+      return false;
+    }
+    pendingPersistedZoomLevel = null;
+  }
+
+  committedPersistedZoomLevel = clampedLevel;
+
+  if (lastAppliedZoomLevel === clampedLevel) {
+    return true;
+  }
+
+  try {
+    applyWindowZoomLevel(clampedLevel, false);
+  } catch {
+    applySnapshotFromLevel(clampedLevel);
+    lastAppliedZoomLevel = clampedLevel;
+  }
+
+  return true;
 }
 
 type SetZoomLevelOptions = {
@@ -214,22 +247,16 @@ export function useWindowZoom() {
   );
 
   useEffect(() => {
-    const clampedStoredZoomLevel = clampWindowZoomLevel(storedZoomLevel);
-    if (lastAppliedZoomLevel === clampedStoredZoomLevel) {
-      return;
-    }
-    void applyWindowZoomLevel(clampedStoredZoomLevel, false);
+    syncPersistedWindowZoomLevel(storedZoomLevel);
   }, [storedZoomLevel]);
 
   const setZoomLevel = useCallback(
     async (level: number, options?: SetZoomLevelOptions) => {
-      const nextLevel = await applyWindowZoomLevel(level, options?.showIndicator ?? true);
-      if (nextLevel !== clampWindowZoomLevel(storedZoomLevel)) {
-        updateSettings({ windowZoomLevel: nextLevel });
-      }
+      const nextLevel = applyWindowZoomLevel(level, options?.showIndicator ?? true);
+      requestPersistedWindowZoomLevel(nextLevel, updateSettings);
       return nextLevel;
     },
-    [storedZoomLevel, updateSettings],
+    [updateSettings],
   );
 
   const zoomIn = useCallback(() => {
@@ -268,6 +295,14 @@ export async function __applyWindowZoomLevelForTests(level: number, showIndicato
   return applyWindowZoomLevel(level, showIndicator);
 }
 
+export function __requestPersistedWindowZoomLevelForTests(level: number) {
+  return requestPersistedWindowZoomLevel(level, () => undefined);
+}
+
+export function __syncPersistedWindowZoomLevelForTests(level: number) {
+  return syncPersistedWindowZoomLevel(level);
+}
+
 export function __getWindowZoomSnapshotForTests() {
   return getWindowZoomSnapshot();
 }
@@ -286,7 +321,7 @@ export function __resetWindowZoomForTests() {
     announcementToken: 0,
   };
   lastAppliedZoomLevel = null;
-  desktopZoomQueue = Promise.resolve();
-  latestDesktopZoomRequestId = 0;
+  committedPersistedZoomLevel = 0;
+  pendingPersistedZoomLevel = null;
   listeners.clear();
 }

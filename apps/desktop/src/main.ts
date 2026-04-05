@@ -20,7 +20,6 @@ import * as Effect from "effect/Effect";
 import type {
   DesktopMenuAction,
   DesktopTheme,
-  DesktopZoomState,
   DesktopUpdateActionResult,
   DesktopUpdateCheckResult,
   DesktopUpdateState,
@@ -47,14 +46,11 @@ import {
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
-import { getDesktopZoomState, setDesktopZoomLevel } from "./zoom";
 
 syncShellEnvironment();
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
-const GET_ZOOM_STATE_CHANNEL = "desktop:get-zoom-state";
-const SET_ZOOM_LEVEL_CHANNEL = "desktop:set-zoom-level";
 const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
@@ -559,14 +555,6 @@ function dispatchMenuAction(action: DesktopMenuAction): void {
   }
 
   send();
-}
-
-function getTargetZoomWindow(): BrowserWindow {
-  return BrowserWindow.getFocusedWindow() ?? mainWindow ?? createWindow();
-}
-
-function getCanonicalZoomState(targetWindow: BrowserWindow): DesktopZoomState {
-  return getDesktopZoomState(targetWindow);
 }
 
 function handleCheckForUpdatesMenuClick(): void {
@@ -1234,18 +1222,6 @@ function registerIpcHandlers(): void {
     }
 
     nativeTheme.themeSource = theme;
-  });
-
-  ipcMain.removeHandler(GET_ZOOM_STATE_CHANNEL);
-  ipcMain.handle(GET_ZOOM_STATE_CHANNEL, async () => {
-    return getCanonicalZoomState(getTargetZoomWindow());
-  });
-
-  ipcMain.removeHandler(SET_ZOOM_LEVEL_CHANNEL);
-  ipcMain.handle(SET_ZOOM_LEVEL_CHANNEL, async (_event, rawLevel: unknown) => {
-    const targetWindow = getTargetZoomWindow();
-    const level = typeof rawLevel === "number" ? rawLevel : 0;
-    return setDesktopZoomLevel(targetWindow, level);
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);

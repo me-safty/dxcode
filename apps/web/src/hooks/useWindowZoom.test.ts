@@ -6,7 +6,9 @@ import { removeLocalStorageItem, setLocalStorageItem } from "./useLocalStorage";
 import {
   __applyWindowZoomLevelForTests,
   __getWindowZoomSnapshotForTests,
+  __requestPersistedWindowZoomLevelForTests,
   __resetWindowZoomForTests,
+  __syncPersistedWindowZoomLevelForTests,
   applyInitialWindowZoom,
 } from "./useWindowZoom";
 
@@ -14,17 +16,6 @@ type TestWindow = Window &
   typeof globalThis & {
     desktopBridge?: Window["desktopBridge"];
   };
-
-function createDeferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-
-  return { promise, resolve, reject };
-}
 
 function installDomGlobals() {
   const windowStub = {
@@ -109,14 +100,68 @@ describe("window zoom controller", () => {
     expect(__getWindowZoomSnapshotForTests().indicatorVisible).toBe(false);
   });
 
+  it("applies the persisted desktop zoom level through the bridge before mount", () => {
+    setLocalStorageItem(
+      CLIENT_SETTINGS_STORAGE_KEY,
+      {
+        ...DEFAULT_CLIENT_SETTINGS,
+        windowZoomLevel: 1,
+      },
+      ClientSettingsSchema,
+    );
+
+    const desktopBridge: NonNullable<Window["desktopBridge"]> = {
+      setZoomLevel: vi.fn((level: number) => ({
+        level,
+        factor: 1.2 ** level,
+        percent: Math.round(1.2 ** level * 100),
+      })),
+      getZoomState: vi.fn(() => ({
+        level: 0,
+        factor: 1,
+        percent: 100,
+      })),
+      getWsUrl: () => null,
+      pickFolder: async () => null,
+      confirm: async () => true,
+      setTheme: async () => undefined,
+      showContextMenu: async () => null,
+      openExternal: async () => true,
+      onMenuAction: () => () => undefined,
+      getUpdateState: async () => {
+        throw new Error("unused in zoom test");
+      },
+      checkForUpdate: async () => {
+        throw new Error("unused in zoom test");
+      },
+      downloadUpdate: async () => {
+        throw new Error("unused in zoom test");
+      },
+      installUpdate: async () => {
+        throw new Error("unused in zoom test");
+      },
+      onUpdateState: () => () => undefined,
+    };
+    window.desktopBridge = desktopBridge;
+
+    applyInitialWindowZoom();
+
+    expect(desktopBridge.setZoomLevel).toHaveBeenCalledWith(1);
+    expect(document.body.style.zoom).toBe("");
+    expect(__getWindowZoomSnapshotForTests()).toMatchObject({
+      zoomLevel: 1,
+      zoomPercent: 120,
+    });
+  });
+
   it("uses the desktop bridge as the canonical Electron source of truth", async () => {
     const desktopBridge: NonNullable<Window["desktopBridge"]> = {
-      setZoomLevel: vi.fn(async () => ({
+      setZoomLevel: vi.fn((_level: number) => ({
         level: -1,
         factor: 0.83,
         percent: 83,
       })),
-      getZoomState: vi.fn(async () => ({
+      getZoomState: vi.fn(() => ({
         level: 0,
         factor: 1,
         percent: 100,
@@ -154,20 +199,16 @@ describe("window zoom controller", () => {
     });
   });
 
-  it("serializes desktop zoom updates and keeps the latest optimistic level visible", async () => {
-    const firstZoom = createDeferred<{ level: number; factor: number; percent: number }>();
-    const secondZoom = createDeferred<{ level: number; factor: number; percent: number }>();
+  it("applies repeated desktop zoom updates immediately without stale-state loss", async () => {
     const desktopBridge: NonNullable<Window["desktopBridge"]> = {
       setZoomLevel: vi.fn((level: number) => {
-        if (level === 1) {
-          return firstZoom.promise;
-        }
-        if (level === 2) {
-          return secondZoom.promise;
-        }
-        return Promise.reject(new Error(`unexpected zoom level ${level}`));
+        return {
+          level,
+          factor: 1.2 ** level,
+          percent: Math.round(1.2 ** level * 100),
+        };
       }),
-      getZoomState: vi.fn(async () => ({
+      getZoomState: vi.fn(() => ({
         level: 0,
         factor: 1,
         percent: 100,
@@ -195,24 +236,15 @@ describe("window zoom controller", () => {
     };
     window.desktopBridge = desktopBridge;
 
-    const firstApply = __applyWindowZoomLevelForTests(1);
-    const secondApply = __applyWindowZoomLevelForTests(2);
-
-    await vi.waitFor(() => {
-      expect(desktopBridge.setZoomLevel).toHaveBeenCalledTimes(1);
-    });
+    await expect(__applyWindowZoomLevelForTests(1)).resolves.toBe(1);
     expect(desktopBridge.setZoomLevel).toHaveBeenNthCalledWith(1, 1);
     expect(__getWindowZoomSnapshotForTests()).toMatchObject({
-      zoomLevel: 2,
-      zoomPercent: 144,
+      zoomLevel: 1,
+      zoomPercent: 120,
       indicatorVisible: true,
     });
 
-    firstZoom.resolve({ level: 1, factor: 1.2, percent: 120 });
-
-    await vi.waitFor(() => {
-      expect(desktopBridge.setZoomLevel).toHaveBeenCalledTimes(2);
-    });
+    await expect(__applyWindowZoomLevelForTests(2)).resolves.toBe(2);
     expect(desktopBridge.setZoomLevel).toHaveBeenNthCalledWith(2, 2);
     expect(__getWindowZoomSnapshotForTests()).toMatchObject({
       zoomLevel: 2,
@@ -220,14 +252,70 @@ describe("window zoom controller", () => {
       indicatorVisible: true,
     });
 
-    secondZoom.resolve({ level: 2, factor: 1.44, percent: 144 });
-
-    await expect(firstApply).resolves.toBe(1);
-    await expect(secondApply).resolves.toBe(2);
+    await expect(__applyWindowZoomLevelForTests(1)).resolves.toBe(1);
+    expect(desktopBridge.setZoomLevel).toHaveBeenNthCalledWith(3, 1);
     expect(__getWindowZoomSnapshotForTests()).toMatchObject({
-      zoomLevel: 2,
-      zoomPercent: 144,
+      zoomLevel: 1,
+      zoomPercent: 120,
       indicatorVisible: true,
+    });
+  });
+
+  it("ignores stale persisted zoom echoes while a newer local zoom is pending", async () => {
+    const desktopBridge: NonNullable<Window["desktopBridge"]> = {
+      setZoomLevel: vi.fn((level: number) => ({
+        level,
+        factor: 1.2 ** level,
+        percent: Math.round(1.2 ** level * 100),
+      })),
+      getZoomState: vi.fn(() => ({
+        level: 0,
+        factor: 1,
+        percent: 100,
+      })),
+      getWsUrl: () => null,
+      pickFolder: async () => null,
+      confirm: async () => true,
+      setTheme: async () => undefined,
+      showContextMenu: async () => null,
+      openExternal: async () => true,
+      onMenuAction: () => () => undefined,
+      getUpdateState: async () => {
+        throw new Error("unused in zoom test");
+      },
+      checkForUpdate: async () => {
+        throw new Error("unused in zoom test");
+      },
+      downloadUpdate: async () => {
+        throw new Error("unused in zoom test");
+      },
+      installUpdate: async () => {
+        throw new Error("unused in zoom test");
+      },
+      onUpdateState: () => () => undefined,
+    };
+    window.desktopBridge = desktopBridge;
+
+    await expect(__applyWindowZoomLevelForTests(1)).resolves.toBe(1);
+    expect(__requestPersistedWindowZoomLevelForTests(1)).toBe(true);
+
+    await expect(__applyWindowZoomLevelForTests(0)).resolves.toBe(0);
+    expect(__requestPersistedWindowZoomLevelForTests(0)).toBe(true);
+
+    expect(__syncPersistedWindowZoomLevelForTests(1)).toBe(false);
+    expect(__getWindowZoomSnapshotForTests()).toMatchObject({
+      zoomLevel: 0,
+      zoomPercent: 100,
+      indicatorVisible: true,
+      indicatorMessage: "UI scale 100%",
+    });
+
+    expect(__syncPersistedWindowZoomLevelForTests(0)).toBe(true);
+    expect(__getWindowZoomSnapshotForTests()).toMatchObject({
+      zoomLevel: 0,
+      zoomPercent: 100,
+      indicatorVisible: true,
+      indicatorMessage: "UI scale 100%",
     });
   });
 });

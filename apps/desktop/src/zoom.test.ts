@@ -2,24 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import { getDesktopZoomState, setDesktopZoomLevel } from "./zoom";
 
-function createWindow(level = 0, factor = 1) {
-  const webContents = {
-    getZoomLevel: vi.fn(() => level),
-    getZoomFactor: vi.fn(() => factor),
-    setZoomLevel: vi.fn((nextLevel: number) => {
-      level = nextLevel;
-      factor = 1.2 ** nextLevel;
-    }),
+function createZoomTarget() {
+  return {
+    setZoomLevel: vi.fn(),
   };
-
-  return { webContents };
 }
 
 describe("desktop zoom helpers", () => {
   it("returns canonical zoom state", () => {
-    const targetWindow = createWindow(1, 1.2);
-
-    expect(getDesktopZoomState(targetWindow as never)).toEqual({
+    expect(getDesktopZoomState(1)).toEqual({
       level: 1,
       factor: 1.2,
       percent: 120,
@@ -27,13 +18,28 @@ describe("desktop zoom helpers", () => {
   });
 
   it("clamps and applies zoom levels", () => {
-    const targetWindow = createWindow(0, 1);
+    const target = createZoomTarget();
 
-    expect(setDesktopZoomLevel(targetWindow as never, 99)).toEqual({
+    expect(setDesktopZoomLevel(target, 99)).toEqual({
       level: 8,
       factor: 1.2 ** 8,
       percent: Math.round(1.2 ** 8 * 100),
     });
-    expect(targetWindow.webContents.setZoomLevel).toHaveBeenCalledWith(8);
+    expect(target.setZoomLevel).toHaveBeenCalledWith(8);
+  });
+
+  it("applies rapid local increments monotonically without queueing", () => {
+    const target = createZoomTarget();
+
+    expect(setDesktopZoomLevel(target, 1)).toMatchObject({
+      level: 1,
+      percent: 120,
+    });
+    expect(setDesktopZoomLevel(target, 2)).toMatchObject({
+      level: 2,
+      percent: 144,
+    });
+    expect(target.setZoomLevel).toHaveBeenNthCalledWith(1, 1);
+    expect(target.setZoomLevel).toHaveBeenNthCalledWith(2, 2);
   });
 });

@@ -1,10 +1,9 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webFrame } from "electron";
 import type { DesktopBridge } from "@t3tools/contracts";
+import { getDesktopZoomState, setDesktopZoomLevel } from "./zoom";
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
-const GET_ZOOM_STATE_CHANNEL = "desktop:get-zoom-state";
-const SET_ZOOM_LEVEL_CHANNEL = "desktop:set-zoom-level";
 const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
@@ -15,6 +14,7 @@ const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
+let desktopZoomLevel = 0;
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: () => {
@@ -23,8 +23,12 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   },
   pickFolder: () => ipcRenderer.invoke(PICK_FOLDER_CHANNEL),
   confirm: (message) => ipcRenderer.invoke(CONFIRM_CHANNEL, message),
-  getZoomState: () => ipcRenderer.invoke(GET_ZOOM_STATE_CHANNEL),
-  setZoomLevel: (level) => ipcRenderer.invoke(SET_ZOOM_LEVEL_CHANNEL, level),
+  getZoomState: () => getDesktopZoomState(desktopZoomLevel),
+  setZoomLevel: (level) => {
+    const state = setDesktopZoomLevel(webFrame, level);
+    desktopZoomLevel = state.level;
+    return state;
+  },
   setTheme: (theme) => ipcRenderer.invoke(SET_THEME_CHANNEL, theme),
   showContextMenu: (items, position) => ipcRenderer.invoke(CONTEXT_MENU_CHANNEL, items, position),
   openExternal: (url: string) => ipcRenderer.invoke(OPEN_EXTERNAL_CHANNEL, url),
