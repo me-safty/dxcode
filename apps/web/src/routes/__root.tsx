@@ -47,6 +47,7 @@ import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 import { deriveReplayRetryDecision } from "../orchestrationRecovery";
+import { isDesktopHandledZoomAccelerator } from "../lib/desktopZoomShortcuts";
 import { getWsRpcClient } from "~/wsRpcClient";
 
 export const Route = createRootRouteWithContext<{
@@ -129,19 +130,24 @@ function WindowZoomShortcuts() {
       if (event.defaultPrevented) return;
 
       const command = resolveShortcutCommand(event, keybindings);
+      const handledByDesktopMenu =
+        window.desktopBridge !== undefined && isDesktopHandledZoomAccelerator(event);
       if (command === "window.zoomIn") {
+        if (handledByDesktopMenu) return;
         event.preventDefault();
         event.stopPropagation();
         void zoomIn();
         return;
       }
       if (command === "window.zoomOut") {
+        if (handledByDesktopMenu) return;
         event.preventDefault();
         event.stopPropagation();
         void zoomOut();
         return;
       }
       if (command === "window.zoomReset") {
+        if (handledByDesktopMenu) return;
         event.preventDefault();
         event.stopPropagation();
         void resetZoom();
