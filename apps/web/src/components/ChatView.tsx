@@ -64,6 +64,7 @@ import {
   buildPendingUserInputAnswers,
   derivePendingUserInputProgress,
   setPendingUserInputCustomAnswer,
+  togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
 import { useStore } from "../store";
@@ -1510,7 +1511,7 @@ export default function ChatView({ layoutState, threadId }: ChatViewProps) {
           type: "slash-command",
           command: "default",
           label: "/default",
-          description: "Switch this thread back to normal chat mode",
+          description: "Switch this thread back to normal build mode",
         },
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
@@ -3239,19 +3240,24 @@ export default function ChatView({ layoutState, threadId }: ChatViewProps) {
     [activePendingUserInput],
   );
 
-  const onSelectActivePendingUserInputOption = useCallback(
+  const onToggleActivePendingUserInputOption = useCallback(
     (questionId: string, optionLabel: string) => {
       if (!activePendingUserInput) {
+        return;
+      }
+      const question = activePendingUserInput.questions.find((entry) => entry.id === questionId);
+      if (!question) {
         return;
       }
       setPendingUserInputAnswersByRequestId((existing) => ({
         ...existing,
         [activePendingUserInput.requestId]: {
           ...existing[activePendingUserInput.requestId],
-          [questionId]: {
-            selectedOptionLabel: optionLabel,
-            customAnswer: "",
-          },
+          [questionId]: togglePendingUserInputOptionSelection(
+            question,
+            existing[activePendingUserInput.requestId]?.[questionId],
+            optionLabel,
+          ),
         },
       }));
       promptRef.current = "";
@@ -4074,7 +4080,7 @@ export default function ChatView({ layoutState, threadId }: ChatViewProps) {
             <form
               ref={composerFormRef}
               onSubmit={onSend}
-              className="mx-auto w-full min-w-0 max-w-[52rem]"
+              className="mx-auto w-full min-w-0 max-w-208"
               data-chat-composer-form="true"
             >
               <div
@@ -4108,7 +4114,7 @@ export default function ChatView({ layoutState, threadId }: ChatViewProps) {
                         respondingRequestIds={respondingRequestIds}
                         answers={activePendingDraftAnswers}
                         questionIndex={activePendingQuestionIndex}
-                        onSelectOption={onSelectActivePendingUserInputOption}
+                        onToggleOption={onToggleActivePendingUserInputOption}
                         onAdvance={onAdvanceActivePendingUserInput}
                       />
                     </div>
@@ -4329,13 +4335,13 @@ export default function ChatView({ layoutState, threadId }: ChatViewProps) {
                               onClick={toggleInteractionMode}
                               title={
                                 interactionMode === "plan"
-                                  ? "Plan mode — click to return to normal chat mode"
+                                  ? "Plan mode — click to return to normal build mode"
                                   : "Default mode — click to enter plan mode"
                               }
                             >
                               <BotIcon />
                               <span className="sr-only sm:not-sr-only">
-                                {interactionMode === "plan" ? "Plan" : "Chat"}
+                                {interactionMode === "plan" ? "Plan" : "Build"}
                               </span>
                             </Button>
 
