@@ -181,20 +181,42 @@ export function resolveSidebarNewThreadSeedContext(input: {
   worktreePath?: string | null;
   envMode: SidebarNewThreadEnvMode;
 } {
-  if (input.activeDraftThread?.projectId === input.projectId) {
+  const normalizeSeedContext = (
+    context:
+      | {
+          branch: string | null;
+          worktreePath: string | null;
+          envMode: SidebarNewThreadEnvMode;
+        }
+      | undefined,
+  ) => {
+    if (!context) {
+      return null;
+    }
+
     return {
-      branch: input.activeDraftThread.branch,
-      worktreePath: input.activeDraftThread.worktreePath,
-      envMode: input.activeDraftThread.envMode,
+      branch: context.branch,
+      // A fresh thread should inherit the branch selection, not attach itself
+      // to another thread's existing worktree/workspace.
+      worktreePath: null,
+      envMode: context.worktreePath ? "worktree" : context.envMode,
+    } satisfies {
+      branch: string | null;
+      worktreePath: string | null;
+      envMode: SidebarNewThreadEnvMode;
     };
+  };
+
+  if (input.activeDraftThread?.projectId === input.projectId) {
+    return normalizeSeedContext(input.activeDraftThread)!;
   }
 
   if (input.activeThread?.projectId === input.projectId) {
-    return {
+    return normalizeSeedContext({
       branch: input.activeThread.branch,
       worktreePath: input.activeThread.worktreePath,
       envMode: input.activeThread.worktreePath ? "worktree" : "local",
-    };
+    })!;
   }
 
   return {

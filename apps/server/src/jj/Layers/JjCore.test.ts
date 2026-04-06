@@ -226,6 +226,41 @@ it.layer(TestLayer)("JjCore", (it) => {
     );
   });
 
+  describe("createWorktree", () => {
+    it.effect("creates distinct jj workspaces for distinct temporary thread branches", () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-jj-core-workspaces-");
+        yield* initJjRepo(repoDir);
+
+        const jjCore = yield* JjCore;
+        const first = yield* jjCore.createWorktree({
+          cwd: repoDir,
+          branch: "main",
+          newBranch: "t3code/11111111",
+          path: null,
+        });
+        const second = yield* jjCore.createWorktree({
+          cwd: repoDir,
+          branch: "main",
+          newBranch: "t3code/22222222",
+          path: null,
+        });
+
+        expect(first.worktree.path).not.toBe(second.worktree.path);
+        expect(existsSync(first.worktree.path)).toBe(true);
+        expect(existsSync(second.worktree.path)).toBe(true);
+
+        const firstStatus = yield* jjCore.statusDetails(first.worktree.path);
+        const secondStatus = yield* jjCore.statusDetails(second.worktree.path);
+        const rootStatus = yield* jjCore.statusDetails(repoDir);
+
+        expect(firstStatus.branch).toBe("t3code/11111111");
+        expect(secondStatus.branch).toBe("t3code/22222222");
+        expect(rootStatus.branch).toBe("main");
+      }),
+    );
+  });
+
   describe("filterIgnoredPaths", () => {
     it.effect("filters out gitignored paths", () =>
       Effect.gen(function* () {

@@ -206,7 +206,26 @@ describe("resolveSidebarNewThreadSeedContext", () => {
       }),
     ).toEqual({
       branch: "feature/new-draft",
-      worktreePath: "/repo/worktree",
+      worktreePath: null,
+      envMode: "worktree",
+    });
+  });
+
+  it("does not reuse an active server worktree path for a fresh thread", () => {
+    expect(
+      resolveSidebarNewThreadSeedContext({
+        projectId: "project-1",
+        defaultEnvMode: "local",
+        activeThread: {
+          projectId: "project-1",
+          branch: "feature/existing-worktree",
+          worktreePath: "/repo/worktrees/existing",
+        },
+        activeDraftThread: null,
+      }),
+    ).toEqual({
+      branch: "feature/existing-worktree",
+      worktreePath: null,
       envMode: "worktree",
     });
   });

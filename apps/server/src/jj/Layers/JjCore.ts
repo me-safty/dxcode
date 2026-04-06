@@ -248,6 +248,17 @@ function normalizeWorkspaceRegistry(value: unknown): WorkspaceRegistry {
   return { branches };
 }
 
+function isBranchAssignedToDifferentWorkspace(input: {
+  readonly branch: string;
+  readonly workspaceRoot: string;
+  readonly registry: WorkspaceRegistry;
+}): boolean {
+  const assignedWorkspacePath = input.registry.branches[input.branch];
+  return assignedWorkspacePath
+    ? canonicalizePath(assignedWorkspacePath) !== input.workspaceRoot
+    : false;
+}
+
 function resolveRemoteNameForBranch(input: {
   readonly branch: string;
   readonly remoteBookmarks: ReadonlyArray<ParsedBookmark>;
@@ -521,12 +532,20 @@ export const makeJjCore = Effect.fn("makeJjCore")(function* () {
       return registryBranch;
     }
 
-    const directCurrentCandidates = currentCandidates.filter((name) => localBranchNames.has(name));
+    const candidateIsAvailableInWorkspace = (name: string) =>
+      localBranchNames.has(name) &&
+      !isBranchAssignedToDifferentWorkspace({
+        branch: name,
+        workspaceRoot,
+        registry,
+      });
+
+    const directCurrentCandidates = currentCandidates.filter(candidateIsAvailableInWorkspace);
     if (directCurrentCandidates.length > 0) {
       return sortCurrentBranchCandidates(directCurrentCandidates)[0] ?? null;
     }
 
-    const candidates = nearestCandidates.filter((name) => localBranchNames.has(name));
+    const candidates = nearestCandidates.filter(candidateIsAvailableInWorkspace);
     if (candidates.length === 0) {
       return null;
     }
