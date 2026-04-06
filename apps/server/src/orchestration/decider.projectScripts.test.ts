@@ -68,7 +68,8 @@ async function withThreadReadModel(input: {
       payload: {
         threadId: asThreadId(input.threadId),
         projectId: asProjectId(input.projectId),
-        parentThreadId: input.parentThreadId === undefined ? null : asThreadId(input.parentThreadId),
+        parentThreadId:
+          input.parentThreadId == null ? null : asThreadId(input.parentThreadId),
         title: `Thread ${input.threadId}`,
         modelSelection: {
           provider: "codex",
@@ -413,10 +414,8 @@ describe("decider project scripts", () => {
     );
 
     expect(Array.isArray(result)).toBe(false);
-    if (Array.isArray(result)) {
-      return;
-    }
-    expect(result.type).toBe("thread.created");
+    const singleResult = result as Exclude<typeof result, ReadonlyArray<unknown>>;
+    expect(singleResult.type).toBe("thread.created");
   });
 
   it("rejects thread.create when a thread attempts to parent itself", async () => {
@@ -490,6 +489,7 @@ describe("decider project scripts", () => {
         payload: {
           threadId: ThreadId.makeUnsafe("thread-1"),
           projectId: asProjectId("project-1"),
+          parentThreadId: null,
           title: "Thread",
           modelSelection: {
             provider: "codex",
@@ -599,6 +599,7 @@ describe("decider project scripts", () => {
         payload: {
           threadId: ThreadId.makeUnsafe("thread-1"),
           projectId: asProjectId("project-1"),
+          parentThreadId: null,
           title: "Thread",
           modelSelection: {
             provider: "codex",
@@ -681,6 +682,7 @@ describe("decider project scripts", () => {
         payload: {
           threadId: ThreadId.makeUnsafe("thread-1"),
           projectId: asProjectId("project-1"),
+          parentThreadId: null,
           title: "Thread",
           modelSelection: {
             provider: "codex",

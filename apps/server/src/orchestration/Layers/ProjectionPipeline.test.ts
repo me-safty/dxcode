@@ -162,9 +162,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           parent_thread_id AS "parentThreadId"
         FROM projection_threads
       `;
-      assert.deepEqual(threadRows, [
-        { threadId: "thread-1", parentThreadId: "thread-parent" },
-      ]);
+      assert.deepEqual(threadRows, [{ threadId: "thread-1", parentThreadId: "thread-parent" }]);
 
       const stateRows = yield* sql<{
         readonly projector: string;

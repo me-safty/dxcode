@@ -128,6 +128,7 @@ const seedProjectAndThread = (harness: OrchestrationIntegrationHarness) =>
       commandId: CommandId.makeUnsafe("cmd-thread-create"),
       threadId: THREAD_ID,
       projectId: PROJECT_ID,
+      parentThreadId: null,
       title: "Integration Thread",
       modelSelection: {
         provider,
@@ -277,6 +278,7 @@ it.live.skipIf(!process.env.CODEX_BINARY_PATH)(
           commandId: CommandId.makeUnsafe("cmd-thread-create-real-codex"),
           threadId: THREAD_ID,
           projectId: PROJECT_ID,
+          parentThreadId: null,
           title: "Integration Thread",
           modelSelection: {
             provider: "codex",
