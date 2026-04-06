@@ -3905,7 +3905,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
             </div>
           </header>
         )}
-        {isWindowsElectron && <DesktopTitleBar title="Threads" subtitle="No active thread" />}
+        {isWindowsElectron && (
+          <DesktopTitleBar
+            title="Threads"
+            subtitle="No active thread"
+            contextLabel="Workspace"
+            contextValue="Threads"
+            showContextChip={false}
+          />
+        )}
         {isElectron && !isWindowsElectron && (
           <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
             <span className="text-xs text-muted-foreground/50">No active thread</span>
@@ -3923,13 +3931,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
       {isWindowsElectron && (
-        <DesktopTitleBar title={activeThread.title} subtitle={activeProject?.name} />
+        <DesktopTitleBar
+          title={activeThread.title}
+          contextLabel="Project"
+          contextValue={activeProject?.name ?? "None"}
+          showContextChip={false}
+          {...(activeProject?.name ? { subtitle: activeProject.name } : {})}
+        />
       )}
       {/* Top bar */}
       <header
         className={cn(
           "border-b border-border px-3 sm:px-5",
-          isElectron && !isWindowsElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
+          isElectron && !isWindowsElectron
+            ? "drag-region flex h-[52px] items-center"
+            : "py-2 sm:py-3",
         )}
       >
         <ChatHeader

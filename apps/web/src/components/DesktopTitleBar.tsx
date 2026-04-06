@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 
-import { APP_BASE_NAME, APP_STAGE_LABEL } from "~/branding";
 import { cn } from "~/lib/utils";
 
 import { DesktopWindowControls } from "./DesktopWindowControls";
@@ -8,12 +7,19 @@ import { DesktopWindowControls } from "./DesktopWindowControls";
 interface DesktopTitleBarProps {
   title: string;
   subtitle?: string;
+  contextLabel?: string;
+  contextValue?: string;
+  showContextChip?: boolean;
   trailing?: ReactNode;
   className?: string;
   showWindowControls?: boolean;
 }
 
 export function DesktopTitleBar(props: DesktopTitleBarProps) {
+  const showContextChip = props.showContextChip ?? true;
+  const contextLabel = props.contextLabel ?? "Workspace";
+  const contextValue = props.contextValue;
+
   return (
     <div
       className={cn(
@@ -21,17 +27,23 @@ export function DesktopTitleBar(props: DesktopTitleBarProps) {
         props.className,
       )}
     >
-      <div className="min-w-0 max-w-[40%] truncate">
-        <div className="inline-flex items-center gap-2 rounded-md border border-border/60 bg-card/70 px-2 py-1 text-[11px] leading-none">
-          <span className="inline-flex size-4 items-center justify-center rounded-sm bg-foreground text-[9px] font-semibold text-background">
-            T3
-          </span>
-          <span className="truncate font-medium tracking-tight text-foreground/85">{APP_BASE_NAME}</span>
-          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold tracking-[0.16em] uppercase text-muted-foreground">
-            {APP_STAGE_LABEL}
-          </span>
+      {showContextChip ? (
+        <div className="min-w-0 max-w-[40%] truncate">
+          <div className="inline-flex items-center gap-2 rounded-md border border-border/60 bg-card/70 px-2 py-1 text-[11px] leading-none">
+            <span className="inline-flex size-4 items-center justify-center rounded-sm bg-foreground text-[9px] font-semibold text-background">
+              T3
+            </span>
+            <span className="truncate font-medium tracking-tight text-foreground/85">
+              {contextLabel}
+            </span>
+            {contextValue ? (
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold tracking-[0.14em] uppercase text-muted-foreground">
+                {contextValue}
+              </span>
+            ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div className="pointer-events-none absolute inset-0 flex min-w-0 items-center justify-center px-[8.5rem]">
         <div className="min-w-0 text-center">

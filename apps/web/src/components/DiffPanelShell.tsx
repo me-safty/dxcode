@@ -36,6 +36,8 @@ export function DiffPanelShell(props: {
       {shouldUseWindowsTitleBar ? (
         <DesktopTitleBar
           title="Diff"
+          contextLabel="Panel"
+          contextValue="Diff"
           trailing={<div className="min-w-0 max-w-[60vw]">{props.header}</div>}
           showWindowControls={false}
         />

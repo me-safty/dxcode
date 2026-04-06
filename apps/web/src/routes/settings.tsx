@@ -55,6 +55,8 @@ function SettingsContentLayout() {
         {isWindowsElectron && (
           <DesktopTitleBar
             title="Settings"
+            contextLabel="Section"
+            contextValue="Settings"
             trailing={
               <Button
                 size="xs"

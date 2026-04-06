@@ -16,7 +16,15 @@ function ChatIndexRouteView() {
         </header>
       )}
 
-      {isWindowsElectron && <DesktopTitleBar title="Threads" subtitle="No active thread" />}
+      {isWindowsElectron && (
+        <DesktopTitleBar
+          title="Threads"
+          subtitle="No active thread"
+          contextLabel="Workspace"
+          contextValue="Threads"
+          showContextChip={false}
+        />
+      )}
 
       {isElectron && !isWindowsElectron && (
         <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
