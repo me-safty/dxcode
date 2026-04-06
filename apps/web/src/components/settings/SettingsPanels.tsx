@@ -29,6 +29,12 @@ import {
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
+import {
+  toastDesktopUpdateCheckFailure,
+  toastDesktopUpdateDownloadResult,
+  toastDesktopUpdateInstallResult,
+  toastDesktopUpdateUnexpectedError,
+} from "../../components/desktopUpdateToast";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
@@ -341,13 +347,10 @@ function AboutVersionSection() {
         .downloadUpdate()
         .then((result) => {
           setDesktopUpdateStateQueryData(queryClient, result.state);
+          toastDesktopUpdateDownloadResult(result);
         })
         .catch((error: unknown) => {
-          toastManager.add({
-            type: "error",
-            title: "Could not download update",
-            description: error instanceof Error ? error.message : "Download failed.",
-          });
+          toastDesktopUpdateUnexpectedError("download", error);
         });
       return;
     }
@@ -363,13 +366,10 @@ function AboutVersionSection() {
         .installUpdate()
         .then((result) => {
           setDesktopUpdateStateQueryData(queryClient, result.state);
+          toastDesktopUpdateInstallResult(result);
         })
         .catch((error: unknown) => {
-          toastManager.add({
-            type: "error",
-            title: "Could not install update",
-            description: error instanceof Error ? error.message : "Install failed.",
-          });
+          toastDesktopUpdateUnexpectedError("install", error);
         });
       return;
     }
@@ -379,21 +379,10 @@ function AboutVersionSection() {
       .checkForUpdate()
       .then((result) => {
         setDesktopUpdateStateQueryData(queryClient, result.state);
-        if (!result.checked) {
-          toastManager.add({
-            type: "error",
-            title: "Could not check for updates",
-            description:
-              result.state.message ?? "Automatic updates are not available in this build.",
-          });
-        }
+        toastDesktopUpdateCheckFailure(result);
       })
       .catch((error: unknown) => {
-        toastManager.add({
-          type: "error",
-          title: "Could not check for updates",
-          description: error instanceof Error ? error.message : "Update check failed.",
-        });
+        toastDesktopUpdateUnexpectedError("check", error);
       });
   }, [queryClient, updateState]);
 
