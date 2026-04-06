@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
+import { FetchHttpClient, HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http";
 
 import { ServerConfig } from "./config";
 import {
@@ -216,6 +216,17 @@ export const makeRoutesLayer = Layer.mergeAll(
   websocketRpcRouteLayer,
 );
 
+/** Middleware that appends standard security headers to every HTTP response. */
+const securityHeadersMiddleware = HttpRouter.middleware(
+  (httpApp) =>
+    Effect.map(httpApp, (response) =>
+      HttpServerResponse.setHeaders(response, {
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY",
+      }),
+    ),
+);
+
 export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig;
@@ -234,6 +245,7 @@ export const makeServerLayer = Layer.unwrap(
       HttpRouter.serve(makeRoutesLayer, {
         disableLogger: !config.logWebSocketEvents,
       }),
+      securityHeadersMiddleware.layer,
       httpListeningLayer,
     );
 
