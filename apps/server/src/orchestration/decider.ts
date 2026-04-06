@@ -12,6 +12,7 @@ import {
   requireThread,
   requireThreadArchived,
   requireThreadAbsent,
+  requireThreadNotDeleted,
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
 
@@ -146,6 +147,30 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      const parentThreadId = command.parentThreadId ?? null;
+      if (parentThreadId !== null) {
+        if (parentThreadId === command.threadId) {
+          return yield* Effect.fail(
+            new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Thread '${command.threadId}' cannot parent itself during thread.create.`,
+            }),
+          );
+        }
+        const parentThread = yield* requireThreadNotDeleted({
+          readModel,
+          command,
+          threadId: parentThreadId,
+        });
+        if (parentThread.projectId !== command.projectId) {
+          return yield* Effect.fail(
+            new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Parent thread '${parentThread.id}' belongs to thread project '${parentThread.projectId}' in a different project.`,
+            }),
+          );
+        }
+      }
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -157,6 +182,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           projectId: command.projectId,
+          parentThreadId,
           title: command.title,
           modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,

@@ -1731,6 +1731,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               bootstrap: {
                 createThread: {
                   projectId: defaultProjectId,
+                  parentThreadId: ThreadId.makeUnsafe("thread-parent"),
                   title: "Bootstrap Thread",
                   modelSelection: defaultModelSelection,
                   runtimeMode: "full-access",
@@ -1768,6 +1769,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           newBranch: "t3code/bootstrap-branch",
           path: null,
         });
+        const bootstrapCreateCommand = dispatchedCommands[0];
+        assertTrue(bootstrapCreateCommand?.type === "thread.create");
+        if (bootstrapCreateCommand?.type === "thread.create") {
+          assert.equal(bootstrapCreateCommand.parentThreadId, ThreadId.makeUnsafe("thread-parent"));
+        }
         assert.deepEqual(runForThread.mock.calls[0]?.[0], {
           threadId: ThreadId.makeUnsafe("thread-bootstrap"),
           projectId: defaultProjectId,
