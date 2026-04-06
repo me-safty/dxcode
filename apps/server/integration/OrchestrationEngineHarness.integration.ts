@@ -49,7 +49,7 @@ import { OrchestrationEngineLive } from "../src/orchestration/Layers/Orchestrati
 import { OrchestrationProjectionPipelineLive } from "../src/orchestration/Layers/ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "../src/orchestration/Layers/ProjectionSnapshotQuery.ts";
 import { QueuedFollowUpReactorLive } from "../src/orchestration/Layers/QueuedFollowUpReactor.ts";
-import { RuntimeReceiptBusLive } from "../src/orchestration/Layers/RuntimeReceiptBus.ts";
+import { RuntimeReceiptBusTest } from "../src/orchestration/Layers/RuntimeReceiptBus.ts";
 import { OrchestrationReactorLive } from "../src/orchestration/Layers/OrchestrationReactor.ts";
 import { ProviderCommandReactorLive } from "../src/orchestration/Layers/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionLive } from "../src/orchestration/Layers/ProviderRuntimeIngestion.ts";
@@ -310,7 +310,7 @@ export const makeOrchestrationIntegrationHarness = (
       ProjectionPendingApprovalRepositoryLive,
       checkpointStoreLayer,
       providerLayer,
-      RuntimeReceiptBusLive,
+      RuntimeReceiptBusTest,
     );
     const serverSettingsLayer = ServerSettingsService.layerTest();
     const runtimeIngestionLayer = ProviderRuntimeIngestionLive.pipe(
@@ -403,7 +403,7 @@ export const makeOrchestrationIntegrationHarness = (
       yield* startReactor;
     }
     const receiptHistory = yield* Ref.make<ReadonlyArray<OrchestrationRuntimeReceipt>>([]);
-    yield* Stream.runForEach(runtimeReceiptBus.stream, (receipt) =>
+    yield* Stream.runForEach(runtimeReceiptBus.streamEventsForTest, (receipt) =>
       Ref.update(receiptHistory, (history) => [...history, receipt]).pipe(Effect.asVoid),
     ).pipe(Effect.forkIn(scope));
     yield* Effect.sleep(10);

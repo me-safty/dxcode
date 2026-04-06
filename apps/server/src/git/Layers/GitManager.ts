@@ -5,6 +5,7 @@ import { Cache, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Ref } f
 import {
   GitActionProgressEvent,
   GitActionProgressPhase,
+  GitCommandError,
   GitRunStackedActionResult,
   GitStackedAction,
   ModelSelection,
@@ -22,9 +23,10 @@ import {
   type GitManagerShape,
   type GitRunStackedActionOptions,
 } from "../Services/GitManager.ts";
-import { GitCore } from "../Services/GitCore.ts";
+import { GitCore, GitStatusDetails } from "../Services/GitCore.ts";
 import { GitHubCli, type GitHubPullRequestSummary } from "../Services/GitHubCli.ts";
 import { TextGeneration } from "../Services/TextGeneration.ts";
+import { ProjectSetupScriptRunner } from "../../project/Services/ProjectSetupScriptRunner.ts";
 import { extractBranchNameFromRemoteRef } from "../remoteRefs.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import type { GitManagerServiceError } from "@t3tools/contracts";
@@ -37,6 +39,11 @@ const STATUS_RESULT_CACHE_TTL = Duration.seconds(1);
 const STATUS_RESULT_CACHE_CAPACITY = 2_048;
 type StripProgressContext<T> = T extends any ? Omit<T, "actionId" | "cwd" | "action"> : never;
 type GitActionProgressPayload = StripProgressContext<GitActionProgressEvent>;
+type GitActionProgressEmitter = (event: GitActionProgressPayload) => Effect.Effect<void, never>;
+
+function isNotGitRepositoryError(error: GitCommandError): boolean {
+  return error.message.toLowerCase().includes("not a git repository");
+}
 
 interface OpenPrInfo {
   number: number;
@@ -546,6 +553,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   const gitCore = yield* GitCore;
   const gitHubCli = yield* GitHubCli;
   const textGeneration = yield* TextGeneration;
+  const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
   const serverSettingsService = yield* ServerSettingsService;
 
   const createProgressEmitter = (
@@ -688,10 +696,25 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   const tempDir = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? "/tmp";
   const normalizeStatusCacheKey = (cwd: string) => canonicalizeExistingPath(cwd);
   const readStatus = Effect.fn("readStatus")(function* (cwd: string) {
-    const details = yield* gitCore.statusDetails(cwd);
+    const details = yield* gitCore.statusDetails(cwd).pipe(
+      Effect.catchIf(isNotGitRepositoryError, () =>
+        Effect.succeed({
+          isRepo: false,
+          hasOriginRemote: false,
+          isDefaultBranch: false,
+          branch: null,
+          upstreamRef: null,
+          hasWorkingTreeChanges: false,
+          workingTree: { files: [], insertions: 0, deletions: 0 },
+          hasUpstream: false,
+          aheadCount: 0,
+          behindCount: 0,
+        } satisfies GitStatusDetails),
+      ),
+    );
 
     const pr =
-      details.branch !== null
+      details.isRepo && details.branch !== null
         ? yield* findLatestPr(cwd, {
             branch: details.branch,
             upstreamRef: details.upstreamRef,
@@ -702,6 +725,9 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         : null;
 
     return {
+      isRepo: details.isRepo,
+      hasOriginRemote: details.hasOriginRemote,
+      isDefaultBranch: details.isDefaultBranch,
       branch: details.branch,
       hasWorkingTreeChanges: details.hasWorkingTreeChanges,
       workingTree: details.workingTree,
@@ -908,12 +934,6 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     return parsed[0] ?? null;
   });
 
-  const isDefaultBranch = Effect.fn("isDefaultBranch")(function* (cwd: string, branch: string) {
-    const branches = yield* gitCore.listBranches({ cwd });
-    const currentBranch = branches.branches.find((candidate) => candidate.name === branch);
-    return currentBranch?.isDefault ?? (branch === "main" || branch === "master");
-  });
-
   const buildCompletionToast = Effect.fn("buildCompletionToast")(function* (
     cwd: string,
     result: Pick<GitRunStackedActionResult, "action" | "branch" | "commit" | "push" | "pr">,
@@ -935,11 +955,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
           upstreamRef: finalStatus.upstreamRef,
           hasUpstream: finalStatus.hasUpstream,
         };
-        currentBranchIsDefault = yield* isDefaultBranch(cwd, finalStatus.branch).pipe(
-          Effect.catch(() =>
-            Effect.succeed(finalStatus.branch === "main" || finalStatus.branch === "master"),
-          ),
-        );
+        currentBranchIsDefault = finalStatus.isDefaultBranch;
       }
     }
 
@@ -1200,6 +1216,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     modelSelection: ModelSelection,
     cwd: string,
     fallbackBranch: string | null,
+    emit: GitActionProgressEmitter,
   ) {
     const details = yield* gitCore.statusDetails(cwd);
     const branch = details.branch ?? fallbackBranch;
@@ -1234,6 +1251,11 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     }
 
     const baseBranch = yield* resolveBaseBranch(cwd, branch, details.upstreamRef, headContext);
+    yield* emit({
+      kind: "phase_started",
+      phase: "pr",
+      label: "Generating PR content...",
+    });
     const rangeContext = yield* gitCore.readRangeContext(cwd, baseBranch);
 
     const generated = yield* textGeneration.generatePrContent({
@@ -1254,6 +1276,11 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
           gitManagerError("runPrStep", "Failed to write pull request body temp file.", cause),
         ),
       );
+    yield* emit({
+      kind: "phase_started",
+      phase: "pr",
+      label: "Creating GitHub pull request...",
+    });
     yield* gitHubCli
       .createPullRequest({
         cwd,
@@ -1304,6 +1331,24 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   const preparePullRequestThread: GitManagerShape["preparePullRequestThread"] = Effect.fn(
     "preparePullRequestThread",
   )(function* (input) {
+    const maybeRunSetupScript = (worktreePath: string) => {
+      if (!input.threadId) {
+        return Effect.void;
+      }
+      return projectSetupScriptRunner
+        .runForThread({
+          threadId: input.threadId,
+          projectCwd: input.cwd,
+          worktreePath,
+        })
+        .pipe(
+          Effect.catch((error) =>
+            Effect.logWarning(
+              `GitManager.preparePullRequestThread: failed to launch worktree setup script for thread ${input.threadId} in ${worktreePath}: ${error.message}`,
+            ).pipe(Effect.asVoid),
+          ),
+        );
+    };
     return yield* Effect.gen(function* () {
       const normalizedReference = normalizePullRequestReference(input.reference);
       const rootWorktreePath = canonicalizeExistingPath(input.cwd);
@@ -1436,6 +1481,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         path: null,
       });
       yield* ensureExistingWorktreeUpstream(worktree.worktree.path);
+      yield* maybeRunSetupScript(worktree.worktree.path);
 
       return {
         pullRequest,
@@ -1612,11 +1658,13 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
               .emit({
                 kind: "phase_started",
                 phase: "pr",
-                label: "Creating PR...",
+                label: "Preparing PR...",
               })
               .pipe(
                 Effect.tap(() => Ref.set(currentPhase, Option.some("pr"))),
-                Effect.flatMap(() => runPrStep(modelSelection, input.cwd, currentBranch)),
+                Effect.flatMap(() =>
+                  runPrStep(modelSelection, input.cwd, currentBranch, progress.emit),
+                ),
               )
           : { status: "skipped_not_requested" as const };
 

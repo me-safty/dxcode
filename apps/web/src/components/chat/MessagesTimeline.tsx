@@ -35,13 +35,15 @@ import {
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { clamp } from "effect/Number";
-import { estimateTimelineMessageHeight } from "../timelineHeight";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
+  MAX_VISIBLE_WORK_LOG_ENTRIES,
+  deriveMessagesTimelineRows,
+  estimateMessagesTimelineRowHeight,
   renderableWorkEntryChangedFiles,
   renderableWorkEntryHeading,
   renderableWorkEntryPreview,
@@ -70,14 +72,17 @@ import {
 } from "../../lib/assistantMessageCopy";
 import { renderHighlightedText } from "./threadSearchHighlight";
 
-const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
 
 interface MessagesTimelineProps {
-  rows: ReadonlyArray<TimelineRow>;
+  rows?: ReadonlyArray<TimelineRow>;
+  hasMessages?: boolean;
+  isWorking?: boolean;
   activeTurnInProgress: boolean;
   activeTurnStartedAt: string | null;
   scrollContainer: HTMLDivElement | null;
+  timelineEntries?: Parameters<typeof deriveMessagesTimelineRows>[0]["timelineEntries"];
+  completionDividerBeforeEntryId?: string | null;
   completionSummary: string | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   nowIso: string;
@@ -93,16 +98,31 @@ interface MessagesTimelineProps {
   assistantResponseCopyFormat?: AssistantResponseCopyFormat;
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
-  activeSearchRowId: string | null;
-  matchedSearchRowIds: ReadonlySet<string>;
-  searchQuery: string;
+  activeSearchRowId?: string | null;
+  matchedSearchRowIds?: ReadonlySet<string>;
+  searchQuery?: string;
+  onVirtualizerSnapshot?: (snapshot: {
+    totalSize: number;
+    measurements: ReadonlyArray<{
+      id: string;
+      kind: TimelineRow["kind"];
+      index: number;
+      size: number;
+      start: number;
+      end: number;
+    }>;
+  }) => void;
 }
 
 export const MessagesTimeline = memo(function MessagesTimeline({
-  rows,
+  rows: providedRows,
+  hasMessages,
+  isWorking: providedIsWorking,
   activeTurnInProgress,
   activeTurnStartedAt,
   scrollContainer,
+  timelineEntries,
+  completionDividerBeforeEntryId,
   completionSummary,
   turnDiffSummaryByAssistantMessageId,
   nowIso,
@@ -118,14 +138,32 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   assistantResponseCopyFormat = "markdown",
   timestampFormat,
   workspaceRoot,
-  activeSearchRowId,
-  matchedSearchRowIds,
-  searchQuery,
+  activeSearchRowId = null,
+  matchedSearchRowIds = new Set(),
+  searchQuery = "",
+  onVirtualizerSnapshot,
 }: MessagesTimelineProps) {
+  const rows = useMemo(
+    () =>
+      providedRows ??
+      deriveMessagesTimelineRows({
+        timelineEntries: timelineEntries ?? [],
+        completionDividerBeforeEntryId: completionDividerBeforeEntryId ?? null,
+        isWorking: providedIsWorking ?? false,
+        activeTurnStartedAt,
+      }),
+    [
+      activeTurnStartedAt,
+      completionDividerBeforeEntryId,
+      providedIsWorking,
+      providedRows,
+      timelineEntries,
+    ],
+  );
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
-  const isWorking = rows.some((row) => row.kind === "working");
-  const hasRows = rows.some((row) => row.kind !== "working");
+  const isWorking = providedIsWorking ?? rows.some((row) => row.kind === "working");
+  const hasRows = hasMessages ?? rows.some((row) => row.kind !== "working");
 
   useLayoutEffect(() => {
     const timelineRoot = timelineRootRef.current;
@@ -194,21 +232,25 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     minimum: 0,
     maximum: rows.length,
   });
+  const virtualMeasurementScopeKey =
+    timelineWidthPx === null ? "width:unknown" : `width:${Math.round(timelineWidthPx)}`;
 
   const rowVirtualizer = useVirtualizer({
     count: virtualizedRowCount,
     getScrollElement: () => scrollContainer,
-    // Use stable row ids so virtual measurements do not leak across thread switches.
-    getItemKey: (index: number) => rows[index]?.id ?? index,
+    // Scope cached row measurements to the current timeline width so offscreen
+    // rows do not keep stale heights after wrapping changes.
+    getItemKey: (index: number) => {
+      const rowId = rows[index]?.id ?? String(index);
+      return `${virtualMeasurementScopeKey}:${rowId}`;
+    },
     estimateSize: (index: number) => {
       const row = rows[index];
       if (!row) return 96;
-      if (row.kind === "work") return 112;
-      if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
-      if (row.kind === "working") return 40;
-      return estimateTimelineMessageHeight(row.message, {
+      return estimateMessagesTimelineRowHeight(row, {
+        expandedWorkGroups,
         timelineWidthPx,
-        assistantResponseCopyFormat,
+        turnDiffSummaryByAssistantMessageId,
       });
     },
     measureElement: measureVirtualElement,
@@ -251,6 +293,32 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       }
     };
   }, []);
+  useLayoutEffect(() => {
+    if (!onVirtualizerSnapshot) {
+      return;
+    }
+    onVirtualizerSnapshot({
+      totalSize: rowVirtualizer.getTotalSize(),
+      measurements: rowVirtualizer.measurementsCache
+        .slice(0, virtualizedRowCount)
+        .flatMap((measurement) => {
+          const row = rows[measurement.index];
+          if (!row) {
+            return [];
+          }
+          return [
+            {
+              id: row.id,
+              kind: row.kind,
+              index: measurement.index,
+              size: measurement.size,
+              start: measurement.start,
+              end: measurement.end,
+            },
+          ];
+        }),
+    });
+  }, [onVirtualizerSnapshot, rowVirtualizer, rows, virtualizedRowCount]);
 
   const rowIndexById = useMemo(
     () => new Map(rows.map((row, index) => [row.id, index] as const)),
@@ -634,6 +702,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               <div
                 key={`virtual-row:${row.id}`}
                 data-index={virtualRow.index}
+                data-virtual-row-id={row.id}
+                data-virtual-row-kind={row.kind}
+                data-virtual-row-size={virtualRow.size}
+                data-virtual-row-start={virtualRow.start}
                 ref={rowVirtualizer.measureElement}
                 className="absolute left-0 top-0 w-full"
                 style={{ transform: `translateY(${virtualRow.start}px)` }}
@@ -653,12 +725,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 });
 
 type TimelineMessage = Extract<TimelineRow, { kind: "message" }>["message"];
-type TimelineProposedPlan = Extract<TimelineRow, { kind: "proposed-plan" }>["proposedPlan"];
-
-function estimateTimelineProposedPlanHeight(proposedPlan: TimelineProposedPlan): number {
-  const estimatedLines = Math.max(1, Math.ceil(proposedPlan.planMarkdown.length / 72));
-  return 120 + Math.min(estimatedLines * 22, 880);
-}
 
 function formatWorkingTimer(startIso: string, endIso: string): string | null {
   const startedAtMs = Date.parse(startIso);

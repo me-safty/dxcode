@@ -208,6 +208,48 @@ describe("orchestration contracts", () => {
     expect(parsed.interactionMode).toBe(DEFAULT_PROVIDER_INTERACTION_MODE);
   });
 
+  it("accepts bootstrap metadata in thread.turn.start", async () => {
+    const parsed = await Effect.runPromise(
+      decodeThreadTurnStartCommand({
+        type: "thread.turn.start",
+        commandId: "cmd-turn-bootstrap",
+        threadId: "thread-1",
+        message: {
+          messageId: "msg-bootstrap",
+          role: "user",
+          text: "hello",
+          attachments: [],
+        },
+        bootstrap: {
+          createThread: {
+            projectId: "project-1",
+            title: "Bootstrap thread",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.4",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+          prepareWorktree: {
+            projectCwd: "/tmp/workspace",
+            baseBranch: "main",
+            branch: "t3code/example",
+          },
+          runSetupScript: true,
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    expect(parsed.bootstrap?.createThread?.projectId).toBe("project-1");
+    expect(parsed.bootstrap?.prepareWorktree?.baseBranch).toBe("main");
+    expect(parsed.bootstrap?.runSetupScript).toBe(true);
+  });
+
   it("accepts a title seed in thread.turn.start", async () => {
     const parsed = await Effect.runPromise(
       decodeThreadTurnStartCommand({

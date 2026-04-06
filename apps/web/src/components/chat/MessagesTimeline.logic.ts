@@ -1,4 +1,10 @@
-import type { TimelineEntry } from "../../session-logic";
+import { type MessageId } from "@t3tools/contracts";
+import { type TimelineEntry, type WorkLogEntry } from "../../session-logic";
+import { buildTurnDiffTree, type TurnDiffTreeNode } from "../../lib/turnDiffTree";
+import { type ProposedPlan, type TurnDiffSummary } from "../../types";
+import { estimateTimelineMessageHeight } from "../timelineHeight";
+
+export const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 
 export interface TimelineDurationMessage {
   id: string;
@@ -6,6 +12,33 @@ export interface TimelineDurationMessage {
   createdAt: string;
   completedAt?: string | undefined;
 }
+
+export type TimelineWorkEntry = WorkLogEntry;
+
+export type MessagesTimelineRow =
+  | {
+      kind: "work";
+      id: string;
+      createdAt: string;
+      groupedEntries: TimelineWorkEntry[];
+    }
+  | {
+      kind: "message";
+      id: string;
+      createdAt: string;
+      message: Extract<TimelineEntry, { kind: "message" }>["message"];
+      durationStart: string;
+      showCompletionDivider: boolean;
+    }
+  | {
+      kind: "proposed-plan";
+      id: string;
+      createdAt: string;
+      proposedPlan: ProposedPlan;
+    }
+  | { kind: "working"; id: string; createdAt: string | null };
+
+export type TimelineRow = MessagesTimelineRow;
 
 export function computeMessageDurationStart(
   messages: ReadonlyArray<TimelineDurationMessage>,
@@ -29,10 +62,6 @@ export function computeMessageDurationStart(
 export function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
 }
-
-type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
-type TimelineProposedPlan = Extract<TimelineEntry, { kind: "proposed-plan" }>["proposedPlan"];
-export type TimelineWorkEntry = Extract<TimelineEntry, { kind: "work" }>["entry"];
 
 function capitalizePhrase(value: string): string {
   const trimmed = value.trim();
@@ -75,36 +104,13 @@ export function renderableWorkEntryChangedFiles(
   return changedFiles.slice(0, 4);
 }
 
-export type TimelineRow =
-  | {
-      kind: "work";
-      id: string;
-      createdAt: string;
-      groupedEntries: TimelineWorkEntry[];
-    }
-  | {
-      kind: "message";
-      id: string;
-      createdAt: string;
-      message: TimelineMessage;
-      durationStart: string;
-      showCompletionDivider: boolean;
-    }
-  | {
-      kind: "proposed-plan";
-      id: string;
-      createdAt: string;
-      proposedPlan: TimelineProposedPlan;
-    }
-  | { kind: "working"; id: string; createdAt: string | null };
-
-export function buildTimelineRows(input: {
+export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   completionDividerBeforeEntryId: string | null;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
-}): TimelineRow[] {
-  const nextRows: TimelineRow[] = [];
+}): MessagesTimelineRow[] {
+  const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
     input.timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
@@ -166,4 +172,73 @@ export function buildTimelineRows(input: {
   }
 
   return nextRows;
+}
+
+export const buildTimelineRows = deriveMessagesTimelineRows;
+
+export function estimateMessagesTimelineRowHeight(
+  row: MessagesTimelineRow,
+  input: {
+    timelineWidthPx: number | null;
+    expandedWorkGroups?: Readonly<Record<string, boolean>>;
+    turnDiffSummaryByAssistantMessageId?: ReadonlyMap<MessageId, TurnDiffSummary>;
+  },
+): number {
+  switch (row.kind) {
+    case "work":
+      return estimateWorkRowHeight(row, input);
+    case "proposed-plan":
+      return estimateTimelineProposedPlanHeight(row.proposedPlan);
+    case "working":
+      return 40;
+    case "message": {
+      let estimate = estimateTimelineMessageHeight(row.message, {
+        timelineWidthPx: input.timelineWidthPx,
+      });
+      const turnDiffSummary = input.turnDiffSummaryByAssistantMessageId?.get(row.message.id);
+      if (turnDiffSummary && turnDiffSummary.files.length > 0) {
+        estimate += estimateChangedFilesCardHeight(turnDiffSummary);
+      }
+      return estimate;
+    }
+  }
+}
+
+function estimateWorkRowHeight(
+  row: Extract<MessagesTimelineRow, { kind: "work" }>,
+  input: {
+    expandedWorkGroups?: Readonly<Record<string, boolean>>;
+  },
+): number {
+  const isExpanded = input.expandedWorkGroups?.[row.id] ?? false;
+  const hasOverflow = row.groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
+  const visibleEntries =
+    hasOverflow && !isExpanded ? MAX_VISIBLE_WORK_LOG_ENTRIES : row.groupedEntries.length;
+  const onlyToolEntries = row.groupedEntries.every((entry) => entry.tone === "tool");
+  const showHeader = hasOverflow || !onlyToolEntries;
+
+  return 28 + (showHeader ? 26 : 0) + visibleEntries * 32;
+}
+
+function estimateTimelineProposedPlanHeight(proposedPlan: ProposedPlan): number {
+  const estimatedLines = Math.max(1, Math.ceil(proposedPlan.planMarkdown.length / 72));
+  return 120 + Math.min(estimatedLines * 22, 880);
+}
+
+function estimateChangedFilesCardHeight(turnDiffSummary: TurnDiffSummary): number {
+  const treeNodes = buildTurnDiffTree(turnDiffSummary.files);
+  const visibleNodeCount = countTurnDiffTreeNodes(treeNodes);
+
+  return 60 + visibleNodeCount * 25;
+}
+
+function countTurnDiffTreeNodes(nodes: ReadonlyArray<TurnDiffTreeNode>): number {
+  let count = 0;
+  for (const node of nodes) {
+    count += 1;
+    if (node.kind === "directory") {
+      count += countTurnDiffTreeNodes(node.children);
+    }
+  }
+  return count;
 }

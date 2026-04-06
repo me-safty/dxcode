@@ -12,7 +12,7 @@ describe("estimateTimelineMessageHeight", () => {
         text: "a".repeat(144),
         streaming: false,
       }),
-    ).toBe(140);
+    ).toBe(86.5);
   });
 
   it("keeps the smaller assistant base height while streaming", () => {
@@ -22,7 +22,7 @@ describe("estimateTimelineMessageHeight", () => {
         text: "a".repeat(144),
         streaming: true,
       }),
-    ).toBe(122);
+    ).toBe(86.5);
   });
 
   it("keeps the smaller assistant base height when plain-text copy resolves empty", () => {
@@ -35,7 +35,7 @@ describe("estimateTimelineMessageHeight", () => {
         },
         { timelineWidthPx: null, assistantResponseCopyFormat: "plain-text" },
       ),
-    ).toBe(100);
+    ).toBe(63.75);
   });
 
   it("uses assistant sizing rules for system messages", () => {
@@ -44,7 +44,7 @@ describe("estimateTimelineMessageHeight", () => {
         role: "system",
         text: "a".repeat(144),
       }),
-    ).toBe(122);
+    ).toBe(86.5);
   });
 
   it("adds one attachment row for one or two user attachments", () => {
@@ -157,7 +157,7 @@ describe("estimateTimelineMessageHeight", () => {
       streaming: false,
     };
 
-    expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 320 })).toBe(206);
-    expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 768 })).toBe(140);
+    expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 320 })).toBe(154.75);
+    expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 768 })).toBe(86.5);
   });
 });
