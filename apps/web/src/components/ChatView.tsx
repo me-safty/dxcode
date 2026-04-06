@@ -100,11 +100,13 @@ import {
   ListTodoIcon,
   LockIcon,
   LockOpenIcon,
+  type LucideIcon,
   PenLineIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Separator } from "./ui/separator";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { cn, randomUUID } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { toastManager } from "./ui/toast";
@@ -341,27 +343,26 @@ interface TerminalLaunchContext {
 
 const runtimeModeConfig: Record<
   RuntimeMode,
-  { label: string; title: string; icon: React.ReactNode; next: RuntimeMode }
+  { label: string; description: string; icon: LucideIcon }
 > = {
   "approval-required": {
     label: "Supervised",
-    title: "Supervised - click for auto-accept edits",
-    icon: <LockIcon />,
-    next: "auto-accept-edits",
+    description: "Ask before commands and file changes.",
+    icon: LockIcon,
   },
   "auto-accept-edits": {
     label: "Auto-accept edits",
-    title: "Auto-accept edits - click for full access",
-    icon: <PenLineIcon />,
-    next: "full-access",
+    description: "Auto-approve edits, ask before other actions.",
+    icon: PenLineIcon,
   },
   "full-access": {
     label: "Full access",
-    title: "Full access - click for supervised",
-    icon: <LockOpenIcon />,
-    next: "approval-required",
+    description: "Allow commands and edits without prompts.",
+    icon: LockOpenIcon,
   },
 };
+
+const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
 
 type PersistentTerminalLaunchContext = Pick<TerminalLaunchContext, "cwd" | "worktreePath">;
 
@@ -865,6 +866,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
     composerDraft.interactionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
+  const runtimeModeOption = runtimeModeConfig[runtimeMode];
+  const RuntimeModeIcon = runtimeModeOption.icon;
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
@@ -2016,9 +2019,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const toggleInteractionMode = useCallback(() => {
     handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
   }, [handleInteractionModeChange, interactionMode]);
-  const cycleRuntimeMode = useCallback(() => {
-    void handleRuntimeModeChange(runtimeModeConfig[runtimeMode].next);
-  }, [handleRuntimeModeChange, runtimeMode]);
   const togglePlanSidebar = useCallback(() => {
     setPlanSidebarOpen((open) => {
       if (open) {
@@ -4322,19 +4322,41 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               className="mx-0.5 hidden h-4 sm:block"
                             />
 
-                            <Button
-                              variant="ghost"
-                              className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                              size="sm"
-                              type="button"
-                              onClick={cycleRuntimeMode}
-                              title={runtimeModeConfig[runtimeMode].title}
+                            <Select
+                              value={runtimeMode}
+                              onValueChange={(value) =>
+                                handleRuntimeModeChange(value!)
+                              }
                             >
-                              {runtimeModeConfig[runtimeMode].icon}
-                              <span className="sr-only sm:not-sr-only">
-                                {runtimeModeConfig[runtimeMode].label}
-                              </span>
-                            </Button>
+                              <SelectTrigger
+                                variant="ghost"
+                                size="sm"
+                                aria-label="Runtime mode"
+                                title={runtimeModeOption.description}
+                              >
+                                <RuntimeModeIcon className="size-4" />
+                                <SelectValue>{runtimeModeOption.label}</SelectValue>
+                              </SelectTrigger>
+                              <SelectPopup alignItemWithTrigger={false}>
+                                {runtimeModeOptions.map((mode) => {
+                                  const option = runtimeModeConfig[mode];
+                                  const OptionIcon = option.icon;
+                                  return (
+                                    <SelectItem key={mode} value={mode} className="min-w-64 py-2">
+                                      <div className="grid min-w-0 gap-0.5">
+                                        <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                                          <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                                          {option.label}
+                                        </span>
+                                        <span className="text-muted-foreground text-xs leading-4">
+                                          {option.description}
+                                        </span>
+                                      </div>
+                                    </SelectItem>
+                                  );
+                                })}
+                              </SelectPopup>
+                            </Select>
 
                             {activePlan || sidebarProposedPlan || planSidebarOpen ? (
                               <>
