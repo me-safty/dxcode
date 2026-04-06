@@ -210,10 +210,15 @@ export function resolveAvailableEditors(
   const available: EditorId[] = [];
 
   for (const editor of EDITORS) {
-    const command =
-      editor.commands === null
-        ? fileManagerCommandForPlatform(platform)
-        : resolveAvailableCommand(editor.commands, { platform, env });
+    if (editor.commands === null) {
+      const command = fileManagerCommandForPlatform(platform);
+      if (isCommandAvailable(command, { platform, env })) {
+        available.push(editor.id);
+      }
+      continue;
+    }
+
+    const command = resolveAvailableCommand(editor.commands, { platform, env });
     if (command !== null) {
       available.push(editor.id);
     }

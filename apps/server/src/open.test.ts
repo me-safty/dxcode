@@ -381,4 +381,11 @@ it.layer(NodeServices.layer)("resolveAvailableEditors", (it) => {
       assert.deepEqual(editors, ["zed", "file-manager"]);
     }),
   );
+
+  it("omits file-manager when the platform opener is unavailable", () => {
+    const editors = resolveAvailableEditors("linux", {
+      PATH: "",
+    });
+    assert.deepEqual(editors, []);
+  });
 });
