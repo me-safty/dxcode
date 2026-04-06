@@ -30,6 +30,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { createPortal } from "react-dom";
 import type { TerminalBottomScope } from "@t3tools/contracts/settings";
 import { gitStatusQueryOptions } from "~/lib/gitReactQuery";
+import { useGitStatus } from "~/lib/gitStatusState";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
@@ -1432,7 +1433,7 @@ export default function ChatView({ layoutState, threadId }: ChatViewProps) {
     (debouncerState) => ({ isPending: debouncerState.isPending }),
   );
   const effectivePathQuery = pathTriggerQuery.length > 0 ? debouncedPathQuery : "";
-  const gitStatusQuery = useQuery(gitStatusQueryOptions(gitCwd));
+  const gitStatusQuery = useGitStatus(gitCwd);
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
   const modelOptionsByProvider = useMemo(
