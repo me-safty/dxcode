@@ -442,6 +442,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
           const assistantCopyState = resolveAssistantMessageCopyState({
             text: row.message.text ?? null,
+            showCopyButton: row.showAssistantCopyButton,
             streaming: row.message.streaming,
           });
           return (
