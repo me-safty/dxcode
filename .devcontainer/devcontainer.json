@@ -1,0 +1,23 @@
+{
+  "name": "T3 Code Dev",
+  "image": "debian:bookworm",
+  "features": {
+    "ghcr.io/devcontainers-extra/features/bun:1": {},
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "24",
+      "nodeGypDependencies": true
+    },
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.12"
+    }
+  },
+  "postCreateCommand": {
+    "install-deps": "apt-get update && apt-get install -y libfuse2 libnotify4 libnss3 libxss1 libasound2 libatk-bridge2.0-0 libgtk-3-0 libx11-xcb1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2",
+    "bun-install": "bun install --backend=copyfile --from-lockfile"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": []
+    }
+  }
+}
