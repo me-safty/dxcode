@@ -4290,7 +4290,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             >
                               <BotIcon />
                               <span className="sr-only sm:not-sr-only">
-                                {interactionMode === "plan" ? "Plan" : "Chat"}
+                                {interactionMode === "plan" ? "Plan" : "Code"}
                               </span>
                             </Button>
 
