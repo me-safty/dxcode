@@ -906,6 +906,38 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          title="Turn completion notifications"
+          description="Show an OS notification when a turn finishes while the tab is in the background."
+          resetAction={
+            settings.enableTurnCompletionNotifications !==
+            DEFAULT_UNIFIED_SETTINGS.enableTurnCompletionNotifications ? (
+              <SettingResetButton
+                label="turn completion notifications"
+                onClick={() =>
+                  updateSettings({
+                    enableTurnCompletionNotifications:
+                      DEFAULT_UNIFIED_SETTINGS.enableTurnCompletionNotifications,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.enableTurnCompletionNotifications}
+              onCheckedChange={(checked) => {
+                const enabled = Boolean(checked);
+                if (enabled && "Notification" in window && Notification.permission === "default") {
+                  void Notification.requestPermission();
+                }
+                updateSettings({ enableTurnCompletionNotifications: enabled });
+              }}
+              aria-label="Enable turn completion notifications"
+            />
+          }
+        />
+
+        <SettingsRow
           title="New threads"
           description="Pick the default workspace mode for newly created draft threads."
           resetAction={
