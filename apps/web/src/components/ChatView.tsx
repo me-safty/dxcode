@@ -29,7 +29,6 @@ import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { createPortal } from "react-dom";
 import type { TerminalBottomScope } from "@t3tools/contracts/settings";
-import { gitStatusQueryOptions } from "~/lib/gitReactQuery";
 import { useGitStatus } from "~/lib/gitStatusState";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
@@ -3735,7 +3734,9 @@ export default function ChatView({ layoutState, threadId }: ChatViewProps) {
           trigger.rangeStart,
           replacementRangeEnd,
           replacement,
-          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+          {
+            expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd),
+          },
         );
         if (applied) {
           setComposerHighlightedItemId(null);
@@ -3754,7 +3755,9 @@ export default function ChatView({ layoutState, threadId }: ChatViewProps) {
             trigger.rangeStart,
             replacementRangeEnd,
             replacement,
-            { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+            {
+              expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd),
+            },
           );
           if (applied) {
             setComposerHighlightedItemId(null);
