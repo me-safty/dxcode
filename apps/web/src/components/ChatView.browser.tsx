@@ -2125,7 +2125,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         async () => {
           expect((await waitForInteractionModeButton("Plan")).title).toContain(
-            "return to normal chat mode",
+            "return to normal code mode",
           );
         },
         { timeout: 8_000, interval: 16 },

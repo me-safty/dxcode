@@ -1476,7 +1476,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           type: "slash-command",
           command: "default",
           label: "/default",
-          description: "Switch this thread back to normal chat mode",
+          description: "Switch this thread back to normal code mode",
         },
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
@@ -4284,7 +4284,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               onClick={toggleInteractionMode}
                               title={
                                 interactionMode === "plan"
-                                  ? "Plan mode — click to return to normal chat mode"
+                                  ? "Plan mode — click to return to normal code mode"
                                   : "Default mode — click to enter plan mode"
                               }
                             >
