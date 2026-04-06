@@ -1,6 +1,6 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
-import type { EnvironmentId, GitBranch, ThreadId } from "@t3tools/contracts";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import type { EnvironmentApi, EnvironmentId, GitBranch, ThreadId } from "@t3tools/contracts";
+import { type QueryClient, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronDownIcon } from "lucide-react";
 import {
@@ -13,10 +13,14 @@ import {
   useState,
   useTransition,
 } from "react";
-
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { readEnvironmentApi } from "../environmentApi";
-import { gitBranchSearchInfiniteQueryOptions, gitQueryKeys } from "../lib/gitReactQuery";
+import { readLocalApi } from "../localApi";
+import {
+  gitBranchSearchInfiniteQueryOptions,
+  gitQueryKeys,
+  invalidateGitQueries,
+} from "../lib/gitReactQuery";
 import { useGitStatus } from "../lib/gitStatusState";
 import { newCommandId } from "../lib/utils";
 import { parsePullRequestReference } from "../pullRequestReference";
@@ -58,6 +62,120 @@ interface BranchToolbarBranchSelectorProps {
 
 function toBranchActionErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "An error occurred.";
+}
+
+const DIRTY_WORKTREE_ERROR_PATTERN = /Uncommitted changes block checkout to ([^:]+): (.+)/;
+
+function parseDirtyWorktreeError(error: unknown): { branch: string; files: string[] } | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = DIRTY_WORKTREE_ERROR_PATTERN.exec(message);
+  if (!match?.[1] || !match[2]) return null;
+  return {
+    branch: match[1],
+    files: match[2].split(", ").map((f) => f.trim()),
+  };
+}
+
+const STASH_CONFLICT_PATTERN = /Stash could not be applied|Stash applied with merge conflicts/;
+
+function isStashConflictError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return STASH_CONFLICT_PATTERN.test(message);
+}
+
+const UNRESOLVED_INDEX_PATTERN = /you need to resolve your current index/;
+
+function isUnresolvedIndexError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return UNRESOLVED_INDEX_PATTERN.test(message);
+}
+
+function formatDirtyWorktreeDescription(files: string[]): string {
+  const basenames = files.map((f) => f.split("/").pop() ?? f);
+  if (basenames.length <= 3) {
+    return `${basenames.join(", ")} ${basenames.length === 1 ? "has" : "have"} uncommitted changes. Commit or stash before switching.`;
+  }
+  return `${basenames.slice(0, 2).join(", ")} and ${basenames.length - 2} other file${basenames.length - 2 === 1 ? "" : "s"} have uncommitted changes. Commit or stash before switching.`;
+}
+
+function handleCheckoutError(
+  error: unknown,
+  ctx: {
+    api: EnvironmentApi;
+    cwd: string;
+    branch: string;
+    queryClient: QueryClient;
+    onSuccess: () => void;
+    fallbackTitle: string;
+  },
+): void {
+  const dirtyWorktree = parseDirtyWorktreeError(error);
+  if (dirtyWorktree) {
+    toastManager.add({
+      type: "warning",
+      title: "Uncommitted changes block checkout.",
+      description: formatDirtyWorktreeDescription(dirtyWorktree.files),
+      actionProps: {
+        children: "Stash & Switch",
+        onClick: async () => {
+          try {
+            await ctx.api.git.stashAndCheckout({ cwd: ctx.cwd, branch: ctx.branch });
+            await invalidateGitQueries(ctx.queryClient);
+            ctx.onSuccess();
+          } catch (stashError) {
+            if (isStashConflictError(stashError)) {
+              await invalidateGitQueries(ctx.queryClient);
+              ctx.onSuccess();
+              toastManager.add({
+                type: "warning",
+                title: "Stash could not be applied.",
+                description:
+                  "Your stashed changes could not be applied to this branch. They are saved in the stash.",
+                actionProps: {
+                  children: "Discard stash",
+                  onClick: async () => {
+                    const confirmed = await readLocalApi()?.dialogs.confirm(
+                      "Drop the most recent stash entry? This cannot be undone.",
+                    );
+                    if (!confirmed) return;
+                    try {
+                      await ctx.api.git.stashDrop({ cwd: ctx.cwd });
+                    } catch (dropError) {
+                      toastManager.add({
+                        type: "error",
+                        title: "Failed to drop stash.",
+                        description: toBranchActionErrorMessage(dropError),
+                      });
+                    }
+                  },
+                },
+              });
+            } else {
+              toastManager.add({
+                type: "error",
+                title: "Failed to stash and switch.",
+                description: toBranchActionErrorMessage(stashError),
+              });
+            }
+          }
+        },
+      },
+    });
+    return;
+  }
+  if (isUnresolvedIndexError(error)) {
+    toastManager.add({
+      type: "error",
+      title: "Unresolved conflicts in the repository.",
+      description: toBranchActionErrorMessage(error),
+    });
+    return;
+  }
+  toastManager.add({
+    type: "error",
+    title: ctx.fallbackTitle,
+    description: toBranchActionErrorMessage(error),
+  });
 }
 
 function getBranchTriggerLabel(input: {
@@ -351,10 +469,16 @@ export function BranchToolbarBranchSelector({
         setThreadBranch(nextBranchName, selectionTarget.nextWorktreePath);
       } catch (error) {
         setOptimisticBranch(previousBranch);
-        toastManager.add({
-          type: "error",
-          title: "Failed to checkout branch.",
-          description: toBranchActionErrorMessage(error),
+        handleCheckoutError(error, {
+          api,
+          cwd: selectionTarget.checkoutCwd,
+          branch: branch.name,
+          queryClient,
+          onSuccess: () => {
+            setOptimisticBranch(selectedBranchName);
+            setThreadBranch(selectedBranchName, selectionTarget.nextWorktreePath);
+          },
+          fallbackTitle: "Failed to checkout branch.",
         });
       }
     });
@@ -381,10 +505,16 @@ export function BranchToolbarBranchSelector({
         setThreadBranch(createBranchResult.branch, activeWorktreePath);
       } catch (error) {
         setOptimisticBranch(previousBranch);
-        toastManager.add({
-          type: "error",
-          title: "Failed to create and checkout branch.",
-          description: toBranchActionErrorMessage(error),
+        handleCheckoutError(error, {
+          api,
+          cwd: branchCwd,
+          branch: name,
+          queryClient,
+          onSuccess: () => {
+            setOptimisticBranch(name);
+            setThreadBranch(name, activeWorktreePath);
+          },
+          fallbackTitle: "Failed to create and checkout branch.",
         });
       }
     });

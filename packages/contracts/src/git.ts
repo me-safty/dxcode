@@ -184,6 +184,17 @@ export const GitCheckoutInput = Schema.Struct({
 });
 export type GitCheckoutInput = typeof GitCheckoutInput.Type;
 
+export const GitStashAndCheckoutInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  branch: TrimmedNonEmptyStringSchema,
+});
+export type GitStashAndCheckoutInput = typeof GitStashAndCheckoutInput.Type;
+
+export const GitStashDropInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type GitStashDropInput = typeof GitStashDropInput.Type;
+
 export const GitInitInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
 });
@@ -366,11 +377,26 @@ export class GitManagerError extends Schema.TaggedErrorClass<GitManagerError>()(
   }
 }
 
+export class GitCheckoutDirtyWorktreeError extends Schema.TaggedErrorClass<GitCheckoutDirtyWorktreeError>()(
+  "GitCheckoutDirtyWorktreeError",
+  {
+    branch: Schema.String,
+    cwd: Schema.String,
+    conflictingFiles: Schema.Array(Schema.String),
+  },
+) {
+  override get message(): string {
+    const fileList = this.conflictingFiles.join(", ");
+    return `Uncommitted changes block checkout to ${this.branch}: ${fileList}`;
+  }
+}
+
 export const GitManagerServiceError = Schema.Union([
   GitManagerError,
   GitCommandError,
   GitHubCliError,
   TextGenerationError,
+  GitCheckoutDirtyWorktreeError,
 ]);
 export type GitManagerServiceError = typeof GitManagerServiceError.Type;
 

@@ -3,12 +3,12 @@ import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { Effect, FileSystem, Layer, PlatformError, Scope } from "effect";
+import { Cause, Effect, FileSystem, Layer, PlatformError, Schema, Scope } from "effect";
 import { describe, expect, vi } from "vitest";
 
 import { GitCoreLive, makeGitCore } from "./GitCore.ts";
 import { GitCore, type GitCoreShape } from "../Services/GitCore.ts";
-import { GitCommandError } from "@t3tools/contracts";
+import { GitCheckoutDirtyWorktreeError, GitCommandError } from "@t3tools/contracts";
 import { type ProcessRunResult, runProcess } from "../../processRunner.ts";
 import { ServerConfig } from "../../config.ts";
 
@@ -1616,6 +1616,198 @@ it.layer(TestLayer)("git integration", (it) => {
         // Current branch should still be the initial one
         const result = yield* (yield* GitCore).listBranches({ cwd: tmp });
         expect(result.branches.find((b) => b.current)!.name).toBe(initialBranch);
+      }),
+    );
+  });
+
+  describe("stashAndCheckout", () => {
+    it.effect("stashes uncommitted changes, checks out, and pops stash", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(tmp);
+        const core = yield* GitCore;
+
+        yield* core.createBranch({ cwd: tmp, branch: "feature" });
+        yield* core.checkoutBranch({ cwd: tmp, branch: "feature" });
+        yield* writeTextFile(path.join(tmp, "feature.txt"), "feature content\n");
+        yield* git(tmp, ["add", "."]);
+        yield* git(tmp, ["commit", "-m", "add feature file"]);
+        yield* core.checkoutBranch({ cwd: tmp, branch: initialBranch });
+
+        yield* writeTextFile(path.join(tmp, "README.md"), "dirty changes\n");
+
+        yield* core.stashAndCheckout({ cwd: tmp, branch: "feature" });
+
+        const branches = yield* core.listBranches({ cwd: tmp });
+        expect(branches.branches.find((b) => b.current)!.name).toBe("feature");
+
+        const stashList = yield* git(tmp, ["stash", "list"]);
+        expect(stashList.trim()).toBe("");
+      }),
+    );
+
+    it.effect("includes descriptive stash message", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const core = yield* GitCore;
+
+        yield* core.createBranch({ cwd: tmp, branch: "target-branch" });
+
+        yield* writeTextFile(path.join(tmp, "README.md"), "modified\n");
+
+        const stashBefore = yield* git(tmp, ["stash", "list"]);
+        expect(stashBefore.trim()).toBe("");
+
+        yield* git(tmp, [
+          "stash",
+          "push",
+          "-u",
+          "-m",
+          "t3code: stash before switching to target-branch",
+        ]);
+        const stashAfter = yield* git(tmp, ["stash", "list"]);
+        expect(stashAfter).toContain("t3code: stash before switching to target-branch");
+        yield* git(tmp, ["stash", "pop"]);
+      }),
+    );
+
+    it.effect("cleans up and preserves stash on pop conflict", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(tmp);
+        const core = yield* GitCore;
+
+        yield* core.createBranch({ cwd: tmp, branch: "conflicting" });
+        yield* core.checkoutBranch({ cwd: tmp, branch: "conflicting" });
+        yield* writeTextFile(path.join(tmp, "README.md"), "conflicting content\n");
+        yield* git(tmp, ["add", "."]);
+        yield* git(tmp, ["commit", "-m", "conflicting change"]);
+        yield* core.checkoutBranch({ cwd: tmp, branch: initialBranch });
+
+        yield* writeTextFile(path.join(tmp, "README.md"), "local edits that will conflict\n");
+
+        const result = yield* Effect.result(
+          core.stashAndCheckout({ cwd: tmp, branch: "conflicting" }),
+        );
+        expect(result._tag).toBe("Failure");
+
+        const stashList = yield* git(tmp, ["stash", "list"]);
+        expect(stashList).toContain("t3code:");
+      }),
+    );
+
+    it.effect("cleans untracked files from failed stash pop", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(tmp);
+        const core = yield* GitCore;
+
+        yield* core.createBranch({ cwd: tmp, branch: "other" });
+        yield* core.checkoutBranch({ cwd: tmp, branch: "other" });
+        yield* writeTextFile(path.join(tmp, "new-file.txt"), "new file on other\n");
+        yield* git(tmp, ["add", "."]);
+        yield* git(tmp, ["commit", "-m", "add new file on other"]);
+        yield* core.checkoutBranch({ cwd: tmp, branch: initialBranch });
+
+        yield* writeTextFile(path.join(tmp, "new-file.txt"), "untracked content that conflicts\n");
+
+        const result = yield* Effect.result(core.stashAndCheckout({ cwd: tmp, branch: "other" }));
+        expect(result._tag).toBe("Failure");
+
+        const branches = yield* core.listBranches({ cwd: tmp });
+        expect(branches.branches.find((b) => b.current)!.name).toBe("other");
+      }),
+    );
+
+    it.effect("repo is usable after stash pop conflict", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(tmp);
+        const core = yield* GitCore;
+
+        yield* core.createBranch({ cwd: tmp, branch: "conflict-target" });
+        yield* core.checkoutBranch({ cwd: tmp, branch: "conflict-target" });
+        yield* writeTextFile(path.join(tmp, "README.md"), "conflicting\n");
+        yield* git(tmp, ["add", "."]);
+        yield* git(tmp, ["commit", "-m", "diverge"]);
+        yield* core.checkoutBranch({ cwd: tmp, branch: initialBranch });
+
+        yield* writeTextFile(path.join(tmp, "README.md"), "local dirty\n");
+
+        yield* Effect.result(core.stashAndCheckout({ cwd: tmp, branch: "conflict-target" }));
+
+        const status = yield* core.status({ cwd: tmp });
+        expect(status.isRepo).toBe(true);
+        expect(status.hasWorkingTreeChanges).toBe(false);
+
+        yield* core.checkoutBranch({ cwd: tmp, branch: initialBranch });
+        const branchesAfter = yield* core.listBranches({ cwd: tmp });
+        expect(branchesAfter.branches.find((b) => b.current)!.name).toBe(initialBranch);
+      }),
+    );
+  });
+
+  describe("stashDrop", () => {
+    it.effect("drops the top stash entry", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const core = yield* GitCore;
+
+        yield* writeTextFile(path.join(tmp, "README.md"), "stashed changes\n");
+        yield* git(tmp, ["stash", "push", "-m", "test stash"]);
+
+        const stashBefore = yield* git(tmp, ["stash", "list"]);
+        expect(stashBefore).toContain("test stash");
+
+        yield* core.stashDrop(tmp);
+
+        const stashAfter = yield* git(tmp, ["stash", "list"]);
+        expect(stashAfter.trim()).toBe("");
+      }),
+    );
+
+    it.effect("fails when stash is empty", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const core = yield* GitCore;
+
+        const result = yield* Effect.result(core.stashDrop(tmp));
+        expect(result._tag).toBe("Failure");
+      }),
+    );
+  });
+
+  describe("checkoutBranch untracked conflicts", () => {
+    it.effect("raises GitCheckoutDirtyWorktreeError for untracked file conflicts", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(tmp);
+        const core = yield* GitCore;
+
+        yield* core.createBranch({ cwd: tmp, branch: "with-tracked-file" });
+        yield* core.checkoutBranch({ cwd: tmp, branch: "with-tracked-file" });
+        yield* writeTextFile(path.join(tmp, "conflict.txt"), "tracked content\n");
+        yield* git(tmp, ["add", "."]);
+        yield* git(tmp, ["commit", "-m", "add tracked file"]);
+        yield* core.checkoutBranch({ cwd: tmp, branch: initialBranch });
+
+        yield* writeTextFile(path.join(tmp, "conflict.txt"), "untracked content\n");
+
+        const result = yield* Effect.exit(
+          core.checkoutBranch({ cwd: tmp, branch: "with-tracked-file" }),
+        );
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure") {
+          const error = Cause.squash(result.cause);
+          expect(Schema.is(GitCheckoutDirtyWorktreeError)(error)).toBe(true);
+          if (Schema.is(GitCheckoutDirtyWorktreeError)(error)) {
+            expect(error.conflictingFiles).toContain("conflict.txt");
+            expect(error.branch).toBe("with-tracked-file");
+          }
+        }
       }),
     );
   });

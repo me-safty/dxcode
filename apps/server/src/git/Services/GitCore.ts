@@ -7,7 +7,7 @@
  * @module GitCore
  */
 import { Context } from "effect";
-import type { Effect } from "effect";
+import type { Effect, Scope } from "effect";
 import type {
   GitCheckoutInput,
   GitCheckoutResult,
@@ -24,7 +24,7 @@ import type {
   GitStatusResult,
 } from "@t3tools/contracts";
 
-import type { GitCommandError } from "@t3tools/contracts";
+import type { GitCheckoutDirtyWorktreeError, GitCommandError } from "@t3tools/contracts";
 
 export interface ExecuteGitInput {
   readonly operation: string;
@@ -294,7 +294,17 @@ export interface GitCoreShape {
    */
   readonly checkoutBranch: (
     input: GitCheckoutInput,
-  ) => Effect.Effect<GitCheckoutResult, GitCommandError>;
+  ) => Effect.Effect<
+    GitCheckoutResult,
+    GitCommandError | GitCheckoutDirtyWorktreeError,
+    Scope.Scope
+  >;
+
+  readonly stashAndCheckout: (
+    input: GitCheckoutInput,
+  ) => Effect.Effect<void, GitCommandError, Scope.Scope>;
+
+  readonly stashDrop: (cwd: string) => Effect.Effect<void, GitCommandError>;
 
   /**
    * Initialize a repository in the provided directory.

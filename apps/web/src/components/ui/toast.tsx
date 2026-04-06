@@ -320,29 +320,36 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                   )}
 
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <div className="flex items-center justify-between gap-1">
-                      <Toast.Title
-                        className="min-w-0 wrap-break-word font-medium"
-                        data-slot="toast-title"
-                      />
-                      {toast.type === "error" &&
-                        typeof toast.description === "string" &&
-                        !toast.data?.hideCopyButton && <CopyErrorButton text={toast.description} />}
-                    </div>
+                    <Toast.Title
+                      className="min-w-0 wrap-break-word font-medium"
+                      data-slot="toast-title"
+                    />
                     <Toast.Description
                       className="min-w-0 select-text wrap-break-word text-muted-foreground"
                       data-slot="toast-description"
                     />
+                    {(toast.actionProps ||
+                      ((toast.type === "error" || toast.type === "warning") &&
+                        typeof toast.description === "string" &&
+                        !toast.data?.hideCopyButton)) && (
+                      <div className="mt-1 flex items-center gap-2">
+                        {(toast.type === "error" || toast.type === "warning") &&
+                          typeof toast.description === "string" &&
+                          !toast.data?.hideCopyButton && (
+                            <CopyErrorButton text={toast.description} />
+                          )}
+                        {toast.actionProps && (
+                          <Toast.Action
+                            className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
+                            data-slot="toast-action"
+                          >
+                            {toast.actionProps.children}
+                          </Toast.Action>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
-                {toast.actionProps && (
-                  <Toast.Action
-                    className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
-                    data-slot="toast-action"
-                  >
-                    {toast.actionProps.children}
-                  </Toast.Action>
-                )}
               </Toast.Content>
             </Toast.Root>
           );
@@ -414,31 +421,36 @@ function AnchoredToasts() {
                         )}
 
                         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <div className="flex items-center gap-1">
-                            <Toast.Title
-                              className="min-w-0 wrap-break-word font-medium"
-                              data-slot="toast-title"
-                            />
-                            {toast.type === "error" &&
-                              typeof toast.description === "string" &&
-                              !toast.data?.hideCopyButton && (
-                                <CopyErrorButton text={toast.description} />
-                              )}
-                          </div>
+                          <Toast.Title
+                            className="min-w-0 wrap-break-word font-medium"
+                            data-slot="toast-title"
+                          />
                           <Toast.Description
                             className="min-w-0 select-text wrap-break-word text-muted-foreground"
                             data-slot="toast-description"
                           />
+                          {(toast.actionProps ||
+                            ((toast.type === "error" || toast.type === "warning") &&
+                              typeof toast.description === "string" &&
+                              !toast.data?.hideCopyButton)) && (
+                            <div className="mt-1 flex items-center gap-2">
+                              {(toast.type === "error" || toast.type === "warning") &&
+                                typeof toast.description === "string" &&
+                                !toast.data?.hideCopyButton && (
+                                  <CopyErrorButton text={toast.description} />
+                                )}
+                              {toast.actionProps && (
+                                <Toast.Action
+                                  className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
+                                  data-slot="toast-action"
+                                >
+                                  {toast.actionProps.children}
+                                </Toast.Action>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
-                      {toast.actionProps && (
-                        <Toast.Action
-                          className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
-                          data-slot="toast-action"
-                        >
-                          {toast.actionProps.children}
-                        </Toast.Action>
-                      )}
                     </Toast.Content>
                   )}
                 </Toast.Root>

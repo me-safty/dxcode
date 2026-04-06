@@ -11,6 +11,7 @@ import {
 } from "./filesystem.ts";
 import {
   GitActionProgressEvent,
+  GitCheckoutDirtyWorktreeError,
   GitCheckoutInput,
   GitCheckoutResult,
   GitCommandError,
@@ -30,6 +31,8 @@ import {
   GitRemoveWorktreeInput,
   GitResolvePullRequestResult,
   GitRunStackedActionInput,
+  GitStashAndCheckoutInput,
+  GitStashDropInput,
   GitStatusInput,
   GitStatusResult,
   GitStatusStreamEvent,
@@ -100,6 +103,8 @@ export const WS_METHODS = {
   gitRemoveWorktree: "git.removeWorktree",
   gitCreateBranch: "git.createBranch",
   gitCheckout: "git.checkout",
+  gitStashAndCheckout: "git.stashAndCheckout",
+  gitStashDrop: "git.stashDrop",
   gitInit: "git.init",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
@@ -243,6 +248,16 @@ export const WsGitCreateBranchRpc = Rpc.make(WS_METHODS.gitCreateBranch, {
 export const WsGitCheckoutRpc = Rpc.make(WS_METHODS.gitCheckout, {
   payload: GitCheckoutInput,
   success: GitCheckoutResult,
+  error: Schema.Union([GitCommandError, GitCheckoutDirtyWorktreeError]),
+});
+
+export const WsGitStashAndCheckoutRpc = Rpc.make(WS_METHODS.gitStashAndCheckout, {
+  payload: GitStashAndCheckoutInput,
+  error: GitCommandError,
+});
+
+export const WsGitStashDropRpc = Rpc.make(WS_METHODS.gitStashDrop, {
+  payload: GitStashDropInput,
   error: GitCommandError,
 });
 
@@ -376,6 +391,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitRemoveWorktreeRpc,
   WsGitCreateBranchRpc,
   WsGitCheckoutRpc,
+  WsGitStashAndCheckoutRpc,
+  WsGitStashDropRpc,
   WsGitInitRpc,
   WsTerminalOpenRpc,
   WsTerminalWriteRpc,

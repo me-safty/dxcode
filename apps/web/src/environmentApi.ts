@@ -32,6 +32,8 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       removeWorktree: rpcClient.git.removeWorktree,
       createBranch: rpcClient.git.createBranch,
       checkout: rpcClient.git.checkout,
+      stashAndCheckout: rpcClient.git.stashAndCheckout,
+      stashDrop: rpcClient.git.stashDrop,
       init: rpcClient.git.init,
       resolvePullRequest: rpcClient.git.resolvePullRequest,
       preparePullRequestThread: rpcClient.git.preparePullRequestThread,

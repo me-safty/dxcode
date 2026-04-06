@@ -18,7 +18,7 @@ import {
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { GitCommandError, type GitBranch } from "@t3tools/contracts";
+import { GitCheckoutDirtyWorktreeError, GitCommandError, type GitBranch } from "@t3tools/contracts";
 import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 import { compactTraceAttributes } from "../../observability/Attributes.ts";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../../observability/Metrics.ts";
@@ -364,6 +364,21 @@ function createGitCommandError(
     detail,
     ...(cause !== undefined ? { cause } : {}),
   });
+}
+
+const DIRTY_WORKTREE_PATTERN =
+  /Your local changes to the following files would be overwritten by (?:checkout|merge):\s*([\s\S]*?)Please commit your changes or stash them/;
+
+const UNTRACKED_OVERWRITE_PATTERN =
+  /The following untracked working tree files would be overwritten by checkout:\s*([\s\S]*?)Please move or remove them/;
+
+function parseDirtyWorktreeFiles(stderr: string): string[] | null {
+  const match = DIRTY_WORKTREE_PATTERN.exec(stderr) ?? UNTRACKED_OVERWRITE_PATTERN.exec(stderr);
+  if (!match?.[1]) return null;
+  return match[1]
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
 }
 
 function quoteGitCommand(args: ReadonlyArray<string>): string {
@@ -2127,10 +2142,29 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
               ? ["checkout", localTrackingBranch]
               : ["checkout", input.branch];
 
-      yield* executeGit("GitCore.checkoutBranch.checkout", input.cwd, checkoutArgs, {
-        timeoutMs: 10_000,
-        fallbackErrorMessage: "git checkout failed",
-      });
+      const checkoutResult = yield* executeGit(
+        "GitCore.checkoutBranch.checkout",
+        input.cwd,
+        checkoutArgs,
+        { timeoutMs: 10_000, allowNonZeroExit: true },
+      );
+      if (checkoutResult.code !== 0) {
+        const dirtyFiles = parseDirtyWorktreeFiles(checkoutResult.stderr);
+        if (dirtyFiles && dirtyFiles.length > 0) {
+          return yield* new GitCheckoutDirtyWorktreeError({
+            branch: input.branch,
+            cwd: input.cwd,
+            conflictingFiles: dirtyFiles,
+          });
+        }
+        const stderr = checkoutResult.stderr.trim();
+        return yield* createGitCommandError(
+          "GitCore.checkoutBranch.checkout",
+          input.cwd,
+          checkoutArgs,
+          stderr.length > 0 ? stderr : "git checkout failed",
+        );
+      }
 
       const branch = yield* runGitStdout("GitCore.checkoutBranch.currentBranch", input.cwd, [
         "branch",
@@ -2147,11 +2181,99 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       fallbackErrorMessage: "git branch create failed",
     });
     if (input.checkout) {
-      yield* checkoutBranch({ cwd: input.cwd, branch: input.branch });
+      yield* Effect.scoped(
+        checkoutBranch({ cwd: input.cwd, branch: input.branch }).pipe(
+          Effect.catchTag("GitCheckoutDirtyWorktreeError", (e) =>
+            Effect.fail(
+              createGitCommandError(
+                "GitCore.createBranch.checkout",
+                input.cwd,
+                ["checkout", input.branch],
+                e.message,
+              ),
+            ),
+          ),
+        ),
+      );
     }
 
     return { branch: input.branch };
   });
+
+  const stashAndCheckout: GitCoreShape["stashAndCheckout"] = (input) =>
+    Effect.gen(function* () {
+      yield* executeGit(
+        "GitCore.stashAndCheckout.stash",
+        input.cwd,
+        ["stash", "push", "-u", "-m", `t3code: stash before switching to ${input.branch}`],
+        { timeoutMs: 15_000, fallbackErrorMessage: "git stash failed" },
+      );
+
+      yield* checkoutBranch(input).pipe(
+        Effect.catchTag("GitCheckoutDirtyWorktreeError", (e) =>
+          Effect.fail(
+            createGitCommandError(
+              "GitCore.stashAndCheckout.checkout",
+              input.cwd,
+              ["checkout", input.branch],
+              e.message,
+            ),
+          ),
+        ),
+      );
+
+      const popResult = yield* executeGit(
+        "GitCore.stashAndCheckout.stashPop",
+        input.cwd,
+        ["stash", "pop"],
+        { timeoutMs: 15_000, allowNonZeroExit: true },
+      );
+      if (popResult.code !== 0) {
+        const stashFiles = yield* executeGit(
+          "GitCore.stashAndCheckout.stashFileList",
+          input.cwd,
+          ["stash", "show", "--name-only"],
+          { timeoutMs: 5_000, allowNonZeroExit: true },
+        );
+        yield* executeGit("GitCore.stashAndCheckout.resetIndex", input.cwd, ["reset", "HEAD"], {
+          timeoutMs: 10_000,
+          allowNonZeroExit: true,
+        });
+        yield* executeGit(
+          "GitCore.stashAndCheckout.restoreWorktree",
+          input.cwd,
+          ["checkout", "--", "."],
+          { timeoutMs: 10_000, allowNonZeroExit: true },
+        );
+        if (stashFiles.code === 0 && stashFiles.stdout.trim().length > 0) {
+          const filePaths = stashFiles.stdout
+            .trim()
+            .split("\n")
+            .map((f) => f.trim())
+            .filter((f) => f.length > 0);
+          if (filePaths.length > 0) {
+            yield* executeGit(
+              "GitCore.stashAndCheckout.cleanStashRemnants",
+              input.cwd,
+              ["clean", "-f", "--", ...filePaths],
+              { timeoutMs: 10_000, allowNonZeroExit: true },
+            );
+          }
+        }
+        return yield* createGitCommandError(
+          "GitCore.stashAndCheckout.stashPop",
+          input.cwd,
+          ["stash", "pop"],
+          "Stash could not be applied to this branch. Your changes are saved in the stash.",
+        );
+      }
+    });
+
+  const stashDrop: GitCoreShape["stashDrop"] = (cwd) =>
+    executeGit("GitCore.stashDrop", cwd, ["stash", "drop"], {
+      timeoutMs: 10_000,
+      fallbackErrorMessage: "git stash drop failed",
+    }).pipe(Effect.asVoid);
 
   const initRepo: GitCoreShape["initRepo"] = (input) =>
     executeGit("GitCore.initRepo", input.cwd, ["init"], {
@@ -2198,6 +2320,8 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     renameBranch,
     createBranch,
     checkoutBranch,
+    stashAndCheckout,
+    stashDrop,
     initRepo,
     listLocalBranchNames,
   } satisfies GitCoreShape;

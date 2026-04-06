@@ -913,6 +913,18 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "git" },
           ),
+        [WS_METHODS.gitStashAndCheckout]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitStashAndCheckout,
+            Effect.scoped(git.stashAndCheckout(input)).pipe(
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.gitStashDrop]: (input) =>
+          observeRpcEffect(WS_METHODS.gitStashDrop, git.stashDrop(input.cwd), {
+            "rpc.aggregate": "git",
+          }),
         [WS_METHODS.gitInit]: (input) =>
           observeRpcEffect(
             WS_METHODS.gitInit,
