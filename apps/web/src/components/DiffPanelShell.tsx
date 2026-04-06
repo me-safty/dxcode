@@ -1,14 +1,15 @@
 import type { ReactNode } from "react";
 
-import { isElectron } from "~/env";
+import { isElectron, isWindowsElectron } from "~/env";
 import { cn } from "~/lib/utils";
 
+import { DesktopTitleBar } from "./DesktopTitleBar";
 import { Skeleton } from "./ui/skeleton";
 
 export type DiffPanelMode = "inline" | "sheet" | "sidebar";
 
 function getDiffPanelHeaderRowClassName(mode: DiffPanelMode) {
-  const shouldUseDragRegion = isElectron && mode !== "sheet";
+  const shouldUseDragRegion = isElectron && mode !== "sheet" && !isWindowsElectron;
   return cn(
     "flex items-center justify-between gap-2 px-4",
     shouldUseDragRegion ? "drag-region h-[52px] border-b border-border" : "h-12",
@@ -20,7 +21,8 @@ export function DiffPanelShell(props: {
   header: ReactNode;
   children: ReactNode;
 }) {
-  const shouldUseDragRegion = isElectron && props.mode !== "sheet";
+  const shouldUseDragRegion = isElectron && props.mode !== "sheet" && !isWindowsElectron;
+  const shouldUseWindowsTitleBar = isWindowsElectron && props.mode !== "sheet";
 
   return (
     <div
@@ -31,7 +33,13 @@ export function DiffPanelShell(props: {
           : "w-full",
       )}
     >
-      {shouldUseDragRegion ? (
+      {shouldUseWindowsTitleBar ? (
+        <DesktopTitleBar
+          title="Diff"
+          trailing={<div className="min-w-0 max-w-[60vw]">{props.header}</div>}
+          showWindowControls={false}
+        />
+      ) : shouldUseDragRegion ? (
         <div className={getDiffPanelHeaderRowClassName(props.mode)}>{props.header}</div>
       ) : (
         <div className="border-b border-border">

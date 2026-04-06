@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { isElectron } from "../env";
+import { isElectron, isWindowsElectron } from "../env";
+import { DesktopTitleBar } from "../components/DesktopTitleBar";
 import { SidebarTrigger } from "../components/ui/sidebar";
 
 function ChatIndexRouteView() {
@@ -15,7 +16,9 @@ function ChatIndexRouteView() {
         </header>
       )}
 
-      {isElectron && (
+      {isWindowsElectron && <DesktopTitleBar title="Threads" subtitle="No active thread" />}
+
+      {isElectron && !isWindowsElectron && (
         <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
           <span className="text-xs text-muted-foreground/50">No active thread</span>
         </div>

@@ -29,7 +29,7 @@ import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useGitStatus } from "~/lib/gitStatusState";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
-import { isElectron } from "../env";
+import { isElectron, isWindowsElectron } from "../env";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
   clampCollapsedComposerCursor,
@@ -153,6 +153,7 @@ import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./Compose
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
+import { DesktopTitleBar } from "./DesktopTitleBar";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
@@ -3904,7 +3905,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
             </div>
           </header>
         )}
-        {isElectron && (
+        {isWindowsElectron && <DesktopTitleBar title="Threads" subtitle="No active thread" />}
+        {isElectron && !isWindowsElectron && (
           <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
             <span className="text-xs text-muted-foreground/50">No active thread</span>
           </div>
@@ -3920,11 +3922,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      {isWindowsElectron && (
+        <DesktopTitleBar title={activeThread.title} subtitle={activeProject?.name} />
+      )}
       {/* Top bar */}
       <header
         className={cn(
           "border-b border-border px-3 sm:px-5",
-          isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
+          isElectron && !isWindowsElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
         )}
       >
         <ChatHeader

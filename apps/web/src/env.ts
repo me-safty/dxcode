@@ -1,3 +1,5 @@
+import { isWindowsPlatform } from "./lib/utils";
+
 /**
  * True when running inside the Electron preload bridge, false in a regular browser.
  * The preload script sets window.nativeApi via contextBridge before any web-app
@@ -6,3 +8,6 @@
 export const isElectron =
   typeof window !== "undefined" &&
   (window.desktopBridge !== undefined || window.nativeApi !== undefined);
+
+export const isWindowsElectron =
+  isElectron && typeof navigator !== "undefined" && isWindowsPlatform(navigator.platform);

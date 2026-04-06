@@ -57,7 +57,13 @@ import {
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
+import {
+  isLinuxPlatform,
+  isMacPlatform,
+  isWindowsPlatform,
+  newCommandId,
+  newProjectId,
+} from "../lib/utils";
 import { useStore } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
@@ -739,6 +745,7 @@ export default function Sidebar() {
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
+  const isWindowsDesktop = isElectron && isWindowsPlatform(navigator.platform);
   const platform = navigator.platform;
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
   const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
@@ -1960,7 +1967,11 @@ export default function Sidebar() {
   return (
     <>
       {isElectron ? (
-        <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]">
+        <SidebarHeader
+          className={`drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 ${
+            isWindowsDesktop ? "pl-4" : "pl-[90px]"
+          }`}
+        >
           {wordmark}
         </SidebarHeader>
       ) : (
