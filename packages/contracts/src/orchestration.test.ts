@@ -13,6 +13,7 @@ import {
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
   OrchestrationSession,
+  OrchestrationThread,
   ProjectCreateCommand,
   ThreadMetaUpdatedPayload,
   ThreadTurnStartCommand,
@@ -33,6 +34,7 @@ const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
 const decodeOrchestrationLatestTurn = Schema.decodeUnknownEffect(OrchestrationLatestTurn);
 const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
+const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread);
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
@@ -210,6 +212,7 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
       bootstrap: {
         createThread: {
           projectId: "project-1",
+          parentThreadId: "thread-parent",
           title: "Bootstrap thread",
           modelSelection: {
             provider: "codex",
@@ -231,8 +234,37 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
       createdAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.bootstrap?.createThread?.projectId, "project-1");
+    assert.strictEqual(parsed.bootstrap?.createThread?.parentThreadId, "thread-parent");
     assert.strictEqual(parsed.bootstrap?.prepareWorktree?.baseBranch, "main");
     assert.strictEqual(parsed.bootstrap?.runSetupScript, true);
+  }),
+);
+
+it.effect("accepts parent thread metadata in thread.create commands", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationCommand({
+      type: "thread.create",
+      commandId: "cmd-thread-create-parent",
+      threadId: "thread-child",
+      projectId: "project-1",
+      parentThreadId: "thread-parent",
+      title: "Child thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.type, "thread.create");
+    if (parsed.type !== "thread.create") {
+      return;
+    }
+    assert.strictEqual(parsed.parentThreadId, "thread-parent");
   }),
 );
 
@@ -253,8 +285,61 @@ it.effect("decodes thread.created runtime mode for historical events", () =>
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
 
+    assert.strictEqual(parsed.parentThreadId, null);
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
     assert.strictEqual(parsed.modelSelection.provider, "codex");
+  }),
+);
+
+it.effect("preserves thread.created parent thread metadata when present", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadCreatedPayload({
+      threadId: "thread-child",
+      projectId: "project-1",
+      parentThreadId: "thread-parent",
+      title: "Child thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.parentThreadId, "thread-parent");
+  }),
+);
+
+it.effect("defaults thread snapshot parent metadata for historical rows", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationThread({
+      id: "thread-1",
+      projectId: "project-1",
+      title: "Thread title",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      latestTurn: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      archivedAt: null,
+      deletedAt: null,
+      messages: [],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+      session: null,
+    });
+
+    assert.strictEqual(parsed.parentThreadId, null);
   }),
 );
 
