@@ -866,7 +866,7 @@ async function expectComposerActionsContained(): Promise<void> {
 }
 
 async function waitForInteractionModeButton(
-  expectedLabel: "Code" | "Plan",
+  expectedLabel: "Build" | "Plan",
 ): Promise<HTMLButtonElement> {
   return waitForElement(
     () =>
@@ -2096,7 +2096,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const initialModeButton = await waitForInteractionModeButton("Code");
+      const initialModeButton = await waitForInteractionModeButton("Build");
       expect(initialModeButton.title).toContain("enter plan mode");
 
       window.dispatchEvent(
@@ -2109,7 +2109,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
       await waitForLayout();
 
-      expect((await waitForInteractionModeButton("Code")).title).toContain("enter plan mode");
+      expect((await waitForInteractionModeButton("Build")).title).toContain("enter plan mode");
 
       const composerEditor = await waitForComposerEditor();
       composerEditor.focus();
@@ -2125,7 +2125,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         async () => {
           expect((await waitForInteractionModeButton("Plan")).title).toContain(
-            "return to normal code mode",
+            "return to normal build mode",
           );
         },
         { timeout: 8_000, interval: 16 },
@@ -2142,7 +2142,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         async () => {
-          expect((await waitForInteractionModeButton("Code")).title).toContain("enter plan mode");
+          expect((await waitForInteractionModeButton("Build")).title).toContain("enter plan mode");
         },
         { timeout: 8_000, interval: 16 },
       );
