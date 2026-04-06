@@ -163,6 +163,7 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
       const zedLineOnly = yield* resolveEditorLaunch(
         { cwd: "/tmp/workspace/AGENTS.md:48", editor: "zed" },
         "darwin",
+        { PATH: "" },
       );
       assert.deepEqual(zedLineOnly, {
         command: "zed",
