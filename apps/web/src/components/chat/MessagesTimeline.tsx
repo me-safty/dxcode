@@ -56,8 +56,7 @@ import {
 import { cn } from "~/lib/utils";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
-import { useSettings } from "../../hooks/useSettings";
-import { pickTypographySettings } from "../../typography";
+import { useTypographySettings } from "../../hooks/useTypographySettings";
 import {
   buildInlineTerminalContextText,
   formatInlineTerminalContextLabel,
@@ -125,7 +124,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   onVirtualizerSnapshot,
 }: MessagesTimelineProps) {
-  const typography = useSettings(pickTypographySettings);
+  const typography = useTypographySettings();
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
 

@@ -1,9 +1,9 @@
 import { useEffect } from "react";
-import { useSettings } from "./useSettings";
-import { applyTypographySettings, pickTypographySettings } from "../typography";
+import { applyTypographySettings } from "../typography";
+import { useTypographySettings } from "./useTypographySettings";
 
 export function useAppliedTypographySettings() {
-  const typographySettings = useSettings(pickTypographySettings);
+  const typographySettings = useTypographySettings();
 
   useEffect(() => {
     applyTypographySettings(document.documentElement, typographySettings);
