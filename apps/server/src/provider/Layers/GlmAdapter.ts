@@ -31,12 +31,12 @@ function remapSessionProvider(session: ProviderSession): ProviderSession {
   return { ...session, provider: PROVIDER };
 }
 
-export const GlmAdapterLive = Layer.effect(
-  GlmAdapter,
-  Effect.gen(function* () {
+function makeGlmAdapter(options?: GlmAdapterLiveOptions) {
+  return Effect.gen(function* () {
     const codexAdapter = yield* CodexAdapter;
     const glmEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const glmThreadIds = new Set<ThreadId>();
+    const _nativeEventLogger = options?.nativeEventLogger;
 
     const capabilities: ProviderAdapterCapabilities = {
       sessionModelSwitch: "restart-session",
@@ -132,9 +132,9 @@ export const GlmAdapterLive = Layer.effect(
         return Stream.fromQueue(glmEventQueue);
       },
     } satisfies GlmAdapterShape;
-  }),
-);
+  });
+}
 
-export function makeGlmAdapterLive(_options?: GlmAdapterLiveOptions) {
-  return GlmAdapterLive;
+export function makeGlmAdapterLive(options?: GlmAdapterLiveOptions) {
+  return Layer.effect(GlmAdapter, makeGlmAdapter(options));
 }
