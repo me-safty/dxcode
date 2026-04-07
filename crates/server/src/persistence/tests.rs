@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use rusqlite::params;
 
 use crate::config::ServerRuntimeConfig;
-use crate::persistence::{run_migrations, SqliteDb};
+use crate::persistence::{run_migrations, SqliteDb, MIGRATION_COUNT};
 use crate::AppState;
 
 #[test]
@@ -101,9 +101,12 @@ fn migration_summary_only_reports_newly_applied_steps() {
     let mut conn = rusqlite::Connection::open(db_path).expect("open sqlite");
 
     let first = run_migrations(&mut conn).expect("first migration run");
-    assert_eq!(first.applied.len(), 19);
+    assert_eq!(first.applied.len(), MIGRATION_COUNT);
     assert_eq!(first.applied.first().map(|(v, _)| *v), Some(1));
-    assert_eq!(first.applied.last().map(|(v, _)| *v), Some(19));
+    assert_eq!(
+        first.applied.last().map(|(v, _)| *v),
+        Some(i32::try_from(MIGRATION_COUNT).expect("migration count fits i32"))
+    );
 
     let second = run_migrations(&mut conn).expect("second migration run");
     assert!(second.applied.is_empty());

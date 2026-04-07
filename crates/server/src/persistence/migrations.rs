@@ -8,7 +8,7 @@ pub struct MigrationSummary {
     pub applied: Vec<(i32, &'static str)>,
 }
 
-const MIGRATION_NAMES: [&str; 19] = [
+const MIGRATION_NAMES: &[&str] = &[
     "OrchestrationEvents",
     "OrchestrationCommandReceipts",
     "CheckpointDiffBlobs",
@@ -29,6 +29,7 @@ const MIGRATION_NAMES: [&str; 19] = [
     "ProjectionThreadsArchivedAtIndex",
     "ProjectionSnapshotLookupIndexes",
 ];
+pub const MIGRATION_COUNT: usize = MIGRATION_NAMES.len();
 
 /// Runs the full `SQLite` migration set (1-19) against `conn`.
 ///

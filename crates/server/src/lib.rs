@@ -32,6 +32,8 @@ use crate::http::load_asset_response;
 use crate::persistence::SqliteDb;
 use crate::ws::handle_socket;
 
+const SQLITE_UTC_TIMESTAMP_FORMAT: &str = "%Y-%m-%dT%H:%M:%fZ";
+
 #[derive(Clone)]
 pub struct AppState {
     inner: Arc<AppStateInner>,
@@ -386,9 +388,11 @@ fn load_threads_from_db(
 fn current_utc_timestamp(conn: &rusqlite::Connection) -> anyhow::Result<String> {
     use anyhow::Context;
 
-    conn.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
-        row.get::<_, String>(0)
-    })
+    conn.query_row(
+        "SELECT strftime(?1, 'now')",
+        rusqlite::params![SQLITE_UTC_TIMESTAMP_FORMAT],
+        |row| row.get::<_, String>(0),
+    )
     .context("failed to query sqlite utc timestamp")
 }
 
