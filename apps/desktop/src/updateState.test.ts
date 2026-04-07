@@ -71,7 +71,7 @@ describe("getAutoUpdateDisabledReason", () => {
         platform: "darwin",
         appImage: undefined,
         disabledByEnv: false,
-        hasFeedURL: true,
+        hasUpdateFeedConfig: true,
       }),
     ).toContain("packaged production builds");
   });
@@ -84,9 +84,9 @@ describe("getAutoUpdateDisabledReason", () => {
         platform: "darwin",
         appImage: undefined,
         disabledByEnv: false,
-        hasFeedURL: false,
+        hasUpdateFeedConfig: false,
       }),
-    ).toContain("no update feed URL");
+    ).toContain("no update feed");
   });
 
   it("allows packaged builds with an update feed", () => {
@@ -97,7 +97,7 @@ describe("getAutoUpdateDisabledReason", () => {
         platform: "darwin",
         appImage: undefined,
         disabledByEnv: false,
-        hasFeedURL: true,
+        hasUpdateFeedConfig: true,
       }),
     ).toBeNull();
   });
@@ -110,7 +110,7 @@ describe("getAutoUpdateDisabledReason", () => {
         platform: "darwin",
         appImage: undefined,
         disabledByEnv: true,
-        hasFeedURL: true,
+        hasUpdateFeedConfig: true,
       }),
     ).toContain("T3CODE_DISABLE_AUTO_UPDATE");
   });
@@ -123,7 +123,7 @@ describe("getAutoUpdateDisabledReason", () => {
         platform: "linux",
         appImage: undefined,
         disabledByEnv: false,
-        hasFeedURL: true,
+        hasUpdateFeedConfig: true,
       }),
     ).toContain("AppImage");
   });
