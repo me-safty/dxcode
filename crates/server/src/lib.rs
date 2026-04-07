@@ -252,9 +252,6 @@ fn load_snapshot_from_db(
 ) -> anyhow::Result<OrchestrationReadModel> {
     use anyhow::Context;
     use rusqlite::OptionalExtension;
-    use t3code_contracts::orchestration::{
-        ModelSelection, OrchestrationProject, OrchestrationThread, ProjectScript, ProviderKind,
-    };
 
     let snapshot_sequence: u64 = conn
         .query_row(
@@ -268,7 +265,24 @@ fn load_snapshot_from_db(
         .try_into()
         .unwrap_or(0);
 
-    let mut projects_stmt = conn
+    let projects = load_projects_from_db(conn)?;
+    let threads = load_threads_from_db(conn)?;
+
+    Ok(OrchestrationReadModel {
+        snapshot_sequence,
+        projects,
+        threads,
+        updated_at: now.to_owned(),
+    })
+}
+
+fn load_projects_from_db(
+    conn: &rusqlite::Connection,
+) -> anyhow::Result<Vec<t3code_contracts::orchestration::OrchestrationProject>> {
+    use anyhow::Context;
+    use t3code_contracts::orchestration::{ModelSelection, OrchestrationProject, ProjectScript};
+
+    let mut stmt = conn
         .prepare(
             "SELECT project_id, title, workspace_root, default_model_selection_json, scripts_json, created_at, updated_at, deleted_at
              FROM projection_projects
@@ -276,11 +290,10 @@ fn load_snapshot_from_db(
              ORDER BY updated_at DESC",
         )
         .context("prepare projection_projects query failed")?;
-    let mut projects_rows = projects_stmt
-        .query([])
-        .context("query projection_projects failed")?;
+    let mut rows = stmt.query([]).context("query projection_projects failed")?;
     let mut projects = Vec::new();
-    while let Some(row) = projects_rows
+
+    while let Some(row) = rows
         .next()
         .context("advance projection_projects rows failed")?
     {
@@ -309,7 +322,16 @@ fn load_snapshot_from_db(
         });
     }
 
-    let mut threads_stmt = conn
+    Ok(projects)
+}
+
+fn load_threads_from_db(
+    conn: &rusqlite::Connection,
+) -> anyhow::Result<Vec<t3code_contracts::orchestration::OrchestrationThread>> {
+    use anyhow::Context;
+    use t3code_contracts::orchestration::{ModelSelection, OrchestrationThread, ProviderKind};
+
+    let mut stmt = conn
         .prepare(
             "SELECT thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode, branch, worktree_path, latest_turn_id, created_at, updated_at, archived_at, deleted_at
              FROM projection_threads
@@ -317,16 +339,15 @@ fn load_snapshot_from_db(
              ORDER BY updated_at DESC",
         )
         .context("prepare projection_threads query failed")?;
-    let mut threads_rows = threads_stmt
-        .query([])
-        .context("query projection_threads failed")?;
+    let mut rows = stmt.query([]).context("query projection_threads failed")?;
     let mut threads = Vec::new();
-    while let Some(row) = threads_rows
+
+    while let Some(row) = rows
         .next()
         .context("advance projection_threads rows failed")?
     {
         let model_selection_json: Option<String> = row.get(3)?;
-        let model_selection: ModelSelection = if let Some(raw) = model_selection_json {
+        let model_selection = if let Some(raw) = model_selection_json {
             serde_json::from_str::<ModelSelection>(&raw)
                 .context("invalid projection_threads.model_selection_json")?
         } else {
@@ -359,12 +380,7 @@ fn load_snapshot_from_db(
         });
     }
 
-    Ok(OrchestrationReadModel {
-        snapshot_sequence,
-        projects,
-        threads,
-        updated_at: now.to_owned(),
-    })
+    Ok(threads)
 }
 
 fn current_utc_timestamp(conn: &rusqlite::Connection) -> anyhow::Result<String> {

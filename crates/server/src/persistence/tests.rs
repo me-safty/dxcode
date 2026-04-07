@@ -137,18 +137,19 @@ async fn app_state_fails_bootstrap_on_invalid_projection_json() {
     })
     .expect("seed invalid row");
 
-    let err = AppState::new(ServerRuntimeConfig {
+    let result = AppState::new(ServerRuntimeConfig {
         cwd: PathBuf::from(env!("CARGO_MANIFEST_DIR")),
         web_dist_dir,
         ws_token: "secret-token".to_owned(),
         logs_dir: dir.path().join("logs"),
         db_path,
-    })
-    .expect_err("bootstrap should fail for invalid json");
+    });
+    assert!(result.is_err(), "bootstrap should fail for invalid json");
+    let err = result.err().expect("error should be present");
 
+    let error_chain = format!("{err:#}");
     assert!(
-        err.to_string()
-            .contains("invalid projection_projects.scripts_json"),
-        "unexpected error: {err:#}"
+        error_chain.contains("invalid projection_projects.scripts_json"),
+        "unexpected error: {error_chain}"
     );
 }

@@ -89,16 +89,18 @@ pub fn run_migrations(conn: &mut Connection) -> anyhow::Result<MigrationSummary>
         .pragma_query_value(None, "user_version", |row| row.get::<_, i32>(0))
         .context("failed to read sqlite user_version after migrations")?;
 
-    let start = previous_version.max(0) as usize;
-    let end = current_version.max(0) as usize;
-    let applied = if end > start {
-        MIGRATION_NAMES
-            .iter()
-            .enumerate()
-            .skip(start)
-            .take(end.saturating_sub(start))
-            .map(|(idx, name)| ((idx + 1) as i32, *name))
-            .collect()
+    let start = previous_version.max(0) + 1;
+    let end = current_version.max(0);
+    let applied = if start <= end {
+        let mut applied = Vec::new();
+        for version in start..=end {
+            let index = usize::try_from(version - 1)
+                .context("migration version could not be converted to index")?;
+            if let Some(name) = MIGRATION_NAMES.get(index) {
+                applied.push((version, *name));
+            }
+        }
+        applied
     } else {
         Vec::new()
     };
