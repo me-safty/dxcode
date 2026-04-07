@@ -7,8 +7,6 @@ import { cn } from "~/lib/utils";
 export const MessageCopyButton = memo(function MessageCopyButton({
   text,
   title = "Copy message",
-  disabled = false,
-  disabledTitle,
   size = "xs",
   variant = "outline",
   className,
@@ -17,8 +15,6 @@ export const MessageCopyButton = memo(function MessageCopyButton({
 }: {
   text: string;
   title?: string;
-  disabled?: boolean;
-  disabledTitle?: string;
   size?: "xs" | "icon-xs";
   variant?: "outline" | "ghost";
   className?: string;
@@ -29,7 +25,7 @@ export const MessageCopyButton = memo(function MessageCopyButton({
     ...(onCopy ? { onCopy: () => onCopy() } : {}),
     ...(onError ? { onError: (error: Error) => onError(error) } : {}),
   });
-  const buttonTitle = disabled ? (disabledTitle ?? title) : isCopied ? "Copied" : title;
+  const buttonTitle = isCopied ? "Copied" : title;
 
   return (
     <Button
@@ -37,7 +33,6 @@ export const MessageCopyButton = memo(function MessageCopyButton({
       size={size}
       variant={variant}
       className={cn(className)}
-      disabled={disabled}
       onClick={() => copyToClipboard(text, undefined)}
       title={buttonTitle}
       aria-label={buttonTitle}
