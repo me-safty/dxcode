@@ -563,3 +563,12 @@ export const OpenCodeIcon: Icon = (props) => (
     </defs>
   </svg>
 );
+
+export const GlmIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Zm3.5 14.5h-2v-3h-3v3h-2v-3H7v-2h1.5v-3h2v3h3v-3h2v3H17v2h-1.5v3Z"
+      fill="currentColor"
+    />
+  </svg>
+);

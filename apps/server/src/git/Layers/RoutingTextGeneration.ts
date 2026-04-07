@@ -39,8 +39,16 @@ const makeRoutingTextGeneration = Effect.gen(function* () {
   const codex = yield* CodexTextGen;
   const claude = yield* ClaudeTextGen;
 
-  const route = (provider?: TextGenerationProvider): TextGenerationShape =>
-    provider === "claudeAgent" ? claude : codex;
+  const route = (provider?: TextGenerationProvider): TextGenerationShape => {
+    switch (provider) {
+      case "claudeAgent":
+        return claude;
+      case "codex":
+      case "glm":
+      case undefined:
+        return codex;
+    }
+  };
 
   return {
     generateCommitMessage: (input) =>

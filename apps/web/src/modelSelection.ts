@@ -45,6 +45,13 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     placeholder: "your-claude-model-slug",
     example: "claude-sonnet-5-0",
   },
+  glm: {
+    provider: "glm",
+    title: "GLM",
+    description: "Save additional GLM model slugs for the picker and /model command.",
+    placeholder: "your-glm-model-slug",
+    example: "glm-5.1-preview",
+  },
 };
 
 export const MODEL_PROVIDER_SETTINGS = Object.values(PROVIDER_CUSTOM_MODEL_CONFIG);
@@ -164,6 +171,12 @@ export function getCustomModelOptionsByProvider(
       providers,
       "claudeAgent",
       selectedProvider === "claudeAgent" ? selectedModel : undefined,
+    ),
+    glm: getAppModelOptions(
+      settings,
+      providers,
+      "glm",
+      selectedProvider === "glm" ? selectedModel : undefined,
     ),
   };
 }

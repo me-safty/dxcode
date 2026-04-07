@@ -102,11 +102,12 @@ const TIMESTAMP_FORMAT_LABELS = {
 type InstallProviderSettings = {
   provider: ProviderKind;
   title: string;
-  binaryPlaceholder: string;
-  binaryDescription: ReactNode;
+  binaryPlaceholder?: string;
+  binaryDescription?: ReactNode;
   homePathKey?: "codexHomePath";
   homePlaceholder?: string;
   homeDescription?: ReactNode;
+  envVarHint?: string;
 };
 
 const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
@@ -124,6 +125,11 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     title: "Claude",
     binaryPlaceholder: "Claude binary path",
     binaryDescription: "Path to the Claude binary",
+  },
+  {
+    provider: "glm",
+    title: "GLM (Z.ai)",
+    envVarHint: "GLM_API_KEY",
   },
 ] as const;
 
@@ -514,12 +520,14 @@ export function GeneralSettingsPanel() {
       settings.providers.claudeAgent.customModels.length > 0 ||
       settings.providers.claudeAgent.launchArgs !== "",
     ),
+    glm: Boolean(settings.providers.glm.customModels.length > 0),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
   >({
     codex: "",
     claudeAgent: "",
+    glm: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -735,7 +743,8 @@ export function GeneralSettingsPanel() {
       homePathKey: providerSettings.homePathKey,
       homePlaceholder: providerSettings.homePlaceholder,
       homeDescription: providerSettings.homeDescription,
-      binaryPathValue: providerConfig.binaryPath,
+      envVarHint: providerSettings.envVarHint,
+      binaryPathValue: "binaryPath" in providerConfig ? providerConfig.binaryPath : undefined,
       isDirty: !Equal.equals(providerConfig, defaultProviderConfig),
       liveProvider,
       models,
@@ -1211,37 +1220,55 @@ export function GeneralSettingsPanel() {
               >
                 <CollapsibleContent>
                   <div className="space-y-0">
-                    <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-                      <label
-                        htmlFor={`provider-install-${providerCard.provider}-binary-path`}
-                        className="block"
-                      >
-                        <span className="text-xs font-medium text-foreground">
-                          {providerDisplayName} binary path
-                        </span>
-                        <Input
-                          id={`provider-install-${providerCard.provider}-binary-path`}
-                          className="mt-1.5"
-                          value={providerCard.binaryPathValue}
-                          onChange={(event) =>
-                            updateSettings({
-                              providers: {
-                                ...settings.providers,
-                                [providerCard.provider]: {
-                                  ...settings.providers[providerCard.provider],
-                                  binaryPath: event.target.value,
+                    {providerCard.binaryPlaceholder ? (
+                      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                        <label
+                          htmlFor={`provider-install-${providerCard.provider}-binary-path`}
+                          className="block"
+                        >
+                          <span className="text-xs font-medium text-foreground">
+                            {providerDisplayName} binary path
+                          </span>
+                          <Input
+                            id={`provider-install-${providerCard.provider}-binary-path`}
+                            className="mt-1.5"
+                            value={providerCard.binaryPathValue ?? ""}
+                            onChange={(event) =>
+                              updateSettings({
+                                providers: {
+                                  ...settings.providers,
+                                  [providerCard.provider]: {
+                                    ...settings.providers[providerCard.provider],
+                                    binaryPath: event.target.value,
+                                  },
                                 },
-                              },
-                            })
-                          }
-                          placeholder={providerCard.binaryPlaceholder}
-                          spellCheck={false}
-                        />
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          {providerCard.binaryDescription}
+                              })
+                            }
+                            placeholder={providerCard.binaryPlaceholder}
+                            spellCheck={false}
+                          />
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            {providerCard.binaryDescription}
+                          </span>
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {providerCard.envVarHint ? (
+                      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                        <span className="text-xs font-medium text-foreground">
+                          API key environment variable
                         </span>
-                      </label>
-                    </div>
+                        <div className="mt-1.5 rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+                          <code className="text-xs text-foreground/80">
+                            {providerCard.envVarHint}
+                          </code>
+                        </div>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          Set this environment variable before starting the server.
+                        </span>
+                      </div>
+                    ) : null}
 
                     {providerCard.homePathKey ? (
                       <div className="border-t border-border/60 px-4 py-3 sm:px-5">
