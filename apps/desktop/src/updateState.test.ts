@@ -86,7 +86,7 @@ describe("getAutoUpdateDisabledReason", () => {
         disabledByEnv: false,
         hasFeedURL: false,
       }),
-    ).toContain("packaged production builds");
+    ).toContain("no update feed URL");
   });
 
   it("allows packaged builds with an update feed", () => {
