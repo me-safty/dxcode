@@ -162,14 +162,8 @@ function recordsEqual<T>(left: Record<string, T>, right: Record<string, T>): boo
   return true;
 }
 
-function projectOrdersEqual(left: readonly ProjectId[], right: readonly ProjectId[]): boolean {
-  return (
-    left.length === right.length && left.every((projectId, index) => projectId === right[index])
-  );
-}
-
-function threadIdListsEqual(left: readonly ThreadId[], right: readonly ThreadId[]): boolean {
-  return left.length === right.length && left.every((threadId, index) => threadId === right[index]);
+function arraysEqual<T>(left: readonly T[], right: readonly T[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function syncProjects(state: UiState, projects: readonly SyncProjectInput[]): UiState {
@@ -257,7 +251,7 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
 
   if (
     recordsEqual(state.projectExpandedById, nextExpandedById) &&
-    projectOrdersEqual(state.projectOrder, nextProjectOrder) &&
+    arraysEqual(state.projectOrder, nextProjectOrder) &&
     !cwdMappingChanged
   ) {
     return state;
@@ -291,7 +285,7 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
   );
   if (
     recordsEqual(state.threadLastVisitedAtById, nextThreadLastVisitedAtById) &&
-    threadIdListsEqual(state.pinnedThreadIds, nextPinnedThreadIds)
+    arraysEqual(state.pinnedThreadIds, nextPinnedThreadIds)
   ) {
     return state;
   }
