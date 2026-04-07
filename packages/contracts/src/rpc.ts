@@ -4,6 +4,19 @@ import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { OpenError, OpenInEditorInput } from "./editor";
 import {
+  CodeRabbitCancelReviewInput,
+  CodeRabbitFixWithAiInput,
+  CodeRabbitFixWithAiResult,
+  CodeRabbitGetReviewInput,
+  CodeRabbitGetStatusInput,
+  CodeRabbitReviewEvent,
+  CodeRabbitReviewSnapshot,
+  CodeRabbitReviewStatus,
+  CodeRabbitRpcError,
+  CodeRabbitStartReviewInput,
+  CodeRabbitStartReviewResult,
+} from "./coderabbit";
+import {
   GitActionProgressEvent,
   GitCheckoutInput,
   GitCommandError,
@@ -78,6 +91,13 @@ export const WS_METHODS = {
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
 
+  // CodeRabbit methods
+  coderabbitStartReview: "coderabbit.startReview",
+  coderabbitCancelReview: "coderabbit.cancelReview",
+  coderabbitGetStatus: "coderabbit.getStatus",
+  coderabbitGetReview: "coderabbit.getReview",
+  coderabbitFixWithAI: "coderabbit.fixWithAI",
+
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
 
@@ -114,6 +134,7 @@ export const WS_METHODS = {
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
+  subscribeCodeRabbitReviewEvents: "subscribeCodeRabbitReviewEvents",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -155,6 +176,35 @@ export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
   success: ProjectWriteFileResult,
   error: ProjectWriteFileError,
+});
+
+export const WsCodeRabbitStartReviewRpc = Rpc.make(WS_METHODS.coderabbitStartReview, {
+  payload: CodeRabbitStartReviewInput,
+  success: CodeRabbitStartReviewResult,
+  error: CodeRabbitRpcError,
+});
+
+export const WsCodeRabbitCancelReviewRpc = Rpc.make(WS_METHODS.coderabbitCancelReview, {
+  payload: CodeRabbitCancelReviewInput,
+  error: CodeRabbitRpcError,
+});
+
+export const WsCodeRabbitGetStatusRpc = Rpc.make(WS_METHODS.coderabbitGetStatus, {
+  payload: CodeRabbitGetStatusInput,
+  success: CodeRabbitReviewStatus,
+  error: CodeRabbitRpcError,
+});
+
+export const WsCodeRabbitGetReviewRpc = Rpc.make(WS_METHODS.coderabbitGetReview, {
+  payload: CodeRabbitGetReviewInput,
+  success: CodeRabbitReviewSnapshot,
+  error: CodeRabbitRpcError,
+});
+
+export const WsCodeRabbitFixWithAIRpc = Rpc.make(WS_METHODS.coderabbitFixWithAI, {
+  payload: CodeRabbitFixWithAiInput,
+  success: CodeRabbitFixWithAiResult,
+  error: CodeRabbitRpcError,
 });
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -321,6 +371,16 @@ export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServer
   stream: true,
 });
 
+export const WsSubscribeCodeRabbitReviewEventsRpc = Rpc.make(
+  WS_METHODS.subscribeCodeRabbitReviewEvents,
+  {
+    payload: CodeRabbitGetReviewInput,
+    success: CodeRabbitReviewEvent,
+    error: CodeRabbitRpcError,
+    stream: true,
+  },
+);
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -329,6 +389,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerUpdateSettingsRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
+  WsCodeRabbitStartReviewRpc,
+  WsCodeRabbitCancelReviewRpc,
+  WsCodeRabbitGetStatusRpc,
+  WsCodeRabbitGetReviewRpc,
+  WsCodeRabbitFixWithAIRpc,
   WsShellOpenInEditorRpc,
   WsGitStatusRpc,
   WsGitPullRpc,
@@ -351,6 +416,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeTerminalEventsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
+  WsSubscribeCodeRabbitReviewEventsRpc,
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,

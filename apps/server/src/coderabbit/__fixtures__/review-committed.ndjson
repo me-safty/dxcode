@@ -1,0 +1,2 @@
+{"type":"review_context","reviewType":"committed","currentBranch":"main","baseBranch":"main","workingDirectory":"/Users/james/dev/t3code"}
+{"type":"error","errorType":"review","message":"Review failed: No files found for review","recoverable":false,"details":{}}

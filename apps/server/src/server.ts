@@ -28,6 +28,7 @@ import { OrchestrationCommandReceiptRepositoryLive } from "./persistence/Layers/
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
 import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers/ProjectionSnapshotQuery";
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
+import { CodeRabbitServiceLive } from "./coderabbit/Layers/CodeRabbitService";
 import { GitCoreLive } from "./git/Layers/GitCore";
 import { GitHubCliLive } from "./git/Layers/GitHubCli";
 import { RoutingTextGenerationLive } from "./git/Layers/RoutingTextGeneration";
@@ -197,6 +198,7 @@ const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ServerSettingsLive),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLive),
+  Layer.provideMerge(CodeRabbitServiceLive),
 
   // Misc.
   Layer.provideMerge(AnalyticsServiceLayerLive),

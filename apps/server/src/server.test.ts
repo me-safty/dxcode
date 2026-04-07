@@ -3,6 +3,9 @@ import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
 import {
+  CodeRabbitFindingId,
+  CodeRabbitReviewId,
+  type CodeRabbitReviewSnapshot,
   CommandId,
   DEFAULT_SERVER_SETTINGS,
   GitCommandError,
@@ -38,6 +41,10 @@ import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
+import {
+  CodeRabbitService,
+  type CodeRabbitServiceShape,
+} from "./coderabbit/Services/CodeRabbitService.ts";
 import {
   CheckpointDiffQuery,
   type CheckpointDiffQueryShape,
@@ -257,6 +264,7 @@ const buildAppUnderTest = (options?: {
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
+    coderabbit?: Partial<CodeRabbitServiceShape>;
     browserTraceCollector?: Partial<BrowserTraceCollectorShape>;
     serverLifecycleEvents?: Partial<ServerLifecycleEventsShape>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
@@ -381,6 +389,38 @@ const buildAppUnderTest = (options?: {
               diff: "",
             }),
           ...options?.layers?.checkpointDiffQuery,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(CodeRabbitService)({
+          startReview: () =>
+            Effect.succeed({ reviewId: CodeRabbitReviewId.makeUnsafe("crr-test") }),
+          cancelReview: () => Effect.void,
+          getStatus: () =>
+            Effect.succeed({
+              available: true,
+              authenticated: true,
+              activeReviewId: null,
+              latestReviewId: null,
+            }),
+          getReview: () =>
+            Effect.succeed({
+              reviewId: CodeRabbitReviewId.makeUnsafe("crr-test"),
+              cwd: "/tmp/default-project",
+              scope: "all",
+              phase: "completed",
+              statusText: "review_completed",
+              currentBranch: "main",
+              baseBranch: "main",
+              findings: [],
+              degraded: false,
+              startedAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+              completedAt: "2026-01-01T00:00:00.000Z",
+              errorMessage: null,
+            }),
+          streamReviewEvents: () => Stream.empty,
+          ...options?.layers?.coderabbit,
         }),
       ),
       Layer.provide(
@@ -1095,6 +1135,166 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(second?.type, "ready");
         assert.equal(second?.sequence, 2);
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc CodeRabbit unary methods", () =>
+    Effect.gen(function* () {
+      const findingId = CodeRabbitFindingId.makeUnsafe("crf-1");
+      const reviewId = CodeRabbitReviewId.makeUnsafe("crr-rpc");
+
+      yield* buildAppUnderTest({
+        layers: {
+          coderabbit: {
+            startReview: () => Effect.succeed({ reviewId }),
+            cancelReview: () => Effect.void,
+            getStatus: () =>
+              Effect.succeed({
+                available: true,
+                authenticated: true,
+                activeReviewId: reviewId,
+                latestReviewId: reviewId,
+              }),
+            getReview: () =>
+              Effect.succeed({
+                reviewId,
+                cwd: "/tmp/default-project",
+                scope: "all" as const,
+                phase: "completed" as const,
+                statusText: "review_completed",
+                currentBranch: "main",
+                baseBranch: "main",
+                findings: [
+                  {
+                    id: findingId,
+                    severity: "minor",
+                    summary: "Fix the issue",
+                    filePath: "src/example.ts",
+                    location: {
+                      type: "file",
+                      filePath: "src/example.ts",
+                    },
+                    codegenInstructions: "Fix the issue in src/example.ts",
+                    suggestions: [],
+                    sourceEventType: "finding",
+                    createdAt: "2026-01-01T00:00:00.000Z",
+                  },
+                ],
+                degraded: false,
+                startedAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+                completedAt: "2026-01-01T00:00:00.000Z",
+                errorMessage: null,
+              } satisfies CodeRabbitReviewSnapshot),
+            streamReviewEvents: () => Stream.empty,
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.succeed({
+                sequence: command.type === "thread.turn.start" ? 2 : 1,
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+
+      const startResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.coderabbitStartReview]({
+            cwd: "/tmp/default-project",
+            scope: "all",
+          }),
+        ),
+      );
+      const statusResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.coderabbitGetStatus]({ cwd: "/tmp/default-project" }),
+        ),
+      );
+      const reviewResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.coderabbitGetReview]({ reviewId })),
+      );
+      const fixResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.coderabbitFixWithAI]({
+            reviewId,
+            findingIds: [findingId],
+            projectId: defaultProjectId,
+            sourceThreadId: defaultThreadId,
+          }),
+        ),
+      );
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.coderabbitCancelReview]({ reviewId })),
+      );
+
+      assert.deepEqual(startResult, { reviewId });
+      assert.deepEqual(statusResult, {
+        available: true,
+        authenticated: true,
+        activeReviewId: reviewId,
+        latestReviewId: reviewId,
+      });
+      assert.equal(reviewResult.reviewId, reviewId);
+      assert.isTrue(fixResult.threadId.startsWith("thread-coderabbit-fix-"));
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc subscribeCodeRabbitReviewEvents", () =>
+    Effect.gen(function* () {
+      const reviewId = CodeRabbitReviewId.makeUnsafe("crr-stream");
+      const snapshot = {
+        reviewId,
+        cwd: "/tmp/default-project",
+        scope: "all" as const,
+        phase: "completed" as const,
+        statusText: "review_completed",
+        currentBranch: "main",
+        baseBranch: "main",
+        findings: [],
+        degraded: false,
+        startedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        completedAt: "2026-01-01T00:00:00.000Z",
+        errorMessage: null,
+      } satisfies CodeRabbitReviewSnapshot;
+
+      yield* buildAppUnderTest({
+        layers: {
+          coderabbit: {
+            streamReviewEvents: () =>
+              Stream.make(
+                {
+                  type: "snapshot" as const,
+                  reviewId,
+                  timestamp: "2026-01-01T00:00:00.000Z",
+                  snapshot,
+                },
+                {
+                  type: "completed" as const,
+                  reviewId,
+                  timestamp: "2026-01-01T00:00:01.000Z",
+                  snapshot,
+                },
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const events = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeCodeRabbitReviewEvents]({ reviewId }).pipe(
+            Stream.take(2),
+            Stream.runCollect,
+          ),
+        ),
+      );
+
+      const [first, second] = Array.from(events);
+      assert.equal(first?.type, "snapshot");
+      assert.equal(second?.type, "completed");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc projects.searchEntries", () =>

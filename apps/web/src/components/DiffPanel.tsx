@@ -20,6 +20,10 @@ import {
 } from "react";
 import { openInPreferredEditor } from "../editorPreferences";
 import { gitStatusQueryOptions } from "~/lib/gitReactQuery";
+import {
+  coderabbitReviewQueryOptions,
+  coderabbitStatusQueryOptions,
+} from "~/lib/coderabbitReactQuery";
 import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
 import { cn } from "~/lib/utils";
 import { readNativeApi } from "../nativeApi";
@@ -33,6 +37,7 @@ import { useStore } from "../store";
 import { useSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
+import { Badge } from "./ui/badge";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 
 type DiffRenderMode = "stacked" | "split";
@@ -157,6 +162,22 @@ function buildFileDiffRenderKey(fileDiff: FileDiffMetadata): string {
   return fileDiff.cacheKey ?? `${fileDiff.prevName ?? "none"}:${fileDiff.name}`;
 }
 
+function codeRabbitFindingBadgeVariant(
+  severity: string,
+): "default" | "secondary" | "outline" | "destructive" {
+  switch (severity) {
+    case "major":
+    case "critical":
+      return "destructive";
+    case "minor":
+      return "default";
+    case "trivial":
+      return "secondary";
+    default:
+      return "outline";
+  }
+}
+
 interface DiffPanelProps {
   mode?: DiffPanelMode;
 }
@@ -190,7 +211,26 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   );
   const activeCwd = activeThread?.worktreePath ?? activeProject?.cwd;
   const gitStatusQuery = useQuery(gitStatusQueryOptions(activeCwd ?? null));
+  const coderabbitStatusQuery = useQuery(
+    coderabbitStatusQueryOptions(activeCwd ? { cwd: activeCwd } : null),
+  );
+  const coderabbitReviewQuery = useQuery(
+    coderabbitReviewQueryOptions(
+      coderabbitStatusQuery.data?.latestReviewId
+        ? { reviewId: coderabbitStatusQuery.data.latestReviewId }
+        : null,
+    ),
+  );
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const reviewFindingsByFile = useMemo(() => {
+    const findings = coderabbitReviewQuery.data?.findings ?? [];
+    const grouped = new Map<string, typeof findings>();
+    for (const finding of findings) {
+      const current = grouped.get(finding.filePath) ?? [];
+      grouped.set(finding.filePath, [...current, finding]);
+    }
+    return grouped;
+  }, [coderabbitReviewQuery.data?.findings]);
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
   const orderedTurnDiffSummaries = useMemo(
@@ -591,6 +631,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                   const filePath = resolveFileDiffPath(fileDiff);
                   const fileKey = buildFileDiffRenderKey(fileDiff);
                   const themedFileKey = `${fileKey}:${resolvedTheme}`;
+                  const codeRabbitFindings = reviewFindingsByFile.get(filePath) ?? [];
                   return (
                     <div
                       key={themedFileKey}
@@ -607,6 +648,41 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                         openDiffFileInEditor(filePath);
                       }}
                     >
+                      {codeRabbitFindings.length > 0 ? (
+                        <div className="mb-2 rounded-md border border-border/70 bg-card/75 p-3">
+                          <div className="mb-2 flex items-center gap-2">
+                            <Badge variant="outline">CodeRabbit</Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {codeRabbitFindings.length} finding
+                              {codeRabbitFindings.length === 1 ? "" : "s"}
+                            </span>
+                          </div>
+                          <div className="space-y-2">
+                            {codeRabbitFindings.map((finding) => (
+                              <button
+                                key={finding.id}
+                                type="button"
+                                className="w-full rounded-md border border-border/60 bg-background/70 p-2 text-left transition-colors hover:bg-accent/40"
+                                onClick={() => {
+                                  openDiffFileInEditor(filePath);
+                                }}
+                              >
+                                <div className="mb-1 flex items-center gap-2">
+                                  <Badge variant={codeRabbitFindingBadgeVariant(finding.severity)}>
+                                    {finding.severity}
+                                  </Badge>
+                                  <span className="text-sm font-medium text-foreground">
+                                    {finding.summary}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-wrap">
+                                  {finding.codegenInstructions}
+                                </p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                       <FileDiff
                         fileDiff={fileDiff}
                         options={{

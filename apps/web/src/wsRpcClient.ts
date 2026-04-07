@@ -1,4 +1,14 @@
 import {
+  type CodeRabbitCancelReviewInput,
+  type CodeRabbitFixWithAiResult,
+  type CodeRabbitFixWithAiInput,
+  type CodeRabbitGetReviewInput,
+  type CodeRabbitGetStatusInput,
+  type CodeRabbitReviewEvent,
+  type CodeRabbitReviewSnapshot,
+  type CodeRabbitReviewStatus,
+  type CodeRabbitStartReviewResult,
+  type CodeRabbitStartReviewInput,
   type GitActionProgressEvent,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
@@ -90,6 +100,20 @@ export interface WsRpcClient {
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverUpdateSettings>>;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
+  };
+  readonly coderabbit: {
+    readonly startReview: (
+      input: CodeRabbitStartReviewInput,
+    ) => Promise<CodeRabbitStartReviewResult>;
+    readonly cancelReview: (input: CodeRabbitCancelReviewInput) => Promise<void>;
+    readonly getStatus: (input: CodeRabbitGetStatusInput) => Promise<CodeRabbitReviewStatus>;
+    readonly getReview: (input: CodeRabbitGetReviewInput) => Promise<CodeRabbitReviewSnapshot>;
+    readonly fixWithAI: (input: CodeRabbitFixWithAiInput) => Promise<CodeRabbitFixWithAiResult>;
+    readonly onReviewEvent: (
+      reviewId: CodeRabbitGetReviewInput["reviewId"],
+      listener: (event: CodeRabbitReviewEvent) => void,
+      options?: StreamSubscriptionOptions,
+    ) => () => void;
   };
   readonly orchestration: {
     readonly getSnapshot: RpcUnaryNoArgMethod<typeof ORCHESTRATION_WS_METHODS.getSnapshot>;
@@ -202,6 +226,27 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
       subscribeLifecycle: (listener, options) =>
         transport.subscribe(
           (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+          listener,
+          options,
+        ),
+    },
+    coderabbit: {
+      startReview: (input) =>
+        transport.request((client) => client[WS_METHODS.coderabbitStartReview](input)),
+      cancelReview: (input) =>
+        transport.request((client) => client[WS_METHODS.coderabbitCancelReview](input)),
+      getStatus: (input) =>
+        transport.request((client) => client[WS_METHODS.coderabbitGetStatus](input)),
+      getReview: (input) =>
+        transport.request((client) => client[WS_METHODS.coderabbitGetReview](input)),
+      fixWithAI: (input) =>
+        transport.request((client) => client[WS_METHODS.coderabbitFixWithAI](input)),
+      onReviewEvent: (reviewId, listener, options) =>
+        transport.subscribe(
+          (client) =>
+            client[WS_METHODS.subscribeCodeRabbitReviewEvents]({
+              reviewId,
+            }),
           listener,
           options,
         ),

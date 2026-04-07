@@ -1,193 +1,445 @@
 # CodeRabbit Integration for T3 Code
 
-Direct integration of CodeRabbit code review into T3 Code, powered by the CodeRabbit CLI (`coderabbit review --agent`). Mirrors the CodeRabbit VS Code extension UX: a right-side panel with branch selection, review scope controls, streamed progress, and per-file findings with inline annotations on the DiffPanel.
+Integrate CodeRabbit reviews directly into T3 Code using `coderabbit review --agent --no-color`.
+
+V1 should optimize for reliability, reconnect safety, and reuse of existing T3 Code primitives. The goal is not to clone the full CodeRabbit VS Code extension on day one. The goal is to make local CodeRabbit review feel native inside T3 Code without introducing a second orchestration system, fragile diff assumptions, or UI state that disappears on every reconnect.
+
+## V1 Principles
+
+- The server owns review lifecycle and review state.
+- Browser disconnects, panel closes, and tab switches must not kill an active review.
+- Reuse existing chat, diff, git, and orchestration flows wherever possible.
+- Prefer accurate file-level findings over fragile line anchoring.
+- Normalize CLI output from captured fixtures rather than baking raw CLI payloads into shared contracts.
+- Keep the first version small enough that it remains predictable under failure.
 
 ## Architecture
 
-Three layers: server service, shared contracts, and web UI.
+Three layers: server review service, shared contracts, and web UI.
 
+```text
+┌──────────────────────────────────────────────────────────────┐
+│ Web (apps/web)                                              │
+│ ┌────────────────────┐   ┌───────────────────────────────┐  │
+│ │ Chat Route Right   │   │ DiffPanel (existing)          │  │
+│ │ Rail: Diff/Review  │──▶│ optional CodeRabbit overlays  │  │
+│ │ tabs, progress,    │   │ when a reviewed file is       │  │
+│ │ findings, fix CTA  │   │ already present in the diff   │  │
+│ └──────────┬─────────┘   └───────────────────────────────┘  │
+├────────────┼────────────────────────────────────────────────┤
+│ Contracts (packages/contracts)                              │
+│ Normalized review snapshot/events + RPC schemas             │
+├────────────┼────────────────────────────────────────────────┤
+│ Server (apps/server)                                        │
+│ ┌──────────┴─────────┐                                      │
+│ │ CodeRabbitService  │──▶ spawns `coderabbit review --agent`│
+│ │ review registry    │◀── parses NDJSON / structured JSON   │
+│ │ replay + fanout    │                                      │
+│ └────────────────────┘                                      │
+└──────────────────────────────────────────────────────────────┘
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Web (apps/web)                                         │
-│  ┌──────────────┐  ┌─────────────┐  ┌────────────────┐  │
-│  │ CodeRabbit   │  │  DiffPanel  │  │  Orchestration │  │
-│  │ Panel        │──│  Annotations│  │  (Fix with AI) │  │
-│  └──────┬───────┘  └─────────────┘  └────────────────┘  │
-│         │ WebSocket push: coderabbit.reviewEvent         │
-├─────────┼───────────────────────────────────────────────┤
-│  Contracts (packages/contracts)                          │
-│  CodeRabbitReviewEvent union, RPC method schemas         │
-├─────────┼───────────────────────────────────────────────┤
-│  Server (apps/server)                                    │
-│  ┌──────┴───────┐                                       │
-│  │ CodeRabbit   │──▶ spawns `coderabbit review --agent` │
-│  │ Service      │◀── streams NDJSON lines               │
-│  └──────────────┘                                       │
-└─────────────────────────────────────────────────────────┘
-```
 
-## Server: CodeRabbitService
+## Design Notes
 
-**File:** `apps/server/src/coderabbit/CodeRabbitService.ts`
+### Reuse the existing right rail
 
-Spawns the CodeRabbit CLI as a child process and streams its NDJSON output line-by-line through the existing WebSocket push infrastructure.
+V1 should reuse the existing right-side diff rail in [apps/web/src/routes/\_chat.$threadId.tsx](/Users/james/dev/t3code/apps/web/src/routes/_chat.$threadId.tsx) instead of adding a second simultaneous right column.
+
+- Desktop: one right rail with a tab or segmented control for `Diff` and `Review`
+- Mobile/narrow layouts: the same shared sheet behavior the diff panel already uses
+- V1 intentionally does not support DiffPanel and CodeRabbit as two side-by-side rails at once
+
+This keeps layout pressure manageable and avoids re-solving the composer width constraints that the current diff sidebar already handles.
+
+### The review panel is the source of truth
+
+The CodeRabbit review panel is the primary place to browse findings.
+
+The DiffPanel may optionally render CodeRabbit annotations, but only when the reviewed file is already present in the currently rendered thread diff. CodeRabbit findings must not depend on the DiffPanel being able to render an arbitrary Git comparison that it does not currently support.
+
+## Server: `CodeRabbitService`
+
+**Primary file:** [apps/server/src/coderabbit/CodeRabbitService.ts](/Users/james/dev/t3code/apps/server/src/coderabbit/CodeRabbitService.ts)
+
+The server owns the review process.
+
+`CodeRabbitService` should be an Effect service (`Context.Tag`) responsible for spawning the CLI, normalizing its output, tracking in-memory review state, and serving both snapshot queries and event streams.
 
 ### Responsibilities
 
-- Spawn `coderabbit review --agent --no-color` with user-selected flags (`--type`, `--base`, `--cwd`)
-- Parse each NDJSON line and push to the web client via WebSocket push channel `coderabbit.reviewEvent`
-- Track active review state (one review at a time per project)
-- Handle cancellation (kill subprocess, send synthetic `ReviewCancelled` event)
-- Detect CLI availability and auth status (`coderabbit --version`, `coderabbit auth status`)
+- Spawn `coderabbit review --agent --no-color` with supported flags:
+  - `--type all | committed | uncommitted`
+  - `--base <branch>` when provided
+  - `--cwd <path>`
+- Parse the CLI output line-by-line and normalize it into typed T3 Code review events
+- Maintain an in-memory review registry keyed by `reviewId`
+- Allow at most one active review per project `cwd`
+- If a new review starts for the same `cwd`, cancel the previous active review and mark it cancelled
+- Keep the latest review snapshot in memory until it is replaced by a newer review for the same `cwd` or the server restarts
+- Fan out live events to multiple subscribers
+- Replay the current snapshot to newly attached clients
+- Generate stable server-side `findingId` values
+- Detect CLI availability and auth status using:
+  - `coderabbit --version`
+  - `coderabbit auth status --agent`
+- Use Effect `Scope` / finalizers to guarantee child-process cleanup
+- Log unknown or unmapped raw CLI event shapes so parser drift is visible during upgrades
 
-### What it does NOT do
+### What it must not do
 
-- No caching or persistence of review results. Reviews are ephemeral. The client holds the current review in memory.
-- No modification of the OrchestrationEngine. "Fix with AI" dispatches new sessions through the existing orchestration command path.
+- No durable persistence across server restarts in v1
+- No direct edits to workspace files from CodeRabbit suggestions
+- No changes to the orchestration engine beyond dispatching existing orchestration commands
 
-## Contracts: Review Schemas & RPC
+### Review lifecycle
 
-**File:** `packages/contracts/src/coderabbit.ts`
+1. Client calls `coderabbitStartReview`
+2. Server creates `reviewId`, allocates an in-memory review entry, and starts the CLI subprocess
+3. Server updates the review snapshot as normalized events arrive
+4. Clients call `coderabbitGetReview` for the latest snapshot and `subscribeCodeRabbitReviewEvents` for live updates
+5. If the client disconnects or closes the panel, the review continues running
+6. Only explicit cancellation, server shutdown, or a replacement review for the same `cwd` ends the subprocess
+7. Terminal review state remains queryable after completion so the browser can reconnect cleanly
 
-Schema-only, no runtime logic.
+This is intentionally different from the original draft. Closing the panel or losing the WebSocket should not kill the review.
 
-### NDJSON Event Schemas
+## Contracts: review schemas and RPC
 
-The CLI emits newline-delimited JSON. Each line is one of these types:
+**Primary file:** [packages/contracts/src/coderabbit.ts](/Users/james/dev/t3code/packages/contracts/src/coderabbit.ts)
 
-| Type | Key Fields |
-|------|-----------|
-| `ReviewContext` | `reviewType`, `currentBranch`, `baseBranch`, `workingDirectory` |
-| `ReviewStatus` | `phase` (connecting, setup, analyzing), `status` string |
-| `ReviewFinding` | `severity` (critical, high, medium, low), `fileName`, `codegenInstructions`, `suggestions: string[]` |
-| `ReviewComplete` | `status`, `findings` count |
-| `ReviewError` | `errorType`, `message`, `recoverable`, `details` |
-| `ReviewCancelled` | Synthetic, emitted by server on cancel |
+This package stays schema-only.
 
-These are wrapped in a `CodeRabbitReviewEvent` discriminated union tagged on `type`.
+### Normalized review model
 
-### RPC Methods
+Do not expose raw CodeRabbit CLI payloads directly to the rest of the app.
 
-Added to the existing `WsRpcGroup`:
+Define a normalized model with stable T3 Code semantics:
 
-| Method | Input | Output |
-|--------|-------|--------|
-| `coderabbit.startReview` | `{ type: "all" \| "committed" \| "uncommitted", baseBranch?: string }` | `{ reviewId: string }` |
-| `coderabbit.cancelReview` | `{ reviewId: string }` | `void` |
-| `coderabbit.getStatus` | `void` | `{ available: boolean, authenticated: boolean, reviewing: boolean }` |
-| `coderabbit.fixWithAI` | `{ fileName: string, codegenInstructions: string, suggestions: string[] }` | `{ threadId: string }` |
+- `CodeRabbitReviewScope`
+  - `"all" | "committed" | "uncommitted"`
+- `CodeRabbitReviewPhase`
+  - `"starting" | "setup" | "analyzing" | "complete" | "error" | "cancelled"`
+- `CodeRabbitFindingSeverity`
+  - `"critical" | "high" | "medium" | "low" | "info"`
+- `CodeRabbitFindingLocation`
+  - file-level by default
+  - optional line-level only when the server has a reliable structured line number
+- `CodeRabbitFinding`
+  - `id`
+  - `reviewId`
+  - `filePath`
+  - `severity`
+  - `summary`
+  - `codegenInstructions`
+  - `suggestions: string[]`
+  - `location`
+- `CodeRabbitReviewSnapshot`
+  - `reviewId`
+  - `cwd`
+  - `scope`
+  - `baseBranch`
+  - `currentBranch`
+  - `phase`
+  - `statusMessage`
+  - `startedAt`
+  - `completedAt`
+  - `findings`
+  - `changedFiles` when available
 
-### WebSocket Push Channel
+### Event stream
 
-`coderabbit.reviewEvent` streams `CodeRabbitReviewEvent` objects as they arrive from the CLI subprocess.
+The stream should carry normalized delta events, not raw CLI lines.
 
-## Web: Right-Side Panel
+Suggested union:
 
-**Trigger:** A new CodeRabbit icon in the top-right toolbar (next to the existing diff panel toggle). Clicking it toggles a right-side panel, same behavior as the diff panel.
+- `ReviewSnapshot`
+- `ReviewStatusUpdated`
+- `ReviewFindingAdded`
+- `ReviewCompleted`
+- `ReviewErrored`
+- `ReviewCancelled`
 
-### Panel Layout
+The snapshot is the durable server-side read model. Events are incremental updates.
 
-**Section 1: NEW REVIEW** (always visible)
+### Important schema rule
 
-- **Branch row:** `[main pencil-icon]` `<-` `[current-branch]` as pill badges. Clicking the base branch pill opens a branch picker dropdown with search. Uses existing `gitListBranches` RPC.
-- **FILES TO REVIEW (n):** Collapsible file list with git status badges (M/A/D) right-aligned. Populated from existing `gitStatus` RPC for the selected scope.
-- **Review action button:** Split button. Primary label shows current scope ("Review all changes"). Dropdown chevron reveals three options:
+The schema should be derived from captured real CLI fixtures for the pinned CodeRabbit CLI version, not from hand-written assumptions about undocumented fields.
+
+Add parser fixtures and tests on the server side before relying on any raw field shape.
+
+### RPC methods
+
+Add methods to [packages/contracts/src/rpc.ts](/Users/james/dev/t3code/packages/contracts/src/rpc.ts).
+
+**Unary RPCs**
+
+| Method                   | Input                                                                                    | Output                                                                           |
+| ------------------------ | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `coderabbitStartReview`  | `{ cwd: string, scope: "all" \| "committed" \| "uncommitted", baseBranch?: string }`     | `{ reviewId: string }`                                                           |
+| `coderabbitCancelReview` | `{ reviewId: string }`                                                                   | `void`                                                                           |
+| `coderabbitGetStatus`    | `{ cwd: string }`                                                                        | `{ available: boolean, authenticated: boolean, activeReviewId: string \| null }` |
+| `coderabbitGetReview`    | `{ reviewId: string }`                                                                   | `CodeRabbitReviewSnapshot`                                                       |
+| `coderabbitFixWithAI`    | `{ reviewId: string, findingIds: string[], projectId: string, sourceThreadId?: string }` | `{ threadId: string }`                                                           |
+
+**Stream RPC**
+
+| Method                            | Input                  | Output                          |
+| --------------------------------- | ---------------------- | ------------------------------- |
+| `subscribeCodeRabbitReviewEvents` | `{ reviewId: string }` | `Stream<CodeRabbitReviewEvent>` |
+
+### Web RPC client implication
+
+The current web RPC helper only exposes no-argument subscriptions. This integration requires stream subscriptions with input payloads, so [apps/web/src/wsRpcClient.ts](/Users/james/dev/t3code/apps/web/src/wsRpcClient.ts) will need a small abstraction upgrade.
+
+## Web: review rail
+
+**Primary files**
+
+- [apps/web/src/routes/\_chat.$threadId.tsx](/Users/james/dev/t3code/apps/web/src/routes/_chat.$threadId.tsx)
+- [apps/web/src/components/CodeRabbitPanel.tsx](/Users/james/dev/t3code/apps/web/src/components/CodeRabbitPanel.tsx)
+- [apps/web/src/wsRpcClient.ts](/Users/james/dev/t3code/apps/web/src/wsRpcClient.ts)
+
+### Trigger
+
+Add a CodeRabbit button near the existing diff toggle.
+
+When opened, the shared right rail switches to the `Review` tab. The existing `Diff` tab remains available in the same rail.
+
+### Layout
+
+**Section 1: New review**
+
+- Base branch picker
+  - Reuse the existing branch search infrastructure that already backs `gitListBranches`
+- Scope split button
   - Review all changes
   - Review committed changes
   - Review uncommitted changes
+- Review action button
+  - Starts a new review
+- Stop review button
+  - Replaces the action button when a review is active
 
-**During review:** The action button is replaced with a "Stop Review" button.
+**Section 2: Active review**
 
-**Section 2: REVIEWS** (appears after first review)
+- Current branch / base branch summary
+- Progress checklist or status list
+- Latest status text from the server snapshot
+- Findings grouped by file
 
-- **Review header:** Collapsible, titled with the current branch name (e.g., "claude-code-cli-delegation"). The CLI's `ReviewContext` event provides `currentBranch` which is used as the title.
-- **Progress checklist** (during review):
-  - Checkmark "Setting up" (maps to `status.phase === "setup"`)
-  - Checkmark "Analyzing changes" (maps to `status.phase === "analyzing"`, `status === "summarizing"`)
-  - Circle "Reviewing files..." (maps to `status.phase === "analyzing"`, `status === "reviewing"`)
-  - Steps show a green checkmark when completed, hollow circle when in-progress with animated dots.
-- **After completion:**
-  - "Fix all issues" button with sparkle icon
-  - Progress bar + "0 of N issues resolved" counter
-  - **FILES (n)** list:
-    - Each file shows a finding count badge (red `2!` for issues, blue `1` for info/suggestions)
-    - Files expand to show individual findings with summary text and severity badge ("Potential Issue", "Critical", etc.)
-    - Files without findings listed without badges
-    - Clicking a finding opens the DiffPanel for that file with the annotation highlighted
+**Section 3: Fix actions**
 
-### State Management
+- `Fix selected finding`
+- `Fix flagged files`
+- Progress text should say `N of M fix sessions completed`
 
-**File:** `apps/web/src/stores/coderabbitStore.ts`
+Do not label this as `resolved` in v1. A completed AI thread is not the same thing as a verified fix.
 
-New Zustand store holding:
-- CLI status (available, authenticated)
-- Current review state (idle, reviewing, complete, error)
-- Selected scope and base branch
-- Review findings array
-- Fix session progress (resolved count)
+### Pre-review file list
 
-Ephemeral — cleared on page refresh or new review.
+Do not assume the existing `gitStatus` RPC can power the full scope selector.
 
-## Web: DiffPanel Annotations
+- `gitStatus` only covers working-tree changes
+- `committed` and `all` need a separate server-side diff summary if we want an accurate preview before the review starts
 
-When the DiffPanel shows a file that has CodeRabbit findings, those findings render as annotation blocks attached to the relevant lines.
+Because of that, the changed-files preview is optional in v1:
 
-### Annotation Content
+- Show it when the server can provide it reliably
+- Do not block the feature on a preflight file list for every scope
 
-Each annotation shows:
-- **Severity badge** (color-coded: red for critical, orange for high, yellow for medium, blue for low/info)
-- **Summary text** extracted from `codegenInstructions`
-- **"Show suggested fix"** toggle (visible only when `suggestions[]` is non-empty) — reveals the code suggestion
-- **"Apply fix"** button (checkmark icon) — visible only when `suggestions[]` has content. Applies the suggestion directly via the existing `projectsWriteFile` RPC.
-- **"Fix with AI"** button (sparkle icon) — always visible. Creates a new orchestration session with the finding context.
+## Web state management
 
-### Line Anchoring
+Avoid duplicating the full server review snapshot into a separate long-lived client store.
 
-The CLI's `codegenInstructions` contains natural language references like "In @test.ts at line 1". The line reference is parsed to anchor annotations. When a reliable line number can't be parsed, the annotation attaches to the top of the file as a file-level finding.
+Recommended split:
 
-## "Fix with AI" Flow
+- React Query or equivalent request lifecycle for:
+  - `coderabbitGetStatus`
+  - `coderabbitGetReview`
+  - reconnect-safe review refresh
+- Lightweight Zustand store for local UI state only:
+  - selected base branch
+  - selected scope
+  - selected finding
+  - review rail tab
+  - fix session progress mapping
 
-### Single finding fix
-1. User clicks sparkle "Fix with AI" on a finding
-2. Server receives `coderabbit.fixWithAI` RPC call
-3. Server dispatches a new orchestration session (new thread) with the `codegenInstructions` as the initial prompt, prefixed with: "CodeRabbit found an issue in `{fileName}`. Fix the following:\n\n{codegenInstructions}"
-4. The new session appears in the left sidebar thread list like any other coding agent session
-5. Uses whatever provider the user currently has configured (Codex, Claude, etc.)
+**Suggested file:** [apps/web/src/coderabbitStore.ts](/Users/james/dev/t3code/apps/web/src/coderabbitStore.ts)
 
-### "Fix all issues"
-Findings are grouped by `fileName`. Each unique file gets one new session with all of that file's findings combined into a single prompt. Files with only one finding still get their own session.
+The server snapshot remains the source of truth for findings and review progress.
+
+## DiffPanel annotations
+
+**Primary file:** [apps/web/src/components/DiffPanel.tsx](/Users/james/dev/t3code/apps/web/src/components/DiffPanel.tsx)
+
+Annotations in the DiffPanel are optional enhancement, not the main review surface.
+
+### V1 behavior
+
+- If the current DiffPanel file path matches a file with CodeRabbit findings, show file-level annotation blocks
+- If the reviewed file is not present in the current rendered diff, the review panel still works normally
+- Clicking a finding:
+  - opens the Diff tab and focuses the file if that file exists in the current diff
+  - otherwise opens the file in the editor and keeps the review panel selection active
+
+### Annotation content
+
+Each annotation may show:
+
+- Severity badge
+- Short summary
+- Expandable suggestion text when `suggestions[]` is non-empty
+- `Fix with AI`
+
+### No direct `Apply fix` in v1
+
+Do not wire CodeRabbit suggestions straight to `projectsWriteFile`.
+
+[projectsWriteFile](/Users/james/dev/t3code/packages/contracts/src/project.ts) writes full file contents, and the plan cannot safely assume CodeRabbit suggestions are always full-file replacements. Direct file mutation risks clobbering user edits.
+
+If we later add direct apply, it should use a patch-aware flow with explicit preview and conflict handling.
+
+### Line anchoring
+
+V1 should default to file-level findings.
+
+Do not parse line numbers out of natural-language `codegenInstructions` with regex as a primary strategy. That is too fragile.
+
+Only attach a line when the server has a reliable structured line number from CodeRabbit output or a strongly validated parser path. Until then, file-level annotations are the correct default.
+
+## "Fix with AI" flow
+
+### Single finding or grouped findings
+
+The client sends stable finding IDs back to the server, not raw `codegenInstructions` copied from the browser.
+
+1. User selects one or more findings
+2. Client calls `coderabbitFixWithAI({ reviewId, findingIds, projectId, sourceThreadId? })`
+3. Server loads the review snapshot and constructs the prompt from the canonical finding data
+4. Server creates a normal orchestration thread using the existing orchestration command path
+5. Server starts the first turn with a prompt that includes:
+   - finding summaries
+   - file paths
+   - `codegenInstructions`
+   - any suggestion text
+6. Server returns `{ threadId }`
+
+### Thread bootstrap
+
+Implementation should reuse the same orchestration bootstrapping pattern already used by chat flows in [apps/server/src/ws.ts](/Users/james/dev/t3code/apps/server/src/ws.ts) and [apps/web/src/components/ChatView.tsx](/Users/james/dev/t3code/apps/web/src/components/ChatView.tsx).
+
+Preferred inheritance order:
+
+1. Source thread settings, when `sourceThreadId` is provided
+2. Existing project defaults
+
+Carry over:
+
+- model selection
+- runtime mode
+- interaction mode
+- active branch / worktree path when applicable
+
+### "Fix flagged files"
+
+Group findings by `filePath` and create one AI fix session per file.
+
+That keeps related issues together while avoiding a single oversized prompt for an entire review.
 
 ### Progress tracking
-The `coderabbitStore` maintains a map of `findingId -> threadId` for all fix sessions it has dispatched. The "0 of N issues resolved" counter increments when any of those tracked threads reaches a terminal state (checked via the existing orchestration snapshot subscription). This is a simple count — it does not re-run CodeRabbit to verify the fix. Verification is a v2 concern.
 
-## Error Handling
+Track file-group or request-level fix sessions on the client.
+
+The UI should count how many fix sessions reached a terminal thread state. It should not claim the issue is fixed unless the review is rerun and passes.
+
+## Error handling
 
 ### CLI not installed
-`coderabbit.getStatus` checks on startup. Panel shows "CodeRabbit CLI not installed" with install instructions. Review controls disabled.
+
+Show `CodeRabbit CLI not installed` with install guidance. Review controls stay disabled.
 
 ### Not authenticated
-Panel shows "Not signed in" with prompt to run `coderabbit auth login` in their terminal. Auth requires a browser redirect so it can't be done inline. Panel re-checks status when toggled open.
+
+Show `Not signed in` with guidance to run `coderabbit auth login --agent` or `coderabbit auth login` in the terminal, depending on the final UX decision for auth.
+
+### Unknown raw CLI event shape
+
+Do not crash the review parser on one unknown line.
+
+- Log the raw event shape on the server
+- Surface a generic status update if possible
+- Keep the review running unless the CLI itself exits or returns a terminal error
 
 ### Review fails mid-stream
-CLI emits `{"type":"error"}`. Panel shows the error message in the progress checklist (red text, replacing the current step). "Stop Review" switches back to the review action button for retry.
+
+Surface the error in the review snapshot and mark the review terminal with phase `error`.
 
 ### No files to review
-"No files to review" message with review button still visible. User may need to adjust scope or base branch.
+
+Show a clear empty state and allow the user to change scope or base branch.
 
 ### Rate limiting
-CodeRabbit free tier: 3 reviews/hour. If the CLI returns a rate limit error, surface it: "Rate limit reached. Try again in X minutes."
+
+Surface CodeRabbit rate-limit responses directly when available.
 
 ### Subprocess cleanup
-If the user closes the panel, navigates away, or the WebSocket disconnects during a review, the server kills the subprocess. No orphaned `coderabbit` processes.
 
-## File Inventory
+Kill the subprocess on:
 
-| File | Package | Purpose |
-|------|---------|---------|
-| `src/coderabbit/CodeRabbitService.ts` | apps/server | CLI subprocess management, NDJSON parsing, WebSocket push |
-| `src/coderabbit.ts` | packages/contracts | Effect/Schema definitions for review events and RPC methods |
-| `src/components/CodeRabbitPanel.tsx` | apps/web | Right-side panel UI (review controls, progress, results tree) |
-| `src/components/CodeRabbitAnnotation.tsx` | apps/web | Inline finding annotation component for DiffPanel |
-| `src/stores/coderabbitStore.ts` | apps/web | Zustand store for review state |
+- explicit cancel
+- replacement by a newer review for the same `cwd`
+- server shutdown
 
-Additional files will likely be needed for sub-components (branch picker, finding card, severity badge, etc.) but these are the primary touch points.
+Do not kill it just because the panel closed or the WebSocket disconnected.
+
+### Server restart
+
+Because review state is in-memory only in v1, server restart ends active reviews. The UI should handle this as a lost review state and offer a clean restart path.
+
+## Testing and fixtures
+
+This feature should not ship without parser fixtures.
+
+Add:
+
+- Captured `coderabbit review --agent` fixture output for the pinned CLI version
+- Parser unit tests for raw event normalization
+- WebSocket subscription tests that verify:
+  - reconnect
+  - replay from `coderabbitGetReview`
+  - live event fanout
+  - cancellation semantics
+- UI tests for:
+  - switching between `Diff` and `Review`
+  - starting a review
+  - reconnecting to an in-flight review
+  - launching `Fix with AI`
+
+## File inventory
+
+| File                                       | Package            | Purpose                                                                            |
+| ------------------------------------------ | ------------------ | ---------------------------------------------------------------------------------- |
+| `src/coderabbit/CodeRabbitService.ts`      | apps/server        | CLI subprocess management, parser, review registry, replay/fanout                  |
+| `src/coderabbit/CodeRabbitService.test.ts` | apps/server        | Parser and lifecycle tests                                                         |
+| `src/coderabbit/fixtures/*.jsonl`          | apps/server        | Real captured CLI fixtures for the pinned CodeRabbit version                       |
+| `src/ws.ts`                                | apps/server        | Wire RPC handlers into the existing WS server                                      |
+| `src/coderabbit.ts`                        | packages/contracts | Review snapshot, event, and RPC schemas                                            |
+| `src/rpc.ts`                               | packages/contracts | Register CodeRabbit RPC methods with `WsRpcGroup`                                  |
+| `src/wsRpcClient.ts`                       | apps/web           | Add input-bearing review stream subscription support                               |
+| `src/routes/_chat.$threadId.tsx`           | apps/web           | Reuse existing right rail / sheet for the Review tab                               |
+| `src/components/CodeRabbitPanel.tsx`       | apps/web           | Review panel UI                                                                    |
+| `src/components/DiffPanel.tsx`             | apps/web           | Optional file-level review annotations when a reviewed file is already in the diff |
+| `src/coderabbitStore.ts`                   | apps/web           | Local UI-only state for review rail, selection, and fix-session progress           |
+
+## Summary
+
+The original concept is solid, but the implementation should be narrowed for v1:
+
+- server-owned review state
+- reconnect-safe snapshots and streams
+- one shared right rail instead of dual rails
+- file-level findings by default
+- no direct apply-to-file shortcut
+- fix progress measured as completed AI sessions, not verified resolutions
+
+That version is much more aligned with T3 Code's stated priorities around performance, reliability, and predictable behavior under failure.

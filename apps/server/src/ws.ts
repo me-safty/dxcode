@@ -1,7 +1,17 @@
 import { Cause, Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
 import {
+  type CodeRabbitFinding,
+  type CodeRabbitFixWithAiInput,
+  type CodeRabbitFixWithAiResult,
+  type CodeRabbitReviewSnapshot,
+  CodeRabbitRpcError,
+  type CodeRabbitRpcErrorReason,
   CommandId,
+  DEFAULT_MODEL_BY_PROVIDER,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
+  DEFAULT_RUNTIME_MODE,
   EventId,
+  MessageId,
   type OrchestrationCommand,
   type GitActionProgressEvent,
   type GitManagerServiceError,
@@ -23,6 +33,7 @@ import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
+import { CodeRabbitService } from "./coderabbit/Services/CodeRabbitService";
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery";
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore";
@@ -47,11 +58,62 @@ import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
 import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptRunner";
 
+const sanitizeCodeRabbitPromptValue = (value: string) =>
+  JSON.stringify(value.replace(/\r\n?/g, "\n"));
+
+const buildCodeRabbitFixPrompt = (input: {
+  readonly snapshot: CodeRabbitReviewSnapshot;
+  readonly findings: ReadonlyArray<CodeRabbitFinding>;
+}) => {
+  const findingSections = input.findings.map((finding, index) => {
+    const location =
+      finding.location.type === "line"
+        ? `${finding.filePath}:${finding.location.lineNumber}`
+        : finding.filePath;
+    const suggestions =
+      finding.suggestions.length > 0
+        ? `\nSuggestions:\n${finding.suggestions.map((entry) => `- ${sanitizeCodeRabbitPromptValue(entry)}`).join("\n")}`
+        : "";
+    return [
+      `${index + 1}. [${sanitizeCodeRabbitPromptValue(finding.severity)}] ${sanitizeCodeRabbitPromptValue(finding.summary)}`,
+      `id: ${sanitizeCodeRabbitPromptValue(finding.id)}`,
+      `location: ${sanitizeCodeRabbitPromptValue(location)}`,
+      "codegenInstructions:",
+      sanitizeCodeRabbitPromptValue(finding.codegenInstructions),
+      suggestions,
+    ]
+      .filter((entry) => entry.length > 0)
+      .join("\n");
+  });
+
+  return [
+    "System:",
+    "You are fixing CodeRabbit review findings inside the user's workspace.",
+    "Verify each finding against the current code before editing anything.",
+    "Keep the changes narrowly scoped to the findings below and preserve unrelated behavior.",
+    "If a finding is already resolved or stale, explain that in your response and do not force a change.",
+    "",
+    "User:",
+    `Review cwd: ${sanitizeCodeRabbitPromptValue(input.snapshot.cwd)}`,
+    `Review scope: ${sanitizeCodeRabbitPromptValue(input.snapshot.scope)}`,
+    ...(input.snapshot.currentBranch
+      ? [`Current branch: ${sanitizeCodeRabbitPromptValue(input.snapshot.currentBranch)}`]
+      : []),
+    ...(input.snapshot.baseBranch
+      ? [`Base branch: ${sanitizeCodeRabbitPromptValue(input.snapshot.baseBranch)}`]
+      : []),
+    "",
+    "Findings:",
+    ...findingSections,
+  ].join("\n");
+};
+
 const WsRpcLayer = WsRpcGroup.toLayer(
   Effect.gen(function* () {
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const orchestrationEngine = yield* OrchestrationEngineService;
     const checkpointDiffQuery = yield* CheckpointDiffQuery;
+    const codeRabbit = yield* CodeRabbitService;
     const keybindings = yield* Keybindings;
     const open = yield* Open;
     const gitManager = yield* GitManager;
@@ -111,6 +173,21 @@ const WsRpcLayer = WsRpcGroup.toLayer(
             cause,
           });
     };
+
+    const toCodeRabbitRpcError = (
+      cause: unknown,
+      fallback: {
+        readonly reason: CodeRabbitRpcErrorReason;
+        readonly message: string;
+      },
+    ) =>
+      Schema.is(CodeRabbitRpcError)(cause)
+        ? cause
+        : new CodeRabbitRpcError({
+            message: cause instanceof Error ? cause.message : fallback.message,
+            reason: fallback.reason,
+            cause,
+          });
 
     const dispatchBootstrapTurnStart = (
       command: Extract<OrchestrationCommand, { type: "thread.turn.start" }>,
@@ -324,6 +401,139 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         );
     };
 
+    const dispatchCodeRabbitFixWithAI = (
+      input: CodeRabbitFixWithAiInput,
+    ): Effect.Effect<CodeRabbitFixWithAiResult, CodeRabbitRpcError> =>
+      Effect.gen(function* () {
+        const review = yield* codeRabbit.getReview({ reviewId: input.reviewId }).pipe(
+          Effect.mapError((cause) =>
+            toCodeRabbitRpcError(cause, {
+              reason: "review_not_found",
+              message: "Unable to load the requested CodeRabbit review.",
+            }),
+          ),
+        );
+        const findings = review.findings.filter((finding) => input.findingIds.includes(finding.id));
+        if (findings.length === 0) {
+          return yield* new CodeRabbitRpcError({
+            message: "No matching CodeRabbit findings were found for the fix request.",
+            reason: "invalid_request",
+          });
+        }
+
+        const readModel = yield* orchestrationEngine.getReadModel();
+        const project = readModel.projects.find((entry) => entry.id === input.projectId);
+        if (!project) {
+          return yield* new CodeRabbitRpcError({
+            message: "Project was not found for the CodeRabbit fix session.",
+            reason: "invalid_request",
+          });
+        }
+
+        const sourceThread =
+          input.sourceThreadId !== undefined
+            ? readModel.threads.find((entry) => entry.id === input.sourceThreadId)
+            : undefined;
+        if (input.sourceThreadId && !sourceThread) {
+          return yield* new CodeRabbitRpcError({
+            message: "Source thread was not found for the CodeRabbit fix session.",
+            reason: "invalid_request",
+          });
+        }
+
+        if (sourceThread && sourceThread.projectId !== input.projectId) {
+          return yield* new CodeRabbitRpcError({
+            message: "Source thread does not belong to the requested project.",
+            reason: "invalid_request",
+          });
+        }
+
+        if (sourceThread) {
+          const sourceThreadCwd = sourceThread.worktreePath ?? project.workspaceRoot;
+          if (sourceThreadCwd !== review.cwd) {
+            return yield* new CodeRabbitRpcError({
+              message: "Source thread does not match the review workspace.",
+              reason: "invalid_request",
+            });
+          }
+        }
+
+        const modelSelection = sourceThread?.modelSelection ??
+          project.defaultModelSelection ?? {
+            provider: "codex" as const,
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          };
+        const runtimeMode = sourceThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+        const interactionMode = sourceThread?.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
+        const worktreePath =
+          sourceThread?.worktreePath ?? (review.cwd === project.workspaceRoot ? null : review.cwd);
+        const branch = sourceThread?.branch ?? review.currentBranch ?? null;
+        const threadId = ThreadId.makeUnsafe(`thread-coderabbit-fix-${crypto.randomUUID()}`);
+        const createdAt = new Date().toISOString();
+        const title =
+          findings.length === 1
+            ? `Fix CodeRabbit: ${findings[0]?.filePath ?? "finding"}`
+            : `Fix CodeRabbit findings (${findings.length})`;
+        const prompt = buildCodeRabbitFixPrompt({
+          snapshot: review,
+          findings,
+        });
+
+        yield* dispatchNormalizedCommand({
+          type: "thread.create",
+          commandId: serverCommandId("coderabbit-thread-create"),
+          threadId,
+          projectId: project.id,
+          title,
+          modelSelection,
+          runtimeMode,
+          interactionMode,
+          branch,
+          worktreePath,
+          createdAt,
+        }).pipe(
+          Effect.mapError((cause) =>
+            toCodeRabbitRpcError(cause, {
+              reason: "process_failed",
+              message: "Failed to create a CodeRabbit fix thread.",
+            }),
+          ),
+        );
+
+        yield* dispatchNormalizedCommand({
+          type: "thread.turn.start",
+          commandId: serverCommandId("coderabbit-turn-start"),
+          threadId,
+          message: {
+            messageId: MessageId.makeUnsafe(`msg-coderabbit-fix-${crypto.randomUUID()}`),
+            role: "user",
+            text: prompt,
+            attachments: [],
+          },
+          titleSeed: title,
+          modelSelection,
+          runtimeMode,
+          interactionMode,
+          createdAt,
+        }).pipe(
+          Effect.mapError((cause) =>
+            toCodeRabbitRpcError(cause, {
+              reason: "process_failed",
+              message: "Failed to start a CodeRabbit fix turn.",
+            }),
+          ),
+          Effect.catch((error) =>
+            dispatchNormalizedCommand({
+              type: "thread.delete",
+              commandId: serverCommandId("coderabbit-thread-delete"),
+              threadId,
+            }).pipe(Effect.ignoreCause({ log: true }), Effect.andThen(Effect.fail(error))),
+          ),
+        );
+
+        return { threadId };
+      });
+
     const loadServerConfig = Effect.gen(function* () {
       const keybindingsConfig = yield* keybindings.loadConfigState;
       const providers = yield* providerRegistry.getProviders;
@@ -525,6 +735,26 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         observeRpcEffect(WS_METHODS.serverUpdateSettings, serverSettings.updateSettings(patch), {
           "rpc.aggregate": "server",
         }),
+      [WS_METHODS.coderabbitStartReview]: (input) =>
+        observeRpcEffect(WS_METHODS.coderabbitStartReview, codeRabbit.startReview(input), {
+          "rpc.aggregate": "coderabbit",
+        }),
+      [WS_METHODS.coderabbitCancelReview]: (input) =>
+        observeRpcEffect(WS_METHODS.coderabbitCancelReview, codeRabbit.cancelReview(input), {
+          "rpc.aggregate": "coderabbit",
+        }),
+      [WS_METHODS.coderabbitGetStatus]: (input) =>
+        observeRpcEffect(WS_METHODS.coderabbitGetStatus, codeRabbit.getStatus(input), {
+          "rpc.aggregate": "coderabbit",
+        }),
+      [WS_METHODS.coderabbitGetReview]: (input) =>
+        observeRpcEffect(WS_METHODS.coderabbitGetReview, codeRabbit.getReview(input), {
+          "rpc.aggregate": "coderabbit",
+        }),
+      [WS_METHODS.coderabbitFixWithAI]: (input) =>
+        observeRpcEffect(WS_METHODS.coderabbitFixWithAI, dispatchCodeRabbitFixWithAI(input), {
+          "rpc.aggregate": "coderabbit",
+        }),
       [WS_METHODS.projectsSearchEntries]: (input) =>
         observeRpcEffect(
           WS_METHODS.projectsSearchEntries,
@@ -707,6 +937,12 @@ const WsRpcLayer = WsRpcGroup.toLayer(
             return Stream.concat(Stream.fromIterable(snapshotEvents), liveEvents);
           }),
           { "rpc.aggregate": "server" },
+        ),
+      [WS_METHODS.subscribeCodeRabbitReviewEvents]: (input) =>
+        observeRpcStreamEffect(
+          WS_METHODS.subscribeCodeRabbitReviewEvents,
+          Effect.succeed(codeRabbit.streamReviewEvents(input)),
+          { "rpc.aggregate": "coderabbit" },
         ),
     });
   }),

@@ -1,4 +1,16 @@
 import type {
+  CodeRabbitCancelReviewInput,
+  CodeRabbitFixWithAiInput,
+  CodeRabbitFixWithAiResult,
+  CodeRabbitGetReviewInput,
+  CodeRabbitGetStatusInput,
+  CodeRabbitReviewEvent,
+  CodeRabbitReviewSnapshot,
+  CodeRabbitReviewStatus,
+  CodeRabbitStartReviewInput,
+  CodeRabbitStartReviewResult,
+} from "./coderabbit";
+import type {
   GitCheckoutInput,
   GitCreateBranchInput,
   GitPreparePullRequestThreadInput,
@@ -182,6 +194,20 @@ export interface NativeApi {
     replayEvents: (fromSequenceExclusive: number) => Promise<OrchestrationEvent[]>;
     onDomainEvent: (
       callback: (event: OrchestrationEvent) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
+  };
+  coderabbit: {
+    startReview: (input: CodeRabbitStartReviewInput) => Promise<CodeRabbitStartReviewResult>;
+    cancelReview: (input: CodeRabbitCancelReviewInput) => Promise<void>;
+    getStatus: (input: CodeRabbitGetStatusInput) => Promise<CodeRabbitReviewStatus>;
+    getReview: (input: CodeRabbitGetReviewInput) => Promise<CodeRabbitReviewSnapshot>;
+    fixWithAI: (input: CodeRabbitFixWithAiInput) => Promise<CodeRabbitFixWithAiResult>;
+    onReviewEvent: (
+      reviewId: CodeRabbitGetReviewInput["reviewId"],
+      callback: (event: CodeRabbitReviewEvent) => void,
       options?: {
         onResubscribe?: () => void;
       },

@@ -31,6 +31,7 @@ import { gitStatusQueryOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import { useCodeRabbitStore } from "../coderabbitStore";
 import {
   clampCollapsedComposerCursor,
   type ComposerTrigger,
@@ -1571,17 +1572,34 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
     [keybindings, nonTerminalShortcutLabelOptions],
   );
+  const reviewOpen = useCodeRabbitStore((store) => store.activeRailTab === "review");
+  const diffPanelVisible = useCodeRabbitStore((store) => store.activeRailTab === "diff");
+  const setActiveRailTab = useCodeRabbitStore((store) => store.setActiveRailTab);
   const onToggleDiff = useCallback(() => {
+    if (diffPanelVisible) {
+      setActiveRailTab(null);
+      if (!diffOpen) {
+        return;
+      }
+    } else {
+      setActiveRailTab("diff");
+      if (diffOpen) {
+        return;
+      }
+    }
     void navigate({
       to: "/$threadId",
       params: { threadId },
       replace: true,
       search: (previous) => {
         const rest = stripDiffSearchParams(previous);
-        return diffOpen ? { ...rest, diff: undefined } : { ...rest, diff: "1" };
+        return diffPanelVisible ? { ...rest, diff: undefined } : { ...rest, diff: "1" };
       },
     });
-  }, [diffOpen, navigate, threadId]);
+  }, [diffOpen, diffPanelVisible, navigate, setActiveRailTab, threadId]);
+  const onToggleReview = useCallback(() => {
+    setActiveRailTab(reviewOpen ? null : "review");
+  }, [reviewOpen, setActiveRailTab]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -3944,7 +3962,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
-          diffOpen={diffOpen}
+          diffOpen={diffPanelVisible}
+          reviewOpen={reviewOpen}
+          reviewEnabled={Boolean(isGitRepo && gitCwd)}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
           }}
@@ -3953,6 +3973,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
+          onToggleReview={onToggleReview}
         />
       </header>
 

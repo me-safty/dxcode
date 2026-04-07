@@ -93,6 +93,15 @@ export function createWsNativeApi(): NativeApi {
       getSettings: rpcClient.server.getSettings,
       updateSettings: rpcClient.server.updateSettings,
     },
+    coderabbit: {
+      startReview: rpcClient.coderabbit.startReview,
+      cancelReview: rpcClient.coderabbit.cancelReview,
+      getStatus: rpcClient.coderabbit.getStatus,
+      getReview: rpcClient.coderabbit.getReview,
+      fixWithAI: rpcClient.coderabbit.fixWithAI,
+      onReviewEvent: (reviewId, callback, options) =>
+        rpcClient.coderabbit.onReviewEvent(reviewId, callback, options),
+    },
     orchestration: {
       getSnapshot: rpcClient.orchestration.getSnapshot,
       dispatchCommand: rpcClient.orchestration.dispatchCommand,

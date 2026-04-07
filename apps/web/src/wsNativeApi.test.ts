@@ -1,4 +1,7 @@
 import {
+  CodeRabbitFindingId,
+  type CodeRabbitReviewEvent,
+  CodeRabbitReviewId,
   CommandId,
   DEFAULT_SERVER_SETTINGS,
   type DesktopBridge,
@@ -31,6 +34,7 @@ function registerListener<T>(listeners: Set<(event: T) => void>, listener: (even
 
 const terminalEventListeners = new Set<(event: TerminalEvent) => void>();
 const orchestrationEventListeners = new Set<(event: OrchestrationEvent) => void>();
+const coderabbitEventListeners = new Set<(event: CodeRabbitReviewEvent) => void>();
 
 const rpcClientMock = {
   dispose: vi.fn(),
@@ -73,6 +77,17 @@ const rpcClientMock = {
     updateSettings: vi.fn(),
     subscribeConfig: vi.fn(),
     subscribeLifecycle: vi.fn(),
+  },
+  coderabbit: {
+    startReview: vi.fn(),
+    cancelReview: vi.fn(),
+    getStatus: vi.fn(),
+    getReview: vi.fn(),
+    fixWithAI: vi.fn(),
+    onReviewEvent: vi.fn((reviewId: string, listener: (event: CodeRabbitReviewEvent) => void) => {
+      void reviewId;
+      return registerListener(coderabbitEventListeners, listener);
+    }),
   },
   orchestration: {
     getSnapshot: vi.fn(),
@@ -174,6 +189,7 @@ beforeEach(() => {
   showContextMenuFallbackMock.mockReset();
   terminalEventListeners.clear();
   orchestrationEventListeners.clear();
+  coderabbitEventListeners.clear();
   Reflect.deleteProperty(getWindowForTest(), "desktopBridge");
 });
 
@@ -243,6 +259,31 @@ describe("wsNativeApi", () => {
     expect(onDomainEvent).toHaveBeenCalledWith(orchestrationEvent);
   });
 
+  it("forwards CodeRabbit review stream events", async () => {
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    const onReviewEvent = vi.fn();
+
+    api.coderabbit.onReviewEvent(CodeRabbitReviewId.makeUnsafe("crr-1"), onReviewEvent);
+
+    const reviewEvent = {
+      type: "status_updated",
+      reviewId: CodeRabbitReviewId.makeUnsafe("crr-1"),
+      timestamp: "2026-02-24T00:00:00.000Z",
+      phase: "analyzing",
+      statusText: "reviewing",
+    } as const;
+    emitEvent(coderabbitEventListeners, reviewEvent);
+
+    expect(onReviewEvent).toHaveBeenCalledWith(reviewEvent);
+    expect(rpcClientMock.coderabbit.onReviewEvent).toHaveBeenCalledWith(
+      "crr-1",
+      onReviewEvent,
+      undefined,
+    );
+  });
+
   it("forwards orchestration stream subscription options to the RPC client", async () => {
     const { createWsNativeApi } = await import("./wsNativeApi");
 
@@ -294,6 +335,66 @@ describe("wsNativeApi", () => {
       cwd: "/tmp/project",
       relativePath: "plan.md",
       contents: "# Plan\n",
+    });
+  });
+
+  it("forwards CodeRabbit control calls to the RPC client", async () => {
+    rpcClientMock.coderabbit.getStatus.mockResolvedValue({
+      available: true,
+      authenticated: true,
+      activeReviewId: CodeRabbitReviewId.makeUnsafe("crr-active"),
+      latestReviewId: CodeRabbitReviewId.makeUnsafe("crr-active"),
+    });
+    rpcClientMock.coderabbit.getReview.mockResolvedValue({
+      reviewId: CodeRabbitReviewId.makeUnsafe("crr-active"),
+      cwd: "/tmp/project",
+      scope: "all",
+      phase: "completed",
+      statusText: "review_completed",
+      currentBranch: "main",
+      baseBranch: "main",
+      findings: [],
+      degraded: false,
+      startedAt: "2026-02-24T00:00:00.000Z",
+      updatedAt: "2026-02-24T00:00:00.000Z",
+      completedAt: "2026-02-24T00:00:00.000Z",
+      errorMessage: null,
+    });
+
+    const { createWsNativeApi } = await import("./wsNativeApi");
+    const api = createWsNativeApi();
+
+    await api.coderabbit.startReview({ cwd: "/tmp/project", scope: "all" });
+    await api.coderabbit.cancelReview({
+      reviewId: CodeRabbitReviewId.makeUnsafe("crr-active"),
+    });
+    await api.coderabbit.getStatus({ cwd: "/tmp/project" });
+    await api.coderabbit.getReview({
+      reviewId: CodeRabbitReviewId.makeUnsafe("crr-active"),
+    });
+    await api.coderabbit.fixWithAI({
+      reviewId: CodeRabbitReviewId.makeUnsafe("crr-active"),
+      findingIds: [CodeRabbitFindingId.makeUnsafe("finding-1")],
+      projectId: ProjectId.makeUnsafe("project-1"),
+    });
+
+    expect(rpcClientMock.coderabbit.startReview).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+      scope: "all",
+    });
+    expect(rpcClientMock.coderabbit.cancelReview).toHaveBeenCalledWith({
+      reviewId: "crr-active",
+    });
+    expect(rpcClientMock.coderabbit.getStatus).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+    });
+    expect(rpcClientMock.coderabbit.getReview).toHaveBeenCalledWith({
+      reviewId: "crr-active",
+    });
+    expect(rpcClientMock.coderabbit.fixWithAI).toHaveBeenCalledWith({
+      reviewId: "crr-active",
+      findingIds: ["finding-1"],
+      projectId: "project-1",
     });
   });
 
