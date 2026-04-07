@@ -2,4 +2,6 @@
 import type { JsonValue } from "../../../serde_json/JsonValue";
 import type { RpcExit } from "./RpcExit";
 
-export type RpcServerMessage = { "_tag": "Chunk", requestId: string, values: Array<JsonValue>, } | { "_tag": "Exit", requestId: string, exit: RpcExit, };
+export type RpcServerMessage =
+  | { _tag: "Chunk"; requestId: string; values: Array<JsonValue> }
+  | { _tag: "Exit"; requestId: string; exit: RpcExit };

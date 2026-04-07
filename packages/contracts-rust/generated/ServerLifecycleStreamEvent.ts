@@ -2,4 +2,6 @@
 import type { ServerLifecycleReadyPayload } from "./ServerLifecycleReadyPayload";
 import type { ServerLifecycleWelcomePayload } from "./ServerLifecycleWelcomePayload";
 
-export type ServerLifecycleStreamEvent = { "type": "welcome", version: number, sequence: bigint, payload: ServerLifecycleWelcomePayload, } | { "type": "ready", version: number, sequence: bigint, payload: ServerLifecycleReadyPayload, };
+export type ServerLifecycleStreamEvent =
+  | { type: "welcome"; version: number; sequence: bigint; payload: ServerLifecycleWelcomePayload }
+  | { type: "ready"; version: number; sequence: bigint; payload: ServerLifecycleReadyPayload };

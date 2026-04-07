@@ -2,4 +2,4 @@
 import type { JsonValue } from "../../../serde_json/JsonValue";
 import type { RpcCause } from "./RpcCause";
 
-export type RpcExit = { "_tag": "Success", value: JsonValue, } | { "_tag": "Failure", cause: RpcCause, };
+export type RpcExit = { _tag: "Success"; value: JsonValue } | { _tag: "Failure"; cause: RpcCause };

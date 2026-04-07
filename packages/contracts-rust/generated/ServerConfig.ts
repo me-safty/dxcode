@@ -5,4 +5,13 @@ import type { ServerObservability } from "./ServerObservability";
 import type { ServerProvider } from "./ServerProvider";
 import type { ServerSettings } from "./ServerSettings";
 
-export type ServerConfig = { cwd: string, keybindingsConfigPath: string, keybindings: Array<ResolvedKeybindingRule>, issues: Array<ServerConfigIssue>, providers: Array<ServerProvider>, availableEditors: Array<string>, observability: ServerObservability, settings: ServerSettings, };
+export type ServerConfig = {
+  cwd: string;
+  keybindingsConfigPath: string;
+  keybindings: Array<ResolvedKeybindingRule>;
+  issues: Array<ServerConfigIssue>;
+  providers: Array<ServerProvider>;
+  availableEditors: Array<string>;
+  observability: ServerObservability;
+  settings: ServerSettings;
+};

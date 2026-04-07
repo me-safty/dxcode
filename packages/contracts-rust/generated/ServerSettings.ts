@@ -3,4 +3,10 @@ import type { ModelSelection } from "./ModelSelection";
 import type { ObservabilitySettings } from "./ObservabilitySettings";
 import type { ProviderSettings } from "./ProviderSettings";
 
-export type ServerSettings = { enableAssistantStreaming: boolean, defaultThreadEnvMode: string, textGenerationModelSelection: ModelSelection, providers: ProviderSettings, observability: ObservabilitySettings, };
+export type ServerSettings = {
+  enableAssistantStreaming: boolean;
+  defaultThreadEnvMode: string;
+  textGenerationModelSelection: ModelSelection;
+  providers: ProviderSettings;
+  observability: ObservabilitySettings;
+};

@@ -2,4 +2,4 @@
 import type { JsonValue } from "../../../serde_json/JsonValue";
 import type { ProviderKind } from "./ProviderKind";
 
-export type ModelSelection = { provider: ProviderKind, model: string, options: JsonValue | null, };
+export type ModelSelection = { provider: ProviderKind; model: string; options: JsonValue | null };

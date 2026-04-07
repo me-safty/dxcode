@@ -2,4 +2,13 @@
 import type { ModelSelection } from "./ModelSelection";
 import type { ProjectScript } from "./ProjectScript";
 
-export type OrchestrationProject = { id: string, title: string, workspaceRoot: string, defaultModelSelection: ModelSelection | null, scripts: Array<ProjectScript>, createdAt: string, updatedAt: string, deletedAt: string | null, };
+export type OrchestrationProject = {
+  id: string;
+  title: string;
+  workspaceRoot: string;
+  defaultModelSelection: ModelSelection | null;
+  scripts: Array<ProjectScript>;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};

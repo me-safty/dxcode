@@ -2,4 +2,4 @@
 import type { ClaudeSettings } from "./ClaudeSettings";
 import type { CodexSettings } from "./CodexSettings";
 
-export type ProviderSettings = { codex: CodexSettings, claudeAgent: ClaudeSettings, };
+export type ProviderSettings = { codex: CodexSettings; claudeAgent: ClaudeSettings };

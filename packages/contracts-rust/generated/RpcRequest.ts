@@ -2,4 +2,11 @@
 import type { JsonValue } from "../../../serde_json/JsonValue";
 import type { RpcInboundTag } from "./RpcInboundTag";
 
-export type RpcRequest = { _tag: RpcInboundTag, id: string, tag: string, payload: JsonValue, trace_id: string | null, span_id: string | null, };
+export type RpcRequest = {
+  _tag: RpcInboundTag;
+  id: string;
+  tag: string;
+  payload: JsonValue;
+  trace_id: string | null;
+  span_id: string | null;
+};

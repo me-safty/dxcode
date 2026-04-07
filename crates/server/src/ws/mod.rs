@@ -150,7 +150,34 @@ async fn dispatch_request(
             ));
         }
         METHOD_ORCHESTRATION_REPLAY_EVENTS => {
-            let _ = outbound_tx.send(RpcServerMessage::success(request.id, serde_json::json!([])));
+            let from_sequence_exclusive = request
+                .payload
+                .get("fromSequenceExclusive")
+                .and_then(serde_json::Value::as_u64)
+                .or_else(|| {
+                    request
+                        .payload
+                        .get("fromSequence")
+                        .and_then(serde_json::Value::as_u64)
+                })
+                .or_else(|| request.payload.as_u64())
+                .unwrap_or(0);
+
+            match state.replay_events(from_sequence_exclusive).await {
+                Ok(events) => {
+                    let _ = outbound_tx.send(RpcServerMessage::success(
+                        request.id,
+                        serde_json::to_value(events).unwrap_or(Value::Null),
+                    ));
+                }
+                Err(error) => {
+                    let _ = outbound_tx.send(RpcServerMessage::failure(
+                        request.id,
+                        "Unable to replay events.",
+                        Some(serde_json::json!({ "detail": error.to_string() })),
+                    ));
+                }
+            }
         }
         METHOD_SUBSCRIBE_SERVER_CONFIG => {
             let request_id = request.id.clone();

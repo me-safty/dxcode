@@ -4,4 +4,8 @@ import type { ServerConfigKeybindingsUpdatedPayload } from "./ServerConfigKeybin
 import type { ServerConfigProviderStatusesPayload } from "./ServerConfigProviderStatusesPayload";
 import type { ServerConfigSettingsUpdatedPayload } from "./ServerConfigSettingsUpdatedPayload";
 
-export type ServerConfigStreamEvent = { "type": "snapshot", version: number, config: ServerConfig, } | { "type": "keybindingsUpdated", version: number, payload: ServerConfigKeybindingsUpdatedPayload, } | { "type": "providerStatuses", version: number, payload: ServerConfigProviderStatusesPayload, } | { "type": "settingsUpdated", version: number, payload: ServerConfigSettingsUpdatedPayload, };
+export type ServerConfigStreamEvent =
+  | { type: "snapshot"; version: number; config: ServerConfig }
+  | { type: "keybindingsUpdated"; version: number; payload: ServerConfigKeybindingsUpdatedPayload }
+  | { type: "providerStatuses"; version: number; payload: ServerConfigProviderStatusesPayload }
+  | { type: "settingsUpdated"; version: number; payload: ServerConfigSettingsUpdatedPayload };

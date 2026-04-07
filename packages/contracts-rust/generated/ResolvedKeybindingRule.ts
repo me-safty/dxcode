@@ -2,4 +2,8 @@
 import type { JsonValue } from "../../../serde_json/JsonValue";
 import type { KeybindingShortcut } from "./KeybindingShortcut";
 
-export type ResolvedKeybindingRule = { command: string, shortcut: KeybindingShortcut, whenAst: JsonValue | null, };
+export type ResolvedKeybindingRule = {
+  command: string;
+  shortcut: KeybindingShortcut;
+  whenAst: JsonValue | null;
+};

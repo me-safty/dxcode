@@ -7,4 +7,23 @@ import type { OrchestrationProposedPlan } from "./OrchestrationProposedPlan";
 import type { OrchestrationSession } from "./OrchestrationSession";
 import type { OrchestrationThreadActivity } from "./OrchestrationThreadActivity";
 
-export type OrchestrationThread = { id: string, projectId: string, title: string, modelSelection: ModelSelection, runtimeMode: string, interactionMode: string, branch: string | null, worktreePath: string | null, latestTurn: OrchestrationLatestTurn | null, createdAt: string, updatedAt: string, archivedAt: string | null, deletedAt: string | null, messages: Array<OrchestrationMessage>, proposedPlans: Array<OrchestrationProposedPlan>, activities: Array<OrchestrationThreadActivity>, checkpoints: Array<OrchestrationCheckpointSummary>, session: OrchestrationSession | null, };
+export type OrchestrationThread = {
+  id: string;
+  projectId: string;
+  title: string;
+  modelSelection: ModelSelection;
+  runtimeMode: string;
+  interactionMode: string;
+  branch: string | null;
+  worktreePath: string | null;
+  latestTurn: OrchestrationLatestTurn | null;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+  deletedAt: string | null;
+  messages: Array<OrchestrationMessage>;
+  proposedPlans: Array<OrchestrationProposedPlan>;
+  activities: Array<OrchestrationThreadActivity>;
+  checkpoints: Array<OrchestrationCheckpointSummary>;
+  session: OrchestrationSession | null;
+};

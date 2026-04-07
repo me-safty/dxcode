@@ -37,6 +37,7 @@ fn run() -> anyhow::Result<()> {
     let repo_root = workspace_root()?;
     let web_dist_dir = repo_root.join("apps/web/dist");
     let logs_dir = default_logs_dir()?;
+    let db_path = default_db_path()?;
     std::fs::create_dir_all(&logs_dir)
         .with_context(|| format!("failed to create {}", logs_dir.display()))?;
 
@@ -55,6 +56,7 @@ fn run() -> anyhow::Result<()> {
             web_dist_dir,
             ws_token: token,
             logs_dir: logs_dir.clone(),
+            db_path: db_path.clone(),
         },
     )?;
 
@@ -69,7 +71,8 @@ fn run() -> anyhow::Result<()> {
         web_dist_dir: workspace_root()?.join("apps/web/dist"),
         ws_token: String::new(),
         logs_dir,
-    });
+        db_path,
+    })?;
 
     let app = tauri::Builder::default()
         .manage(desktop_state.clone())
@@ -149,6 +152,11 @@ fn workspace_root() -> anyhow::Result<PathBuf> {
 fn default_logs_dir() -> anyhow::Result<PathBuf> {
     let home = std::env::var_os("HOME").context("HOME is not set")?;
     Ok(PathBuf::from(home).join(".t3/userdata/logs"))
+}
+
+fn default_db_path() -> anyhow::Result<PathBuf> {
+    let home = std::env::var_os("HOME").context("HOME is not set")?;
+    Ok(PathBuf::from(home).join(".t3/userdata/state.sqlite3"))
 }
 
 fn generate_auth_token() -> String {

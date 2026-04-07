@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod http;
+pub mod persistence;
 pub mod ws;
 
 use std::net::SocketAddr;
@@ -28,6 +29,7 @@ use t3code_contracts::server::{
 
 use crate::config::ServerRuntimeConfig;
 use crate::http::load_asset_response;
+use crate::persistence::SqliteDb;
 use crate::ws::handle_socket;
 
 #[derive(Clone)]
@@ -37,6 +39,7 @@ pub struct AppState {
 
 struct AppStateInner {
     config: ServerRuntimeConfig,
+    db: SqliteDb,
     settings: RwLock<ServerSettings>,
     snapshot: RwLock<OrchestrationReadModel>,
     config_events: broadcast::Sender<ServerConfigStreamEvent>,
@@ -46,29 +49,35 @@ struct AppStateInner {
 }
 
 impl AppState {
-    #[must_use]
-    pub fn new(config: ServerRuntimeConfig) -> Self {
+    /// Constructs a new server state, running migrations and loading the read-model snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `SQLite` database cannot be opened, migrations fail, or the
+    /// persisted snapshot cannot be decoded.
+    pub fn new(config: ServerRuntimeConfig) -> anyhow::Result<Self> {
         let started_at = "2026-04-07T00:00:00Z".to_owned();
         let (config_events, _) = broadcast::channel(64);
         let (orchestration_events, _) = broadcast::channel(64);
         let (terminal_events, _) = broadcast::channel(64);
 
-        Self {
+        let db = SqliteDb::open_and_migrate(&config.db_path).context("failed to open sqlite db")?;
+        let snapshot = db
+            .with_conn_blocking(|conn| load_snapshot_from_db(conn, &started_at))
+            .context("failed to load snapshot from sqlite")?;
+
+        Ok(Self {
             inner: Arc::new(AppStateInner {
                 config,
+                db,
                 settings: RwLock::new(ServerSettings::default()),
-                snapshot: RwLock::new(OrchestrationReadModel {
-                    snapshot_sequence: 0,
-                    projects: Vec::new(),
-                    threads: Vec::new(),
-                    updated_at: started_at.clone(),
-                }),
+                snapshot: RwLock::new(snapshot),
                 config_events,
                 orchestration_events,
                 terminal_events,
                 started_at,
             }),
-        }
+        })
     }
 
     pub async fn server_config(&self) -> ServerConfig {
@@ -133,6 +142,62 @@ impl AppState {
         self.inner.snapshot.read().await.clone()
     }
 
+    /// Loads orchestration events from the persisted event store.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails or if stored JSON payloads are invalid.
+    pub async fn replay_events(
+        &self,
+        from_sequence_exclusive: u64,
+    ) -> anyhow::Result<Vec<OrchestrationEvent>> {
+        self.inner
+            .db
+            .with_conn(move |conn| {
+                use anyhow::Context;
+
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT sequence, event_id, aggregate_kind, stream_id, occurred_at, command_id, causation_event_id, correlation_id, metadata_json, event_type, payload_json
+                         FROM orchestration_events
+                         WHERE sequence > ?1
+                         ORDER BY sequence ASC",
+                    )
+                    .context("prepare orchestration_events replay query failed")?;
+
+                let mut rows = stmt
+                    .query(rusqlite::params![i64::try_from(from_sequence_exclusive).unwrap_or(i64::MAX)])
+                    .context("query orchestration_events replay failed")?;
+
+                let mut out = Vec::new();
+                while let Some(row) = rows.next().context("advance orchestration_events rows failed")? {
+                    let metadata_json: String = row.get(8)?;
+                    let payload_json: String = row.get(10)?;
+                    let metadata: serde_json::Value =
+                        serde_json::from_str(&metadata_json).context("invalid event metadata_json")?;
+                    let payload: serde_json::Value =
+                        serde_json::from_str(&payload_json).context("invalid event payload_json")?;
+
+                    out.push(OrchestrationEvent {
+                        sequence: row.get::<_, i64>(0).unwrap_or(0).try_into().unwrap_or(0),
+                        event_id: row.get(1)?,
+                        aggregate_kind: row.get(2)?,
+                        aggregate_id: row.get(3)?,
+                        occurred_at: row.get(4)?,
+                        command_id: row.get(5)?,
+                        causation_event_id: row.get(6)?,
+                        correlation_id: row.get(7)?,
+                        metadata,
+                        r#type: row.get(9)?,
+                        payload,
+                    });
+                }
+
+                Ok(out)
+            })
+            .await
+    }
+
     #[must_use]
     pub fn welcome_event(&self) -> ServerLifecycleStreamEvent {
         let project_name = self.inner.config.cwd.file_name().map_or_else(
@@ -179,6 +244,117 @@ impl AppState {
     }
 }
 
+fn load_snapshot_from_db(
+    conn: &rusqlite::Connection,
+    now: &str,
+) -> anyhow::Result<OrchestrationReadModel> {
+    use anyhow::Context;
+    use rusqlite::OptionalExtension;
+    use t3code_contracts::orchestration::{
+        ModelSelection, OrchestrationProject, OrchestrationThread, ProjectScript, ProviderKind,
+    };
+
+    let snapshot_sequence: u64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(sequence), 0) FROM orchestration_events",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .context("failed to query orchestration_events max sequence")?
+        .unwrap_or(0)
+        .try_into()
+        .unwrap_or(0);
+
+    let mut projects_stmt = conn
+        .prepare(
+            "SELECT project_id, title, workspace_root, default_model_selection_json, scripts_json, created_at, updated_at, deleted_at
+             FROM projection_projects
+             WHERE deleted_at IS NULL
+             ORDER BY updated_at DESC",
+        )
+        .context("prepare projection_projects query failed")?;
+    let projects_iter = projects_stmt
+        .query_map([], |row| {
+            let scripts_json: String = row.get(4)?;
+            let scripts: Vec<ProjectScript> =
+                serde_json::from_str(&scripts_json).unwrap_or_default();
+            let default_model_selection_json: Option<String> = row.get(3)?;
+            let default_model_selection: Option<ModelSelection> =
+                default_model_selection_json.and_then(|raw| serde_json::from_str(&raw).ok());
+
+            Ok(OrchestrationProject {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                workspace_root: row.get(2)?,
+                default_model_selection,
+                scripts,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+                deleted_at: row.get(7)?,
+            })
+        })
+        .context("query projection_projects failed")?;
+    let mut projects = Vec::new();
+    for project in projects_iter {
+        projects.push(project.context("projection_projects row decode failed")?);
+    }
+
+    let mut threads_stmt = conn
+        .prepare(
+            "SELECT thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode, branch, worktree_path, latest_turn_id, created_at, updated_at, archived_at, deleted_at
+             FROM projection_threads
+             WHERE deleted_at IS NULL
+             ORDER BY updated_at DESC",
+        )
+        .context("prepare projection_threads query failed")?;
+    let threads_iter = threads_stmt
+        .query_map([], |row| {
+            let model_selection_json: Option<String> = row.get(3)?;
+            let model_selection: ModelSelection = model_selection_json
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<ModelSelection>(raw).ok())
+                .unwrap_or(ModelSelection {
+                    provider: ProviderKind::Codex,
+                    model: "gpt-5.4".to_owned(),
+                    options: None,
+                });
+
+            Ok(OrchestrationThread {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                title: row.get(2)?,
+                model_selection,
+                runtime_mode: row.get(4)?,
+                interaction_mode: row.get(5)?,
+                branch: row.get(6)?,
+                worktree_path: row.get(7)?,
+                latest_turn: None,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+                archived_at: row.get(11)?,
+                deleted_at: row.get(12)?,
+                messages: Vec::new(),
+                proposed_plans: Vec::new(),
+                activities: Vec::new(),
+                checkpoints: Vec::new(),
+                session: None,
+            })
+        })
+        .context("query projection_threads failed")?;
+    let mut threads = Vec::new();
+    for thread in threads_iter {
+        threads.push(thread.context("projection_threads row decode failed")?);
+    }
+
+    Ok(OrchestrationReadModel {
+        snapshot_sequence,
+        projects,
+        threads,
+        updated_at: now.to_owned(),
+    })
+}
+
 pub struct ServerHandle {
     pub local_addr: SocketAddr,
     shutdown: Option<oneshot::Sender<()>>,
@@ -216,7 +392,7 @@ pub fn spawn(
     let local_addr = listener
         .local_addr()
         .context("failed to read listener address")?;
-    let state = AppState::new(runtime_config);
+    let state = AppState::new(runtime_config)?;
     let router = make_router(state.clone());
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
@@ -337,7 +513,7 @@ mod tests {
 
     #[tokio::test]
     async fn exposes_empty_bootstrap_state() {
-        let state = AppState::new(test_config());
+        let state = AppState::new(test_config()).expect("state should init");
 
         let config = state.server_config().await;
         assert!(config.providers.is_empty());
@@ -351,7 +527,7 @@ mod tests {
 
     #[tokio::test]
     async fn updates_settings_in_memory() {
-        let state = AppState::new(test_config());
+        let state = AppState::new(test_config()).expect("state should init");
         let next = state
             .update_settings(serde_json::json!({
                 "enableAssistantStreaming": true,
@@ -373,11 +549,13 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).expect("temp dir");
         std::fs::write(temp_dir.join("index.html"), "<html></html>").expect("write index");
 
+        let db_path = temp_dir.join("state.sqlite3");
         ServerRuntimeConfig {
             cwd: PathBuf::from(env!("CARGO_MANIFEST_DIR")),
             web_dist_dir: temp_dir,
             ws_token: "secret-token".to_owned(),
             logs_dir: PathBuf::from("/tmp/t3-logs"),
+            db_path,
         }
     }
 

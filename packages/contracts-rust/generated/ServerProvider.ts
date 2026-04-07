@@ -3,4 +3,14 @@ import type { ProviderKind } from "./ProviderKind";
 import type { ServerProviderAuth } from "./ServerProviderAuth";
 import type { ServerProviderModel } from "./ServerProviderModel";
 
-export type ServerProvider = { provider: ProviderKind, enabled: boolean, installed: boolean, version: string | null, status: string, auth: ServerProviderAuth, checkedAt: string, message: string | null, models: Array<ServerProviderModel>, };
+export type ServerProvider = {
+  provider: ProviderKind;
+  enabled: boolean;
+  installed: boolean;
+  version: string | null;
+  status: string;
+  auth: ServerProviderAuth;
+  checkedAt: string;
+  message: string | null;
+  models: Array<ServerProviderModel>;
+};

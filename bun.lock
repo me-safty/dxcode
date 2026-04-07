@@ -135,6 +135,9 @@
         "vitest": "catalog:",
       },
     },
+    "packages/contracts-rust": {
+      "name": "@t3tools/contracts-rust",
+    },
     "packages/shared": {
       "name": "@t3tools/shared",
       "version": "0.0.0-alpha.1",
@@ -660,6 +663,8 @@
     "@szmarczak/http-timer": ["@szmarczak/http-timer@4.0.6", "", { "dependencies": { "defer-to-connect": "^2.0.0" } }, "sha512-4BAffykYOgO+5nzBWYwE3W90sBgLJoUPRWWcL8wlyiM8IB8ipJz3UMJ9KXQd1RKQXpKp8Tutn80HZtWsu2u76w=="],
 
     "@t3tools/contracts": ["@t3tools/contracts@workspace:packages/contracts"],
+
+    "@t3tools/contracts-rust": ["@t3tools/contracts-rust@workspace:packages/contracts-rust"],
 
     "@t3tools/desktop": ["@t3tools/desktop@workspace:apps/desktop"],
 

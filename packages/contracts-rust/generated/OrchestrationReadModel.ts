@@ -2,4 +2,9 @@
 import type { OrchestrationProject } from "./OrchestrationProject";
 import type { OrchestrationThread } from "./OrchestrationThread";
 
-export type OrchestrationReadModel = { snapshotSequence: bigint, projects: Array<OrchestrationProject>, threads: Array<OrchestrationThread>, updatedAt: string, };
+export type OrchestrationReadModel = {
+  snapshotSequence: bigint;
+  projects: Array<OrchestrationProject>;
+  threads: Array<OrchestrationThread>;
+  updatedAt: string;
+};

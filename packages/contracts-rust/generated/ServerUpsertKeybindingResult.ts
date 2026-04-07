@@ -2,4 +2,7 @@
 import type { ResolvedKeybindingRule } from "./ResolvedKeybindingRule";
 import type { ServerConfigIssue } from "./ServerConfigIssue";
 
-export type ServerUpsertKeybindingResult = { keybindings: Array<ResolvedKeybindingRule>, issues: Array<ServerConfigIssue>, };
+export type ServerUpsertKeybindingResult = {
+  keybindings: Array<ResolvedKeybindingRule>;
+  issues: Array<ServerConfigIssue>;
+};

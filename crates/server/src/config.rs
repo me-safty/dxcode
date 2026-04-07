@@ -8,4 +8,5 @@ pub struct ServerRuntimeConfig {
     pub web_dist_dir: PathBuf,
     pub ws_token: String,
     pub logs_dir: PathBuf,
+    pub db_path: PathBuf,
 }
