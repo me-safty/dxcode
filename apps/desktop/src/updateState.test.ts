@@ -71,7 +71,7 @@ describe("getAutoUpdateDisabledReason", () => {
         platform: "darwin",
         appImage: undefined,
         disabledByEnv: false,
-        hasFeedURL: false,
+        hasFeedURL: true,
       }),
     ).toContain("packaged production builds");
   });
