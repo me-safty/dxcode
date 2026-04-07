@@ -103,7 +103,5 @@ pub fn run_migrations(conn: &mut Connection) -> anyhow::Result<MigrationSummary>
         Vec::new()
     };
 
-    Ok(MigrationSummary {
-        applied,
-    })
+    Ok(MigrationSummary { applied })
 }

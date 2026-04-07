@@ -147,7 +147,8 @@ async fn app_state_fails_bootstrap_on_invalid_projection_json() {
     .expect_err("bootstrap should fail for invalid json");
 
     assert!(
-        err.to_string().contains("invalid projection_projects.scripts_json"),
+        err.to_string()
+            .contains("invalid projection_projects.scripts_json"),
         "unexpected error: {err:#}"
     );
 }

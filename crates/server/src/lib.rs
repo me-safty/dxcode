@@ -370,11 +370,9 @@ fn load_snapshot_from_db(
 fn current_utc_timestamp(conn: &rusqlite::Connection) -> anyhow::Result<String> {
     use anyhow::Context;
 
-    conn.query_row(
-        "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-        [],
-        |row| row.get::<_, String>(0),
-    )
+    conn.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
+        row.get::<_, String>(0)
+    })
     .context("failed to query sqlite utc timestamp")
 }
 
