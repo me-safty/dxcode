@@ -46,6 +46,8 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   type DesktopUpdateState,
   ProjectId,
+  type ProviderKind,
+  PROVIDER_DISPLAY_NAMES,
   ThreadId,
   type GitStatusResult,
 } from "@t3tools/contracts";
@@ -130,11 +132,7 @@ import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
 import { useSidebarThreadSummaryById } from "../storeSelectors";
 import type { Project } from "../types";
-import {
-  PROVIDER_ICON_BY_KIND,
-  providerDisplayLabel,
-  providerIconClassName,
-} from "../providerPresentation";
+import { PROVIDER_ICON_BY_KIND, providerIconClassName } from "../providerPresentation";
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
@@ -260,9 +258,9 @@ function resolveThreadPr(
   return gitStatus.pr ?? null;
 }
 
-function ThreadProviderIcon(props: { provider: "codex" | "claudeAgent"; threadId: ThreadId }) {
+function ThreadProviderIcon(props: { provider: ProviderKind; threadId: ThreadId }) {
   const ProviderIcon = PROVIDER_ICON_BY_KIND[props.provider];
-  const label = `${providerDisplayLabel(props.provider)} thread`;
+  const label = `${PROVIDER_DISPLAY_NAMES[props.provider]} thread`;
 
   return (
     <span

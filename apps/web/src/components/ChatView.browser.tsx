@@ -8,6 +8,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type ProjectId,
+  type ProviderKind,
   type ServerConfig,
   type ServerLifecycleWelcomePayload,
   type ThreadId,
@@ -219,7 +220,7 @@ function createSnapshotForTargetUser(options: {
   targetText: string;
   targetAttachmentCount?: number;
   sessionStatus?: OrchestrationSessionStatus;
-  provider?: "codex" | "claudeAgent";
+  provider?: ProviderKind;
 }): OrchestrationReadModel {
   const provider = options.provider ?? "codex";
   const messages: Array<OrchestrationReadModel["threads"][number]["messages"][number]> = [];
