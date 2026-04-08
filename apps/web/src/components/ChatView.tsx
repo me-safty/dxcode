@@ -3112,6 +3112,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
         setPrompt(promptForSend);
         setComposerCursor(collapseExpandedComposerCursor(promptForSend, promptForSend.length));
         addComposerImagesToDraft(composerImagesSnapshot.map(cloneComposerImageForRetry));
+        if (persistedComposerAttachmentsSnapshot.length > 0) {
+          syncComposerDraftPersistedAttachments(
+            threadIdForSend,
+            persistedComposerAttachmentsSnapshot,
+          );
+        }
         addComposerTerminalContextsToDraft(composerTerminalContextsSnapshot);
         setComposerTrigger(detectComposerTrigger(promptForSend, promptForSend.length));
       }
