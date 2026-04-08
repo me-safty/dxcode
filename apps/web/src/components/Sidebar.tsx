@@ -111,6 +111,7 @@ import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
   getVisibleSidebarThreadIds,
   getVisibleThreadsForProject,
+  getFallbackThreadIdAfterBulkDelete,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
@@ -130,6 +131,15 @@ import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
 import { useSidebarThreadSummaryById } from "../storeSelectors";
 import type { Project } from "../types";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
@@ -162,6 +172,12 @@ interface PrStatusIndicator {
 }
 
 type ThreadPr = GitStatusResult["pr"];
+interface PendingProjectDelete {
+  projectId: ProjectId;
+  projectName: string;
+  threadIds: ThreadId[];
+  threadCount: number;
+}
 
 function ThreadStatusLabel({
   status,
@@ -731,6 +747,10 @@ export default function Sidebar() {
   const suppressProjectClickAfterDragRef = useRef(false);
   const suppressProjectClickForContextMenuRef = useRef(false);
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
+  const [pendingProjectDelete, setPendingProjectDelete] = useState<PendingProjectDelete | null>(
+    null,
+  );
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
   const selectedThreadIds = useThreadSelectionStore((s) => s.selectedThreadIds);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
   const rangeSelectTo = useThreadSelectionStore((s) => s.rangeSelectTo);
@@ -1295,50 +1315,94 @@ export default function Sidebar() {
         return;
       }
       if (clicked !== "delete") return;
-
-      const projectThreadIds = threadIdsByProjectId[projectId] ?? [];
-      if (projectThreadIds.length > 0) {
-        toastManager.add({
-          type: "warning",
-          title: "Project is not empty",
-          description: "Delete all threads in this project before removing it.",
-        });
-        return;
-      }
-
-      const confirmed = await api.dialogs.confirm(`Remove project "${project.name}"?`);
-      if (!confirmed) return;
-
-      try {
-        const projectDraftThread = getDraftThreadByProjectId(projectId);
-        if (projectDraftThread) {
-          clearComposerDraftForThread(projectDraftThread.threadId);
-        }
-        clearProjectDraftThreadId(projectId);
-        await api.orchestration.dispatchCommand({
-          type: "project.delete",
-          commandId: newCommandId(),
-          projectId,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown error removing project.";
-        console.error("Failed to remove project", { projectId, error });
-        toastManager.add({
-          type: "error",
-          title: `Failed to remove "${project.name}"`,
-          description: message,
-        });
-      }
+      const projectThreadIds = [...(threadIdsByProjectId[projectId] ?? [])];
+      setPendingProjectDelete({
+        projectId,
+        projectName: project.name,
+        threadIds: projectThreadIds,
+        threadCount: projectThreadIds.length,
+      });
     },
-    [
-      clearComposerDraftForThread,
-      clearProjectDraftThreadId,
-      copyPathToClipboard,
-      getDraftThreadByProjectId,
-      projects,
-      threadIdsByProjectId,
-    ],
+    [copyPathToClipboard, projects, threadIdsByProjectId],
   );
+
+  const confirmProjectDelete = useCallback(async () => {
+    const api = readNativeApi();
+    const pendingDelete = pendingProjectDelete;
+    if (!api || !pendingDelete || isDeletingProject) return;
+
+    setIsDeletingProject(true);
+    try {
+      const deletedThreadIds = new Set<ThreadId>(pendingDelete.threadIds);
+      const shouldNavigateAway =
+        (routeThreadId !== null && deletedThreadIds.has(routeThreadId)) ||
+        (routeThreadId === null && activeDraftThread?.projectId === pendingDelete.projectId);
+      const fallbackThreadId = shouldNavigateAway
+        ? getFallbackThreadIdAfterBulkDelete({
+            threads: Object.values(sidebarThreadsById),
+            deletedThreadIds,
+            sortOrder: appSettings.sidebarThreadSortOrder,
+          })
+        : null;
+
+      for (const threadId of pendingDelete.threadIds) {
+        await deleteThread(threadId, {
+          deletedThreadIds,
+          skipWorktreeConfirm: true,
+          suppressNavigation: true,
+        });
+      }
+
+      const projectDraftThread = getDraftThreadByProjectId(pendingDelete.projectId);
+      if (projectDraftThread) {
+        clearComposerDraftForThread(projectDraftThread.threadId);
+      }
+      clearProjectDraftThreadId(pendingDelete.projectId);
+      await api.orchestration.dispatchCommand({
+        type: "project.delete",
+        commandId: newCommandId(),
+        projectId: pendingDelete.projectId,
+      });
+      removeFromSelection(pendingDelete.threadIds);
+
+      if (shouldNavigateAway) {
+        if (fallbackThreadId) {
+          await navigate({
+            to: "/$threadId",
+            params: { threadId: fallbackThreadId },
+            replace: true,
+          });
+        } else {
+          await navigate({ to: "/", replace: true });
+        }
+      }
+
+      setPendingProjectDelete(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error removing project.";
+      console.error("Failed to remove project", { projectId: pendingDelete.projectId, error });
+      toastManager.add({
+        type: "error",
+        title: `Failed to remove "${pendingDelete.projectName}"`,
+        description: message,
+      });
+    } finally {
+      setIsDeletingProject(false);
+    }
+  }, [
+    activeDraftThread?.projectId,
+    appSettings.sidebarThreadSortOrder,
+    clearComposerDraftForThread,
+    clearProjectDraftThreadId,
+    deleteThread,
+    getDraftThreadByProjectId,
+    isDeletingProject,
+    navigate,
+    pendingProjectDelete,
+    removeFromSelection,
+    routeThreadId,
+    sidebarThreadsById,
+  ]);
 
   const projectDnDSensors = useSensors(
     useSensor(PointerSensor, {
@@ -2073,6 +2137,41 @@ export default function Sidebar() {
 
   return (
     <>
+      <AlertDialog
+        open={pendingProjectDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingProject) {
+            setPendingProjectDelete(null);
+          }
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Remove project "{pendingProjectDelete?.projectName}"?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingProjectDelete
+                ? pendingProjectDelete.threadCount > 0
+                  ? `This permanently deletes the project and its ${pendingProjectDelete.threadCount} ${pendingProjectDelete.threadCount === 1 ? "chat" : "chats"}.`
+                  : "This permanently deletes the project."
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" disabled={isDeletingProject} />}>
+              Cancel
+            </AlertDialogClose>
+            <Button
+              variant="destructive"
+              onClick={() => void confirmProjectDelete()}
+              disabled={isDeletingProject}
+            >
+              {isDeletingProject ? "Removing..." : "Remove project"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
       {isElectron ? (
         <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]">
           {wordmark}

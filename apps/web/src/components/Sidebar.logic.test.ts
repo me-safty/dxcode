@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createThreadJumpHintVisibilityController,
+  getFallbackThreadIdAfterBulkDelete,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
@@ -862,6 +863,43 @@ describe("getFallbackThreadIdAfterDelete", () => {
     });
 
     expect(fallbackThreadId).toBe(ThreadId.makeUnsafe("thread-next"));
+  });
+});
+
+describe("getFallbackThreadIdAfterBulkDelete", () => {
+  it("returns the top remaining non-archived thread across projects", () => {
+    const fallbackThreadId = getFallbackThreadIdAfterBulkDelete({
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          archivedAt: null,
+          latestUserMessageAt: null,
+        },
+        {
+          id: ThreadId.makeUnsafe("thread-2"),
+          projectId: ProjectId.makeUnsafe("project-2"),
+          createdAt: "2026-01-02T00:00:00.000Z",
+          updatedAt: "2026-01-02T00:00:00.000Z",
+          archivedAt: null,
+          latestUserMessageAt: null,
+        },
+        {
+          id: ThreadId.makeUnsafe("thread-3"),
+          projectId: ProjectId.makeUnsafe("project-3"),
+          createdAt: "2026-01-03T00:00:00.000Z",
+          updatedAt: "2026-01-03T00:00:00.000Z",
+          archivedAt: "2026-01-04T00:00:00.000Z",
+          latestUserMessageAt: null,
+        },
+      ],
+      deletedThreadIds: new Set([ThreadId.makeUnsafe("thread-1"), ThreadId.makeUnsafe("thread-3")]),
+      sortOrder: "updated_at",
+    });
+
+    expect(fallbackThreadId).toBe(ThreadId.makeUnsafe("thread-2"));
   });
 });
 

@@ -65,7 +65,14 @@ export function useThreadActions() {
   }, []);
 
   const deleteThread = useCallback(
-    async (threadId: ThreadId, opts: { deletedThreadIds?: ReadonlySet<ThreadId> } = {}) => {
+    async (
+      threadId: ThreadId,
+      opts: {
+        deletedThreadIds?: ReadonlySet<ThreadId>;
+        skipWorktreeConfirm?: boolean;
+        suppressNavigation?: boolean;
+      } = {},
+    ) => {
       const api = readNativeApi();
       if (!api) return;
       const { projects, threads } = useStore.getState();
@@ -83,6 +90,7 @@ export function useThreadActions() {
         : null;
       const canDeleteWorktree = orphanedWorktreePath !== null && threadProject !== undefined;
       const shouldDeleteWorktree =
+        !opts.skipWorktreeConfirm &&
         canDeleteWorktree &&
         (await api.dialogs.confirm(
           [
@@ -127,7 +135,7 @@ export function useThreadActions() {
       clearProjectDraftThreadById(thread.projectId, thread.id);
       clearTerminalState(threadId);
 
-      if (shouldNavigateToFallback) {
+      if (shouldNavigateToFallback && !opts.suppressNavigation) {
         if (fallbackThreadId) {
           await navigate({
             to: "/$threadId",
