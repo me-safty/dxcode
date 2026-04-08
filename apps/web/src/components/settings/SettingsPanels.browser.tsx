@@ -357,7 +357,7 @@ describe("GeneralSettingsPanel observability", () => {
 
     await render(
       <AppAtomRegistryProvider>
-        <ConnectionsSettings />
+        <GeneralSettingsPanel />
       </AppAtomRegistryProvider>,
     );
 
