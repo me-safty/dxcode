@@ -51,6 +51,7 @@ import {
   type TimelineWorkEntry,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   deriveDisplayedUserMessageState,
   type ParsedTerminalContextEntry,
@@ -932,6 +933,15 @@ function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
   return "text-muted-foreground/40";
 }
 
+function workEntryRawCommand(
+  workEntry: Pick<TimelineWorkEntry, "command" | "rawCommand">,
+): string | null {
+  const rawCommand = workEntry.rawCommand?.trim();
+  if (!rawCommand || !workEntry.command) {
+    return null;
+  }
+  return rawCommand === workEntry.command.trim() ? null : rawCommand;
+}
 function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
   if (workEntry.requestKind === "command") return TerminalIcon;
   if (workEntry.requestKind === "file-read") return EyeIcon;
@@ -967,6 +977,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const EntryIcon = workEntryIcon(workEntry);
   const heading = renderableWorkEntryHeading(workEntry);
   const preview = renderableWorkEntryPreview(workEntry);
+  const rawCommand = workEntryRawCommand(workEntry);
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
@@ -981,28 +992,60 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           <EntryIcon className="size-3" />
         </span>
         <div className="min-w-0 flex-1 overflow-hidden">
-          <p
-            className={cn(
-              "truncate text-[11px] leading-5",
-              workToneClass(workEntry.tone),
-              preview ? "text-muted-foreground/70" : "",
-            )}
-            title={displayText}
-          >
-            <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
-              {renderHighlightedText(heading, searchQuery, `work-heading:${workEntry.id}`, {
-                active: searchActive,
-              })}
-            </span>
-            {preview && (
-              <span className="text-muted-foreground/55">
-                {" - "}
-                {renderHighlightedText(preview, searchQuery, `work-preview:${workEntry.id}`, {
+          <div className="max-w-full">
+            <p
+              className={cn(
+                "truncate text-[11px] leading-5",
+                workToneClass(workEntry.tone),
+                preview ? "text-muted-foreground/70" : "",
+              )}
+              title={rawCommand ? undefined : displayText}
+            >
+              <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
+                {renderHighlightedText(heading, searchQuery, `work-heading:${workEntry.id}`, {
                   active: searchActive,
                 })}
               </span>
-            )}
-          </p>
+              {preview &&
+                (rawCommand ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      closeDelay={0}
+                      delay={75}
+                      render={
+                        <span className="max-w-full cursor-default text-muted-foreground/55 transition-colors hover:text-muted-foreground/75 focus-visible:text-muted-foreground/75">
+                          {" - "}
+                          {renderHighlightedText(
+                            preview,
+                            searchQuery,
+                            `work-preview:${workEntry.id}`,
+                            {
+                              active: searchActive,
+                            },
+                          )}
+                        </span>
+                      }
+                    />
+                    <TooltipPopup
+                      align="start"
+                      className="max-w-[min(56rem,calc(100vw-2rem))] px-0 py-0"
+                      side="top"
+                    >
+                      <div className="max-w-[min(56rem,calc(100vw-2rem))] overflow-x-auto px-1.5 py-1 font-mono text-[11px] leading-4 whitespace-nowrap">
+                        {rawCommand}
+                      </div>
+                    </TooltipPopup>
+                  </Tooltip>
+                ) : (
+                  <span className="text-muted-foreground/55">
+                    {" - "}
+                    {renderHighlightedText(preview, searchQuery, `work-preview:${workEntry.id}`, {
+                      active: searchActive,
+                    })}
+                  </span>
+                ))}
+            </p>
+          </div>
         </div>
       </div>
       {hasChangedFiles && !previewIsChangedFiles && (

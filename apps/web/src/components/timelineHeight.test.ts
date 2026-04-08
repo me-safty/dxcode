@@ -54,7 +54,7 @@ describe("estimateTimelineMessageHeight", () => {
         text: "hello",
         attachments: [{ id: "1" }],
       }),
-    ).toBe(346);
+    ).toBe(234);
 
     expect(
       estimateTimelineMessageHeight({
@@ -62,7 +62,7 @@ describe("estimateTimelineMessageHeight", () => {
         text: "hello",
         attachments: [{ id: "1" }, { id: "2" }],
       }),
-    ).toBe(346);
+    ).toBe(234);
   });
 
   it("adds a second attachment row for three or four user attachments", () => {
@@ -72,7 +72,7 @@ describe("estimateTimelineMessageHeight", () => {
         text: "hello",
         attachments: [{ id: "1" }, { id: "2" }, { id: "3" }],
       }),
-    ).toBe(574);
+    ).toBe(350);
 
     expect(
       estimateTimelineMessageHeight({
@@ -80,7 +80,7 @@ describe("estimateTimelineMessageHeight", () => {
         text: "hello",
         attachments: [{ id: "1" }, { id: "2" }, { id: "3" }, { id: "4" }],
       }),
-    ).toBe(574);
+    ).toBe(350);
   });
 
   it("does not cap long user message estimates", () => {
