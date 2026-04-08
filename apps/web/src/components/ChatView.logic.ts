@@ -1,7 +1,17 @@
-import { ProjectId, type ModelSelection, type ThreadId, type TurnId } from "@t3tools/contracts";
+import {
+  ProjectId,
+  type ModelSelection,
+  type ThreadId,
+  type TurnId,
+  type UploadChatAttachment,
+} from "@t3tools/contracts";
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadSession } from "../types";
 import { randomUUID } from "~/lib/utils";
-import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
+import {
+  type ComposerImageAttachment,
+  type DraftThreadState,
+  type PersistedComposerImageAttachment,
+} from "../composerDraftStore";
 import { Schema } from "effect";
 import { useStore } from "../store";
 import {
@@ -127,6 +137,38 @@ export function readFileAsDataUrl(file: File): Promise<string> {
     });
     reader.readAsDataURL(file);
   });
+}
+
+export async function buildTurnImageAttachments(input: {
+  images: ReadonlyArray<ComposerImageAttachment>;
+  persistedAttachments?: ReadonlyArray<PersistedComposerImageAttachment>;
+  readFile?: (file: File) => Promise<string>;
+}): Promise<UploadChatAttachment[]> {
+  const persistedAttachmentById = new Map(
+    (input.persistedAttachments ?? []).map((attachment) => [attachment.id, attachment] as const),
+  );
+  const readFile = input.readFile ?? readFileAsDataUrl;
+  return await Promise.all(
+    input.images.map(async (image) => {
+      let dataUrl: string;
+      try {
+        dataUrl = await readFile(image.file);
+      } catch (error) {
+        const persistedAttachment = persistedAttachmentById.get(image.id);
+        if (!persistedAttachment) {
+          throw error;
+        }
+        dataUrl = persistedAttachment.dataUrl;
+      }
+      return {
+        type: "image" as const,
+        name: image.name,
+        mimeType: image.mimeType,
+        sizeBytes: image.sizeBytes,
+        dataUrl,
+      };
+    }),
+  );
 }
 
 export function buildTemporaryWorktreeBranchName(): string {

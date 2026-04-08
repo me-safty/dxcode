@@ -5,6 +5,7 @@ import { useStore } from "../store";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
+  buildTurnImageAttachments,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
@@ -74,6 +75,94 @@ describe("buildExpiredTerminalContextToastCopy", () => {
       title: "Expired terminal contexts omitted from message",
       description: "Re-add it if you want that terminal output included.",
     });
+  });
+});
+
+describe("buildTurnImageAttachments", () => {
+  it("uses the live file bytes when the file is still readable", async () => {
+    const image = {
+      type: "image" as const,
+      id: "image-1",
+      name: "simulator_screenshot_123.png",
+      mimeType: "image/png",
+      sizeBytes: 4,
+      previewUrl: "blob:image-1",
+      file: new File(["live"], "simulator_screenshot_123.png", { type: "image/png" }),
+    };
+
+    await expect(
+      buildTurnImageAttachments({
+        images: [image],
+        readFile: vi.fn(async () => "data:image/png;base64,bGl2ZQ=="),
+      }),
+    ).resolves.toEqual([
+      {
+        type: "image",
+        name: "simulator_screenshot_123.png",
+        mimeType: "image/png",
+        sizeBytes: 4,
+        dataUrl: "data:image/png;base64,bGl2ZQ==",
+      },
+    ]);
+  });
+
+  it("falls back to persisted draft bytes when the live file is gone", async () => {
+    const image = {
+      type: "image" as const,
+      id: "image-1",
+      name: "simulator_screenshot_123.png",
+      mimeType: "image/png",
+      sizeBytes: 4,
+      previewUrl: "blob:image-1",
+      file: new File(["live"], "simulator_screenshot_123.png", { type: "image/png" }),
+    };
+
+    await expect(
+      buildTurnImageAttachments({
+        images: [image],
+        persistedAttachments: [
+          {
+            id: "image-1",
+            name: "simulator_screenshot_123.png",
+            mimeType: "image/png",
+            sizeBytes: 4,
+            dataUrl: "data:image/png;base64,c2F2ZWQ=",
+          },
+        ],
+        readFile: vi.fn(async () => {
+          throw new Error("ENOENT");
+        }),
+      }),
+    ).resolves.toEqual([
+      {
+        type: "image",
+        name: "simulator_screenshot_123.png",
+        mimeType: "image/png",
+        sizeBytes: 4,
+        dataUrl: "data:image/png;base64,c2F2ZWQ=",
+      },
+    ]);
+  });
+
+  it("still fails when neither the live file nor a persisted draft copy is available", async () => {
+    const image = {
+      type: "image" as const,
+      id: "image-1",
+      name: "simulator_screenshot_123.png",
+      mimeType: "image/png",
+      sizeBytes: 4,
+      previewUrl: "blob:image-1",
+      file: new File(["live"], "simulator_screenshot_123.png", { type: "image/png" }),
+    };
+
+    await expect(
+      buildTurnImageAttachments({
+        images: [image],
+        readFile: vi.fn(async () => {
+          throw new Error("ENOENT");
+        }),
+      }),
+    ).rejects.toThrow("ENOENT");
   });
 });
 

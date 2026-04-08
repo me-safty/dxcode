@@ -174,6 +174,7 @@ import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
+  buildTurnImageAttachments,
   buildLocalDraftThread,
   buildTemporaryWorktreeBranchName,
   cloneComposerImageForRetry,
@@ -2933,6 +2934,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
 
     const composerImagesSnapshot = [...composerImages];
+    const persistedComposerAttachmentsSnapshot = [...composerDraft.persistedAttachments];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const messageTextForSend = appendTerminalContextsToPrompt(
       promptForSend,
@@ -2947,15 +2949,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       effort: selectedPromptEffort,
       text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
     });
-    const turnAttachmentsPromise = Promise.all(
-      composerImagesSnapshot.map(async (image) => ({
-        type: "image" as const,
-        name: image.name,
-        mimeType: image.mimeType,
-        sizeBytes: image.sizeBytes,
-        dataUrl: await readFileAsDataUrl(image.file),
-      })),
-    );
+    const turnAttachmentsPromise = buildTurnImageAttachments({
+      images: composerImagesSnapshot,
+      persistedAttachments: persistedComposerAttachmentsSnapshot,
+      readFile: readFileAsDataUrl,
+    });
     const optimisticAttachments = composerImagesSnapshot.map((image) => ({
       type: "image" as const,
       id: image.id,
