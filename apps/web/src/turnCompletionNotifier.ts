@@ -20,11 +20,13 @@ export function resetRunningThreadTracker(): void {
 }
 
 /**
- * Seed the tracker with threads that are already running in the store.
- * Call after snapshot bootstrap so we can detect transitions that
- * started before the current event subscription.
+ * Replace the tracker with threads that are running in the given snapshot.
+ * Call after each snapshot sync (bootstrap / recovery) so the set matches
+ * server state and stale IDs from before a disconnect cannot produce false
+ * completion transitions.
  */
 export function seedRunningThreads(threads: readonly Thread[]): void {
+  runningThreadIds.clear();
   for (const thread of threads) {
     if (thread.session?.orchestrationStatus === "running") {
       runningThreadIds.add(thread.id);

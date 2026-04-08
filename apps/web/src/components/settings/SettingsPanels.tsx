@@ -46,6 +46,7 @@ import {
   resolveAppModelSelectionState,
 } from "../../modelSelection";
 import { ensureNativeApi, readNativeApi } from "../../nativeApi";
+import { requestNotificationPermission } from "../../turnCompletionNotifier";
 import { useStore } from "../../store";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
 import { cn } from "../../lib/utils";
@@ -469,6 +470,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
+      ...(settings.enableTurnCompletionNotifications !==
+      DEFAULT_UNIFIED_SETTINGS.enableTurnCompletionNotifications
+        ? ["Turn completion notifications"]
+        : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
         : []),
@@ -489,6 +494,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.enableTurnCompletionNotifications,
       settings.timestampFormat,
       theme,
     ],
@@ -927,8 +933,8 @@ export function GeneralSettingsPanel() {
               checked={settings.enableTurnCompletionNotifications}
               onCheckedChange={(checked) => {
                 const enabled = Boolean(checked);
-                if (enabled && "Notification" in window && Notification.permission === "default") {
-                  void Notification.requestPermission();
+                if (enabled) {
+                  void requestNotificationPermission();
                 }
                 updateSettings({ enableTurnCompletionNotifications: enabled });
               }}
