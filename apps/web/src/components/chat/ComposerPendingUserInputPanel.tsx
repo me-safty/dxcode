@@ -1,5 +1,5 @@
 import { type ApprovalRequestId } from "@t3tools/contracts";
-import { memo, useCallback, useEffect, useRef } from "react";
+import { memo, useEffect, useEffectEvent, useRef } from "react";
 import { type PendingUserInput } from "../../session-logic";
 import {
   derivePendingUserInputProgress,
@@ -75,22 +75,19 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
   }, []);
 
-  const handleOptionSelection = useCallback(
-    (questionId: string, optionLabel: string) => {
-      onToggleOption(questionId, optionLabel);
-      if (activeQuestion?.multiSelect) {
-        return;
-      }
-      if (autoAdvanceTimerRef.current !== null) {
-        window.clearTimeout(autoAdvanceTimerRef.current);
-      }
-      autoAdvanceTimerRef.current = window.setTimeout(() => {
-        autoAdvanceTimerRef.current = null;
-        onAdvanceRef.current();
-      }, 200);
-    },
-    [activeQuestion?.multiSelect, onToggleOption],
-  );
+  const handleOptionSelection = useEffectEvent((questionId: string, optionLabel: string) => {
+    onToggleOption(questionId, optionLabel);
+    if (activeQuestion?.multiSelect) {
+      return;
+    }
+    if (autoAdvanceTimerRef.current !== null) {
+      window.clearTimeout(autoAdvanceTimerRef.current);
+    }
+    autoAdvanceTimerRef.current = window.setTimeout(() => {
+      autoAdvanceTimerRef.current = null;
+      onAdvanceRef.current();
+    }, 200);
+  });
 
   // Keyboard shortcut: number keys 1-9 select corresponding options when focus is
   // outside editable fields. Multi-select prompts toggle options in place; single-
@@ -117,7 +114,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, handleOptionSelection, isResponding]);
+  }, [activeQuestion, isResponding]);
 
   if (!activeQuestion) {
     return null;
