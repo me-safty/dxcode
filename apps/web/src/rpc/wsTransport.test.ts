@@ -248,6 +248,46 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("composes custom lifecycle handlers with default websocket state tracking", async () => {
+    const onOpen = vi.fn();
+    const onClose = vi.fn();
+    const transport = new WsTransport("ws://localhost:3020", {
+      onOpen,
+      onClose,
+    });
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    const socket = getSocket();
+    socket.open();
+
+    await waitFor(() => {
+      expect(onOpen).toHaveBeenCalledOnce();
+      expect(getWsConnectionStatus()).toMatchObject({
+        hasConnected: true,
+        phase: "connected",
+      });
+    });
+
+    socket.close(1012, "service restart");
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledWith({
+        code: 1012,
+        reason: "service restart",
+      });
+      expect(getWsConnectionStatus()).toMatchObject({
+        attemptCount: 2,
+        closeReason: "service restart",
+        phase: "connecting",
+      });
+    });
+
+    await transport.dispose();
+  });
+
   it("reconnects the websocket session without disposing the transport", async () => {
     const transport = new WsTransport("ws://localhost:3020");
 
