@@ -39,7 +39,7 @@ import {
   expandCollapsedComposerCursor,
   replaceTextRange,
 } from "../../composer-logic";
-import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
+import { deriveComposerSendState, readFileAsDataUrl, threadHasStarted } from "../ChatView.logic";
 import {
   type ComposerImageAttachment,
   type DraftId,
@@ -542,12 +542,18 @@ export const ChatComposer = memo(
     const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
     const threadProvider =
       activeThreadModelSelection?.provider ?? activeProjectDefaultModelSelection?.provider ?? null;
+    const hasThreadStarted = threadHasStarted(activeThread);
+    const sessionProvider = activeThread?.session?.provider ?? null;
+    const computedLockedProvider: ProviderKind | null = hasThreadStarted
+      ? (sessionProvider ?? threadProvider ?? selectedProviderByThreadId ?? null)
+      : null;
+    const effectiveLockedProvider = lockedProvider ?? computedLockedProvider;
 
     const unlockedSelectedProvider = resolveSelectableProvider(
       providerStatuses,
       selectedProviderByThreadId ?? threadProvider ?? "codex",
     );
-    const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
+    const selectedProvider: ProviderKind = effectiveLockedProvider ?? unlockedSelectedProvider;
 
     const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
       threadRef: composerDraftTarget,
