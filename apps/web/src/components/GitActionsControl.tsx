@@ -209,11 +209,10 @@ function GitQuickActionIcon({ quickAction }: { quickAction: GitQuickAction }) {
 }
 
 export default function GitActionsControl({ gitCwd, activeThreadRef }: GitActionsControlProps) {
-  const activeThreadId = activeThreadRef?.threadId ?? null;
   const activeEnvironmentId = activeThreadRef?.environmentId ?? null;
   const threadToastData = useMemo(
-    () => (activeThreadId ? { threadId: activeThreadId } : undefined),
-    [activeThreadId],
+    () => (activeThreadRef ? { threadRef: activeThreadRef } : undefined),
+    [activeThreadRef],
   );
   const activeServerThreadSelector = useMemo(
     () => createThreadSelectorByRef(activeThreadRef),
@@ -247,27 +246,27 @@ export default function GitActionsControl({ gitCwd, activeThreadRef }: GitAction
 
   const persistThreadBranchSync = useCallback(
     (branch: string | null) => {
-      if (!activeThreadId || !activeServerThread || activeServerThread.branch === branch) {
+      if (!activeThreadRef || !activeServerThread || activeServerThread.branch === branch) {
         return;
       }
 
       const worktreePath = activeServerThread.worktreePath;
-      const api = activeEnvironmentId ? readEnvironmentApi(activeEnvironmentId) : undefined;
+      const api = readEnvironmentApi(activeThreadRef.environmentId);
       if (api) {
         void api.orchestration
           .dispatchCommand({
             type: "thread.meta.update",
             commandId: newCommandId(),
-            threadId: activeThreadId,
+            threadId: activeThreadRef.threadId,
             branch,
             worktreePath,
           })
           .catch(() => undefined);
       }
 
-      setThreadBranch(activeThreadId, branch, worktreePath);
+      setThreadBranch(activeThreadRef, branch, worktreePath);
     },
-    [activeEnvironmentId, activeServerThread, activeThreadId, setThreadBranch],
+    [activeServerThread, activeThreadRef, setThreadBranch],
   );
 
   const syncThreadBranchAfterGitAction = useCallback(
