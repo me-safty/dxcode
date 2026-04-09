@@ -60,6 +60,11 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
   const autoAdvanceTimerRef = useRef<number | null>(null);
+  const onAdvanceRef = useRef(onAdvance);
+
+  useEffect(() => {
+    onAdvanceRef.current = onAdvance;
+  }, [onAdvance]);
 
   // Clear auto-advance timer on unmount
   useEffect(() => {
@@ -81,10 +86,10 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       }
       autoAdvanceTimerRef.current = window.setTimeout(() => {
         autoAdvanceTimerRef.current = null;
-        onAdvance();
+        onAdvanceRef.current();
       }, 200);
     },
-    [activeQuestion?.multiSelect, onAdvance, onToggleOption],
+    [activeQuestion?.multiSelect, onToggleOption],
   );
 
   // Keyboard shortcut: number keys 1-9 select corresponding options when focus is
