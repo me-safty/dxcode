@@ -16,7 +16,6 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import {
   forwardRef,
@@ -1184,7 +1183,7 @@ export const ChatComposer = memo(
           return true;
         }
       }
-      if (key === "Enter") {
+      if (key === "Enter" && !event.shiftKey) {
         void onSend();
         return true;
       }
@@ -1328,7 +1327,7 @@ export const ChatComposer = memo(
             insertion.cursor,
           );
           const inserted = insertComposerDraftTerminalContext(
-            scopeThreadRef(activeThread.environmentId, activeThread.id),
+            composerDraftTarget,
             insertion.prompt,
             {
               id: randomUUID(),
@@ -1360,6 +1359,7 @@ export const ChatComposer = memo(
       }),
       [
         activeThread,
+        composerDraftTarget,
         composerCursor,
         composerTerminalContexts,
         insertComposerDraftTerminalContext,

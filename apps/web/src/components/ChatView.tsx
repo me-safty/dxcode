@@ -607,6 +607,10 @@ export default function ChatView(props: ChatViewProps) {
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
   );
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
+  const setComposerDraftTerminalContexts = useComposerDraftStore(
+    (store) => store.setTerminalContexts,
+  );
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
@@ -2458,7 +2462,7 @@ export default function ChatView(props: ChatViewProps) {
         planMarkdown: activeProposedPlan.planMarkdown,
       });
       promptRef.current = "";
-      clearComposerDraftContent(scopeThreadRef(activeThread.environmentId, activeThread.id));
+      clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
       await onSubmitPlanFollowUp({
         text: followUp.text,
@@ -2473,7 +2477,7 @@ export default function ChatView(props: ChatViewProps) {
     if (standaloneSlashCommand) {
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
-      clearComposerDraftContent(scopeThreadRef(activeThread.environmentId, activeThread.id));
+      clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
       return;
     }
@@ -2571,7 +2575,7 @@ export default function ChatView(props: ChatViewProps) {
       });
     }
     promptRef.current = "";
-    clearComposerDraftContent(scopeThreadRef(activeThread.environmentId, threadIdForSend));
+    clearComposerDraftContent(composerDraftTarget);
     composerRef.current?.resetCursorState();
 
     let turnStartSucceeded = false;
@@ -2690,7 +2694,12 @@ export default function ChatView(props: ChatViewProps) {
           return next.length === existing.length ? existing : next;
         });
         promptRef.current = promptForSend;
+        composerImagesRef.current = composerImagesSnapshot;
+        composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
         setComposerDraftPrompt(composerDraftTarget, promptForSend);
+        addComposerDraftImages(composerDraftTarget, composerImagesSnapshot);
+        setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
+        composerRef.current?.resetCursorState({ cursor: promptForSend.length });
       }
       setThreadError(
         threadIdForSend,
