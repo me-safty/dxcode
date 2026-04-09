@@ -184,6 +184,7 @@ import { ComposerPrimaryActions } from "./chat/ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./chat/ComposerPlanFollowUpBanner";
+import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import {
   getComposerProviderState,
   renderProviderTraitsMenuContent,
@@ -1029,9 +1030,12 @@ export default function ChatView(props: ChatViewProps) {
       const isPrimary = p.environmentId === primaryEnvironmentId;
       const savedRecord = savedEnvironmentRegistry[p.environmentId];
       const runtimeState = savedEnvironmentRuntimeById[p.environmentId];
-      const label = isPrimary
-        ? "Local"
-        : (runtimeState?.descriptor?.label ?? savedRecord?.label ?? p.environmentId);
+      const label = resolveEnvironmentOptionLabel({
+        isPrimary,
+        environmentId: p.environmentId,
+        runtimeLabel: runtimeState?.descriptor?.label ?? null,
+        savedLabel: savedRecord?.label ?? null,
+      });
       envs.push({
         environmentId: p.environmentId,
         projectId: p.id,

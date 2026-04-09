@@ -1,12 +1,20 @@
 import { FolderIcon, GitForkIcon } from "lucide-react";
 import { memo } from "react";
 
-import type { EnvMode } from "./BranchToolbar.logic";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
+import { resolveEnvModeLabel, type EnvMode } from "./BranchToolbar.logic";
+import {
+  Select,
+  SelectGroup,
+  SelectGroupLabel,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 
 const envModeItems = [
-  { value: "local", label: "Local" },
-  { value: "worktree", label: "New worktree" },
+  { value: "local", label: resolveEnvModeLabel("local") },
+  { value: "worktree", label: resolveEnvModeLabel("worktree") },
 ] as const;
 
 interface BranchToolbarEnvModeSelectorProps {
@@ -33,7 +41,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
         ) : (
           <>
             <FolderIcon className="size-3" />
-            Local
+            {resolveEnvModeLabel("local")}
           </>
         )}
       </span>
@@ -46,7 +54,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       onValueChange={(value) => onEnvModeChange(value as EnvMode)}
       items={envModeItems}
     >
-      <SelectTrigger variant="ghost" size="xs" className="font-medium">
+      <SelectTrigger variant="ghost" size="xs" className="font-medium" aria-label="Workspace">
         {effectiveEnvMode === "worktree" ? (
           <GitForkIcon className="size-3" />
         ) : (
@@ -55,18 +63,21 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
         <SelectValue />
       </SelectTrigger>
       <SelectPopup>
-        <SelectItem value="local">
-          <span className="inline-flex items-center gap-1.5">
-            <FolderIcon className="size-3" />
-            Local
-          </span>
-        </SelectItem>
-        <SelectItem value="worktree">
-          <span className="inline-flex items-center gap-1.5">
-            <GitForkIcon className="size-3" />
-            New worktree
-          </span>
-        </SelectItem>
+        <SelectGroup>
+          <SelectGroupLabel>Workspace</SelectGroupLabel>
+          <SelectItem value="local">
+            <span className="inline-flex items-center gap-1.5">
+              <FolderIcon className="size-3" />
+              {resolveEnvModeLabel("local")}
+            </span>
+          </SelectItem>
+          <SelectItem value="worktree">
+            <span className="inline-flex items-center gap-1.5">
+              <GitForkIcon className="size-3" />
+              {resolveEnvModeLabel("worktree")}
+            </span>
+          </SelectItem>
+        </SelectGroup>
       </SelectPopup>
     </Select>
   );
