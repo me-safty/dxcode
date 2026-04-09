@@ -64,6 +64,7 @@ function resolveBrowserChromeSurface(): HTMLElement {
 }
 
 export function syncBrowserChromeTheme() {
+  if (typeof document === "undefined") return;
   const surfaceColor = normalizeThemeColor(
     getComputedStyle(resolveBrowserChromeSurface()).backgroundColor,
   );
