@@ -202,7 +202,7 @@ function nestedBooleanRecordsEqual(
     return false;
   }
   for (const [key, value] of leftEntries) {
-    if (!recordsEqual(value, right[key] ?? {})) {
+    if (!(key in right) || !recordsEqual(value, right[key]!)) {
       return false;
     }
   }
