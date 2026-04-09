@@ -167,26 +167,46 @@ function chunkPathsForGitCheckIgnore(relativePaths: readonly string[]): string[]
   return chunks;
 }
 
-function parsePorcelainPath(line: string): string | null {
+function parsePorcelainEntry(
+  line: string,
+): { path: string; isSubmodule: boolean; isSubmoduleDirty: boolean } | null {
+  // Untracked (?) and ignored (!) entries are never submodules.
   if (line.startsWith("? ") || line.startsWith("! ")) {
     const simple = line.slice(2).trim();
-    return simple.length > 0 ? simple : null;
+    return simple.length > 0 ? { path: simple, isSubmodule: false, isSubmoduleDirty: false } : null;
   }
 
+  // Ordinary changed (1), rename/copy (2), unmerged (u) entries.
   if (!(line.startsWith("1 ") || line.startsWith("2 ") || line.startsWith("u "))) {
     return null;
   }
 
+  // Detect submodule via the <sub> field at space-separated index 2.
+  // Porcelain v2 format: "1 XY <sub> <mH> <mI> <mW> <hH> <hI> <path>"
+  // <sub> is "N..." for non-submodules or "S<C><M><U>" for submodules.
+  // Submodule flags: S=submodule, C=commits differ, M=modified content, U=untracked content.
+  let isSubmodule = false;
+  let isSubmoduleDirty = false;
+  const spaceFields = line.split(/\s+/);
+  const subField = spaceFields[2];
+  if (subField && subField.startsWith("S")) {
+    isSubmodule = true;
+    // Dirty when submodule has modified tracked content (M) or untracked files (U).
+    isSubmoduleDirty = subField.includes("M") || subField.includes("U");
+  }
+
+  // Extract the file path (after tab for rename/copy, or last space-separated token).
   const tabIndex = line.indexOf("\t");
   if (tabIndex >= 0) {
     const fromTab = line.slice(tabIndex + 1);
     const [filePath] = fromTab.split("\t");
-    return filePath?.trim().length ? filePath.trim() : null;
+    const path = filePath?.trim();
+    return path && path.length > 0 ? { path, isSubmodule, isSubmoduleDirty } : null;
   }
 
   const parts = line.trim().split(/\s+/g);
   const filePath = parts.at(-1) ?? "";
-  return filePath.length > 0 ? filePath : null;
+  return filePath.length > 0 ? { path: filePath, isSubmodule, isSubmoduleDirty } : null;
 }
 
 function parseBranchLine(line: string): { name: string; current: boolean } | null {
@@ -1196,6 +1216,67 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     return branchLastCommit;
   });
 
+  /**
+   * Fetch individual file changes inside a dirty submodule by running
+   * git diff/status within the submodule directory itself.
+   */
+  const expandDirtySubmoduleFiles = Effect.fn("expandDirtySubmoduleFiles")(function* (
+    parentCwd: string,
+    submodulePath: string,
+  ) {
+    const submoduleCwd = path.join(parentCwd, submodulePath);
+    const [unstagedStdout, stagedStdout, statusResult] = yield* Effect.all(
+      [
+        runGitStdout("GitCore.expandSubmodule.unstagedNumstat", submoduleCwd, [
+          "diff",
+          "--numstat",
+          "--ignore-submodules=all",
+        ]),
+        runGitStdout("GitCore.expandSubmodule.stagedNumstat", submoduleCwd, [
+          "diff",
+          "--cached",
+          "--numstat",
+          "--ignore-submodules=all",
+        ]),
+        executeGit("GitCore.expandSubmodule.status", submoduleCwd, ["status", "--porcelain=2"], {
+          allowNonZeroExit: true,
+          timeoutMs: 10_000,
+        }),
+      ],
+      { concurrency: "unbounded" },
+    );
+
+    const allNumstat = [
+      ...parseNumstatEntries(unstagedStdout),
+      ...parseNumstatEntries(stagedStdout),
+    ];
+    const fileMap = new Map<string, { insertions: number; deletions: number }>();
+    for (const entry of allNumstat) {
+      const existing = fileMap.get(entry.path) ?? { insertions: 0, deletions: 0 };
+      existing.insertions += entry.insertions;
+      existing.deletions += entry.deletions;
+      fileMap.set(entry.path, existing);
+    }
+
+    // Pick up untracked files from the submodule's porcelain output.
+    if (statusResult.code === 0) {
+      for (const line of statusResult.stdout.split(/\r?\n/g)) {
+        const entry = parsePorcelainEntry(line);
+        if (entry && !fileMap.has(entry.path)) {
+          fileMap.set(entry.path, { insertions: 0, deletions: 0 });
+        }
+      }
+    }
+
+    return Array.from(fileMap.entries())
+      .map(([filePath, stat]) => ({
+        path: filePath,
+        insertions: stat.insertions,
+        deletions: stat.deletions,
+      }))
+      .toSorted((a, b) => a.path.localeCompare(b.path));
+  });
+
   const readStatusDetailsLocal = Effect.fn("readStatusDetailsLocal")(function* (cwd: string) {
     const statusResult = yield* executeGit(
       "GitCore.statusDetails.status",
@@ -1252,7 +1333,10 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     let aheadCount = 0;
     let behindCount = 0;
     let hasWorkingTreeChanges = false;
-    const changedFilesWithoutNumstat = new Set<string>();
+    const changedFileEntries = new Map<
+      string,
+      { isSubmodule: boolean; isSubmoduleDirty: boolean }
+    >();
 
     for (const line of statusStdout.split(/\r?\n/g)) {
       if (line.startsWith("# branch.head ")) {
@@ -1274,8 +1358,13 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       }
       if (line.trim().length > 0 && !line.startsWith("#")) {
         hasWorkingTreeChanges = true;
-        const pathValue = parsePorcelainPath(line);
-        if (pathValue) changedFilesWithoutNumstat.add(pathValue);
+        const entry = parsePorcelainEntry(line);
+        if (entry) {
+          changedFileEntries.set(entry.path, {
+            isSubmodule: entry.isSubmodule,
+            isSubmoduleDirty: entry.isSubmoduleDirty,
+          });
+        }
       }
     }
 
@@ -1288,9 +1377,17 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
 
     const stagedEntries = parseNumstatEntries(stagedNumstatStdout);
     const unstagedEntries = parseNumstatEntries(unstagedNumstatStdout);
-    const fileStatMap = new Map<string, { insertions: number; deletions: number }>();
+    const fileStatMap = new Map<
+      string,
+      { insertions: number; deletions: number; isSubmodule: boolean }
+    >();
     for (const entry of [...stagedEntries, ...unstagedEntries]) {
-      const existing = fileStatMap.get(entry.path) ?? { insertions: 0, deletions: 0 };
+      const porcelainMeta = changedFileEntries.get(entry.path);
+      const existing = fileStatMap.get(entry.path) ?? {
+        insertions: 0,
+        deletions: 0,
+        isSubmodule: porcelainMeta?.isSubmodule ?? false,
+      };
       existing.insertions += entry.insertions;
       existing.deletions += entry.deletions;
       fileStatMap.set(entry.path, existing);
@@ -1302,15 +1399,60 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       .map(([filePath, stat]) => {
         insertions += stat.insertions;
         deletions += stat.deletions;
-        return { path: filePath, insertions: stat.insertions, deletions: stat.deletions };
+        const entry: {
+          path: string;
+          insertions: number;
+          deletions: number;
+          isSubmodule?: true;
+        } = {
+          path: filePath,
+          insertions: stat.insertions,
+          deletions: stat.deletions,
+        };
+        if (stat.isSubmodule) entry.isSubmodule = true;
+        return entry;
       })
       .toSorted((a, b) => a.path.localeCompare(b.path));
 
-    for (const filePath of changedFilesWithoutNumstat) {
+    for (const [filePath, meta] of changedFileEntries) {
       if (fileStatMap.has(filePath)) continue;
-      files.push({ path: filePath, insertions: 0, deletions: 0 });
+      const entry: { path: string; insertions: number; deletions: number; isSubmodule?: true } = {
+        path: filePath,
+        insertions: 0,
+        deletions: 0,
+      };
+      if (meta.isSubmodule) entry.isSubmodule = true;
+      files.push(entry);
     }
     files.sort((a, b) => a.path.localeCompare(b.path));
+
+    // Expand dirty submodules: fetch individual file changes inside each one.
+    const dirtySubmodules = files.filter(
+      (f) => f.isSubmodule && changedFileEntries.get(f.path)?.isSubmoduleDirty,
+    );
+    if (dirtySubmodules.length > 0) {
+      const expansions = yield* Effect.all(
+        dirtySubmodules.map((sub) =>
+          expandDirtySubmoduleFiles(cwd, sub.path).pipe(
+            Effect.catch(() =>
+              Effect.succeed([] as Array<{ path: string; insertions: number; deletions: number }>),
+            ),
+          ),
+        ),
+        { concurrency: "unbounded" },
+      );
+      for (let i = 0; i < dirtySubmodules.length; i++) {
+        const subEntry = dirtySubmodules[i]!;
+        const subFiles = expansions[i]!;
+        if (subFiles.length > 0) {
+          (
+            subEntry as {
+              submoduleFiles?: Array<{ path: string; insertions: number; deletions: number }>;
+            }
+          ).submoduleFiles = subFiles;
+        }
+      }
+    }
 
     return {
       isRepo: true,
@@ -1384,6 +1526,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       "diff",
       "--cached",
       "--name-status",
+      "--submodule=short",
     ]).pipe(Effect.map((stdout) => stdout.trim()));
     if (stagedSummary.length === 0) {
       return null;
@@ -1392,7 +1535,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     const stagedPatch = yield* runGitStdoutWithOptions(
       "GitCore.prepareCommitContext.stagedPatch",
       cwd,
-      ["diff", "--cached", "--patch", "--minimal"],
+      ["diff", "--cached", "--patch", "--minimal", "--submodule=short"],
       {
         maxOutputBytes: PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES,
         truncateOutputAtMaxBytes: true,

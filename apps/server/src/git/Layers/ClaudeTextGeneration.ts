@@ -117,7 +117,6 @@ const makeClaudeTextGeneration = Effect.gen(function* () {
         ],
         {
           cwd,
-          shell: process.platform === "win32",
           stdin: {
             stream: Stream.encodeText(Stream.make(prompt)),
           },

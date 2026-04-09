@@ -186,7 +186,6 @@ const makeCodexTextGeneration = Effect.gen(function* () {
             ...(codexSettings?.homePath ? { CODEX_HOME: codexSettings.homePath } : {}),
           },
           cwd,
-          shell: process.platform === "win32",
           stdin: {
             stream: Stream.encodeText(Stream.make(prompt)),
           },

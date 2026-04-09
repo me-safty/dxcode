@@ -213,6 +213,16 @@ const GitStatusLocalShape = {
         path: TrimmedNonEmptyStringSchema,
         insertions: NonNegativeInt,
         deletions: NonNegativeInt,
+        isSubmodule: Schema.optional(Schema.Boolean),
+        submoduleFiles: Schema.optional(
+          Schema.Array(
+            Schema.Struct({
+              path: TrimmedNonEmptyStringSchema,
+              insertions: NonNegativeInt,
+              deletions: NonNegativeInt,
+            }),
+          ),
+        ),
       }),
     ),
     insertions: NonNegativeInt,

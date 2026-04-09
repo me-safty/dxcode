@@ -1713,6 +1713,134 @@ it.layer(TestLayer)("git integration", (it) => {
       }),
     );
 
+    it.effect("detects submodule changes in status details", () =>
+      Effect.gen(function* () {
+        const ok = (stdout = "") =>
+          Effect.succeed({
+            code: 0,
+            stdout,
+            stderr: "",
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          });
+
+        const core = yield* makeIsolatedGitCore((input) => {
+          if (input.operation === "GitCore.statusDetails.status") {
+            return ok(
+              [
+                "# branch.head main",
+                "# branch.upstream origin/main",
+                "# branch.ab +0 -0",
+                "1 .M SC.. 160000 160000 160000 abc1234567890123456789012345678901234abcd def5678901234567890123456789012345678abcd my-submodule",
+                "1 .M N... 100644 100644 100644 abc1234567890123456789012345678901234abcd def5678901234567890123456789012345678abcd regular-file.ts",
+              ].join("\n"),
+            );
+          }
+          if (input.operation === "GitCore.statusDetails.unstagedNumstat") {
+            return ok("-\t-\tmy-submodule\n5\t2\tregular-file.ts");
+          }
+          if (input.operation === "GitCore.statusDetails.stagedNumstat") {
+            return ok("");
+          }
+          if (input.operation === "GitCore.statusDetails.defaultRef") {
+            return ok("refs/remotes/origin/main\n");
+          }
+          if (input.args[0] === "remote") {
+            return ok("origin\n");
+          }
+          return ok();
+        });
+
+        const details = yield* core.statusDetailsLocal("/repo");
+        expect(details.hasWorkingTreeChanges).toBe(true);
+        expect(details.workingTree.files).toHaveLength(2);
+
+        const submoduleFile = details.workingTree.files.find((f) => f.path === "my-submodule");
+        expect(submoduleFile).toBeDefined();
+        expect(submoduleFile!.isSubmodule).toBe(true);
+        expect(submoduleFile!.insertions).toBe(0);
+        expect(submoduleFile!.deletions).toBe(0);
+        // SC.. = commit-only change, no dirty content → no expanded files
+        expect(submoduleFile!.submoduleFiles).toBeUndefined();
+
+        const regularFile = details.workingTree.files.find((f) => f.path === "regular-file.ts");
+        expect(regularFile).toBeDefined();
+        expect(regularFile!.isSubmodule).toBeUndefined();
+        expect(regularFile!.insertions).toBe(5);
+        expect(regularFile!.deletions).toBe(2);
+      }),
+    );
+
+    it.effect("expands dirty submodule to show individual file changes", () =>
+      Effect.gen(function* () {
+        const ok = (stdout = "") =>
+          Effect.succeed({
+            code: 0,
+            stdout,
+            stderr: "",
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          });
+
+        const core = yield* makeIsolatedGitCore((input) => {
+          // Parent repo status: submodule with modified content (S.M.)
+          if (input.operation === "GitCore.statusDetails.status") {
+            return ok(
+              [
+                "# branch.head main",
+                "# branch.upstream origin/main",
+                "# branch.ab +0 -0",
+                "1 .M S.M. 160000 160000 160000 abc1234567890123456789012345678901234abcd def5678901234567890123456789012345678abcd submodules/pm-core",
+              ].join("\n"),
+            );
+          }
+          if (input.operation === "GitCore.statusDetails.unstagedNumstat") {
+            return ok("-\t-\tsubmodules/pm-core");
+          }
+          if (input.operation === "GitCore.statusDetails.stagedNumstat") {
+            return ok("");
+          }
+          if (input.operation === "GitCore.statusDetails.defaultRef") {
+            return ok("refs/remotes/origin/main\n");
+          }
+          if (input.args[0] === "remote") {
+            return ok("origin\n");
+          }
+
+          // Submodule-level git commands (cwd ends with submodule path)
+          if (input.operation === "GitCore.expandSubmodule.unstagedNumstat") {
+            return ok("10\t3\tsrc/core.ts\n2\t1\tsrc/utils.ts");
+          }
+          if (input.operation === "GitCore.expandSubmodule.stagedNumstat") {
+            return ok("");
+          }
+          if (input.operation === "GitCore.expandSubmodule.status") {
+            return ok("? new-file.txt");
+          }
+
+          return ok();
+        });
+
+        const details = yield* core.statusDetailsLocal("/repo");
+        expect(details.hasWorkingTreeChanges).toBe(true);
+
+        const subEntry = details.workingTree.files.find((f) => f.path === "submodules/pm-core");
+        expect(subEntry).toBeDefined();
+        expect(subEntry!.isSubmodule).toBe(true);
+        expect(subEntry!.submoduleFiles).toBeDefined();
+        expect(subEntry!.submoduleFiles).toHaveLength(3);
+
+        const coreFile = subEntry!.submoduleFiles!.find((f) => f.path === "src/core.ts");
+        expect(coreFile).toEqual({ path: "src/core.ts", insertions: 10, deletions: 3 });
+
+        const utilsFile = subEntry!.submoduleFiles!.find((f) => f.path === "src/utils.ts");
+        expect(utilsFile).toEqual({ path: "src/utils.ts", insertions: 2, deletions: 1 });
+
+        const newFile = subEntry!.submoduleFiles!.find((f) => f.path === "new-file.txt");
+        expect(newFile).toEqual({ path: "new-file.txt", insertions: 0, deletions: 0 });
+      }),
+    );
+
     it.effect("computes ahead count against base branch when no upstream is configured", () =>
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();

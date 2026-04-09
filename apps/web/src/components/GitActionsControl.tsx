@@ -7,7 +7,13 @@ import type {
 } from "@t3tools/contracts";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
-import { ChevronDownIcon, CloudUploadIcon, GitCommitIcon, InfoIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  CloudUploadIcon,
+  GitCommitIcon,
+  InfoIcon,
+  PackageIcon,
+} from "lucide-react";
 import { GitHubIcon } from "./Icons";
 import {
   buildGitActionProgressStages,
@@ -1042,61 +1048,112 @@ export default function GitActionsControl({
                         {allFiles.map((file) => {
                           const isExcluded = excludedFiles.has(file.path);
                           return (
-                            <div
-                              key={file.path}
-                              className="flex w-full items-center gap-2 rounded-md px-2 py-1 font-mono text-xs transition-colors hover:bg-accent/50"
-                            >
-                              {isEditingFiles && (
-                                <Checkbox
-                                  checked={!excludedFiles.has(file.path)}
-                                  onCheckedChange={() => {
-                                    setExcludedFiles((prev) => {
-                                      const next = new Set(prev);
-                                      if (next.has(file.path)) {
-                                        next.delete(file.path);
-                                      } else {
-                                        next.add(file.path);
-                                      }
-                                      return next;
-                                    });
-                                  }}
-                                />
-                              )}
-                              <button
-                                type="button"
-                                className="flex flex-1 items-center justify-between gap-3 text-left truncate"
-                                onClick={() => openChangedFileInEditor(file.path)}
-                              >
-                                <span
-                                  className={`truncate${isExcluded ? " text-muted-foreground" : ""}`}
+                            <div key={file.path}>
+                              <div className="flex w-full items-center gap-2 rounded-md px-2 py-1 font-mono text-xs transition-colors hover:bg-accent/50">
+                                {isEditingFiles && (
+                                  <Checkbox
+                                    checked={!excludedFiles.has(file.path)}
+                                    onCheckedChange={() => {
+                                      setExcludedFiles((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(file.path)) {
+                                          next.delete(file.path);
+                                        } else {
+                                          next.add(file.path);
+                                        }
+                                        return next;
+                                      });
+                                    }}
+                                  />
+                                )}
+                                <button
+                                  type="button"
+                                  className="flex flex-1 items-center justify-between gap-3 text-left truncate"
+                                  onClick={() => openChangedFileInEditor(file.path)}
                                 >
-                                  {file.path}
-                                </span>
-                                <span className="shrink-0">
-                                  {isExcluded ? (
-                                    <span className="text-muted-foreground">Excluded</span>
-                                  ) : (
-                                    <>
-                                      <span className="text-success">+{file.insertions}</span>
-                                      <span className="text-muted-foreground"> / </span>
-                                      <span className="text-destructive">-{file.deletions}</span>
-                                    </>
-                                  )}
-                                </span>
-                              </button>
+                                  <span
+                                    className={`flex items-center gap-1.5 truncate${isExcluded ? " text-muted-foreground" : ""}`}
+                                  >
+                                    {file.isSubmodule && (
+                                      <PackageIcon className="size-3 shrink-0 text-muted-foreground" />
+                                    )}
+                                    <span className="truncate">{file.path}</span>
+                                  </span>
+                                  <span className="shrink-0">
+                                    {isExcluded ? (
+                                      <span className="text-muted-foreground">Excluded</span>
+                                    ) : file.isSubmodule ? (
+                                      <span className="text-muted-foreground italic">
+                                        submodule
+                                      </span>
+                                    ) : (
+                                      <>
+                                        <span className="text-success">+{file.insertions}</span>
+                                        <span className="text-muted-foreground"> / </span>
+                                        <span className="text-destructive">-{file.deletions}</span>
+                                      </>
+                                    )}
+                                  </span>
+                                </button>
+                              </div>
+                              {file.isSubmodule &&
+                                file.submoduleFiles &&
+                                file.submoduleFiles.length > 0 &&
+                                !isExcluded && (
+                                  <div className="ml-6 border-l border-border/50 pl-2">
+                                    {file.submoduleFiles.map((subFile) => (
+                                      <div
+                                        key={subFile.path}
+                                        className="flex items-center justify-between gap-3 rounded-md px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                                      >
+                                        <span className="truncate">{subFile.path}</span>
+                                        <span className="shrink-0">
+                                          <span className="text-success/80">
+                                            +{subFile.insertions}
+                                          </span>
+                                          <span className="text-muted-foreground"> / </span>
+                                          <span className="text-destructive/80">
+                                            -{subFile.deletions}
+                                          </span>
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                             </div>
                           );
                         })}
                       </div>
                     </ScrollArea>
-                    <div className="flex justify-end font-mono">
-                      <span className="text-success">
-                        +{selectedFiles.reduce((sum, f) => sum + f.insertions, 0)}
-                      </span>
-                      <span className="text-muted-foreground"> / </span>
-                      <span className="text-destructive">
-                        -{selectedFiles.reduce((sum, f) => sum + f.deletions, 0)}
-                      </span>
+                    <div className="flex justify-end gap-2 font-mono">
+                      {(() => {
+                        const regularFiles = selectedFiles.filter((f) => !f.isSubmodule);
+                        const submoduleCount = selectedFiles.length - regularFiles.length;
+                        const totalInsertions = regularFiles.reduce(
+                          (sum, f) => sum + f.insertions,
+                          0,
+                        );
+                        const totalDeletions = regularFiles.reduce(
+                          (sum, f) => sum + f.deletions,
+                          0,
+                        );
+                        return (
+                          <>
+                            {regularFiles.length > 0 && (
+                              <>
+                                <span className="text-success">+{totalInsertions}</span>
+                                <span className="text-muted-foreground">/</span>
+                                <span className="text-destructive">-{totalDeletions}</span>
+                              </>
+                            )}
+                            {submoduleCount > 0 && (
+                              <span className="text-muted-foreground italic">
+                                {submoduleCount} {submoduleCount === 1 ? "submodule" : "submodules"}
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}
