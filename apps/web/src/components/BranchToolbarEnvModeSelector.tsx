@@ -1,4 +1,4 @@
-import { FolderIcon, GitForkIcon } from "lucide-react";
+import { FolderGit2Icon, FolderGitIcon, FolderIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
 import {
@@ -42,7 +42,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       <span className="inline-flex items-center gap-1 border border-transparent px-[calc(--spacing(3)-1px)] text-sm font-medium text-muted-foreground/70 sm:text-xs">
         {activeWorktreePath ? (
           <>
-            <GitForkIcon className="size-3" />
+            <FolderGitIcon className="size-3" />
             {resolveCurrentWorkspaceLabel(activeWorktreePath)}
           </>
         ) : (
@@ -62,8 +62,10 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       items={envModeItems}
     >
       <SelectTrigger variant="ghost" size="xs" className="font-medium" aria-label="Workspace">
-        {effectiveEnvMode === "worktree" || activeWorktreePath ? (
-          <GitForkIcon className="size-3" />
+        {effectiveEnvMode === "worktree" ? (
+          <FolderGit2Icon className="size-3" />
+        ) : activeWorktreePath ? (
+          <FolderGitIcon className="size-3" />
         ) : (
           <FolderIcon className="size-3" />
         )}
@@ -75,7 +77,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
           <SelectItem value="local">
             <span className="inline-flex items-center gap-1.5">
               {activeWorktreePath ? (
-                <GitForkIcon className="size-3" />
+                <FolderGitIcon className="size-3" />
               ) : (
                 <FolderIcon className="size-3" />
               )}
@@ -84,7 +86,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
           </SelectItem>
           <SelectItem value="worktree">
             <span className="inline-flex items-center gap-1.5">
-              <GitForkIcon className="size-3" />
+              <FolderGit2Icon className="size-3" />
               {resolveEnvModeLabel("worktree")}
             </span>
           </SelectItem>
