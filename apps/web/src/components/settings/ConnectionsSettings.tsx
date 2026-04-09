@@ -10,7 +10,7 @@ import { DateTime } from "effect";
 
 import {
   createServerPairingCredential,
-  fetchServerAuthSessionState,
+  fetchSessionState,
   revokeOtherServerClientSessions,
   revokeServerClientSession,
   revokeServerPairingLink,
@@ -59,14 +59,14 @@ import {
   addSavedEnvironment,
   reconnectSavedEnvironment,
   removeSavedEnvironment,
-} from "../../environmentManager";
+} from "../../environments/runtime/manager";
 import { setPairingTokenOnUrl } from "../../pairingUrl";
 import {
   type SavedEnvironmentRecord,
   type SavedEnvironmentRuntimeState,
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
-} from "../../savedEnvironmentsStore";
+} from "../../environments/runtime/savedEnvironmentsStore";
 
 const accessTimestampFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -1002,7 +1002,7 @@ export function ConnectionsSettings() {
     }
 
     let cancelled = false;
-    void fetchServerAuthSessionState()
+    void fetchSessionState()
       .then((session) => {
         if (cancelled) return;
         setCurrentSessionRole(session.authenticated ? (session.role ?? null) : null);

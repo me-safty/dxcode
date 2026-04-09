@@ -2,14 +2,8 @@ import type {
   AuthBearerBootstrapResult,
   AuthSessionState,
   AuthWebSocketTokenResult,
+  ExecutionEnvironmentDescriptor,
 } from "@t3tools/contracts";
-import { getPairingTokenFromUrl } from "./pairingUrl";
-
-export interface ResolvedRemotePairingTarget {
-  readonly credential: string;
-  readonly httpBaseUrl: string;
-  readonly wsBaseUrl: string;
-}
 
 class RemoteEnvironmentAuthHttpError extends Error {
   readonly status: number;
@@ -19,49 +13,6 @@ class RemoteEnvironmentAuthHttpError extends Error {
     this.name = "RemoteEnvironmentAuthHttpError";
     this.status = status;
   }
-}
-
-function normalizeRemoteBaseUrl(rawValue: string): URL {
-  const trimmed = rawValue.trim();
-  if (!trimmed) {
-    throw new Error("Enter a backend URL.");
-  }
-
-  const normalizedInput =
-    /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed) || trimmed.startsWith("//")
-      ? trimmed
-      : `https://${trimmed}`;
-  const url = new URL(normalizedInput, window.location.origin);
-  url.pathname = "/";
-  url.search = "";
-  url.hash = "";
-  return url;
-}
-
-function toHttpBaseUrl(url: URL): string {
-  const next = new URL(url.toString());
-  if (next.protocol === "ws:") {
-    next.protocol = "http:";
-  } else if (next.protocol === "wss:") {
-    next.protocol = "https:";
-  }
-  next.pathname = "/";
-  next.search = "";
-  next.hash = "";
-  return next.toString();
-}
-
-function toWsBaseUrl(url: URL): string {
-  const next = new URL(url.toString());
-  if (next.protocol === "http:") {
-    next.protocol = "ws:";
-  } else if (next.protocol === "https:") {
-    next.protocol = "wss:";
-  }
-  next.pathname = "/";
-  next.search = "";
-  next.hash = "";
-  return next.toString();
 }
 
 function remoteEndpointUrl(httpBaseUrl: string, pathname: string): string {
@@ -131,42 +82,6 @@ async function fetchRemoteJson<T>(input: {
   return (await response.json()) as T;
 }
 
-export function resolveRemotePairingTarget(input: {
-  readonly pairingUrl?: string;
-  readonly host?: string;
-  readonly pairingCode?: string;
-}): ResolvedRemotePairingTarget {
-  const pairingUrl = input.pairingUrl?.trim() ?? "";
-  if (pairingUrl.length > 0) {
-    const url = new URL(pairingUrl, window.location.origin);
-    const credential = getPairingTokenFromUrl(url) ?? "";
-    if (!credential) {
-      throw new Error("Pairing URL is missing its token.");
-    }
-    return {
-      credential,
-      httpBaseUrl: toHttpBaseUrl(url),
-      wsBaseUrl: toWsBaseUrl(url),
-    };
-  }
-
-  const host = input.host?.trim() ?? "";
-  const pairingCode = input.pairingCode?.trim() ?? "";
-  if (!host) {
-    throw new Error("Enter a backend URL.");
-  }
-  if (!pairingCode) {
-    throw new Error("Enter a pairing code.");
-  }
-
-  const normalizedHost = normalizeRemoteBaseUrl(host);
-  return {
-    credential: pairingCode,
-    httpBaseUrl: toHttpBaseUrl(normalizedHost),
-    wsBaseUrl: toWsBaseUrl(normalizedHost),
-  };
-}
-
 export async function bootstrapRemoteBearerSession(input: {
   readonly httpBaseUrl: string;
   readonly credential: string;
@@ -189,6 +104,15 @@ export async function fetchRemoteSessionState(input: {
     httpBaseUrl: input.httpBaseUrl,
     pathname: "/api/auth/session",
     bearerToken: input.bearerToken,
+  });
+}
+
+export async function fetchRemoteEnvironmentDescriptor(input: {
+  readonly httpBaseUrl: string;
+}): Promise<ExecutionEnvironmentDescriptor> {
+  return fetchRemoteJson<ExecutionEnvironmentDescriptor>({
+    httpBaseUrl: input.httpBaseUrl,
+    pathname: "/.well-known/t3/environment",
   });
 }
 

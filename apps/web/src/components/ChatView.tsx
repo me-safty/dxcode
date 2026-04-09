@@ -143,7 +143,7 @@ import { usePrimaryEnvironmentId } from "../hooks/usePrimaryEnvironmentId";
 import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
-} from "../savedEnvironmentsStore";
+} from "../environments/runtime/savedEnvironmentsStore";
 import { buildDraftThreadRouteParams } from "../threadRoutes";
 import {
   type ComposerImageAttachment,

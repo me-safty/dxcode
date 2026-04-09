@@ -8,7 +8,7 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
 import {
-  createKnownEnvironmentFromWsUrl,
+  createKnownEnvironment,
   scopedProjectKey,
   scopedThreadKey,
   scopeProjectRef,
@@ -19,52 +19,53 @@ import {
   markPromotedDraftThreadByRef,
   markPromotedDraftThreadsByRef,
   useComposerDraftStore,
-} from "./composerDraftStore";
-import { deriveOrchestrationBatchEffects } from "./orchestrationEventEffects";
+} from "../../composerDraftStore";
+import { deriveOrchestrationBatchEffects } from "../../orchestrationEventEffects";
 import {
   createWsRpcClient,
-  ensureWsRpcClientEntryForKnownEnvironment,
   getPrimaryWsRpcClientEntry,
-  bindWsRpcClientEntryEnvironment,
   listWsRpcClientEntries,
   readWsRpcClientEntryForEnvironment,
   registerWsRpcClientEntry,
   removeWsRpcClientEntry,
   subscribeWsRpcClientRegistry,
   type WsRpcClientEntry,
-} from "./wsRpcClient";
-import { providerQueryKeys } from "./lib/providerReactQuery";
-import { projectQueryKeys } from "./lib/projectReactQuery";
+} from "../../wsRpcClient";
+import { providerQueryKeys } from "../../lib/providerReactQuery";
+import { projectQueryKeys } from "../../lib/projectReactQuery";
 import {
   getSavedEnvironmentRecord,
+  hasSavedEnvironmentRegistryHydrated,
   listSavedEnvironmentRecords,
   type SavedEnvironmentRecord,
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
+  waitForSavedEnvironmentRegistryHydration,
 } from "./savedEnvironmentsStore";
 import {
   selectProjectsAcrossEnvironments,
   selectThreadByRef,
   selectThreadsAcrossEnvironments,
   useStore,
-} from "./store";
-import { collectActiveTerminalThreadIds } from "./lib/terminalStateCleanup";
-import { useTerminalStateStore } from "./terminalStateStore";
-import { useUiStateStore } from "./uiStateStore";
+} from "../../store";
+import { collectActiveTerminalThreadIds } from "../../lib/terminalStateCleanup";
+import { useTerminalStateStore } from "../../terminalStateStore";
+import { useUiStateStore } from "../../uiStateStore";
 import {
   createOrchestrationRecoveryCoordinator,
   deriveReplayRetryDecision,
   type OrchestrationRecoveryReason,
   type ReplayRetryTracker,
-} from "./orchestrationRecovery";
+} from "../../orchestrationRecovery";
 import type { AuthSessionRole, ServerConfig } from "@t3tools/contracts";
 import {
   bootstrapRemoteBearerSession,
+  fetchRemoteEnvironmentDescriptor,
   fetchRemoteSessionState,
-  resolveRemotePairingTarget,
   resolveRemoteWebSocketConnectionUrl,
-} from "./remoteEnvironmentAuth";
-import { WsTransport } from "./wsTransport";
+} from "../remote/api";
+import { resolveRemotePairingTarget } from "../remote/target";
+import { WsTransport } from "../../wsTransport";
 
 const REPLAY_RECOVERY_RETRY_DELAY_MS = 100;
 const MAX_NO_PROGRESS_REPLAY_RETRIES = 3;
@@ -98,7 +99,6 @@ interface OrchestrationRegistryHandlers {
 interface RegistryAdapter {
   readonly listEntries: () => ReadonlyArray<WsRpcClientEntry>;
   readonly subscribe: (listener: () => void) => () => void;
-  readonly bindEnvironment: (entryKey: string, environmentId: EnvironmentId) => void;
 }
 
 /**
@@ -108,11 +108,6 @@ interface RegistryAdapter {
  * and ensures every websocket client entry has one matching client context.
  */
 interface OrchestrationRegistrySyncController {
-  readonly bindClientEnvironment: (
-    entryKey: string,
-    environmentId: EnvironmentId,
-    options?: { readonly ensureSnapshot?: boolean },
-  ) => void;
   readonly ensureSnapshotRecoveryForEnvironment: (environmentId: EnvironmentId) => Promise<void>;
   readonly dispose: () => void;
 }
@@ -124,15 +119,9 @@ interface OrchestrationRegistrySyncController {
  * subscription cleanup for exactly one websocket client entry.
  */
 interface ClientContext {
-  readonly key: string;
-  readonly getBoundEnvironmentId: () => EnvironmentId | null;
-  readonly bindEnvironmentId: (
-    environmentId: EnvironmentId,
-    options?: { readonly ensureSnapshot?: boolean },
-  ) => void;
+  readonly environmentId: EnvironmentId;
   readonly ensureSnapshotRecovery: (
     reason: Extract<OrchestrationRecoveryReason, "bootstrap" | "replay-failed">,
-    environmentId: EnvironmentId,
   ) => Promise<void>;
   readonly syncEntry: (entry: WsRpcClientEntry) => void;
   readonly cleanup: () => void;
@@ -141,7 +130,6 @@ interface ClientContext {
 const defaultRegistryAdapter: RegistryAdapter = {
   listEntries: listWsRpcClientEntries,
   subscribe: subscribeWsRpcClientRegistry,
-  bindEnvironment: bindWsRpcClientEntryEnvironment,
 };
 
 /**
@@ -153,36 +141,30 @@ const defaultRegistryAdapter: RegistryAdapter = {
  */
 export function createSnapshotBootstrapController(input: {
   readonly isBootstrapped: () => boolean;
-  readonly getBoundEnvironmentId: () => EnvironmentId | null;
   readonly runSnapshotRecovery: (
     reason: Extract<OrchestrationRecoveryReason, "bootstrap" | "replay-failed">,
-    environmentId: EnvironmentId,
   ) => Promise<void>;
 }) {
   let inFlight: Promise<void> | null = null;
-  let inFlightEnvironmentId: EnvironmentId | null = null;
 
   return {
     ensureSnapshotRecovery(
       reason: Extract<OrchestrationRecoveryReason, "bootstrap" | "replay-failed">,
-      environmentId: EnvironmentId,
     ): Promise<void> {
-      if (input.isBootstrapped() && input.getBoundEnvironmentId() === environmentId) {
+      if (input.isBootstrapped()) {
         return Promise.resolve();
       }
 
-      if (inFlight !== null && inFlightEnvironmentId === environmentId) {
+      if (inFlight !== null) {
         return inFlight;
       }
 
-      const nextInFlight = input.runSnapshotRecovery(reason, environmentId).finally(() => {
+      const nextInFlight = input.runSnapshotRecovery(reason).finally(() => {
         if (inFlight === nextInFlight) {
           inFlight = null;
-          inFlightEnvironmentId = null;
         }
       });
       inFlight = nextInFlight;
-      inFlightEnvironmentId = environmentId;
 
       return inFlight;
     },
@@ -198,18 +180,25 @@ export function createSnapshotBootstrapController(input: {
 function createClientContext(
   entry: WsRpcClientEntry,
   handlers: OrchestrationRegistryHandlers,
-  registry: RegistryAdapter,
 ): ClientContext {
   const recovery = createOrchestrationRecoveryCoordinator();
   let replayRetryTracker: ReplayRetryTracker | null = null;
   const pendingDomainEvents: OrchestrationEvent[] = [];
   let flushPendingDomainEventsScheduled = false;
-  let boundEnvironmentId = entry.environmentId;
+  const boundEnvironmentId = entry.environmentId;
   let disposed = false;
+
+  const observeEnvironmentIdentity = (nextEnvironmentId: EnvironmentId, source: string) => {
+    if (boundEnvironmentId !== nextEnvironmentId) {
+      throw new Error(
+        `Websocket client ${entry.environmentId} changed environment identity from ${boundEnvironmentId} to ${nextEnvironmentId} via ${source}.`,
+      );
+    }
+  };
 
   const flushPendingDomainEvents = () => {
     flushPendingDomainEventsScheduled = false;
-    if (disposed || pendingDomainEvents.length === 0 || boundEnvironmentId === null) {
+    if (disposed || pendingDomainEvents.length === 0) {
       return;
     }
 
@@ -239,11 +228,6 @@ function createClientContext(
     try {
       const events = await entry.client.orchestration.replayEvents({ fromSequenceExclusive });
       if (!disposed) {
-        if (boundEnvironmentId === null) {
-          replayRetryTracker = null;
-          recovery.failReplayRecovery();
-          return;
-        }
         const nextEvents = recovery.markEventBatchApplied(events);
         if (nextEvents.length > 0) {
           handlers.applyEventBatch(nextEvents, boundEnvironmentId);
@@ -252,9 +236,7 @@ function createClientContext(
     } catch {
       replayRetryTracker = null;
       recovery.failReplayRecovery();
-      if (boundEnvironmentId !== null) {
-        await snapshotBootstrap.ensureSnapshotRecovery("replay-failed", boundEnvironmentId);
-      }
+      await snapshotBootstrap.ensureSnapshotRecovery("replay-failed");
       return;
     }
 
@@ -284,7 +266,7 @@ function createClientContext(
           "[orchestration-recovery]",
           "Stopping replay recovery after no-progress retries.",
           {
-            entryKey: entry.key,
+            entryEnvironmentId: entry.environmentId,
             environmentId: boundEnvironmentId,
             state: recovery.getState(),
           },
@@ -295,15 +277,14 @@ function createClientContext(
 
   const runSnapshotRecovery = async (
     reason: Extract<OrchestrationRecoveryReason, "bootstrap" | "replay-failed">,
-    environmentId: EnvironmentId,
   ): Promise<void> => {
     const started = recovery.beginSnapshotRecovery(reason);
     if (import.meta.env.MODE !== "test") {
       const state = recovery.getState();
       console.info("[orchestration-recovery]", "Snapshot recovery requested.", {
         reason,
-        entryKey: entry.key,
-        environmentId,
+        entryEnvironmentId: entry.environmentId,
+        environmentId: boundEnvironmentId,
         skipped: !started,
         ...(started
           ? {}
@@ -321,8 +302,7 @@ function createClientContext(
     try {
       const snapshot = await entry.client.orchestration.getSnapshot();
       if (!disposed) {
-        bindEnvironmentId(environmentId, { ensureSnapshot: false });
-        handlers.syncSnapshot(snapshot, environmentId);
+        handlers.syncSnapshot(snapshot, boundEnvironmentId);
         if (recovery.completeSnapshotRecovery(snapshot.snapshotSequence)) {
           void runReplayRecovery("sequence-gap");
         }
@@ -334,49 +314,25 @@ function createClientContext(
 
   const snapshotBootstrap = createSnapshotBootstrapController({
     isBootstrapped: () => recovery.getState().bootstrapped,
-    getBoundEnvironmentId: () => boundEnvironmentId,
     runSnapshotRecovery,
   });
 
-  const bindEnvironmentId = (
-    environmentId: EnvironmentId,
-    options?: { readonly ensureSnapshot?: boolean },
-  ) => {
-    if (boundEnvironmentId !== environmentId) {
-      boundEnvironmentId = environmentId;
-      registry.bindEnvironment(entry.key, environmentId);
-      schedulePendingDomainEventFlush();
-    }
-
-    if (options?.ensureSnapshot ?? true) {
-      void snapshotBootstrap.ensureSnapshotRecovery("bootstrap", environmentId);
-    }
-  };
-
   const unsubLifecycle = entry.client.server.subscribeLifecycle((event) => {
     if (event.type === "welcome") {
-      bindEnvironmentId(event.payload.environment.environmentId);
+      observeEnvironmentIdentity(
+        event.payload.environment.environmentId,
+        "server lifecycle welcome",
+      );
     }
   });
 
   const unsubConfig = entry.client.server.subscribeConfig((event) => {
     if (event.type === "snapshot") {
-      bindEnvironmentId(event.config.environment.environmentId);
+      observeEnvironmentIdentity(event.config.environment.environmentId, "server config snapshot");
     }
   });
 
-  if (boundEnvironmentId !== null) {
-    bindEnvironmentId(boundEnvironmentId);
-  } else {
-    void entry.client.server
-      .getConfig()
-      .then((config) => {
-        if (!disposed) {
-          bindEnvironmentId(config.environment.environmentId);
-        }
-      })
-      .catch(() => undefined);
-  }
+  void snapshotBootstrap.ensureSnapshotRecovery("bootstrap");
 
   const unsubDomainEvent = entry.client.orchestration.onDomainEvent(
     (event) => {
@@ -403,23 +359,14 @@ function createClientContext(
   );
 
   const unsubTerminalEvent = entry.client.terminal.onEvent((event) => {
-    if (boundEnvironmentId === null) {
-      return;
-    }
     handlers.applyTerminalEvent(event, boundEnvironmentId);
   });
 
   return {
-    key: entry.key,
-    getBoundEnvironmentId: () => boundEnvironmentId,
-    bindEnvironmentId,
-    ensureSnapshotRecovery: snapshotBootstrap.ensureSnapshotRecovery,
+    environmentId: boundEnvironmentId,
+    ensureSnapshotRecovery: (reason) => snapshotBootstrap.ensureSnapshotRecovery(reason),
     syncEntry: (nextEntry) => {
-      if (nextEntry.environmentId === null) {
-        boundEnvironmentId = null;
-        return;
-      }
-      bindEnvironmentId(nextEntry.environmentId);
+      observeEnvironmentIdentity(nextEntry.environmentId, "registry sync");
     },
     cleanup: () => {
       disposed = true;
@@ -441,26 +388,26 @@ export function createOrchestrationRegistrySyncController(
   handlers: OrchestrationRegistryHandlers,
   registry: RegistryAdapter = defaultRegistryAdapter,
 ): OrchestrationRegistrySyncController {
-  const contexts = new Map<string, ClientContext>();
+  const contexts = new Map<EnvironmentId, ClientContext>();
 
   const syncRegistry = () => {
     const entries = registry.listEntries();
-    const nextKeys = new Set(entries.map((entry) => entry.key));
+    const nextEnvironmentIds = new Set(entries.map((entry) => entry.environmentId));
 
-    for (const [key, context] of contexts.entries()) {
-      if (!nextKeys.has(key)) {
+    for (const [environmentId, context] of contexts.entries()) {
+      if (!nextEnvironmentIds.has(environmentId)) {
         context.cleanup();
-        contexts.delete(key);
+        contexts.delete(environmentId);
       }
     }
 
     for (const entry of entries) {
-      const existingContext = contexts.get(entry.key);
+      const existingContext = contexts.get(entry.environmentId);
       if (existingContext) {
         existingContext.syncEntry(entry);
         continue;
       }
-      contexts.set(entry.key, createClientContext(entry, handlers, registry));
+      contexts.set(entry.environmentId, createClientContext(entry, handlers));
     }
   };
 
@@ -468,22 +415,12 @@ export function createOrchestrationRegistrySyncController(
   syncRegistry();
 
   return {
-    bindClientEnvironment: (entryKey, environmentId, options) => {
-      const context = contexts.get(entryKey);
-      if (!context) {
-        registry.bindEnvironment(entryKey, environmentId);
-        return;
-      }
-      context.bindEnvironmentId(environmentId, options);
-    },
     ensureSnapshotRecoveryForEnvironment: async (environmentId) => {
-      const context = [...contexts.values()].find(
-        (candidate) => candidate.getBoundEnvironmentId() === environmentId,
-      );
+      const context = contexts.get(environmentId);
       if (!context) {
         return;
       }
-      await context.ensureSnapshotRecovery("bootstrap", environmentId);
+      await context.ensureSnapshotRecovery("bootstrap");
     },
     dispose: () => {
       unsubscribe();
@@ -635,7 +572,6 @@ function applyRecoveredEventBatch(
 
 type EnvironmentConnectionManager = {
   readonly ensureEnvironmentBootstrapped: (environmentId: EnvironmentId) => Promise<void>;
-  readonly bindPrimaryEnvironment: (environmentId: EnvironmentId) => void;
   readonly stop: () => void;
 };
 
@@ -644,7 +580,7 @@ type EnvironmentConnectionManager = {
  * represents one currently materialized remote connection in the running app.
  */
 type ActiveSavedEnvironmentConnection = {
-  readonly entryKey: string;
+  readonly environmentId: EnvironmentId;
   readonly client: ReturnType<typeof createWsRpcClient>;
   readonly cleanup: () => void;
   readonly refreshMetadata: () => Promise<void>;
@@ -728,37 +664,35 @@ async function refreshSavedEnvironmentMetadata(
   });
 }
 
-function createSavedEnvironmentClient(record: SavedEnvironmentRecord) {
+async function createSavedEnvironmentClient(record: SavedEnvironmentRecord) {
   useSavedEnvironmentRuntimeStore.getState().ensure(record.environmentId);
 
-  return createWsRpcClient(
-    new WsTransport(
-      () =>
-        resolveRemoteWebSocketConnectionUrl({
-          wsBaseUrl: record.wsBaseUrl,
-          httpBaseUrl: record.httpBaseUrl,
-          bearerToken: record.bearerToken,
-        }),
-      {
-        onAttempt: () => {
-          setRuntimeConnecting(record.environmentId);
-        },
-        onOpen: () => {
-          setRuntimeConnected(record.environmentId);
-        },
-        onError: (message) => {
-          useSavedEnvironmentRuntimeStore.getState().patch(record.environmentId, {
-            connectionState: "error",
-            lastError: message,
-            lastErrorAt: isoNow(),
-          });
-        },
-        onClose: (details) => {
-          setRuntimeDisconnected(record.environmentId, details.reason);
-        },
-      },
-    ),
-  );
+  const url = await resolveRemoteWebSocketConnectionUrl({
+    wsBaseUrl: record.wsBaseUrl,
+    httpBaseUrl: record.httpBaseUrl,
+    bearerToken: record.bearerToken,
+  });
+
+  const transport = new WsTransport(url, {
+    onAttempt: () => {
+      setRuntimeConnecting(record.environmentId);
+    },
+    onOpen: () => {
+      setRuntimeConnected(record.environmentId);
+    },
+    onError: (message) => {
+      useSavedEnvironmentRuntimeStore.getState().patch(record.environmentId, {
+        connectionState: "error",
+        lastError: message,
+        lastErrorAt: isoNow(),
+      });
+    },
+    onClose: (details) => {
+      setRuntimeDisconnected(record.environmentId, details.reason);
+    },
+  });
+
+  return createWsRpcClient(transport);
 }
 
 /**
@@ -781,7 +715,7 @@ async function ensureSavedEnvironmentConnection(
   }
 
   const existingEntry = readWsRpcClientEntryForEnvironment(record.environmentId);
-  if (existingEntry && existingEntry.key !== record.environmentId) {
+  if (existingEntry) {
     useSavedEnvironmentRuntimeStore.getState().patch(record.environmentId, {
       connectionState: "error",
       lastError: "This environment is already connected elsewhere in the app.",
@@ -791,18 +725,20 @@ async function ensureSavedEnvironmentConnection(
     return;
   }
 
-  const client = options?.client ?? createSavedEnvironmentClient(record);
-  const knownEnvironment = createKnownEnvironmentFromWsUrl({
+  const client = options?.client ?? (await createSavedEnvironmentClient(record));
+  const knownEnvironment = createKnownEnvironment({
     id: record.environmentId,
     label: record.label,
     source: "manual",
-    wsUrl: record.wsBaseUrl,
+    target: {
+      httpBaseUrl: record.httpBaseUrl,
+      wsBaseUrl: record.wsBaseUrl,
+    },
   });
 
   let removedOnFailure = false;
   try {
     const entry = registerWsRpcClientEntry({
-      key: record.environmentId,
       knownEnvironment: {
         ...knownEnvironment,
         environmentId: record.environmentId,
@@ -841,7 +777,7 @@ async function ensureSavedEnvironmentConnection(
     });
 
     activeSavedEnvironmentConnections.set(record.environmentId, {
-      entryKey: entry.key,
+      environmentId: entry.environmentId,
       client,
       cleanup: () => {
         unsubscribeConfig();
@@ -861,7 +797,7 @@ async function ensureSavedEnvironmentConnection(
       await client.dispose().catch(() => undefined);
     }
 
-    if (readWsRpcClientEntryForEnvironment(record.environmentId)?.key === record.environmentId) {
+    if (readWsRpcClientEntryForEnvironment(record.environmentId)) {
       removedOnFailure = await removeWsRpcClientEntry(record.environmentId);
     }
 
@@ -952,54 +888,36 @@ export async function addSavedEnvironment(input: {
     ...(input.host !== undefined ? { host: input.host } : {}),
     ...(input.pairingCode !== undefined ? { pairingCode: input.pairingCode } : {}),
   });
+  const descriptor = await fetchRemoteEnvironmentDescriptor({
+    httpBaseUrl: resolvedTarget.httpBaseUrl,
+  });
+  const environmentId = descriptor.environmentId;
+
+  if (readWsRpcClientEntryForEnvironment(environmentId)) {
+    throw new Error("This environment is already connected.");
+  }
+
   const bearerSession = await bootstrapRemoteBearerSession({
     httpBaseUrl: resolvedTarget.httpBaseUrl,
     credential: resolvedTarget.credential,
   });
-  const temporaryClient = createWsRpcClient(
-    new WsTransport(() =>
-      resolveRemoteWebSocketConnectionUrl({
-        wsBaseUrl: resolvedTarget.wsBaseUrl,
-        httpBaseUrl: resolvedTarget.httpBaseUrl,
-        bearerToken: bearerSession.sessionToken,
-      }),
-    ),
-  );
 
-  try {
-    const serverConfig = await temporaryClient.server.getConfig();
-    const environmentId = serverConfig.environment.environmentId;
+  const record: SavedEnvironmentRecord = {
+    environmentId,
+    label: input.label.trim() || descriptor.label,
+    wsBaseUrl: resolvedTarget.wsBaseUrl,
+    httpBaseUrl: resolvedTarget.httpBaseUrl,
+    bearerToken: bearerSession.sessionToken,
+    createdAt: isoNow(),
+    lastConnectedAt: isoNow(),
+  };
 
-    if (readWsRpcClientEntryForEnvironment(environmentId)) {
-      throw new Error("This environment is already connected.");
-    }
-
-    const record: SavedEnvironmentRecord = {
-      environmentId,
-      label: input.label.trim() || serverConfig.environment.label,
-      wsBaseUrl: resolvedTarget.wsBaseUrl,
-      httpBaseUrl: resolvedTarget.httpBaseUrl,
-      bearerToken: bearerSession.sessionToken,
-      createdAt: isoNow(),
-      lastConnectedAt: isoNow(),
-    };
-
-    await temporaryClient.dispose().catch(() => undefined);
-    await ensureSavedEnvironmentConnection(record, {
-      client: createSavedEnvironmentClient(record),
-      role: bearerSession.role,
-      serverConfig,
-    });
-    useSavedEnvironmentRegistryStore.getState().upsert(record);
-    return record;
-  } catch (error) {
-    await temporaryClient.dispose().catch(() => undefined);
-    throw error;
-  }
-}
-
-function syncSavedEnvironmentConnectionsFromStore(): Promise<void> {
-  return syncSavedEnvironmentConnections(listSavedEnvironmentRecords());
+  await ensureSavedEnvironmentConnection(record, {
+    client: await createSavedEnvironmentClient(record),
+    role: bearerSession.role,
+  });
+  useSavedEnvironmentRegistryStore.getState().upsert(record);
+  return record;
 }
 
 export async function resetSavedEnvironmentConnectionsForTests(): Promise<void> {
@@ -1028,8 +946,7 @@ function createEnvironmentConnectionManager(
 ): EnvironmentConnectionManager {
   let needsProviderInvalidation = false;
   let stopped = false;
-
-  ensureWsRpcClientEntryForKnownEnvironment(getPrimaryWsRpcClientEntry().knownEnvironment);
+  getPrimaryWsRpcClientEntry();
 
   const queryInvalidationThrottler = new Throttler(
     () => {
@@ -1077,20 +994,23 @@ function createEnvironmentConnectionManager(
   });
 
   const unsubscribeSavedEnvironments = useSavedEnvironmentRegistryStore.subscribe(() => {
-    void syncSavedEnvironmentConnectionsFromStore();
+    if (!hasSavedEnvironmentRegistryHydrated()) {
+      return;
+    }
+    void syncSavedEnvironmentConnections(listSavedEnvironmentRecords());
   });
-  void syncSavedEnvironmentConnectionsFromStore();
-
-  const primaryClientKey = getPrimaryWsRpcClientEntry().key;
+  void waitForSavedEnvironmentRegistryHydration()
+    .then(() => {
+      if (stopped) {
+        return;
+      }
+      return syncSavedEnvironmentConnections(listSavedEnvironmentRecords());
+    })
+    .catch(() => undefined);
 
   return {
     ensureEnvironmentBootstrapped: (environmentId) =>
       orchestrationSync.ensureSnapshotRecoveryForEnvironment(environmentId),
-    bindPrimaryEnvironment: (environmentId) => {
-      orchestrationSync.bindClientEnvironment(primaryClientKey, environmentId, {
-        ensureSnapshot: false,
-      });
-    },
     stop: () => {
       if (stopped) {
         return;
@@ -1133,10 +1053,6 @@ export function startEnvironmentConnectionManager(queryClient: QueryClient): () 
     activeManager.manager.stop();
     activeManager = null;
   };
-}
-
-export function bindPrimaryEnvironmentConnection(environmentId: EnvironmentId): void {
-  activeManager?.manager.bindPrimaryEnvironment(environmentId);
 }
 
 export async function ensureEnvironmentConnectionBootstrapped(

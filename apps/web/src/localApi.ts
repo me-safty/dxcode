@@ -1,24 +1,20 @@
 import type { ContextMenuItem, LocalApi } from "@t3tools/contracts";
 
 import { resetGitStatusStateForTests } from "./lib/gitStatusState";
-
-import { __resetWsRpcAtomClientForTests } from "./rpc/client";
 import { resetRequestLatencyStateForTests } from "./rpc/requestLatencyState";
 import { resetServerStateForTests } from "./rpc/serverState";
 import { resetWsConnectionStateForTests } from "./rpc/wsConnectionState";
-import { resetSavedEnvironmentConnectionsForTests } from "./environmentManager";
+import { resetSavedEnvironmentConnectionsForTests } from "./environments/runtime/manager";
 import {
   resetSavedEnvironmentRegistryStoreForTests,
   resetSavedEnvironmentRuntimeStoreForTests,
-} from "./savedEnvironmentsStore";
+} from "./environments/runtime/savedEnvironmentsStore";
 import { getPrimaryWsRpcClientEntry, WsRpcClient, __resetWsRpcClientForTests } from "./wsRpcClient";
 import { showContextMenuFallback } from "./contextMenuFallback";
 
 let cachedApi: LocalApi | undefined;
 
-export function createLocalApi(
-  rpcClient: WsRpcClient = getPrimaryWsRpcClientEntry().client,
-): LocalApi {
+export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
   return {
     dialogs: {
       pickFolder: async () => {
@@ -67,6 +63,10 @@ export function createLocalApi(
   };
 }
 
+export function createPrimaryLocalApi(): LocalApi {
+  return createLocalApi(getPrimaryWsRpcClientEntry().client);
+}
+
 export function readLocalApi(): LocalApi | undefined {
   if (typeof window === "undefined") return undefined;
   if (cachedApi) return cachedApi;
@@ -76,7 +76,7 @@ export function readLocalApi(): LocalApi | undefined {
     return cachedApi;
   }
 
-  cachedApi = createLocalApi();
+  cachedApi = createPrimaryLocalApi();
   return cachedApi;
 }
 
@@ -91,7 +91,6 @@ export function ensureLocalApi(): LocalApi {
 export async function __resetLocalApiForTests() {
   cachedApi = undefined;
   await resetSavedEnvironmentConnectionsForTests();
-  await __resetWsRpcAtomClientForTests();
   await __resetWsRpcClientForTests();
   resetGitStatusStateForTests();
   resetRequestLatencyStateForTests();

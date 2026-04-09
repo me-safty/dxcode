@@ -33,20 +33,29 @@ import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { migrateLocalSettingsToServer } from "../hooks/useSettings";
 import {
-  bindPrimaryEnvironmentConnection,
   ensureEnvironmentConnectionBootstrapped,
   startEnvironmentConnectionManager,
-} from "../environmentManager";
-import { bindPrimaryWsRpcClientEnvironment, getPrimaryWsRpcClientEntry } from "~/wsRpcClient";
+} from "../environments/runtime/manager";
+import { getPrimaryWsRpcClientEntry } from "~/wsRpcClient";
 import { resolveInitialServerAuthGateState } from "../authBootstrap";
 import { configureClientTracing } from "../observability/clientTracing";
+import {
+  resolveInitialPrimaryEnvironmentDescriptor,
+  writePrimaryEnvironmentDescriptor,
+} from "../environments/primary/bootstrap";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
-  beforeLoad: async () => ({
-    authGateState: await resolveInitialServerAuthGateState(),
-  }),
+  beforeLoad: async () => {
+    const [, authGateState] = await Promise.all([
+      resolveInitialPrimaryEnvironmentDescriptor(),
+      resolveInitialServerAuthGateState(),
+    ]);
+    return {
+      authGateState,
+    };
+  },
   component: RootRouteView,
   errorComponent: RootRouteErrorView,
   head: () => ({
@@ -192,8 +201,7 @@ function EventRouter() {
   const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
     if (!payload) return;
 
-    bindPrimaryWsRpcClientEnvironment(payload.environment.environmentId);
-    bindPrimaryEnvironmentConnection(payload.environment.environmentId);
+    writePrimaryEnvironmentDescriptor(payload.environment);
     setActiveEnvironmentId(payload.environment.environmentId);
     migrateLocalSettingsToServer();
     void (async () => {
@@ -294,8 +302,7 @@ function EventRouter() {
       return;
     }
 
-    bindPrimaryWsRpcClientEnvironment(serverConfig.environment.environmentId);
-    bindPrimaryEnvironmentConnection(serverConfig.environment.environmentId);
+    writePrimaryEnvironmentDescriptor(serverConfig.environment);
     setActiveEnvironmentId(serverConfig.environment.environmentId);
   }, [serverConfig, setActiveEnvironmentId]);
 

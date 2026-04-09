@@ -107,7 +107,8 @@ export interface DesktopUpdateCheckResult {
 
 export interface DesktopEnvironmentBootstrap {
   label: string;
-  wsUrl: string | null;
+  httpBaseUrl: string | null;
+  wsBaseUrl: string | null;
   bootstrapToken?: string;
 }
 
@@ -120,7 +121,6 @@ export interface DesktopServerExposureState {
 }
 
 export interface DesktopBridge {
-  getWsUrl: () => string | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
   getServerExposureState: () => Promise<DesktopServerExposureState>;
   setServerExposureMode: (mode: DesktopServerExposureMode) => Promise<DesktopServerExposureState>;

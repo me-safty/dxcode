@@ -119,9 +119,17 @@ vi.mock("../../wsRpcClient", async (importOriginal) => {
     ...actual,
     getPrimaryWsRpcClientEntry: () =>
       ({
-        key: "primary",
-        knownEnvironment: null,
-        environmentId: null,
+        knownEnvironment: {
+          id: "environment-local",
+          label: "Local environment",
+          source: "manual",
+          environmentId: EnvironmentId.makeUnsafe("environment-local"),
+          target: {
+            httpBaseUrl: "http://localhost:3000",
+            wsBaseUrl: "ws://localhost:3000",
+          },
+        },
+        environmentId: EnvironmentId.makeUnsafe("environment-local"),
         client: {
           server: {
             subscribeAuthAccess: (listener: Parameters<typeof authAccessHarness.subscribe>[0]) =>
@@ -240,10 +248,10 @@ const createDesktopBridgeStub = (overrides?: {
   };
 
   return {
-    getWsUrl: () => null,
     getLocalEnvironmentBootstrap: () => ({
       label: "Local environment",
-      wsUrl: "ws://127.0.0.1:3773/ws",
+      httpBaseUrl: "http://127.0.0.1:3773",
+      wsBaseUrl: "ws://127.0.0.1:3773",
       bootstrapToken: "desktop-bootstrap-token",
     }),
     getServerExposureState: vi.fn().mockResolvedValue(

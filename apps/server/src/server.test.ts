@@ -749,6 +749,21 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("serves the public environment descriptor without requiring auth", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+
+      const url = yield* getHttpServerUrl("/.well-known/t3/environment");
+      const response = yield* Effect.promise(() => fetch(url));
+      const body = (yield* Effect.promise(() =>
+        response.json(),
+      )) as typeof testEnvironmentDescriptor;
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(body, testEnvironmentDescriptor);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("reports unauthenticated session state without requiring auth", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();

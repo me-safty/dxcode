@@ -17,6 +17,7 @@ import {
   makeWsRpcProtocolClient,
   type WsProtocolLifecycleHandlers,
   type WsRpcProtocolClient,
+  type WsRpcProtocolSocketUrlProvider,
 } from "./rpc/protocol";
 import { isTransportConnectionErrorMessage } from "./rpc/transportError";
 
@@ -38,8 +39,6 @@ interface TransportSession {
   readonly runtime: ManagedRuntime.ManagedRuntime<RpcClient.Protocol, never>;
 }
 
-export type WsTransportUrlInput = string | (() => Promise<string>);
-
 function formatErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
@@ -48,13 +47,16 @@ function formatErrorMessage(error: unknown): string {
 }
 
 export class WsTransport {
-  private readonly url: WsTransportUrlInput | undefined;
+  private readonly url: WsRpcProtocolSocketUrlProvider;
   private readonly lifecycleHandlers: WsProtocolLifecycleHandlers | undefined;
   private disposed = false;
   private reconnectChain: Promise<void> = Promise.resolve();
   private session: TransportSession;
 
-  constructor(url?: WsTransportUrlInput, lifecycleHandlers?: WsProtocolLifecycleHandlers) {
+  constructor(
+    url: WsRpcProtocolSocketUrlProvider,
+    lifecycleHandlers?: WsProtocolLifecycleHandlers,
+  ) {
     this.url = url;
     this.lifecycleHandlers = lifecycleHandlers;
     this.session = this.createSession();

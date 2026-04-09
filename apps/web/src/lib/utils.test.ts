@@ -1,14 +1,9 @@
-import { afterEach, beforeEach, describe, assert, expect, it, vi } from "vitest";
-
-const { resolvePrimaryEnvironmentBootstrapUrlMock } = vi.hoisted(() => ({
-  resolvePrimaryEnvironmentBootstrapUrlMock: vi.fn(() => "http://bootstrap.test:4321"),
-}));
-
-vi.mock("../environmentBootstrap", () => ({
-  resolvePrimaryEnvironmentBootstrapUrl: resolvePrimaryEnvironmentBootstrapUrlMock,
-}));
-
-import { isWindowsPlatform, resolveServerHttpUrl, resolveServerUrl } from "./utils";
+import { afterEach, beforeEach, describe, assert, it, vi } from "vitest";
+import {
+  __resetPrimaryEnvironmentBootstrapForTests,
+  resolvePrimaryEnvironmentHttpUrl,
+} from "../environments/primary/bootstrap";
+import { isWindowsPlatform } from "./utils";
 
 describe("isWindowsPlatform", () => {
   it("matches Windows platform identifiers", () => {
@@ -25,8 +20,6 @@ describe("isWindowsPlatform", () => {
 const originalWindow = globalThis.window;
 
 beforeEach(() => {
-  resolvePrimaryEnvironmentBootstrapUrlMock.mockReset();
-  resolvePrimaryEnvironmentBootstrapUrlMock.mockReturnValue("http://bootstrap.test:4321");
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: {
@@ -42,64 +35,27 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  __resetPrimaryEnvironmentBootstrapForTests();
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: originalWindow,
   });
 });
 
-describe("resolveServerHttpUrl", () => {
-  it("uses the Vite dev origin for local HTTP requests automatically", () => {
-    resolvePrimaryEnvironmentBootstrapUrlMock.mockReturnValueOnce("");
-    vi.stubEnv("VITE_WS_URL", "ws://127.0.0.1:3775/ws");
+describe("resolvePrimaryEnvironmentHttpUrl", () => {
+  it("uses the configured explicit primary HTTP base URL", () => {
+    vi.stubEnv("VITE_HTTP_URL", "http://127.0.0.1:3775");
+    vi.stubEnv("VITE_WS_URL", "ws://127.0.0.1:3775");
 
     assert.equal(
-      resolveServerHttpUrl({ pathname: "/api/observability/v1/traces" }),
+      resolvePrimaryEnvironmentHttpUrl("/api/observability/v1/traces"),
+      "http://127.0.0.1:3775/api/observability/v1/traces",
+    );
+  });
+  it("falls back to the current window origin when there is no explicit primary target", () => {
+    assert.equal(
+      resolvePrimaryEnvironmentHttpUrl("/api/observability/v1/traces"),
       "http://localhost:5735/api/observability/v1/traces",
-    );
-  });
-});
-
-describe("resolveServerUrl", () => {
-  it("falls back to the bootstrap environment URL when the explicit URL is empty", () => {
-    expect(resolveServerUrl({ url: "" })).toBe("http://bootstrap.test:4321/");
-  });
-
-  it("uses the bootstrap environment URL when no explicit URL is provided", () => {
-    expect(resolveServerUrl()).toBe("http://bootstrap.test:4321/");
-  });
-
-  it("prefers an explicit URL override", () => {
-    expect(
-      resolveServerUrl({
-        url: "https://override.test:9999",
-        protocol: "wss",
-        pathname: "/rpc",
-        searchParams: { hello: "world" },
-      }),
-    ).toBe("wss://override.test:9999/rpc?hello=world");
-  });
-
-  it("does not evaluate the bootstrap resolver when an explicit URL is provided", () => {
-    resolvePrimaryEnvironmentBootstrapUrlMock.mockImplementationOnce(() => {
-      throw new Error("bootstrap unavailable");
-    });
-
-    expect(resolveServerUrl({ url: "https://override.test:9999" })).toBe(
-      "https://override.test:9999/",
-    );
-  });
-
-  it("keeps the backend origin for websocket requests", () => {
-    resolvePrimaryEnvironmentBootstrapUrlMock.mockReturnValueOnce("");
-    vi.stubEnv("VITE_WS_URL", "ws://127.0.0.1:3775/ws");
-
-    assert.equal(
-      resolveServerUrl({
-        protocol: "ws",
-        pathname: "/ws",
-      }),
-      "ws://127.0.0.1:3775/ws",
     );
   });
 });

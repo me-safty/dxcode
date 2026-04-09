@@ -98,17 +98,19 @@ vi.mock("./wsRpcClient", async (importOriginal) => {
 
   return {
     ...actual,
-    getWsRpcClient: () => rpcClientMock,
     getPrimaryWsRpcClientEntry: () => ({
-      key: "primary",
       knownEnvironment: {
-        id: "primary",
+        id: "environment-local",
         label: "Primary",
         source: "manual",
-        target: { type: "ws", wsUrl: "ws://localhost:3000" },
+        target: {
+          httpBaseUrl: "http://localhost:3000",
+          wsBaseUrl: "ws://localhost:3000",
+        },
+        environmentId: EnvironmentId.makeUnsafe("environment-local"),
       },
       client: rpcClientMock,
-      environmentId: null,
+      environmentId: EnvironmentId.makeUnsafe("environment-local"),
     }),
     __resetWsRpcClientForTests: vi.fn(),
   };
@@ -136,7 +138,6 @@ function getWindowForTest(): Window & typeof globalThis & { desktopBridge?: unkn
 
 function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridge {
   return {
-    getWsUrl: () => null,
     getLocalEnvironmentBootstrap: () => null,
     getServerExposureState: async () => ({
       mode: "local-only",
@@ -252,7 +253,7 @@ describe("wsApi", () => {
     rpcClientMock.server.getConfig.mockResolvedValue(baseServerConfig);
     const { createLocalApi } = await import("./localApi");
 
-    const api = createLocalApi();
+    const api = createLocalApi(rpcClientMock as never);
 
     await expect(api.server.getConfig()).resolves.toEqual(baseServerConfig);
     expect(rpcClientMock.server.getConfig).toHaveBeenCalledWith();
@@ -415,7 +416,7 @@ describe("wsApi", () => {
     rpcClientMock.server.refreshProviders.mockResolvedValue({ providers: nextProviders });
     const { createLocalApi } = await import("./localApi");
 
-    const api = createLocalApi();
+    const api = createLocalApi(rpcClientMock as never);
 
     await expect(api.server.refreshProviders()).resolves.toEqual({ providers: nextProviders });
     expect(rpcClientMock.server.refreshProviders).toHaveBeenCalledWith();
@@ -429,7 +430,7 @@ describe("wsApi", () => {
     rpcClientMock.server.updateSettings.mockResolvedValue(nextSettings);
     const { createLocalApi } = await import("./localApi");
 
-    const api = createLocalApi();
+    const api = createLocalApi(rpcClientMock as never);
 
     await expect(api.server.updateSettings({ enableAssistantStreaming: true })).resolves.toEqual(
       nextSettings,
@@ -444,7 +445,7 @@ describe("wsApi", () => {
     getWindowForTest().desktopBridge = makeDesktopBridge({ showContextMenu });
 
     const { createLocalApi } = await import("./localApi");
-    const api = createLocalApi();
+    const api = createLocalApi(rpcClientMock as never);
     const items = [{ id: "delete", label: "Delete" }] as const;
 
     await expect(api.contextMenu.show(items)).resolves.toBe("delete");
@@ -455,7 +456,7 @@ describe("wsApi", () => {
     showContextMenuFallbackMock.mockResolvedValue("rename");
     const { createLocalApi } = await import("./localApi");
 
-    const api = createLocalApi();
+    const api = createLocalApi(rpcClientMock as never);
     const items = [{ id: "rename", label: "Rename" }] as const;
 
     await expect(api.contextMenu.show(items, { x: 4, y: 5 })).resolves.toBe("rename");

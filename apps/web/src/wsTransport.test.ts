@@ -154,15 +154,8 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
-  it("uses wss when falling back to an https page origin", async () => {
-    Object.assign(window.location, {
-      origin: "https://app.example.com",
-      hostname: "app.example.com",
-      port: "",
-      protocol: "https:",
-    });
-
-    const transport = new WsTransport();
+  it("uses an explicit secure websocket base url", async () => {
+    const transport = new WsTransport("wss://app.example.com");
 
     await waitFor(() => {
       expect(sockets).toHaveLength(1);
@@ -172,8 +165,8 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
-  it("preserves an explicit insecure websocket protocol for remote backends", async () => {
-    const transport = new WsTransport("http://192.168.1.44:3773");
+  it("uses an explicit insecure websocket base url for remote backends", async () => {
+    const transport = new WsTransport("ws://192.168.1.44:3773");
 
     await waitFor(() => {
       expect(sockets).toHaveLength(1);

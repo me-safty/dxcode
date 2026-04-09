@@ -1,8 +1,8 @@
 import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 
 export interface KnownEnvironmentConnectionTarget {
-  readonly type: "ws";
-  readonly wsUrl: string;
+  readonly httpBaseUrl: string;
+  readonly wsBaseUrl: string;
 }
 
 export type KnownEnvironmentSource = "configured" | "desktop-managed" | "manual" | "window-origin";
@@ -15,48 +15,30 @@ export interface KnownEnvironment {
   readonly target: KnownEnvironmentConnectionTarget;
 }
 
-export function createKnownEnvironmentFromWsUrl(input: {
+export function createKnownEnvironment(input: {
   readonly id?: string;
   readonly label: string;
   readonly source?: KnownEnvironmentSource;
-  readonly wsUrl: string;
+  readonly target: KnownEnvironmentConnectionTarget;
 }): KnownEnvironment {
   return {
     id: input.id ?? `ws:${input.label}`,
     label: input.label,
     source: input.source ?? "manual",
-    target: {
-      type: "ws",
-      wsUrl: input.wsUrl,
-    },
+    target: input.target,
   };
 }
 
-export function getKnownEnvironmentBaseUrl(
+export function getKnownEnvironmentWsBaseUrl(
   environment: KnownEnvironment | null | undefined,
 ): string | null {
-  return environment?.target.wsUrl ?? null;
+  return environment?.target.wsBaseUrl ?? null;
 }
 
 export function getKnownEnvironmentHttpBaseUrl(
   environment: KnownEnvironment | null | undefined,
 ): string | null {
-  const baseUrl = getKnownEnvironmentBaseUrl(environment);
-  if (!baseUrl) {
-    return null;
-  }
-
-  try {
-    const url = new URL(baseUrl);
-    if (url.protocol === "ws:") {
-      url.protocol = "http:";
-    } else if (url.protocol === "wss:") {
-      url.protocol = "https:";
-    }
-    return url.toString();
-  } catch {
-    return baseUrl;
-  }
+  return environment?.target.httpBaseUrl ?? null;
 }
 
 export function attachEnvironmentDescriptor(

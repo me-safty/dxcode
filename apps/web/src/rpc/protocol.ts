@@ -3,7 +3,6 @@ import { Duration, Effect, Layer, Schedule } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
 
-import { resolveServerUrl } from "../lib/utils";
 import {
   acknowledgeRpcRequest,
   clearAllTrackedRpcRequests,
@@ -18,8 +17,6 @@ import {
   WS_RECONNECT_MAX_RETRIES,
 } from "./wsConnectionState";
 
-export const makeWsRpcProtocolClient = RpcClient.make(WsRpcGroup);
-
 export interface WsProtocolLifecycleHandlers {
   readonly onAttempt?: (socketUrl: string) => void;
   readonly onOpen?: () => void;
@@ -27,11 +24,11 @@ export interface WsProtocolLifecycleHandlers {
   readonly onClose?: (details: { readonly code: number; readonly reason: string }) => void;
 }
 
-type WsRpcProtocolUrlInput = string | (() => Promise<string>);
-
+export const makeWsRpcProtocolClient = RpcClient.make(WsRpcGroup);
 type RpcClientFactory = typeof makeWsRpcProtocolClient;
 export type WsRpcProtocolClient =
   RpcClientFactory extends Effect.Effect<infer Client, any, any> ? Client : never;
+export type WsRpcProtocolSocketUrlProvider = string | (() => Promise<string>);
 
 function formatSocketErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
@@ -40,30 +37,14 @@ function formatSocketErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function resolveWsProtocol(rawUrl?: string): "ws" | "wss" {
-  if (rawUrl) {
-    try {
-      const resolved = new URL(rawUrl, window.location.origin);
-      if (resolved.protocol === "https:" || resolved.protocol === "wss:") {
-        return "wss";
-      }
-      if (resolved.protocol === "http:" || resolved.protocol === "ws:") {
-        return "ws";
-      }
-    } catch {
-      // Fall through to page protocol inference.
-    }
+function resolveWsRpcSocketUrl(rawUrl: string): string {
+  const resolved = new URL(rawUrl);
+  if (resolved.protocol !== "ws:" && resolved.protocol !== "wss:") {
+    throw new Error(`Unsupported websocket transport URL protocol: ${resolved.protocol}`);
   }
 
-  return window.location.protocol === "https:" ? "wss" : "ws";
-}
-
-function resolveWsRpcSocketUrl(rawUrl?: string): string {
-  return resolveServerUrl({
-    url: rawUrl,
-    protocol: resolveWsProtocol(rawUrl),
-    pathname: "/ws",
-  });
+  resolved.pathname = "/ws";
+  return resolved.toString();
 }
 
 function defaultLifecycleHandlers(): Required<WsProtocolLifecycleHandlers> {
@@ -82,7 +63,7 @@ function defaultLifecycleHandlers(): Required<WsProtocolLifecycleHandlers> {
 }
 
 export function createWsRpcProtocolLayer(
-  url?: WsRpcProtocolUrlInput,
+  url: WsRpcProtocolSocketUrlProvider,
   handlers?: WsProtocolLifecycleHandlers,
 ) {
   const lifecycle = {
@@ -98,8 +79,10 @@ export function createWsRpcProtocolLayer(
               lifecycle.onError(formatSocketErrorMessage(error));
             }),
           ),
+          Effect.orDie,
         )
       : resolveWsRpcSocketUrl(url);
+
   const trackingWebSocketConstructorLayer = Layer.succeed(
     Socket.WebSocketConstructor,
     (socketUrl, protocols) => {

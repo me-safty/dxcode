@@ -35,6 +35,10 @@ function installTestBrowser(url: string) {
   return testWindow;
 }
 
+function sessionResponse(body: unknown, init?: ResponseInit) {
+  return jsonResponse(body, init);
+}
+
 describe("resolveInitialServerAuthGateState", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -45,6 +49,7 @@ describe("resolveInitialServerAuthGateState", () => {
   afterEach(async () => {
     const { __resetServerAuthBootstrapForTests } = await import("./authBootstrap");
     __resetServerAuthBootstrapForTests();
+    vi.unstubAllEnvs();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -53,7 +58,7 @@ describe("resolveInitialServerAuthGateState", () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
-        jsonResponse({
+        sessionResponse({
           authenticated: false,
           auth: {
             policy: "desktop-managed-local",
@@ -71,7 +76,7 @@ describe("resolveInitialServerAuthGateState", () => {
         }),
       )
       .mockResolvedValueOnce(
-        jsonResponse({
+        sessionResponse({
           authenticated: true,
           auth: {
             policy: "loopback-browser",
@@ -89,7 +94,8 @@ describe("resolveInitialServerAuthGateState", () => {
     testWindow.desktopBridge = {
       getLocalEnvironmentBootstrap: () => ({
         label: "Local environment",
-        wsUrl: "ws://localhost:3773/ws",
+        httpBaseUrl: "http://localhost:3773",
+        wsBaseUrl: "ws://localhost:3773",
         bootstrapToken: "desktop-bootstrap-token",
       }),
     } as DesktopBridge;
@@ -99,14 +105,14 @@ describe("resolveInitialServerAuthGateState", () => {
     await Promise.all([resolveInitialServerAuthGateState(), resolveInitialServerAuthGateState()]);
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost/api/auth/session");
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost/api/auth/bootstrap");
-    expect(fetchMock.mock.calls[2]?.[0]).toBe("http://localhost/api/auth/session");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:3773/api/auth/session");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost:3773/api/auth/bootstrap");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("http://localhost:3773/api/auth/session");
   });
 
   it("uses https fetch urls when the primary environment uses wss", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      jsonResponse({
+      sessionResponse({
         authenticated: false,
         auth: {
           policy: "loopback-browser",
@@ -117,7 +123,8 @@ describe("resolveInitialServerAuthGateState", () => {
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubEnv("VITE_WS_URL", "wss://remote.example.com/ws");
+    vi.stubEnv("VITE_HTTP_URL", "https://remote.example.com");
+    vi.stubEnv("VITE_WS_URL", "wss://remote.example.com");
 
     const { resolveInitialServerAuthGateState } = await import("./authBootstrap");
 
@@ -138,7 +145,7 @@ describe("resolveInitialServerAuthGateState", () => {
 
   it("uses the current origin as an auth proxy base for local dev environments", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      jsonResponse({
+      sessionResponse({
         authenticated: false,
         auth: {
           policy: "loopback-browser",
@@ -149,7 +156,6 @@ describe("resolveInitialServerAuthGateState", () => {
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubEnv("VITE_WS_URL", "ws://127.0.0.1:3773/ws");
     installTestBrowser("http://localhost:5735/");
 
     const { resolveInitialServerAuthGateState } = await import("./authBootstrap");
@@ -171,7 +177,7 @@ describe("resolveInitialServerAuthGateState", () => {
 
   it("returns a requires-auth state instead of throwing when no bootstrap credential exists", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      jsonResponse({
+      sessionResponse({
         authenticated: false,
         auth: {
           policy: "loopback-browser",
@@ -204,7 +210,7 @@ describe("resolveInitialServerAuthGateState", () => {
       .mockResolvedValueOnce(new Response("Bad Gateway", { status: 502 }))
       .mockResolvedValueOnce(new Response("Bad Gateway", { status: 502 }))
       .mockResolvedValueOnce(
-        jsonResponse({
+        sessionResponse({
           authenticated: false,
           auth: {
             policy: "loopback-browser",
@@ -254,7 +260,7 @@ describe("resolveInitialServerAuthGateState", () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
-        jsonResponse({
+        sessionResponse({
           authenticated: false,
           auth: {
             policy: "loopback-browser",
@@ -272,7 +278,7 @@ describe("resolveInitialServerAuthGateState", () => {
         }),
       )
       .mockResolvedValueOnce(
-        jsonResponse({
+        sessionResponse({
           authenticated: true,
           auth: {
             policy: "loopback-browser",
@@ -311,7 +317,7 @@ describe("resolveInitialServerAuthGateState", () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
-        jsonResponse({
+        sessionResponse({
           authenticated: false,
           auth: {
             policy: "desktop-managed-local",
@@ -329,7 +335,7 @@ describe("resolveInitialServerAuthGateState", () => {
         }),
       )
       .mockResolvedValueOnce(
-        jsonResponse({
+        sessionResponse({
           authenticated: false,
           auth: {
             policy: "desktop-managed-local",
@@ -340,7 +346,7 @@ describe("resolveInitialServerAuthGateState", () => {
         }),
       )
       .mockResolvedValueOnce(
-        jsonResponse({
+        sessionResponse({
           authenticated: true,
           auth: {
             policy: "desktop-managed-local",
@@ -358,7 +364,8 @@ describe("resolveInitialServerAuthGateState", () => {
     testWindow.desktopBridge = {
       getLocalEnvironmentBootstrap: () => ({
         label: "Local environment",
-        wsUrl: "ws://localhost:3773/ws",
+        httpBaseUrl: "http://localhost:3773",
+        wsBaseUrl: "ws://localhost:3773",
         bootstrapToken: "desktop-bootstrap-token",
       }),
     } as DesktopBridge;
@@ -372,15 +379,15 @@ describe("resolveInitialServerAuthGateState", () => {
       status: "authenticated",
     });
     expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(fetchMock.mock.calls[2]?.[0]).toBe("http://localhost/api/auth/session");
-    expect(fetchMock.mock.calls[3]?.[0]).toBe("http://localhost/api/auth/session");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("http://localhost:3773/api/auth/session");
+    expect(fetchMock.mock.calls[3]?.[0]).toBe("http://localhost:3773/api/auth/session");
   });
 
   it("revalidates the server session state after a previous authenticated result", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
-        jsonResponse({
+        sessionResponse({
           authenticated: true,
           auth: {
             policy: "loopback-browser",
@@ -393,7 +400,7 @@ describe("resolveInitialServerAuthGateState", () => {
         }),
       )
       .mockResolvedValueOnce(
-        jsonResponse({
+        sessionResponse({
           authenticated: false,
           auth: {
             policy: "loopback-browser",

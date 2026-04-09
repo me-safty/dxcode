@@ -143,7 +143,7 @@ import { deriveLogicalProjectKey } from "../logicalProject";
 import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
-} from "../savedEnvironmentsStore";
+} from "../environments/runtime/savedEnvironmentsStore";
 import type { Project, SidebarThreadSummary } from "../types";
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
@@ -1714,7 +1714,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               }`}
             />
           )}
-          <ProjectFavicon cwd={project.cwd} />
+          <ProjectFavicon environmentId={project.environmentId} cwd={project.cwd} />
           <span className="flex-1 truncate text-xs font-medium text-foreground/90">
             {project.name}
           </span>

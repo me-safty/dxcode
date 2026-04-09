@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createOrchestrationRegistrySyncController,
   createSnapshotBootstrapController,
-} from "./environmentManager";
-import type { WsRpcClient, WsRpcClientEntry } from "./wsRpcClient";
+} from "./manager";
+import type { WsRpcClient, WsRpcClientEntry } from "../../wsRpcClient";
 
 function createTestClient(options?: {
   readonly getSnapshot?: () => Promise<{ readonly snapshotSequence: number }>;
@@ -110,8 +110,6 @@ function createTestClient(options?: {
 
 describe("createSnapshotBootstrapController", () => {
   it("deduplicates concurrent snapshot recovery requests", async () => {
-    const environmentId = EnvironmentId.makeUnsafe("env-1");
-    let boundEnvironmentId: EnvironmentId | null = environmentId;
     let bootstrapped = false;
     let resolveRecovery: (() => void) | undefined;
     const runSnapshotRecovery = vi.fn(
@@ -126,12 +124,11 @@ describe("createSnapshotBootstrapController", () => {
 
     const controller = createSnapshotBootstrapController({
       isBootstrapped: () => bootstrapped,
-      getBoundEnvironmentId: () => boundEnvironmentId,
       runSnapshotRecovery,
     });
 
-    const first = controller.ensureSnapshotRecovery("bootstrap", environmentId);
-    const second = controller.ensureSnapshotRecovery("bootstrap", environmentId);
+    const first = controller.ensureSnapshotRecovery("bootstrap");
+    const second = controller.ensureSnapshotRecovery("bootstrap");
 
     expect(runSnapshotRecovery).toHaveBeenCalledTimes(1);
     expect(first).toBe(second);
@@ -140,68 +137,64 @@ describe("createSnapshotBootstrapController", () => {
     await Promise.all([first, second]);
   });
 
-  it("skips recovery after the bound environment has already been bootstrapped", async () => {
-    const firstEnvironmentId = EnvironmentId.makeUnsafe("env-1");
-    const secondEnvironmentId = EnvironmentId.makeUnsafe("env-2");
-    let boundEnvironmentId: EnvironmentId | null = firstEnvironmentId;
+  it("skips recovery after the environment has already been bootstrapped", async () => {
     let bootstrapped = true;
     const runSnapshotRecovery = vi.fn(async () => undefined);
 
     const controller = createSnapshotBootstrapController({
       isBootstrapped: () => bootstrapped,
-      getBoundEnvironmentId: () => boundEnvironmentId,
       runSnapshotRecovery,
     });
 
-    await controller.ensureSnapshotRecovery("bootstrap", firstEnvironmentId);
+    await controller.ensureSnapshotRecovery("bootstrap");
 
     expect(runSnapshotRecovery).not.toHaveBeenCalled();
 
-    boundEnvironmentId = secondEnvironmentId;
     bootstrapped = false;
-    await controller.ensureSnapshotRecovery("bootstrap", secondEnvironmentId);
+    await controller.ensureSnapshotRecovery("bootstrap");
 
     expect(runSnapshotRecovery).toHaveBeenCalledTimes(1);
-    expect(runSnapshotRecovery).toHaveBeenCalledWith("bootstrap", secondEnvironmentId);
+    expect(runSnapshotRecovery).toHaveBeenCalledWith("bootstrap");
   });
 
-  it("starts a new recovery when the bound environment changes mid-flight", async () => {
-    const firstEnvironmentId = EnvironmentId.makeUnsafe("env-1");
-    const secondEnvironmentId = EnvironmentId.makeUnsafe("env-2");
-    let boundEnvironmentId: EnvironmentId | null = firstEnvironmentId;
+  it("starts a new recovery after the previous one settles", async () => {
     let bootstrapped = false;
     let resolveFirstRecovery: (() => void) | undefined;
     let resolveSecondRecovery: (() => void) | undefined;
-    const runSnapshotRecovery = vi.fn(
-      async (_reason: "bootstrap" | "replay-failed", environmentId: EnvironmentId) =>
-        new Promise<void>((resolve) => {
-          if (environmentId === firstEnvironmentId) {
+    const runSnapshotRecovery = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
             resolveFirstRecovery = resolve;
-            return;
-          }
-          resolveSecondRecovery = resolve;
-        }),
-    );
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSecondRecovery = resolve;
+          }),
+      );
 
     const controller = createSnapshotBootstrapController({
       isBootstrapped: () => bootstrapped,
-      getBoundEnvironmentId: () => boundEnvironmentId,
       runSnapshotRecovery,
     });
 
-    const first = controller.ensureSnapshotRecovery("bootstrap", firstEnvironmentId);
+    const first = controller.ensureSnapshotRecovery("bootstrap");
+    const deduped = controller.ensureSnapshotRecovery("bootstrap");
 
-    boundEnvironmentId = secondEnvironmentId;
-
-    const second = controller.ensureSnapshotRecovery("bootstrap", secondEnvironmentId);
-
-    expect(runSnapshotRecovery).toHaveBeenCalledTimes(2);
-    expect(second).not.toBe(first);
+    expect(runSnapshotRecovery).toHaveBeenCalledTimes(1);
+    expect(deduped).toBe(first);
 
     resolveFirstRecovery?.();
     await first;
 
-    const dedupedSecond = controller.ensureSnapshotRecovery("bootstrap", secondEnvironmentId);
+    const second = controller.ensureSnapshotRecovery("bootstrap");
+
+    expect(runSnapshotRecovery).toHaveBeenCalledTimes(2);
+
+    const dedupedSecond = controller.ensureSnapshotRecovery("bootstrap");
     expect(dedupedSecond).toBe(second);
     expect(runSnapshotRecovery).toHaveBeenCalledTimes(2);
 
@@ -210,67 +203,55 @@ describe("createSnapshotBootstrapController", () => {
     await second;
   });
 
-  it("skips recovery for an already-bootstrapped environment even when another environment is in flight", async () => {
-    const firstEnvironmentId = EnvironmentId.makeUnsafe("env-1");
-    const secondEnvironmentId = EnvironmentId.makeUnsafe("env-2");
-    let boundEnvironmentId: EnvironmentId | null = secondEnvironmentId;
+  it("skips new recovery requests once the environment becomes bootstrapped", async () => {
     let bootstrapped = false;
     let resolveRecovery: (() => void) | undefined;
     const runSnapshotRecovery = vi.fn(
-      (_reason, environmentId: EnvironmentId) =>
+      (_reason) =>
         new Promise<void>((resolve) => {
-          if (environmentId === firstEnvironmentId) {
-            resolveRecovery = resolve;
-            return;
-          }
-
-          resolve();
+          resolveRecovery = resolve;
         }),
     );
 
     const controller = createSnapshotBootstrapController({
       isBootstrapped: () => bootstrapped,
-      getBoundEnvironmentId: () => boundEnvironmentId,
       runSnapshotRecovery,
     });
 
-    const firstRecovery = controller.ensureSnapshotRecovery("bootstrap", firstEnvironmentId);
-
-    boundEnvironmentId = secondEnvironmentId;
-    bootstrapped = true;
-
-    await expect(
-      controller.ensureSnapshotRecovery("bootstrap", secondEnvironmentId),
-    ).resolves.toBeUndefined();
+    const firstRecovery = controller.ensureSnapshotRecovery("bootstrap");
+    const dedupedRecovery = controller.ensureSnapshotRecovery("bootstrap");
+    expect(dedupedRecovery).toBe(firstRecovery);
 
     expect(runSnapshotRecovery).toHaveBeenCalledTimes(1);
-    expect(runSnapshotRecovery).toHaveBeenCalledWith("bootstrap", firstEnvironmentId);
+    expect(runSnapshotRecovery).toHaveBeenCalledWith("bootstrap");
 
+    bootstrapped = true;
     resolveRecovery?.();
     await firstRecovery;
+
+    await expect(controller.ensureSnapshotRecovery("bootstrap")).resolves.toBeUndefined();
+    expect(runSnapshotRecovery).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("createOrchestrationRegistrySyncController", () => {
-  it("bootstraps a snapshot when an entry binds an environment after connect", async () => {
+  it("bootstraps a snapshot for a registered environment client", async () => {
     const environmentId = EnvironmentId.makeUnsafe("env-1");
-    const { client, getSnapshot, emitWelcome } = createTestClient();
-    const baseEntry: WsRpcClientEntry = {
-      key: "client-1",
+    const { client, getSnapshot } = createTestClient();
+    const entry: WsRpcClientEntry = {
       knownEnvironment: {
-        id: "client-1",
+        id: "env-1",
         label: "Remote env",
         source: "manual",
         target: {
-          type: "ws",
-          wsUrl: "ws://example.test/ws",
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
         },
+        environmentId,
       },
       client,
-      environmentId: null,
+      environmentId,
     };
-    let entries: ReadonlyArray<WsRpcClientEntry> = [baseEntry];
-    const listeners = new Set<() => void>();
     const syncSnapshot = vi.fn();
 
     const controller = createOrchestrationRegistrySyncController(
@@ -280,27 +261,11 @@ describe("createOrchestrationRegistrySyncController", () => {
         applyTerminalEvent: vi.fn(),
       },
       {
-        listEntries: () => entries,
-        subscribe: (listener) => {
-          listeners.add(listener);
-          return () => listeners.delete(listener);
-        },
-        bindEnvironment: (_entryKey, nextEnvironmentId) => {
-          entries = [
-            {
-              ...baseEntry,
-              environmentId: nextEnvironmentId,
-              knownEnvironment: {
-                ...baseEntry.knownEnvironment,
-                environmentId: nextEnvironmentId,
-              },
-            },
-          ];
-        },
+        listEntries: () => [entry],
+        subscribe: () => () => undefined,
       },
     );
 
-    emitWelcome(environmentId);
     await Promise.resolve();
     await Promise.resolve();
 
@@ -312,5 +277,45 @@ describe("createOrchestrationRegistrySyncController", () => {
     );
 
     controller.dispose();
+  });
+
+  it("rejects a client that reports a different environment id after it is already bound", async () => {
+    const environmentId = EnvironmentId.makeUnsafe("env-1");
+    const otherEnvironmentId = EnvironmentId.makeUnsafe("env-2");
+    const { client, emitWelcome } = createTestClient();
+    const controller = createOrchestrationRegistrySyncController(
+      {
+        applyEventBatch: vi.fn(),
+        syncSnapshot: vi.fn(),
+        applyTerminalEvent: vi.fn(),
+      },
+      {
+        listEntries: () => [
+          {
+            knownEnvironment: {
+              id: "env-1",
+              label: "Remote env",
+              source: "manual",
+              target: {
+                httpBaseUrl: "http://example.test",
+                wsBaseUrl: "ws://example.test",
+              },
+              environmentId,
+            },
+            client,
+            environmentId,
+          },
+        ],
+        subscribe: () => () => undefined,
+      },
+    );
+
+    try {
+      expect(() => emitWelcome(otherEnvironmentId)).toThrow(
+        "Websocket client env-1 changed environment identity from env-1 to env-2 via server lifecycle welcome.",
+      );
+    } finally {
+      controller.dispose();
+    }
   });
 });

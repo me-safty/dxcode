@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   bootstrapRemoteBearerSession,
+  fetchRemoteEnvironmentDescriptor,
   fetchRemoteSessionState,
   issueRemoteWebSocketToken,
-  resolveRemotePairingTarget,
   resolveRemoteWebSocketConnectionUrl,
-} from "./remoteEnvironmentAuth";
+} from "./api";
+import { resolveRemotePairingTarget } from "./target";
 
 const originalFetch = globalThis.fetch;
 
@@ -22,7 +23,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("remoteEnvironmentAuth", () => {
+describe("remote environment api", () => {
   it("derives backend urls and token from a pairing url", () => {
     expect(
       resolveRemotePairingTarget({
@@ -102,6 +103,23 @@ describe("remoteEnvironmentAuth", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            environmentId: "environment-remote",
+            label: "Remote environment",
+            platform: {
+              os: "linux",
+              arch: "x64",
+            },
+            serverVersion: "0.0.0-test",
+            capabilities: {
+              repositoryIdentity: true,
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
             authenticated: true,
             auth: {
               policy: "remote-reachable",
@@ -128,6 +146,15 @@ describe("remoteEnvironmentAuth", () => {
     globalThis.fetch = fetchMock as typeof fetch;
 
     await expect(
+      fetchRemoteEnvironmentDescriptor({
+        httpBaseUrl: "https://remote.example.com/",
+      }),
+    ).resolves.toMatchObject({
+      environmentId: "environment-remote",
+      label: "Remote environment",
+    });
+
+    await expect(
       fetchRemoteSessionState({
         httpBaseUrl: "https://remote.example.com/",
         bearerToken: "bearer-token",
@@ -146,13 +173,21 @@ describe("remoteEnvironmentAuth", () => {
       token: "ws-token",
     });
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "https://remote.example.com/api/auth/session", {
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://remote.example.com/.well-known/t3/environment",
+      {
+        method: "GET",
+        headers: {},
+      },
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "https://remote.example.com/api/auth/session", {
       method: "GET",
       headers: {
         authorization: "Bearer bearer-token",
       },
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "https://remote.example.com/api/auth/ws-token", {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "https://remote.example.com/api/auth/ws-token", {
       method: "POST",
       headers: {
         authorization: "Bearer bearer-token",

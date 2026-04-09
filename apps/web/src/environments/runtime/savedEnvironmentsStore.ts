@@ -7,7 +7,7 @@ import type {
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import { resolveStorage } from "./lib/storage";
+import { resolveStorage } from "../../lib/storage";
 
 const SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY = "t3code:saved-environment-registry:v1";
 
@@ -111,9 +111,34 @@ export const useSavedEnvironmentRegistryStore = create<SavedEnvironmentRegistryS
       version: 1,
       storage: createJSONStorage(createSavedEnvironmentRegistryStorage),
       migrate: migratePersistedSavedEnvironmentRegistryState,
+      partialize: (state) => ({
+        byId: state.byId,
+      }),
     },
   ),
 );
+
+export function hasSavedEnvironmentRegistryHydrated(): boolean {
+  return useSavedEnvironmentRegistryStore.persist.hasHydrated();
+}
+
+export function waitForSavedEnvironmentRegistryHydration(): Promise<void> {
+  if (hasSavedEnvironmentRegistryHydrated()) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const unsubscribe = useSavedEnvironmentRegistryStore.persist.onFinishHydration(() => {
+      unsubscribe();
+      resolve();
+    });
+
+    if (hasSavedEnvironmentRegistryHydrated()) {
+      unsubscribe();
+      resolve();
+    }
+  });
+}
 
 export function listSavedEnvironmentRecords(): ReadonlyArray<SavedEnvironmentRecord> {
   return Object.values(useSavedEnvironmentRegistryStore.getState().byId).toSorted((left, right) =>

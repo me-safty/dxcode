@@ -3,6 +3,7 @@ import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { resolveInitialServerAuthGateState } from "../authBootstrap";
+import { resolveInitialPrimaryEnvironmentDescriptor } from "../environments/primary/bootstrap";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { Button } from "../components/ui/button";
 import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
@@ -85,7 +86,10 @@ function SettingsRouteLayout() {
 
 export const Route = createFileRoute("/settings")({
   beforeLoad: async ({ location }) => {
-    const authGateState = await resolveInitialServerAuthGateState();
+    const [, authGateState] = await Promise.all([
+      resolveInitialPrimaryEnvironmentDescriptor(),
+      resolveInitialServerAuthGateState(),
+    ]);
     if (authGateState.status !== "authenticated") {
       throw redirect({ to: "/pair", replace: true });
     }
