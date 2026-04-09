@@ -178,58 +178,15 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   },
 ];
 
-const GLM_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
-  {
-    slug: "glm-5.1",
-    name: "GLM 5.1",
-    isCustom: false,
-    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
-  },
-  {
-    slug: "glm-5",
-    name: "GLM 5",
-    isCustom: false,
-    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
-  },
-  {
-    slug: "glm-5-turbo",
-    name: "GLM 5 Turbo",
-    isCustom: false,
-    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
-  },
-  {
-    slug: "glm-4.7",
-    name: "GLM 4.7",
-    isCustom: false,
-    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
-  },
-  {
-    slug: "glm-4.6",
-    name: "GLM 4.6",
-    isCustom: false,
-    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
-  },
-  {
-    slug: "glm-4.5",
-    name: "GLM 4.5",
-    isCustom: false,
-    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
-  },
-  {
-    slug: "glm-4.5-air",
-    name: "GLM 4.5 Air",
-    isCustom: false,
-    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
-  },
-];
+interface CodexConfigSnapshot {
+  readonly modelProvider: string | undefined;
+  readonly configuredModels: ReadonlyArray<string>;
+}
 
 export function getCodexModelCapabilities(model: string | null | undefined): ModelCapabilities {
   const slug = model?.trim();
   if (slug?.startsWith("glm-")) {
-    return (
-      GLM_BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ??
-      DEFAULT_GLM_MODEL_CAPABILITIES
-    );
+    return DEFAULT_GLM_MODEL_CAPABILITIES;
   }
   return (
     BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ??
@@ -317,7 +274,55 @@ export function parseAuthStatusFromOutput(result: CommandResult): {
   };
 }
 
-export const readCodexConfigModelProvider = Effect.fn("readCodexConfigModelProvider")(function* () {
+function parseCodexConfigSnapshot(content: string): CodexConfigSnapshot {
+  let inTopLevel = true;
+  let inProfileSection = false;
+  let modelProvider: string | undefined;
+  const configuredModels: string[] = [];
+  const seenModels = new Set<string>();
+
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+    if (trimmed.startsWith("[")) {
+      const sectionName = trimmed.slice(1, trimmed.lastIndexOf("]")).trim();
+      inTopLevel = false;
+      inProfileSection =
+        sectionName === "profiles" ||
+        sectionName.startsWith("profiles.") ||
+        sectionName.startsWith('profiles."') ||
+        sectionName.startsWith("profiles.'");
+      continue;
+    }
+
+    const modelMatch = trimmed.match(/^model\s*=\s*["']([^"']+)["']/);
+    if (modelMatch && (inTopLevel || inProfileSection)) {
+      const model = modelMatch[1]?.trim();
+      if (model && !seenModels.has(model)) {
+        seenModels.add(model);
+        configuredModels.push(model);
+      }
+    }
+
+    if (!inTopLevel) {
+      continue;
+    }
+
+    const providerMatch = trimmed.match(/^model_provider\s*=\s*["']([^"']+)["']/);
+    if (providerMatch) {
+      modelProvider = providerMatch[1];
+    }
+  }
+
+  return {
+    modelProvider,
+    configuredModels,
+  };
+}
+
+export const readCodexConfigSnapshot = Effect.fn("readCodexConfigSnapshot")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const settingsService = yield* ServerSettingsService;
@@ -335,23 +340,21 @@ export const readCodexConfigModelProvider = Effect.fn("readCodexConfigModelProvi
     .readFileString(configPath)
     .pipe(Effect.orElseSucceed(() => undefined));
   if (content === undefined) {
-    return undefined;
+    return {
+      modelProvider: undefined,
+      configuredModels: [],
+    } satisfies CodexConfigSnapshot;
   }
 
-  let inTopLevel = true;
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    if (trimmed.startsWith("[")) {
-      inTopLevel = false;
-      continue;
-    }
-    if (!inTopLevel) continue;
+  return parseCodexConfigSnapshot(content);
+});
 
-    const match = trimmed.match(/^model_provider\s*=\s*["']([^"']+)["']/);
-    if (match) return match[1];
-  }
-  return undefined;
+export const readCodexConfigModelProvider = Effect.fn("readCodexConfigModelProvider")(function* () {
+  return (yield* readCodexConfigSnapshot()).modelProvider;
+});
+
+export const readCodexConfiguredModels = Effect.fn("readCodexConfiguredModels")(function* () {
+  return (yield* readCodexConfigSnapshot()).configuredModels;
 });
 
 export const hasCustomModelProvider = readCodexConfigModelProvider().pipe(
@@ -384,14 +387,64 @@ function codexCustomProviderMessage(modelProvider: string | undefined): string {
   return "Using a custom Codex model provider; OpenAI login check skipped.";
 }
 
-function codexBuiltInModels(modelProvider: string | undefined): ReadonlyArray<ServerProviderModel> {
-  return modelProvider === "glm" ? GLM_BUILT_IN_MODELS : BUILT_IN_MODELS;
-}
-
 function codexCustomModelCapabilities(modelProvider: string | undefined): ModelCapabilities {
   return modelProvider === "glm"
     ? DEFAULT_GLM_MODEL_CAPABILITIES
     : DEFAULT_CODEX_MODEL_CAPABILITIES;
+}
+
+function configuredCodexModels(
+  modelProvider: string | undefined,
+  configuredModels: ReadonlyArray<string>,
+): ReadonlyArray<ServerProviderModel> {
+  const capabilities = codexCustomModelCapabilities(modelProvider);
+  const models: ServerProviderModel[] = [];
+  const seen = new Set<string>();
+
+  for (const slug of configuredModels) {
+    if (!slug || seen.has(slug)) {
+      continue;
+    }
+    seen.add(slug);
+
+    const builtInModel =
+      modelProvider === undefined || OPENAI_AUTH_PROVIDERS.has(modelProvider)
+        ? BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)
+        : undefined;
+
+    models.push(
+      builtInModel ?? {
+        slug,
+        name: slug,
+        isCustom: false,
+        capabilities,
+      },
+    );
+  }
+
+  return models;
+}
+
+function codexBuiltInModels(config: CodexConfigSnapshot): ReadonlyArray<ServerProviderModel> {
+  if (config.modelProvider !== undefined && !OPENAI_AUTH_PROVIDERS.has(config.modelProvider)) {
+    return configuredCodexModels(config.modelProvider, config.configuredModels);
+  }
+
+  const configuredModelEntries = configuredCodexModels(
+    config.modelProvider,
+    config.configuredModels,
+  );
+  const seen = new Set(BUILT_IN_MODELS.map((model) => model.slug));
+  return [
+    ...BUILT_IN_MODELS,
+    ...configuredModelEntries.filter((model) => {
+      if (seen.has(model.slug)) {
+        return false;
+      }
+      seen.add(model.slug);
+      return true;
+    }),
+  ];
 }
 
 const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
@@ -448,12 +501,16 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     Effect.map((settings) => settings.providers.codex),
   );
   const checkedAt = new Date().toISOString();
-  const modelProvider = yield* readCodexConfigModelProvider().pipe(
-    Effect.orElseSucceed(() => undefined),
+  const config = yield* readCodexConfigSnapshot().pipe(
+    Effect.orElseSucceed(() => ({
+      modelProvider: undefined,
+      configuredModels: [],
+    })),
   );
+  const modelProvider = config.modelProvider;
   const displayName = codexDisplayName(modelProvider);
   const models = providerModelsFromSettings(
-    codexBuiltInModels(modelProvider),
+    codexBuiltInModels(config),
     PROVIDER,
     codexSettings.customModels,
     codexCustomModelCapabilities(modelProvider),

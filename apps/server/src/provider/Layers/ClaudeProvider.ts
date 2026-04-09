@@ -56,11 +56,6 @@ const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = {
 const PROVIDER = "claudeAgent" as const;
 const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
 const ZAI_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
-const DEFAULT_CLAUDE_GLM_MODEL_MAPPING = {
-  opus: "glm-4.7",
-  sonnet: "glm-4.7",
-  haiku: "glm-4.5-air",
-} as const;
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
     slug: "claude-opus-4-7",
@@ -159,9 +154,9 @@ function formatClaudeOpus47UpgradeMessage(version: string | null): string {
 
 interface ClaudeGlmIntegration {
   readonly hasAuthToken: boolean;
-  readonly opusModel: string;
-  readonly sonnetModel: string;
-  readonly haikuModel: string;
+  readonly opusModel: string | undefined;
+  readonly sonnetModel: string | undefined;
+  readonly haikuModel: string | undefined;
 }
 
 function normalizeUrl(value: string | undefined): string | undefined {
@@ -188,13 +183,9 @@ function readClaudeGlmIntegrationFromEnv(
 
   return {
     hasAuthToken: Boolean(asTrimmedString(env.ANTHROPIC_AUTH_TOKEN)),
-    opusModel:
-      asTrimmedString(env.ANTHROPIC_DEFAULT_OPUS_MODEL) ?? DEFAULT_CLAUDE_GLM_MODEL_MAPPING.opus,
-    sonnetModel:
-      asTrimmedString(env.ANTHROPIC_DEFAULT_SONNET_MODEL) ??
-      DEFAULT_CLAUDE_GLM_MODEL_MAPPING.sonnet,
-    haikuModel:
-      asTrimmedString(env.ANTHROPIC_DEFAULT_HAIKU_MODEL) ?? DEFAULT_CLAUDE_GLM_MODEL_MAPPING.haiku,
+    opusModel: asTrimmedString(env.ANTHROPIC_DEFAULT_OPUS_MODEL),
+    sonnetModel: asTrimmedString(env.ANTHROPIC_DEFAULT_SONNET_MODEL),
+    haikuModel: asTrimmedString(env.ANTHROPIC_DEFAULT_HAIKU_MODEL),
   };
 }
 

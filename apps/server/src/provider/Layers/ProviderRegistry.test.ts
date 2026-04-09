@@ -27,6 +27,7 @@ import {
   checkCodexProviderStatus,
   hasCustomModelProvider,
   parseAuthStatusFromOutput,
+  readCodexConfiguredModels,
   readCodexConfigModelProvider,
 } from "./CodexProvider.ts";
 import { checkClaudeProviderStatus, parseClaudeAuthStatusFromOutput } from "./ClaudeProvider.ts";
@@ -799,37 +800,43 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         }).pipe(Effect.provide(failingSpawnerLayer("spawn codex ENOENT"))),
       );
 
-      it.effect("surfaces GLM models when Codex is configured with model_provider=glm", () =>
-        Effect.gen(function* () {
-          yield* withTempCodexHome(
-            [
-              'model_provider = "glm"',
-              "",
-              "[model_providers.glm]",
-              'base_url = "https://api.z.ai/api/coding/paas/v4"',
-              'env_key = "GLM_API_KEY"',
-            ].join("\n"),
-          );
-          const status = yield* checkCodexProviderStatus();
-          assert.strictEqual(status.displayName, "Codex / GLM");
-          assert.strictEqual(status.status, "ready");
-          assert.strictEqual(
-            status.message,
-            "Using Z.AI GLM through Codex custom model provider config; OpenAI login check skipped.",
-          );
-          assert.deepStrictEqual(
-            status.models.slice(0, 3).map((model) => model.slug),
-            ["glm-5.1", "glm-5", "glm-5-turbo"],
-          );
-        }).pipe(
-          Effect.provide(
-            mockSpawnerLayer((args) => {
-              const joined = args.join(" ");
-              if (joined === "--version") return { stdout: "codex 1.0.0\n", stderr: "", code: 0 };
-              throw new Error(`Auth probe should have been skipped but got args: ${joined}`);
-            }),
+      it.effect(
+        "surfaces only configured GLM models when Codex is configured with model_provider=glm",
+        () =>
+          Effect.gen(function* () {
+            yield* withTempCodexHome(
+              [
+                'model_provider = "glm"',
+                'model = "glm-5.1"',
+                "",
+                "[profiles.fast]",
+                'model = "glm-5-air"',
+                "",
+                "[model_providers.glm]",
+                'base_url = "https://api.z.ai/api/coding/paas/v4"',
+                'env_key = "GLM_API_KEY"',
+              ].join("\n"),
+            );
+            const status = yield* checkCodexProviderStatus();
+            assert.strictEqual(status.displayName, "Codex / GLM");
+            assert.strictEqual(status.status, "ready");
+            assert.strictEqual(
+              status.message,
+              "Using Z.AI GLM through Codex custom model provider config; OpenAI login check skipped.",
+            );
+            assert.deepStrictEqual(
+              status.models.map((model) => model.slug),
+              ["glm-5.1", "glm-5-air"],
+            );
+          }).pipe(
+            Effect.provide(
+              mockSpawnerLayer((args) => {
+                const joined = args.join(" ");
+                if (joined === "--version") return { stdout: "codex 1.0.0\n", stderr: "", code: 0 };
+                throw new Error(`Auth probe should have been skipped but got args: ${joined}`);
+              }),
+            ),
           ),
-        ),
       );
     });
 
@@ -952,6 +959,52 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         Effect.gen(function* () {
           yield* withTempCodexHome("model_provider = 'mistral'\n");
           assert.strictEqual(yield* readCodexConfigModelProvider(), "mistral");
+        }),
+      );
+    });
+
+    describe("readCodexConfiguredModels", () => {
+      it.effect("returns an empty list when config file does not exist", () =>
+        Effect.gen(function* () {
+          yield* withTempCodexHome();
+          assert.deepStrictEqual(yield* readCodexConfiguredModels(), []);
+        }),
+      );
+
+      it.effect("reads configured models from top-level and profile sections", () =>
+        Effect.gen(function* () {
+          yield* withTempCodexHome(
+            [
+              'model = "glm-5.1"',
+              'model_provider = "glm"',
+              "",
+              "[profiles.fast]",
+              'model = "glm-5-air"',
+              "",
+              "[profiles.review]",
+              'model = "glm-5.1"',
+              "",
+              "[model_providers.glm]",
+              'base_url = "https://api.z.ai/api/coding/paas/v4"',
+              'env_key = "GLM_API_KEY"',
+            ].join("\n"),
+          );
+          assert.deepStrictEqual(yield* readCodexConfiguredModels(), ["glm-5.1", "glm-5-air"]);
+        }),
+      );
+
+      it.effect("ignores model keys outside top-level and profile sections", () =>
+        Effect.gen(function* () {
+          yield* withTempCodexHome(
+            [
+              "[model_providers.glm]",
+              'model = "should-be-ignored"',
+              "",
+              "[profiles.fast]",
+              'model = "glm-5-fast"',
+            ].join("\n"),
+          );
+          assert.deepStrictEqual(yield* readCodexConfiguredModels(), ["glm-5-fast"]);
         }),
       );
     });
