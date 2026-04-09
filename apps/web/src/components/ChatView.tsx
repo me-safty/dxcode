@@ -148,12 +148,12 @@ import {
   type LocalDispatchSnapshot,
   PullRequestDialogState,
   cloneComposerImageForRetry,
+  deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   shouldWriteThreadErrorToCurrentServerThread,
-  threadHasStarted,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -997,14 +997,14 @@ export default function ChatView(props: ChatViewProps) {
     serverThread?.id,
   ]);
 
-  const sessionProvider = activeThread?.session?.provider ?? null;
   const selectedProviderByThreadId = composerActiveProvider ?? null;
   const threadProvider =
     activeThread?.modelSelection.provider ?? activeProject?.defaultModelSelection?.provider ?? null;
-  const hasThreadStarted = threadHasStarted(activeThread);
-  const lockedProvider: ProviderKind | null = hasThreadStarted
-    ? (sessionProvider ?? threadProvider ?? selectedProviderByThreadId ?? null)
-    : null;
+  const lockedProvider = deriveLockedProvider({
+    thread: activeThread,
+    selectedProvider: selectedProviderByThreadId,
+    threadProvider,
+  });
   const primaryServerConfig = useServerConfig();
   const activeEnvRuntimeState = useSavedEnvironmentRuntimeStore((s) =>
     activeThread?.environmentId ? s.byId[activeThread.environmentId] : null,

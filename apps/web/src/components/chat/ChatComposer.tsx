@@ -39,7 +39,11 @@ import {
   expandCollapsedComposerCursor,
   replaceTextRange,
 } from "../../composer-logic";
-import { deriveComposerSendState, readFileAsDataUrl, threadHasStarted } from "../ChatView.logic";
+import {
+  deriveComposerSendState,
+  deriveLockedProvider,
+  readFileAsDataUrl,
+} from "../ChatView.logic";
 import {
   type ComposerImageAttachment,
   type DraftId,
@@ -398,11 +402,11 @@ export const ChatComposer = memo(
     const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
     const threadProvider =
       activeThreadModelSelection?.provider ?? activeProjectDefaultModelSelection?.provider ?? null;
-    const hasThreadStarted = threadHasStarted(activeThread);
-    const sessionProvider = activeThread?.session?.provider ?? null;
-    const computedLockedProvider: ProviderKind | null = hasThreadStarted
-      ? (sessionProvider ?? threadProvider ?? selectedProviderByThreadId ?? null)
-      : null;
+    const computedLockedProvider = deriveLockedProvider({
+      thread: activeThread,
+      selectedProvider: selectedProviderByThreadId,
+      threadProvider,
+    });
     const effectiveLockedProvider = lockedProvider ?? computedLockedProvider;
 
     const unlockedSelectedProvider = resolveSelectableProvider(
@@ -1232,6 +1236,7 @@ export const ChatComposer = memo(
       const menuIsActive = composerMenuOpenRef.current || trigger !== null;
       if (menuIsActive) {
         const currentItems = composerMenuItemsRef.current;
+        const selectedItem = activeComposerMenuItemRef.current ?? currentItems[0];
         if (key === "ArrowDown" && currentItems.length > 0) {
           nudgeComposerMenuHighlight("ArrowDown");
           return true;
@@ -1240,8 +1245,8 @@ export const ChatComposer = memo(
           nudgeComposerMenuHighlight("ArrowUp");
           return true;
         }
-        if ((key === "Enter" || key === "Tab") && activeComposerMenuItemRef.current) {
-          onSelectComposerItem(activeComposerMenuItemRef.current);
+        if ((key === "Enter" || key === "Tab") && selectedItem) {
+          onSelectComposerItem(selectedItem);
           return true;
         }
       }
