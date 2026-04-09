@@ -14,6 +14,7 @@ import {
   IntelliJIdeaIcon,
   VisualStudioCode,
   VisualStudioCodeInsiders,
+  VSCodium,
   Zed,
 } from "../Icons";
 import { isMacPlatform, isWindowsPlatform } from "~/lib/utils";
@@ -43,7 +44,7 @@ const resolveOptions = (platform: string, availableEditors: ReadonlyArray<Editor
     },
     {
       label: "VSCodium",
-      Icon: VisualStudioCode,
+      Icon: VSCodium,
       value: "vscodium",
     },
     {
