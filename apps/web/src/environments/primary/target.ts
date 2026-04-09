@@ -23,7 +23,7 @@ function normalizeHostname(hostname: string): string {
     .replace(/^\[(.*)\]$/, "$1");
 }
 
-function isLoopbackHostname(hostname: string): boolean {
+export function isLoopbackHostname(hostname: string): boolean {
   return LOOPBACK_HOSTNAMES.has(normalizeHostname(hostname));
 }
 
