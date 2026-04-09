@@ -137,6 +137,19 @@ vi.mock("~/store", () => ({
     }
     return environmentState;
   },
+  selectProjectsForEnvironment: () => [],
+  selectProjectsAcrossEnvironments: () => [],
+  selectThreadsForEnvironment: () => [],
+  selectThreadsAcrossEnvironments: () => [],
+  selectThreadShellsAcrossEnvironments: () => [],
+  selectSidebarThreadsAcrossEnvironments: () => [],
+  selectSidebarThreadsForProjectRef: () => [],
+  selectSidebarThreadsForProjectRefs: () => [],
+  selectBootstrapCompleteForActiveEnvironment: () => true,
+  selectProjectByRef: () => null,
+  selectThreadByRef: () => null,
+  selectSidebarThreadSummaryByRef: () => null,
+  selectThreadIdsByProjectRef: () => [],
   useStore: (selector: (state: unknown) => unknown) =>
     selector({
       setThreadBranch: setThreadBranchSpy,

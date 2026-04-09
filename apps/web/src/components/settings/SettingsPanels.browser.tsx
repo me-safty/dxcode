@@ -112,36 +112,59 @@ const authAccessHarness = vi.hoisted(() => {
   };
 });
 
-vi.mock("../../environments/runtime", async () => {
-  const actual = await vi.importActual<typeof import("../../environments/runtime")>(
-    "../../environments/runtime",
-  );
+vi.mock("../../environments/runtime", () => {
+  const primaryConnection = {
+    kind: "primary" as const,
+    knownEnvironment: {
+      id: "environment-local",
+      label: "Local environment",
+      source: "manual" as const,
+      environmentId: EnvironmentId.makeUnsafe("environment-local"),
+      target: {
+        httpBaseUrl: "http://localhost:3000",
+        wsBaseUrl: "ws://localhost:3000",
+      },
+    },
+    environmentId: EnvironmentId.makeUnsafe("environment-local"),
+    client: {
+      server: {
+        subscribeAuthAccess: (listener: Parameters<typeof authAccessHarness.subscribe>[0]) =>
+          authAccessHarness.subscribe(listener),
+      },
+    },
+    ensureBootstrapped: async () => undefined,
+    reconnect: async () => undefined,
+    dispose: async () => undefined,
+  };
 
   return {
-    ...actual,
-    getPrimaryEnvironmentConnection: () => ({
-      kind: "primary" as const,
-      knownEnvironment: {
-        id: "environment-local",
-        label: "Local environment",
-        source: "manual" as const,
-        environmentId: EnvironmentId.makeUnsafe("environment-local"),
-        target: {
-          httpBaseUrl: "http://localhost:3000",
-          wsBaseUrl: "ws://localhost:3000",
-        },
-      },
-      environmentId: EnvironmentId.makeUnsafe("environment-local"),
-      client: {
-        server: {
-          subscribeAuthAccess: (listener: Parameters<typeof authAccessHarness.subscribe>[0]) =>
-            authAccessHarness.subscribe(listener),
-        },
-      },
-      ensureBootstrapped: async () => undefined,
-      reconnect: async () => undefined,
-      dispose: async () => undefined,
-    }),
+    getEnvironmentHttpBaseUrl: () => "http://localhost:3000",
+    getSavedEnvironmentRecord: () => null,
+    getSavedEnvironmentRuntimeState: () => null,
+    hasSavedEnvironmentRegistryHydrated: () => true,
+    listSavedEnvironmentRecords: () => [],
+    resetSavedEnvironmentRegistryStoreForTests: () => undefined,
+    resetSavedEnvironmentRuntimeStoreForTests: () => undefined,
+    resolveEnvironmentHttpUrl: (_environmentId: unknown, path: string) =>
+      new URL(path, "http://localhost:3000").toString(),
+    waitForSavedEnvironmentRegistryHydration: async () => undefined,
+    addSavedEnvironment: vi.fn(),
+    disconnectSavedEnvironment: vi.fn(),
+    ensureEnvironmentConnectionBootstrapped: async () => undefined,
+    getPrimaryEnvironmentConnection: () => primaryConnection,
+    readEnvironmentConnection: () => primaryConnection,
+    reconnectSavedEnvironment: vi.fn(),
+    removeSavedEnvironment: vi.fn(),
+    requireEnvironmentConnection: () => primaryConnection,
+    resetEnvironmentServiceForTests: () => undefined,
+    startEnvironmentConnectionService: () => undefined,
+    subscribeEnvironmentConnections: () => () => {},
+    useSavedEnvironmentRegistryStore: (
+      selector: (state: { byId: Record<string, never> }) => unknown,
+    ) => selector({ byId: {} }),
+    useSavedEnvironmentRuntimeStore: (
+      selector: (state: { byId: Record<string, never> }) => unknown,
+    ) => selector({ byId: {} }),
   };
 });
 
@@ -292,6 +315,13 @@ const createDesktopBridgeStub = (overrides?: {
 };
 
 describe("GeneralSettingsPanel observability", () => {
+  let mounted:
+    | (Awaited<ReturnType<typeof render>> & {
+        cleanup?: () => Promise<void>;
+        unmount?: () => Promise<void>;
+      })
+    | null = null;
+
   beforeEach(async () => {
     resetServerStateForTests();
     await __resetLocalApiForTests();
@@ -300,6 +330,15 @@ describe("GeneralSettingsPanel observability", () => {
   });
 
   afterEach(async () => {
+    if (mounted) {
+      const teardown = mounted.cleanup ?? mounted.unmount;
+      await teardown?.call(mounted).catch(() => {});
+    }
+    mounted = null;
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(window, "desktopBridge");
+    Reflect.deleteProperty(window, "nativeApi");
+    document.body.innerHTML = "";
     resetServerStateForTests();
     await __resetLocalApiForTests();
     authAccessHarness.reset();
@@ -351,7 +390,7 @@ describe("GeneralSettingsPanel observability", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await render(
+    mounted = await render(
       <AppAtomRegistryProvider>
         <ConnectionsSettings />
       </AppAtomRegistryProvider>,
@@ -376,7 +415,7 @@ describe("GeneralSettingsPanel observability", () => {
   it("shows diagnostics inside About with a single logs-folder action", async () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
-    await render(
+    mounted = await render(
       <AppAtomRegistryProvider>
         <GeneralSettingsPanel />
       </AppAtomRegistryProvider>,
@@ -490,7 +529,7 @@ describe("GeneralSettingsPanel observability", () => {
 
     setServerConfigSnapshot(createBaseServerConfig());
 
-    await render(
+    mounted = await render(
       <AppAtomRegistryProvider>
         <ConnectionsSettings />
       </AppAtomRegistryProvider>,
@@ -583,7 +622,7 @@ describe("GeneralSettingsPanel observability", () => {
 
     setServerConfigSnapshot(createBaseServerConfig());
 
-    await render(
+    mounted = await render(
       <AppAtomRegistryProvider>
         <ConnectionsSettings />
       </AppAtomRegistryProvider>,
@@ -602,7 +641,7 @@ describe("GeneralSettingsPanel observability", () => {
 
     setServerConfigSnapshot(createBaseServerConfig());
 
-    await render(
+    mounted = await render(
       <AppAtomRegistryProvider>
         <ConnectionsSettings />
       </AppAtomRegistryProvider>,
@@ -634,7 +673,7 @@ describe("GeneralSettingsPanel observability", () => {
 
     setServerConfigSnapshot(createBaseServerConfig());
 
-    await render(
+    mounted = await render(
       <AppAtomRegistryProvider>
         <GeneralSettingsPanel />
       </AppAtomRegistryProvider>,
