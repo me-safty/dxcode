@@ -1042,8 +1042,6 @@ function ComposerSurroundSelectionPlugin(props: {
         return;
       }
 
-      const shouldTrackDeadKeyBacktick =
-        BACKTICK_SURROUND_CLOSE_SYMBOL !== null && event.key === "Dead";
       editor.getEditorState().read(() => {
         const selection = $getSelection();
         if (!$isRangeSelection(selection) || selection.isCollapsed()) {
@@ -1074,12 +1072,26 @@ function ComposerSurroundSelectionPlugin(props: {
           expandedEnd: range.end,
         };
         pendingSurroundSelectionRef.current = snapshot;
-        pendingDeadKeySelectionRef.current = shouldTrackDeadKeyBacktick ? snapshot : null;
+        pendingDeadKeySelectionRef.current = null;
       });
     };
 
     const onBeforeInput = (event: InputEvent) => {
+      if (
+        event.inputType === "insertCompositionText" &&
+        event.data === "`" &&
+        BACKTICK_SURROUND_CLOSE_SYMBOL !== null &&
+        pendingSurroundSelectionRef.current
+      ) {
+        pendingDeadKeySelectionRef.current = pendingSurroundSelectionRef.current;
+        return;
+      }
+
       if (pendingDeadKeySelectionRef.current) {
+        return;
+      }
+
+      if (event.inputType === "insertCompositionText") {
         return;
       }
 
