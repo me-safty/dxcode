@@ -33,9 +33,20 @@ function pushTextSegment(segments: ComposerPromptSegment[], text: string): void 
   segments.push({ type: "text", text });
 }
 
-function forEachPromptTextSlice(
+function forEachPromptSegmentSlice(
   prompt: string,
-  visitor: (text: string, promptOffset: number) => boolean | void,
+  visitor: (
+    slice:
+      | {
+          type: "text";
+          text: string;
+          promptOffset: number;
+        }
+      | {
+          type: "terminal-context";
+          promptOffset: number;
+        },
+  ) => boolean | void,
 ): boolean {
   let textCursor = 0;
 
@@ -44,17 +55,46 @@ function forEachPromptTextSlice(
       continue;
     }
 
-    if (index > textCursor && visitor(prompt.slice(textCursor, index), textCursor) === true) {
+    if (
+      index > textCursor &&
+      visitor({
+        type: "text",
+        text: prompt.slice(textCursor, index),
+        promptOffset: textCursor,
+      }) === true
+    ) {
+      return true;
+    }
+    if (visitor({ type: "terminal-context", promptOffset: index }) === true) {
       return true;
     }
     textCursor = index + 1;
   }
 
-  if (textCursor < prompt.length && visitor(prompt.slice(textCursor), textCursor) === true) {
+  if (
+    textCursor < prompt.length &&
+    visitor({
+      type: "text",
+      text: prompt.slice(textCursor),
+      promptOffset: textCursor,
+    }) === true
+  ) {
     return true;
   }
 
   return false;
+}
+
+function forEachPromptTextSlice(
+  prompt: string,
+  visitor: (text: string, promptOffset: number) => boolean | void,
+): boolean {
+  return forEachPromptSegmentSlice(prompt, (slice) => {
+    if (slice.type !== "text") {
+      return false;
+    }
+    return visitor(slice.text, slice.promptOffset);
+  });
 }
 
 function forEachMentionMatch(
@@ -152,28 +192,20 @@ export function splitPromptIntoComposerSegments(
   }
 
   const segments: ComposerPromptSegment[] = [];
-  let textCursor = 0;
   let terminalContextIndex = 0;
-
-  for (let index = 0; index < prompt.length; index += 1) {
-    if (prompt[index] !== INLINE_TERMINAL_CONTEXT_PLACEHOLDER) {
-      continue;
+  forEachPromptSegmentSlice(prompt, (slice) => {
+    if (slice.type === "text") {
+      segments.push(...splitPromptTextIntoComposerSegments(slice.text));
+      return false;
     }
 
-    if (index > textCursor) {
-      segments.push(...splitPromptTextIntoComposerSegments(prompt.slice(textCursor, index)));
-    }
     segments.push({
       type: "terminal-context",
       context: terminalContexts[terminalContextIndex] ?? null,
     });
     terminalContextIndex += 1;
-    textCursor = index + 1;
-  }
-
-  if (textCursor < prompt.length) {
-    segments.push(...splitPromptTextIntoComposerSegments(prompt.slice(textCursor)));
-  }
+    return false;
+  });
 
   return segments;
 }

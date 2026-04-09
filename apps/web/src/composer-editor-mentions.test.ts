@@ -41,6 +41,18 @@ describe("splitPromptIntoComposerSegments", () => {
       { type: "text", text: " please" },
     ]);
   });
+
+  it("preserves consecutive terminal context placeholders without dropping positions", () => {
+    expect(
+      splitPromptIntoComposerSegments(
+        `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}tail`,
+      ),
+    ).toEqual([
+      { type: "terminal-context", context: null },
+      { type: "terminal-context", context: null },
+      { type: "text", text: "tail" },
+    ]);
+  });
 });
 
 describe("selectionTouchesMentionBoundary", () => {
