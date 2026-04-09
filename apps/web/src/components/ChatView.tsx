@@ -231,6 +231,7 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
+const EMPTY_CHANGED_FILES_EXPANDED_BY_TURN_ID: Record<string, boolean> = {};
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
@@ -685,6 +686,7 @@ export default function ChatView(props: ChatViewProps) {
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
   );
+  const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
   const composerDraftTarget: ScopedThreadRef | DraftId =
     routeKind === "server" ? routeThreadRef : props.draftId;
   const serverThread = useStore(
@@ -695,10 +697,17 @@ export default function ChatView(props: ChatViewProps) {
   );
   const setStoreThreadError = useStore((store) => store.setError);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
+  const setThreadChangedFilesExpanded = useUiStateStore(
+    (store) => store.setThreadChangedFilesExpanded,
+  );
   const activeThreadLastVisitedAt = useUiStateStore((store) =>
+    routeKind === "server" ? store.threadLastVisitedAtById[routeThreadKey] : undefined,
+  );
+  const changedFilesExpandedByTurnId = useUiStateStore((store) =>
     routeKind === "server"
-      ? store.threadLastVisitedAtById[scopedThreadKey(scopeThreadRef(environmentId, threadId))]
-      : undefined,
+      ? (store.threadChangedFilesExpandedById[routeThreadKey] ??
+        EMPTY_CHANGED_FILES_EXPANDED_BY_TURN_ID)
+      : EMPTY_CHANGED_FILES_EXPANDED_BY_TURN_ID,
   );
   const settings = useSettings();
   const setStickyComposerModelSelection = useComposerDraftStore(
@@ -1190,6 +1199,16 @@ export default function ChatView(props: ChatViewProps) {
       });
     },
     [openOrReuseProjectDraftThread],
+  );
+
+  const handleSetChangedFilesExpanded = useCallback(
+    (turnId: TurnId, expanded: boolean) => {
+      if (routeKind !== "server") {
+        return;
+      }
+      setThreadChangedFilesExpanded(routeThreadKey, turnId, expanded);
+    },
+    [routeKind, routeThreadKey, setThreadChangedFilesExpanded],
   );
 
   useEffect(() => {
@@ -4414,6 +4433,8 @@ export default function ChatView(props: ChatViewProps) {
                 activeThreadEnvironmentId={activeThread.environmentId}
                 expandedWorkGroups={expandedWorkGroups}
                 onToggleWorkGroup={onToggleWorkGroup}
+                changedFilesExpandedByTurnId={changedFilesExpandedByTurnId}
+                onSetChangedFilesExpanded={handleSetChangedFilesExpanded}
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
