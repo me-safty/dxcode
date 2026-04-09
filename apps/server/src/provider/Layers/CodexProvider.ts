@@ -63,6 +63,14 @@ const DEFAULT_CODEX_MODEL_CAPABILITIES: ModelCapabilities = {
   promptInjectedEffortLevels: [],
 };
 
+const DEFAULT_GLM_MODEL_CAPABILITIES: ModelCapabilities = {
+  reasoningEffortLevels: [],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  contextWindowOptions: [],
+  promptInjectedEffortLevels: [],
+};
+
 const PROVIDER = "codex" as const;
 const OPENAI_AUTH_PROVIDERS = new Set(["openai"]);
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
@@ -170,8 +178,59 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   },
 ];
 
+const GLM_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
+  {
+    slug: "glm-5.1",
+    name: "GLM 5.1",
+    isCustom: false,
+    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
+  },
+  {
+    slug: "glm-5",
+    name: "GLM 5",
+    isCustom: false,
+    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
+  },
+  {
+    slug: "glm-5-turbo",
+    name: "GLM 5 Turbo",
+    isCustom: false,
+    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
+  },
+  {
+    slug: "glm-4.7",
+    name: "GLM 4.7",
+    isCustom: false,
+    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
+  },
+  {
+    slug: "glm-4.6",
+    name: "GLM 4.6",
+    isCustom: false,
+    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
+  },
+  {
+    slug: "glm-4.5",
+    name: "GLM 4.5",
+    isCustom: false,
+    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
+  },
+  {
+    slug: "glm-4.5-air",
+    name: "GLM 4.5 Air",
+    isCustom: false,
+    capabilities: DEFAULT_GLM_MODEL_CAPABILITIES,
+  },
+];
+
 export function getCodexModelCapabilities(model: string | null | undefined): ModelCapabilities {
   const slug = model?.trim();
+  if (slug?.startsWith("glm-")) {
+    return (
+      GLM_BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ??
+      DEFAULT_GLM_MODEL_CAPABILITIES
+    );
+  }
   return (
     BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ??
     DEFAULT_CODEX_MODEL_CAPABILITIES
@@ -300,6 +359,41 @@ export const hasCustomModelProvider = readCodexConfigModelProvider().pipe(
   Effect.orElseSucceed(() => false),
 );
 
+function toTitleCaseWords(value: string): string {
+  return value
+    .split(/[\s_-]+/g)
+    .filter(Boolean)
+    .map((part) => part[0]!.toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function codexDisplayName(modelProvider: string | undefined): string {
+  if (!modelProvider || OPENAI_AUTH_PROVIDERS.has(modelProvider)) {
+    return "Codex";
+  }
+  if (modelProvider === "glm") {
+    return "Codex / GLM";
+  }
+  return `Codex / ${toTitleCaseWords(modelProvider)}`;
+}
+
+function codexCustomProviderMessage(modelProvider: string | undefined): string {
+  if (modelProvider === "glm") {
+    return "Using Z.AI GLM through Codex custom model provider config; OpenAI login check skipped.";
+  }
+  return "Using a custom Codex model provider; OpenAI login check skipped.";
+}
+
+function codexBuiltInModels(modelProvider: string | undefined): ReadonlyArray<ServerProviderModel> {
+  return modelProvider === "glm" ? GLM_BUILT_IN_MODELS : BUILT_IN_MODELS;
+}
+
+function codexCustomModelCapabilities(modelProvider: string | undefined): ModelCapabilities {
+  return modelProvider === "glm"
+    ? DEFAULT_GLM_MODEL_CAPABILITIES
+    : DEFAULT_CODEX_MODEL_CAPABILITIES;
+}
+
 const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
 
 const probeCodexCapabilities = (input: {
@@ -354,11 +448,15 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     Effect.map((settings) => settings.providers.codex),
   );
   const checkedAt = new Date().toISOString();
+  const modelProvider = yield* readCodexConfigModelProvider().pipe(
+    Effect.orElseSucceed(() => undefined),
+  );
+  const displayName = codexDisplayName(modelProvider);
   const models = providerModelsFromSettings(
-    BUILT_IN_MODELS,
+    codexBuiltInModels(modelProvider),
     PROVIDER,
     codexSettings.customModels,
-    DEFAULT_CODEX_MODEL_CAPABILITIES,
+    codexCustomModelCapabilities(modelProvider),
   );
 
   if (!codexSettings.enabled) {
@@ -367,6 +465,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       enabled: false,
       checkedAt,
       models,
+      displayName,
       probe: {
         installed: false,
         version: null,
@@ -389,6 +488,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       enabled: codexSettings.enabled,
       checkedAt,
       models,
+      displayName,
       probe: {
         installed: !isCommandMissingCause(error),
         version: null,
@@ -407,6 +507,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       enabled: codexSettings.enabled,
       checkedAt,
       models,
+      displayName,
       probe: {
         installed: true,
         version: null,
@@ -428,6 +529,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       enabled: codexSettings.enabled,
       checkedAt,
       models,
+      displayName,
       probe: {
         installed: true,
         version: parsedVersion,
@@ -464,20 +566,20 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
           cwd: process.cwd(),
         }).pipe(Effect.orElseSucceed(() => undefined))
       : undefined) ?? [];
-
-  if (yield* hasCustomModelProvider) {
+  if (modelProvider !== undefined && !OPENAI_AUTH_PROVIDERS.has(modelProvider)) {
     return buildServerProvider({
       provider: PROVIDER,
       enabled: codexSettings.enabled,
       checkedAt,
       models,
       skills,
+      displayName,
       probe: {
         installed: true,
         version: parsedVersion,
         status: "ready",
         auth: { status: "unknown" },
-        message: "Using a custom Codex model provider; OpenAI login check skipped.",
+        message: codexCustomProviderMessage(modelProvider),
       },
     });
   }
@@ -502,6 +604,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       checkedAt,
       models: resolvedModels,
       skills,
+      displayName,
       probe: {
         installed: true,
         version: parsedVersion,
@@ -519,6 +622,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       checkedAt,
       models: resolvedModels,
       skills,
+      displayName,
       probe: {
         installed: true,
         version: parsedVersion,
@@ -538,6 +642,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     checkedAt,
     models: resolvedModels,
     skills,
+    displayName,
     probe: {
       installed: true,
       version: parsedVersion,

@@ -9,13 +9,10 @@ import { Effect, Equal, FileSystem, Layer, Path, PubSub, Ref, Stream } from "eff
 import { ServerConfig } from "../../config.ts";
 import { ClaudeProviderLive } from "./ClaudeProvider.ts";
 import { CodexProviderLive } from "./CodexProvider.ts";
-import { GlmProviderLive } from "./GlmProvider.ts";
 import type { ClaudeProviderShape } from "../Services/ClaudeProvider.ts";
 import { ClaudeProvider } from "../Services/ClaudeProvider.ts";
 import type { CodexProviderShape } from "../Services/CodexProvider.ts";
 import { CodexProvider } from "../Services/CodexProvider.ts";
-import type { GlmProviderShape } from "../Services/GlmProvider.ts";
-import { GlmProvider } from "../Services/GlmProvider.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
 import {
   hydrateCachedProvider,
@@ -29,9 +26,8 @@ import {
 const loadProviders = (
   codexProvider: CodexProviderShape,
   claudeProvider: ClaudeProviderShape,
-  glmProvider: GlmProviderShape,
-): Effect.Effect<readonly [ServerProvider, ServerProvider, ServerProvider]> =>
-  Effect.all([codexProvider.getSnapshot, claudeProvider.getSnapshot, glmProvider.getSnapshot], {
+): Effect.Effect<readonly [ServerProvider, ServerProvider]> =>
+  Effect.all([codexProvider.getSnapshot, claudeProvider.getSnapshot], {
     concurrency: "unbounded",
   });
 
@@ -45,7 +41,6 @@ export const ProviderRegistryLive = Layer.effect(
   Effect.gen(function* () {
     const codexProvider = yield* CodexProvider;
     const claudeProvider = yield* ClaudeProvider;
-    const glmProvider = yield* GlmProvider;
     const config = yield* ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -53,7 +48,7 @@ export const ProviderRegistryLive = Layer.effect(
       PubSub.unbounded<ReadonlyArray<ServerProvider>>(),
       PubSub.shutdown,
     );
-    const fallbackProviders = yield* loadProviders(codexProvider, claudeProvider, glmProvider);
+    const fallbackProviders = yield* loadProviders(codexProvider, claudeProvider);
     const cachePathByProvider = new Map(
       PROVIDER_CACHE_IDS.map(
         (provider) =>
@@ -69,7 +64,7 @@ export const ProviderRegistryLive = Layer.effect(
     const fallbackByProvider = new Map(
       fallbackProviders.map((provider) => [provider.provider, provider] as const),
     );
-    const hydratedCachedProviders = yield* Effect.forEach(
+    const cachedProviders = yield* Effect.forEach(
       PROVIDER_CACHE_IDS,
       (provider) => {
         const filePath = cachePathByProvider.get(provider)!;
@@ -87,24 +82,18 @@ export const ProviderRegistryLive = Layer.effect(
         );
       },
       { concurrency: "unbounded" },
+    ).pipe(
+      Effect.map((providers) =>
+        orderProviderSnapshots(
+          providers.filter((provider): provider is ServerProvider => provider !== undefined),
+        ),
+      ),
     );
-    const cachedByProvider = new Map(
-      hydratedCachedProviders
-        .filter((provider): provider is ServerProvider => provider !== undefined)
-        .map((provider) => [provider.provider, provider] as const),
-    );
-    const initialProviders = orderProviderSnapshots(
-      fallbackProviders.map((provider) => cachedByProvider.get(provider.provider) ?? provider),
-    );
-    const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(initialProviders);
+    const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(cachedProviders);
 
-    const persistProvider = (provider: ServerProvider) => {
-      const filePath = cachePathByProvider.get(provider.provider);
-      if (!filePath) {
-        return Effect.void;
-      }
-      return writeProviderStatusCache({
-        filePath,
+    const persistProvider = (provider: ServerProvider) =>
+      writeProviderStatusCache({
+        filePath: cachePathByProvider.get(provider.provider)!,
         provider,
       }).pipe(
         Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -112,7 +101,6 @@ export const ProviderRegistryLive = Layer.effect(
         Effect.tapError(Effect.logError),
         Effect.ignore,
       );
-    };
 
     const upsertProviders = Effect.fn("upsertProviders")(function* (
       nextProviders: ReadonlyArray<ServerProvider>,
@@ -168,10 +156,6 @@ export const ProviderRegistryLive = Layer.effect(
           return yield* claudeProvider.refresh.pipe(
             Effect.flatMap((nextProvider) => syncProvider(nextProvider)),
           );
-        case "glm":
-          return yield* glmProvider.refresh.pipe(
-            Effect.flatMap((nextProvider) => syncProvider(nextProvider)),
-          );
         default:
           return yield* Effect.all(
             [
@@ -179,9 +163,6 @@ export const ProviderRegistryLive = Layer.effect(
                 Effect.flatMap((nextProvider) => syncProvider(nextProvider)),
               ),
               claudeProvider.refresh.pipe(
-                Effect.flatMap((nextProvider) => syncProvider(nextProvider)),
-              ),
-              glmProvider.refresh.pipe(
                 Effect.flatMap((nextProvider) => syncProvider(nextProvider)),
               ),
             ],
@@ -199,9 +180,6 @@ export const ProviderRegistryLive = Layer.effect(
     yield* Stream.runForEach(claudeProvider.streamChanges, (provider) =>
       syncProvider(provider),
     ).pipe(Effect.forkScoped);
-    yield* Stream.runForEach(glmProvider.streamChanges, (provider) =>
-      syncProvider(provider),
-    ).pipe(Effect.forkScoped);
 
     return {
       getProviders: Ref.get(providersRef),
@@ -215,8 +193,4 @@ export const ProviderRegistryLive = Layer.effect(
       },
     } satisfies ProviderRegistryShape;
   }),
-).pipe(
-  Layer.provideMerge(CodexProviderLive),
-  Layer.provideMerge(ClaudeProviderLive),
-  Layer.provideMerge(GlmProviderLive),
-);
+).pipe(Layer.provideMerge(CodexProviderLive), Layer.provideMerge(ClaudeProviderLive));

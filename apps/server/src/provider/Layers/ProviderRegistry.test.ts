@@ -158,6 +158,36 @@ function withTempCodexHome(configContent?: string) {
   });
 }
 
+function withTempHomeFile(relativePath: string, content: string) {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const tmpDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-test-home-" });
+
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        const originalHome = process.env.HOME;
+        process.env.HOME = tmpDir;
+        return originalHome;
+      }),
+      (originalHome) =>
+        Effect.sync(() => {
+          if (originalHome !== undefined) {
+            process.env.HOME = originalHome;
+          } else {
+            delete process.env.HOME;
+          }
+        }),
+    );
+
+    const filePath = path.join(tmpDir, relativePath);
+    yield* fileSystem.makeDirectory(path.dirname(filePath), { recursive: true });
+    yield* fileSystem.writeFileString(filePath, content);
+
+    return { tmpDir } as const;
+  });
+}
+
 it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
   "ProviderRegistry",
   (it) => {
@@ -768,6 +798,39 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           assert.strictEqual(status.installed, false);
         }).pipe(Effect.provide(failingSpawnerLayer("spawn codex ENOENT"))),
       );
+
+      it.effect("surfaces GLM models when Codex is configured with model_provider=glm", () =>
+        Effect.gen(function* () {
+          yield* withTempCodexHome(
+            [
+              'model_provider = "glm"',
+              "",
+              "[model_providers.glm]",
+              'base_url = "https://api.z.ai/api/coding/paas/v4"',
+              'env_key = "GLM_API_KEY"',
+            ].join("\n"),
+          );
+          const status = yield* checkCodexProviderStatus();
+          assert.strictEqual(status.displayName, "Codex / GLM");
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(
+            status.message,
+            "Using Z.AI GLM through Codex custom model provider config; OpenAI login check skipped.",
+          );
+          assert.deepStrictEqual(
+            status.models.slice(0, 3).map((model) => model.slug),
+            ["glm-5.1", "glm-5", "glm-5-turbo"],
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "codex 1.0.0\n", stderr: "", code: 0 };
+              throw new Error(`Auth probe should have been skipped but got args: ${joined}`);
+            }),
+          ),
+        ),
+      );
     });
 
     describe("checkCodexProviderStatus with openai model provider", () => {
@@ -1031,6 +1094,49 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
                   code: 0,
                 };
               throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("detects Z.AI GLM config from Claude settings", () =>
+        Effect.gen(function* () {
+          yield* withTempHomeFile(
+            ".claude/settings.json",
+            JSON.stringify({
+              env: {
+                ANTHROPIC_AUTH_TOKEN: "glm-api-key",
+                ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic",
+                ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-5.1",
+                ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.1",
+                ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-4.5-air",
+              },
+            }),
+          );
+          const status = yield* checkClaudeProviderStatus();
+          assert.strictEqual(status.displayName, "Claude / GLM");
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.auth.status, "authenticated");
+          assert.strictEqual(status.auth.type, "apiKey");
+          assert.strictEqual(status.auth.label, "Z.AI GLM Plan");
+          assert.strictEqual(
+            status.message,
+            "Configured to use Z.AI's Anthropic-compatible endpoint. Claude model tiers map to GLM models from your Claude settings.",
+          );
+          assert.deepStrictEqual(
+            status.models.slice(0, 3).map((model) => model.name),
+            [
+              "Claude Opus 4.6 (glm-5.1)",
+              "Claude Sonnet 4.6 (glm-5.1)",
+              "Claude Haiku 4.5 (glm-4.5-air)",
+            ],
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+              throw new Error(`Auth probe should have been skipped but got args: ${joined}`);
             }),
           ),
         ),

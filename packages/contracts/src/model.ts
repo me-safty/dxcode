@@ -29,13 +29,9 @@ export const ClaudeModelOptions = Schema.Struct({
 });
 export type ClaudeModelOptions = typeof ClaudeModelOptions.Type;
 
-export const GlmModelOptions = Schema.Struct({});
-export type GlmModelOptions = typeof GlmModelOptions.Type;
-
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
-  glm: Schema.optional(GlmModelOptions),
 });
 export type ProviderModelOptions = typeof ProviderModelOptions.Type;
 
@@ -65,7 +61,6 @@ export type ModelCapabilities = typeof ModelCapabilities.Type;
 export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
   codex: "gpt-5.4",
   claudeAgent: "claude-sonnet-4-6",
-  glm: "glm-5.1",
 };
 
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
@@ -74,7 +69,6 @@ export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
 export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
   codex: "gpt-5.4-mini",
   claudeAgent: "claude-haiku-4-5",
-  glm: "glm-5.1",
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string, string>> = {
@@ -102,17 +96,6 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "claude-haiku-4.5": "claude-haiku-4-5",
     "claude-haiku-4-5-20251001": "claude-haiku-4-5",
   },
-  glm: {
-    "5.1": "glm-5.1",
-    "5": "glm-5",
-    turbo: "glm-5-turbo",
-    "5-turbo": "glm-5-turbo",
-    "4.7": "glm-4.7",
-    "4.6": "glm-4.6",
-    "4.5": "glm-4.5",
-    "4.5-air": "glm-4.5-air",
-    air: "glm-4.5-air",
-  },
 };
 
 // ── Provider display names ────────────────────────────────────────────
@@ -120,5 +103,4 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
 export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
   codex: "Codex",
   claudeAgent: "Claude",
-  glm: "GLM",
 };

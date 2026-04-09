@@ -44,7 +44,6 @@ const makeRoutingTextGeneration = Effect.gen(function* () {
       case "claudeAgent":
         return claude;
       case "codex":
-      case "glm":
       case undefined:
         return codex;
     }

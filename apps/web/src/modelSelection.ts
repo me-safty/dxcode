@@ -34,8 +34,9 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
   codex: {
     provider: "codex",
     title: "Codex",
-    description: "Save additional Codex model slugs for the picker and `/model` command.",
-    placeholder: "your-codex-model-slug",
+    description:
+      "Save additional model slugs exposed through Codex for the picker and `/model` command.",
+    placeholder: "your-model-slug",
     example: "gpt-6.7-codex-ultra-preview",
   },
   claudeAgent: {
@@ -44,13 +45,6 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     description: "Save additional Claude model slugs for the picker and `/model` command.",
     placeholder: "your-claude-model-slug",
     example: "claude-sonnet-5-0",
-  },
-  glm: {
-    provider: "glm",
-    title: "GLM",
-    description: "Save additional GLM model slugs for the picker and /model command.",
-    placeholder: "your-glm-model-slug",
-    example: "glm-5.1-preview",
   },
 };
 
@@ -171,12 +165,6 @@ export function getCustomModelOptionsByProvider(
       providers,
       "claudeAgent",
       selectedProvider === "claudeAgent" ? selectedModel : undefined,
-    ),
-    glm: getAppModelOptions(
-      settings,
-      providers,
-      "glm",
-      selectedProvider === "glm" ? selectedModel : undefined,
     ),
   };
 }

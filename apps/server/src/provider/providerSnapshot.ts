@@ -132,6 +132,7 @@ export function buildServerProvider(input: {
   enabled: boolean;
   checkedAt: string;
   models: ReadonlyArray<ServerProviderModel>;
+  displayName?: string;
   slashCommands?: ReadonlyArray<ServerProviderSlashCommand>;
   skills?: ReadonlyArray<ServerProviderSkill>;
   probe: ProviderProbeResult;
@@ -141,6 +142,7 @@ export function buildServerProvider(input: {
     enabled: input.enabled,
     installed: input.probe.installed,
     version: input.probe.version,
+    ...(input.displayName ? { displayName: input.displayName } : {}),
     status: input.enabled ? input.probe.status : "disabled",
     auth: input.probe.auth,
     checkedAt: input.checkedAt,
