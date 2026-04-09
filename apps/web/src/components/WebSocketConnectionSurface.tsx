@@ -12,7 +12,7 @@ import {
   WS_RECONNECT_MAX_ATTEMPTS,
 } from "../rpc/wsConnectionState";
 import { toastManager } from "./ui/toast";
-import { getPrimaryWsRpcClient } from "~/wsRpcClient";
+import { getPrimaryEnvironmentConnection } from "../environments/runtime";
 
 const FORCED_WS_RECONNECT_DEBOUNCE_MS = 5_000;
 type WsAutoReconnectTrigger = "focus" | "online";
@@ -120,7 +120,7 @@ export function WebSocketConnectionCoordinator() {
       toastResetTimerRef.current = null;
     }
     lastForcedReconnectAtRef.current = Date.now();
-    void getPrimaryWsRpcClient()
+    void getPrimaryEnvironmentConnection()
       .reconnect()
       .catch((error) => {
         if (!showFailureToast) {

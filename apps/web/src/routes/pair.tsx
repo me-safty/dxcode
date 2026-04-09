@@ -1,13 +1,15 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 
 import { PairingPendingSurface, PairingRouteSurface } from "../components/auth/PairingRouteSurface";
-import { resolveInitialServerAuthGateState } from "../authBootstrap";
-import { resolveInitialPrimaryEnvironmentDescriptor } from "../environments/primary/bootstrap";
+import {
+  ensurePrimaryEnvironmentReady,
+  resolveInitialServerAuthGateState,
+} from "../environments/primary";
 
 export const Route = createFileRoute("/pair")({
   beforeLoad: async () => {
     const [, authGateState] = await Promise.all([
-      resolveInitialPrimaryEnvironmentDescriptor(),
+      ensurePrimaryEnvironmentReady(),
       resolveInitialServerAuthGateState(),
     ]);
     if (authGateState.status === "authenticated") {

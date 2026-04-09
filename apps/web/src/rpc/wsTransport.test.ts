@@ -5,17 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetClientTracingForTests,
   configureClientTracing,
-} from "./observability/clientTracing";
+} from "../observability/clientTracing";
 import {
   getSlowRpcAckRequests,
   resetRequestLatencyStateForTests,
   setSlowRpcAckThresholdMsForTests,
-} from "./rpc/requestLatencyState";
+} from "../rpc/requestLatencyState";
 import {
   getWsConnectionStatus,
   getWsConnectionUiState,
   resetWsConnectionStateForTests,
-} from "./rpc/wsConnectionState";
+} from "../rpc/wsConnectionState";
 import { WsTransport } from "./wsTransport";
 
 type WsEventType = "open" | "message" | "close" | "error";

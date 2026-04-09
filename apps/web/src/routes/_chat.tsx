@@ -2,8 +2,10 @@ import { scopeProjectRef } from "@t3tools/client-runtime";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-import { resolveInitialServerAuthGateState } from "../authBootstrap";
-import { resolveInitialPrimaryEnvironmentDescriptor } from "../environments/primary/bootstrap";
+import {
+  ensurePrimaryEnvironmentReady,
+  resolveInitialServerAuthGateState,
+} from "../environments/primary";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { resolveShortcutCommand } from "../keybindings";
@@ -106,7 +108,7 @@ function ChatRouteLayout() {
 export const Route = createFileRoute("/_chat")({
   beforeLoad: async () => {
     const [, authGateState] = await Promise.all([
-      resolveInitialPrimaryEnvironmentDescriptor(),
+      ensurePrimaryEnvironmentReady(),
       resolveInitialServerAuthGateState(),
     ]);
     if (authGateState.status !== "authenticated") {

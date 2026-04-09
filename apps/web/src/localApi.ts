@@ -4,12 +4,15 @@ import { resetGitStatusStateForTests } from "./lib/gitStatusState";
 import { resetRequestLatencyStateForTests } from "./rpc/requestLatencyState";
 import { resetServerStateForTests } from "./rpc/serverState";
 import { resetWsConnectionStateForTests } from "./rpc/wsConnectionState";
-import { resetSavedEnvironmentConnectionsForTests } from "./environments/runtime/manager";
 import {
   resetSavedEnvironmentRegistryStoreForTests,
   resetSavedEnvironmentRuntimeStoreForTests,
-} from "./environments/runtime/savedEnvironmentsStore";
-import { getPrimaryWsRpcClientEntry, WsRpcClient, __resetWsRpcClientForTests } from "./wsRpcClient";
+} from "./environments/runtime";
+import {
+  getPrimaryEnvironmentConnection,
+  resetEnvironmentServiceForTests,
+} from "./environments/runtime";
+import { type WsRpcClient } from "./rpc/wsRpcClient";
 import { showContextMenuFallback } from "./contextMenuFallback";
 
 let cachedApi: LocalApi | undefined;
@@ -63,10 +66,6 @@ export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
   };
 }
 
-export function createPrimaryLocalApi(): LocalApi {
-  return createLocalApi(getPrimaryWsRpcClientEntry().client);
-}
-
 export function readLocalApi(): LocalApi | undefined {
   if (typeof window === "undefined") return undefined;
   if (cachedApi) return cachedApi;
@@ -76,7 +75,7 @@ export function readLocalApi(): LocalApi | undefined {
     return cachedApi;
   }
 
-  cachedApi = createPrimaryLocalApi();
+  cachedApi = createLocalApi(getPrimaryEnvironmentConnection().client);
   return cachedApi;
 }
 
@@ -90,8 +89,7 @@ export function ensureLocalApi(): LocalApi {
 
 export async function __resetLocalApiForTests() {
   cachedApi = undefined;
-  await resetSavedEnvironmentConnectionsForTests();
-  await __resetWsRpcClientForTests();
+  await resetEnvironmentServiceForTests();
   resetGitStatusStateForTests();
   resetRequestLatencyStateForTests();
   resetSavedEnvironmentRegistryStoreForTests();

@@ -112,33 +112,31 @@ const authAccessHarness = vi.hoisted(() => {
   };
 });
 
-vi.mock("../../wsRpcClient", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../wsRpcClient")>();
-
-  return {
-    ...actual,
-    getPrimaryWsRpcClientEntry: () =>
-      ({
-        knownEnvironment: {
-          id: "environment-local",
-          label: "Local environment",
-          source: "manual",
-          environmentId: EnvironmentId.makeUnsafe("environment-local"),
-          target: {
-            httpBaseUrl: "http://localhost:3000",
-            wsBaseUrl: "ws://localhost:3000",
-          },
-        },
-        environmentId: EnvironmentId.makeUnsafe("environment-local"),
-        client: {
-          server: {
-            subscribeAuthAccess: (listener: Parameters<typeof authAccessHarness.subscribe>[0]) =>
-              authAccessHarness.subscribe(listener),
-          },
-        },
-      }) as unknown as ReturnType<typeof actual.getPrimaryWsRpcClientEntry>,
-  };
-});
+vi.mock("../../environments/runtime", () => ({
+  getPrimaryEnvironmentConnection: () => ({
+    kind: "primary" as const,
+    knownEnvironment: {
+      id: "environment-local",
+      label: "Local environment",
+      source: "manual" as const,
+      environmentId: EnvironmentId.makeUnsafe("environment-local"),
+      target: {
+        httpBaseUrl: "http://localhost:3000",
+        wsBaseUrl: "ws://localhost:3000",
+      },
+    },
+    environmentId: EnvironmentId.makeUnsafe("environment-local"),
+    client: {
+      server: {
+        subscribeAuthAccess: (listener: Parameters<typeof authAccessHarness.subscribe>[0]) =>
+          authAccessHarness.subscribe(listener),
+      },
+    },
+    ensureBootstrapped: async () => undefined,
+    reconnect: async () => undefined,
+    dispose: async () => undefined,
+  }),
+}));
 
 function createBaseServerConfig(): ServerConfig {
   return {

@@ -1,12 +1,7 @@
 import { EnvironmentId, type GitStatusResult } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  __resetWsRpcClientForTests,
-  registerWsRpcClientEntry,
-  removeWsRpcClientEntry,
-  type WsRpcClient,
-} from "../wsRpcClient";
+import type { WsRpcClient } from "../rpc/wsRpcClient";
 import { resetAppAtomRegistryForTests } from "../rpc/atomRegistry";
 import {
   getGitStatusSnapshot,
@@ -14,6 +9,22 @@ import {
   refreshGitStatus,
   watchGitStatus,
 } from "./gitStatusState";
+
+const serviceHarness = vi.hoisted(() => ({
+  connections: new Map<string, any>(),
+  listeners: new Set<() => void>(),
+}));
+
+vi.mock("../environments/runtime/service", () => ({
+  readEnvironmentConnection: (environmentId: string) =>
+    serviceHarness.connections.get(environmentId) ?? null,
+  subscribeEnvironmentConnections: (listener: () => void) => {
+    serviceHarness.listeners.add(listener);
+    return () => {
+      serviceHarness.listeners.delete(listener);
+    };
+  },
+}));
 
 function registerListener<T>(listeners: Set<(event: T) => void>, listener: (event: T) => void) {
   listeners.add(listener);
@@ -121,11 +132,12 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
     },
   } as unknown as WsRpcClient;
 
-  registerWsRpcClientEntry({
+  serviceHarness.connections.set(environmentId, {
+    kind: "saved" as const,
     knownEnvironment: {
       id: environmentId,
       label: `Environment ${environmentId}`,
-      source: "manual",
+      source: "manual" as const,
       environmentId,
       target: {
         httpBaseUrl: "http://example.test",
@@ -134,7 +146,13 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
     },
     client,
     environmentId,
+    ensureBootstrapped: async () => undefined,
+    reconnect: async () => undefined,
+    dispose: async () => undefined,
   });
+  for (const listener of serviceHarness.listeners) {
+    listener();
+  }
 
   return {
     client,
@@ -148,11 +166,12 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
 
 afterEach(async () => {
   gitStatusListeners.clear();
+  serviceHarness.connections.clear();
+  serviceHarness.listeners.clear();
   gitClient.onStatus.mockClear();
   gitClient.refreshStatus.mockClear();
   resetGitStatusStateForTests();
   resetAppAtomRegistryForTests();
-  await __resetWsRpcClientForTests();
 });
 
 describe("gitStatusState", () => {
@@ -276,7 +295,10 @@ describe("gitStatusState", () => {
     firstClient.emit(BASE_STATUS);
     expect(getGitStatusSnapshot(TARGET).data?.branch).toBe("feature/push-status");
 
-    await removeWsRpcClientEntry(ENVIRONMENT_ID);
+    serviceHarness.connections.delete(ENVIRONMENT_ID);
+    for (const listener of serviceHarness.listeners) {
+      listener();
+    }
 
     expect(getGitStatusSnapshot(TARGET)).toEqual({
       data: BASE_STATUS,

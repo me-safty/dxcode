@@ -10,18 +10,15 @@ import { useEffect } from "react";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import {
-  getPrimaryWsRpcClientEntry,
-  readWsRpcClientEntryForEnvironment,
-  subscribeWsRpcClientRegistry,
-  type WsRpcClient,
-} from "../wsRpcClient";
+  readEnvironmentConnection,
+  subscribeEnvironmentConnections,
+} from "../environments/runtime";
+import type { WsRpcClient } from "~/rpc/wsRpcClient";
 
-export type GitStatusStreamError = GitManagerServiceError;
-
-export interface GitStatusState {
+interface GitStatusState {
   readonly data: GitStatusResult | null;
-  readonly error: GitStatusStreamError | null;
-  readonly cause: Cause.Cause<GitStatusStreamError> | null;
+  readonly error: GitManagerServiceError | null;
+  readonly cause: Cause.Cause<GitManagerServiceError> | null;
   readonly isPending: boolean;
 }
 
@@ -36,7 +33,7 @@ interface WatchedGitStatus {
   unsubscribe: () => void;
 }
 
-export interface GitStatusTarget {
+interface GitStatusTarget {
   readonly environmentId: EnvironmentId | null;
   readonly cwd: string | null;
 }
@@ -73,24 +70,21 @@ const gitStatusStateAtom = Atom.family((key: string) => {
 });
 
 function getGitStatusTargetKey(target: GitStatusTarget): string | null {
-  if (target.cwd === null) {
+  if (target.environmentId === null || target.cwd === null) {
     return null;
   }
 
-  return `${target.environmentId ?? "__default__"}:${target.cwd}`;
+  return `${target.environmentId}:${target.cwd}`;
 }
 
 function readResolvedGitStatusClient(target: GitStatusTarget): ResolvedGitStatusClient | null {
-  if (target.environmentId) {
-    const entry = readWsRpcClientEntryForEnvironment(target.environmentId);
-    return entry ? { clientIdentity: entry.environmentId, client: entry.client.git } : null;
+  if (target.environmentId === null) {
+    return null;
   }
-
-  const entry = getPrimaryWsRpcClientEntry();
-  return {
-    clientIdentity: entry.environmentId,
-    client: entry.client.git,
-  };
+  const connection = readEnvironmentConnection(target.environmentId);
+  return connection
+    ? { clientIdentity: connection.environmentId, client: connection.client.git }
+    : null;
 }
 
 export function getGitStatusSnapshot(target: GitStatusTarget): GitStatusState {
@@ -238,7 +232,7 @@ function subscribeToGitStatusTarget(
 
   const unsubscribeRegistry = providedClient
     ? NOOP
-    : subscribeWsRpcClientRegistry(syncClientSubscription);
+    : subscribeEnvironmentConnections(syncClientSubscription);
   syncClientSubscription();
 
   return () => {
@@ -251,7 +245,7 @@ function subscribeToGitStatus(targetKey: string, cwd: string, client: GitStatusC
   markGitStatusPending(targetKey);
   return client.onStatus(
     { cwd },
-    (status) => {
+    (status: GitStatusResult) => {
       appAtomRegistry.set(gitStatusStateAtom(targetKey), {
         data: status,
         error: null,

@@ -6,7 +6,7 @@ import {
   peekPairingTokenFromUrl,
   stripPairingTokenFromUrl,
   submitServerAuthCredential,
-} from "../../authBootstrap";
+} from "../../environments/primary";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 

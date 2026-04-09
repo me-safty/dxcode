@@ -11,15 +11,15 @@ import {
 } from "effect";
 import { RpcClient } from "effect/unstable/rpc";
 
-import { ClientTracingLive } from "./observability/clientTracing";
+import { ClientTracingLive } from "../observability/clientTracing";
 import {
   createWsRpcProtocolLayer,
   makeWsRpcProtocolClient,
   type WsProtocolLifecycleHandlers,
   type WsRpcProtocolClient,
   type WsRpcProtocolSocketUrlProvider,
-} from "./rpc/protocol";
-import { isTransportConnectionErrorMessage } from "./rpc/transportError";
+} from "./protocol";
+import { isTransportConnectionErrorMessage } from "./transportError";
 
 interface SubscribeOptions {
   readonly retryDelay?: Duration.Input;

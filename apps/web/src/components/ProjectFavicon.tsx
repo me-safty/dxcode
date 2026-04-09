@@ -1,7 +1,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { FolderIcon } from "lucide-react";
 import { useState } from "react";
-import { resolveEnvironmentHttpUrl } from "../environments/runtime/url";
+import { resolveEnvironmentHttpUrl } from "../environments/runtime";
 
 const loadedProjectFaviconSrcs = new Set<string>();
 

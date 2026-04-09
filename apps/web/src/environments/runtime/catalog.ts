@@ -1,3 +1,4 @@
+import { getKnownEnvironmentHttpBaseUrl } from "@t3tools/client-runtime";
 import type {
   AuthSessionRole,
   EnvironmentId,
@@ -8,20 +9,10 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "../../lib/storage";
+import { getPrimaryKnownEnvironment } from "../primary";
 
 const SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY = "t3code:saved-environment-registry:v1";
 
-/**
- * State for user-managed remote environments.
- *
- * This module intentionally colocates:
- * - the persisted registry of environments the user has registered
- * - the ephemeral runtime state for those environments
- *
- * The stores stay separate because they have different lifecycles. Persisted
- * configuration should be stable, while runtime connection/auth state is noisy
- * and should never survive a reload.
- */
 export interface SavedEnvironmentRecord {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -32,16 +23,11 @@ export interface SavedEnvironmentRecord {
   readonly lastConnectedAt: string | null;
 }
 
-interface PersistedSavedEnvironmentRegistryState {
-  readonly byId?: Record<string, SavedEnvironmentRecord>;
+interface SavedEnvironmentRegistryState {
+  readonly byId: Record<EnvironmentId, SavedEnvironmentRecord>;
 }
 
-/**
- * Durable user intent: which remote environments should be materialized by the
- * environment manager on app startup.
- */
-interface SavedEnvironmentRegistryState {
-  readonly byId: Record<string, SavedEnvironmentRecord>;
+interface SavedEnvironmentRegistryStore extends SavedEnvironmentRegistryState {
   readonly upsert: (record: SavedEnvironmentRecord) => void;
   readonly remove: (environmentId: EnvironmentId) => void;
   readonly markConnected: (environmentId: EnvironmentId, connectedAt: string) => void;
@@ -52,23 +38,7 @@ function createSavedEnvironmentRegistryStorage() {
   return resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined);
 }
 
-function migratePersistedSavedEnvironmentRegistryState(
-  persistedState: unknown,
-  version: number,
-): Pick<SavedEnvironmentRegistryState, "byId"> {
-  if (version === 1 && persistedState && typeof persistedState === "object") {
-    const candidate = persistedState as PersistedSavedEnvironmentRegistryState;
-    return {
-      byId: candidate.byId ?? {},
-    };
-  }
-
-  return {
-    byId: {},
-  };
-}
-
-export const useSavedEnvironmentRegistryStore = create<SavedEnvironmentRegistryState>()(
+export const useSavedEnvironmentRegistryStore = create<SavedEnvironmentRegistryStore>()(
   persist(
     (set) => ({
       byId: {},
@@ -110,7 +80,6 @@ export const useSavedEnvironmentRegistryStore = create<SavedEnvironmentRegistryS
       name: SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY,
       version: 1,
       storage: createJSONStorage(createSavedEnvironmentRegistryStorage),
-      migrate: migratePersistedSavedEnvironmentRegistryState,
       partialize: (state) => ({
         byId: state.byId,
       }),
@@ -152,6 +121,33 @@ export function getSavedEnvironmentRecord(
   return useSavedEnvironmentRegistryStore.getState().byId[environmentId] ?? null;
 }
 
+export function getEnvironmentHttpBaseUrl(environmentId: EnvironmentId): string | null {
+  const primaryEnvironment = getPrimaryKnownEnvironment();
+  if (primaryEnvironment?.environmentId === environmentId) {
+    return getKnownEnvironmentHttpBaseUrl(primaryEnvironment);
+  }
+
+  return getSavedEnvironmentRecord(environmentId)?.httpBaseUrl ?? null;
+}
+
+export function resolveEnvironmentHttpUrl(input: {
+  readonly environmentId: EnvironmentId;
+  readonly pathname: string;
+  readonly searchParams?: Record<string, string>;
+}): string {
+  const httpBaseUrl = getEnvironmentHttpBaseUrl(input.environmentId);
+  if (!httpBaseUrl) {
+    throw new Error(`Unable to resolve HTTP base URL for environment ${input.environmentId}.`);
+  }
+
+  const url = new URL(httpBaseUrl);
+  url.pathname = input.pathname;
+  if (input.searchParams) {
+    url.search = new URLSearchParams(input.searchParams).toString();
+  }
+  return url.toString();
+}
+
 export function resetSavedEnvironmentRegistryStoreForTests() {
   useSavedEnvironmentRegistryStore.getState().reset();
 }
@@ -160,12 +156,6 @@ export type SavedEnvironmentConnectionState = "connecting" | "connected" | "disc
 
 export type SavedEnvironmentAuthState = "authenticated" | "requires-auth" | "unknown";
 
-/**
- * Live status/diagnostics for a materialized remote environment connection.
- *
- * This is runtime visibility for the UI and can always be rebuilt by the
- * environment manager from active websocket/auth state.
- */
 export interface SavedEnvironmentRuntimeState {
   readonly connectionState: SavedEnvironmentConnectionState;
   readonly authState: SavedEnvironmentAuthState;
@@ -178,12 +168,6 @@ export interface SavedEnvironmentRuntimeState {
   readonly disconnectedAt: string | null;
 }
 
-/**
- * Ephemeral runtime store keyed by environment id.
- *
- * The manager ensures entries exist before patching them so UI selectors can
- * subscribe safely even while a connection is still bootstrapping.
- */
 interface SavedEnvironmentRuntimeStoreState {
   readonly byId: Record<string, SavedEnvironmentRuntimeState>;
   readonly ensure: (environmentId: EnvironmentId) => void;

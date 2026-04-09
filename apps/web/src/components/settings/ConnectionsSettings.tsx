@@ -8,19 +8,9 @@ import {
 } from "@t3tools/contracts";
 import { DateTime } from "effect";
 
-import {
-  createServerPairingCredential,
-  fetchSessionState,
-  revokeOtherServerClientSessions,
-  revokeServerClientSession,
-  revokeServerPairingLink,
-  type ServerClientSessionRecord,
-  type ServerPairingLinkRecord,
-} from "../../authBootstrap";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
 import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestampFormat";
-import { getPrimaryWsRpcClientEntry } from "../../wsRpcClient";
 import {
   SettingsPageContainer,
   SettingsRow,
@@ -55,18 +45,27 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
-import {
-  addSavedEnvironment,
-  reconnectSavedEnvironment,
-  removeSavedEnvironment,
-} from "../../environments/runtime/manager";
 import { setPairingTokenOnUrl } from "../../pairingUrl";
+import {
+  createServerPairingCredential,
+  fetchSessionState,
+  revokeOtherServerClientSessions,
+  revokeServerClientSession,
+  revokeServerPairingLink,
+  type ServerClientSessionRecord,
+  type ServerPairingLinkRecord,
+} from "../../environments/primary";
+import type { WsRpcClient } from "~/rpc/wsRpcClient";
 import {
   type SavedEnvironmentRecord,
   type SavedEnvironmentRuntimeState,
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
-} from "../../environments/runtime/savedEnvironmentsStore";
+  addSavedEnvironment,
+  getPrimaryEnvironmentConnection,
+  reconnectSavedEnvironment,
+  removeSavedEnvironment,
+} from "../../environments/runtime";
 
 const accessTimestampFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -1024,62 +1023,66 @@ export function ConnectionsSettings() {
 
     let cancelled = false;
     setIsLoadingDesktopAccessManagement(true);
-    const unsubscribeAuthAccess = getPrimaryWsRpcClientEntry().client.server.subscribeAuthAccess(
-      (event) => {
-        if (cancelled) {
-          return;
-        }
-
-        switch (event.type) {
-          case "snapshot":
-            setDesktopPairingLinks(
-              sortDesktopPairingLinks(
-                event.payload.pairingLinks.map((pairingLink) =>
-                  toDesktopPairingLinkRecord(pairingLink),
-                ),
-              ),
-            );
-            setDesktopClientSessions(
-              sortDesktopClientSessions(
-                event.payload.clientSessions.map((clientSession) =>
-                  toDesktopClientSessionRecord(clientSession),
-                ),
-              ),
-            );
-            break;
-          case "pairingLinkUpserted":
-            setDesktopPairingLinks((current) =>
-              upsertDesktopPairingLink(current, toDesktopPairingLinkRecord(event.payload)),
-            );
-            break;
-          case "pairingLinkRemoved":
-            setDesktopPairingLinks((current) =>
-              removeDesktopPairingLink(current, event.payload.id),
-            );
-            break;
-          case "clientUpserted":
-            setDesktopClientSessions((current) =>
-              upsertDesktopClientSession(current, toDesktopClientSessionRecord(event.payload)),
-            );
-            break;
-          case "clientRemoved":
-            setDesktopClientSessions((current) =>
-              removeDesktopClientSession(current, event.payload.sessionId),
-            );
-            break;
-        }
-
-        setDesktopAccessManagementError(null);
-        setIsLoadingDesktopAccessManagement(false);
-      },
-      {
-        onResubscribe: () => {
-          if (!cancelled) {
-            setIsLoadingDesktopAccessManagement(true);
+    type AuthAccessEvent = Parameters<
+      Parameters<WsRpcClient["server"]["subscribeAuthAccess"]>[0]
+    >[0];
+    const unsubscribeAuthAccess =
+      getPrimaryEnvironmentConnection().client.server.subscribeAuthAccess(
+        (event: AuthAccessEvent) => {
+          if (cancelled) {
+            return;
           }
+
+          switch (event.type) {
+            case "snapshot":
+              setDesktopPairingLinks(
+                sortDesktopPairingLinks(
+                  event.payload.pairingLinks.map((pairingLink: AuthPairingLink) =>
+                    toDesktopPairingLinkRecord(pairingLink),
+                  ),
+                ),
+              );
+              setDesktopClientSessions(
+                sortDesktopClientSessions(
+                  event.payload.clientSessions.map((clientSession: AuthClientSession) =>
+                    toDesktopClientSessionRecord(clientSession),
+                  ),
+                ),
+              );
+              break;
+            case "pairingLinkUpserted":
+              setDesktopPairingLinks((current) =>
+                upsertDesktopPairingLink(current, toDesktopPairingLinkRecord(event.payload)),
+              );
+              break;
+            case "pairingLinkRemoved":
+              setDesktopPairingLinks((current) =>
+                removeDesktopPairingLink(current, event.payload.id),
+              );
+              break;
+            case "clientUpserted":
+              setDesktopClientSessions((current) =>
+                upsertDesktopClientSession(current, toDesktopClientSessionRecord(event.payload)),
+              );
+              break;
+            case "clientRemoved":
+              setDesktopClientSessions((current) =>
+                removeDesktopClientSession(current, event.payload.sessionId),
+              );
+              break;
+          }
+
+          setDesktopAccessManagementError(null);
+          setIsLoadingDesktopAccessManagement(false);
         },
-      },
-    );
+        {
+          onResubscribe: () => {
+            if (!cancelled) {
+              setIsLoadingDesktopAccessManagement(true);
+            }
+          },
+        },
+      );
     if (desktopBridge) {
       void desktopBridge
         .getServerExposureState()

@@ -34,22 +34,22 @@ import { useUiStateStore } from "../uiStateStore";
 import { migrateLocalSettingsToServer } from "../hooks/useSettings";
 import {
   ensureEnvironmentConnectionBootstrapped,
-  startEnvironmentConnectionManager,
-} from "../environments/runtime/manager";
-import { getPrimaryWsRpcClientEntry } from "~/wsRpcClient";
-import { resolveInitialServerAuthGateState } from "../authBootstrap";
+  getPrimaryEnvironmentConnection,
+  startEnvironmentConnectionService,
+} from "../environments/runtime";
 import { configureClientTracing } from "../observability/clientTracing";
 import {
-  resolveInitialPrimaryEnvironmentDescriptor,
-  writePrimaryEnvironmentDescriptor,
-} from "../environments/primary/bootstrap";
+  ensurePrimaryEnvironmentReady,
+  resolveInitialServerAuthGateState,
+  updatePrimaryEnvironmentDescriptor,
+} from "../environments/primary";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
   beforeLoad: async () => {
     const [, authGateState] = await Promise.all([
-      resolveInitialPrimaryEnvironmentDescriptor(),
+      ensurePrimaryEnvironmentReady(),
       resolveInitialServerAuthGateState(),
     ]);
     return {
@@ -165,7 +165,7 @@ function errorDetails(error: unknown): string {
 }
 
 function ServerStateBootstrap() {
-  useEffect(() => startServerStateSync(getPrimaryWsRpcClientEntry().client.server), []);
+  useEffect(() => startServerStateSync(getPrimaryEnvironmentConnection().client.server), []);
 
   return null;
 }
@@ -182,7 +182,7 @@ function EnvironmentConnectionManagerBootstrap() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    return startEnvironmentConnectionManager(queryClient);
+    return startEnvironmentConnectionService(queryClient);
   }, [queryClient]);
 
   return null;
@@ -201,7 +201,7 @@ function EventRouter() {
   const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
     if (!payload) return;
 
-    writePrimaryEnvironmentDescriptor(payload.environment);
+    updatePrimaryEnvironmentDescriptor(payload.environment);
     setActiveEnvironmentId(payload.environment.environmentId);
     migrateLocalSettingsToServer();
     void (async () => {
@@ -302,7 +302,7 @@ function EventRouter() {
       return;
     }
 
-    writePrimaryEnvironmentDescriptor(serverConfig.environment);
+    updatePrimaryEnvironmentDescriptor(serverConfig.environment);
     setActiveEnvironmentId(serverConfig.environment.environmentId);
   }, [serverConfig, setActiveEnvironmentId]);
 

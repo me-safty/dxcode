@@ -93,28 +93,29 @@ const rpcClientMock = {
   },
 };
 
-vi.mock("./wsRpcClient", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./wsRpcClient")>();
-
-  return {
-    ...actual,
-    getPrimaryWsRpcClientEntry: () => ({
-      knownEnvironment: {
-        id: "environment-local",
-        label: "Primary",
-        source: "manual",
-        target: {
-          httpBaseUrl: "http://localhost:3000",
-          wsBaseUrl: "ws://localhost:3000",
-        },
-        environmentId: EnvironmentId.makeUnsafe("environment-local"),
+vi.mock("./environments/runtime", () => ({
+  getPrimaryEnvironmentConnection: () => ({
+    kind: "primary" as const,
+    knownEnvironment: {
+      id: "environment-local",
+      label: "Primary",
+      source: "manual" as const,
+      target: {
+        httpBaseUrl: "http://localhost:3000",
+        wsBaseUrl: "ws://localhost:3000",
       },
-      client: rpcClientMock,
       environmentId: EnvironmentId.makeUnsafe("environment-local"),
-    }),
-    __resetWsRpcClientForTests: vi.fn(),
-  };
-});
+    },
+    client: rpcClientMock,
+    environmentId: EnvironmentId.makeUnsafe("environment-local"),
+    ensureBootstrapped: async () => undefined,
+    reconnect: async () => undefined,
+    dispose: async () => undefined,
+  }),
+  resetEnvironmentServiceForTests: vi.fn(),
+  resetSavedEnvironmentRegistryStoreForTests: vi.fn(),
+  resetSavedEnvironmentRuntimeStoreForTests: vi.fn(),
+}));
 
 vi.mock("./contextMenuFallback", () => ({
   showContextMenuFallback: showContextMenuFallbackMock,

@@ -3,22 +3,19 @@ import type {
   AuthBootstrapResult,
   AuthClientMetadata,
   AuthCreatePairingCredentialInput,
-  AuthSessionId,
   AuthPairingCredentialResult,
   AuthRevokeClientSessionInput,
   AuthRevokePairingLinkInput,
+  AuthSessionId,
   AuthSessionState,
 } from "@t3tools/contracts";
-import { resolvePrimaryEnvironmentHttpUrl } from "./environments/primary/bootstrap";
+
 import {
   getPairingTokenFromUrl,
   stripPairingTokenFromUrl as stripPairingTokenUrl,
-} from "./pairingUrl";
-import {
-  BootstrapHttpError,
-  retryTransientBootstrap,
-  waitForBootstrapRetry,
-} from "./environments/shared/bootstrapHttp";
+} from "../../pairingUrl";
+
+import { resolvePrimaryEnvironmentHttpUrl } from "./target";
 
 export interface ServerPairingLinkRecord {
   readonly id: string;
@@ -43,7 +40,7 @@ export interface ServerClientSessionRecord {
   readonly current: boolean;
 }
 
-export type ServerAuthGateState =
+type ServerAuthGateState =
   | { status: "authenticated" }
   | {
       status: "requires-auth";
@@ -143,6 +140,57 @@ async function waitForAuthenticatedSessionAfterBootstrap(): Promise<AuthSessionS
 
     await waitForBootstrapRetry(AUTH_SESSION_ESTABLISH_STEP_MS);
   }
+}
+
+const TRANSIENT_BOOTSTRAP_STATUS_CODES = new Set([502, 503, 504]);
+const BOOTSTRAP_RETRY_TIMEOUT_MS = 15_000;
+const BOOTSTRAP_RETRY_STEP_MS = 500;
+
+export class BootstrapHttpError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "BootstrapHttpError";
+    this.status = status;
+  }
+}
+
+export async function retryTransientBootstrap<T>(operation: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now();
+  while (true) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isTransientBootstrapError(error)) {
+        throw error;
+      }
+
+      if (Date.now() - startedAt >= BOOTSTRAP_RETRY_TIMEOUT_MS) {
+        throw error;
+      }
+
+      await waitForBootstrapRetry(BOOTSTRAP_RETRY_STEP_MS);
+    }
+  }
+}
+
+function waitForBootstrapRetry(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+}
+
+function isTransientBootstrapError(error: unknown): boolean {
+  if (error instanceof BootstrapHttpError) {
+    return TRANSIENT_BOOTSTRAP_STATUS_CODES.has(error.status);
+  }
+
+  if (error instanceof TypeError) {
+    return true;
+  }
+
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 async function bootstrapServerAuth(): Promise<ServerAuthGateState> {
@@ -267,7 +315,7 @@ export async function revokeServerClientSession(sessionId: AuthSessionId): Promi
 
   if (!response.ok) {
     throw new Error(
-      await readErrorMessage(response, `Failed to revoke client access (${response.status}).`),
+      await readErrorMessage(response, `Failed to revoke client session (${response.status}).`),
     );
   }
 }
@@ -283,23 +331,26 @@ export async function revokeOtherServerClientSessions(): Promise<number> {
 
   if (!response.ok) {
     throw new Error(
-      await readErrorMessage(response, `Failed to revoke other clients (${response.status}).`),
+      await readErrorMessage(
+        response,
+        `Failed to revoke other client sessions (${response.status}).`,
+      ),
     );
   }
 
-  const body = (await response.json()) as { readonly revokedCount: number };
-  return body.revokedCount;
+  const result = (await response.json()) as { revokedCount?: number };
+  return result.revokedCount ?? 0;
 }
 
-export function resolveInitialServerAuthGateState(): Promise<ServerAuthGateState> {
+export async function resolveInitialServerAuthGateState(): Promise<ServerAuthGateState> {
   if (bootstrapPromise) {
     return bootstrapPromise;
   }
 
-  const nextBootstrapPromise = bootstrapServerAuth();
-  bootstrapPromise = nextBootstrapPromise;
-  return nextBootstrapPromise.finally(() => {
-    if (bootstrapPromise === nextBootstrapPromise) {
+  const nextPromise = bootstrapServerAuth();
+  bootstrapPromise = nextPromise;
+  return nextPromise.finally(() => {
+    if (bootstrapPromise === nextPromise) {
       bootstrapPromise = null;
     }
   });

@@ -2,7 +2,7 @@ import { Exit, Layer, ManagedRuntime, Scope, Tracer } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 
-import { resolvePrimaryEnvironmentHttpUrl } from "../environments/primary/bootstrap";
+import { resolvePrimaryEnvironmentHttpUrl } from "../environments/primary";
 import { isElectron } from "../env";
 import { APP_VERSION } from "~/branding";
 
