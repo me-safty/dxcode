@@ -160,6 +160,146 @@ const terminalContextIdListsEqual = (
 ): boolean =>
   contexts.length === ids.length && contexts.every((context, index) => context.id === ids[index]);
 
+const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
+  interactionMode: ProviderInteractionMode;
+  runtimeMode: RuntimeMode;
+  showPlanToggle: boolean;
+  planSidebarOpen: boolean;
+  onToggleInteractionMode: () => void;
+  onRuntimeModeChange: (mode: RuntimeMode) => void;
+  onTogglePlanSidebar: () => void;
+}) {
+  const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
+  const RuntimeModeIcon = runtimeModeOption.icon;
+
+  return (
+    <>
+      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+
+      <Button
+        variant="ghost"
+        className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+        size="sm"
+        type="button"
+        onClick={props.onToggleInteractionMode}
+        title={
+          props.interactionMode === "plan"
+            ? "Plan mode — click to return to normal build mode"
+            : "Default mode — click to enter plan mode"
+        }
+      >
+        <BotIcon />
+        <span className="sr-only sm:not-sr-only">
+          {props.interactionMode === "plan" ? "Plan" : "Build"}
+        </span>
+      </Button>
+
+      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+
+      <Select
+        value={props.runtimeMode}
+        onValueChange={(value) => props.onRuntimeModeChange(value!)}
+      >
+        <SelectTrigger
+          variant="ghost"
+          size="sm"
+          aria-label="Runtime mode"
+          title={runtimeModeOption.description}
+        >
+          <RuntimeModeIcon className="size-4" />
+          <SelectValue>{runtimeModeOption.label}</SelectValue>
+        </SelectTrigger>
+        <SelectPopup alignItemWithTrigger={false}>
+          {runtimeModeOptions.map((mode) => {
+            const option = runtimeModeConfig[mode];
+            const OptionIcon = option.icon;
+            return (
+              <SelectItem key={mode} value={mode} className="min-w-64 py-2">
+                <div className="grid min-w-0 gap-0.5">
+                  <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                    <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                    {option.label}
+                  </span>
+                  <span className="text-muted-foreground text-xs leading-4">
+                    {option.description}
+                  </span>
+                </div>
+              </SelectItem>
+            );
+          })}
+        </SelectPopup>
+      </Select>
+
+      {props.showPlanToggle ? (
+        <>
+          <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+          <Button
+            variant="ghost"
+            className={cn(
+              "shrink-0 whitespace-nowrap px-2 sm:px-3",
+              props.planSidebarOpen
+                ? "text-blue-400 hover:text-blue-300"
+                : "text-muted-foreground/70 hover:text-foreground/80",
+            )}
+            size="sm"
+            type="button"
+            onClick={props.onTogglePlanSidebar}
+            title={props.planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
+          >
+            <ListTodoIcon />
+            <span className="sr-only sm:not-sr-only">Plan</span>
+          </Button>
+        </>
+      ) : null}
+    </>
+  );
+});
+
+const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(props: {
+  compact: boolean;
+  activeContextWindow: ReturnType<typeof deriveLatestContextWindowSnapshot>;
+  isPreparingWorktree: boolean;
+  pendingAction: {
+    questionIndex: number;
+    isLastQuestion: boolean;
+    canAdvance: boolean;
+    isResponding: boolean;
+    isComplete: boolean;
+  } | null;
+  isRunning: boolean;
+  showPlanFollowUpPrompt: boolean;
+  promptHasText: boolean;
+  isSendBusy: boolean;
+  isConnecting: boolean;
+  hasSendableContent: boolean;
+  onPreviousPendingQuestion: () => void;
+  onInterrupt: () => void;
+  onImplementPlanInNewThread: () => void;
+}) {
+  return (
+    <>
+      {props.activeContextWindow ? <ContextWindowMeter usage={props.activeContextWindow} /> : null}
+      {props.isPreparingWorktree ? (
+        <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
+      ) : null}
+      <ComposerPrimaryActions
+        compact={props.compact}
+        pendingAction={props.pendingAction}
+        isRunning={props.isRunning}
+        showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
+        promptHasText={props.promptHasText}
+        isSendBusy={props.isSendBusy}
+        isConnecting={props.isConnecting}
+        isPreparingWorktree={props.isPreparingWorktree}
+        hasSendableContent={props.hasSendableContent}
+        onPreviousPendingQuestion={props.onPreviousPendingQuestion}
+        onInterrupt={props.onInterrupt}
+        onImplementPlanInNewThread={props.onImplementPlanInNewThread}
+      />
+    </>
+  );
+});
+
 // --------------------------------------------------------------------------
 // Handle exposed to ChatView
 // --------------------------------------------------------------------------
@@ -646,6 +786,7 @@ export const ChatComposer = memo(
       (showPlanFollowUpPrompt && activeProposedPlan !== null);
 
     const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
+    const showPlanSidebarToggle = Boolean(activePlan || sidebarProposedPlan || planSidebarOpen);
     const composerFooterActionLayoutKey = useMemo(() => {
       if (activePendingProgress) {
         return `pending:${activePendingProgress.questionIndex}:${activePendingProgress.isLastQuestion}:${activePendingIsResponding}`;
@@ -715,6 +856,19 @@ export const ChatComposer = memo(
       prompt,
       onPromptChange: setPromptFromTraits,
     });
+    const pendingPrimaryAction = useMemo(
+      () =>
+        activePendingProgress
+          ? {
+              questionIndex: activePendingProgress.questionIndex,
+              isLastQuestion: activePendingProgress.isLastQuestion,
+              canAdvance: activePendingProgress.canAdvance,
+              isResponding: activePendingIsResponding,
+              isComplete: Boolean(activePendingResolvedAnswers),
+            }
+          : null,
+      [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
+    );
 
     // ------------------------------------------------------------------
     // Prompt helpers
@@ -1355,6 +1509,12 @@ export const ChatComposer = memo(
       addComposerImages(files);
       focusComposer();
     };
+    const handleInterruptPrimaryAction = useCallback(() => {
+      void onInterrupt();
+    }, [onInterrupt]);
+    const handleImplementPlanInNewThreadPrimaryAction = useCallback(() => {
+      void onImplementPlanInNewThread();
+    }, [onImplementPlanInNewThread]);
 
     // ------------------------------------------------------------------
     // Imperative handle
@@ -1442,10 +1602,6 @@ export const ChatComposer = memo(
         selectedProviderModels,
       ],
     );
-
-    // ------------------------------------------------------------------
-    const runtimeModeOption = runtimeModeConfig[runtimeMode];
-    const RuntimeModeIcon = runtimeModeOption.icon;
 
     // Render
     // ------------------------------------------------------------------
@@ -1667,7 +1823,7 @@ export const ChatComposer = memo(
 
                   {isComposerFooterCompact ? (
                     <CompactComposerControlsMenu
-                      activePlan={Boolean(activePlan || sidebarProposedPlan || planSidebarOpen)}
+                      activePlan={showPlanSidebarToggle}
                       interactionMode={interactionMode}
                       planSidebarOpen={planSidebarOpen}
                       runtimeMode={runtimeMode}
@@ -1687,87 +1843,15 @@ export const ChatComposer = memo(
                           {providerTraitsPicker}
                         </>
                       ) : null}
-
-                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-
-                      <Button
-                        variant="ghost"
-                        className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                        size="sm"
-                        type="button"
-                        onClick={toggleInteractionMode}
-                        title={
-                          interactionMode === "plan"
-                            ? "Plan mode — click to return to normal build mode"
-                            : "Default mode — click to enter plan mode"
-                        }
-                      >
-                        <BotIcon />
-                        <span className="sr-only sm:not-sr-only">
-                          {interactionMode === "plan" ? "Plan" : "Build"}
-                        </span>
-                      </Button>
-
-                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-
-                      <Select
-                        value={runtimeMode}
-                        onValueChange={(value) => handleRuntimeModeChange(value!)}
-                      >
-                        <SelectTrigger
-                          variant="ghost"
-                          size="sm"
-                          aria-label="Runtime mode"
-                          title={runtimeModeOption.description}
-                        >
-                          <RuntimeModeIcon className="size-4" />
-                          <SelectValue>{runtimeModeOption.label}</SelectValue>
-                        </SelectTrigger>
-                        <SelectPopup alignItemWithTrigger={false}>
-                          {runtimeModeOptions.map((mode) => {
-                            const option = runtimeModeConfig[mode];
-                            const OptionIcon = option.icon;
-                            return (
-                              <SelectItem key={mode} value={mode} className="min-w-64 py-2">
-                                <div className="grid min-w-0 gap-0.5">
-                                  <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                                    <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                                    {option.label}
-                                  </span>
-                                  <span className="text-muted-foreground text-xs leading-4">
-                                    {option.description}
-                                  </span>
-                                </div>
-                              </SelectItem>
-                            );
-                          })}
-                        </SelectPopup>
-                      </Select>
-
-                      {activePlan || sidebarProposedPlan || planSidebarOpen ? (
-                        <>
-                          <Separator
-                            orientation="vertical"
-                            className="mx-0.5 hidden h-4 sm:block"
-                          />
-                          <Button
-                            variant="ghost"
-                            className={cn(
-                              "shrink-0 whitespace-nowrap px-2 sm:px-3",
-                              planSidebarOpen
-                                ? "text-blue-400 hover:text-blue-300"
-                                : "text-muted-foreground/70 hover:text-foreground/80",
-                            )}
-                            size="sm"
-                            type="button"
-                            onClick={togglePlanSidebar}
-                            title={planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
-                          >
-                            <ListTodoIcon />
-                            <span className="sr-only sm:not-sr-only">Plan</span>
-                          </Button>
-                        </>
-                      ) : null}
+                      <ComposerFooterModeControls
+                        interactionMode={interactionMode}
+                        runtimeMode={runtimeMode}
+                        showPlanToggle={showPlanSidebarToggle}
+                        planSidebarOpen={planSidebarOpen}
+                        onToggleInteractionMode={toggleInteractionMode}
+                        onRuntimeModeChange={handleRuntimeModeChange}
+                        onTogglePlanSidebar={togglePlanSidebar}
+                      />
                     </>
                   )}
                 </div>
@@ -1781,23 +1865,10 @@ export const ChatComposer = memo(
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
-                  {activeContextWindow ? <ContextWindowMeter usage={activeContextWindow} /> : null}
-                  {isPreparingWorktree ? (
-                    <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
-                  ) : null}
-                  <ComposerPrimaryActions
+                  <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}
-                    pendingAction={
-                      activePendingProgress
-                        ? {
-                            questionIndex: activePendingProgress.questionIndex,
-                            isLastQuestion: activePendingProgress.isLastQuestion,
-                            canAdvance: activePendingProgress.canAdvance,
-                            isResponding: activePendingIsResponding,
-                            isComplete: Boolean(activePendingResolvedAnswers),
-                          }
-                        : null
-                    }
+                    activeContextWindow={activeContextWindow}
+                    pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}
                     showPlanFollowUpPrompt={
                       pendingUserInputs.length === 0 && showPlanFollowUpPrompt
@@ -1808,8 +1879,8 @@ export const ChatComposer = memo(
                     isPreparingWorktree={isPreparingWorktree}
                     hasSendableContent={composerSendState.hasSendableContent}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
-                    onInterrupt={() => void onInterrupt()}
-                    onImplementPlanInNewThread={() => void onImplementPlanInNewThread()}
+                    onInterrupt={handleInterruptPrimaryAction}
+                    onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                   />
                 </div>
               </div>
