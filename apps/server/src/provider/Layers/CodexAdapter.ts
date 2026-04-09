@@ -22,7 +22,7 @@ import {
   TurnId,
   ProviderSendTurnInput,
 } from "@t3tools/contracts";
-import { Effect, FileSystem, Layer, Queue, Schema, ServiceMap, Stream } from "effect";
+import { Effect, FileSystem, Layer, Queue, Schema, Context, Stream } from "effect";
 
 import {
   ProviderAdapterProcessError,
@@ -46,7 +46,7 @@ const PROVIDER = "codex" as const;
 
 export interface CodexAdapterLiveOptions {
   readonly manager?: CodexAppServerManager;
-  readonly makeManager?: (services?: ServiceMap.ServiceMap<never>) => CodexAppServerManager;
+  readonly makeManager?: (services?: Context.Context<never>) => CodexAppServerManager;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
 }
@@ -1366,7 +1366,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     if (options?.manager) {
       return options.manager;
     }
-    const services = yield* Effect.services<never>();
+    const services = yield* Effect.context<never>();
     return options?.makeManager?.(services) ?? new CodexAppServerManager(services);
   });
 
@@ -1585,7 +1585,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   });
 
   const registerListener = Effect.fn("registerListener")(function* () {
-    const services = yield* Effect.services<never>();
+    const services = yield* Effect.context<never>();
     const listenerEffect = Effect.fn("listener")(function* (event: ProviderEvent) {
       yield* writeNativeEvent(event);
       const runtimeEvents = mapToRuntimeEvents(event, event.threadId);

@@ -166,9 +166,6 @@ interface CliAuthLocationFlags {
   readonly devUrl: Option.Option<URL>;
 }
 
-const resolveBooleanFlag = (flag: Option.Option<boolean>, envValue: boolean) =>
-  Option.getOrElse(Option.filter(flag, Boolean), () => envValue);
-
 const resolveOptionPrecedence = <Value>(
   ...values: ReadonlyArray<Option.Option<Value>>
 ): Option.Option<Value> => Option.firstSomeOf(values);
@@ -253,46 +250,40 @@ export const resolveServerConfig = (
     );
     const serverTracePath = env.traceFile ?? derivedPaths.serverTracePath;
     yield* fs.makeDirectory(path.dirname(serverTracePath), { recursive: true });
-    const noBrowser = resolveBooleanFlag(
-      flags.noBrowser,
-      Option.getOrElse(
-        resolveOptionPrecedence(
-          Option.fromUndefinedOr(env.noBrowser),
-          Option.flatMap(bootstrapEnvelope, (bootstrap) =>
-            Option.fromUndefinedOr(bootstrap.noBrowser),
-          ),
+    const noBrowser = Option.getOrElse(
+      resolveOptionPrecedence(
+        flags.noBrowser,
+        Option.fromUndefinedOr(env.noBrowser),
+        Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+          Option.fromUndefinedOr(bootstrap.noBrowser),
         ),
-        () => mode === "desktop",
       ),
+      () => mode === "desktop",
     );
     const desktopBootstrapToken = Option.getOrUndefined(
       Option.flatMap(bootstrapEnvelope, (bootstrap) =>
         Option.fromUndefinedOr(bootstrap.desktopBootstrapToken),
       ),
     );
-    const autoBootstrapProjectFromCwd = resolveBooleanFlag(
-      flags.autoBootstrapProjectFromCwd,
-      Option.getOrElse(
-        resolveOptionPrecedence(
-          Option.fromUndefinedOr(env.autoBootstrapProjectFromCwd),
-          Option.flatMap(bootstrapEnvelope, (bootstrap) =>
-            Option.fromUndefinedOr(bootstrap.autoBootstrapProjectFromCwd),
-          ),
+    const autoBootstrapProjectFromCwd = Option.getOrElse(
+      resolveOptionPrecedence(
+        flags.autoBootstrapProjectFromCwd,
+        Option.fromUndefinedOr(env.autoBootstrapProjectFromCwd),
+        Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+          Option.fromUndefinedOr(bootstrap.autoBootstrapProjectFromCwd),
         ),
-        () => mode === "web",
       ),
+      () => mode === "web",
     );
-    const logWebSocketEvents = resolveBooleanFlag(
-      flags.logWebSocketEvents,
-      Option.getOrElse(
-        resolveOptionPrecedence(
-          Option.fromUndefinedOr(env.logWebSocketEvents),
-          Option.flatMap(bootstrapEnvelope, (bootstrap) =>
-            Option.fromUndefinedOr(bootstrap.logWebSocketEvents),
-          ),
+    const logWebSocketEvents = Option.getOrElse(
+      resolveOptionPrecedence(
+        flags.logWebSocketEvents,
+        Option.fromUndefinedOr(env.logWebSocketEvents),
+        Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+          Option.fromUndefinedOr(bootstrap.logWebSocketEvents),
         ),
-        () => Boolean(devUrl),
       ),
+      () => Boolean(devUrl),
     );
     const staticDir = devUrl ? undefined : yield* resolveStaticDir();
     const host = Option.getOrElse(

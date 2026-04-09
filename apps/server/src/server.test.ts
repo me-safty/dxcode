@@ -1306,7 +1306,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         );
 
         assert.equal(error._tag, "RpcClientError");
-        assertInclude(String(error), "401");
+        assertInclude(String(error), "SocketOpenError");
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

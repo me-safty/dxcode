@@ -17,7 +17,7 @@ import {
   Queue,
   Ref,
   Scope,
-  ServiceMap,
+  Context,
 } from "effect";
 
 import { ServerConfig } from "./config";
@@ -51,7 +51,7 @@ export interface ServerRuntimeStartupShape {
   ) => Effect.Effect<A, E | ServerRuntimeStartupError>;
 }
 
-export class ServerRuntimeStartup extends ServiceMap.Service<
+export class ServerRuntimeStartup extends Context.Service<
   ServerRuntimeStartup,
   ServerRuntimeStartupShape
 >()("t3/serverRuntimeStartup") {}
