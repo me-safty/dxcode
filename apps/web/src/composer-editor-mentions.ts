@@ -33,6 +33,44 @@ function pushTextSegment(segments: ComposerPromptSegment[], text: string): void 
   segments.push({ type: "text", text });
 }
 
+function forEachPromptTextSlice(
+  prompt: string,
+  visitor: (text: string, promptOffset: number) => boolean | void,
+): boolean {
+  let textCursor = 0;
+
+  for (let index = 0; index < prompt.length; index += 1) {
+    if (prompt[index] !== INLINE_TERMINAL_CONTEXT_PLACEHOLDER) {
+      continue;
+    }
+
+    if (index > textCursor && visitor(prompt.slice(textCursor, index), textCursor) === true) {
+      return true;
+    }
+    textCursor = index + 1;
+  }
+
+  if (textCursor < prompt.length && visitor(prompt.slice(textCursor), textCursor) === true) {
+    return true;
+  }
+
+  return false;
+}
+
+function forEachMentionMatch(
+  prompt: string,
+  visitor: (match: RegExpMatchArray, promptOffset: number) => boolean | void,
+): boolean {
+  return forEachPromptTextSlice(prompt, (text, promptOffset) => {
+    for (const match of text.matchAll(MENTION_TOKEN_REGEX)) {
+      if (visitor(match, promptOffset) === true) {
+        return true;
+      }
+    }
+    return false;
+  });
+}
+
 function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegment[] {
   const segments: ComposerPromptSegment[] = [];
   if (!text) {
@@ -77,11 +115,11 @@ export function selectionTouchesMentionBoundary(
     return false;
   }
 
-  for (const match of prompt.matchAll(MENTION_TOKEN_REGEX)) {
+  return forEachMentionMatch(prompt, (match, promptOffset) => {
     const fullMatch = match[0];
     const prefix = match[1] ?? "";
     const matchIndex = match.index ?? 0;
-    const mentionStart = matchIndex + prefix.length;
+    const mentionStart = promptOffset + matchIndex + prefix.length;
     const mentionEnd = mentionStart + fullMatch.length - prefix.length;
     const beforeMentionIndex = mentionStart - 1;
     const afterMentionIndex = mentionEnd;
@@ -101,9 +139,8 @@ export function selectionTouchesMentionBoundary(
     ) {
       return true;
     }
-  }
-
-  return false;
+    return false;
+  });
 }
 
 export function splitPromptIntoComposerSegments(

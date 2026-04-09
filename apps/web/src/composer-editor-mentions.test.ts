@@ -73,4 +73,15 @@ describe("selectionTouchesMentionBoundary", () => {
       ),
     ).toBe(false);
   });
+
+  it("returns true when selection includes whitespace after a mention following a terminal placeholder", () => {
+    const prompt = `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}@AGENTS.md there`;
+    expect(
+      selectionTouchesMentionBoundary(
+        prompt,
+        `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}@AGENTS.md`.length,
+        prompt.length,
+      ),
+    ).toBe(true);
+  });
 });
