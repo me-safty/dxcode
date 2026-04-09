@@ -314,7 +314,11 @@ export interface ChatComposerHandle {
     terminalContextIds: string[];
   };
   /** Reset composer cursor/trigger/highlight after external prompt mutations (e.g. onSend). */
-  resetCursorState: (options?: { cursor?: number }) => void;
+  resetCursorState: (options?: {
+    cursor?: number;
+    prompt?: string;
+    detectTrigger?: boolean;
+  }) => void;
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
   /** Get the current prompt/effort/model state for use in send. */
@@ -911,9 +915,9 @@ export const ChatComposer = memo(
         promptRef.current = removal.prompt;
         setPrompt(removal.prompt);
         removeComposerDraftTerminalContext(composerDraftTarget, contextId);
-        const nextCursor = collapseExpandedComposerCursor(removal.prompt, removal.prompt.length);
+        const nextCursor = collapseExpandedComposerCursor(removal.prompt, removal.cursor);
         setComposerCursor(nextCursor);
-        setComposerTrigger(detectComposerTrigger(removal.prompt, removal.prompt.length));
+        setComposerTrigger(detectComposerTrigger(removal.prompt, removal.cursor));
       },
       [
         composerDraftTarget,
@@ -1531,11 +1535,23 @@ export const ChatComposer = memo(
         readSnapshot: () => {
           return readComposerSnapshot();
         },
-        resetCursorState: (options?: { cursor?: number }) => {
-          const cursor = options?.cursor ?? 0;
+        resetCursorState: (options?: {
+          cursor?: number;
+          prompt?: string;
+          detectTrigger?: boolean;
+        }) => {
+          const promptForState = options?.prompt ?? promptRef.current;
+          const cursor = clampCollapsedComposerCursor(promptForState, options?.cursor ?? 0);
           setComposerHighlightedItemId(null);
           setComposerCursor(cursor);
-          setComposerTrigger(null);
+          setComposerTrigger(
+            options?.detectTrigger
+              ? detectComposerTrigger(
+                  promptForState,
+                  expandCollapsedComposerCursor(promptForState, cursor),
+                )
+              : null,
+          );
         },
         addTerminalContext: (selection: TerminalContextSelection) => {
           if (!activeThread) return;

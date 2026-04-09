@@ -37,7 +37,10 @@ import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
-import { parseStandaloneComposerSlashCommand } from "../composer-logic";
+import {
+  collapseExpandedComposerCursor,
+  parseStandaloneComposerSlashCommand,
+} from "../composer-logic";
 import {
   deriveCompletionDividerBeforeEntryId,
   derivePendingApprovals,
@@ -2696,7 +2699,11 @@ export default function ChatView(props: ChatViewProps) {
         setComposerDraftPrompt(composerDraftTarget, promptForSend);
         addComposerDraftImages(composerDraftTarget, retryComposerImages);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
-        composerRef.current?.resetCursorState({ cursor: promptForSend.length });
+        composerRef.current?.resetCursorState({
+          cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),
+          prompt: promptForSend,
+          detectTrigger: true,
+        });
       }
       setThreadError(
         threadIdForSend,
