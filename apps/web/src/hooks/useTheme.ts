@@ -64,7 +64,7 @@ function resolveBrowserChromeSurface(): HTMLElement {
 }
 
 export function syncBrowserChromeTheme() {
-  if (typeof document === "undefined") return;
+  if (typeof document === "undefined" || typeof getComputedStyle === "undefined") return;
   const surfaceColor = normalizeThemeColor(
     getComputedStyle(resolveBrowserChromeSurface()).backgroundColor,
   );
@@ -78,6 +78,7 @@ export function syncBrowserChromeTheme() {
 }
 
 function applyTheme(theme: Theme, suppressTransitions = false) {
+  if (typeof document === "undefined") return;
   if (suppressTransitions) {
     document.documentElement.classList.add("no-transitions");
   }
