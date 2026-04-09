@@ -974,7 +974,7 @@ async function pressComposerKey(key: string): Promise<void> {
 async function waitForComposerText(expectedText: string): Promise<void> {
   await vi.waitFor(
     () => {
-      expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt ?? "").toBe(
+      expect(useComposerDraftStore.getState().draftsByThreadKey[THREAD_KEY]?.prompt ?? "").toBe(
         expectedText,
       );
     },
@@ -2506,7 +2506,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      useComposerDraftStore.getState().setPrompt(THREAD_ID, "selected");
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "selected");
       await waitForComposerText("selected");
       await setComposerSelectionByTextOffsets({ start: 0, end: "selected".length });
       await pressComposerKey("(");
@@ -2520,7 +2520,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   it("leaves collapsed-caret typing unchanged for surround symbols", async () => {
-    useComposerDraftStore.getState().setPrompt(THREAD_ID, "selected");
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "selected");
 
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -2544,7 +2544,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   it("supports symmetric and backward-selection surrounds", async () => {
-    useComposerDraftStore.getState().setPrompt(THREAD_ID, "backward");
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "backward");
 
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -2569,7 +2569,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   it("supports option-produced surround symbols like guillemets", async () => {
-    useComposerDraftStore.getState().setPrompt(THREAD_ID, "quoted");
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "quoted");
 
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -2590,7 +2590,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   it("surrounds text after a mention using the correct expanded offsets", async () => {
-    useComposerDraftStore.getState().setPrompt(THREAD_ID, "hi @package.json there");
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "hi @package.json there");
 
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -2620,7 +2620,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   it("falls back to normal replacement when the selection includes a mention token", async () => {
-    useComposerDraftStore.getState().setPrompt(THREAD_ID, "hi @package.json there ");
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "hi @package.json there ");
 
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
