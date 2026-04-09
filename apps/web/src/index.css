@@ -335,7 +335,6 @@ label:has(> select#reasoning-effort) select {
   border: none;
   background: transparent;
   padding: 0;
-  line-height: 1.5;
   font-size: 0.75rem;
 }
 
