@@ -24,9 +24,12 @@ function createDeferredPromise<T>() {
 
 const {
   activeRunStackedActionDeferredRef,
+  activeDraftThreadRef,
+  hasServerThreadRef,
   invalidateGitQueriesSpy,
   refreshGitStatusSpy,
   runStackedActionMutateAsyncSpy,
+  setDraftThreadContextSpy,
   setThreadBranchSpy,
   toastAddSpy,
   toastCloseSpy,
@@ -34,9 +37,12 @@ const {
   toastUpdateSpy,
 } = vi.hoisted(() => ({
   activeRunStackedActionDeferredRef: { current: createDeferredPromise<never>() },
+  activeDraftThreadRef: { current: null as unknown },
+  hasServerThreadRef: { current: true },
   invalidateGitQueriesSpy: vi.fn(() => Promise.resolve()),
   refreshGitStatusSpy: vi.fn(() => Promise.resolve(null)),
   runStackedActionMutateAsyncSpy: vi.fn(() => activeRunStackedActionDeferredRef.current.promise),
+  setDraftThreadContextSpy: vi.fn(),
   setThreadBranchSpy: vi.fn(),
   toastAddSpy: vi.fn(() => "toast-1"),
   toastCloseSpy: vi.fn(),
@@ -123,6 +129,36 @@ vi.mock("~/localApi", () => ({
   readLocalApi: vi.fn(() => null),
 }));
 
+vi.mock("~/composerDraftStore", async () => {
+  const draftStoreState = {
+    getDraftThreadByRef: () => activeDraftThreadRef.current,
+    getDraftSession: () => activeDraftThreadRef.current,
+    getDraftThread: () => activeDraftThreadRef.current,
+    getDraftSessionByLogicalProjectKey: () => null,
+    setDraftThreadContext: setDraftThreadContextSpy,
+    setLogicalProjectDraftThreadId: vi.fn(),
+    setProjectDraftThreadId: vi.fn(),
+    hasDraftThreadsInEnvironment: () => false,
+    clearDraftThread: vi.fn(),
+  };
+
+  return {
+    DraftId: {
+      makeUnsafe: (value: string) => value,
+    },
+    useComposerDraftStore: Object.assign(
+      (selector: (state: unknown) => unknown) => selector(draftStoreState),
+      { getState: () => draftStoreState },
+    ),
+    markPromotedDraftThread: vi.fn(),
+    markPromotedDraftThreadByRef: vi.fn(),
+    markPromotedDraftThreads: vi.fn(),
+    markPromotedDraftThreadsByRef: vi.fn(),
+    finalizePromotedDraftThreadByRef: vi.fn(),
+    finalizePromotedDraftThreadsByRef: vi.fn(),
+  };
+});
+
 vi.mock("~/store", () => ({
   selectEnvironmentState: (
     state: { environmentStateById: Record<string, unknown> },
@@ -155,13 +191,15 @@ vi.mock("~/store", () => ({
       setThreadBranch: setThreadBranchSpy,
       environmentStateById: {
         [ENVIRONMENT_A]: {
-          threadShellById: {
-            [SHARED_THREAD_ID]: {
-              id: SHARED_THREAD_ID,
-              branch: BRANCH_NAME,
-              worktreePath: null,
-            },
-          },
+          threadShellById: hasServerThreadRef.current
+            ? {
+                [SHARED_THREAD_ID]: {
+                  id: SHARED_THREAD_ID,
+                  branch: BRANCH_NAME,
+                  worktreePath: null,
+                },
+              }
+            : {},
           threadSessionById: {},
           threadTurnStateById: {},
           messageIdsByThreadId: {},
@@ -174,13 +212,15 @@ vi.mock("~/store", () => ({
           turnDiffSummaryByThreadId: {},
         },
         [ENVIRONMENT_B]: {
-          threadShellById: {
-            [SHARED_THREAD_ID]: {
-              id: SHARED_THREAD_ID,
-              branch: BRANCH_NAME,
-              worktreePath: null,
-            },
-          },
+          threadShellById: hasServerThreadRef.current
+            ? {
+                [SHARED_THREAD_ID]: {
+                  id: SHARED_THREAD_ID,
+                  branch: BRANCH_NAME,
+                  worktreePath: null,
+                },
+              }
+            : {},
           threadSessionById: {},
           threadTurnStateById: {},
           messageIdsByThreadId: {},
@@ -231,6 +271,8 @@ describe("GitActionsControl thread-scoped progress toast", () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     activeRunStackedActionDeferredRef.current = createDeferredPromise<never>();
+    activeDraftThreadRef.current = null;
+    hasServerThreadRef.current = true;
     document.body.innerHTML = "";
   });
 
@@ -339,6 +381,44 @@ describe("GitActionsControl thread-scoped progress toast", () => {
         Object.defineProperty(document, "visibilityState", originalVisibilityState);
       }
       vi.useRealTimers();
+      await screen.unmount();
+      host.remove();
+    }
+  });
+
+  it("syncs the live branch into the active draft thread when no server thread exists", async () => {
+    hasServerThreadRef.current = false;
+    activeDraftThreadRef.current = {
+      threadId: SHARED_THREAD_ID,
+      environmentId: ENVIRONMENT_A,
+      branch: null,
+      worktreePath: null,
+    };
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <GitActionsControl
+        gitCwd={GIT_CWD}
+        activeThreadRef={scopeThreadRef(ENVIRONMENT_A, SHARED_THREAD_ID)}
+      />,
+      {
+        container: host,
+      },
+    );
+
+    try {
+      await Promise.resolve();
+
+      expect(setDraftThreadContextSpy).toHaveBeenCalledWith(
+        scopeThreadRef(ENVIRONMENT_A, SHARED_THREAD_ID),
+        {
+          branch: BRANCH_NAME,
+          worktreePath: null,
+        },
+      );
+      expect(setThreadBranchSpy).not.toHaveBeenCalled();
+    } finally {
       await screen.unmount();
       host.remove();
     }

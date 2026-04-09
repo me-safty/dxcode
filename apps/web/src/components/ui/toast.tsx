@@ -1,9 +1,9 @@
 "use client";
 
 import { Toast } from "@base-ui/react/toast";
-import { useEffect, type CSSProperties } from "react";
+import { useEffect, useMemo, type CSSProperties } from "react";
 import { useParams } from "@tanstack/react-router";
-import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import { type ScopedThreadRef, type ThreadId } from "@t3tools/contracts";
 import {
   CheckIcon,
   CircleAlertIcon,
@@ -16,7 +16,9 @@ import {
 
 import { cn } from "~/lib/utils";
 import { buttonVariants } from "~/components/ui/button";
+import { useComposerDraftStore } from "~/composerDraftStore";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { resolveThreadRouteTarget } from "~/threadRoutes";
 import {
   buildVisibleToastLayout,
   shouldHideCollapsedToastContent,
@@ -76,16 +78,26 @@ interface ToastProviderProps extends Toast.Provider.Props {
 }
 
 function useActiveThreadRefFromRoute(): ScopedThreadRef | null {
-  return useParams({
+  const routeTarget = useParams({
     strict: false,
-    select: (params) =>
-      typeof params.environmentId === "string" && typeof params.threadId === "string"
-        ? {
-            environmentId: EnvironmentId.makeUnsafe(params.environmentId),
-            threadId: ThreadId.makeUnsafe(params.threadId),
-          }
-        : null,
+    select: (params) => resolveThreadRouteTarget(params),
   });
+  const activeDraftSession = useComposerDraftStore((store) =>
+    routeTarget?.kind === "draft" ? store.getDraftSession(routeTarget.draftId) : null,
+  );
+
+  return useMemo(() => {
+    if (routeTarget?.kind === "server") {
+      return routeTarget.threadRef;
+    }
+    if (routeTarget?.kind === "draft" && activeDraftSession) {
+      return {
+        environmentId: activeDraftSession.environmentId,
+        threadId: activeDraftSession.threadId,
+      };
+    }
+    return null;
+  }, [activeDraftSession, routeTarget]);
 }
 
 function ThreadToastVisibleAutoDismiss({
