@@ -72,9 +72,10 @@ export const useSavedEnvironmentRegistryStore = create<SavedEnvironmentRegistryS
             },
           };
         }),
-      reset: () => ({
-        byId: {},
-      }),
+      reset: () =>
+        set({
+          byId: {},
+        }),
     }),
     {
       name: SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY,
@@ -169,7 +170,7 @@ export interface SavedEnvironmentRuntimeState {
 }
 
 interface SavedEnvironmentRuntimeStoreState {
-  readonly byId: Record<string, SavedEnvironmentRuntimeState>;
+  readonly byId: Record<EnvironmentId, SavedEnvironmentRuntimeState>;
   readonly ensure: (environmentId: EnvironmentId) => void;
   readonly patch: (
     environmentId: EnvironmentId,
@@ -229,9 +230,10 @@ export const useSavedEnvironmentRuntimeStore = create<SavedEnvironmentRuntimeSto
           byId: remaining,
         };
       }),
-    reset: () => ({
-      byId: {},
-    }),
+    reset: () =>
+      set({
+        byId: {},
+      }),
   }),
 );
 

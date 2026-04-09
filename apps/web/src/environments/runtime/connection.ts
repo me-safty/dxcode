@@ -201,8 +201,9 @@ export function createEnvironmentConnection(
           void runReplayRecovery("sequence-gap");
         }
       }
-    } catch {
+    } catch (error) {
       recovery.failSnapshotRecovery();
+      throw error;
     }
   };
 
@@ -264,7 +265,7 @@ export function createEnvironmentConnection(
     },
   );
 
-  void snapshotBootstrap.ensureSnapshotRecovery("bootstrap");
+  void snapshotBootstrap.ensureSnapshotRecovery("bootstrap").catch(() => undefined);
 
   const cleanup = () => {
     disposed = true;

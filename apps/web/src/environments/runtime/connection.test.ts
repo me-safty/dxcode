@@ -181,4 +181,36 @@ describe("createEnvironmentConnection", () => {
 
     await connection.dispose();
   });
+
+  it("rejects ensureBootstrapped when snapshot recovery fails", async () => {
+    const environmentId = EnvironmentId.makeUnsafe("env-1");
+    const snapshotError = new Error("snapshot failed");
+    const { client } = createTestClient({
+      getSnapshot: async () => {
+        throw snapshotError;
+      },
+    });
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      applyEventBatch: vi.fn(),
+      syncSnapshot: vi.fn(),
+      applyTerminalEvent: vi.fn(),
+    });
+
+    await expect(connection.ensureBootstrapped()).rejects.toThrow("snapshot failed");
+
+    await connection.dispose();
+  });
 });

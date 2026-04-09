@@ -417,12 +417,7 @@ async function ensureSavedEnvironmentConnection(
     },
     client,
     refreshMetadata: async () => {
-      await refreshSavedEnvironmentMetadata(
-        record,
-        client,
-        options?.role ?? null,
-        options?.serverConfig ?? null,
-      );
+      await refreshSavedEnvironmentMetadata(record, client);
     },
     onConfigSnapshot: (config) => {
       useSavedEnvironmentRuntimeStore.getState().patch(record.environmentId, {

@@ -61,6 +61,19 @@ describe("remote environment api", () => {
     });
   });
 
+  it("preserves host ports when normalizing a bare host input", () => {
+    expect(
+      resolveRemotePairingTarget({
+        host: "myserver.com:3000",
+        pairingCode: "pairing-token",
+      }),
+    ).toEqual({
+      credential: "pairing-token",
+      httpBaseUrl: "https://myserver.com:3000/",
+      wsBaseUrl: "wss://myserver.com:3000/",
+    });
+  });
+
   it("bootstraps bearer auth against a remote backend", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

@@ -8,6 +8,8 @@ type QRCodeSvgProps = {
   marginSize?: number;
   title?: string;
   className?: string;
+  foregroundColor?: string;
+  backgroundColor?: string;
 };
 
 const ERROR_CORRECTION_LEVELS = {
@@ -54,6 +56,8 @@ export const QRCodeSvg = memo(function QRCodeSvg({
   marginSize = 0,
   title,
   className,
+  foregroundColor = "#000",
+  backgroundColor = "#fff",
 }: QRCodeSvgProps) {
   const qrCode = QrCode.encodeText(value, ERROR_CORRECTION_LEVELS[level]);
   const viewBoxSize = qrCode.size + marginSize * 2;
@@ -70,8 +74,8 @@ export const QRCodeSvg = memo(function QRCodeSvg({
       className={className}
     >
       {title ? <title>{title}</title> : null}
-      <rect width={viewBoxSize} height={viewBoxSize} fill="#fff" />
-      <path d={buildQrPathData(qrCode, marginSize)} fill="currentColor" />
+      <rect width={viewBoxSize} height={viewBoxSize} fill={backgroundColor} />
+      <path d={buildQrPathData(qrCode, marginSize)} fill={foregroundColor} />
     </svg>
   );
 });

@@ -8,6 +8,7 @@ type ThemeSnapshot = {
 
 const STORAGE_KEY = "t3code:theme";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
+const THEME_COLOR_META_NAME = "theme-color";
 
 let listeners: Array<() => void> = [];
 let lastSnapshot: ThemeSnapshot | null = null;
@@ -26,12 +27,35 @@ function getStored(): Theme {
   return "system";
 }
 
+function ensureThemeColorMetaTag(): HTMLMetaElement {
+  let element = document.querySelector<HTMLMetaElement>(`meta[name="${THEME_COLOR_META_NAME}"]`);
+  if (element) {
+    return element;
+  }
+
+  element = document.createElement("meta");
+  element.name = THEME_COLOR_META_NAME;
+  document.head.append(element);
+  return element;
+}
+
+function syncBrowserChromeTheme() {
+  const backgroundColor = getComputedStyle(document.body).backgroundColor.trim();
+  if (!backgroundColor) {
+    return;
+  }
+
+  document.documentElement.style.backgroundColor = backgroundColor;
+  ensureThemeColorMetaTag().setAttribute("content", backgroundColor);
+}
+
 function applyTheme(theme: Theme, suppressTransitions = false) {
   if (suppressTransitions) {
     document.documentElement.classList.add("no-transitions");
   }
   const isDark = theme === "dark" || (theme === "system" && getSystemDark());
   document.documentElement.classList.toggle("dark", isDark);
+  syncBrowserChromeTheme();
   syncDesktopTheme(theme);
   if (suppressTransitions) {
     // Force a reflow so the no-transitions class takes effect before removal

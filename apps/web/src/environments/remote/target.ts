@@ -13,7 +13,7 @@ function normalizeRemoteBaseUrl(rawValue: string): URL {
   }
 
   const normalizedInput =
-    /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(trimmed) || trimmed.startsWith("//")
+    /^[a-zA-Z][a-zA-Z\d+-]*:\/\//.test(trimmed) || trimmed.startsWith("//")
       ? trimmed
       : `https://${trimmed}`;
   const url = new URL(normalizedInput, window.location.origin);
