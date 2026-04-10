@@ -159,6 +159,13 @@ function handleCheckoutError(
                     },
                   },
                 });
+              } else if (parseDirtyWorktreeError(stashError)) {
+                toastManager.add({
+                  type: "error",
+                  title: "Cannot switch branches.",
+                  description:
+                    "Some conflicting files are not covered by git stash (e.g., files in .gitignore). Remove or move them manually before switching.",
+                });
               } else {
                 toastManager.add({
                   type: "error",
