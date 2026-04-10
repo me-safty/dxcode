@@ -57,6 +57,7 @@ const clientSettings: ClientSettings = {
     "environment-1:/tmp/project-a": "separate",
   },
   sidebarProjectSortOrder: "manual",
+  sidebarThreadPreviewCount: 6,
   sidebarThreadSortOrder: "created_at",
   timestampFormat: "24-hour",
 };
