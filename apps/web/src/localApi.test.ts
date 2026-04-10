@@ -104,10 +104,10 @@ vi.mock("./environments/runtime", () => ({
         httpBaseUrl: "http://localhost:3000",
         wsBaseUrl: "ws://localhost:3000",
       },
-      environmentId: EnvironmentId.makeUnsafe("environment-local"),
+      environmentId: EnvironmentId.make("environment-local"),
     },
     client: rpcClientMock,
-    environmentId: EnvironmentId.makeUnsafe("environment-local"),
+    environmentId: EnvironmentId.make("environment-local"),
     ensureBootstrapped: async () => undefined,
     reconnect: async () => undefined,
     dispose: async () => undefined,
@@ -187,7 +187,7 @@ const defaultProviders: ReadonlyArray<ServerProvider> = [
 ];
 
 const baseEnvironment = {
-  environmentId: EnvironmentId.makeUnsafe("environment-local"),
+  environmentId: EnvironmentId.make("environment-local"),
   label: "Local environment",
   platform: {
     os: "darwin" as const,
@@ -283,9 +283,9 @@ describe("wsApi", () => {
 
     const orchestrationEvent = {
       sequence: 1,
-      eventId: EventId.makeUnsafe("event-1"),
+      eventId: EventId.make("event-1"),
       aggregateKind: "project",
-      aggregateId: ProjectId.makeUnsafe("project-1"),
+      aggregateId: ProjectId.make("project-1"),
       occurredAt: "2026-02-24T00:00:00.000Z",
       commandId: null,
       causationEventId: null,
@@ -293,7 +293,7 @@ describe("wsApi", () => {
       metadata: {},
       type: "project.created",
       payload: {
-        projectId: ProjectId.makeUnsafe("project-1"),
+        projectId: ProjectId.make("project-1"),
         title: "Project",
         workspaceRoot: "/tmp/workspace",
         defaultModelSelection: {
@@ -358,8 +358,8 @@ describe("wsApi", () => {
     const api = createEnvironmentApi(rpcClientMock as never);
     const command = {
       type: "project.create",
-      commandId: CommandId.makeUnsafe("cmd-1"),
-      projectId: ProjectId.makeUnsafe("project-1"),
+      commandId: CommandId.make("cmd-1"),
+      projectId: ProjectId.make("project-1"),
       title: "Project",
       workspaceRoot: "/tmp/project",
       defaultModelSelection: {
@@ -397,7 +397,7 @@ describe("wsApi", () => {
 
     const api = createEnvironmentApi(rpcClientMock as never);
     await api.orchestration.getFullThreadDiff({
-      threadId: ThreadId.makeUnsafe("thread-1"),
+      threadId: ThreadId.make("thread-1"),
       toTurnCount: 1,
     });
 

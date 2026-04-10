@@ -15,7 +15,7 @@ describe("environment runtime catalog stores", () => {
   });
 
   it("resets the saved environment registry store state", () => {
-    const environmentId = EnvironmentId.makeUnsafe("environment-1");
+    const environmentId = EnvironmentId.make("environment-1");
 
     useSavedEnvironmentRegistryStore.getState().upsert({
       environmentId,
@@ -35,7 +35,7 @@ describe("environment runtime catalog stores", () => {
   });
 
   it("resets the saved environment runtime store state", () => {
-    const environmentId = EnvironmentId.makeUnsafe("environment-1");
+    const environmentId = EnvironmentId.make("environment-1");
 
     useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
       connectionState: "connected",
