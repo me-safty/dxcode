@@ -13,6 +13,9 @@ export const DEFAULT_PORT = 3773;
 export const RuntimeMode = Schema.Literals(["web", "desktop"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 
+export const StartupPresentation = Schema.Literals(["browser", "headless"]);
+export type StartupPresentation = typeof StartupPresentation.Type;
+
 /**
  * ServerDerivedPaths - Derived paths from the base directory.
  */
@@ -56,6 +59,7 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly staticDir: string | undefined;
   readonly devUrl: URL | undefined;
   readonly noBrowser: boolean;
+  readonly startupPresentation: StartupPresentation;
   readonly desktopBootstrapToken: string | undefined;
   readonly autoBootstrapProjectFromCwd: boolean;
   readonly logWebSocketEvents: boolean;
@@ -153,6 +157,7 @@ export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigS
           staticDir: undefined,
           devUrl,
           noBrowser: false,
+          startupPresentation: "browser",
         } satisfies ServerConfigShape;
       }),
     );

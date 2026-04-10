@@ -25,6 +25,7 @@ import {
   ServerConfig,
   RuntimeMode,
   type ServerConfigShape,
+  type StartupPresentation,
 } from "./config";
 import { readBootstrapEnvelope } from "./bootstrap";
 import { expandHomePath, resolveBaseDir } from "./os-jank";
@@ -187,6 +188,9 @@ const loadPersistedObservabilitySettings = Effect.fn(function* (settingsPath: st
 export const resolveServerConfig = (
   flags: CliServerFlags,
   cliLogLevel: Option.Option<LogLevel.LogLevel>,
+  options?: {
+    readonly startupPresentation?: StartupPresentation;
+  },
 ) =>
   Effect.gen(function* () {
     const { findAvailablePort } = yield* NetService;
@@ -253,18 +257,22 @@ export const resolveServerConfig = (
     );
     const serverTracePath = env.traceFile ?? derivedPaths.serverTracePath;
     yield* fs.makeDirectory(path.dirname(serverTracePath), { recursive: true });
-    const noBrowser = resolveBooleanFlag(
-      flags.noBrowser,
-      Option.getOrElse(
-        resolveOptionPrecedence(
-          Option.fromUndefinedOr(env.noBrowser),
-          Option.flatMap(bootstrapEnvelope, (bootstrap) =>
-            Option.fromUndefinedOr(bootstrap.noBrowser),
-          ),
-        ),
-        () => mode === "desktop",
-      ),
-    );
+    const startupPresentation = options?.startupPresentation ?? "browser";
+    const noBrowser =
+      startupPresentation === "headless"
+        ? true
+        : resolveBooleanFlag(
+            flags.noBrowser,
+            Option.getOrElse(
+              resolveOptionPrecedence(
+                Option.fromUndefinedOr(env.noBrowser),
+                Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+                  Option.fromUndefinedOr(bootstrap.noBrowser),
+                ),
+              ),
+              () => mode === "desktop",
+            ),
+          );
     const desktopBootstrapToken = Option.getOrUndefined(
       Option.flatMap(bootstrapEnvelope, (bootstrap) =>
         Option.fromUndefinedOr(bootstrap.desktopBootstrapToken),
@@ -340,6 +348,7 @@ export const resolveServerConfig = (
       staticDir,
       devUrl,
       noBrowser,
+      startupPresentation,
       desktopBootstrapToken,
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
@@ -452,7 +461,7 @@ const runWithAuthControlPlane = <A, E>(
     );
   });
 
-const commandFlags = {
+const sharedServerCommandFlags = {
   mode: modeFlag,
   port: portFlag,
   host: hostFlag,
@@ -674,25 +683,36 @@ const authCommand = Command.make("auth").pipe(
   Command.withSubcommands([pairingCommand, sessionCommand]),
 );
 
-const startCommand = Command.make("start", commandFlags).pipe(
+const runServerCommand = (
+  flags: CliServerFlags,
+  options?: {
+    readonly startupPresentation?: StartupPresentation;
+  },
+) =>
+  Effect.gen(function* () {
+    const logLevel = yield* GlobalFlag.LogLevel;
+    const config = yield* resolveServerConfig(flags, logLevel, options);
+    return yield* runServer.pipe(Effect.provideService(ServerConfig, config));
+  });
+
+const startCommand = Command.make("start", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the T3 Code server."),
+  Command.withHandler((flags) => runServerCommand(flags)),
+);
+
+const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe(
+  Command.withDescription(
+    "Run the T3 Code server without opening a browser and print headless pairing details.",
+  ),
   Command.withHandler((flags) =>
-    Effect.gen(function* () {
-      const logLevel = yield* GlobalFlag.LogLevel;
-      const config = yield* resolveServerConfig(flags, logLevel);
-      return yield* runServer.pipe(Effect.provideService(ServerConfig, config));
+    runServerCommand(flags, {
+      startupPresentation: "headless",
     }),
   ),
 );
 
-export const cli = Command.make("t3", commandFlags).pipe(
+export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the T3 Code server."),
-  Command.withHandler((flags) =>
-    Effect.gen(function* () {
-      const logLevel = yield* GlobalFlag.LogLevel;
-      const config = yield* resolveServerConfig(flags, logLevel);
-      return yield* runServer.pipe(Effect.provideService(ServerConfig, config));
-    }),
-  ),
-  Command.withSubcommands([startCommand, authCommand]),
+  Command.withHandler((flags) => runServerCommand(flags)),
+  Command.withSubcommands([startCommand, serveCommand, authCommand]),
 );
