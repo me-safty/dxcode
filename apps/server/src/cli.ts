@@ -683,13 +683,6 @@ const getOfflineSnapshot = Effect.fn("getOfflineSnapshot")(function* () {
   return yield* projectionSnapshotQuery.getSnapshot();
 });
 
-const dispatchOfflineCommand = Effect.fn("dispatchOfflineCommand")(function* (
-  command: ProjectCliDispatchCommand,
-) {
-  const orchestrationEngine = yield* OrchestrationEngineService;
-  yield* orchestrationEngine.dispatch(command);
-});
-
 const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecutionMode")(
   function* (authControlPlane: AuthControlPlaneShape, config: ServerConfigShape) {
     const runtimeState = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
@@ -759,10 +752,10 @@ const runProjectMutation = Effect.fn("runProjectMutation")(function* (
 
     return yield* Effect.gen(function* () {
       const snapshot = yield* getOfflineSnapshot();
+      const orchestrationEngine = yield* OrchestrationEngineService;
       const output = yield* run({
         snapshot,
-        dispatch: (command) =>
-          dispatchOfflineCommand(command).pipe(Effect.provide(offlineRuntimeLayer)),
+        dispatch: (command) => orchestrationEngine.dispatch(command),
         mode: "offline",
       });
       yield* Console.log(output);

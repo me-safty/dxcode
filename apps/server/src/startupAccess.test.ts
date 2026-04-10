@@ -6,6 +6,7 @@ import {
   renderTerminalQrCode,
   resolveHeadlessConnectionHost,
   resolveHeadlessConnectionString,
+  resolveListeningPort,
 } from "./startupAccess";
 
 it("prefers localhost when no explicit host is configured", () => {
@@ -43,6 +44,12 @@ it("resolves wildcard hosts to a concrete external interface when one is availab
   });
 
   expect(connectionString).toBe("http://192.168.1.42:3773");
+});
+
+it("prefers the actual bound port when an http server address is available", () => {
+  expect(resolveListeningPort({ port: 4123 }, 3773)).toBe(4123);
+  expect(resolveListeningPort("pipe", 3773)).toBe(3773);
+  expect(resolveListeningPort(null, 3773)).toBe(3773);
 });
 
 it("builds a pairing URL that embeds the token in the hash", () => {

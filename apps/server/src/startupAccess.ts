@@ -2,6 +2,7 @@ import { networkInterfaces } from "node:os";
 
 import { QrCode } from "@t3tools/shared/qrCode";
 import { Effect } from "effect";
+import { HttpServer } from "effect/unstable/http";
 
 import { ServerConfig } from "./config";
 import { ServerAuth } from "./auth/Services/ServerAuth";
@@ -13,6 +14,20 @@ export interface HeadlessServeAccessInfo {
 }
 
 type NetworkInterfacesMap = ReturnType<typeof networkInterfaces>;
+
+export const isLoopbackHost = (host: string | undefined): boolean => {
+  if (!host || host.length === 0) {
+    return true;
+  }
+
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "[::1]" ||
+    host.startsWith("127.")
+  );
+};
 
 export const isWildcardHost = (host: string | undefined): boolean =>
   host === "0.0.0.0" || host === "::" || host === "[::]";
@@ -62,6 +77,18 @@ export const resolveHeadlessConnectionString = (
   return `http://${formatHostForUrl(connectionHost)}:${port}`;
 };
 
+export const resolveListeningPort = (address: unknown, fallbackPort: number): number => {
+  if (
+    typeof address === "object" &&
+    address !== null &&
+    "port" in address &&
+    typeof address.port === "number"
+  ) {
+    return address.port;
+  }
+  return fallbackPort;
+};
+
 export const buildPairingUrl = (connectionString: string, token: string): string => {
   const url = new URL(connectionString);
   url.pathname = "/pair";
@@ -103,10 +130,14 @@ export const formatHeadlessServeOutput = (accessInfo: HeadlessServeAccessInfo): 
     "",
   ].join("\n");
 
-export const issueHeadlessServeAccessInfo = Effect.gen(function* () {
+export const issueHeadlessServeAccessInfo = Effect.fn("issueHeadlessServeAccessInfo")(function* () {
   const serverConfig = yield* ServerConfig;
+  const httpServer = yield* HttpServer.HttpServer;
   const serverAuth = yield* ServerAuth;
-  const connectionString = resolveHeadlessConnectionString(serverConfig.host, serverConfig.port);
+  const connectionString = resolveHeadlessConnectionString(
+    serverConfig.host,
+    resolveListeningPort(httpServer.address, serverConfig.port),
+  );
   const issued = yield* serverAuth.issuePairingCredential({ role: "owner" });
 
   return {

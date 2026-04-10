@@ -13,6 +13,10 @@ export const PersistedServerRuntimeState = Schema.Struct({
 });
 export type PersistedServerRuntimeState = typeof PersistedServerRuntimeState.Type;
 
+const decodePersistedServerRuntimeState = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(PersistedServerRuntimeState),
+);
+
 const runtimeOriginForConfig = (
   config: Pick<ServerConfigShape, "host">,
   port: number,
@@ -69,9 +73,7 @@ export const readPersistedServerRuntimeState = (path: string) =>
       return Option.none<PersistedServerRuntimeState>();
     }
 
-    const decoded = yield* Schema.decodeUnknownEffect(
-      Schema.fromJsonString(PersistedServerRuntimeState),
-    )(trimmed);
+    const decoded = yield* decodePersistedServerRuntimeState(trimmed);
 
     return decoded === null ? Option.none<PersistedServerRuntimeState>() : Option.some(decoded);
   });
