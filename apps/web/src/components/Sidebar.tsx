@@ -2696,7 +2696,16 @@ export default function Sidebar() {
       const activeProject = sidebarProjects.find((project) => project.projectKey === active.id);
       const overProject = sidebarProjects.find((project) => project.projectKey === over.id);
       if (!activeProject || !overProject) return;
-      reorderProjects(activeProject.projectKey, overProject.projectKey);
+      // projectOrder stores physical keys, but projectKey is a logical key
+      // that may differ (e.g. canonicalKey from repositoryIdentity). Resolve
+      // back to the representative's physical key for the reorder.
+      const activePhysicalKey = scopedProjectKey(
+        scopeProjectRef(activeProject.environmentId, activeProject.id),
+      );
+      const overPhysicalKey = scopedProjectKey(
+        scopeProjectRef(overProject.environmentId, overProject.id),
+      );
+      reorderProjects(activePhysicalKey, overPhysicalKey);
     },
     [sidebarProjectSortOrder, reorderProjects, sidebarProjects],
   );
