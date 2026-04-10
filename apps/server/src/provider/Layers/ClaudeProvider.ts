@@ -27,6 +27,14 @@ import { ClaudeProvider } from "../Services/ClaudeProvider";
 import { ServerSettingsService } from "../../serverSettings";
 import { ServerSettingsError } from "@t3tools/contracts";
 
+const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = {
+  reasoningEffortLevels: [],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  contextWindowOptions: [],
+  promptInjectedEffortLevels: [],
+};
+
 const PROVIDER = "claudeAgent" as const;
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
@@ -87,13 +95,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
 export function getClaudeModelCapabilities(model: string | null | undefined): ModelCapabilities {
   const slug = model?.trim();
   return (
-    BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ?? {
-      reasoningEffortLevels: [],
-      supportsFastMode: false,
-      supportsThinkingToggle: false,
-      contextWindowOptions: [],
-      promptInjectedEffortLevels: [],
-    }
+    BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ??
+    DEFAULT_CLAUDE_MODEL_CAPABILITIES
   );
 }
 
@@ -273,18 +276,6 @@ function extractClaudeAuthMethodFromOutput(result: CommandResult): string | unde
   return Option.getOrUndefined(findAuthMethod(parsed.success));
 }
 
-// ── Dynamic model capability adjustment ─────────────────────────────
-
-/** Subscription types where the 1M context window is included in the plan. */
-const PREMIUM_SUBSCRIPTION_TYPES = new Set([
-  "max",
-  "maxplan",
-  "max5",
-  "max20",
-  "enterprise",
-  "team",
-]);
-
 function toTitleCaseWords(value: string): string {
   return value
     .split(/[\s_-]+/g)
@@ -343,41 +334,6 @@ function claudeAuthMetadata(input: {
   }
 
   return undefined;
-}
-
-/**
- * Adjust the built-in model list based on the user's detected subscription.
- *
- * - Premium tiers (Max, Enterprise, Team): 1M context becomes the default.
- * - Other tiers (Pro, free, unknown): 200k context stays the default;
- *   1M remains available as a manual option so users can still enable it.
- */
-export function adjustModelsForSubscription(
-  baseModels: ReadonlyArray<ServerProviderModel>,
-  subscriptionType: string | undefined,
-): ReadonlyArray<ServerProviderModel> {
-  const normalized = subscriptionType?.toLowerCase().replace(/[\s_-]+/g, "");
-  if (!normalized || !PREMIUM_SUBSCRIPTION_TYPES.has(normalized)) {
-    return baseModels;
-  }
-
-  // Flip 1M to be the default for premium users
-  return baseModels.map((model) => {
-    const caps = model.capabilities;
-    if (!caps || caps.contextWindowOptions.length === 0) return model;
-
-    return {
-      ...model,
-      capabilities: {
-        ...caps,
-        contextWindowOptions: caps.contextWindowOptions.map((opt) =>
-          opt.value === "1m"
-            ? { value: opt.value, label: opt.label, isDefault: true as const }
-            : { value: opt.value, label: opt.label },
-        ),
-      },
-    };
-  });
 }
 
 // ── SDK capability probe ────────────────────────────────────────────
@@ -450,7 +406,12 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     Effect.map((settings) => settings.providers.claudeAgent),
   );
   const checkedAt = new Date().toISOString();
-  const models = providerModelsFromSettings(BUILT_IN_MODELS, PROVIDER, claudeSettings.customModels);
+  const models = providerModelsFromSettings(
+    BUILT_IN_MODELS,
+    PROVIDER,
+    claudeSettings.customModels,
+    DEFAULT_CLAUDE_MODEL_CAPABILITIES,
+  );
 
   if (!claudeSettings.enabled) {
     return buildServerProvider({
@@ -555,8 +516,6 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     subscriptionType = yield* resolveSubscriptionType(claudeSettings.binaryPath);
   }
 
-  const resolvedModels = adjustModelsForSubscription(models, subscriptionType);
-
   // ── Handle auth results (same logic as before, adjusted models) ──
 
   if (Result.isFailure(authProbe)) {
@@ -565,7 +524,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       provider: PROVIDER,
       enabled: claudeSettings.enabled,
       checkedAt,
-      models: resolvedModels,
+      models,
       probe: {
         installed: true,
         version: parsedVersion,
@@ -584,7 +543,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       provider: PROVIDER,
       enabled: claudeSettings.enabled,
       checkedAt,
-      models: resolvedModels,
+      models,
       probe: {
         installed: true,
         version: parsedVersion,
@@ -601,7 +560,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     provider: PROVIDER,
     enabled: claudeSettings.enabled,
     checkedAt,
-    models: resolvedModels,
+    models,
     probe: {
       installed: true,
       version: parsedVersion,
