@@ -126,7 +126,7 @@ export const makeServerSecretStore = Effect.gen(function* () {
   const remove: ServerSecretStoreShape["remove"] = (name) =>
     fileSystem.remove(resolveSecretPath(name)).pipe(
       Effect.catch((cause) =>
-        cause instanceof PlatformError.PlatformError && cause.reason._tag === "NotFound"
+        cause.reason._tag === "NotFound"
           ? Effect.void
           : Effect.fail(
               new SecretStoreError({
