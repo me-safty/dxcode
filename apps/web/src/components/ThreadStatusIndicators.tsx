@@ -13,6 +13,8 @@ import { useThreadRunningTerminalIds } from "../terminalSessionState";
 import { useUiStateStore } from "../uiStateStore";
 import { resolveChangeRequestPresentation } from "../sourceControlPresentation";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "./Sidebar.logic";
+import { ClaudeAI, OpenAI } from "./Icons";
+import { CLAUDE_PROVIDER_ICON_CLASS_NAME } from "./providerBrandClassNames";
 import type { SidebarThreadSummary } from "../types";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
@@ -100,6 +102,15 @@ export function ThreadStatusLabel({
   status: ThreadStatusPill;
   compact?: boolean;
 }) {
+  const statusIcon =
+    status.workingProvider === "claudeAgent" ? (
+      <ClaudeAI
+        className={`size-3 ${CLAUDE_PROVIDER_ICON_CLASS_NAME} ${status.pulse ? "animate-pulse" : ""}`}
+      />
+    ) : status.workingProvider === "codex" ? (
+      <OpenAI className={`size-3 text-foreground ${status.pulse ? "animate-pulse" : ""}`} />
+    ) : null;
+
   if (compact) {
     return (
       <Tooltip>
@@ -111,11 +122,13 @@ export function ThreadStatusLabel({
             />
           }
         >
-          <span
-            className={`size-[9px] rounded-full ${status.dotClass} ${
-              status.pulse ? "animate-pulse" : ""
-            }`}
-          />
+          {statusIcon ?? (
+            <span
+              className={`size-[9px] rounded-full ${status.dotClass} ${
+                status.pulse ? "animate-pulse" : ""
+              }`}
+            />
+          )}
         </TooltipTrigger>
         <TooltipPopup side="top">{status.label}</TooltipPopup>
       </Tooltip>
@@ -132,11 +145,13 @@ export function ThreadStatusLabel({
           />
         }
       >
-        <span
-          className={`h-1.5 w-1.5 rounded-full ${status.dotClass} ${
-            status.pulse ? "animate-pulse" : ""
-          }`}
-        />
+        {statusIcon ?? (
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${status.dotClass} ${
+              status.pulse ? "animate-pulse" : ""
+            }`}
+          />
+        )}
         <span className="hidden md:inline">{status.label}</span>
       </TooltipTrigger>
       <TooltipPopup side="top">{status.label}</TooltipPopup>
