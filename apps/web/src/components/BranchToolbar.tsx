@@ -5,6 +5,7 @@ import { memo, useMemo } from "react";
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { useStore } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
+import { chatComposerWidthClassName } from "./chat/chatLayout";
 import {
   type EnvMode,
   type EnvironmentOption,
@@ -70,7 +71,9 @@ export const BranchToolbar = memo(function BranchToolbar({
   if (!hasActiveThread || !activeProject) return null;
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl items-center justify-between px-5 pb-3 pt-1">
+    <div
+      className={`mx-auto flex ${chatComposerWidthClassName} items-center justify-between px-2.5 pb-3 pt-1 sm:px-3`}
+    >
       <div className="flex items-center gap-1">
         {showEnvironmentPicker && (
           <>

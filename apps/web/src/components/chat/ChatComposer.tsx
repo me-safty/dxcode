@@ -69,6 +69,7 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
+import { chatComposerColumnClassName } from "./chatLayout";
 import {
   getComposerProviderState,
   renderProviderTraitsMenuContent,
@@ -1616,7 +1617,7 @@ export const ChatComposer = memo(
       <form
         ref={composerFormRef}
         onSubmit={onSend}
-        className="mx-auto w-full min-w-0 max-w-208"
+        className={chatComposerColumnClassName}
         data-chat-composer-form="true"
       >
         <div
