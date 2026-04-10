@@ -12,30 +12,45 @@ import {
 
 type ThreadDeletedEvent = Extract<OrchestrationEvent, { type: "thread.deleted" }>;
 
+export const logCleanupCauseUnlessInterrupted = <R, E>({
+  effect,
+  message,
+  threadId,
+}: {
+  readonly effect: Effect.Effect<void, E, R>;
+  readonly message: string;
+  readonly threadId: ThreadDeletedEvent["payload"]["threadId"];
+}): Effect.Effect<void, E, R> =>
+  effect.pipe(
+    Effect.catchCause((cause) => {
+      if (Cause.hasInterruptsOnly(cause)) {
+        return Effect.failCause(cause);
+      }
+      return Effect.logDebug(message, {
+        threadId,
+        cause: Cause.pretty(cause),
+      });
+    }),
+  );
+
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
   const terminalManager = yield* TerminalManager;
 
   const stopProviderSession = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
-    providerService.stopSession({ threadId }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logDebug("thread deletion cleanup skipped provider session stop", {
-          threadId,
-          cause: Cause.pretty(cause),
-        }),
-      ),
-    );
+    logCleanupCauseUnlessInterrupted({
+      effect: providerService.stopSession({ threadId }),
+      message: "thread deletion cleanup skipped provider session stop",
+      threadId,
+    });
 
   const closeThreadTerminals = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
-    terminalManager.close({ threadId, deleteHistory: true }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logDebug("thread deletion cleanup skipped terminal close", {
-          threadId,
-          cause: Cause.pretty(cause),
-        }),
-      ),
-    );
+    logCleanupCauseUnlessInterrupted({
+      effect: terminalManager.close({ threadId, deleteHistory: true }),
+      message: "thread deletion cleanup skipped terminal close",
+      threadId,
+    });
 
   const processThreadDeleted = Effect.fn("processThreadDeleted")(function* (
     event: ThreadDeletedEvent,
