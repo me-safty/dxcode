@@ -12,7 +12,7 @@ import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.t
 import { OpenCodeAdapter } from "../Services/OpenCodeAdapter.ts";
 import { makeOpenCodeAdapterLive } from "./OpenCodeAdapter.ts";
 
-const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
+const asThreadId = (value: string): ThreadId => ThreadId.make(value);
 
 const runtimeMock = vi.hoisted(() => {
   const state = {
@@ -20,6 +20,7 @@ const runtimeMock = vi.hoisted(() => {
     sessionCreateUrls: [] as string[],
     authHeaders: [] as Array<string | null>,
     abortCalls: [] as string[],
+    promptAsyncError: null as Error | null,
   };
 
   return {
@@ -29,6 +30,7 @@ const runtimeMock = vi.hoisted(() => {
       state.sessionCreateUrls.length = 0;
       state.authHeaders.length = 0;
       state.abortCalls.length = 0;
+      state.promptAsyncError = null;
     },
   };
 });
@@ -61,6 +63,11 @@ vi.mock("../opencodeRuntime.ts", async () => {
           }),
           abort: vi.fn(async ({ sessionID }: { sessionID: string }) => {
             runtimeMock.state.abortCalls.push(sessionID);
+          }),
+          promptAsync: vi.fn(async () => {
+            if (runtimeMock.state.promptAsyncError) {
+              throw runtimeMock.state.promptAsyncError;
+            }
           }),
         },
         event: {
@@ -140,6 +147,44 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         runtimeMock.state.abortCalls.includes("http://127.0.0.1:9999/session"),
         true,
       );
+    }),
+  );
+
+  it.effect("rolls back session state when sendTurn fails before OpenCode accepts the prompt", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      yield* adapter.startSession({
+        provider: "opencode",
+        threadId: asThreadId("thread-opencode"),
+        runtimeMode: "full-access",
+      });
+
+      runtimeMock.state.promptAsyncError = new Error("prompt failed");
+      const error = yield* adapter
+        .sendTurn({
+          threadId: asThreadId("thread-opencode"),
+          input: "Fix it",
+          modelSelection: {
+            provider: "opencode",
+            model: "openai/gpt-5",
+          },
+        })
+        .pipe(Effect.flip);
+      const sessions = yield* adapter.listSessions();
+
+      assert.equal(error._tag, "ProviderAdapterRequestError");
+      if (error._tag !== "ProviderAdapterRequestError") {
+        throw new Error("Unexpected error type");
+      }
+      assert.equal(error.detail, "prompt failed");
+      assert.equal(
+        error.message,
+        "Provider adapter request failed (opencode) for session.promptAsync: prompt failed",
+      );
+      assert.equal(sessions.length, 1);
+      assert.equal(sessions[0]?.status, "ready");
+      assert.equal(sessions[0]?.activeTurnId, undefined);
+      assert.equal(sessions[0]?.lastError, "prompt failed");
     }),
   );
 });

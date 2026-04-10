@@ -11,7 +11,7 @@ import {
   TurnId,
   type UserInputQuestion,
 } from "@t3tools/contracts";
-import { Effect, Layer, Queue, Stream } from "effect";
+import { Cause, Effect, Layer, Queue, Stream } from "effect";
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -70,6 +70,15 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function isProviderAdapterRequestError(cause: unknown): cause is ProviderAdapterRequestError {
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    "_tag" in cause &&
+    cause._tag === "ProviderAdapterRequestError"
+  );
+}
+
 function buildEventBase(input: {
   readonly threadId: ThreadId;
   readonly turnId?: TurnId | undefined;
@@ -82,13 +91,13 @@ function buildEventBase(input: {
   "eventId" | "provider" | "threadId" | "createdAt" | "turnId" | "itemId" | "requestId" | "raw"
 > {
   return {
-    eventId: EventId.makeUnsafe(randomUUID()),
+    eventId: EventId.make(randomUUID()),
     provider: PROVIDER,
     threadId: input.threadId,
     createdAt: input.createdAt ?? nowIso(),
     ...(input.turnId ? { turnId: input.turnId } : {}),
-    ...(input.itemId ? { itemId: RuntimeItemId.makeUnsafe(input.itemId) } : {}),
-    ...(input.requestId ? { requestId: RuntimeRequestId.makeUnsafe(input.requestId) } : {}),
+    ...(input.itemId ? { itemId: RuntimeItemId.make(input.itemId) } : {}),
+    ...(input.requestId ? { requestId: RuntimeRequestId.make(input.requestId) } : {}),
     ...(input.raw !== undefined
       ? {
           raw: {
@@ -320,7 +329,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
     Effect.gen(function* () {
       const serverConfig = yield* ServerConfig;
       const serverSettings = yield* ServerSettingsService;
-      const services = yield* Effect.services();
+      const services = yield* Effect.context<never>();
       const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
       const sessions = new Map<ThreadId, OpenCodeSessionContext>();
 
@@ -878,7 +887,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
 
       const sendTurn: OpenCodeAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
         const context = ensureSessionContext(sessions, input.threadId);
-        const turnId = TurnId.makeUnsafe(`opencode-turn-${randomUUID()}`);
+        const turnId = TurnId.make(`opencode-turn-${randomUUID()}`);
         const modelSelection =
           input.modelSelection ??
           (context.session.model
@@ -938,24 +947,59 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
           },
         });
 
-        yield* Effect.tryPromise({
-          try: async () => {
-            await context.client.session.promptAsync({
-              sessionID: context.openCodeSessionId,
-              model: parsedModel,
-              ...(context.activeAgent ? { agent: context.activeAgent } : {}),
-              ...(context.activeVariant ? { variant: context.activeVariant } : {}),
-              parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
-            });
-          },
-          catch: (cause) =>
-            new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method: "session.promptAsync",
-              detail: cause instanceof Error ? cause.message : "Failed to send OpenCode turn.",
-              cause,
-            }),
-        });
+        const promptExit = yield* Effect.exit(
+          Effect.tryPromise({
+            try: async () => {
+              await context.client.session.promptAsync({
+                sessionID: context.openCodeSessionId,
+                model: parsedModel,
+                ...(context.activeAgent ? { agent: context.activeAgent } : {}),
+                ...(context.activeVariant ? { variant: context.activeVariant } : {}),
+                parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
+              });
+            },
+            catch: (cause) =>
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "session.promptAsync",
+                detail: cause instanceof Error ? cause.message : "Failed to send OpenCode turn.",
+                cause,
+              }),
+          }),
+        );
+        if (promptExit._tag === "Failure") {
+          const failure = Cause.squash(promptExit.cause);
+          const requestError = isProviderAdapterRequestError(failure)
+            ? failure
+            : new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "session.promptAsync",
+                detail:
+                  failure instanceof Error ? failure.message : "Failed to send OpenCode turn.",
+                cause: failure,
+              });
+          const failureMessage = requestError.detail;
+          context.activeTurnId = undefined;
+          context.activeAgent = undefined;
+          context.activeVariant = undefined;
+          updateProviderSession(
+            context,
+            {
+              status: "ready",
+              model: modelSelection?.model ?? context.session.model,
+              lastError: failureMessage,
+            },
+            { clearActiveTurnId: true },
+          );
+          yield* emit({
+            ...buildEventBase({ threadId: input.threadId, turnId }),
+            type: "turn.aborted",
+            payload: {
+              reason: failureMessage,
+            },
+          });
+          return yield* requestError;
+        }
 
         return {
           threadId: input.threadId,
@@ -1097,7 +1141,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
           const turns = (messages.data ?? [])
             .filter((entry) => entry.info.role === "assistant")
             .map((entry) => ({
-              id: TurnId.makeUnsafe(entry.info.id),
+              id: TurnId.make(entry.info.id),
               items: [entry.info, ...entry.parts],
             }));
 

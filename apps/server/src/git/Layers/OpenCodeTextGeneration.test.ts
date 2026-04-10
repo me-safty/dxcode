@@ -17,6 +17,7 @@ const runtimeMock = vi.hoisted(() => {
     promptUrls: [] as string[],
     authHeaders: [] as Array<string | null>,
     closeCalls: [] as string[],
+    promptResult: undefined as { data?: { info?: { structured?: unknown } } } | undefined,
   };
 
   return {
@@ -26,6 +27,7 @@ const runtimeMock = vi.hoisted(() => {
       state.promptUrls.length = 0;
       state.authHeaders.length = 0;
       state.closeCalls.length = 0;
+      state.promptResult = undefined;
     },
   };
 });
@@ -58,16 +60,18 @@ vi.mock("../../provider/opencodeRuntime.ts", async () => {
             runtimeMock.state.authHeaders.push(
               serverPassword ? `Basic ${btoa(`opencode:${serverPassword}`)}` : null,
             );
-            return {
-              data: {
-                info: {
-                  structured: {
-                    subject: "Improve OpenCode reuse",
-                    body: "Reuse one server for the full action.",
+            return (
+              runtimeMock.state.promptResult ?? {
+                data: {
+                  info: {
+                    structured: {
+                      subject: "Improve OpenCode reuse",
+                      body: "Reuse one server for the full action.",
+                    },
                   },
                 },
-              },
-            };
+              }
+            );
           }),
         },
       }),
@@ -192,6 +196,25 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGenerationLive", (it) => 
       ]);
       expect(runtimeMock.state.closeCalls).toEqual(["http://127.0.0.1:4301"]);
     }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("returns a typed missing-output error when OpenCode omits info.structured", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.promptResult = { data: {} };
+      const textGeneration = yield* TextGeneration;
+
+      const error = yield* textGeneration
+        .generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/opencode-reuse",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        })
+        .pipe(Effect.flip);
+
+      expect(error.message).toContain("OpenCode returned no structured output.");
+    }),
   );
 });
 

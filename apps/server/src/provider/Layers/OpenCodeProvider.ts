@@ -22,17 +22,106 @@ import {
 
 const PROVIDER = "opencode" as const;
 
-function checkOpenCodeProviderStatus(input: {
+class OpenCodeProbePromiseError extends Error {
+  constructor(override readonly cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "OpenCodeProbePromiseError";
+  }
+}
+
+function toOpenCodeProbeError(cause: unknown): OpenCodeProbePromiseError {
+  return new OpenCodeProbePromiseError(cause);
+}
+
+function normalizedErrorMessage(cause: unknown): string | undefined {
+  if (!(cause instanceof Error)) {
+    return undefined;
+  }
+
+  const message = cause.message.trim();
+  if (message.length === 0) {
+    return undefined;
+  }
+  if (
+    message === "An error occurred in Effect.tryPromise" ||
+    message === "An error occurred in Effect.try"
+  ) {
+    return undefined;
+  }
+  return message;
+}
+
+function formatOpenCodeProbeError(input: {
+  readonly cause: unknown;
+  readonly isExternalServer: boolean;
+  readonly serverUrl: string;
+}): { readonly installed: boolean; readonly message: string } {
+  const lower = input.cause instanceof Error ? input.cause.message.toLowerCase() : "";
+  const detail = normalizedErrorMessage(input.cause);
+
+  if (input.isExternalServer) {
+    if (
+      lower.includes("401") ||
+      lower.includes("403") ||
+      lower.includes("unauthorized") ||
+      lower.includes("forbidden")
+    ) {
+      return {
+        installed: true,
+        message: "OpenCode server rejected authentication. Check the server URL and password.",
+      };
+    }
+
+    if (
+      lower.includes("econnrefused") ||
+      lower.includes("enotfound") ||
+      lower.includes("fetch failed") ||
+      lower.includes("networkerror") ||
+      lower.includes("timed out") ||
+      lower.includes("timeout") ||
+      lower.includes("socket hang up")
+    ) {
+      return {
+        installed: true,
+        message: `Couldn't reach the configured OpenCode server at ${input.serverUrl}. Check that the server is running and the URL is correct.`,
+      };
+    }
+
+    return {
+      installed: true,
+      message: detail ?? "Failed to connect to the configured OpenCode server.",
+    };
+  }
+
+  if (input.cause instanceof Error && isCommandMissingCause(input.cause)) {
+    return {
+      installed: false,
+      message: "OpenCode CLI (`opencode`) is not installed or not on PATH.",
+    };
+  }
+
+  return {
+    installed: true,
+    message: detail
+      ? `Failed to execute OpenCode CLI health check: ${detail}`
+      : "Failed to execute OpenCode CLI health check.",
+  };
+}
+
+export function checkOpenCodeProviderStatus(input: {
   readonly settings: OpenCodeSettings;
   readonly cwd: string;
 }): Effect.Effect<ServerProvider> {
   const checkedAt = new Date().toISOString();
   const customModels = input.settings.customModels;
-  const isExternalServer = input.settings.serverUrl.length > 0;
+  const isExternalServer = input.settings.serverUrl.trim().length > 0;
 
   const fallback = (cause: unknown, version: string | null = null) => {
-    const installed = isExternalServer ? true : !isCommandMissingCause(cause);
-    const detail = cause instanceof Error ? cause.message : undefined;
+    const failure = formatOpenCodeProbeError({
+      cause,
+      isExternalServer,
+      serverUrl: input.settings.serverUrl,
+    });
     return buildServerProvider({
       provider: PROVIDER,
       enabled: input.settings.enabled,
@@ -44,17 +133,11 @@ function checkOpenCodeProviderStatus(input: {
         DEFAULT_OPENCODE_MODEL_CAPABILITIES,
       ),
       probe: {
-        installed,
+        installed: failure.installed,
         version,
         status: "error",
         auth: { status: "unknown" },
-        message:
-          detail ??
-          (isExternalServer
-            ? "Failed to connect to the configured OpenCode server."
-            : installed
-              ? "Failed to probe OpenCode CLI."
-              : "OpenCode CLI not found on PATH."),
+        message: failure.message,
       },
     });
   };
@@ -63,12 +146,14 @@ function checkOpenCodeProviderStatus(input: {
     let version: string | null = null;
     if (!isExternalServer) {
       const versionExit = yield* Effect.exit(
-        Effect.tryPromise(() =>
-          runOpenCodeCommand({
-            binaryPath: input.settings.binaryPath,
-            args: ["--version"],
-          }),
-        ),
+        Effect.tryPromise({
+          try: () =>
+            runOpenCodeCommand({
+              binaryPath: input.settings.binaryPath,
+              args: ["--version"],
+            }),
+          catch: toOpenCodeProbeError,
+        }),
       );
       if (versionExit._tag === "Failure") {
         return fallback(Cause.squash(versionExit.cause));
@@ -101,22 +186,27 @@ function checkOpenCodeProviderStatus(input: {
 
     const inventoryExit = yield* Effect.exit(
       Effect.acquireUseRelease(
-        Effect.tryPromise(() =>
-          connectToOpenCodeServer({
-            binaryPath: input.settings.binaryPath,
-            serverUrl: input.settings.serverUrl,
-          }),
-        ),
+        Effect.tryPromise({
+          try: () =>
+            connectToOpenCodeServer({
+              binaryPath: input.settings.binaryPath,
+              serverUrl: input.settings.serverUrl,
+            }),
+          catch: toOpenCodeProbeError,
+        }),
         (server) =>
-          Effect.tryPromise(async () => {
-            const client = createOpenCodeSdkClient({
-              baseUrl: server.url,
-              directory: input.cwd,
-              ...(isExternalServer && input.settings.serverPassword
-                ? { serverPassword: input.settings.serverPassword }
-                : {}),
-            });
-            return await loadOpenCodeInventory(client);
+          Effect.tryPromise({
+            try: async () => {
+              const client = createOpenCodeSdkClient({
+                baseUrl: server.url,
+                directory: input.cwd,
+                ...(isExternalServer && input.settings.serverPassword
+                  ? { serverPassword: input.settings.serverPassword }
+                  : {}),
+              });
+              return await loadOpenCodeInventory(client);
+            },
+            catch: toOpenCodeProbeError,
           }),
         (server) => Effect.sync(() => server.close()),
       ),

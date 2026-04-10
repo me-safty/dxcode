@@ -233,7 +233,7 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
             },
             parts: [{ type: "text", text: input.prompt }, ...fileParts],
           });
-          const structured = result.data?.info.structured;
+          const structured = result.data?.info?.structured;
           if (structured === undefined) {
             throw new Error("OpenCode returned no structured output.");
           }
