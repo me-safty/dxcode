@@ -121,6 +121,7 @@ import {
   ThreadStatusPill,
 } from "./Sidebar.logic";
 import {
+  createSidebarSortedProjectKeysSelector,
   createSidebarProjectRenderStateSelector,
   createSidebarProjectThreadStatusInputsSelector,
   createSidebarThreadMetaSnapshotSelectorByRef,
@@ -131,7 +132,6 @@ import {
 import { THREAD_PREVIEW_LIMIT } from "./sidebar/sidebarConstants";
 import {
   SidebarKeyboardController,
-  SidebarProjectOrderingController,
   SidebarSelectionController,
 } from "./sidebar/sidebarControllers";
 import {
@@ -140,7 +140,6 @@ import {
   resetSidebarViewState,
   useSidebarIsActiveThread,
   useSidebarProjectActiveRouteThreadKey,
-  useSidebarProjectKeys,
   useSidebarProjectThreadListExpanded,
   useSidebarThreadJumpLabel,
 } from "./sidebar/sidebarViewStore";
@@ -159,6 +158,7 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
+import type { LogicalProjectKey } from "../logicalProject";
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
   created_at: "Created at",
@@ -1966,7 +1966,8 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
 });
 
 interface SidebarProjectsContentProps {
-  sidebarProjectByKey: ReadonlyMap<string, SidebarProjectSnapshot>;
+  sortedProjectKeys: readonly LogicalProjectKey[];
+  sidebarProjectByKey: ReadonlyMap<LogicalProjectKey, SidebarProjectSnapshot>;
   showArm64IntelBuildWarning: boolean;
   arm64IntelBuildWarningDescription: string | null;
   desktopUpdateButtonAction: "download" | "install" | "none";
@@ -2007,6 +2008,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
   props: SidebarProjectsContentProps,
 ) {
   const {
+    sortedProjectKeys,
     sidebarProjectByKey,
     showArm64IntelBuildWarning,
     arm64IntelBuildWarningDescription,
@@ -2043,8 +2045,6 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     attachProjectListAutoAnimateRef,
     projectsLength,
   } = props;
-  const sortedProjectKeys = useSidebarProjectKeys();
-
   const handleProjectSortOrderChange = useCallback(
     (sortOrder: SidebarProjectSortOrder) => {
       updateSettings({ sidebarProjectSortOrder: sortOrder });
@@ -2330,8 +2330,8 @@ export default function Sidebar() {
   );
 
   const previousSidebarProjectSnapshotByKeyRef = useRef<
-    ReadonlyMap<string, SidebarProjectSnapshot>
-  >(new Map<string, SidebarProjectSnapshot>());
+    ReadonlyMap<LogicalProjectKey, SidebarProjectSnapshot>
+  >(new Map<LogicalProjectKey, SidebarProjectSnapshot>());
   const sidebarProjects = useMemo<SidebarProjectSnapshot[]>(() => {
     const { projectSnapshotByKey, sidebarProjects: nextSidebarProjects } =
       buildSidebarProjectSnapshots({
@@ -2351,8 +2351,22 @@ export default function Sidebar() {
   ]);
 
   const sidebarProjectByKey = useMemo(
-    () => new Map(sidebarProjects.map((project) => [project.projectKey, project] as const)),
+    () =>
+      new Map<LogicalProjectKey, SidebarProjectSnapshot>(
+        sidebarProjects.map((project) => [project.projectKey, project] as const),
+      ),
     [sidebarProjects],
+  );
+  const sortedProjectKeys = useStore(
+    useMemo(
+      () =>
+        createSidebarSortedProjectKeysSelector({
+          physicalToLogicalKey,
+          projects: sidebarProjects,
+          sortOrder: sidebarProjectSortOrder,
+        }),
+      [physicalToLogicalKey, sidebarProjectSortOrder, sidebarProjects],
+    ),
   );
   const focusMostRecentThreadForProject = useCallback(
     (projectRef: { environmentId: EnvironmentId; projectId: ProjectId }) => {
@@ -2686,15 +2700,11 @@ export default function Sidebar() {
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />
-      <SidebarProjectOrderingController
-        sidebarProjects={sidebarProjects}
-        physicalToLogicalKey={physicalToLogicalKey}
-        sidebarProjectSortOrder={sidebarProjectSortOrder}
-      />
       <SidebarSelectionController />
       <SidebarKeyboardController
         navigateToThread={navigateToThread}
         physicalToLogicalKey={physicalToLogicalKey}
+        sortedProjectKeys={sortedProjectKeys}
         sidebarThreadSortOrder={sidebarThreadSortOrder}
       />
 
@@ -2703,6 +2713,7 @@ export default function Sidebar() {
       ) : (
         <>
           <SidebarProjectsContent
+            sortedProjectKeys={sortedProjectKeys}
             sidebarProjectByKey={sidebarProjectByKey}
             showArm64IntelBuildWarning={showArm64IntelBuildWarning}
             arm64IntelBuildWarningDescription={arm64IntelBuildWarningDescription}
