@@ -100,6 +100,7 @@ import type { SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
+import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -560,6 +561,10 @@ export const ChatComposer = memo(
     });
 
     const selectedProviderModels = getProviderModels(providerStatuses, selectedProvider);
+    const selectedProviderStatus = useMemo(
+      () => providerStatuses.find((provider) => provider.provider === selectedProvider),
+      [providerStatuses, selectedProvider],
+    );
 
     const composerProviderState = useMemo(
       () =>
@@ -704,7 +709,7 @@ export const ChatComposer = memo(
         }));
       }
       if (composerTrigger.kind === "slash-command") {
-        const slashCommandItems = [
+        const builtInSlashCommandItems = [
           {
             id: "slash:model",
             type: "slash-command",
@@ -727,13 +732,58 @@ export const ChatComposer = memo(
             description: "Switch this thread back to normal build mode",
           },
         ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
+        const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
+          (command) => ({
+            id: `provider-slash-command:${selectedProvider}:${command.name}`,
+            type: "provider-slash-command" as const,
+            provider: selectedProvider,
+            command: {
+              name: command.name,
+              ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}),
+            },
+            label: `/${command.name}`,
+            description: command.description ?? command.argumentHint ?? "Run provider command",
+          }),
+        );
         const query = composerTrigger.query.trim().toLowerCase();
+        const slashCommandItems = [...builtInSlashCommandItems, ...providerSlashCommandItems];
         if (!query) {
-          return [...slashCommandItems];
+          return slashCommandItems;
         }
         return slashCommandItems.filter(
-          (item) => item.command.includes(query) || item.label.slice(1).includes(query),
+          (item) =>
+            item.label.slice(1).toLowerCase().includes(query) ||
+            item.description.toLowerCase().includes(query) ||
+            (item.type === "slash-command"
+              ? item.command.includes(query)
+              : item.command.name.toLowerCase().includes(query)),
         );
+      }
+      if (composerTrigger.kind === "skill") {
+        const query = composerTrigger.query.trim().toLowerCase();
+        return (selectedProviderStatus?.skills ?? [])
+          .filter((skill) => skill.enabled)
+          .filter((skill) => {
+            if (!query) return true;
+            return (
+              skill.name.toLowerCase().includes(query) ||
+              skill.displayName?.toLowerCase().includes(query) ||
+              skill.shortDescription?.toLowerCase().includes(query) ||
+              skill.description?.toLowerCase().includes(query) ||
+              skill.scope?.toLowerCase().includes(query)
+            );
+          })
+          .map((skill) => ({
+            id: `skill:${selectedProvider}:${skill.name}`,
+            type: "skill" as const,
+            provider: selectedProvider,
+            skill,
+            label: formatProviderSkillDisplayName(skill),
+            description:
+              skill.shortDescription ??
+              skill.description ??
+              (skill.scope ? `${skill.scope} skill` : "Run provider skill"),
+          }));
       }
       return searchableModelOptions
         .filter(({ searchSlug, searchName, searchProvider }) => {
@@ -753,7 +803,13 @@ export const ChatComposer = memo(
           label: name,
           description: `${providerLabel} · ${slug}`,
         }));
-    }, [composerTrigger, searchableModelOptions, workspaceEntries]);
+    }, [
+      composerTrigger,
+      searchableModelOptions,
+      selectedProvider,
+      selectedProviderStatus,
+      workspaceEntries,
+    ]);
 
     const composerMenuOpen = Boolean(composerTrigger);
     const activeComposerMenuItem = useMemo(
@@ -764,9 +820,11 @@ export const ChatComposer = memo(
       [composerHighlightedItemId, composerMenuItems],
     );
 
-    composerMenuOpenRef.current = composerMenuOpen;
-    composerMenuItemsRef.current = composerMenuItems;
-    activeComposerMenuItemRef.current = activeComposerMenuItem;
+    useEffect(() => {
+      composerMenuOpenRef.current = composerMenuOpen;
+      composerMenuItemsRef.current = composerMenuItems;
+      activeComposerMenuItemRef.current = activeComposerMenuItem;
+    }, [activeComposerMenuItem, composerMenuItems, composerMenuOpen]);
 
     const nonPersistedComposerImageIdSet = useMemo(
       () => new Set(nonPersistedComposerImageIds),
@@ -810,14 +868,21 @@ export const ChatComposer = memo(
       ((pathTriggerQuery.length > 0 && composerPathQueryDebouncer.state.isPending) ||
         workspaceEntriesQuery.isLoading ||
         workspaceEntriesQuery.isFetching);
+    const composerMenuEmptyState = useMemo(() => {
+      if (composerTriggerKind === "skill") {
+        return "No skills found. Try / to browse provider commands.";
+      }
+      return composerTriggerKind === "path"
+        ? "No matching files or folders."
+        : "No matching command.";
+    }, [composerTriggerKind]);
 
     // ------------------------------------------------------------------
     // Provider traits UI
     // ------------------------------------------------------------------
     const setPromptFromTraits = useCallback(
       (nextPrompt: string) => {
-        const currentPrompt = promptRef.current;
-        if (nextPrompt === currentPrompt) {
+        if (nextPrompt === prompt) {
           scheduleComposerFocus();
           return;
         }
@@ -828,7 +893,7 @@ export const ChatComposer = memo(
         setComposerTrigger(detectComposerTrigger(nextPrompt, nextPrompt.length));
         scheduleComposerFocus();
       },
-      [composerDraftTarget, promptRef, scheduleComposerFocus, setComposerDraftPrompt],
+      [composerDraftTarget, prompt, promptRef, scheduleComposerFocus, setComposerDraftPrompt],
     );
 
     const providerTraitsMenuContent = renderProviderTraitsMenuContent({
@@ -1333,6 +1398,42 @@ export const ChatComposer = memo(
           }
           return;
         }
+        if (item.type === "provider-slash-command") {
+          const replacement = `/${item.command.name} `;
+          const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+            snapshot.value,
+            trigger.rangeEnd,
+            replacement,
+          );
+          const applied = applyPromptReplacement(
+            trigger.rangeStart,
+            replacementRangeEnd,
+            replacement,
+            { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+          );
+          if (applied) {
+            setComposerHighlightedItemId(null);
+          }
+          return;
+        }
+        if (item.type === "skill") {
+          const replacement = `$${item.skill.name} `;
+          const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+            snapshot.value,
+            trigger.rangeEnd,
+            replacement,
+          );
+          const applied = applyPromptReplacement(
+            trigger.rangeStart,
+            replacementRangeEnd,
+            replacement,
+            { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+          );
+          if (applied) {
+            setComposerHighlightedItemId(null);
+          }
+          return;
+        }
         onProviderModelSelect(item.provider, item.model);
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -1676,6 +1777,7 @@ export const ChatComposer = memo(
                     resolvedTheme={resolvedTheme}
                     isLoading={isComposerMenuLoading}
                     triggerKind={composerTriggerKind}
+                    emptyStateText={composerMenuEmptyState}
                     activeItemId={activeComposerMenuItem?.id ?? null}
                     onHighlightedItemChange={onComposerMenuItemHighlighted}
                     onSelect={onSelectComposerItem}
@@ -1765,6 +1867,7 @@ export const ChatComposer = memo(
                     ? composerTerminalContexts
                     : []
                 }
+                skills={selectedProviderStatus?.skills ?? []}
                 onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
                 onChange={onPromptChange}
                 onCommandKeyDown={onComposerCommandKey}

@@ -220,6 +220,49 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         ),
       );
 
+      it.effect("includes probed codex skills in the provider snapshot", () =>
+        Effect.gen(function* () {
+          yield* withTempCodexHome();
+          const status = yield* checkCodexProviderStatus(
+            () =>
+              Effect.succeed({
+                type: "chatgpt" as const,
+                planType: "pro" as const,
+                sparkEnabled: true,
+              }),
+            () =>
+              Effect.succeed([
+                {
+                  name: "github:gh-fix-ci",
+                  path: "/Users/test/.codex/skills/gh-fix-ci/SKILL.md",
+                  enabled: true,
+                  displayName: "CI Debug",
+                  shortDescription: "Debug failing GitHub Actions checks",
+                },
+              ]),
+          );
+
+          assert.deepStrictEqual(status.skills, [
+            {
+              name: "github:gh-fix-ci",
+              path: "/Users/test/.codex/skills/gh-fix-ci/SKILL.md",
+              enabled: true,
+              displayName: "CI Debug",
+              shortDescription: "Debug failing GitHub Actions checks",
+            },
+          ]);
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "codex 1.0.0\n", stderr: "", code: 0 };
+              if (joined === "login status") return { stdout: "Logged in\n", stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
       it.effect("hides spark from codex models for unsupported chatgpt plans", () =>
         Effect.gen(function* () {
           yield* withTempCodexHome();
@@ -498,6 +541,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             checkedAt: "2026-03-25T00:00:00.000Z",
             version: "1.0.0",
             models: [],
+            slashCommands: [],
+            skills: [],
           },
           {
             provider: "claudeAgent",
@@ -508,6 +553,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             checkedAt: "2026-03-25T00:00:00.000Z",
             version: "1.0.0",
             models: [],
+            slashCommands: [],
+            skills: [],
           },
         ] as const satisfies ReadonlyArray<ServerProvider>;
 
@@ -869,6 +916,42 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           assert.strictEqual(status.auth.status, "authenticated");
           assert.strictEqual(status.auth.type, "maxplan");
           assert.strictEqual(status.auth.label, "Claude Max Subscription");
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+              if (joined === "auth status")
+                return {
+                  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                  stderr: "",
+                  code: 0,
+                };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("includes probed claude slash commands in the provider snapshot", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            () => Effect.succeed("maxplan"),
+            () =>
+              Effect.succeed([
+                {
+                  name: "review",
+                  description: "Review a pull request",
+                },
+              ]),
+          );
+
+          assert.deepStrictEqual(status.slashCommands, [
+            {
+              name: "review",
+              description: "Review a pull request",
+            },
+          ]);
         }).pipe(
           Effect.provide(
             mockSpawnerLayer((args) => {
