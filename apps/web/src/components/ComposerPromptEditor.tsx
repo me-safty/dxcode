@@ -26,7 +26,7 @@ import {
   COMMAND_PRIORITY_HIGH,
   KEY_BACKSPACE_COMMAND,
   $getRoot,
-  HISTORY_PUSH_TAG,
+  HISTORY_MERGE_TAG,
   DecoratorNode,
   type ElementNode,
   type LexicalNode,
@@ -1161,7 +1161,7 @@ function ComposerSurroundSelectionPlugin(props: {
             pendingSurroundSelectionRef.current = null;
             pendingDeadKeySelectionRef.current = null;
           },
-          { tag: HISTORY_PUSH_TAG },
+          { tag: HISTORY_MERGE_TAG },
         );
       });
     };

@@ -971,6 +971,22 @@ async function pressComposerKey(key: string): Promise<void> {
   await waitForLayout();
 }
 
+async function pressComposerUndo(): Promise<void> {
+  const composerEditor = await waitForComposerEditor();
+  const useMetaForMod = isMacPlatform(navigator.platform);
+  composerEditor.focus();
+  composerEditor.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "z",
+      metaKey: useMetaForMod,
+      ctrlKey: !useMetaForMod,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  await waitForLayout();
+}
+
 async function waitForComposerText(expectedText: string): Promise<void> {
   await vi.waitFor(
     () => {
@@ -2589,7 +2605,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("supports dead-key composition that resolves to another surround symbol", async () => {
+  it("supports dead-key composition that resolves to another surround symbol without an extra undo step", async () => {
     useComposerDraftStore.getState().setPrompt(THREAD_REF, "quoted");
 
     const mounted = await mountChatView({
@@ -2629,6 +2645,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
       composerEditor.dispatchEvent(resolvedInputEvent);
       expect(resolvedInputEvent.defaultPrevented).toBe(true);
       await waitForComposerText("'quoted'");
+      await pressComposerUndo();
+      await waitForComposerText("quoted");
     } finally {
       await mounted.cleanup();
     }
