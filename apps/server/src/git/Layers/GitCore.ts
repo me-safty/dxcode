@@ -2002,7 +2002,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
             "GitCore.removeWorktree",
             input.cwd,
             args,
-            `${commandLabel(args)} failed (cwd: ${input.cwd}): ${error instanceof Error ? error.message : String(error)}`,
+            `${commandLabel(args)} failed (cwd: ${input.cwd}): ${error.message}`,
             error,
           ),
         ),
