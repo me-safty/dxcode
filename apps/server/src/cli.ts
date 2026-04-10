@@ -190,6 +190,7 @@ export const resolveServerConfig = (
   cliLogLevel: Option.Option<LogLevel.LogLevel>,
   options?: {
     readonly startupPresentation?: StartupPresentation;
+    readonly forceAutoBootstrapProjectFromCwd?: boolean;
   },
 ) =>
   Effect.gen(function* () {
@@ -278,18 +279,22 @@ export const resolveServerConfig = (
         Option.fromUndefinedOr(bootstrap.desktopBootstrapToken),
       ),
     );
-    const autoBootstrapProjectFromCwd = resolveBooleanFlag(
-      flags.autoBootstrapProjectFromCwd,
-      Option.getOrElse(
-        resolveOptionPrecedence(
-          Option.fromUndefinedOr(env.autoBootstrapProjectFromCwd),
-          Option.flatMap(bootstrapEnvelope, (bootstrap) =>
-            Option.fromUndefinedOr(bootstrap.autoBootstrapProjectFromCwd),
-          ),
-        ),
-        () => mode === "web",
-      ),
-    );
+    const autoBootstrapProjectFromCwd =
+      options?.forceAutoBootstrapProjectFromCwd ??
+      (startupPresentation === "headless"
+        ? false
+        : resolveBooleanFlag(
+            flags.autoBootstrapProjectFromCwd,
+            Option.getOrElse(
+              resolveOptionPrecedence(
+                Option.fromUndefinedOr(env.autoBootstrapProjectFromCwd),
+                Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+                  Option.fromUndefinedOr(bootstrap.autoBootstrapProjectFromCwd),
+                ),
+              ),
+              () => mode === "web",
+            ),
+          ));
     const logWebSocketEvents = resolveBooleanFlag(
       flags.logWebSocketEvents,
       Option.getOrElse(
@@ -687,6 +692,7 @@ const runServerCommand = (
   flags: CliServerFlags,
   options?: {
     readonly startupPresentation?: StartupPresentation;
+    readonly forceAutoBootstrapProjectFromCwd?: boolean;
   },
 ) =>
   Effect.gen(function* () {
@@ -707,6 +713,7 @@ const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe
   Command.withHandler((flags) =>
     runServerCommand(flags, {
       startupPresentation: "headless",
+      forceAutoBootstrapProjectFromCwd: false,
     }),
   ),
 );
