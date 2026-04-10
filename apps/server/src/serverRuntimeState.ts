@@ -73,7 +73,5 @@ export const readPersistedServerRuntimeState = (path: string) =>
       return Option.none<PersistedServerRuntimeState>();
     }
 
-    const decoded = yield* decodePersistedServerRuntimeState(trimmed);
-
-    return decoded === null ? Option.none<PersistedServerRuntimeState>() : Option.some(decoded);
+    return yield* decodePersistedServerRuntimeState(trimmed).pipe(Effect.option);
   });
