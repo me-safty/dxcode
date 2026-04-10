@@ -1625,7 +1625,14 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     executeGit(
       "GitCore.listWorkspaceFiles",
       cwd,
-      [...WORKSPACE_GIT_HARDENED_CONFIG_ARGS, "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      [
+        ...WORKSPACE_GIT_HARDENED_CONFIG_ARGS,
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "-z",
+      ],
       {
         allowNonZeroExit: true,
         timeoutMs: 20_000,
@@ -1643,7 +1650,14 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
               createGitCommandError(
                 "GitCore.listWorkspaceFiles",
                 cwd,
-                [...WORKSPACE_GIT_HARDENED_CONFIG_ARGS, "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+                [
+                  ...WORKSPACE_GIT_HARDENED_CONFIG_ARGS,
+                  "ls-files",
+                  "--cached",
+                  "--others",
+                  "--exclude-standard",
+                  "-z",
+                ],
                 result.stderr.trim().length > 0 ? result.stderr.trim() : "git ls-files failed",
               ),
             ),
