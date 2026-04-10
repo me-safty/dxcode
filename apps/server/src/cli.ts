@@ -238,12 +238,13 @@ export const resolveServerConfig = (
       bootstrapFd !== undefined
         ? yield* readBootstrapEnvelope(BootstrapEnvelopeSchema, bootstrapFd)
         : Option.none();
+    const bootstrap = Option.getOrUndefined(bootstrapEnvelope);
 
     const mode: RuntimeMode = Option.getOrElse(
       resolveOptionPrecedence(
         normalizedFlags.mode,
         Option.fromUndefinedOr(env.mode),
-        Option.flatMap(bootstrapEnvelope, (bootstrap) => Option.fromUndefinedOr(bootstrap.mode)),
+        Option.fromUndefinedOr(bootstrap?.mode),
       ),
       () => "web",
     );
@@ -252,7 +253,7 @@ export const resolveServerConfig = (
       resolveOptionPrecedence(
         normalizedFlags.port,
         Option.fromUndefinedOr(env.port),
-        Option.flatMap(bootstrapEnvelope, (bootstrap) => Option.fromUndefinedOr(bootstrap.port)),
+        Option.fromUndefinedOr(bootstrap?.port),
       ),
       {
         onSome: (value) => Effect.succeed(value),
@@ -268,7 +269,7 @@ export const resolveServerConfig = (
       resolveOptionPrecedence(
         normalizedFlags.devUrl,
         Option.fromUndefinedOr(env.devUrl),
-        Option.flatMap(bootstrapEnvelope, (bootstrap) => Option.fromUndefinedOr(bootstrap.devUrl)),
+        Option.fromUndefinedOr(bootstrap?.devUrl),
       ),
       () => undefined,
     );
@@ -277,9 +278,7 @@ export const resolveServerConfig = (
         resolveOptionPrecedence(
           normalizedFlags.baseDir,
           Option.fromUndefinedOr(env.t3Home),
-          Option.flatMap(bootstrapEnvelope, (bootstrap) =>
-            Option.fromUndefinedOr(bootstrap.t3Home),
-          ),
+          Option.fromUndefinedOr(bootstrap?.t3Home),
         ),
       ),
     );
@@ -294,45 +293,32 @@ export const resolveServerConfig = (
     const serverTracePath = env.traceFile ?? derivedPaths.serverTracePath;
     yield* fs.makeDirectory(path.dirname(serverTracePath), { recursive: true });
     const startupPresentation = options?.startupPresentation ?? "browser";
-    const noBrowser =
-      startupPresentation === "headless"
-        ? true
-        : Option.getOrElse(
-            resolveOptionPrecedence(
-              normalizedFlags.noBrowser,
-              Option.fromUndefinedOr(env.noBrowser),
-              Option.flatMap(bootstrapEnvelope, (bootstrap) =>
-                Option.fromUndefinedOr(bootstrap.noBrowser),
-              ),
-            ),
-            () => mode === "desktop",
-          );
-    const desktopBootstrapToken = Option.getOrUndefined(
-      Option.flatMap(bootstrapEnvelope, (bootstrap) =>
-        Option.fromUndefinedOr(bootstrap.desktopBootstrapToken),
+    const isHeadlessStartup = startupPresentation === "headless";
+    const noBrowser = Option.getOrElse(
+      resolveOptionPrecedence(
+        isHeadlessStartup ? Option.some(true) : Option.none(),
+        normalizedFlags.noBrowser,
+        Option.fromUndefinedOr(env.noBrowser),
+        Option.fromUndefinedOr(bootstrap?.noBrowser),
       ),
+      () => mode === "desktop",
     );
-    const autoBootstrapProjectFromCwd =
-      options?.forceAutoBootstrapProjectFromCwd ??
-      (startupPresentation === "headless"
-        ? false
-        : Option.getOrElse(
-            resolveOptionPrecedence(
-              normalizedFlags.autoBootstrapProjectFromCwd,
-              Option.fromUndefinedOr(env.autoBootstrapProjectFromCwd),
-              Option.flatMap(bootstrapEnvelope, (bootstrap) =>
-                Option.fromUndefinedOr(bootstrap.autoBootstrapProjectFromCwd),
-              ),
-            ),
-            () => mode === "web",
-          ));
+    const desktopBootstrapToken = bootstrap?.desktopBootstrapToken;
+    const autoBootstrapProjectFromCwd = Option.getOrElse(
+      resolveOptionPrecedence(
+        Option.fromUndefinedOr(options?.forceAutoBootstrapProjectFromCwd),
+        isHeadlessStartup ? Option.some(false) : Option.none(),
+        normalizedFlags.autoBootstrapProjectFromCwd,
+        Option.fromUndefinedOr(env.autoBootstrapProjectFromCwd),
+        Option.fromUndefinedOr(bootstrap?.autoBootstrapProjectFromCwd),
+      ),
+      () => mode === "web",
+    );
     const logWebSocketEvents = Option.getOrElse(
       resolveOptionPrecedence(
         normalizedFlags.logWebSocketEvents,
         Option.fromUndefinedOr(env.logWebSocketEvents),
-        Option.flatMap(bootstrapEnvelope, (bootstrap) =>
-          Option.fromUndefinedOr(bootstrap.logWebSocketEvents),
-        ),
+        Option.fromUndefinedOr(bootstrap?.logWebSocketEvents),
       ),
       () => Boolean(devUrl),
     );
@@ -341,7 +327,7 @@ export const resolveServerConfig = (
       resolveOptionPrecedence(
         normalizedFlags.host,
         Option.fromUndefinedOr(env.host),
-        Option.flatMap(bootstrapEnvelope, (bootstrap) => Option.fromUndefinedOr(bootstrap.host)),
+        Option.fromUndefinedOr(bootstrap?.host),
       ),
       () => (mode === "desktop" ? "127.0.0.1" : undefined),
     );
@@ -356,19 +342,11 @@ export const resolveServerConfig = (
       traceMaxFiles: env.traceMaxFiles,
       otlpTracesUrl:
         env.otlpTracesUrl ??
-        Option.getOrUndefined(
-          Option.flatMap(bootstrapEnvelope, (bootstrap) =>
-            Option.fromUndefinedOr(bootstrap.otlpTracesUrl),
-          ),
-        ) ??
+        bootstrap?.otlpTracesUrl ??
         persistedObservabilitySettings.otlpTracesUrl,
       otlpMetricsUrl:
         env.otlpMetricsUrl ??
-        Option.getOrUndefined(
-          Option.flatMap(bootstrapEnvelope, (bootstrap) =>
-            Option.fromUndefinedOr(bootstrap.otlpMetricsUrl),
-          ),
-        ) ??
+        bootstrap?.otlpMetricsUrl ??
         persistedObservabilitySettings.otlpMetricsUrl,
       otlpExportIntervalMs: env.otlpExportIntervalMs,
       otlpServiceName: env.otlpServiceName,
