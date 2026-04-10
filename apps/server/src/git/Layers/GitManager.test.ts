@@ -186,6 +186,24 @@ function makeTempDir(
   });
 }
 
+function removePath(
+  targetPath: string,
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    yield* fileSystem.remove(targetPath, { recursive: true, force: true });
+  });
+}
+
+function makeDirectory(
+  dirPath: string,
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    yield* fileSystem.makeDirectory(dirPath, { recursive: true });
+  });
+}
+
 function runGit(
   cwd: string,
   args: readonly string[],
@@ -697,6 +715,35 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
   it.effect("status returns an explicit non-repo result for non-git directories", () =>
     Effect.gen(function* () {
       const cwd = yield* makeTempDir("t3code-git-manager-non-repo-");
+      const { manager } = yield* makeManager();
+
+      const status = yield* manager.status({ cwd });
+
+      expect(status).toEqual({
+        isRepo: false,
+        hasOriginRemote: false,
+        isDefaultBranch: false,
+        branch: null,
+        hasWorkingTreeChanges: false,
+        workingTree: {
+          files: [],
+          insertions: 0,
+          deletions: 0,
+        },
+        hasUpstream: false,
+        aheadCount: 0,
+        behindCount: 0,
+        pr: null,
+      });
+    }),
+  );
+
+  it.effect("status returns an explicit non-repo result for deleted directories", () =>
+    Effect.gen(function* () {
+      const rootDir = yield* makeTempDir("t3code-git-manager-missing-dir-");
+      const cwd = path.join(rootDir, "deleted-repo");
+      yield* makeDirectory(cwd);
+      yield* removePath(cwd);
       const { manager } = yield* makeManager();
 
       const status = yield* manager.status({ cwd });
