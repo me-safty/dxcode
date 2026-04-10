@@ -237,7 +237,7 @@ class ComposerSkillNode extends TextNode {
     return $createComposerSkillNode(
       serializedNode.skillName,
       serializedNode.skillLabel ?? serializedNode.skillName,
-    );
+    ).updateFromJSON(serializedNode);
   }
 
   constructor(skillName: string, skillLabel: string, key?: NodeKey) {
@@ -1401,7 +1401,7 @@ function ComposerPromptEditorInner({
     onChangeRef.current = onChange;
   }, [onChange]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     skillsByNameRef.current = skillLabelByName(skills);
   }, [skills]);
 

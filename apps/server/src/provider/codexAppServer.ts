@@ -244,16 +244,3 @@ export async function probeCodexDiscovery(input: {
     });
   });
 }
-
-export async function probeCodexAccount(input: {
-  readonly binaryPath: string;
-  readonly homePath?: string;
-  readonly signal?: AbortSignal;
-}): Promise<CodexAccountSnapshot> {
-  return (
-    await probeCodexDiscovery({
-      ...input,
-      cwd: process.cwd(),
-    })
-  ).account;
-}
