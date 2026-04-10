@@ -2514,8 +2514,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   it("uses the active draft route session when changing the base branch", async () => {
-    const staleDraftId = DraftId.makeUnsafe("draft-stale-branch-session");
-    const activeDraftId = DraftId.makeUnsafe("draft-active-branch-session");
+    const staleDraftId = "draft-stale-branch-session" as ReturnType<typeof draftIdFromPath>;
+    const activeDraftId = "draft-active-branch-session" as ReturnType<typeof draftIdFromPath>;
 
     useComposerDraftStore.setState({
       draftThreadsByThreadKey: {
