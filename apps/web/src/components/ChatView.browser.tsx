@@ -58,7 +58,7 @@ vi.mock("../lib/gitStatusState", () => ({
 
 const THREAD_ID = "thread-browser-test" as ThreadId;
 const PROJECT_ID = "project-1" as ProjectId;
-const LOCAL_ENVIRONMENT_ID = EnvironmentId.makeUnsafe("environment-local");
+const LOCAL_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const THREAD_REF = scopeThreadRef(LOCAL_ENVIRONMENT_ID, THREAD_ID);
 const THREAD_KEY = scopedThreadKey(THREAD_REF);
 const UUID_ROUTE_RE = /^\/draft\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -143,7 +143,7 @@ function isoAt(offsetSeconds: number): string {
 function createBaseServerConfig(): ServerConfig {
   return {
     environment: {
-      environmentId: EnvironmentId.makeUnsafe("environment-local"),
+      environmentId: EnvironmentId.make("environment-local"),
       label: "Local environment",
       platform: { os: "darwin" as const, arch: "arm64" as const },
       serverVersion: "0.0.0-test",
@@ -341,7 +341,7 @@ function buildFixture(snapshot: OrchestrationReadModel): TestFixture {
     serverConfig: createBaseServerConfig(),
     welcome: {
       environment: {
-        environmentId: EnvironmentId.makeUnsafe("environment-local"),
+        environmentId: EnvironmentId.make("environment-local"),
         label: "Local environment",
         platform: { os: "darwin" as const, arch: "arm64" as const },
         serverVersion: "0.0.0-test",
@@ -402,7 +402,7 @@ function addThreadToSnapshot(
 function createThreadCreatedEvent(threadId: ThreadId, sequence: number): OrchestrationEvent {
   return {
     sequence,
-    eventId: EventId.makeUnsafe(`event-thread-created-${sequence}`),
+    eventId: EventId.make(`event-thread-created-${sequence}`),
     aggregateKind: "thread",
     aggregateId: threadId,
     occurredAt: NOW_ISO,
@@ -432,7 +432,7 @@ function createThreadCreatedEvent(threadId: ThreadId, sequence: number): Orchest
 function createThreadSessionSetEvent(threadId: ThreadId, sequence: number): OrchestrationEvent {
   return {
     sequence,
-    eventId: EventId.makeUnsafe(`event-thread-session-set-${sequence}`),
+    eventId: EventId.make(`event-thread-session-set-${sequence}`),
     aggregateKind: "thread",
     aggregateId: threadId,
     occurredAt: NOW_ISO,
@@ -498,7 +498,7 @@ function draftIdFromPath(pathname: string) {
   if (!draftId) {
     throw new Error(`Expected thread path, received "${pathname}".`);
   }
-  return DraftId.makeUnsafe(draftId);
+  return DraftId.make(draftId);
 }
 
 function draftThreadIdFor(draftId: ReturnType<typeof draftIdFromPath>): ThreadId {
@@ -666,7 +666,7 @@ function createSnapshotWithPendingUserInput(): OrchestrationReadModel {
             interactionMode: "plan",
             activities: [
               {
-                id: EventId.makeUnsafe("activity-user-input-requested"),
+                id: EventId.make("activity-user-input-requested"),
                 tone: "info",
                 kind: "user-input.requested",
                 summary: "User input requested",
@@ -915,13 +915,189 @@ async function waitForComposerEditor(): Promise<HTMLElement> {
   );
 }
 
+async function pressComposerKey(key: string): Promise<void> {
+  const composerEditor = await waitForComposerEditor();
+  composerEditor.focus();
+  const keydownEvent = new KeyboardEvent("keydown", {
+    key,
+    bubbles: true,
+    cancelable: true,
+  });
+  composerEditor.dispatchEvent(keydownEvent);
+  if (keydownEvent.defaultPrevented) {
+    await waitForLayout();
+    return;
+  }
+
+  const beforeInputEvent = new InputEvent("beforeinput", {
+    data: key,
+    inputType: "insertText",
+    bubbles: true,
+    cancelable: true,
+  });
+  composerEditor.dispatchEvent(beforeInputEvent);
+  if (beforeInputEvent.defaultPrevented) {
+    await waitForLayout();
+    return;
+  }
+
+  if (
+    typeof document.execCommand === "function" &&
+    document.execCommand("insertText", false, key)
+  ) {
+    await waitForLayout();
+    return;
+  }
+
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    throw new Error("Unable to resolve composer selection for text input.");
+  }
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  const textNode = document.createTextNode(key);
+  range.insertNode(textNode);
+  range.setStartAfter(textNode);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  composerEditor.dispatchEvent(
+    new InputEvent("input", {
+      data: key,
+      inputType: "insertText",
+      bubbles: true,
+    }),
+  );
+  await waitForLayout();
+}
+
+async function pressComposerUndo(): Promise<void> {
+  const composerEditor = await waitForComposerEditor();
+  const useMetaForMod = isMacPlatform(navigator.platform);
+  composerEditor.focus();
+  composerEditor.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "z",
+      metaKey: useMetaForMod,
+      ctrlKey: !useMetaForMod,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  await waitForLayout();
+}
+
+async function waitForComposerText(expectedText: string): Promise<void> {
+  await vi.waitFor(
+    () => {
+      expect(useComposerDraftStore.getState().draftsByThreadKey[THREAD_KEY]?.prompt ?? "").toBe(
+        expectedText,
+      );
+    },
+    { timeout: 8_000, interval: 16 },
+  );
+}
+
+async function setComposerSelectionByTextOffsets(options: {
+  start: number;
+  end: number;
+  direction?: "forward" | "backward";
+}): Promise<void> {
+  const composerEditor = await waitForComposerEditor();
+  composerEditor.focus();
+  const resolvePoint = (targetOffset: number) => {
+    const traversedRef = { value: 0 };
+
+    const visitNode = (node: Node): { node: Node; offset: number } | null => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const textLength = node.textContent?.length ?? 0;
+        if (targetOffset <= traversedRef.value + textLength) {
+          return {
+            node,
+            offset: Math.max(0, Math.min(targetOffset - traversedRef.value, textLength)),
+          };
+        }
+        traversedRef.value += textLength;
+        return null;
+      }
+
+      if (node instanceof HTMLBRElement) {
+        const parent = node.parentNode;
+        if (!parent) {
+          return null;
+        }
+        const siblingIndex = Array.prototype.indexOf.call(parent.childNodes, node);
+        if (targetOffset <= traversedRef.value) {
+          return { node: parent, offset: siblingIndex };
+        }
+        if (targetOffset <= traversedRef.value + 1) {
+          return { node: parent, offset: siblingIndex + 1 };
+        }
+        traversedRef.value += 1;
+        return null;
+      }
+
+      if (node instanceof Element || node instanceof DocumentFragment) {
+        for (const child of node.childNodes) {
+          const point = visitNode(child);
+          if (point) {
+            return point;
+          }
+        }
+      }
+
+      return null;
+    };
+
+    return (
+      visitNode(composerEditor) ?? {
+        node: composerEditor,
+        offset: composerEditor.childNodes.length,
+      }
+    );
+  };
+
+  const startPoint = resolvePoint(options.start);
+  const endPoint = resolvePoint(options.end);
+  const selection = window.getSelection();
+  if (!selection) {
+    throw new Error("Unable to resolve window selection.");
+  }
+  selection.removeAllRanges();
+
+  if (options.direction === "backward" && "setBaseAndExtent" in selection) {
+    selection.setBaseAndExtent(endPoint.node, endPoint.offset, startPoint.node, startPoint.offset);
+    await waitForLayout();
+    return;
+  }
+
+  const range = document.createRange();
+  range.setStart(startPoint.node, startPoint.offset);
+  range.setEnd(endPoint.node, endPoint.offset);
+  selection.addRange(range);
+  await waitForLayout();
+}
+
+async function selectAllComposerContent(): Promise<void> {
+  const composerEditor = await waitForComposerEditor();
+  composerEditor.focus();
+  const selection = window.getSelection();
+  if (!selection) {
+    throw new Error("Unable to resolve window selection.");
+  }
+  selection.removeAllRanges();
+  const range = document.createRange();
+  range.selectNodeContents(composerEditor);
+  selection.addRange(range);
+  await waitForLayout();
+}
+
 async function waitForComposerMenuItem(itemId: string): Promise<HTMLElement> {
   return waitForElement(
     () => document.querySelector<HTMLElement>(`[data-composer-item-id="${itemId}"]`),
     `Unable to find composer menu item "${itemId}".`,
   );
 }
-
 async function waitForSendButton(): Promise<HTMLButtonElement> {
   return waitForElement(
     () => document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]'),
@@ -2331,6 +2507,202 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("surrounds selected plain text and preserves the inner selection for repeated wrapping", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-surround-basic" as MessageId,
+        targetText: "surround basic",
+      }),
+    });
+
+    try {
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "selected");
+      await waitForComposerText("selected");
+      await setComposerSelectionByTextOffsets({ start: 0, end: "selected".length });
+      await pressComposerKey("(");
+      await waitForComposerText("(selected)");
+
+      await pressComposerKey("[");
+      await waitForComposerText("([selected])");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("leaves collapsed-caret typing unchanged for surround symbols", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "selected");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-surround-collapsed" as MessageId,
+        targetText: "surround collapsed",
+      }),
+    });
+
+    try {
+      await waitForComposerText("selected");
+      await setComposerSelectionByTextOffsets({
+        start: "selected".length,
+        end: "selected".length,
+      });
+      await pressComposerKey("(");
+      await waitForComposerText("selected(");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("supports symmetric and backward-selection surrounds", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "backward");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-surround-backward" as MessageId,
+        targetText: "surround backward",
+      }),
+    });
+
+    try {
+      await waitForComposerText("backward");
+      await setComposerSelectionByTextOffsets({
+        start: 0,
+        end: "backward".length,
+        direction: "backward",
+      });
+      await pressComposerKey("*");
+      await waitForComposerText("*backward*");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("supports option-produced surround symbols like guillemets", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "quoted");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-surround-guillemet" as MessageId,
+        targetText: "surround guillemet",
+      }),
+    });
+
+    try {
+      await waitForComposerText("quoted");
+      await setComposerSelectionByTextOffsets({ start: 0, end: "quoted".length });
+      await pressComposerKey("«");
+      await waitForComposerText("«quoted»");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("supports dead-key composition that resolves to another surround symbol without an extra undo step", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "quoted");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-surround-dead-quote" as MessageId,
+        targetText: "surround dead quote",
+      }),
+    });
+
+    try {
+      await waitForComposerText("quoted");
+      await setComposerSelectionByTextOffsets({ start: 0, end: "quoted".length });
+      const composerEditor = await waitForComposerEditor();
+      composerEditor.focus();
+      composerEditor.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Dead",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      composerEditor.dispatchEvent(
+        new InputEvent("beforeinput", {
+          data: "'",
+          inputType: "insertCompositionText",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      const resolvedInputEvent = new InputEvent("beforeinput", {
+        data: "'",
+        inputType: "insertText",
+        bubbles: true,
+        cancelable: true,
+      });
+      composerEditor.dispatchEvent(resolvedInputEvent);
+      expect(resolvedInputEvent.defaultPrevented).toBe(true);
+      await waitForComposerText("'quoted'");
+      await pressComposerUndo();
+      await waitForComposerText("quoted");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("surrounds text after a mention using the correct expanded offsets", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "hi @package.json there");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-surround-after-mention" as MessageId,
+        targetText: "surround after mention",
+      }),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("package.json");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      await waitForComposerText("hi @package.json there");
+      await setComposerSelectionByTextOffsets({
+        start: "hi package.json ".length,
+        end: "hi package.json there".length,
+      });
+      await pressComposerKey("(");
+      await waitForComposerText("hi @package.json (there)");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("falls back to normal replacement when the selection includes a mention token", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "hi @package.json there ");
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-surround-token" as MessageId,
+        targetText: "surround token",
+      }),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("package.json");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      await selectAllComposerContent();
+      await pressComposerKey("(");
+      await waitForComposerText("(");
     } finally {
       await mounted.cleanup();
     }

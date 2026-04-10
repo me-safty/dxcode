@@ -159,9 +159,11 @@ export function createDevRunnerEnv({
 
     if (!isDesktopMode) {
       output.T3CODE_PORT = String(serverPort);
+      output.VITE_HTTP_URL = `http://localhost:${serverPort}`;
       output.VITE_WS_URL = `ws://localhost:${serverPort}`;
     } else {
       output.T3CODE_PORT = String(serverPort);
+      output.VITE_HTTP_URL = `http://${DESKTOP_DEV_LOOPBACK_HOST}:${serverPort}`;
       output.VITE_WS_URL = `ws://${DESKTOP_DEV_LOOPBACK_HOST}:${serverPort}`;
       delete output.T3CODE_MODE;
       delete output.T3CODE_NO_BROWSER;
@@ -354,35 +356,6 @@ interface DevRunnerCliInput {
   readonly turboArgs: ReadonlyArray<string>;
 }
 
-const readOptionalBooleanEnv = (name: string): boolean | undefined => {
-  const value = process.env[name];
-  if (value === undefined) {
-    return undefined;
-  }
-  if (value === "1" || value.toLowerCase() === "true") {
-    return true;
-  }
-  if (value === "0" || value.toLowerCase() === "false") {
-    return false;
-  }
-  return undefined;
-};
-
-const resolveOptionalBooleanOverride = (
-  explicitValue: boolean | undefined,
-  envValue: boolean | undefined,
-): boolean | undefined => {
-  if (explicitValue === true) {
-    return true;
-  }
-
-  if (explicitValue === false) {
-    return envValue;
-  }
-
-  return envValue;
-};
-
 export function runDevRunnerWithInput(input: DevRunnerCliInput) {
   return Effect.gen(function* () {
     const { portOffset, devInstance } = yield* OffsetConfig.asEffect().pipe(
@@ -404,12 +377,6 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         }),
     });
 
-    const envOverrides = {
-      noBrowser: readOptionalBooleanEnv("T3CODE_NO_BROWSER"),
-      autoBootstrapProjectFromCwd: readOptionalBooleanEnv("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"),
-      logWebSocketEvents: readOptionalBooleanEnv("T3CODE_LOG_WS_EVENTS"),
-    };
-
     const { serverOffset, webOffset } = yield* resolveModePortOffsets({
       mode: input.mode,
       startOffset: offset,
@@ -423,15 +390,9 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       serverOffset,
       webOffset,
       t3Home: input.t3Home,
-      noBrowser: resolveOptionalBooleanOverride(input.noBrowser, envOverrides.noBrowser),
-      autoBootstrapProjectFromCwd: resolveOptionalBooleanOverride(
-        input.autoBootstrapProjectFromCwd,
-        envOverrides.autoBootstrapProjectFromCwd,
-      ),
-      logWebSocketEvents: resolveOptionalBooleanOverride(
-        input.logWebSocketEvents,
-        envOverrides.logWebSocketEvents,
-      ),
+      noBrowser: input.noBrowser,
+      autoBootstrapProjectFromCwd: input.autoBootstrapProjectFromCwd,
+      logWebSocketEvents: input.logWebSocketEvents,
       host: input.host,
       port: input.port,
       devUrl: input.devUrl,
