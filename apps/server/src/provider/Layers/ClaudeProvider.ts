@@ -10,7 +10,10 @@ import type {
 import { Cache, Duration, Effect, Equal, Layer, Option, Result, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
-import { query as claudeQuery } from "@anthropic-ai/claude-agent-sdk";
+import {
+  query as claudeQuery,
+  type SlashCommand as ClaudeSlashCommand,
+} from "@anthropic-ai/claude-agent-sdk";
 
 import {
   buildServerProvider,
@@ -388,38 +391,28 @@ export function adjustModelsForSubscription(
 
 const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
 
-function readProbeString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function nonEmptyProbeString(value: unknown): string | undefined {
-  const candidate = readProbeString(value)?.trim();
+function nonEmptyProbeString(value: string): string | undefined {
+  const candidate = value.trim();
   return candidate ? candidate : undefined;
 }
 
 function parseClaudeInitializationCommands(
-  commands: unknown,
+  commands: ReadonlyArray<ClaudeSlashCommand> | undefined,
 ): ReadonlyArray<ServerProviderSlashCommand> {
-  return (Array.isArray(commands) ? commands : []).flatMap((value) => {
-    if (!value || typeof value !== "object") {
-      return [];
-    }
-
-    const record = value as Record<string, unknown>;
-    const name = nonEmptyProbeString(record.name);
+  return (commands ?? []).flatMap((command) => {
+    const name = nonEmptyProbeString(command.name);
     if (!name) {
       return [];
     }
 
+    const description = nonEmptyProbeString(command.description);
+    const argumentHint = nonEmptyProbeString(command.argumentHint);
+
     return [
       {
         name,
-        ...(nonEmptyProbeString(record.description)
-          ? { description: nonEmptyProbeString(record.description) }
-          : {}),
-        ...(nonEmptyProbeString(record.argumentHint)
-          ? { argumentHint: nonEmptyProbeString(record.argumentHint) }
-          : {}),
+        ...(description ? { description } : {}),
+        ...(argumentHint ? { input: { hint: argumentHint } } : {}),
       } satisfies ServerProviderSlashCommand,
     ];
   });

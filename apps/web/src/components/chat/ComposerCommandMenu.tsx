@@ -1,4 +1,9 @@
-import { type ProjectEntry, type ProviderKind, type ServerProviderSkill } from "@t3tools/contracts";
+import {
+  type ProjectEntry,
+  type ProviderKind,
+  type ServerProviderSkill,
+  type ServerProviderSlashCommand,
+} from "@t3tools/contracts";
 import { BotIcon } from "lucide-react";
 import { memo, useLayoutEffect, useMemo, useRef } from "react";
 
@@ -36,10 +41,7 @@ export type ComposerCommandItem =
       id: string;
       type: "provider-slash-command";
       provider: ProviderKind;
-      command: {
-        name: string;
-        argumentHint?: string;
-      };
+      command: ServerProviderSlashCommand;
       label: string;
       description: string;
     }

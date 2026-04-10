@@ -737,12 +737,9 @@ export const ChatComposer = memo(
             id: `provider-slash-command:${selectedProvider}:${command.name}`,
             type: "provider-slash-command" as const,
             provider: selectedProvider,
-            command: {
-              name: command.name,
-              ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}),
-            },
+            command,
             label: `/${command.name}`,
-            description: command.description ?? command.argumentHint ?? "Run provider command",
+            description: command.description ?? command.input?.hint ?? "Run provider command",
           }),
         );
         const query = composerTrigger.query.trim().toLowerCase();

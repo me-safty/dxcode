@@ -942,6 +942,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
                 {
                   name: "review",
                   description: "Review a pull request",
+                  input: { hint: "pr-or-branch" },
                 },
               ]),
           );
@@ -950,6 +951,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             {
               name: "review",
               description: "Review a pull request",
+              input: { hint: "pr-or-branch" },
             },
           ]);
         }).pipe(

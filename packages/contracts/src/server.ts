@@ -58,10 +58,15 @@ export const ServerProviderModel = Schema.Struct({
 });
 export type ServerProviderModel = typeof ServerProviderModel.Type;
 
+export const ServerProviderSlashCommandInput = Schema.Struct({
+  hint: TrimmedNonEmptyString,
+});
+export type ServerProviderSlashCommandInput = typeof ServerProviderSlashCommandInput.Type;
+
 export const ServerProviderSlashCommand = Schema.Struct({
   name: TrimmedNonEmptyString,
   description: Schema.optional(TrimmedNonEmptyString),
-  argumentHint: Schema.optional(TrimmedNonEmptyString),
+  input: Schema.optional(ServerProviderSlashCommandInput),
 });
 export type ServerProviderSlashCommand = typeof ServerProviderSlashCommand.Type;
 
