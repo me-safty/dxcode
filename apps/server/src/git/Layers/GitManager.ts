@@ -276,15 +276,16 @@ function parsePullRequestList(raw: unknown): PullRequestInfo[] {
         : typeof headRepositoryOwnerRecord?.login === "string"
           ? headRepositoryOwnerRecord.login
           : null;
+    const normalizedTitle = typeof title === "string" ? title.trim() : null;
+    const normalizedUrl = typeof url === "string" ? url.trim() : null;
+    const normalizedBaseRefName = typeof baseRefName === "string" ? baseRefName.trim() : null;
+    const normalizedHeadRefName = typeof headRefName === "string" ? headRefName.trim() : null;
+    const normalizedHeadRepositoryNameWithOwner = headRepositoryNameWithOwner?.trim() || null;
+    const normalizedHeadRepositoryOwnerLogin = headRepositoryOwnerLogin?.trim() || null;
     if (typeof number !== "number" || !Number.isInteger(number) || number <= 0) {
       continue;
     }
-    if (
-      typeof title !== "string" ||
-      typeof url !== "string" ||
-      typeof baseRefName !== "string" ||
-      typeof headRefName !== "string"
-    ) {
+    if (!normalizedTitle || !normalizedUrl || !normalizedBaseRefName || !normalizedHeadRefName) {
       continue;
     }
 
@@ -305,15 +306,19 @@ function parsePullRequestList(raw: unknown): PullRequestInfo[] {
 
     parsed.push({
       number,
-      title,
-      url,
-      baseRefName,
-      headRefName,
+      title: normalizedTitle,
+      url: normalizedUrl,
+      baseRefName: normalizedBaseRefName,
+      headRefName: normalizedHeadRefName,
       state: normalizedState,
       updatedAt: typeof updatedAt === "string" && updatedAt.trim().length > 0 ? updatedAt : null,
       ...(typeof isCrossRepository === "boolean" ? { isCrossRepository } : {}),
-      ...(headRepositoryNameWithOwner ? { headRepositoryNameWithOwner } : {}),
-      ...(headRepositoryOwnerLogin ? { headRepositoryOwnerLogin } : {}),
+      ...(normalizedHeadRepositoryNameWithOwner
+        ? { headRepositoryNameWithOwner: normalizedHeadRepositoryNameWithOwner }
+        : {}),
+      ...(normalizedHeadRepositoryOwnerLogin
+        ? { headRepositoryOwnerLogin: normalizedHeadRepositoryOwnerLogin }
+        : {}),
     });
   }
   return parsed;
