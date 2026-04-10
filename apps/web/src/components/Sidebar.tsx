@@ -2330,7 +2330,7 @@ export default function Sidebar() {
   const activeEnvironmentId = useStore((store) => store.activeEnvironmentId);
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const reorderProjects = useUiStateStore((store) => store.reorderProjects);
+  const reorderProjectGroup = useUiStateStore((store) => store.reorderProjectGroup);
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
   const isOnSettings = pathname.startsWith("/settings");
@@ -2696,18 +2696,11 @@ export default function Sidebar() {
       const activeProject = sidebarProjects.find((project) => project.projectKey === active.id);
       const overProject = sidebarProjects.find((project) => project.projectKey === over.id);
       if (!activeProject || !overProject) return;
-      // projectOrder stores physical keys, but projectKey is a logical key
-      // that may differ (e.g. canonicalKey from repositoryIdentity). Resolve
-      // back to the representative's physical key for the reorder.
-      const activePhysicalKey = scopedProjectKey(
-        scopeProjectRef(activeProject.environmentId, activeProject.id),
-      );
-      const overPhysicalKey = scopedProjectKey(
-        scopeProjectRef(overProject.environmentId, overProject.id),
-      );
-      reorderProjects(activePhysicalKey, overPhysicalKey);
+      const activeMemberKeys = activeProject.memberProjectRefs.map(scopedProjectKey);
+      const overMemberKeys = overProject.memberProjectRefs.map(scopedProjectKey);
+      reorderProjectGroup(activeMemberKeys, overMemberKeys);
     },
-    [sidebarProjectSortOrder, reorderProjects, sidebarProjects],
+    [sidebarProjectSortOrder, reorderProjectGroup, sidebarProjects],
   );
 
   const handleProjectDragStart = useCallback(

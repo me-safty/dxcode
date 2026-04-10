@@ -505,6 +505,44 @@ export function reorderProjects(
   };
 }
 
+export function reorderProjectGroup(
+  state: UiState,
+  draggedProjectIds: readonly string[],
+  targetProjectIds: readonly string[],
+): UiState {
+  if (draggedProjectIds.length === 0) {
+    return state;
+  }
+  const draggedSet = new Set(draggedProjectIds);
+  const targetSet = new Set(targetProjectIds);
+  if (draggedProjectIds.every((id) => targetSet.has(id))) {
+    return state;
+  }
+
+  const originalTargetIndex = state.projectOrder.findIndex((id) => targetSet.has(id));
+  if (originalTargetIndex < 0) {
+    return state;
+  }
+
+  const projectOrder = [...state.projectOrder];
+
+  const removed: string[] = [];
+  for (let i = projectOrder.length - 1; i >= 0; i--) {
+    if (draggedSet.has(projectOrder[i]!)) {
+      removed.unshift(projectOrder.splice(i, 1)[0]!);
+    }
+  }
+  if (removed.length === 0) {
+    return state;
+  }
+
+  projectOrder.splice(originalTargetIndex, 0, ...removed);
+  return {
+    ...state,
+    projectOrder,
+  };
+}
+
 interface UiStateStore extends UiState {
   syncProjects: (projects: readonly SyncProjectInput[]) => void;
   syncThreads: (threads: readonly SyncThreadInput[]) => void;
@@ -515,6 +553,10 @@ interface UiStateStore extends UiState {
   toggleProject: (projectId: string) => void;
   setProjectExpanded: (projectId: string, expanded: boolean) => void;
   reorderProjects: (draggedProjectId: string, targetProjectId: string) => void;
+  reorderProjectGroup: (
+    draggedProjectIds: readonly string[],
+    targetProjectIds: readonly string[],
+  ) => void;
 }
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
@@ -533,6 +575,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setProjectExpanded(state, projectId, expanded)),
   reorderProjects: (draggedProjectId, targetProjectId) =>
     set((state) => reorderProjects(state, draggedProjectId, targetProjectId)),
+  reorderProjectGroup: (draggedProjectIds, targetProjectIds) =>
+    set((state) => reorderProjectGroup(state, draggedProjectIds, targetProjectIds)),
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));
