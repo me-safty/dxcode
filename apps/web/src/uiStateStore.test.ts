@@ -146,6 +146,26 @@ describe("uiStateStore pure functions", () => {
     expect(next.projectOrder).toEqual([keyALocal, keyARemote, keyB, keyC]);
   });
 
+  it("reorderProjectGroup with multi-member target inserts after first target occurrence", () => {
+    const keyALocal = "env-local:proj-a";
+    const keyARemote = "env-remote:proj-a";
+    const keyBLocal = "env-local:proj-b";
+    const keyBRemote = "env-remote:proj-b";
+    const initialState = makeUiState({
+      projectOrder: [keyALocal, keyARemote, keyBLocal, keyBRemote],
+    });
+
+    const next = reorderProjectGroup(
+      initialState,
+      [keyALocal, keyARemote],
+      [keyBLocal, keyBRemote],
+    );
+
+    // Target members may become non-contiguous; this is fine because the
+    // sidebar groups by logical key using first-occurrence positioning.
+    expect(next.projectOrder).toEqual([keyBLocal, keyALocal, keyARemote, keyBRemote]);
+  });
+
   it("reorderProjectGroup is a no-op when dragged group equals target group", () => {
     const key1 = "env-local:proj-a";
     const key2 = "env-remote:proj-a";
