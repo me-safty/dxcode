@@ -186,7 +186,9 @@ interface StagePackageJson {
 }
 
 const AzureTrustedSigningOptionsConfig = Config.all({
-  publisherName: Config.string("AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"),
+  publisherName: Config.string("AZURE_TRUSTED_SIGNING_PUBLISHER_NAME").pipe(
+    Config.map((s) => s.trim()),
+  ),
   endpoint: Config.string("AZURE_TRUSTED_SIGNING_ENDPOINT"),
   certificateProfileName: Config.string("AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME"),
   codeSigningAccountName: Config.string("AZURE_TRUSTED_SIGNING_ACCOUNT_NAME"),
