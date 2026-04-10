@@ -352,23 +352,64 @@ function nonEmptyProbeString(value: string): string | undefined {
 function parseClaudeInitializationCommands(
   commands: ReadonlyArray<ClaudeSlashCommand> | undefined,
 ): ReadonlyArray<ServerProviderSlashCommand> {
-  return (commands ?? []).flatMap((command) => {
+  return dedupeSlashCommands(
+    (commands ?? []).flatMap((command) => {
+      const name = nonEmptyProbeString(command.name);
+      if (!name) {
+        return [];
+      }
+
+      const description = nonEmptyProbeString(command.description);
+      const argumentHint = nonEmptyProbeString(command.argumentHint);
+
+      return [
+        {
+          name,
+          ...(description ? { description } : {}),
+          ...(argumentHint ? { input: { hint: argumentHint } } : {}),
+        } satisfies ServerProviderSlashCommand,
+      ];
+    }),
+  );
+}
+
+function dedupeSlashCommands(
+  commands: ReadonlyArray<ServerProviderSlashCommand>,
+): ReadonlyArray<ServerProviderSlashCommand> {
+  const commandsByName = new Map<string, ServerProviderSlashCommand>();
+
+  for (const command of commands) {
     const name = nonEmptyProbeString(command.name);
     if (!name) {
-      return [];
+      continue;
     }
 
-    const description = nonEmptyProbeString(command.description);
-    const argumentHint = nonEmptyProbeString(command.argumentHint);
-
-    return [
-      {
+    const key = name.toLowerCase();
+    const existing = commandsByName.get(key);
+    if (!existing) {
+      commandsByName.set(key, {
+        ...command,
         name,
-        ...(description ? { description } : {}),
-        ...(argumentHint ? { input: { hint: argumentHint } } : {}),
-      } satisfies ServerProviderSlashCommand,
-    ];
-  });
+      });
+      continue;
+    }
+
+    commandsByName.set(key, {
+      ...existing,
+      ...(existing.description
+        ? {}
+        : command.description
+          ? { description: command.description }
+          : {}),
+      ...(existing.input?.hint
+        ? {}
+        : command.input?.hint
+          ? { input: { hint: command.input.hint } }
+          : {}),
+    });
+  }
+
+  return [...commandsByName.values()];
 }
 
 /**
@@ -534,6 +575,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
           Effect.orElseSucceed(() => undefined),
         )
       : undefined) ?? [];
+  const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
 
   // ── Auth check + subscription detection ────────────────────────────
 
@@ -569,7 +611,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       enabled: claudeSettings.enabled,
       checkedAt,
       models,
-      slashCommands,
+      slashCommands: dedupedSlashCommands,
       probe: {
         installed: true,
         version: parsedVersion,
@@ -589,7 +631,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       enabled: claudeSettings.enabled,
       checkedAt,
       models,
-      slashCommands,
+      slashCommands: dedupedSlashCommands,
       probe: {
         installed: true,
         version: parsedVersion,
@@ -607,7 +649,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     enabled: claudeSettings.enabled,
     checkedAt,
     models,
-    slashCommands,
+    slashCommands: dedupedSlashCommands,
     probe: {
       installed: true,
       version: parsedVersion,

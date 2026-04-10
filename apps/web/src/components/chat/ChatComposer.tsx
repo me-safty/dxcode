@@ -69,6 +69,7 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
+import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import {
   getComposerProviderState,
   renderProviderTraitsMenuContent,
@@ -748,14 +749,7 @@ export const ChatComposer = memo(
         if (!query) {
           return slashCommandItems;
         }
-        return slashCommandItems.filter(
-          (item) =>
-            item.label.slice(1).toLowerCase().includes(query) ||
-            item.description.toLowerCase().includes(query) ||
-            (item.type === "slash-command"
-              ? item.command.includes(query)
-              : item.command.name.toLowerCase().includes(query)),
-        );
+        return searchSlashCommandItems(slashCommandItems, query);
       }
       if (composerTrigger.kind === "skill") {
         return searchProviderSkills(
@@ -868,7 +862,7 @@ export const ChatComposer = memo(
     // ------------------------------------------------------------------
     const setPromptFromTraits = useCallback(
       (nextPrompt: string) => {
-        if (nextPrompt === prompt) {
+        if (nextPrompt === promptRef.current) {
           scheduleComposerFocus();
           return;
         }
@@ -879,7 +873,7 @@ export const ChatComposer = memo(
         setComposerTrigger(detectComposerTrigger(nextPrompt, nextPrompt.length));
         scheduleComposerFocus();
       },
-      [composerDraftTarget, prompt, promptRef, scheduleComposerFocus, setComposerDraftPrompt],
+      [composerDraftTarget, promptRef, scheduleComposerFocus, setComposerDraftPrompt],
     );
 
     const providerTraitsMenuContent = renderProviderTraitsMenuContent({
@@ -1763,6 +1757,10 @@ export const ChatComposer = memo(
                     resolvedTheme={resolvedTheme}
                     isLoading={isComposerMenuLoading}
                     triggerKind={composerTriggerKind}
+                    groupSlashCommandSections={
+                      composerTrigger?.kind === "slash-command" &&
+                      composerTrigger.query.trim().length === 0
+                    }
                     emptyStateText={composerMenuEmptyState}
                     activeItemId={activeComposerMenuItem?.id ?? null}
                     onHighlightedItemChange={onComposerMenuItemHighlighted}

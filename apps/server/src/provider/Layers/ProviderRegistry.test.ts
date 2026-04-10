@@ -972,6 +972,47 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         ),
       );
 
+      it.effect("deduplicates probed claude slash commands by name", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            () => Effect.succeed("maxplan"),
+            () =>
+              Effect.succeed([
+                {
+                  name: "ui",
+                  description: "Explore and refine UI",
+                },
+                {
+                  name: "ui",
+                  input: { hint: "component-or-screen" },
+                },
+              ]),
+          );
+
+          assert.deepStrictEqual(status.slashCommands, [
+            {
+              name: "ui",
+              description: "Explore and refine UI",
+              input: { hint: "component-or-screen" },
+            },
+          ]);
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+              if (joined === "auth status")
+                return {
+                  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                  stderr: "",
+                  code: 0,
+                };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
       it.effect("returns an api key label for claude api key auth", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus();

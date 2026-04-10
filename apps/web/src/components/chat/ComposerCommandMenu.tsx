@@ -90,11 +90,12 @@ function SkillGlyph(props: { className?: string }) {
 function groupCommandItems(
   items: ComposerCommandItem[],
   triggerKind: ComposerTriggerKind | null,
+  groupSlashCommandSections: boolean,
 ): ComposerCommandGroup[] {
   if (triggerKind === "skill") {
     return items.length > 0 ? [{ id: "skills", label: "Skills", items }] : [];
   }
-  if (triggerKind !== "slash-command") {
+  if (triggerKind !== "slash-command" || !groupSlashCommandSections) {
     return [{ id: "default", label: null, items }];
   }
 
@@ -116,6 +117,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   resolvedTheme: "light" | "dark";
   isLoading: boolean;
   triggerKind: ComposerTriggerKind | null;
+  groupSlashCommandSections?: boolean;
   emptyStateText?: string;
   activeItemId: string | null;
   onHighlightedItemChange: (itemId: string | null) => void;
@@ -123,8 +125,9 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const groups = useMemo(
-    () => groupCommandItems(props.items, props.triggerKind),
-    [props.items, props.triggerKind],
+    () =>
+      groupCommandItems(props.items, props.triggerKind, props.groupSlashCommandSections ?? true),
+    [props.groupSlashCommandSections, props.items, props.triggerKind],
   );
 
   useLayoutEffect(() => {
