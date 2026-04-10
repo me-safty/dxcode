@@ -20,7 +20,10 @@ import {
   AuthError,
   type ServerAuthShape,
 } from "../Services/ServerAuth.ts";
-import { SessionCredentialService } from "../Services/SessionCredentialService.ts";
+import {
+  SessionCredentialError,
+  SessionCredentialService,
+} from "../Services/SessionCredentialService.ts";
 import { AuthControlPlaneLive, AuthCoreLive } from "./AuthControlPlane.ts";
 
 type BootstrapExchangeResult = {
@@ -30,24 +33,6 @@ type BootstrapExchangeResult = {
 
 const AUTHORIZATION_PREFIX = "Bearer ";
 const WEBSOCKET_TOKEN_QUERY_PARAM = "wsToken";
-
-function authFailureReason(cause: unknown): string {
-  if (cause instanceof Error && cause.message.trim().length > 0) {
-    return cause.message;
-  }
-
-  if (
-    typeof cause === "object" &&
-    cause !== null &&
-    "message" in cause &&
-    typeof cause.message === "string" &&
-    cause.message.trim().length > 0
-  ) {
-    return cause.message;
-  }
-
-  return "unknown";
-}
 
 export function toBootstrapExchangeAuthError(cause: BootstrapCredentialError): AuthError {
   if (cause.status === 500) {
@@ -83,10 +68,10 @@ export const makeServerAuth = Effect.gen(function* () {
 
   const authenticateToken = (token: string): Effect.Effect<AuthenticatedSession, AuthError> =>
     sessions.verify(token).pipe(
-      Effect.tapError((cause) =>
+      Effect.tapError((cause: SessionCredentialError) =>
         Effect.logWarning("Rejected authenticated session credential.").pipe(
           Effect.annotateLogs({
-            reason: authFailureReason(cause),
+            reason: cause.message,
           }),
         ),
       ),
