@@ -543,7 +543,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     <div className="flex items-center opacity-0 transition-opacity duration-200  group-hover/assistant:opacity-100">
                       <MessageCopyButton
                         text={assistantCopyState.text ?? ""}
-                        title="Copy assistant response"
                         size="icon-xs"
                         variant="outline"
                         className="border-border/50 bg-background/35 text-muted-foreground/45 shadow-none hover:border-border/70 hover:bg-background/55 hover:text-muted-foreground/70"

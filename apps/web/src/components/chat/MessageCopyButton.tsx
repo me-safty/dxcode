@@ -45,7 +45,6 @@ export const MessageCopyButton = memo(function MessageCopyButton({
   className,
 }: {
   text: string;
-  title?: string;
   size?: "xs" | "icon-xs";
   variant?: "outline" | "ghost";
   className?: string;
