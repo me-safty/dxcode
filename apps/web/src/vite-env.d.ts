@@ -3,6 +3,7 @@
 import type { DesktopBridge, LocalApi } from "@t3tools/contracts";
 
 interface ImportMetaEnv {
+  readonly APP_STAGE_LABEL: string;
   readonly APP_VERSION: string;
 }
 
