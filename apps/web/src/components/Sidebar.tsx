@@ -1318,19 +1318,25 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         }
         if (clicked !== "delete") return;
 
-        if (projectThreads.length > 0) {
-          toastManager.add({
-            type: "warning",
-            title: "Project is not empty",
-            description: "Delete all threads in this project before removing it.",
-          });
-          return;
-        }
-
-        const confirmed = await api.dialogs.confirm(`Remove project "${project.name}"?`);
+        const confirmed = await api.dialogs.confirm(
+          [
+            `Remove project "${project.name}"?`,
+            projectThreads.length > 0
+              ? `This will also delete ${projectThreads.length} thread${projectThreads.length === 1 ? "" : "s"} in this project.`
+              : null,
+            "Your files on disk will not be affected.",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
         if (!confirmed) return;
 
         try {
+          // Delete all threads in the project first
+          for (const thread of projectThreads) {
+            await deleteThread(scopeThreadRef(thread.environmentId, thread.id));
+          }
+
           const projectDraftThread = getDraftThreadByProjectRef(
             scopeProjectRef(project.environmentId, project.id),
           );
@@ -1363,12 +1369,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       clearComposerDraftForThread,
       clearProjectDraftThreadId,
       copyPathToClipboard,
+      deleteThread,
       getDraftThreadByProjectRef,
       project.cwd,
       project.environmentId,
       project.id,
       project.name,
-      projectThreads.length,
+      projectThreads,
       suppressProjectClickForContextMenuRef,
     ],
   );
