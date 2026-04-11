@@ -87,6 +87,7 @@ class StatusUpstreamRefreshCacheKey extends Data.Class<{
 
 interface ExecuteGitOptions {
   stdin?: string | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
   timeoutMs?: number | undefined;
   allowNonZeroExit?: boolean | undefined;
   fallbackErrorMessage?: string | undefined;
@@ -799,6 +800,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       cwd,
       args,
       ...(options.stdin !== undefined ? { stdin: options.stdin } : {}),
+      ...(options.env !== undefined ? { env: options.env } : {}),
       allowNonZeroExit: true,
       ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
       ...(options.maxOutputBytes !== undefined ? { maxOutputBytes: options.maxOutputBytes } : {}),
@@ -932,6 +934,9 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       ["--git-dir", gitCommonDir, "fetch", "--quiet", "--no-tags", upstream.remoteName, refspec],
       {
         allowNonZeroExit: true,
+        env: {
+          SSH_ASKPASS_REQUIRE: "never",
+        },
         timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
       },
     ).pipe(Effect.asVoid);

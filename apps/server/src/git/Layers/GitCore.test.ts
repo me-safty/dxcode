@@ -1023,9 +1023,11 @@ it.layer(TestLayer)("git integration", (it) => {
         expect(yield* git(source, ["branch", "--show-current"])).toBe("upstream/feature");
         const realGitCore = yield* GitCore;
         let fetchArgs: readonly string[] | null = null;
+        let fetchEnv: NodeJS.ProcessEnv | undefined;
         const core = yield* makeIsolatedGitCore((input) => {
           if (input.args[0] === "--git-dir" && input.args[2] === "fetch") {
             fetchArgs = [...input.args];
+            fetchEnv = input.env;
             return Effect.succeed({
               code: 0,
               stdout: "",
@@ -1049,6 +1051,9 @@ it.layer(TestLayer)("git integration", (it) => {
           remoteName,
           `+refs/heads/${featureBranch}:refs/remotes/${remoteName}/${featureBranch}`,
         ]);
+        expect(fetchEnv).toEqual({
+          SSH_ASKPASS_REQUIRE: "never",
+        });
       }),
     );
 
