@@ -204,7 +204,7 @@ function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalog
       let previousEntries = new Map<
         ThreadId,
         {
-          shell: object | null;
+          hasThread: boolean;
           proposedPlanIds: readonly string[] | undefined;
           proposedPlansById: Record<string, Thread["proposedPlans"][number]> | undefined;
           entry: ThreadPlanCatalogEntry;
@@ -218,7 +218,7 @@ function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalog
         const nextEntries = new Map<
           ThreadId,
           {
-            shell: object | null;
+            hasThread: boolean;
             proposedPlanIds: readonly string[] | undefined;
             proposedPlansById: Record<string, Thread["proposedPlans"][number]> | undefined;
             entry: ThreadPlanCatalogEntry;
@@ -228,7 +228,7 @@ function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalog
         let changed = !sameThreadIds;
 
         for (const threadId of threadIds) {
-          let shell: object | undefined;
+          let hasThread = false;
           let proposedPlanIds: readonly string[] | undefined;
           let proposedPlansById: Record<string, Thread["proposedPlans"][number]> | undefined;
 
@@ -237,7 +237,7 @@ function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalog
             if (!matchedShell) {
               continue;
             }
-            shell = matchedShell;
+            hasThread = true;
             proposedPlanIds = environmentState.proposedPlanIdsByThreadId[threadId];
             proposedPlansById = environmentState.proposedPlanByThreadId[threadId] as
               | Record<string, Thread["proposedPlans"][number]>
@@ -245,11 +245,11 @@ function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalog
             break;
           }
 
-          if (!shell) {
+          if (!hasThread) {
             const previous = previousEntries.get(threadId);
             if (
               previous &&
-              previous.shell === null &&
+              !previous.hasThread &&
               previous.proposedPlanIds === undefined &&
               previous.proposedPlansById === undefined
             ) {
@@ -258,7 +258,7 @@ function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalog
             }
             changed = true;
             nextEntries.set(threadId, {
-              shell: null,
+              hasThread: false,
               proposedPlanIds: undefined,
               proposedPlansById: undefined,
               entry: { id: threadId, proposedPlans: EMPTY_PROPOSED_PLANS },
@@ -269,7 +269,7 @@ function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalog
           const previous = previousEntries.get(threadId);
           if (
             previous &&
-            previous.shell === shell &&
+            previous.hasThread &&
             previous.proposedPlanIds === proposedPlanIds &&
             previous.proposedPlansById === proposedPlansById
           ) {
@@ -288,7 +288,7 @@ function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalog
               : EMPTY_PROPOSED_PLANS;
           const entry = { id: threadId, proposedPlans };
           nextEntries.set(threadId, {
-            shell,
+            hasThread: true,
             proposedPlanIds,
             proposedPlansById,
             entry,
