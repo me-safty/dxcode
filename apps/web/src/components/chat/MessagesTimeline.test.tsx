@@ -220,4 +220,60 @@ describe("MessagesTimeline", () => {
 
     expect(markup).not.toContain('aria-label="Copy assistant response"');
   }, 10_000);
+
+  it("renders the assistant copy button next to the footer metadata with row hover visibility", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isWorking={false}
+        activeTurnInProgress={false}
+        activeTurnId={null}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        timelineEntries={[
+          {
+            id: "assistant-entry",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:29.000Z",
+            message: {
+              id: MessageId.make("assistant-1"),
+              role: "assistant",
+              text: "Final answer.",
+              turnId: "turn-1" as never,
+              createdAt: "2026-03-17T19:12:29.000Z",
+              completedAt: "2026-03-17T19:12:30.000Z",
+              streaming: false,
+            },
+          },
+        ]}
+        completionDividerBeforeEntryId={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:12:33.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        changedFilesExpandedByTurnId={{}}
+        onSetChangedFilesExpanded={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        activeThreadEnvironmentId={ACTIVE_THREAD_ENVIRONMENT_ID}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Copy assistant response"');
+    expect(markup).toContain("group/assistant");
+    expect(markup).toContain("group-hover/assistant:opacity-100");
+    expect(markup).toContain('class="text-[10px] text-muted-foreground/30"');
+    expect(markup.indexOf('class="text-[10px] text-muted-foreground/30"')).toBeLessThan(
+      markup.indexOf('aria-label="Copy assistant response"'),
+    );
+  }, 10_000);
 });

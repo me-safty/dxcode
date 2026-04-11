@@ -322,7 +322,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const renderRowContent = (row: TimelineRow) => (
     <div
-      className="pb-4"
+      className={cn(
+        "pb-4",
+        row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
+      )}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
@@ -541,7 +544,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     </div>
                   );
                 })()}
-                <div className="mt-1.5 flex items-center justify-between gap-2">
+                <div className="mt-1.5 flex items-center gap-2">
                   <p className="text-[10px] text-muted-foreground/30">
                     {formatMessageMeta(
                       row.message.createdAt,
@@ -551,8 +554,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                       timestampFormat,
                     )}
                   </p>
-                  <div className="flex items-center gap-1.5">
-                    {assistantCopyState.visible ? (
+                  {assistantCopyState.visible ? (
+                    <div className="flex items-center opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
                       <MessageCopyButton
                         text={assistantCopyState.text ?? ""}
                         title="Copy assistant response"
@@ -562,8 +565,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                         onCopy={handleAssistantCopySuccess}
                         onError={handleAssistantCopyError}
                       />
-                    ) : null}
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </>
