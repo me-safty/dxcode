@@ -66,10 +66,26 @@ import {
 
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
 
+const handleAssistantCopySuccess = () => {
+  toastManager.add({
+    type: "success",
+    title: "Assistant response copied",
+  });
+};
+
+const handleAssistantCopyError = (error: Error) => {
+  toastManager.add({
+    type: "error",
+    title: "Failed to copy assistant response",
+    description: error.message,
+  });
+};
+
 interface MessagesTimelineProps {
   hasMessages: boolean;
   isWorking: boolean;
   activeTurnInProgress: boolean;
+  activeTurnId?: TurnId | null;
   activeTurnStartedAt: string | null;
   scrollContainer: HTMLDivElement | null;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
@@ -108,6 +124,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hasMessages,
   isWorking,
   activeTurnInProgress,
+  activeTurnId,
   activeTurnStartedAt,
   scrollContainer,
   timelineEntries,
@@ -438,10 +455,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         row.message.role === "assistant" &&
         (() => {
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+          const assistantTurnStillInProgress =
+            activeTurnInProgress &&
+            activeTurnId !== null &&
+            activeTurnId !== undefined &&
+            row.message.turnId === activeTurnId;
           const assistantCopyState = resolveAssistantMessageCopyState({
             text: row.message.text ?? null,
             showCopyButton: row.showAssistantCopyButton,
-            streaming: row.message.streaming,
+            streaming: row.message.streaming || assistantTurnStillInProgress,
           });
           return (
             <>
@@ -537,19 +559,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                         size="icon-xs"
                         variant="outline"
                         className="border-border/50 bg-background/35 text-muted-foreground/45 shadow-none hover:border-border/70 hover:bg-background/55 hover:text-muted-foreground/70"
-                        onCopy={() => {
-                          toastManager.add({
-                            type: "success",
-                            title: "Assistant response copied",
-                          });
-                        }}
-                        onError={(error) => {
-                          toastManager.add({
-                            type: "error",
-                            title: "Failed to copy assistant response",
-                            description: error.message,
-                          });
-                        }}
+                        onCopy={handleAssistantCopySuccess}
+                        onError={handleAssistantCopyError}
                       />
                     ) : null}
                   </div>

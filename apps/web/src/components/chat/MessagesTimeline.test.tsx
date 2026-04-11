@@ -12,6 +12,7 @@ describe("MessagesTimeline", () => {
         hasMessages
         isWorking={false}
         activeTurnInProgress={false}
+        activeTurnId={null}
         activeTurnStartedAt={null}
         scrollContainer={null}
         timelineEntries={[
@@ -69,6 +70,7 @@ describe("MessagesTimeline", () => {
         hasMessages
         isWorking={false}
         activeTurnInProgress={false}
+        activeTurnId={null}
         activeTurnStartedAt={null}
         scrollContainer={null}
         timelineEntries={[
@@ -116,6 +118,7 @@ describe("MessagesTimeline", () => {
         hasMessages
         isWorking={false}
         activeTurnInProgress
+        activeTurnId={"turn-1" as never}
         activeTurnStartedAt="2026-03-17T19:12:28.000Z"
         scrollContainer={null}
         timelineEntries={[
@@ -137,6 +140,67 @@ describe("MessagesTimeline", () => {
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         nowIso="2026-03-17T19:12:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        changedFilesExpandedByTurnId={{}}
+        onSetChangedFilesExpanded={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        activeThreadEnvironmentId={ACTIVE_THREAD_ENVIRONMENT_ID}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).not.toContain('aria-label="Copy assistant response"');
+  }, 10_000);
+
+  it("does not render the assistant copy button until the active turn settles", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isWorking={false}
+        activeTurnInProgress
+        activeTurnId={"turn-1" as never}
+        activeTurnStartedAt="2026-03-17T19:12:28.000Z"
+        scrollContainer={null}
+        timelineEntries={[
+          {
+            id: "assistant-entry",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:29.000Z",
+            message: {
+              id: MessageId.make("assistant-1"),
+              role: "assistant",
+              text: "Partial answer before tool work finishes.",
+              turnId: "turn-1" as never,
+              createdAt: "2026-03-17T19:12:29.000Z",
+              completedAt: "2026-03-17T19:12:30.000Z",
+              streaming: false,
+            },
+          },
+          {
+            id: "work-entry",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:31.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:31.000Z",
+              label: "Ran command",
+              tone: "tool",
+            },
+          },
+        ]}
+        completionDividerBeforeEntryId={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:12:33.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
         changedFilesExpandedByTurnId={{}}
