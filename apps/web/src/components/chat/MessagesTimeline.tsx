@@ -57,7 +57,7 @@ import {
 import { cn } from "~/lib/utils";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
-import { toastManager } from "../ui/toast";
+
 import {
   buildInlineTerminalContextText,
   formatInlineTerminalContextLabel,
@@ -65,21 +65,6 @@ import {
 } from "./userMessageTerminalContexts";
 
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
-
-const handleAssistantCopySuccess = () => {
-  toastManager.add({
-    type: "success",
-    title: "Assistant response copied",
-  });
-};
-
-const handleAssistantCopyError = (error: Error) => {
-  toastManager.add({
-    type: "error",
-    title: "Failed to copy assistant response",
-    description: error.message,
-  });
-};
 
 interface MessagesTimelineProps {
   hasMessages: boolean;
@@ -562,8 +547,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                         size="icon-xs"
                         variant="outline"
                         className="border-border/50 bg-background/35 text-muted-foreground/45 shadow-none hover:border-border/70 hover:bg-background/55 hover:text-muted-foreground/70"
-                        onCopy={handleAssistantCopySuccess}
-                        onError={handleAssistantCopyError}
                       />
                     </div>
                   ) : null}
