@@ -30,6 +30,7 @@ import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore";
 import { GitManager } from "./git/Services/GitManager";
 import { GitStatusBroadcaster } from "./git/Services/GitStatusBroadcaster";
+import { WorktreeLocationResolver } from "./project/Services/WorktreeLocationResolver";
 import { Keybindings } from "./keybindings";
 import { Open, resolveAvailableEditors } from "./open";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer";
@@ -112,12 +113,31 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const open = yield* Open;
       const gitManager = yield* GitManager;
       const git = yield* GitCore;
+      const worktreeLocationResolver = yield* WorktreeLocationResolver;
       const gitStatusBroadcaster = yield* GitStatusBroadcaster;
       const terminalManager = yield* TerminalManager;
       const providerRegistry = yield* ProviderRegistry;
       const config = yield* ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents;
       const serverSettings = yield* ServerSettingsService;
+
+      const resolveCreateWorktreePath = Effect.fn("ws.resolveCreateWorktreePath")(
+        function* (input: {
+          cwd: string;
+          branch: string;
+          newBranch?: string;
+          path: string | null;
+        }) {
+          if (input.path !== null) {
+            return input.path;
+          }
+
+          return yield* worktreeLocationResolver.resolveCreateWorktreePath({
+            projectRoot: input.cwd,
+            name: input.newBranch ?? input.branch,
+          });
+        },
+      );
       const startup = yield* ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem;
@@ -376,11 +396,21 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             }
 
             if (bootstrap?.prepareWorktree) {
+              const worktreePath = yield* resolveCreateWorktreePath({
+                cwd: bootstrap.prepareWorktree.projectCwd,
+                branch: bootstrap.prepareWorktree.baseBranch,
+                path: null,
+                ...(bootstrap.prepareWorktree.branch
+                  ? { newBranch: bootstrap.prepareWorktree.branch }
+                  : {}),
+              });
               const worktree = yield* git.createWorktree({
                 cwd: bootstrap.prepareWorktree.projectCwd,
                 branch: bootstrap.prepareWorktree.baseBranch,
-                newBranch: bootstrap.prepareWorktree.branch,
-                path: null,
+                path: worktreePath,
+                ...(bootstrap.prepareWorktree.branch
+                  ? { newBranch: bootstrap.prepareWorktree.branch }
+                  : {}),
               });
               targetWorktreePath = worktree.worktree.path;
               yield* orchestrationEngine.dispatch({
@@ -755,7 +785,22 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.gitCreateWorktree]: (input) =>
           observeRpcEffect(
             WS_METHODS.gitCreateWorktree,
-            git.createWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            Effect.gen(function* () {
+              const worktreePath = yield* resolveCreateWorktreePath({
+                cwd: input.cwd,
+                branch: input.branch,
+                path: input.path,
+                ...(input.newBranch ? { newBranch: input.newBranch } : {}),
+              });
+              return yield* git
+                .createWorktree({
+                  path: worktreePath,
+                  cwd: input.cwd,
+                  branch: input.branch,
+                  ...(input.newBranch ? { newBranch: input.newBranch } : {}),
+                })
+                .pipe(Effect.tap(() => refreshGitStatus(input.cwd)));
+            }),
             { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.gitRemoveWorktree]: (input) =>

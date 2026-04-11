@@ -29,6 +29,7 @@ import { GitCoreLive } from "./git/Layers/GitCore";
 import { GitHubCliLive } from "./git/Layers/GitHubCli";
 import { GitStatusBroadcasterLive } from "./git/Layers/GitStatusBroadcaster";
 import { RoutingTextGenerationLive } from "./git/Layers/RoutingTextGeneration";
+import { WorktreeLocationResolverLive } from "./project/Layers/WorktreeLocationResolver";
 import { TerminalManagerLive } from "./terminal/Layers/Manager";
 import { GitManagerLive } from "./git/Layers/GitManager";
 import { KeybindingsLive } from "./keybindings";
@@ -165,9 +166,14 @@ const ProviderLayerLive = Layer.unwrap(
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
 
+const GitCoreLayerLive = GitCoreLive;
+const WorktreeLocationLayerLive = WorktreeLocationResolverLive.pipe(
+  Layer.provideMerge(ServerSettingsLive),
+);
+
 const GitManagerLayerLive = GitManagerLive.pipe(
   Layer.provideMerge(ProjectSetupScriptRunnerLive),
-  Layer.provideMerge(GitCoreLive),
+  Layer.provideMerge(GitCoreLayerLive),
   Layer.provideMerge(GitHubCliLive),
   Layer.provideMerge(RoutingTextGenerationLive),
 );
@@ -175,7 +181,7 @@ const GitManagerLayerLive = GitManagerLive.pipe(
 const GitLayerLive = Layer.empty.pipe(
   Layer.provideMerge(GitManagerLayerLive),
   Layer.provideMerge(GitStatusBroadcasterLive.pipe(Layer.provide(GitManagerLayerLive))),
-  Layer.provideMerge(GitCoreLive),
+  Layer.provideMerge(GitCoreLayerLive),
 );
 
 const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
@@ -205,6 +211,7 @@ const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
   Layer.provideMerge(ServerSettingsLive),
+  Layer.provideMerge(WorktreeLocationLayerLive),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLive),
   Layer.provideMerge(RepositoryIdentityResolverLive),

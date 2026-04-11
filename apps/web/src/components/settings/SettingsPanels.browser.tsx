@@ -200,6 +200,25 @@ function createBaseServerConfig(): ServerConfig {
   };
 }
 
+function installLocalApiStub() {
+  window.nativeApi = {
+    dialogs: {
+      confirm: vi.fn().mockResolvedValue(true),
+    },
+    persistence: {
+      getClientSettings: vi.fn().mockResolvedValue(null),
+      setClientSettings: vi.fn().mockResolvedValue(undefined),
+    },
+    server: {
+      refreshProviders: vi.fn().mockResolvedValue(undefined),
+      updateSettings: vi.fn().mockResolvedValue(DEFAULT_SERVER_SETTINGS),
+    },
+    shell: {
+      openInEditor: vi.fn().mockResolvedValue(undefined),
+    },
+  } as unknown as LocalApi;
+}
+
 function makeUtc(value: string) {
   return DateTime.makeUnsafe(Date.parse(value));
 }
@@ -334,6 +353,7 @@ describe("GeneralSettingsPanel observability", () => {
     await __resetLocalApiForTests();
     localStorage.clear();
     authAccessHarness.reset();
+    installLocalApiStub();
   });
 
   afterEach(async () => {
@@ -344,7 +364,6 @@ describe("GeneralSettingsPanel observability", () => {
     mounted = null;
     vi.unstubAllGlobals();
     Reflect.deleteProperty(window, "desktopBridge");
-    Reflect.deleteProperty(window, "nativeApi");
     document.body.innerHTML = "";
     resetServerStateForTests();
     await __resetLocalApiForTests();
@@ -690,5 +709,116 @@ describe("GeneralSettingsPanel observability", () => {
     await openLogsButton.click();
 
     expect(openInEditor).toHaveBeenCalledWith("/repo/project/.t3/logs", "cursor");
+  });
+
+  it("renders the worktree location row with the default preview", async () => {
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByText("Worktree location")).toBeInTheDocument();
+    await expect
+      .element(page.getByText("~/.t3/worktrees/project/feature-branch", { exact: true }))
+      .toBeInTheDocument();
+  });
+
+  it("updates the preview for each built-in worktree location mode", async () => {
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    const trigger = page.getByLabelText("Worktree location mode");
+
+    await trigger.click();
+    await page.getByRole("option", { name: "Project-subdirectory", exact: true }).click();
+    await expect
+      .element(page.getByText("/repo/project.worktrees/feature-branch", { exact: true }))
+      .toBeInTheDocument();
+
+    await trigger.click();
+    await page.getByRole("option", { name: "Project-sibling", exact: true }).click();
+    await expect
+      .element(page.getByText("/repo/project.feature-branch", { exact: true }))
+      .toBeInTheDocument();
+  });
+
+  it("reveals custom template controls, validates inline, and updates the preview", async () => {
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    const trigger = page.getByLabelText("Worktree location mode");
+    await trigger.click();
+    await page.getByRole("option", { name: "Custom", exact: true }).click();
+
+    await expect.element(page.getByLabelText("Custom worktree template")).toBeInTheDocument();
+    await expect.element(page.getByText("$T3_HOME", { exact: true })).toBeInTheDocument();
+    await expect.element(page.getByText("$PROJECT_DIRNAME", { exact: true })).toBeInTheDocument();
+    await expect.element(page.getByText("$PROJECT_NAME", { exact: true })).toBeInTheDocument();
+    await expect.element(page.getByText("$WORKTREE_NAME", { exact: true })).toBeInTheDocument();
+
+    const templateInput = page.getByLabelText("Custom worktree template");
+    await expect
+      .element(templateInput)
+      .toHaveValue("$PROJECT_DIRNAME/$PROJECT_NAME.$WORKTREE_NAME");
+
+    await templateInput.fill("$PROJECT_NAME/$WORKTREE_NAME");
+    await expect
+      .element(
+        page.getByText(
+          "Custom worktree templates must start with $T3_HOME, $PROJECT_DIRNAME, /, or \\.",
+        ),
+      )
+      .toBeInTheDocument();
+
+    await templateInput.fill("/custom/$PROJECT_DIRNAME/$WORKTREE_NAME");
+    await expect
+      .element(
+        page.getByText(
+          "$T3_HOME and $PROJECT_DIRNAME can only appear at the start of the template.",
+        ),
+      )
+      .toBeInTheDocument();
+
+    await templateInput.fill("$T3_HOME/custom/$PROJECT_NAME/$WORKTREE_NAME");
+    await expect
+      .element(page.getByText("~/.t3/custom/project/feature-branch", { exact: true }))
+      .toBeInTheDocument();
+  });
+
+  it("resets worktree location mode and template back to defaults", async () => {
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    const trigger = page.getByLabelText("Worktree location mode");
+    await trigger.click();
+    await page.getByRole("option", { name: "Custom", exact: true }).click();
+
+    const templateInput = page.getByLabelText("Custom worktree template");
+    await templateInput.fill("$T3_HOME/custom/$PROJECT_NAME/$WORKTREE_NAME");
+
+    await page.getByLabelText("Reset worktree location to default").click();
+
+    await expect
+      .element(page.getByText("~/.t3/worktrees/project/feature-branch", { exact: true }))
+      .toBeInTheDocument();
+    await expect.element(page.getByLabelText("Custom worktree template")).not.toBeInTheDocument();
   });
 });
