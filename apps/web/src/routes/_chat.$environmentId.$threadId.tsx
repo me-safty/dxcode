@@ -17,7 +17,7 @@ import {
   stripDiffSearchParams,
 } from "../diffRouteSearch";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import { selectEnvironmentState, selectThreadByRef, useStore } from "../store";
+import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
 import { Sheet, SheetPopup } from "../components/ui/sheet";
@@ -172,7 +172,7 @@ function ChatThreadRouteView() {
     (store) => selectEnvironmentState(store, threadRef?.environmentId ?? null).bootstrapComplete,
   );
   const serverThread = useStore(useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]));
-  const threadExists = useStore((store) => selectThreadByRef(store, threadRef) !== undefined);
+  const threadExists = useStore((store) => selectThreadExistsByRef(store, threadRef));
   const environmentHasServerThreads = useStore(
     (store) => selectEnvironmentState(store, threadRef?.environmentId ?? null).threadIds.length > 0,
   );
@@ -208,6 +208,7 @@ function ChatThreadRouteView() {
     if (!threadRef) {
       return;
     }
+    setHasOpenedDiff(true);
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(threadRef),
@@ -217,12 +218,6 @@ function ChatThreadRouteView() {
       },
     });
   }, [navigate, threadRef]);
-
-  useEffect(() => {
-    if (diffOpen) {
-      setHasOpenedDiff(true);
-    }
-  }, [diffOpen]);
 
   useEffect(() => {
     if (!threadRef || !bootstrapComplete) {
