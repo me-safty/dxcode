@@ -36,6 +36,42 @@ describe("getLinuxWindowControlsLayout", () => {
     });
   });
 
+  it("falls back when kwinrc exists but does not define button placement", () => {
+    const layout = getLinuxWindowControlsLayout({
+      existsSync: vi.fn().mockReturnValue(true),
+      homeDir: "/home/tester",
+      readFileSync: vi.fn().mockReturnValue("[org.kde.kdecoration2]\n"),
+      spawnSync: vi.fn().mockReturnValue({
+        status: 0,
+        stdout: "'close,minimize:maximize'\n",
+      }),
+    });
+
+    expect(layout).toEqual({
+      left: ["close", "minimize"],
+      right: ["maximize"],
+    });
+  });
+
+  it("falls back to GNOME when reading kwinrc throws", () => {
+    const layout = getLinuxWindowControlsLayout({
+      existsSync: vi.fn().mockReturnValue(true),
+      homeDir: "/home/tester",
+      readFileSync: vi.fn().mockImplementation(() => {
+        throw new Error("permission denied");
+      }),
+      spawnSync: vi.fn().mockReturnValue({
+        status: 0,
+        stdout: "'close,minimize:maximize'\n",
+      }),
+    });
+
+    expect(layout).toEqual({
+      left: ["close", "minimize"],
+      right: ["maximize"],
+    });
+  });
+
   it("uses the default right-side controls when no desktop layout is available", () => {
     const layout = getLinuxWindowControlsLayout({
       existsSync: vi.fn().mockReturnValue(false),

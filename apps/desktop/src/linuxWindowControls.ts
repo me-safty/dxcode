@@ -52,10 +52,16 @@ function readKdeWindowControlsLayout(
   const content = dependencies.readFileSync(kwinConfigPath, "utf8");
   const left = content.match(/^ButtonsOnLeft=(.*)$/m)?.[1]?.trim();
   const right = content.match(/^ButtonsOnRight=(.*)$/m)?.[1]?.trim();
+  const parsedLeft = parseKdeButtonBank(left);
+  const parsedRight = parseKdeButtonBank(right);
+
+  if (parsedLeft.length === 0 && parsedRight.length === 0) {
+    return null;
+  }
 
   return {
-    left: parseKdeButtonBank(left),
-    right: parseKdeButtonBank(right),
+    left: parsedLeft,
+    right: parsedRight,
   };
 }
 
@@ -106,6 +112,18 @@ function readGnomeWindowControlsLayout(
   };
 }
 
+function safelyReadWindowControlsLayout(
+  source: string,
+  readLayout: () => DesktopWindowControlsLayout | null,
+): DesktopWindowControlsLayout | null {
+  try {
+    return readLayout();
+  } catch (error) {
+    console.warn(`[desktop] failed to read linux window controls from ${source}`, error);
+    return null;
+  }
+}
+
 export function getLinuxWindowControlsLayout(
   dependencies: LinuxWindowControlsDependencies = {},
 ): DesktopWindowControlsLayout {
@@ -117,8 +135,12 @@ export function getLinuxWindowControlsLayout(
   };
 
   return (
-    readKdeWindowControlsLayout(resolvedDependencies) ??
-    readGnomeWindowControlsLayout(resolvedDependencies) ??
+    safelyReadWindowControlsLayout("kde", () =>
+      readKdeWindowControlsLayout(resolvedDependencies),
+    ) ??
+    safelyReadWindowControlsLayout("gnome", () =>
+      readGnomeWindowControlsLayout(resolvedDependencies),
+    ) ??
     FALLBACK_WINDOW_CONTROLS_LAYOUT
   );
 }

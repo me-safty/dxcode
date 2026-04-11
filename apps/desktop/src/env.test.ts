@@ -1,6 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { getWindowControlsLayout } from "./env";
+
+vi.mock("./linuxWindowControls", () => ({
+  getLinuxWindowControlsLayout: vi.fn().mockReturnValue({
+    left: [],
+    right: ["minimize", "maximize", "close"],
+  }),
+}));
 
 describe("getWindowControlsLayout", () => {
   it("uses the standard macOS traffic-light placement in ltr locales", () => {
@@ -10,10 +17,10 @@ describe("getWindowControlsLayout", () => {
     });
   });
 
-  it("mirrors macOS traffic lights in rtl locales", () => {
+  it("keeps macOS traffic lights left-aligned in rtl locales", () => {
     expect(getWindowControlsLayout({ locale: "ar", platform: "macos" })).toEqual({
-      left: [],
-      right: ["maximize", "minimize", "close"],
+      left: ["close", "minimize", "maximize"],
+      right: [],
     });
   });
 

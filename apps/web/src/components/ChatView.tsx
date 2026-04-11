@@ -34,7 +34,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
-import { isElectron, usesWCO } from "../env";
+import { isElectron, usesDesktopChromeHeader, usesWCO } from "../env";
 import { readLocalApi } from "../localApi";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
@@ -3284,7 +3284,7 @@ export default function ChatView(props: ChatViewProps) {
   }
 
   let headerClassName = "border-b border-border px-3 py-2 sm:px-5 sm:py-3";
-  if (isElectron) {
+  if (usesDesktopChromeHeader) {
     headerClassName = "border-b border-border drag-region flex h-[52px] items-center px-3 sm:px-5";
   }
   if (usesWCO) {

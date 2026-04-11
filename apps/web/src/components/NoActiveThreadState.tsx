@@ -1,11 +1,11 @@
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { SidebarInset, SidebarTrigger } from "./ui/sidebar";
-import { isElectron, usesWCO } from "../env";
+import { usesDesktopChromeHeader, usesWCO } from "../env";
 import { cn } from "~/lib/utils";
 
 export function NoActiveThreadState() {
   let headerClassName = "px-3 py-2 sm:px-5 sm:py-3";
-  if (isElectron) {
+  if (usesDesktopChromeHeader) {
     headerClassName = "drag-region flex h-[52px] items-center px-3 sm:px-5";
   }
   if (usesWCO) {
@@ -17,7 +17,7 @@ export function NoActiveThreadState() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
         <header className={cn("border-b border-border", headerClassName)}>
-          {isElectron ? (
+          {usesDesktopChromeHeader ? (
             <span className="text-xs text-muted-foreground/50">No active thread</span>
           ) : (
             <div className="flex items-center gap-2">

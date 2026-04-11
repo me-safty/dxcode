@@ -58,8 +58,8 @@ import {
   desktopPlatform,
   isElectron,
   windowControlsLayout,
-  usesNativeLinuxTitleBar,
   usesCustomLinuxWindowControls,
+  usesDesktopChromeHeader,
   usesWCO,
 } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
@@ -1945,12 +1945,7 @@ function SortableProjectItem({
   );
 }
 
-const SidebarChromeHeader = memo(function SidebarChromeHeader({
-  isElectron,
-}: {
-  isElectron: boolean;
-}) {
-  const usesDesktopChromeHeader = isElectron && !usesNativeLinuxTitleBar;
+const SidebarChromeHeader = memo(function SidebarChromeHeader() {
   const usesCenteredLinuxWordmark = usesCustomLinuxWindowControls;
   const wordmark = (
     <div className="flex items-center gap-2">
@@ -3188,7 +3183,7 @@ export default function Sidebar() {
 
   return (
     <>
-      <SidebarChromeHeader isElectron={isElectron} />
+      <SidebarChromeHeader />
 
       {isOnSettings ? (
         <SettingsSidebarNav pathname={pathname} />

@@ -57,7 +57,7 @@ export function getWindowControlsLayout(options?: {
   const layout =
     resolvedPlatform === "macos" ? MACOS_WINDOW_CONTROLS_LAYOUT : WINDOWS_WINDOW_CONTROLS_LAYOUT;
 
-  if (!rtl) {
+  if (!rtl || resolvedPlatform === "macos") {
     return layout;
   }
 

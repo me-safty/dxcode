@@ -21,3 +21,22 @@ export const usesNativeLinuxTitleBar =
 export const usesWCO =
   desktopPlatform === "windows" ||
   (desktopPlatform === "linux" && runningLinuxTitleBarMode === "overlay");
+
+export function shouldRenderDesktopChromeHeader(options?: {
+  platform?: Platform;
+  linuxTitleBarMode?: LinuxTitleBarMode;
+}): boolean {
+  const resolvedPlatform = options?.platform ?? desktopPlatform;
+  if (resolvedPlatform === "web") {
+    return false;
+  }
+
+  if (resolvedPlatform === "linux") {
+    const resolvedLinuxTitleBarMode = options?.linuxTitleBarMode ?? runningLinuxTitleBarMode;
+    return resolvedLinuxTitleBarMode !== "native";
+  }
+
+  return true;
+}
+
+export const usesDesktopChromeHeader = shouldRenderDesktopChromeHeader();
