@@ -801,6 +801,55 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect("status preserves lowercase merged and closed PR states from gh json", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/status-lowercase-state"]);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/status-lowercase-state"]);
+
+      const { manager } = yield* makeManager({
+        ghScenario: {
+          prListSequence: [
+            JSON.stringify([
+              {
+                number: 16,
+                title: "Closed PR",
+                url: "https://github.com/pingdotgg/codething-mvp/pull/16",
+                baseRefName: "main",
+                headRefName: "feature/status-lowercase-state",
+                state: "closed",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+              },
+              {
+                number: 17,
+                title: "Merged PR",
+                url: "https://github.com/pingdotgg/codething-mvp/pull/17",
+                baseRefName: "main",
+                headRefName: "feature/status-lowercase-state",
+                state: "merged",
+                updatedAt: "2026-01-02T00:00:00.000Z",
+              },
+            ]),
+          ],
+        },
+      });
+
+      const status = yield* manager.status({ cwd: repoDir });
+
+      expect(status.pr).toEqual({
+        number: 17,
+        title: "Merged PR",
+        url: "https://github.com/pingdotgg/codething-mvp/pull/17",
+        baseBranch: "main",
+        headBranch: "feature/status-lowercase-state",
+        state: "merged",
+      });
+    }),
+  );
+
   it.effect("status returns an explicit non-repo result for non-git directories", () =>
     Effect.gen(function* () {
       const cwd = yield* makeTempDir("t3code-git-manager-non-repo-");

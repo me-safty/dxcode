@@ -50,13 +50,14 @@ function normalizeGitHubPullRequestState(input: {
   state?: string | null | undefined;
   mergedAt?: string | null | undefined;
 }): "open" | "closed" | "merged" {
+  const normalizedState = input.state?.trim().toUpperCase();
   if (
     (typeof input.mergedAt === "string" && input.mergedAt.trim().length > 0) ||
-    input.state === "MERGED"
+    normalizedState === "MERGED"
   ) {
     return "merged";
   }
-  if (input.state === "CLOSED") {
+  if (normalizedState === "CLOSED") {
     return "closed";
   }
   return "open";
