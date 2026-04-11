@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_DESKTOP_SETTINGS,
   readDesktopSettings,
+  setDesktopLinuxTitleBarMode,
   setDesktopServerExposurePreference,
   writeDesktopSettings,
 } from "./desktopSettings";
@@ -35,10 +36,12 @@ describe("desktopSettings", () => {
 
     writeDesktopSettings(settingsPath, {
       serverExposureMode: "network-accessible",
+      linuxTitleBarMode: "custom",
     });
 
     expect(readDesktopSettings(settingsPath)).toEqual({
       serverExposureMode: "network-accessible",
+      linuxTitleBarMode: "custom",
     });
   });
 
@@ -47,11 +50,13 @@ describe("desktopSettings", () => {
       setDesktopServerExposurePreference(
         {
           serverExposureMode: "local-only",
+          linuxTitleBarMode: DEFAULT_DESKTOP_SETTINGS.linuxTitleBarMode,
         },
         "network-accessible",
       ),
     ).toEqual({
       serverExposureMode: "network-accessible",
+      linuxTitleBarMode: DEFAULT_DESKTOP_SETTINGS.linuxTitleBarMode,
     });
   });
 
@@ -60,5 +65,20 @@ describe("desktopSettings", () => {
     fs.writeFileSync(settingsPath, "{not-json", "utf8");
 
     expect(readDesktopSettings(settingsPath)).toEqual(DEFAULT_DESKTOP_SETTINGS);
+  });
+
+  it("updates the requested linux title bar mode", () => {
+    expect(
+      setDesktopLinuxTitleBarMode(
+        {
+          ...DEFAULT_DESKTOP_SETTINGS,
+          linuxTitleBarMode: "native",
+        },
+        "overlay",
+      ),
+    ).toEqual({
+      ...DEFAULT_DESKTOP_SETTINGS,
+      linuxTitleBarMode: "overlay",
+    });
   });
 });

@@ -1,4 +1,4 @@
-import type { DesktopUpdateState } from "@t3tools/contracts";
+import type { DesktopPlatform, DesktopUpdateState } from "@t3tools/contracts";
 
 export function shouldBroadcastDownloadProgress(
   currentState: DesktopUpdateState,
@@ -31,7 +31,7 @@ export function getCanRetryAfterDownloadFailure(currentState: DesktopUpdateState
 export function getAutoUpdateDisabledReason(args: {
   isDevelopment: boolean;
   isPackaged: boolean;
-  platform: NodeJS.Platform;
+  platform: DesktopPlatform;
   appImage?: string | undefined;
   disabledByEnv: boolean;
   hasUpdateFeedConfig: boolean;

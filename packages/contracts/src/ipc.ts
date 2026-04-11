@@ -51,7 +51,7 @@ import type {
 } from "./orchestration";
 import type { EnvironmentId } from "./baseSchemas";
 import { EditorId } from "./editor";
-import { ClientSettings, ServerSettings, ServerSettingsPatch } from "./settings";
+import { ClientSettings, LinuxTitleBarMode, ServerSettings, ServerSettingsPatch } from "./settings";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -71,7 +71,16 @@ export type DesktopUpdateStatus =
   | "error";
 
 export type DesktopRuntimeArch = "arm64" | "x64" | "other";
+export type DesktopPlatform = "macos" | "windows" | "linux";
+export type WebPlatform = "web";
+export type Platform = DesktopPlatform | WebPlatform;
 export type DesktopTheme = "light" | "dark" | "system";
+export type DesktopWindowControl = "minimize" | "maximize" | "close";
+
+export interface DesktopWindowControlsLayout {
+  left: readonly DesktopWindowControl[];
+  right: readonly DesktopWindowControl[];
+}
 
 export interface DesktopRuntimeInfo {
   hostArch: DesktopRuntimeArch;
@@ -132,6 +141,10 @@ export interface DesktopServerExposureState {
 
 export interface DesktopBridge {
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
+  getPlatform?: () => DesktopPlatform | null;
+  getLinuxTitleBarMode?: () => LinuxTitleBarMode | null;
+  setLinuxTitleBarMode?: (mode: LinuxTitleBarMode) => Promise<LinuxTitleBarMode>;
+  getWindowControlsLayout?: () => DesktopWindowControlsLayout | null;
   getClientSettings: () => Promise<ClientSettings | null>;
   setClientSettings: (settings: ClientSettings) => Promise<void>;
   getSavedEnvironmentRegistry: () => Promise<readonly PersistedSavedEnvironmentRecord[]>;
@@ -146,6 +159,10 @@ export interface DesktopBridge {
   pickFolder: () => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
+  minimizeWindow?: () => Promise<void>;
+  toggleMaximizeWindow?: () => Promise<void>;
+  closeWindow?: () => Promise<void>;
+  restartApp?: () => Promise<void>;
   showContextMenu: <T extends string>(
     items: readonly ContextMenuItem<T>[],
     position?: { x: number; y: number },

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { isElectron } from "~/env";
+import { isElectron, usesWCO } from "~/env";
 import { cn } from "~/lib/utils";
 
 import { Skeleton } from "./ui/skeleton";
@@ -10,7 +10,8 @@ export type DiffPanelMode = "inline" | "sheet" | "sidebar";
 function getDiffPanelHeaderRowClassName(mode: DiffPanelMode) {
   const shouldUseDragRegion = isElectron && mode !== "sheet";
   return cn(
-    "flex items-center justify-between gap-2 px-4",
+    "flex items-center justify-between gap-2",
+    usesWCO ? "titlebar-overlay-safe titlebar-overlay-safe-md" : "px-4",
     shouldUseDragRegion ? "drag-region h-[52px] border-b border-border" : "h-12",
   );
 }

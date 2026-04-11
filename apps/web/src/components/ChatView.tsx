@@ -34,7 +34,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
-import { isElectron } from "../env";
+import { isElectron, usesWCO } from "../env";
 import { readLocalApi } from "../localApi";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
@@ -3283,15 +3283,19 @@ export default function ChatView(props: ChatViewProps) {
     return <NoActiveThreadState />;
   }
 
+  let headerClassName = "border-b border-border px-3 py-2 sm:px-5 sm:py-3";
+  if (isElectron) {
+    headerClassName = "border-b border-border drag-region flex h-[52px] items-center px-3 sm:px-5";
+  }
+  if (usesWCO) {
+    headerClassName =
+      "border-b border-border drag-region flex h-[52px] items-center titlebar-overlay-safe titlebar-overlay-safe-sm titlebar-overlay-safe-sm-up-lg";
+  }
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
       {/* Top bar */}
-      <header
-        className={cn(
-          "border-b border-border px-3 sm:px-5",
-          isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
-        )}
-      >
+      <header className={headerClassName}>
         <ChatHeader
           activeThreadEnvironmentId={activeThread.environmentId}
           activeThreadId={activeThread.id}

@@ -1,7 +1,7 @@
-import type { DesktopRuntimeArch, DesktopRuntimeInfo } from "@t3tools/contracts";
+import type { DesktopPlatform, DesktopRuntimeArch, DesktopRuntimeInfo } from "@t3tools/contracts";
 
 interface ResolveDesktopRuntimeInfoInput {
-  readonly platform: NodeJS.Platform;
+  readonly platform: DesktopPlatform;
   readonly processArch: string;
   readonly runningUnderArm64Translation: boolean;
 }
@@ -17,7 +17,7 @@ export function resolveDesktopRuntimeInfo(
 ): DesktopRuntimeInfo {
   const appArch = normalizeDesktopArch(input.processArch);
 
-  if (input.platform !== "darwin") {
+  if (input.platform !== "macos") {
     return {
       hostArch: appArch,
       appArch,

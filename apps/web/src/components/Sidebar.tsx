@@ -11,6 +11,7 @@ import {
   TerminalIcon,
   TriangleAlertIcon,
 } from "lucide-react";
+import { LinuxWindowControls } from "./LinuxWindowControls";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
@@ -53,7 +54,14 @@ import {
   type SidebarThreadSortOrder,
 } from "@t3tools/contracts/settings";
 import { usePrimaryEnvironmentId } from "../environments/primary";
-import { isElectron } from "../env";
+import {
+  desktopPlatform,
+  isElectron,
+  windowControlsLayout,
+  usesNativeLinuxTitleBar,
+  usesCustomLinuxWindowControls,
+  usesWCO,
+} from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
@@ -1942,6 +1950,8 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 }: {
   isElectron: boolean;
 }) {
+  const usesDesktopChromeHeader = isElectron && !usesNativeLinuxTitleBar;
+  const usesCenteredLinuxWordmark = usesCustomLinuxWindowControls;
   const wordmark = (
     <div className="flex items-center gap-2">
       <SidebarTrigger className="shrink-0 md:hidden" />
@@ -1970,12 +1980,66 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
     </div>
   );
 
-  return isElectron ? (
-    <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]">
-      {wordmark}
+  const linuxLeftControlsCount = windowControlsLayout?.left.length ?? 0;
+  const linuxRightControlsCount = windowControlsLayout?.right.length ?? 0;
+  const linuxSidebarHeaderInsetStyle = useMemo(() => {
+    if (!usesCenteredLinuxWordmark) {
+      return undefined;
+    }
+
+    const paddingLeft =
+      linuxLeftControlsCount === 0 ? undefined : `${linuxLeftControlsCount * 1.75 + 0.5}rem`;
+    const paddingRight =
+      linuxRightControlsCount === 0 ? undefined : `${linuxRightControlsCount * 1.75 + 0.5}rem`;
+
+    return {
+      paddingLeft,
+      paddingRight,
+    };
+  }, [linuxLeftControlsCount, linuxRightControlsCount, usesCenteredLinuxWordmark]);
+
+  const desktopHeaderClassName = useMemo(() => {
+    if (desktopPlatform === "macos") {
+      return "drag-region relative h-[52px] flex-row items-center gap-2 py-0 px-4 pl-[90px]";
+    }
+
+    if (usesCenteredLinuxWordmark) {
+      return "drag-region relative h-[52px] flex-row items-center gap-2 px-3 py-0";
+    }
+
+    if (usesWCO) {
+      return "drag-region relative h-[52px] flex-row items-center gap-2 py-0 titlebar-overlay-safe titlebar-overlay-safe-md";
+    }
+
+    return "drag-region relative h-[52px] flex-row items-center gap-2 px-4 py-0";
+  }, [usesCenteredLinuxWordmark]);
+
+  if (!usesDesktopChromeHeader) {
+    return (
+      <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">
+        {wordmark}
+      </SidebarHeader>
+    );
+  }
+
+  return (
+    <SidebarHeader className={desktopHeaderClassName}>
+      {usesCenteredLinuxWordmark ? (
+        <div className="absolute inset-x-3 top-1/2 flex -translate-y-1/2 items-center">
+          <LinuxWindowControls />
+        </div>
+      ) : null}
+      {usesCenteredLinuxWordmark ? (
+        <div
+          className="relative z-[1] pointer-events-none flex min-w-0 flex-1 justify-center"
+          style={linuxSidebarHeaderInsetStyle}
+        >
+          <div className="pointer-events-auto">{wordmark}</div>
+        </div>
+      ) : (
+        wordmark
+      )}
     </SidebarHeader>
-  ) : (
-    <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">{wordmark}</SidebarHeader>
   );
 });
 

@@ -68,7 +68,7 @@ describe("getAutoUpdateDisabledReason", () => {
       getAutoUpdateDisabledReason({
         isDevelopment: true,
         isPackaged: false,
-        platform: "darwin",
+        platform: "macos",
         appImage: undefined,
         disabledByEnv: false,
         hasUpdateFeedConfig: true,
@@ -81,7 +81,7 @@ describe("getAutoUpdateDisabledReason", () => {
       getAutoUpdateDisabledReason({
         isDevelopment: false,
         isPackaged: true,
-        platform: "darwin",
+        platform: "macos",
         appImage: undefined,
         disabledByEnv: false,
         hasUpdateFeedConfig: false,
@@ -94,7 +94,7 @@ describe("getAutoUpdateDisabledReason", () => {
       getAutoUpdateDisabledReason({
         isDevelopment: false,
         isPackaged: true,
-        platform: "darwin",
+        platform: "macos",
         appImage: undefined,
         disabledByEnv: false,
         hasUpdateFeedConfig: true,
@@ -107,7 +107,7 @@ describe("getAutoUpdateDisabledReason", () => {
       getAutoUpdateDisabledReason({
         isDevelopment: false,
         isPackaged: true,
-        platform: "darwin",
+        platform: "macos",
         appImage: undefined,
         disabledByEnv: true,
         hasUpdateFeedConfig: true,

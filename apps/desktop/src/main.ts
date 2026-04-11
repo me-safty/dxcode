@@ -29,14 +29,17 @@ import type {
   DesktopUpdateState,
 } from "@t3tools/contracts";
 import { autoUpdater } from "electron-updater";
+import { Schema } from "effect";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS, LinuxTitleBarMode } from "@t3tools/contracts/settings";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort";
 import {
   DEFAULT_DESKTOP_SETTINGS,
   readDesktopSettings,
+  setDesktopLinuxTitleBarMode,
   setDesktopServerExposurePreference,
   writeDesktopSettings,
 } from "./desktopSettings";
@@ -67,6 +70,7 @@ import {
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
+import { getWindowChromeOptions, getWindowControlsLayout, platform } from "./env";
 
 syncShellEnvironment();
 
@@ -82,6 +86,10 @@ const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL = "desktop:get-local-environment-bootstrap";
+const GET_PLATFORM_CHANNEL = "desktop:get-platform";
+const GET_LINUX_TITLE_BAR_MODE_CHANNEL = "desktop:get-linux-title-bar-mode";
+const SET_LINUX_TITLE_BAR_MODE_CHANNEL = "desktop:set-linux-title-bar-mode";
+const GET_WINDOW_CONTROLS_LAYOUT_CHANNEL = "desktop:get-window-controls-layout";
 const GET_CLIENT_SETTINGS_CHANNEL = "desktop:get-client-settings";
 const SET_CLIENT_SETTINGS_CHANNEL = "desktop:set-client-settings";
 const GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL = "desktop:get-saved-environment-registry";
@@ -91,6 +99,10 @@ const SET_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:set-saved-environment-secr
 const REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:remove-saved-environment-secret";
 const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
+const MINIMIZE_WINDOW_CHANNEL = "desktop:minimize-window";
+const TOGGLE_MAXIMIZE_WINDOW_CHANNEL = "desktop:toggle-maximize-window";
+const CLOSE_WINDOW_CHANNEL = "desktop:close-window";
+const RESTART_APP_CHANNEL = "desktop:restart-app";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
@@ -118,7 +130,6 @@ const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
 const DESKTOP_LOOPBACK_HOST = "127.0.0.1";
 const DESKTOP_REQUIRED_PORT_PROBE_HOSTS = ["0.0.0.0", "::"] as const;
-
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 type LinuxDesktopNamedApp = Electron.App & {
   setDesktopName?: (desktopName: string) => void;
@@ -145,11 +156,13 @@ let restoreStdIoCapture: (() => void) | null = null;
 let backendObservabilitySettings = readPersistedBackendObservabilitySettings();
 let desktopSettings = readDesktopSettings(DESKTOP_SETTINGS_PATH);
 let desktopServerExposureMode: DesktopServerExposureMode = desktopSettings.serverExposureMode;
+let currentClientSettings: ClientSettings =
+  readClientSettings(CLIENT_SETTINGS_PATH) ?? DEFAULT_CLIENT_SETTINGS;
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
 const expectedBackendExitChildren = new WeakSet<ChildProcess.ChildProcess>();
 const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
-  platform: process.platform,
+  platform,
   processArch: process.arch,
   runningUnderArm64Translation: app.runningUnderARM64Translation === true,
 });
@@ -462,12 +475,12 @@ function captureBackendOutput(child: ChildProcess.ChildProcess): void {
 
 initializePackagedLogging();
 
-if (process.platform === "linux") {
+if (platform === "linux") {
   app.commandLine.appendSwitch("class", LINUX_WM_CLASS);
 }
 
 function getDestructiveMenuIcon(): Electron.NativeImage | undefined {
-  if (process.platform !== "darwin") return undefined;
+  if (platform !== "macos") return undefined;
   if (destructiveMenuIconCache !== undefined) {
     return destructiveMenuIconCache ?? undefined;
   }
@@ -734,7 +747,7 @@ function handleCheckForUpdatesMenuClick(): void {
   const disabledReason = getAutoUpdateDisabledReason({
     isDevelopment,
     isPackaged: app.isPackaged,
-    platform: process.platform,
+    platform,
     appImage: process.env.APPIMAGE,
     disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
     hasUpdateFeedConfig,
@@ -781,7 +794,7 @@ async function checkForUpdatesFromMenu(): Promise<void> {
 function configureApplicationMenu(): void {
   const template: MenuItemConstructorOptions[] = [];
 
-  if (process.platform === "darwin") {
+  if (platform === "macos") {
     template.push({
       label: app.name,
       submenu: [
@@ -812,7 +825,7 @@ function configureApplicationMenu(): void {
     {
       label: "File",
       submenu: [
-        ...(process.platform === "darwin"
+        ...(platform === "macos"
           ? []
           : [
               {
@@ -822,7 +835,7 @@ function configureApplicationMenu(): void {
               },
               { type: "separator" as const },
             ]),
-        { role: process.platform === "darwin" ? "close" : "quit" },
+        { role: platform === "macos" ? "close" : "quit" },
       ],
     },
     { role: "editMenu" },
@@ -891,9 +904,9 @@ function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
  */
 function resolveUserDataPath(): string {
   const appDataBase =
-    process.platform === "win32"
+    platform === "windows"
       ? process.env.APPDATA || Path.join(OS.homedir(), "AppData", "Roaming")
-      : process.platform === "darwin"
+      : platform === "macos"
         ? Path.join(OS.homedir(), "Library", "Application Support")
         : process.env.XDG_CONFIG_HOME || Path.join(OS.homedir(), ".config");
 
@@ -914,15 +927,15 @@ function configureAppIdentity(): void {
     version: commitHash ?? "unknown",
   });
 
-  if (process.platform === "win32") {
+  if (platform === "windows") {
     app.setAppUserModelId(APP_USER_MODEL_ID);
   }
 
-  if (process.platform === "linux") {
+  if (platform === "linux") {
     (app as LinuxDesktopNamedApp).setDesktopName?.(LINUX_DESKTOP_ENTRY_NAME);
   }
 
-  if (process.platform === "darwin" && app.dock) {
+  if (platform === "macos" && app.dock) {
     const iconPath = resolveIconPath("png");
     if (iconPath) {
       app.dock.setIcon(iconPath);
@@ -954,7 +967,7 @@ function revealWindow(window: BrowserWindow): void {
     window.show();
   }
 
-  if (process.platform === "darwin") {
+  if (platform === "macos") {
     app.focus({ steal: true });
   }
 
@@ -980,7 +993,7 @@ function shouldEnableAutoUpdates(): boolean {
     getAutoUpdateDisabledReason({
       isDevelopment,
       isPackaged: app.isPackaged,
-      platform: process.platform,
+      platform,
       appImage: process.env.APPIMAGE,
       disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
       hasUpdateFeedConfig,
@@ -1378,8 +1391,34 @@ function registerIpcHandlers(): void {
     } as const;
   });
 
+  ipcMain.removeAllListeners(GET_PLATFORM_CHANNEL);
+  ipcMain.on(GET_PLATFORM_CHANNEL, (event) => {
+    event.returnValue = platform;
+  });
+
+  ipcMain.removeAllListeners(GET_LINUX_TITLE_BAR_MODE_CHANNEL);
+  ipcMain.on(GET_LINUX_TITLE_BAR_MODE_CHANNEL, (event) => {
+    event.returnValue = platform === "linux" ? desktopSettings.linuxTitleBarMode : null;
+  });
+
+  ipcMain.removeAllListeners(GET_WINDOW_CONTROLS_LAYOUT_CHANNEL);
+  ipcMain.on(GET_WINDOW_CONTROLS_LAYOUT_CHANNEL, (event) => {
+    event.returnValue = getWindowControlsLayout({ locale: app.getLocale() });
+  });
+
+  ipcMain.removeHandler(SET_LINUX_TITLE_BAR_MODE_CHANNEL);
+  ipcMain.handle(SET_LINUX_TITLE_BAR_MODE_CHANNEL, async (_event, rawMode: unknown) => {
+    if (!Schema.is(LinuxTitleBarMode)(rawMode)) {
+      throw new Error("Invalid linux title bar mode.");
+    }
+
+    desktopSettings = setDesktopLinuxTitleBarMode(desktopSettings, rawMode);
+    writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
+    return desktopSettings.linuxTitleBarMode;
+  });
+
   ipcMain.removeHandler(GET_CLIENT_SETTINGS_CHANNEL);
-  ipcMain.handle(GET_CLIENT_SETTINGS_CHANNEL, async () => readClientSettings(CLIENT_SETTINGS_PATH));
+  ipcMain.handle(GET_CLIENT_SETTINGS_CHANNEL, async () => currentClientSettings);
 
   ipcMain.removeHandler(SET_CLIENT_SETTINGS_CHANNEL);
   ipcMain.handle(SET_CLIENT_SETTINGS_CHANNEL, async (_event, rawSettings: unknown) => {
@@ -1387,7 +1426,9 @@ function registerIpcHandlers(): void {
       throw new Error("Invalid client settings payload.");
     }
 
-    writeClientSettings(CLIENT_SETTINGS_PATH, rawSettings as ClientSettings);
+    const nextSettings = rawSettings as ClientSettings;
+    currentClientSettings = nextSettings;
+    writeClientSettings(CLIENT_SETTINGS_PATH, nextSettings);
   });
 
   ipcMain.removeHandler(GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL);
@@ -1512,6 +1553,34 @@ function registerIpcHandlers(): void {
     }
 
     nativeTheme.themeSource = theme;
+  });
+
+  ipcMain.removeHandler(MINIMIZE_WINDOW_CHANNEL);
+  ipcMain.handle(MINIMIZE_WINDOW_CHANNEL, async (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+  });
+
+  ipcMain.removeHandler(TOGGLE_MAXIMIZE_WINDOW_CHANNEL);
+  ipcMain.handle(TOGGLE_MAXIMIZE_WINDOW_CHANNEL, async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) {
+      return;
+    }
+    if (window.isMaximized()) {
+      window.unmaximize();
+      return;
+    }
+    window.maximize();
+  });
+
+  ipcMain.removeHandler(CLOSE_WINDOW_CHANNEL);
+  ipcMain.handle(CLOSE_WINDOW_CHANNEL, async (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close();
+  });
+
+  ipcMain.removeHandler(RESTART_APP_CHANNEL);
+  ipcMain.handle(RESTART_APP_CHANNEL, async () => {
+    relaunchDesktopApp("manualRestart");
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
@@ -1639,8 +1708,8 @@ function registerIpcHandlers(): void {
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {
-  if (process.platform === "darwin") return {}; // macOS uses .icns from app bundle
-  const ext = process.platform === "win32" ? "ico" : "png";
+  if (platform === "macos") return {}; // macOS uses .icns from app bundle
+  const ext = platform === "windows" ? "ico" : "png";
   const iconPath = resolveIconPath(ext);
   return iconPath ? { icon: iconPath } : {};
 }
@@ -1660,8 +1729,7 @@ function createWindow(): BrowserWindow {
     backgroundColor: getInitialWindowBackgroundColor(),
     ...getIconOption(),
     title: APP_DISPLAY_NAME,
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 18 },
+    ...getWindowChromeOptions(desktopSettings.linuxTitleBarMode),
     webPreferences: {
       preload: Path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -1881,12 +1949,12 @@ app
   });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin" && !isQuitting) {
+  if (platform !== "macos" && !isQuitting) {
     app.quit();
   }
 });
 
-if (process.platform !== "win32") {
+if (platform !== "windows") {
   process.on("SIGINT", () => {
     if (isQuitting) return;
     isQuitting = true;

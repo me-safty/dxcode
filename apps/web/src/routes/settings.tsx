@@ -1,6 +1,7 @@
 import { RotateCcwIcon } from "lucide-react";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { cn } from "~/lib/utils";
 
 import {
   ensurePrimaryEnvironmentReady,
@@ -9,7 +10,7 @@ import {
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { Button } from "../components/ui/button";
 import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
-import { isElectron } from "../env";
+import { isElectron, usesWCO } from "../env";
 
 function SettingsContentLayout() {
   const [restoreSignal, setRestoreSignal] = useState(0);
@@ -56,7 +57,12 @@ function SettingsContentLayout() {
         )}
 
         {isElectron && (
-          <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
+          <div
+            className={cn(
+              "drag-region flex h-[52px] shrink-0 items-center border-b border-border",
+              usesWCO ? "titlebar-overlay-safe titlebar-overlay-safe-lg" : "px-5",
+            )}
+          >
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
               Settings
             </span>

@@ -1,8 +1,23 @@
-/**
- * True when running inside the Electron preload bridge, false in a regular browser.
- * The preload script sets window.nativeApi via contextBridge before any web-app
- * code executes, so this is reliable at module load time.
- */
-export const isElectron =
-  typeof window !== "undefined" &&
-  (window.desktopBridge !== undefined || window.nativeApi !== undefined);
+import type { DesktopWindowControlsLayout, Platform } from "@t3tools/contracts";
+import { DEFAULT_LINUX_TITLE_BAR_MODE, type LinuxTitleBarMode } from "@t3tools/contracts/settings";
+
+export const desktopPlatform: Platform =
+  typeof window === "undefined" ? "web" : (window.desktopBridge?.getPlatform?.() ?? "web");
+export const isElectron = desktopPlatform !== "web";
+export const runningLinuxTitleBarMode: LinuxTitleBarMode =
+  desktopPlatform === "linux"
+    ? (window.desktopBridge?.getLinuxTitleBarMode?.() ?? DEFAULT_LINUX_TITLE_BAR_MODE)
+    : DEFAULT_LINUX_TITLE_BAR_MODE;
+export const windowControlsLayout: DesktopWindowControlsLayout | null =
+  typeof window === "undefined"
+    ? null
+    : (window.desktopBridge?.getWindowControlsLayout?.() ?? null);
+export const usesCustomLinuxWindowControls =
+  desktopPlatform === "linux" &&
+  runningLinuxTitleBarMode === "custom" &&
+  windowControlsLayout !== null;
+export const usesNativeLinuxTitleBar =
+  desktopPlatform === "linux" && runningLinuxTitleBarMode === "native";
+export const usesWCO =
+  desktopPlatform === "windows" ||
+  (desktopPlatform === "linux" && runningLinuxTitleBarMode === "overlay");

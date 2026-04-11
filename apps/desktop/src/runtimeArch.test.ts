@@ -5,7 +5,7 @@ import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runti
 describe("resolveDesktopRuntimeInfo", () => {
   it("detects Rosetta-translated Intel builds on Apple Silicon", () => {
     const runtimeInfo = resolveDesktopRuntimeInfo({
-      platform: "darwin",
+      platform: "macos",
       processArch: "x64",
       runningUnderArm64Translation: true,
     });
@@ -20,7 +20,7 @@ describe("resolveDesktopRuntimeInfo", () => {
 
   it("detects native Apple Silicon builds", () => {
     const runtimeInfo = resolveDesktopRuntimeInfo({
-      platform: "darwin",
+      platform: "macos",
       processArch: "arm64",
       runningUnderArm64Translation: false,
     });

@@ -18,7 +18,11 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_LINUX_TITLE_BAR_MODE,
+  DEFAULT_UNIFIED_SETTINGS,
+  type LinuxTitleBarMode,
+} from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
@@ -32,7 +36,7 @@ import {
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
-import { isElectron } from "../../env";
+import { desktopPlatform, isElectron, runningLinuxTitleBarMode } from "../../env";
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
@@ -97,6 +101,12 @@ const TIMESTAMP_FORMAT_LABELS = {
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
+
+const LINUX_TITLE_BAR_MODE_LABELS: Record<LinuxTitleBarMode, string> = {
+  native: "Native",
+  overlay: "Overlay",
+  custom: "Custom",
+};
 
 type InstallProviderSettings = {
   provider: ProviderKind;
@@ -424,6 +434,13 @@ export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
+  const [selectedLinuxTitleBarMode, setSelectedLinuxTitleBarMode] = useState<LinuxTitleBarMode>(
+    desktopPlatform === "linux"
+      ? (window.desktopBridge?.getLinuxTitleBarMode?.() ?? DEFAULT_LINUX_TITLE_BAR_MODE)
+      : DEFAULT_LINUX_TITLE_BAR_MODE,
+  );
+  const [isSavingLinuxTitleBarMode, setIsSavingLinuxTitleBarMode] = useState(false);
+  const [isRestartingForLinuxTitleBarMode, setIsRestartingForLinuxTitleBarMode] = useState(false);
   const [openingPathByTarget, setOpeningPathByTarget] = useState({
     keybindings: false,
     logsDirectory: false,
@@ -546,6 +563,49 @@ export function GeneralSettingsPanel() {
   const openDiagnosticsError = openPathErrorByTarget.logsDirectory ?? null;
   const isOpeningKeybindings = openingPathByTarget.keybindings;
   const isOpeningLogsDirectory = openingPathByTarget.logsDirectory;
+  const linuxTitleBarModeNeedsRestart =
+    desktopPlatform === "linux" && selectedLinuxTitleBarMode !== runningLinuxTitleBarMode;
+
+  const persistLinuxTitleBarMode = useCallback((mode: LinuxTitleBarMode) => {
+    const setLinuxTitleBarMode = window.desktopBridge?.setLinuxTitleBarMode;
+    if (!setLinuxTitleBarMode) {
+      return;
+    }
+
+    setSelectedLinuxTitleBarMode(mode);
+    setIsSavingLinuxTitleBarMode(true);
+    void setLinuxTitleBarMode(mode)
+      .catch((error: unknown) => {
+        setSelectedLinuxTitleBarMode(
+          window.desktopBridge?.getLinuxTitleBarMode?.() ?? runningLinuxTitleBarMode,
+        );
+        toastManager.add({
+          type: "error",
+          title: "Could not update Linux title bar mode",
+          description: error instanceof Error ? error.message : "Saving failed.",
+        });
+      })
+      .finally(() => {
+        setIsSavingLinuxTitleBarMode(false);
+      });
+  }, []);
+
+  const restartForLinuxTitleBarMode = useCallback(() => {
+    const restartApp = window.desktopBridge?.restartApp;
+    if (!restartApp || isRestartingForLinuxTitleBarMode) {
+      return;
+    }
+
+    setIsRestartingForLinuxTitleBarMode(true);
+    void restartApp().catch((error: unknown) => {
+      setIsRestartingForLinuxTitleBarMode(false);
+      toastManager.add({
+        type: "error",
+        title: "Could not restart T3 Code",
+        description: error instanceof Error ? error.message : "Restart failed.",
+      });
+    });
+  }, [isRestartingForLinuxTitleBarMode]);
 
   const addCustomModel = useCallback(
     (provider: ProviderKind) => {
@@ -717,6 +777,71 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+
+        {desktopPlatform === "linux" ? (
+          <SettingsRow
+            title="Linux title bar"
+            description="Choose whether T3 Code uses the system title bar, native overlay, or the custom title bar."
+            status={
+              <div className="flex shrink-0 items-center gap-2">
+                {linuxTitleBarModeNeedsRestart ? (
+                  <Button
+                    disabled={isRestartingForLinuxTitleBarMode}
+                    size="xs"
+                    variant="outline"
+                    onClick={restartForLinuxTitleBarMode}
+                  >
+                    Restart now
+                  </Button>
+                ) : null}
+                {linuxTitleBarModeNeedsRestart
+                  ? "Restart required to apply this change."
+                  : isSavingLinuxTitleBarMode
+                    ? "Saving preference..."
+                    : undefined}
+              </div>
+            }
+            resetAction={
+              selectedLinuxTitleBarMode !== DEFAULT_LINUX_TITLE_BAR_MODE ? (
+                <SettingResetButton
+                  label="linux title bar"
+                  onClick={() => persistLinuxTitleBarMode(DEFAULT_LINUX_TITLE_BAR_MODE)}
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={selectedLinuxTitleBarMode}
+                onValueChange={(value) => {
+                  if (value === "native" || value === "overlay" || value === "custom") {
+                    persistLinuxTitleBarMode(value);
+                  }
+                }}
+              >
+                <SelectTrigger
+                  className="w-full sm:w-40"
+                  aria-label="Linux title bar mode"
+                  disabled={isSavingLinuxTitleBarMode}
+                >
+                  <SelectValue>
+                    {LINUX_TITLE_BAR_MODE_LABELS[selectedLinuxTitleBarMode]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="native">
+                    {LINUX_TITLE_BAR_MODE_LABELS.native}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="overlay">
+                    {LINUX_TITLE_BAR_MODE_LABELS.overlay}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="custom">
+                    {LINUX_TITLE_BAR_MODE_LABELS.custom}
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+        ) : null}
 
         <SettingsRow
           title="Time format"
