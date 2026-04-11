@@ -158,13 +158,12 @@ describe("resolveAssistantMessageCopyState", () => {
         streaming: false,
       }),
     ).toEqual({
-      disabled: false,
       text: "Ship it",
       visible: true,
     });
   });
 
-  it("keeps copy visible but disabled while an assistant message is still streaming", () => {
+  it("hides copy while an assistant message is still streaming", () => {
     expect(
       resolveAssistantMessageCopyState({
         showCopyButton: true,
@@ -172,23 +171,8 @@ describe("resolveAssistantMessageCopyState", () => {
         streaming: true,
       }),
     ).toEqual({
-      disabled: true,
       text: "Still streaming",
-      visible: true,
-    });
-  });
-
-  it("keeps copy visible while a terminal assistant message is streaming before text arrives", () => {
-    expect(
-      resolveAssistantMessageCopyState({
-        showCopyButton: true,
-        text: "",
-        streaming: true,
-      }),
-    ).toEqual({
-      disabled: true,
-      text: null,
-      visible: true,
+      visible: false,
     });
   });
 
@@ -200,7 +184,6 @@ describe("resolveAssistantMessageCopyState", () => {
         streaming: false,
       }),
     ).toEqual({
-      disabled: false,
       text: null,
       visible: false,
     });
@@ -214,7 +197,6 @@ describe("resolveAssistantMessageCopyState", () => {
         streaming: false,
       }),
     ).toEqual({
-      disabled: false,
       text: "Interim thought",
       visible: false,
     });

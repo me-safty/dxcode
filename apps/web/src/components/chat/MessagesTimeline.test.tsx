@@ -109,7 +109,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Work log");
   });
 
-  it("renders the assistant copy button in a disabled state while streaming", async () => {
+  it("does not render the assistant copy button while streaming", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -154,7 +154,6 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain('aria-label="Copy assistant response"');
-    expect(markup).toContain("disabled");
+    expect(markup).not.toContain('aria-label="Copy assistant response"');
   }, 10_000);
 });

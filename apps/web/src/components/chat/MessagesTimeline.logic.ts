@@ -72,8 +72,7 @@ export function resolveAssistantMessageCopyState({
   const hasText = text !== null && text.trim().length > 0;
   return {
     text: hasText ? text : null,
-    visible: showCopyButton && (hasText || streaming),
-    disabled: streaming,
+    visible: showCopyButton && hasText && !streaming,
   };
 }
 
