@@ -2196,7 +2196,38 @@ export default function ChatView(props: ChatViewProps) {
     activeWorktreePath,
     hasServerThread: isServerThread,
     draftThreadEnvMode: isLocalDraftThread ? draftThread?.envMode : undefined,
+    isGitRepo,
   });
+  const draftThreadEnvMode = draftThread?.envMode;
+  const draftThreadBranch = draftThread?.branch;
+
+  useEffect(() => {
+    if (!isLocalDraftThread) {
+      return;
+    }
+    if (!draftThread) {
+      return;
+    }
+    if (gitStatusQuery.data?.isRepo !== false) {
+      return;
+    }
+    if (draftThreadEnvMode !== "worktree" && draftThreadBranch === null) {
+      return;
+    }
+    setDraftThreadContext(composerDraftTarget, {
+      envMode: "local",
+      branch: null,
+      worktreePath: null,
+    });
+  }, [
+    composerDraftTarget,
+    draftThread,
+    draftThreadBranch,
+    draftThreadEnvMode,
+    gitStatusQuery.data?.isRepo,
+    isLocalDraftThread,
+    setDraftThreadContext,
+  ]);
 
   useEffect(() => {
     if (!activeThreadId) {
