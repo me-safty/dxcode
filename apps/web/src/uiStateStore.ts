@@ -475,9 +475,8 @@ export function setProjectExpanded(
   state: UiState,
   projectId: string,
   expanded: boolean,
-  defaultExpanded = false,
 ): UiState {
-  if ((state.projectExpandedById[projectId] ?? defaultExpanded) === expanded) {
+  if (state.projectExpandedById[projectId] === expanded) {
     return state;
   }
   return {
@@ -540,7 +539,7 @@ interface UiStateStore extends UiState {
   clearThreadUi: (threadId: string) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   toggleProject: (projectId: string, defaultExpanded?: boolean) => void;
-  setProjectExpanded: (projectId: string, expanded: boolean, defaultExpanded?: boolean) => void;
+  setProjectExpanded: (projectId: string, expanded: boolean) => void;
   reorderProjects: (
     draggedProjectIds: readonly string[],
     targetProjectIds: readonly string[],
@@ -561,8 +560,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setThreadChangedFilesExpanded(state, threadId, turnId, expanded)),
   toggleProject: (projectId, defaultExpanded) =>
     set((state) => toggleProject(state, projectId, defaultExpanded)),
-  setProjectExpanded: (projectId, expanded, defaultExpanded) =>
-    set((state) => setProjectExpanded(state, projectId, expanded, defaultExpanded)),
+  setProjectExpanded: (projectId, expanded) =>
+    set((state) => setProjectExpanded(state, projectId, expanded)),
   reorderProjects: (draggedProjectIds, targetProjectIds) =>
     set((state) => reorderProjects(state, draggedProjectIds, targetProjectIds)),
 }));
