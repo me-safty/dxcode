@@ -12,11 +12,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PROVIDER_DISPLAY_NAMES,
+  WorktreeLocationMode,
   type ScopedThreadRef,
   type ProviderKind,
   type ServerProvider,
   type ServerProviderModel,
-  type WorktreeLocationMode,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
@@ -938,7 +938,7 @@ export function GeneralSettingsPanel() {
           title="Worktree location"
           description="Controls where T3 Code creates worktrees when New worktree threads and PR worktree preparation let the server choose the path."
           status={
-            worktreeLocationPreview.preview ? (
+            worktreeLocation.mode !== "custom" && worktreeLocationPreview.preview ? (
               <span>
                 Preview:{" "}
                 <code className="text-[11px] text-foreground/80">
@@ -1031,15 +1031,15 @@ export function GeneralSettingsPanel() {
                   </span>
                 ))}
               </div>
-              <p
-                className={cn(
-                  "text-xs",
-                  worktreeLocationPreview.error ? "text-destructive" : "text-muted-foreground",
-                )}
-              >
-                {worktreeLocationPreview.error ??
-                  "Literal substitution only. Include $WORKTREE_NAME in the final path template."}
-              </p>
+              {worktreeLocation.mode === "custom" && worktreeLocationPreview.preview ? (
+                <p className="text-xs text-muted-foreground">
+                  Preview:{" "}
+                  <code className="text-foreground/80">{worktreeLocationPreview.preview}</code>
+                </p>
+              ) : null}
+              {worktreeLocationPreview.error ? (
+                <p className={cn("text-xs", "text-destructive")}>{worktreeLocationPreview.error}</p>
+              ) : null}
             </div>
           ) : null}
         </SettingsRow>
