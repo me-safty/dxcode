@@ -77,6 +77,12 @@ function findBoundaryMatchIndex(
   return bestIndex;
 }
 
+/**
+ * Scores how well `value` matches `query` using tiered match strategies.
+ *
+ * **Expects pre-normalized inputs**: both `value` and `query` must already be
+ * trimmed and lowercased (e.g. via {@link normalizeSearchQuery}).
+ */
 export function scoreQueryMatch(input: {
   value: string;
   query: string;
@@ -87,8 +93,7 @@ export function scoreQueryMatch(input: {
   fuzzyBase?: number;
   boundaryMarkers?: readonly string[];
 }): number | null {
-  const value = input.value.trim().toLowerCase();
-  const query = input.query.trim().toLowerCase();
+  const { value, query } = input;
 
   if (!value || !query) {
     return null;
