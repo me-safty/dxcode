@@ -69,6 +69,7 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
+import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import {
   getComposerProviderState,
@@ -643,6 +644,9 @@ export const ChatComposer = memo(
       detectComposerTrigger(prompt, prompt.length),
     );
     const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
+    const [composerHighlightedSearchKey, setComposerHighlightedSearchKey] = useState<string | null>(
+      null,
+    );
     const [isDragOverComposer, setIsDragOverComposer] = useState(false);
     const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
     const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
@@ -794,13 +798,23 @@ export const ChatComposer = memo(
     ]);
 
     const composerMenuOpen = Boolean(composerTrigger);
-    const activeComposerMenuItem = useMemo(
-      () =>
-        composerMenuItems.find((item) => item.id === composerHighlightedItemId) ??
-        composerMenuItems[0] ??
-        null,
-      [composerHighlightedItemId, composerMenuItems],
-    );
+    const composerMenuSearchKey = composerTrigger
+      ? `${composerTrigger.kind}:${composerTrigger.query.trim().toLowerCase()}`
+      : null;
+    const activeComposerMenuItem = useMemo(() => {
+      const activeItemId = resolveComposerMenuActiveItemId({
+        items: composerMenuItems,
+        highlightedItemId: composerHighlightedItemId,
+        currentSearchKey: composerMenuSearchKey,
+        highlightedSearchKey: composerHighlightedSearchKey,
+      });
+      return composerMenuItems.find((item) => item.id === activeItemId) ?? null;
+    }, [
+      composerHighlightedItemId,
+      composerHighlightedSearchKey,
+      composerMenuItems,
+      composerMenuSearchKey,
+    ]);
 
     composerMenuOpenRef.current = composerMenuOpen;
     composerMenuItemsRef.current = composerMenuItems;
@@ -986,14 +1000,28 @@ export const ChatComposer = memo(
     useEffect(() => {
       if (!composerMenuOpen) {
         setComposerHighlightedItemId(null);
+        setComposerHighlightedSearchKey(null);
         return;
       }
+      const nextActiveItemId = resolveComposerMenuActiveItemId({
+        items: composerMenuItems,
+        highlightedItemId: composerHighlightedItemId,
+        currentSearchKey: composerMenuSearchKey,
+        highlightedSearchKey: composerHighlightedSearchKey,
+      });
       setComposerHighlightedItemId((existing) =>
-        existing && composerMenuItems.some((item) => item.id === existing)
-          ? existing
-          : (composerMenuItems[0]?.id ?? null),
+        existing === nextActiveItemId ? existing : nextActiveItemId,
       );
-    }, [composerMenuItems, composerMenuOpen]);
+      setComposerHighlightedSearchKey((existing) =>
+        existing === composerMenuSearchKey ? existing : composerMenuSearchKey,
+      );
+    }, [
+      composerHighlightedItemId,
+      composerHighlightedSearchKey,
+      composerMenuItems,
+      composerMenuOpen,
+      composerMenuSearchKey,
+    ]);
 
     const lastSyncedPendingInputRef = useRef<{
       requestId: string | null;
@@ -1430,9 +1458,13 @@ export const ChatComposer = memo(
       ],
     );
 
-    const onComposerMenuItemHighlighted = useCallback((itemId: string | null) => {
-      setComposerHighlightedItemId(itemId);
-    }, []);
+    const onComposerMenuItemHighlighted = useCallback(
+      (itemId: string | null) => {
+        setComposerHighlightedItemId(itemId);
+        setComposerHighlightedSearchKey(composerMenuSearchKey);
+      },
+      [composerMenuSearchKey],
+    );
 
     const nudgeComposerMenuHighlight = useCallback(
       (key: "ArrowDown" | "ArrowUp") => {
