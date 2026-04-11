@@ -193,7 +193,26 @@ function ChatThreadRouteView() {
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
   const diffOpen = search.diff === "1";
   const shouldUseDiffSheet = useMediaQuery(DIFF_INLINE_LAYOUT_MEDIA_QUERY);
-  const [hasOpenedDiff, setHasOpenedDiff] = useState(diffOpen);
+  const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
+  const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
+    threadKey: currentThreadKey,
+    hasOpenedDiff: diffOpen,
+  }));
+  const hasOpenedDiff =
+    diffPanelMountState.threadKey === currentThreadKey
+      ? diffPanelMountState.hasOpenedDiff
+      : diffOpen;
+  const markDiffOpened = useCallback(() => {
+    setDiffPanelMountState((previous) => {
+      if (previous.threadKey === currentThreadKey && previous.hasOpenedDiff) {
+        return previous;
+      }
+      return {
+        threadKey: currentThreadKey,
+        hasOpenedDiff: true,
+      };
+    });
+  }, [currentThreadKey]);
   const closeDiff = useCallback(() => {
     if (!threadRef) {
       return;
@@ -208,7 +227,7 @@ function ChatThreadRouteView() {
     if (!threadRef) {
       return;
     }
-    setHasOpenedDiff(true);
+    markDiffOpened();
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(threadRef),
@@ -217,7 +236,7 @@ function ChatThreadRouteView() {
         return { ...rest, diff: "1" };
       },
     });
-  }, [navigate, threadRef]);
+  }, [markDiffOpened, navigate, threadRef]);
 
   useEffect(() => {
     if (!threadRef || !bootstrapComplete) {
@@ -249,6 +268,7 @@ function ChatThreadRouteView() {
           <ChatView
             environmentId={threadRef.environmentId}
             threadId={threadRef.threadId}
+            onDiffPanelOpen={markDiffOpened}
             routeKind="server"
           />
         </SidebarInset>
@@ -268,6 +288,7 @@ function ChatThreadRouteView() {
         <ChatView
           environmentId={threadRef.environmentId}
           threadId={threadRef.threadId}
+          onDiffPanelOpen={markDiffOpened}
           routeKind="server"
         />
       </SidebarInset>
