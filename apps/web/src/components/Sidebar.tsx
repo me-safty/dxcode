@@ -1328,18 +1328,21 @@ const SidebarProjectOverflowStatusLabel = memo(function SidebarProjectOverflowSt
   const { hiddenThreadKeys, project } = props;
   const statusInputs = useSidebarProjectStatusInputs(project);
   const lastVisitedAtByThreadKey = useLastVisitedAtByThreadKeys(hiddenThreadKeys);
+  const hiddenThreadStatus = useMemo(
+    () =>
+      hiddenThreadKeys.length === 0
+        ? null
+        : resolveProjectStatusFromInputs({
+            statusInputs,
+            threadKeys: hiddenThreadKeys,
+            lastVisitedAtByThreadKey,
+          }),
+    [hiddenThreadKeys, lastVisitedAtByThreadKey, statusInputs],
+  );
+
   if (hiddenThreadKeys.length === 0) {
     return null;
   }
-  const hiddenThreadStatus = useMemo(
-    () =>
-      resolveProjectStatusFromInputs({
-        statusInputs,
-        threadKeys: hiddenThreadKeys,
-        lastVisitedAtByThreadKey,
-      }),
-    [hiddenThreadKeys, lastVisitedAtByThreadKey, statusInputs],
-  );
 
   return hiddenThreadStatus ? <ThreadStatusLabel status={hiddenThreadStatus} compact /> : null;
 });
