@@ -1,12 +1,22 @@
-import { type DiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import {
+  stripWorkspaceRouteSearchParams,
+  type WorkspaceRouteSearch,
+} from "../workspaceRouteSearch";
+import {
+  resolveWorkspaceSurfaceFromSearch,
+  serializeWorkspaceSurfaceToSearch,
+  WORKSPACE_ROUTE_SEARCH_KEYS,
+} from "./surfaceCatalog";
 import { createDefaultWorkspaceState, type WorkspaceState, type WorkspaceTarget } from "./types";
 
 export function resolveWorkspaceState(
   target: WorkspaceTarget,
-  search: DiffRouteSearch,
+  search: WorkspaceRouteSearch,
 ): WorkspaceState {
   const state = createDefaultWorkspaceState(target);
-  if (search.diff !== "1" || target.kind !== "server") {
+  const secondarySurface = resolveWorkspaceSurfaceFromSearch("secondary", target, search);
+
+  if (!secondarySurface) {
     return state;
   }
 
@@ -14,19 +24,7 @@ export function resolveWorkspaceState(
     ...state,
     surfaces: {
       ...state.surfaces,
-      secondary: {
-        id: "diff",
-        input: {
-          threadRef: target.threadRef,
-          focus: search.diffTurnId
-            ? {
-                scope: "turn",
-                turnId: search.diffTurnId,
-                ...(search.diffFilePath ? { filePath: search.diffFilePath } : {}),
-              }
-            : { scope: "conversation" },
-        },
-      },
+      secondary: secondarySurface,
     },
   };
 }
@@ -34,27 +32,10 @@ export function resolveWorkspaceState(
 export function buildWorkspaceRouteSearch<T extends Record<string, unknown>>(
   state: WorkspaceState,
   previous: T,
-): Omit<T, "diff" | "diffTurnId" | "diffFilePath"> & DiffRouteSearch {
-  const rest = stripDiffSearchParams(previous);
-  const secondarySurface = state.surfaces.secondary;
-
-  if (!secondarySurface) {
-    return { ...rest } as Omit<T, "diff" | "diffTurnId" | "diffFilePath"> & DiffRouteSearch;
-  }
-
-  switch (secondarySurface.id) {
-    case "diff":
-      return {
-        ...rest,
-        diff: "1",
-        ...(secondarySurface.input.focus.scope === "turn"
-          ? {
-              diffTurnId: secondarySurface.input.focus.turnId,
-              ...(secondarySurface.input.focus.filePath
-                ? { diffFilePath: secondarySurface.input.focus.filePath }
-                : {}),
-            }
-          : {}),
-      } as Omit<T, "diff" | "diffTurnId" | "diffFilePath"> & DiffRouteSearch;
-  }
+): T & WorkspaceRouteSearch {
+  const rest = stripWorkspaceRouteSearchParams(previous, WORKSPACE_ROUTE_SEARCH_KEYS);
+  return {
+    ...rest,
+    ...serializeWorkspaceSurfaceToSearch(state.surfaces.secondary),
+  };
 }

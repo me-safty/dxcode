@@ -18,18 +18,39 @@ export type WorkspaceTarget =
       threadId: ScopedThreadRef["threadId"];
     };
 
-export type MainSurface = {
-  id: "chat";
-  input: WorkspaceTarget;
-};
-
-export type SecondarySurface = {
-  id: "diff";
-  input: {
+export interface WorkspaceSurfaceInputById {
+  chat: WorkspaceTarget;
+  diff: {
     threadRef: ScopedThreadRef;
     focus: DiffSurfaceFocus;
   };
-};
+}
+
+export interface WorkspaceSurfacePlacementById {
+  chat: "main";
+  diff: "secondary";
+}
+
+export type WorkspaceSurfaceId = keyof WorkspaceSurfaceInputById;
+export type WorkspaceSurfacePlacement = WorkspaceSurfacePlacementById[WorkspaceSurfaceId];
+
+export type WorkspaceSurfaceIdForPlacement<P extends WorkspaceSurfacePlacement> = {
+  [K in WorkspaceSurfaceId]: WorkspaceSurfacePlacementById[K] extends P ? K : never;
+}[WorkspaceSurfaceId];
+
+export type WorkspaceSurfaceInstance<TId extends WorkspaceSurfaceId = WorkspaceSurfaceId> =
+  TId extends WorkspaceSurfaceId
+    ? {
+        id: TId;
+        input: WorkspaceSurfaceInputById[TId];
+      }
+    : never;
+
+export type WorkspaceSurfaceForPlacement<P extends WorkspaceSurfacePlacement> =
+  WorkspaceSurfaceInstance<WorkspaceSurfaceIdForPlacement<P>>;
+
+export type MainSurface = WorkspaceSurfaceForPlacement<"main">;
+export type SecondarySurface = WorkspaceSurfaceForPlacement<"secondary">;
 
 export type WorkspaceState = {
   version: 1;
@@ -87,43 +108,6 @@ export function sameDiffSurfaceFocus(
   }
 
   return left.turnId === right.turnId && left.filePath === right.filePath;
-}
-
-export function sameMainSurface(
-  left: MainSurface | null | undefined,
-  right: MainSurface | null | undefined,
-): boolean {
-  return Boolean(
-    left && right && left.id === right.id && sameWorkspaceTarget(left.input, right.input),
-  );
-}
-
-export function sameSecondarySurface(
-  left: SecondarySurface | null | undefined,
-  right: SecondarySurface | null | undefined,
-): boolean {
-  return Boolean(
-    left &&
-    right &&
-    left.id === right.id &&
-    sameThreadRef(left.input.threadRef, right.input.threadRef) &&
-    sameDiffSurfaceFocus(left.input.focus, right.input.focus),
-  );
-}
-
-export function sameWorkspaceState(
-  left: WorkspaceState | null | undefined,
-  right: WorkspaceState | null | undefined,
-): boolean {
-  return Boolean(
-    left &&
-    right &&
-    left.version === right.version &&
-    sameWorkspaceTarget(left.target, right.target) &&
-    sameMainSurface(left.surfaces.main, right.surfaces.main) &&
-    ((left.surfaces.secondary === null && right.surfaces.secondary === null) ||
-      sameSecondarySurface(left.surfaces.secondary, right.surfaces.secondary)),
-  );
 }
 
 export function createDefaultWorkspaceState(target: WorkspaceTarget): WorkspaceState {

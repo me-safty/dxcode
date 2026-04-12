@@ -3,12 +3,8 @@ import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } fr
 
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { renderMainSurface, renderSecondarySurface } from "~/workspace/registry";
-import {
-  sameMainSurface,
-  sameSecondarySurface,
-  type MainSurface,
-  type SecondarySurface,
-} from "~/workspace/types";
+import { sameWorkspaceSurface } from "~/workspace/surfaceCatalog";
+import { type MainSurface, type SecondarySurface } from "~/workspace/types";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "../ui/sidebar";
 import { Sheet, SheetPopup } from "../ui/sheet";
 import { useWorkspaceActions, useWorkspaceState } from "./WorkspaceProvider";
@@ -175,7 +171,7 @@ const MainSurfaceSlot = memo(
   function MainSurfaceSlot(props: { surface: MainSurface }) {
     return renderMainSurface(props.surface);
   },
-  (previousProps, nextProps) => sameMainSurface(previousProps.surface, nextProps.surface),
+  (previousProps, nextProps) => sameWorkspaceSurface(previousProps.surface, nextProps.surface),
 );
 
 const SecondarySurfaceSlot = memo(
@@ -187,5 +183,5 @@ const SecondarySurfaceSlot = memo(
   },
   (previousProps, nextProps) =>
     previousProps.renderMode === nextProps.renderMode &&
-    sameSecondarySurface(previousProps.surface, nextProps.surface),
+    sameWorkspaceSurface(previousProps.surface, nextProps.surface),
 );

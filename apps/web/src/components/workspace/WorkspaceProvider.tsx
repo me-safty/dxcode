@@ -2,7 +2,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useStore as useZustandStore } from "zustand";
 
-import { parseDiffRouteSearch } from "~/diffRouteSearch";
+import { parseWorkspaceRouteSearch } from "~/workspaceRouteSearch";
 import { buildDraftThreadRouteParams, buildThreadRouteParams } from "~/threadRoutes";
 import {
   createWorkspaceStore,
@@ -20,7 +20,7 @@ const WorkspaceStoreContext = createContext<WorkspaceStoreApi | null>(null);
 
 export function WorkspaceProvider(props: { target: WorkspaceTarget; children: ReactNode }) {
   const navigate = useNavigate();
-  const search = useSearch({ strict: false, select: (value) => parseDiffRouteSearch(value) });
+  const search = useSearch({ strict: false, select: (value) => parseWorkspaceRouteSearch(value) });
   const resolvedState = useMemo(
     () => resolveWorkspaceState(props.target, search),
     [props.target, search],

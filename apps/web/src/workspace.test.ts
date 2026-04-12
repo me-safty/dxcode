@@ -47,7 +47,7 @@ describe("workspace url state", () => {
 
     expect(search).toEqual({
       unrelated: "keep-me",
-      diff: "1",
+      panel: "diff",
     });
     expect(resolveWorkspaceState(target, search)).toEqual(diffState);
   });
@@ -76,9 +76,9 @@ describe("workspace url state", () => {
     const search = buildWorkspaceRouteSearch(diffState, {});
 
     expect(search).toEqual({
-      diff: "1",
-      diffTurnId: TEST_TURN_ID,
-      diffFilePath: "src/app.ts",
+      panel: "diff",
+      panelTurnId: TEST_TURN_ID,
+      panelFilePath: "src/app.ts",
     });
     expect(resolveWorkspaceState(target, search)).toEqual(diffState);
   });

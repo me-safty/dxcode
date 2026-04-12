@@ -1,8 +1,14 @@
 import { createStore } from "zustand/vanilla";
 
 import { reduceWorkspaceState } from "./reducer";
-import { sameWorkspaceState, type WorkspaceState } from "./types";
-import type { MainSurface, SecondarySurface } from "./types";
+import { sameWorkspaceState } from "./surfaceCatalog";
+import type {
+  MainSurface,
+  SecondarySurface,
+  WorkspaceState,
+  WorkspaceSurfaceIdForPlacement,
+  WorkspaceSurfaceInputById,
+} from "./types";
 
 type WorkspaceOptimisticTransition = {
   nextState: WorkspaceState;
@@ -18,10 +24,16 @@ export type OpenSurfaceFn = {
 };
 
 export type UpdateSurfaceFn = {
-  (placement: "main", input: MainSurface["input"], options?: WorkspaceNavigationOptions): void;
+  (
+    placement: "main",
+    surfaceId: WorkspaceSurfaceIdForPlacement<"main">,
+    input: WorkspaceSurfaceInputById[WorkspaceSurfaceIdForPlacement<"main">],
+    options?: WorkspaceNavigationOptions,
+  ): void;
   (
     placement: "secondary",
-    input: SecondarySurface["input"],
+    surfaceId: WorkspaceSurfaceIdForPlacement<"secondary">,
+    input: WorkspaceSurfaceInputById[WorkspaceSurfaceIdForPlacement<"secondary">],
     options?: WorkspaceNavigationOptions,
   ): void;
 };
@@ -132,26 +144,31 @@ export function createWorkspaceStore(
     },
     updateSurface: ((
       placement: "main" | "secondary",
+      surfaceId:
+        | WorkspaceSurfaceIdForPlacement<"main">
+        | WorkspaceSurfaceIdForPlacement<"secondary">,
       input: MainSurface["input"] | SecondarySurface["input"],
       options,
     ) => {
       const currentState = selectResolvedWorkspaceState(get());
-      const nextState = reduceWorkspaceState(
-        currentState,
-        placement === "main"
-          ? {
-              type: "updateSurface",
-              placement,
-              surfaceId: "chat",
-              input: input as MainSurface["input"],
-            }
-          : {
-              type: "updateSurface",
-              placement,
-              surfaceId: "diff",
-              input: input as SecondarySurface["input"],
-            },
-      );
+      const nextState = reduceWorkspaceState(currentState, {
+        type: "updateSurface",
+        placement,
+        surfaceId,
+        input,
+      } as
+        | {
+            type: "updateSurface";
+            placement: "main";
+            surfaceId: WorkspaceSurfaceIdForPlacement<"main">;
+            input: MainSurface["input"];
+          }
+        | {
+            type: "updateSurface";
+            placement: "secondary";
+            surfaceId: WorkspaceSurfaceIdForPlacement<"secondary">;
+            input: SecondarySurface["input"];
+          });
       if (nextState === currentState) {
         return;
       }

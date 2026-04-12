@@ -1,11 +1,10 @@
-import {
-  sameMainSurface,
-  sameSecondarySurface,
-  sameWorkspaceTarget,
-  sameThreadRef,
-  type MainSurface,
-  type SecondarySurface,
-  type WorkspaceState,
+import { isWorkspaceSurfaceCompatibleWithTarget, sameWorkspaceSurface } from "./surfaceCatalog";
+import type {
+  MainSurface,
+  SecondarySurface,
+  WorkspaceState,
+  WorkspaceSurfaceIdForPlacement,
+  WorkspaceSurfaceInputById,
 } from "./types";
 
 export type WorkspaceAction =
@@ -26,14 +25,14 @@ export type WorkspaceAction =
   | {
       type: "updateSurface";
       placement: "main";
-      surfaceId: "chat";
-      input: MainSurface["input"];
+      surfaceId: WorkspaceSurfaceIdForPlacement<"main">;
+      input: WorkspaceSurfaceInputById[WorkspaceSurfaceIdForPlacement<"main">];
     }
   | {
       type: "updateSurface";
       placement: "secondary";
-      surfaceId: "diff";
-      input: SecondarySurface["input"];
+      surfaceId: WorkspaceSurfaceIdForPlacement<"secondary">;
+      input: WorkspaceSurfaceInputById[WorkspaceSurfaceIdForPlacement<"secondary">];
     };
 
 export function reduceWorkspaceState(
@@ -41,12 +40,13 @@ export function reduceWorkspaceState(
   action: WorkspaceAction,
 ): WorkspaceState {
   switch (action.type) {
-    case "openSurface":
+    case "openSurface": {
+      if (!isWorkspaceSurfaceCompatibleWithTarget(action.surface, state.target)) {
+        return state;
+      }
+
       if (action.placement === "main") {
-        if (
-          !sameWorkspaceTarget(action.surface.input, state.target) ||
-          sameMainSurface(state.surfaces.main, action.surface)
-        ) {
+        if (sameWorkspaceSurface(state.surfaces.main, action.surface)) {
           return state;
         }
 
@@ -59,13 +59,7 @@ export function reduceWorkspaceState(
         };
       }
 
-      if (
-        !sameThreadRef(
-          action.surface.input.threadRef,
-          state.target.kind === "server" ? state.target.threadRef : null,
-        ) ||
-        sameSecondarySurface(state.surfaces.secondary, action.surface)
-      ) {
+      if (sameWorkspaceSurface(state.surfaces.secondary, action.surface)) {
         return state;
       }
 
@@ -76,6 +70,7 @@ export function reduceWorkspaceState(
           secondary: action.surface,
         },
       };
+    }
     case "closeSurface":
       if (state.surfaces.secondary === null) {
         return state;
@@ -88,16 +83,18 @@ export function reduceWorkspaceState(
           secondary: null,
         },
       };
-    case "updateSurface":
+    case "updateSurface": {
       if (action.placement === "main") {
-        const nextMain: MainSurface = {
+        const nextSurface: MainSurface = {
           id: action.surfaceId,
           input: action.input,
         };
-        if (
-          !sameWorkspaceTarget(nextMain.input, state.target) ||
-          sameMainSurface(state.surfaces.main, nextMain)
-        ) {
+
+        if (!isWorkspaceSurfaceCompatibleWithTarget(nextSurface, state.target)) {
+          return state;
+        }
+
+        if (sameWorkspaceSurface(state.surfaces.main, nextSurface)) {
           return state;
         }
 
@@ -105,22 +102,21 @@ export function reduceWorkspaceState(
           ...state,
           surfaces: {
             ...state.surfaces,
-            main: nextMain,
+            main: nextSurface,
           },
         };
       }
 
-      const nextSecondary: SecondarySurface = {
+      const nextSurface: SecondarySurface = {
         id: action.surfaceId,
         input: action.input,
       };
-      if (
-        !sameThreadRef(
-          nextSecondary.input.threadRef,
-          state.target.kind === "server" ? state.target.threadRef : null,
-        ) ||
-        sameSecondarySurface(state.surfaces.secondary, nextSecondary)
-      ) {
+
+      if (!isWorkspaceSurfaceCompatibleWithTarget(nextSurface, state.target)) {
+        return state;
+      }
+
+      if (sameWorkspaceSurface(state.surfaces.secondary, nextSurface)) {
         return state;
       }
 
@@ -128,8 +124,9 @@ export function reduceWorkspaceState(
         ...state,
         surfaces: {
           ...state.surfaces,
-          secondary: nextSecondary,
+          secondary: nextSurface,
         },
       };
+    }
   }
 }

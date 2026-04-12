@@ -9,7 +9,7 @@ import {
   type DiffPanelMode,
 } from "../components/DiffPanelShell";
 import { useWorkspaceActions } from "../components/workspace/WorkspaceProvider";
-import type { MainSurface, SecondarySurface } from "./types";
+import type { MainSurface, SecondarySurface, WorkspaceSurfaceInstance } from "./types";
 
 const LazyDiffPanel = lazy(() => import("../components/DiffPanel"));
 
@@ -36,6 +36,7 @@ function RegisteredDiffSurface(props: {
     ) => {
       updateSurface(
         "secondary",
+        "diff",
         {
           threadRef: props.surface.input.threadRef,
           focus,
@@ -60,7 +61,10 @@ function RegisteredDiffSurface(props: {
   );
 }
 
-export function renderMainSurface(surface: MainSurface): ReactNode {
+export function renderWorkspaceSurface(
+  surface: WorkspaceSurfaceInstance,
+  renderMode: WorkspaceSecondaryRenderMode | "inline",
+): ReactNode {
   switch (surface.id) {
     case "chat":
       return surface.input.kind === "server" ? (
@@ -77,15 +81,23 @@ export function renderMainSurface(surface: MainSurface): ReactNode {
           routeKind="draft"
         />
       );
+    case "diff":
+      return (
+        <RegisteredDiffSurface
+          surface={surface}
+          renderMode={renderMode === "sheet" ? "sheet" : "sidebar"}
+        />
+      );
   }
+}
+
+export function renderMainSurface(surface: MainSurface): ReactNode {
+  return renderWorkspaceSurface(surface, "inline");
 }
 
 export function renderSecondarySurface(
   surface: SecondarySurface,
   renderMode: WorkspaceSecondaryRenderMode,
 ): ReactNode {
-  switch (surface.id) {
-    case "diff":
-      return <RegisteredDiffSurface surface={surface} renderMode={renderMode} />;
-  }
+  return renderWorkspaceSurface(surface, renderMode);
 }

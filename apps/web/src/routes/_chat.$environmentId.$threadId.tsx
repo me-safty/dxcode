@@ -5,10 +5,11 @@ import { threadHasStarted } from "../components/ChatView.logic";
 import { WorkspaceProvider } from "../components/workspace/WorkspaceProvider";
 import { WorkspaceShell } from "../components/workspace/WorkspaceShell";
 import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../composerDraftStore";
-import { type DiffRouteSearch, parseDiffRouteSearch } from "../diffRouteSearch";
 import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef } from "../threadRoutes";
+import { WORKSPACE_ROUTE_SEARCH_KEYS } from "../workspace/surfaceCatalog";
+import { type WorkspaceRouteSearch, parseWorkspaceRouteSearch } from "../workspaceRouteSearch";
 
 function ChatThreadRouteView() {
   const navigate = useNavigate();
@@ -73,9 +74,13 @@ function ChatThreadRouteView() {
 }
 
 export const Route = createFileRoute("/_chat/$environmentId/$threadId")({
-  validateSearch: (search) => parseDiffRouteSearch(search),
+  validateSearch: (search) => parseWorkspaceRouteSearch(search),
   search: {
-    middlewares: [retainSearchParams<DiffRouteSearch>(["diff"])],
+    middlewares: [
+      retainSearchParams<WorkspaceRouteSearch>([
+        ...WORKSPACE_ROUTE_SEARCH_KEYS,
+      ] as (keyof WorkspaceRouteSearch)[]),
+    ],
   },
   component: ChatThreadRouteView,
 });
