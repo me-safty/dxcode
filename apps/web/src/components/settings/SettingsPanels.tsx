@@ -440,7 +440,8 @@ export function GeneralSettingsPanel() {
     claudeAgent: Boolean(
       settings.providers.claudeAgent.binaryPath !==
         DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath ||
-      settings.providers.claudeAgent.customModels.length > 0,
+      settings.providers.claudeAgent.customModels.length > 0 ||
+      settings.providers.claudeAgent.enableChrome,
     ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
@@ -1176,6 +1177,36 @@ export function GeneralSettingsPanel() {
                             </span>
                           ) : null}
                         </label>
+                      </div>
+                    ) : null}
+
+                    {providerCard.provider === "claudeAgent" ? (
+                      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-xs font-medium text-foreground">
+                              Enable Chrome
+                            </span>
+                            <span className="mt-0.5 block text-xs text-muted-foreground">
+                              Launch Claude with Chrome browser integration (--chrome).
+                            </span>
+                          </div>
+                          <Switch
+                            checked={settings.providers.claudeAgent.enableChrome}
+                            onCheckedChange={(checked) =>
+                              updateSettings({
+                                providers: {
+                                  ...settings.providers,
+                                  claudeAgent: {
+                                    ...settings.providers.claudeAgent,
+                                    enableChrome: Boolean(checked),
+                                  },
+                                },
+                              })
+                            }
+                            aria-label="Enable Chrome browser integration"
+                          />
+                        </div>
                       </div>
                     ) : null}
 
