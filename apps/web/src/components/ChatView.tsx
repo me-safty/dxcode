@@ -3294,7 +3294,9 @@ export default function ChatView(props: ChatViewProps) {
       <header
         className={cn(
           "border-b border-border px-3 sm:px-5",
-          isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
+          isElectron
+            ? "drag-region flex h-[52px] items-center wco:h-[env(titlebar-area-height)] wco:pr-[calc(env(titlebar-area-width)-env(titlebar-area-x)+3em)]"
+            : "py-2 sm:py-3",
         )}
       >
         <ChatHeader

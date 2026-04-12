@@ -10,11 +10,15 @@ export function NoActiveThreadState() {
         <header
           className={cn(
             "border-b border-border px-3 sm:px-5",
-            isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
+            isElectron
+              ? "drag-region flex h-[52px] items-center wco:h-[env(titlebar-area-height)] wco:px-0"
+              : "py-2 sm:py-3",
           )}
         >
           {isElectron ? (
-            <span className="text-xs text-muted-foreground/50">No active thread</span>
+            <span className="text-xs text-muted-foreground/50 wco:pl-[env(titlebar-area-x)]">
+              No active thread
+            </span>
           ) : (
             <div className="flex items-center gap-2">
               <SidebarTrigger className="size-7 shrink-0 md:hidden" />

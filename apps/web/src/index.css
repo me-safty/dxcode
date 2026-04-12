@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 @custom-variant dark (&:is(.dark, .dark *));
+@custom-variant wco (&:where(.wco *));
 
 @theme inline {
   --animate-skeleton: skeleton 2s -1s infinite linear;
