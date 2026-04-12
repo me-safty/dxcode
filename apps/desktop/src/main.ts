@@ -88,6 +88,11 @@ const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
+const WINDOWS_TITLEBAR_HEIGHT = 40;
+const WINDOWS_TITLEBAR_LIGHT_COLOR = "#ffffff";
+const WINDOWS_TITLEBAR_LIGHT_SYMBOL_COLOR = "#1f2937";
+const WINDOWS_TITLEBAR_DARK_COLOR = "#0e1218";
+const WINDOWS_TITLEBAR_DARK_SYMBOL_COLOR = "#f8fafc";
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 type LinuxDesktopNamedApp = Electron.App & {
@@ -1272,6 +1277,9 @@ function registerIpcHandlers(): void {
     }
 
     nativeTheme.themeSource = theme;
+    if (mainWindow) {
+      syncWindowsTitleBarOverlay(mainWindow);
+    }
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
@@ -1405,6 +1413,23 @@ function getIconOption(): { icon: string } | Record<string, never> {
   return iconPath ? { icon: iconPath } : {};
 }
 
+function getWindowsTitleBarOverlayOptions() {
+  const isDark = nativeTheme.shouldUseDarkColors;
+  return {
+    height: WINDOWS_TITLEBAR_HEIGHT,
+    color: isDark ? WINDOWS_TITLEBAR_DARK_COLOR : WINDOWS_TITLEBAR_LIGHT_COLOR,
+    symbolColor: isDark ? WINDOWS_TITLEBAR_DARK_SYMBOL_COLOR : WINDOWS_TITLEBAR_LIGHT_SYMBOL_COLOR,
+  } as const;
+}
+
+function syncWindowsTitleBarOverlay(window: BrowserWindow) {
+  if (process.platform !== "win32") {
+    return;
+  }
+
+  window.setTitleBarOverlay(getWindowsTitleBarOverlayOptions());
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1100,
@@ -1416,7 +1441,11 @@ function createWindow(): BrowserWindow {
     ...getIconOption(),
     title: APP_DISPLAY_NAME,
     ...(process.platform === "win32"
-      ? { frame: false }
+      ? {
+          frame: false,
+          titleBarStyle: "hidden" as const,
+          titleBarOverlay: getWindowsTitleBarOverlayOptions(),
+        }
       : { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 16, y: 18 } }),
     webPreferences: {
       preload: Path.join(__dirname, "preload.js"),
@@ -1425,6 +1454,8 @@ function createWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+
+  syncWindowsTitleBarOverlay(window);
 
   window.webContents.on("context-menu", (event, params) => {
     event.preventDefault();

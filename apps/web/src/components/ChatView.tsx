@@ -153,7 +153,7 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../terminalSta
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
-import { ChatHeader } from "./chat/ChatHeader";
+import { ChatHeader, ChatHeaderActions } from "./chat/ChatHeader";
 import { DesktopTitleBar } from "./DesktopTitleBar";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -3936,52 +3936,84 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
-      {isWindowsElectron && (
+      {isWindowsElectron ? (
         <DesktopTitleBar
           title={activeThread.title}
           contextLabel="Project"
           contextValue={activeProject?.name ?? "None"}
           showContextChip={false}
+          titleAlignment="left"
+          reserveNativeWindowControlsOverlay={!diffOpen}
           {...(activeProject?.name ? { subtitle: activeProject.name } : {})}
-        />
-      )}
-      {/* Top bar */}
-      <header
-        className={cn(
-          "border-b border-border px-3 sm:px-5",
-          isElectron && !isWindowsElectron
-            ? "drag-region flex h-[52px] items-center"
-            : "py-2 sm:py-3",
-        )}
-      >
-        <ChatHeader
-          activeThreadId={activeThread.id}
-          activeThreadTitle={activeThread.title}
-          activeProjectName={activeProject?.name}
-          isGitRepo={isGitRepo}
-          openInCwd={gitCwd}
-          activeProjectScripts={activeProject?.scripts}
-          preferredScriptId={
-            activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+          trailing={
+            <div className="min-w-0 max-w-[min(62vw,48rem)]">
+              <ChatHeaderActions
+                activeThreadId={activeThread.id}
+                activeProjectName={activeProject?.name}
+                isGitRepo={isGitRepo}
+                openInCwd={gitCwd}
+                activeProjectScripts={activeProject?.scripts}
+                preferredScriptId={
+                  activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+                }
+                keybindings={keybindings}
+                availableEditors={availableEditors}
+                terminalAvailable={activeProject !== undefined}
+                terminalOpen={terminalState.terminalOpen}
+                terminalToggleShortcutLabel={terminalToggleShortcutLabel}
+                diffToggleShortcutLabel={diffPanelShortcutLabel}
+                gitCwd={gitCwd}
+                diffOpen={diffOpen}
+                onRunProjectScript={(script) => {
+                  void runProjectScript(script);
+                }}
+                onAddProjectScript={saveProjectScript}
+                onUpdateProjectScript={updateProjectScript}
+                onDeleteProjectScript={deleteProjectScript}
+                onToggleTerminal={toggleTerminalVisibility}
+                onToggleDiff={onToggleDiff}
+              />
+            </div>
           }
-          keybindings={keybindings}
-          availableEditors={availableEditors}
-          terminalAvailable={activeProject !== undefined}
-          terminalOpen={terminalState.terminalOpen}
-          terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-          diffToggleShortcutLabel={diffPanelShortcutLabel}
-          gitCwd={gitCwd}
-          diffOpen={diffOpen}
-          onRunProjectScript={(script) => {
-            void runProjectScript(script);
-          }}
-          onAddProjectScript={saveProjectScript}
-          onUpdateProjectScript={updateProjectScript}
-          onDeleteProjectScript={deleteProjectScript}
-          onToggleTerminal={toggleTerminalVisibility}
-          onToggleDiff={onToggleDiff}
         />
-      </header>
+      ) : (
+        <header
+          className={cn(
+            "border-b border-border px-3 sm:px-5",
+            isElectron && !isWindowsElectron
+              ? "drag-region flex h-[52px] items-center"
+              : "py-2 sm:py-3",
+          )}
+        >
+          <ChatHeader
+            activeThreadId={activeThread.id}
+            activeThreadTitle={activeThread.title}
+            activeProjectName={activeProject?.name}
+            isGitRepo={isGitRepo}
+            openInCwd={gitCwd}
+            activeProjectScripts={activeProject?.scripts}
+            preferredScriptId={
+              activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+            }
+            keybindings={keybindings}
+            availableEditors={availableEditors}
+            terminalAvailable={activeProject !== undefined}
+            terminalOpen={terminalState.terminalOpen}
+            terminalToggleShortcutLabel={terminalToggleShortcutLabel}
+            diffToggleShortcutLabel={diffPanelShortcutLabel}
+            gitCwd={gitCwd}
+            diffOpen={diffOpen}
+            onRunProjectScript={(script) => {
+              void runProjectScript(script);
+            }}
+            onAddProjectScript={saveProjectScript}
+            onUpdateProjectScript={updateProjectScript}
+            onDeleteProjectScript={deleteProjectScript}
+            onToggleTerminal={toggleTerminalVisibility}
+            onToggleDiff={onToggleDiff}
+          />
+        </header>
+      )}
 
       {/* Error banner */}
       <ProviderStatusBanner status={activeProviderStatus} />

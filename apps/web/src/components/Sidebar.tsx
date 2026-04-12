@@ -54,16 +54,10 @@ import {
   type SidebarProjectSortOrder,
   type SidebarThreadSortOrder,
 } from "@t3tools/contracts/settings";
-import { isElectron } from "../env";
+import { isElectron, isWindowsElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import {
-  isLinuxPlatform,
-  isMacPlatform,
-  isWindowsPlatform,
-  newCommandId,
-  newProjectId,
-} from "../lib/utils";
+import { cn, isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import { useStore } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
@@ -744,7 +738,6 @@ export default function Sidebar() {
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
-  const isWindowsDesktop = isElectron && isWindowsPlatform(navigator.platform);
   const platform = navigator.platform;
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
   const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
@@ -2058,7 +2051,10 @@ export default function Sidebar() {
           render={
             <Link
               aria-label="Go to threads"
-              className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
+              className={cn(
+                "ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2",
+                "desktop-windows:ml-0 desktop-windows:min-h-[31px] desktop-windows:px-1.5 desktop-windows:py-1",
+              )}
               to="/"
             >
               <T3Wordmark />
@@ -2082,9 +2078,12 @@ export default function Sidebar() {
     <>
       {isElectron ? (
         <SidebarHeader
-          className={`drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 ${
-            isWindowsDesktop ? "pl-4" : "pl-[90px]"
-          }`}
+          className={cn(
+            "drag-region relative flex-row items-center gap-2 py-0",
+            isWindowsElectron
+              ? "h-[var(--desktop-titlebar-height)] bg-white px-4 pl-4 after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:border-b after:border-border/70 dark:bg-[#0e1218]"
+              : "h-[52px] px-4 pl-[90px]",
+          )}
         >
           {wordmark}
         </SidebarHeader>

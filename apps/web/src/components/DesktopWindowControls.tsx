@@ -1,5 +1,5 @@
 import type { DesktopWindowState } from "@t3tools/contracts";
-import { Maximize2Icon, MinusIcon, Minimize2Icon, XIcon } from "lucide-react";
+import { MinusIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { cn } from "~/lib/utils";
@@ -10,6 +10,19 @@ function canControlDesktopWindow(): boolean {
     typeof window.desktopBridge?.minimizeWindow === "function" &&
     typeof window.desktopBridge?.toggleMaximizeWindow === "function" &&
     typeof window.desktopBridge?.closeWindow === "function"
+  );
+}
+
+function MaximizeGlyph() {
+  return <span aria-hidden="true" className="block size-[10px] border border-current" />;
+}
+
+function RestoreGlyph() {
+  return (
+    <span aria-hidden="true" className="relative block size-[10px]">
+      <span className="absolute right-0 top-0 size-[8px] border border-current bg-transparent" />
+      <span className="absolute bottom-0 left-0 size-[8px] border border-current bg-transparent" />
+    </span>
   );
 }
 
@@ -50,21 +63,26 @@ export function DesktopWindowControls(props: { className?: string }) {
   }
 
   return (
-    <div className={cn("flex items-stretch gap-0.5 [-webkit-app-region:no-drag]", props.className)}>
+    <div
+      className={cn(
+        "flex h-full items-stretch gap-0 [-webkit-app-region:no-drag]",
+        props.className,
+      )}
+    >
       <button
         type="button"
         aria-label="Minimize window"
-        className="inline-flex h-8 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        className="inline-flex h-full w-[46px] items-center justify-center rounded-none text-muted-foreground transition-colors hover:bg-foreground/6 hover:text-foreground"
         onClick={() => {
           void window.desktopBridge?.minimizeWindow();
         }}
       >
-        <MinusIcon className="size-3.5" />
+        <MinusIcon className="size-3" />
       </button>
       <button
         type="button"
         aria-label={windowState.maximized ? "Restore window" : "Maximize window"}
-        className="inline-flex h-8 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        className="inline-flex h-full w-[46px] items-center justify-center rounded-none text-muted-foreground transition-colors hover:bg-foreground/6 hover:text-foreground"
         onClick={() => {
           void window.desktopBridge
             ?.toggleMaximizeWindow()
@@ -74,21 +92,17 @@ export function DesktopWindowControls(props: { className?: string }) {
             .catch(() => undefined);
         }}
       >
-        {windowState.maximized ? (
-          <Minimize2Icon className="size-3.5" />
-        ) : (
-          <Maximize2Icon className="size-3.5" />
-        )}
+        {windowState.maximized ? <RestoreGlyph /> : <MaximizeGlyph />}
       </button>
       <button
         type="button"
         aria-label="Close window"
-        className="inline-flex h-8 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-500/90 hover:text-white"
+        className="inline-flex h-full w-[46px] items-center justify-center rounded-none text-muted-foreground transition-colors hover:bg-[#c42b1c] hover:text-white"
         onClick={() => {
           void window.desktopBridge?.closeWindow();
         }}
       >
-        <XIcon className="size-3.5" />
+        <XIcon className="size-3" />
       </button>
     </div>
   );

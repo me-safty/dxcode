@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { isElectron, isWindowsElectron } from "~/env";
 import { cn } from "~/lib/utils";
 
-import { DesktopTitleBar } from "./DesktopTitleBar";
 import { Skeleton } from "./ui/skeleton";
 
 export type DiffPanelMode = "inline" | "sheet" | "sidebar";
@@ -11,9 +10,17 @@ export type DiffPanelMode = "inline" | "sheet" | "sidebar";
 function getDiffPanelHeaderRowClassName(mode: DiffPanelMode) {
   const shouldUseDragRegion = isElectron && mode !== "sheet" && !isWindowsElectron;
   return cn(
-    "flex items-center justify-between gap-2 px-4",
-    shouldUseDragRegion ? "drag-region h-[52px] border-b border-border" : "h-12",
+    "flex items-center justify-between gap-2",
+    shouldUseDragRegion
+      ? "drag-region h-[52px] border-b border-border px-4"
+      : mode !== "sheet"
+        ? "h-12 px-4 desktop-windows:h-[var(--desktop-titlebar-height)]"
+        : "h-12 px-4",
   );
+}
+
+function shouldReserveNativeOverlayInset(mode: DiffPanelMode) {
+  return isWindowsElectron && mode !== "sheet";
 }
 
 export function DiffPanelShell(props: {
@@ -22,7 +29,7 @@ export function DiffPanelShell(props: {
   children: ReactNode;
 }) {
   const shouldUseDragRegion = isElectron && props.mode !== "sheet" && !isWindowsElectron;
-  const shouldUseWindowsTitleBar = isWindowsElectron && props.mode !== "sheet";
+  const reserveNativeOverlayInset = shouldReserveNativeOverlayInset(props.mode);
 
   return (
     <div
@@ -33,19 +40,22 @@ export function DiffPanelShell(props: {
           : "w-full",
       )}
     >
-      {shouldUseWindowsTitleBar ? (
-        <DesktopTitleBar
-          title="Diff"
-          contextLabel="Panel"
-          contextValue="Diff"
-          trailing={<div className="min-w-0 max-w-[60vw]">{props.header}</div>}
-          showWindowControls={false}
-        />
-      ) : shouldUseDragRegion ? (
+      {shouldUseDragRegion ? (
         <div className={getDiffPanelHeaderRowClassName(props.mode)}>{props.header}</div>
       ) : (
-        <div className="border-b border-border">
-          <div className={getDiffPanelHeaderRowClassName(props.mode)}>{props.header}</div>
+        <div
+          className={cn(
+            "relative border-b border-border/70 bg-background",
+            isWindowsElectron &&
+              "border-b-0 bg-white after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:border-b after:border-border/70 dark:bg-[#0e1218]",
+          )}
+        >
+          <div className={getDiffPanelHeaderRowClassName(props.mode)}>
+            {props.header}
+            {reserveNativeOverlayInset ? (
+              <div aria-hidden="true" className="pointer-events-none h-full w-[138px] shrink-0" />
+            ) : null}
+          </div>
         </div>
       )}
       {props.children}
