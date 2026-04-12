@@ -576,13 +576,49 @@ const make = Effect.gen(function* () {
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.catchCause((cause) =>
-        appendProviderFailureActivity({
-          threadId: event.payload.threadId,
-          kind: "provider.turn.start.failed",
-          summary: "Provider turn start failed",
-          detail: Cause.pretty(cause),
-          turnId: null,
-          createdAt: event.payload.createdAt,
+        Effect.gen(function* () {
+          const errorDetail = Cause.pretty(cause);
+          yield* appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.turn.start.failed",
+            summary: "Provider turn start failed",
+            detail: errorDetail,
+            turnId: null,
+            createdAt: event.payload.createdAt,
+          });
+          // Transition the thread session so the client can detect the
+          // failure.  Without this update isSendBusy stays true and the
+          // "Working for …" indicator hangs indefinitely.
+          //
+          // When a real provider binding exists, mark the session as
+          // "error" so the binding is preserved for potential recovery.
+          // When no session was bound yet (e.g. provider mismatch before
+          // session start), use "stopped" to avoid creating a synthetic
+          // session that looks bound without a backing ProviderService
+          // directory entry — ensureSessionForThread checks
+          // `status !== "stopped"` to decide whether to reuse a session.
+          const currentThread = yield* resolveThread(event.payload.threadId);
+          // A session record with status "stopped" has no backing
+          // ProviderService binding — treat it the same as no session.
+          // This mirrors the guard in ensureSessionForThread (line ~293).
+          const hasActiveSession =
+            currentThread?.session != null && currentThread.session.status !== "stopped";
+          const baseSession = currentThread?.session ?? {
+            threadId: event.payload.threadId,
+            providerName: thread.modelSelection.provider,
+            runtimeMode: thread.runtimeMode,
+          };
+          yield* setThreadSession({
+            threadId: event.payload.threadId,
+            session: {
+              ...baseSession,
+              status: hasActiveSession ? "error" : "stopped",
+              activeTurnId: null,
+              lastError: `Provider turn start failed: ${errorDetail}`,
+              updatedAt: event.payload.createdAt,
+            },
+            createdAt: event.payload.createdAt,
+          });
         }),
       ),
     );
