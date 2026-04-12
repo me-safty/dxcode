@@ -2,7 +2,7 @@ import { mergeWorkspaceRouteSearch, type WorkspaceRouteSearch } from "../workspa
 import {
   resolveWorkspaceSurfaceFromSearch,
   serializeWorkspaceSurfaceToSearch,
-} from "./surfaceCatalog";
+} from "./surfaceDefinitions";
 import { createDefaultWorkspaceState, type WorkspaceState, type WorkspaceTarget } from "./types";
 
 export function resolveWorkspaceState(

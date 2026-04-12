@@ -1,4 +1,4 @@
-import { isWorkspaceSurfaceCompatibleWithTarget, sameWorkspaceSurface } from "./surfaceCatalog";
+import { isWorkspaceSurfaceCompatibleWithTarget, sameWorkspaceSurface } from "./surfaceDefinitions";
 import type {
   MainSurface,
   SecondarySurface,

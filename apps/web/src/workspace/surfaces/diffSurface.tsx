@@ -1,12 +1,35 @@
 import { type ScopedThreadRef, TurnId as TurnIdSchema, type TurnId } from "@t3tools/contracts";
+import { lazy, Suspense } from "react";
 
 import {
   normalizeWorkspaceRouteSearchString,
   type WorkspaceRouteSearch,
 } from "../../workspaceRouteSearch";
-import type { SecondarySurface, WorkspaceTarget } from "../types";
+import {
+  DiffPanelHeaderSkeleton,
+  DiffPanelLoadingState,
+  DiffPanelShell,
+  type DiffPanelMode,
+} from "../../components/DiffPanelShell";
+import type { WorkspaceSurfaceDefinition } from "../surfaceDefinitions";
+import {
+  sameDiffSurfaceFocus,
+  sameThreadRef,
+  type SecondarySurface,
+  type WorkspaceTarget,
+} from "../types";
 
 export type DiffSurface = Extract<SecondarySurface, { id: "diff" }>;
+
+const LazyRegisteredDiffSurface = lazy(() => import("./RegisteredDiffSurface"));
+
+function DiffFallback(props: { mode: DiffPanelMode }) {
+  return (
+    <DiffPanelShell mode={props.mode} header={<DiffPanelHeaderSkeleton />}>
+      <DiffPanelLoadingState label="Loading diff viewer..." />
+    </DiffPanelShell>
+  );
+}
 
 export function createConversationDiffSurface(threadRef: ScopedThreadRef): DiffSurface {
   return {
@@ -61,3 +84,23 @@ export function serializeDiffSurfaceToSearch(surface: DiffSurface): Partial<Work
       : {}),
   };
 }
+
+export const diffSurfaceDefinition: WorkspaceSurfaceDefinition<"diff"> = {
+  id: "diff",
+  placement: "secondary",
+  isEqual: (left, right) =>
+    sameThreadRef(left.input.threadRef, right.input.threadRef) &&
+    sameDiffSurfaceFocus(left.input.focus, right.input.focus),
+  isCompatibleWithTarget: (surface, target) =>
+    target.kind === "server" && sameThreadRef(surface.input.threadRef, target.threadRef),
+  render: (surface, renderMode) => (
+    <Suspense fallback={<DiffFallback mode={renderMode === "sheet" ? "sheet" : "sidebar"} />}>
+      <LazyRegisteredDiffSurface
+        surface={surface}
+        renderMode={renderMode === "sheet" ? "sheet" : "sidebar"}
+      />
+    </Suspense>
+  ),
+  resolveFromSearch: (target, search) => parseDiffSurfaceFromSearch(target, search),
+  serializeToSearch: (surface) => serializeDiffSurfaceToSearch(surface),
+};

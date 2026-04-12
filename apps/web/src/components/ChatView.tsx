@@ -176,10 +176,8 @@ import {
   useServerKeybindings,
 } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
-import {
-  useWorkspaceSecondarySurface,
-  useWorkspaceSecondarySurfaceActions,
-} from "./workspace/WorkspaceProvider";
+import { useWorkspaceSecondarySurface } from "./workspace/WorkspaceProvider";
+import { useWorkspaceSecondarySurfaceActions } from "./workspace/useWorkspaceSecondarySurfaceActions";
 import {
   createConversationDiffSurface,
   createTurnDiffSurface,

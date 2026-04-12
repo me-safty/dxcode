@@ -1,13 +1,5 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useStore as useZustandStore } from "zustand";
 
 import { parseWorkspaceRouteSearch } from "~/workspaceRouteSearch";
@@ -21,15 +13,8 @@ import {
   type WorkspaceStore,
   type WorkspaceStoreApi,
 } from "~/workspace/store";
-import { sameWorkspaceSurface } from "~/workspace/surfaceCatalog";
 import { buildWorkspaceRouteSearch, resolveWorkspaceState } from "~/workspace/urlState";
-import type {
-  SecondarySurface,
-  WorkspaceState,
-  WorkspaceSurfaceIdForPlacement,
-  WorkspaceSurfaceInputById,
-  WorkspaceTarget,
-} from "~/workspace/types";
+import type { SecondarySurface, WorkspaceState, WorkspaceTarget } from "~/workspace/types";
 
 const WorkspaceStoreContext = createContext<WorkspaceStoreApi | null>(null);
 
@@ -124,65 +109,4 @@ export function useWorkspaceActions(): {
     const { openSurface, closeSurface, updateSurface } = store.getState();
     return { openSurface, closeSurface, updateSurface };
   }, [store]);
-}
-
-export function useWorkspaceSecondarySurfaceActions(): {
-  openSecondarySurface: (surface: SecondarySurface, options?: WorkspaceNavigationOptions) => void;
-  closeSecondarySurface: (options?: WorkspaceNavigationOptions) => void;
-  toggleSecondarySurface: (surface: SecondarySurface, options?: WorkspaceNavigationOptions) => void;
-  updateSecondarySurface: <TId extends WorkspaceSurfaceIdForPlacement<"secondary">>(
-    surfaceId: TId,
-    input: WorkspaceSurfaceInputById[TId],
-    options?: WorkspaceNavigationOptions,
-  ) => void;
-} {
-  const secondarySurface = useWorkspaceSecondarySurface();
-  const { closeSurface, openSurface, updateSurface } = useWorkspaceActions();
-
-  const openSecondarySurface = useCallback(
-    (surface: SecondarySurface, options?: WorkspaceNavigationOptions) => {
-      openSurface("secondary", surface, options);
-    },
-    [openSurface],
-  );
-
-  const closeSecondarySurface = useCallback(
-    (options?: WorkspaceNavigationOptions) => {
-      closeSurface("secondary", options);
-    },
-    [closeSurface],
-  );
-
-  const toggleSecondarySurface = useCallback(
-    (surface: SecondarySurface, options?: WorkspaceNavigationOptions) => {
-      if (sameWorkspaceSurface(secondarySurface, surface)) {
-        closeSurface("secondary", options);
-        return;
-      }
-
-      openSurface("secondary", surface, options);
-    },
-    [closeSurface, openSurface, secondarySurface],
-  );
-
-  const updateSecondarySurface = useCallback(
-    <TId extends WorkspaceSurfaceIdForPlacement<"secondary">>(
-      surfaceId: TId,
-      input: WorkspaceSurfaceInputById[TId],
-      options?: WorkspaceNavigationOptions,
-    ) => {
-      updateSurface("secondary", surfaceId, input, options);
-    },
-    [updateSurface],
-  );
-
-  return useMemo(
-    () => ({
-      openSecondarySurface,
-      closeSecondarySurface,
-      toggleSecondarySurface,
-      updateSecondarySurface,
-    }),
-    [closeSecondarySurface, openSecondarySurface, toggleSecondarySurface, updateSecondarySurface],
-  );
 }

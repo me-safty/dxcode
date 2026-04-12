@@ -1,7 +1,7 @@
 import { createStore } from "zustand/vanilla";
 
 import { reduceWorkspaceState } from "./reducer";
-import { sameWorkspaceState } from "./surfaceCatalog";
+import { sameWorkspaceState } from "./surfaceDefinitions";
 import type {
   MainSurface,
   SecondarySurface,

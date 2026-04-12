@@ -2,8 +2,11 @@ import { scopedThreadKey } from "@t3tools/client-runtime";
 import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 
 import { useMediaQuery } from "~/hooks/useMediaQuery";
-import { renderMainSurface, renderSecondarySurface } from "~/workspace/registry";
-import { sameWorkspaceSurface } from "~/workspace/surfaceCatalog";
+import {
+  renderMainSurface,
+  renderSecondarySurface,
+  sameWorkspaceSurface,
+} from "~/workspace/surfaceDefinitions";
 import { type MainSurface, type SecondarySurface } from "~/workspace/types";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "../ui/sidebar";
 import { Sheet, SheetPopup } from "../ui/sheet";
