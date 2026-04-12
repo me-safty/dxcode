@@ -1326,11 +1326,11 @@ const SidebarProjectOverflowStatusLabel = memo(function SidebarProjectOverflowSt
   project: SidebarProjectSnapshot;
 }) {
   const { hiddenThreadKeys, project } = props;
+  const statusInputs = useSidebarProjectStatusInputs(project);
+  const lastVisitedAtByThreadKey = useLastVisitedAtByThreadKeys(hiddenThreadKeys);
   if (hiddenThreadKeys.length === 0) {
     return null;
   }
-  const statusInputs = useSidebarProjectStatusInputs(project);
-  const lastVisitedAtByThreadKey = useLastVisitedAtByThreadKeys(hiddenThreadKeys);
   const hiddenThreadStatus = useMemo(
     () =>
       resolveProjectStatusFromInputs({

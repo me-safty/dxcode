@@ -39,6 +39,18 @@ const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_REVERT_TURN_COUNT_BY_USER_MESSAGE_ID = new Map<MessageId, number>();
 const NOOP_REVERT_USER_MESSAGE = (_messageId: MessageId) => {};
 
+export function excludeOptimisticMessagesAlreadyRendered(
+  optimisticUserMessages: readonly ChatMessage[],
+  renderedServerMessages: readonly ChatMessage[],
+): ChatMessage[] {
+  if (optimisticUserMessages.length === 0 || renderedServerMessages.length === 0) {
+    return [...optimisticUserMessages];
+  }
+
+  const renderedServerIds = new Set(renderedServerMessages.map((message) => message.id));
+  return optimisticUserMessages.filter((message) => !renderedServerIds.has(message.id));
+}
+
 interface MessagesTimelineContainerProps {
   activeLatestTurn: Thread["latestTurn"] | null;
   activeTurnId: TurnId | null;
@@ -232,20 +244,19 @@ export const MessagesTimelineContainer = memo(function MessagesTimelineContainer
     const baseMessages = threadRef ? serverTimelineSlices.liveMessages : EMPTY_CHAT_MESSAGES;
     const messagesWithPreviewHandoff = applyPreviewHandoff(baseMessages);
     if (settledLiveMessages.length > 0) {
-      const settledLiveMessageIds = new Set(settledLiveMessages.map((message) => message.id));
-      const pendingMessages = optimisticUserMessages.filter(
-        (message) => !settledLiveMessageIds.has(message.id),
-      );
+      const pendingMessages = excludeOptimisticMessagesAlreadyRendered(optimisticUserMessages, [
+        ...historicalTimelineMessages,
+        ...settledLiveMessages,
+      ]);
       return pendingMessages;
     }
     if (optimisticUserMessages.length === 0) {
       return messagesWithPreviewHandoff;
     }
-    const historicalServerIds = new Set(historicalTimelineMessages.map((message) => message.id));
-    const liveServerIds = new Set(messagesWithPreviewHandoff.map((message) => message.id));
-    const pendingMessages = optimisticUserMessages.filter(
-      (message) => !historicalServerIds.has(message.id) && !liveServerIds.has(message.id),
-    );
+    const pendingMessages = excludeOptimisticMessagesAlreadyRendered(optimisticUserMessages, [
+      ...historicalTimelineMessages,
+      ...messagesWithPreviewHandoff,
+    ]);
     if (pendingMessages.length === 0) {
       return messagesWithPreviewHandoff;
     }
