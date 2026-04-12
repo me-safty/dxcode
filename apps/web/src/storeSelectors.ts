@@ -40,6 +40,20 @@ const EMPTY_MESSAGE_IDS: readonly MessageId[] = [];
 const EMPTY_ACTIVITIES: Thread["activities"] = [];
 const EMPTY_PROPOSED_PLANS: ProposedPlan[] = [];
 const EMPTY_TURN_DIFF_SUMMARIES: TurnDiffSummary[] = [];
+const EMPTY_WORK_LOG_ENTRIES: WorkLogEntry[] = [];
+const EMPTY_THREAD_PENDING_SNAPSHOT: ThreadPendingSnapshot = {
+  pendingApprovalRequestId: null,
+  pendingUserInputRequestId: null,
+};
+const EMPTY_THREAD_TIMELINE_SLICE_SNAPSHOT: ThreadTimelineSliceSnapshot = {
+  historicalMessages: EMPTY_MESSAGES,
+  liveMessages: EMPTY_MESSAGES,
+  historicalProposedPlans: EMPTY_PROPOSED_PLANS,
+  liveProposedPlans: EMPTY_PROPOSED_PLANS,
+  turnDiffSummaries: EMPTY_TURN_DIFF_SUMMARIES,
+  activeWorkEntries: EMPTY_WORK_LOG_ENTRIES,
+  latestTurnHasToolActivity: false,
+};
 
 export type ThreadStaticShellSnapshot = Pick<
   ThreadShell,
@@ -277,7 +291,44 @@ function pendingUserInputsEqual(
         candidate !== undefined &&
         userInput.requestId === candidate.requestId &&
         userInput.createdAt === candidate.createdAt &&
-        shallowArrayEqual(userInput.questions, candidate.questions)
+        userInputQuestionsEqual(userInput.questions, candidate.questions)
+      );
+    })
+  );
+}
+
+function userInputQuestionsEqual(
+  left: ReadonlyArray<PendingUserInput["questions"][number]>,
+  right: ReadonlyArray<PendingUserInput["questions"][number]>,
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((question, index) => {
+      const candidate = right[index];
+      return (
+        candidate !== undefined &&
+        question.id === candidate.id &&
+        question.header === candidate.header &&
+        question.question === candidate.question &&
+        question.multiSelect === candidate.multiSelect &&
+        userInputOptionsEqual(question.options, candidate.options)
+      );
+    })
+  );
+}
+
+function userInputOptionsEqual(
+  left: ReadonlyArray<PendingUserInput["questions"][number]["options"][number]>,
+  right: ReadonlyArray<PendingUserInput["questions"][number]["options"][number]>,
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((option, index) => {
+      const candidate = right[index];
+      return (
+        candidate !== undefined &&
+        option.label === candidate.label &&
+        option.description === candidate.description
       );
     })
   );
@@ -694,19 +745,13 @@ export function createThreadPendingSnapshotSelectorByRef(
 ): (state: AppState) => ThreadPendingSnapshot {
   let previousIds: string[] | undefined;
   let previousActivitiesById: EnvironmentState["activityByThreadId"][ThreadId] | undefined;
-  let previousResult: ThreadPendingSnapshot = {
-    pendingApprovalRequestId: null,
-    pendingUserInputRequestId: null,
-  };
+  let previousResult: ThreadPendingSnapshot = EMPTY_THREAD_PENDING_SNAPSHOT;
 
   return (state) => {
     if (!ref) {
       previousIds = undefined;
       previousActivitiesById = undefined;
-      previousResult = {
-        pendingApprovalRequestId: null,
-        pendingUserInputRequestId: null,
-      };
+      previousResult = EMPTY_THREAD_PENDING_SNAPSHOT;
       return previousResult;
     }
 
@@ -871,42 +916,18 @@ export function createThreadComposerSnapshotSelectorByRef(
 export function createThreadTimelineSliceSelectorByRef(
   ref: ScopedThreadRef | null | undefined,
 ): (state: AppState) => ThreadTimelineSliceSnapshot {
-  let previousResult: ThreadTimelineSliceSnapshot = {
-    historicalMessages: EMPTY_MESSAGES,
-    liveMessages: EMPTY_MESSAGES,
-    historicalProposedPlans: EMPTY_PROPOSED_PLANS,
-    liveProposedPlans: EMPTY_PROPOSED_PLANS,
-    turnDiffSummaries: EMPTY_TURN_DIFF_SUMMARIES,
-    activeWorkEntries: [],
-    latestTurnHasToolActivity: false,
-  };
+  let previousResult: ThreadTimelineSliceSnapshot = EMPTY_THREAD_TIMELINE_SLICE_SNAPSHOT;
 
   return (state) => {
     if (!ref) {
-      previousResult = {
-        historicalMessages: EMPTY_MESSAGES,
-        liveMessages: EMPTY_MESSAGES,
-        historicalProposedPlans: EMPTY_PROPOSED_PLANS,
-        liveProposedPlans: EMPTY_PROPOSED_PLANS,
-        turnDiffSummaries: EMPTY_TURN_DIFF_SUMMARIES,
-        activeWorkEntries: [],
-        latestTurnHasToolActivity: false,
-      };
+      previousResult = EMPTY_THREAD_TIMELINE_SLICE_SNAPSHOT;
       return previousResult;
     }
 
     const environmentState = selectEnvironmentState(state, ref.environmentId);
     const shell = environmentState.threadShellById[ref.threadId];
     if (!shell) {
-      previousResult = {
-        historicalMessages: EMPTY_MESSAGES,
-        liveMessages: EMPTY_MESSAGES,
-        historicalProposedPlans: EMPTY_PROPOSED_PLANS,
-        liveProposedPlans: EMPTY_PROPOSED_PLANS,
-        turnDiffSummaries: EMPTY_TURN_DIFF_SUMMARIES,
-        activeWorkEntries: [],
-        latestTurnHasToolActivity: false,
-      };
+      previousResult = EMPTY_THREAD_TIMELINE_SLICE_SNAPSHOT;
       return previousResult;
     }
 

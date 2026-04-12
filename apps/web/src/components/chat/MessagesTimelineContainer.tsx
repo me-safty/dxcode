@@ -5,7 +5,7 @@ import {
   type TurnId,
   type ThreadId,
 } from "@t3tools/contracts";
-import { scopedThreadKey } from "@t3tools/client-runtime";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   deriveActiveWorkStartedAt,
@@ -108,13 +108,24 @@ export const MessagesTimelineContainer = memo(function MessagesTimelineContainer
     clearAttachmentPreviewHandoff,
     workspaceRoot,
   } = props;
-  const serverTimelineSlices = useStore(
-    useMemo(() => createThreadTimelineSliceSelectorByRef(threadRef), [threadRef]),
+  const threadEnvironmentId = threadRef?.environmentId;
+  const threadId = threadRef?.threadId;
+  const stableThreadRef = useMemo(
+    () => (threadEnvironmentId && threadId ? scopeThreadRef(threadEnvironmentId, threadId) : null),
+    [threadEnvironmentId, threadId],
   );
+  const threadKey = useMemo(
+    () => (stableThreadRef ? scopedThreadKey(stableThreadRef) : null),
+    [stableThreadRef],
+  );
+  const serverTimelineSelector = useMemo(
+    () => createThreadTimelineSliceSelectorByRef(stableThreadRef),
+    [stableThreadRef],
+  );
+  const serverTimelineSlices = useStore(serverTimelineSelector);
   const changedFilesExpandedByTurnId = useUiStateStore((store) =>
-    threadRef
-      ? (store.threadChangedFilesExpandedById[scopedThreadKey(threadRef)] ??
-        EMPTY_CHANGED_FILES_EXPANDED_BY_TURN_ID)
+    threadKey
+      ? (store.threadChangedFilesExpandedById[threadKey] ?? EMPTY_CHANGED_FILES_EXPANDED_BY_TURN_ID)
       : EMPTY_CHANGED_FILES_EXPANDED_BY_TURN_ID,
   );
   const setThreadChangedFilesExpanded = useUiStateStore(
@@ -366,12 +377,12 @@ export const MessagesTimelineContainer = memo(function MessagesTimelineContainer
   );
   const onSetChangedFilesExpanded = useCallback(
     (turnId: TurnId, expanded: boolean) => {
-      if (!threadRef) {
+      if (!threadKey) {
         return;
       }
-      setThreadChangedFilesExpanded(scopedThreadKey(threadRef), turnId, expanded);
+      setThreadChangedFilesExpanded(threadKey, turnId, expanded);
     },
-    [setThreadChangedFilesExpanded, threadRef],
+    [setThreadChangedFilesExpanded, threadKey],
   );
   const activeThreadIdRef = useRef(activeThreadId);
 
@@ -380,7 +391,7 @@ export const MessagesTimelineContainer = memo(function MessagesTimelineContainer
       ...serverTimelineSlices.historicalMessages,
       ...serverTimelineSlices.liveMessages,
     ];
-    if (!threadRef || typeof Image === "undefined" || serverMessages.length === 0) {
+    if (!threadKey || typeof Image === "undefined" || serverMessages.length === 0) {
       return;
     }
 
@@ -453,7 +464,7 @@ export const MessagesTimelineContainer = memo(function MessagesTimelineContainer
     clearAttachmentPreviewHandoff,
     serverTimelineSlices.historicalMessages,
     serverTimelineSlices.liveMessages,
-    threadRef,
+    threadKey,
   ]);
 
   useEffect(() => {

@@ -64,6 +64,8 @@ import {
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
 
+const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
+
 interface MessagesTimelineProps {
   hasMessages: boolean;
   isWorking: boolean;
@@ -192,8 +194,13 @@ export const HistoricalMessagesTimelineSection = memo(function HistoricalMessage
   );
   const historicalRows = useStableTimelineRows(historicalRawRows);
   const shouldRenderHistoricalRowsWithoutVirtualizer = typeof ResizeObserver === "undefined";
+  const firstUnvirtualizedHistoricalRowIndex = Math.max(
+    historicalRows.length - ALWAYS_UNVIRTUALIZED_TAIL_ROWS,
+    0,
+  );
+  const measuredHistoricalRowHeightsRef = useRef<Record<string, number>>({});
 
-  const virtualizedRowCount = clamp(historicalRows.length, {
+  const virtualizedRowCount = clamp(firstUnvirtualizedHistoricalRowIndex, {
     minimum: 0,
     maximum: historicalRows.length,
   });
@@ -212,6 +219,10 @@ export const HistoricalMessagesTimelineSection = memo(function HistoricalMessage
     estimateSize: (index: number) => {
       const row = historicalRows[index];
       if (!row) return 96;
+      const measuredHeight = measuredHistoricalRowHeightsRef.current[row.id];
+      if (typeof measuredHeight === "number" && measuredHeight > 0) {
+        return measuredHeight;
+      }
       return estimateMessagesTimelineRowHeight(row, {
         expandedWorkGroups,
         timelineWidthPx,
@@ -286,6 +297,14 @@ export const HistoricalMessagesTimelineSection = memo(function HistoricalMessage
   }, [historicalRows, onVirtualizerSnapshot, rowVirtualizer, virtualizedRowCount]);
 
   const virtualRows = useStableVirtualRows(rowVirtualizer.getVirtualItems());
+  const nonVirtualizedRows = historicalRows.slice(virtualizedRowCount);
+  const onHistoricalRowHeightChange = useCallback((rowId: string, height: number) => {
+    const previousHeight = measuredHistoricalRowHeightsRef.current[rowId];
+    if (typeof previousHeight === "number" && Math.abs(previousHeight - height) < 0.5) {
+      return;
+    }
+    measuredHistoricalRowHeightsRef.current[rowId] = height;
+  }, []);
 
   const renderHistoricalRowContent = useCallback(
     (row: TimelineRow) => {
@@ -355,12 +374,25 @@ export const HistoricalMessagesTimelineSection = memo(function HistoricalMessage
           renderRowContent={renderHistoricalRowContent}
         />
       ) : virtualizedRowCount > 0 ? (
-        <HistoricalTimelineRows
-          rows={historicalRows}
-          virtualRows={virtualRows}
-          totalSize={rowVirtualizer.getTotalSize()}
-          measureElement={rowVirtualizer.measureElement}
+        <>
+          <HistoricalTimelineRows
+            rows={historicalRows}
+            virtualRows={virtualRows}
+            totalSize={rowVirtualizer.getTotalSize()}
+            measureElement={rowVirtualizer.measureElement}
+            renderRowContent={renderHistoricalRowContent}
+          />
+          <NonVirtualTimelineRows
+            rows={nonVirtualizedRows}
+            renderRowContent={renderHistoricalRowContent}
+            onRowHeightChange={onHistoricalRowHeightChange}
+          />
+        </>
+      ) : nonVirtualizedRows.length > 0 ? (
+        <NonVirtualTimelineRows
+          rows={nonVirtualizedRows}
           renderRowContent={renderHistoricalRowContent}
+          onRowHeightChange={onHistoricalRowHeightChange}
         />
       ) : null}
     </div>
@@ -606,10 +638,57 @@ const LiveTimelineRows = memo(function LiveTimelineRows(props: {
 const NonVirtualTimelineRows = memo(function NonVirtualTimelineRows(props: {
   rows: ReadonlyArray<TimelineRow>;
   renderRowContent: (row: TimelineRow) => ReactNode;
+  onRowHeightChange?: ((rowId: string, height: number) => void) | undefined;
 }) {
   return props.rows.map((row) => (
-    <div key={`non-virtual-row:${row.id}`}>{props.renderRowContent(row)}</div>
+    <MeasuredNonVirtualTimelineRow
+      key={`non-virtual-row:${row.id}`}
+      rowId={row.id}
+      onHeightChange={props.onRowHeightChange}
+    >
+      {props.renderRowContent(row)}
+    </MeasuredNonVirtualTimelineRow>
   ));
+});
+
+const MeasuredNonVirtualTimelineRow = memo(function MeasuredNonVirtualTimelineRow(props: {
+  rowId: string;
+  onHeightChange?: ((rowId: string, height: number) => void) | undefined;
+  children: ReactNode;
+}) {
+  const { children, onHeightChange, rowId } = props;
+  const rowRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!onHeightChange) {
+      return;
+    }
+
+    const rowElement = rowRef.current;
+    if (!rowElement) {
+      return;
+    }
+
+    const emitHeight = () => {
+      onHeightChange(rowId, rowElement.getBoundingClientRect().height);
+    };
+
+    emitHeight();
+
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      emitHeight();
+    });
+    observer.observe(rowElement);
+    return () => {
+      observer.disconnect();
+    };
+  }, [onHeightChange, rowId]);
+
+  return <div ref={rowRef}>{children}</div>;
 });
 
 function useStableTimelineRows(rows: ReadonlyArray<TimelineRow>): ReadonlyArray<TimelineRow> {
