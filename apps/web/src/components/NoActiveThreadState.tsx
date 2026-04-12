@@ -11,12 +11,12 @@ export function NoActiveThreadState() {
           className={cn(
             "border-b border-border px-3 sm:px-5",
             isElectron
-              ? "drag-region flex h-[52px] items-center wco:h-[env(titlebar-area-height)] wco:px-0"
+              ? "drag-region flex h-[52px] items-center wco:h-[env(titlebar-area-height)]"
               : "py-2 sm:py-3",
           )}
         >
           {isElectron ? (
-            <span className="text-xs text-muted-foreground/50 wco:pl-[env(titlebar-area-x)]">
+            <span className="text-xs text-muted-foreground/50 wco:pr-[calc(env(titlebar-area-width)-env(titlebar-area-x))]">
               No active thread
             </span>
           ) : (
