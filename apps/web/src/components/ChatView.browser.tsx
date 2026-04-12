@@ -4741,4 +4741,53 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await mounted.cleanup();
     }
   });
+
+  it("renders the desktop diff panel below the chat header instead of resizing it", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      initialPath: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}?diff=1`,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-diff-layout-target" as MessageId,
+        targetText: "diff layout thread",
+      }),
+    });
+
+    try {
+      const header = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-header="true"]'),
+        "Unable to find chat header.",
+      );
+      const composerForm = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-form="true"]'),
+        "Unable to find chat composer form.",
+      );
+      const resizeHandle = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>('[data-chat-messages-aside-resize-handle="true"]'),
+        "Unable to find inline diff resize handle.",
+      );
+      const diffAside = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-messages-aside="open"]'),
+        "Unable to find inline diff panel container.",
+      );
+
+      await vi.waitFor(
+        () => {
+          const headerRect = header.getBoundingClientRect();
+          const composerRect = composerForm.getBoundingClientRect();
+          const diffAsideRect = diffAside.getBoundingClientRect();
+
+          expect(headerRect.right).toBeGreaterThan(diffAsideRect.left + 1);
+          expect(composerRect.right).toBeLessThanOrEqual(diffAsideRect.left + 1);
+          expect(diffAsideRect.top).toBeGreaterThanOrEqual(headerRect.bottom - 1);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await waitForLayout();
+      expect(getComputedStyle(resizeHandle).cursor).toBe("col-resize");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
 });
