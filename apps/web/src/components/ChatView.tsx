@@ -28,7 +28,8 @@ import {
 import { applyClaudePromptEffortPrefix } from "@t3tools/shared/model";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Debouncer, useDebouncedCallback } from "@tanstack/react-pacer";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
@@ -1933,21 +1934,41 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   // Scroll helpers — LegendList handles auto-scroll via maintainScrollAtEnd.
-  // Call scrollToEnd synchronously so LegendList's internal isAtEnd flips to
-  // true *before* React commits new data.  maintainScrollAtEnd then
-  // auto-scrolls on subsequent data/layout changes without extra retries.
   const scrollToEnd = useCallback((animated = false) => {
     legendListRef.current?.scrollToEnd?.({ animated });
   }, []);
+
+  // Flag set by send handlers — the actual scroll happens in the
+  // useLayoutEffect below, which fires after React commits new data so
+  // LegendList already has the updated rows.
+  const scrollToEndOnCommitRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!scrollToEndOnCommitRef.current) return;
+    scrollToEndOnCommitRef.current = false;
+    legendListRef.current?.scrollToEnd?.({ animated: false });
+  }, [timelineEntries]);
+
+  // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
+  // thread switches.  LegendList fires scroll events with isAtEnd=false while
+  // initialScrollAtEnd is settling; hiding is always immediate.
+  const showScrollDebouncer = useRef(
+    new Debouncer(() => setShowScrollToBottom(true), { wait: 150 }),
+  );
   const onIsAtEndChange = useCallback((isAtEnd: boolean) => {
     if (isAtEndRef.current === isAtEnd) return;
     isAtEndRef.current = isAtEnd;
-    setShowScrollToBottom(!isAtEnd);
+    if (isAtEnd) {
+      showScrollDebouncer.current.cancel();
+      setShowScrollToBottom(false);
+    } else {
+      showScrollDebouncer.current.maybeExecute();
+    }
   }, []);
 
   useEffect(() => {
     setPullRequestDialogState(null);
     isAtEndRef.current = true;
+    showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
     if (planSidebarOpenOnNextThreadRef.current) {
       planSidebarOpenOnNextThreadRef.current = false;
@@ -2393,12 +2414,12 @@ export default function ChatView(props: ChatViewProps) {
       },
     ]);
     // Sending a message should always bring the latest user turn into view.
-    // Calling scrollToEnd synchronously (before React commits the new data)
-    // sets LegendList's internal isAtEnd=true, so maintainScrollAtEnd
-    // auto-pins to the new item once the render commits.
+    // Flag scroll-to-end — the useLayoutEffect fires after React commits
+    // the optimistic message so LegendList already has the new rows.
+    scrollToEndOnCommitRef.current = true;
     isAtEndRef.current = true;
+    showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
-    scrollToEnd();
 
     setThreadError(threadIdForSend, null);
     if (expiredTerminalContextCount > 0) {
@@ -2789,9 +2810,10 @@ export default function ChatView(props: ChatViewProps) {
           streaming: false,
         },
       ]);
+      scrollToEndOnCommitRef.current = true;
       isAtEndRef.current = true;
+      showScrollDebouncer.current.cancel();
       setShowScrollToBottom(false);
-      scrollToEnd();
 
       try {
         await persistThreadSettingsForNextTurn({
