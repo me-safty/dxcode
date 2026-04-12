@@ -3913,11 +3913,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
         )}
         {isWindowsElectron && (
           <DesktopTitleBar
-            title="Threads"
-            subtitle="No active thread"
+            title="No active thread"
             contextLabel="Workspace"
             contextValue="Threads"
             showContextChip={false}
+            titleAlignment="left"
           />
         )}
         {isElectron && !isWindowsElectron && (

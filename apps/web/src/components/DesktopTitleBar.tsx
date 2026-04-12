@@ -3,8 +3,6 @@ import type { ReactNode } from "react";
 import { isWindowsElectron } from "~/env";
 import { cn } from "~/lib/utils";
 
-import { DesktopWindowControls } from "./DesktopWindowControls";
-
 interface DesktopTitleBarProps {
   title: string;
   subtitle?: string;
@@ -13,10 +11,8 @@ interface DesktopTitleBarProps {
   showContextChip?: boolean;
   trailing?: ReactNode;
   className?: string;
-  showWindowControls?: boolean;
   titleViewportPaddingClassName?: string;
   titleAlignment?: "center" | "left";
-  useNativeWindowControlsOverlay?: boolean;
   reserveNativeWindowControlsOverlay?: boolean;
 }
 
@@ -25,10 +21,8 @@ export function DesktopTitleBar(props: DesktopTitleBarProps) {
   const contextLabel = props.contextLabel ?? "Workspace";
   const contextValue = props.contextValue;
   const titleAlignment = props.titleAlignment ?? "center";
-  const useNativeWindowControlsOverlay = props.useNativeWindowControlsOverlay ?? isWindowsElectron;
   const reserveNativeWindowControlsOverlay =
-    props.reserveNativeWindowControlsOverlay ??
-    (useNativeWindowControlsOverlay && props.showWindowControls !== false);
+    props.reserveNativeWindowControlsOverlay ?? isWindowsElectron;
 
   return (
     <div
@@ -99,11 +93,9 @@ export function DesktopTitleBar(props: DesktopTitleBarProps) {
             {props.trailing}
           </div>
         ) : null}
-        {props.showWindowControls === false ? null : reserveNativeWindowControlsOverlay ? (
+        {reserveNativeWindowControlsOverlay ? (
           <div aria-hidden="true" className="pointer-events-none h-full w-[138px] shrink-0" />
-        ) : useNativeWindowControlsOverlay ? null : (
-          <DesktopWindowControls className="self-stretch" />
-        )}
+        ) : null}
       </div>
     </div>
   );
