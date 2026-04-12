@@ -140,6 +140,7 @@
   --mask-offset-left: 0px;
   --mask-offset-right: 0px;
   --scroll-buffer: 2rem;
+  --left-mask-width: var(--mask-width);
   --right-mask-width: var(--mask-width);
 
   mask-image:
