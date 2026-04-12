@@ -487,6 +487,14 @@ export function getFallbackThreadIdAfterDelete<
     )[0]?.id ?? null
   );
 }
+
+export function sortThreadsForSidebar<TThread extends Pick<Thread, "id"> & ThreadSortInput>(
+  threads: readonly TThread[],
+  sortOrder: SidebarThreadSortOrder,
+): TThread[] {
+  return sortThreads(threads, sortOrder);
+}
+
 export function getProjectSortTimestamp(
   project: SidebarProject,
   projectThreads: readonly ThreadSortInput[],

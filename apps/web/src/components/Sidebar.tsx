@@ -2045,6 +2045,19 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     attachProjectListAutoAnimateRef,
     projectsLength,
   } = props;
+  const keybindings = useServerKeybindings();
+  const platform = navigator.platform;
+  const commandPaletteShortcutLabel = shortcutLabelForCommand(
+    keybindings,
+    "commandPalette.toggle",
+    {
+      platform,
+      context: {
+        terminalFocus: false,
+        terminalOpen: false,
+      },
+    },
+  );
   const handleProjectSortOrderChange = useCallback(
     (sortOrder: SidebarProjectSortOrder) => {
       updateSettings({ sidebarProjectSortOrder: sortOrder });
@@ -2630,11 +2643,6 @@ export default function Sidebar() {
     desktopUpdateState && showArm64IntelBuildWarning
       ? getArm64IntelBuildWarningDescription(desktopUpdateState)
       : null;
-  const commandPaletteShortcutLabel = shortcutLabelForCommand(
-    keybindings,
-    "commandPalette.toggle",
-    newThreadShortcutLabelOptions,
-  );
   const handleDesktopUpdateButtonClick = useCallback(() => {
     const bridge = window.desktopBridge;
     if (!bridge || !desktopUpdateState) return;
