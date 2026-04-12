@@ -831,6 +831,7 @@ export default function ChatView(props: ChatViewProps) {
       observer.disconnect();
     };
   }, [hasMessagesAside, messagesAsideOpen]);
+  }, [hasMessagesAside, messagesAsideOpen]);
 
   const handleMessagesAsideResizePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {

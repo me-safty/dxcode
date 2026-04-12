@@ -105,6 +105,7 @@ const WIDE_FOOTER_VIEWPORT: ViewportSpec = {
   textTolerancePx: 44,
   attachmentTolerancePx: 56,
 };
+const CHAT_DIFF_INLINE_WIDTH_STORAGE_KEY = "chat_diff_inline_width";
 const COMPACT_FOOTER_VIEWPORT: ViewportSpec = {
   name: "compact-footer",
   width: 430,
@@ -4786,6 +4787,75 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await waitForLayout();
       expect(getComputedStyle(resizeHandle).cursor).toBe("col-resize");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the desktop inline diff panel collapsed after closing during resize sync", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      initialPath: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}?diff=1`,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-diff-collapse-target" as MessageId,
+        targetText: "diff collapse thread",
+      }),
+    });
+
+    try {
+      const toggleDiffButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('[aria-label="Toggle diff panel"]'),
+        "Unable to find diff toggle button.",
+      );
+
+      toggleDiffButton.click();
+      await waitForLayout();
+
+      const closedDiffAside = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-messages-aside="closed"]'),
+        "Unable to find closed inline diff panel container.",
+      );
+
+      await mounted.setContainerSize({
+        width: 1_120,
+        height: WIDE_FOOTER_VIEWPORT.height,
+      });
+
+      await vi.waitFor(
+        () => {
+          expect(closedDiffAside.getBoundingClientRect().width).toBeLessThanOrEqual(1);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("restores the persisted desktop inline diff width on mount", async () => {
+    localStorage.setItem(CHAT_DIFF_INLINE_WIDTH_STORAGE_KEY, JSON.stringify(520));
+
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      initialPath: `/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}?diff=1`,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-diff-persisted-width-target" as MessageId,
+        targetText: "diff persisted width thread",
+      }),
+    });
+
+    try {
+      const diffAside = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-messages-aside="open"]'),
+        "Unable to find open inline diff panel container.",
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(diffAside.getBoundingClientRect().width).toBeCloseTo(520, 0);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
     }
