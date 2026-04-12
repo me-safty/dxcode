@@ -38,8 +38,6 @@ import {
   useState,
   type ComponentProps,
 } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";

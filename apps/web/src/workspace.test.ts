@@ -14,9 +14,9 @@ import {
 } from "./workspace/types";
 import { buildWorkspaceRouteSearch, resolveWorkspaceState } from "./workspace/urlState";
 
-const TEST_ENVIRONMENT_ID = EnvironmentId.makeUnsafe("workspace-env");
-const TEST_THREAD_ID = ThreadId.makeUnsafe("workspace-thread");
-const TEST_TURN_ID = TurnId.makeUnsafe("turn-1");
+const TEST_ENVIRONMENT_ID = EnvironmentId.make("workspace-env");
+const TEST_THREAD_ID = ThreadId.make("workspace-thread");
+const TEST_TURN_ID = TurnId.make("turn-1");
 
 function createServerTarget(): Extract<WorkspaceTarget, { kind: "server" }> {
   return {

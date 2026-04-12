@@ -11,7 +11,7 @@ describe("normalizeDiffSurfaceFocus", () => {
   });
 
   it("keeps turn focus when the requested turn exists", () => {
-    const turnId = TurnId.makeUnsafe("turn-1");
+    const turnId = TurnId.make("turn-1");
 
     expect(
       normalizeDiffSurfaceFocus(
@@ -34,10 +34,10 @@ describe("normalizeDiffSurfaceFocus", () => {
       normalizeDiffSurfaceFocus(
         {
           scope: "turn",
-          turnId: TurnId.makeUnsafe("missing-turn"),
+          turnId: TurnId.make("missing-turn"),
           filePath: "src/app.ts",
         },
-        [TurnId.makeUnsafe("different-turn")],
+        [TurnId.make("different-turn")],
       ),
     ).toEqual({
       scope: "conversation",
