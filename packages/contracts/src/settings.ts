@@ -70,7 +70,7 @@ export const ClaudeSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   binaryPath: makeBinaryPathSetting("claude"),
   customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
-  launchArgs: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  launchArgs: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
 });
 export type ClaudeSettings = typeof ClaudeSettings.Type;
 
