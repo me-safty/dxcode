@@ -506,6 +506,35 @@ const CLAUDE_SETTING_SOURCES = [
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
 
+/**
+ * Parse a CLI-style launch args string into the SDK's `extraArgs` format.
+ *
+ * Boolean flags (no value) become `null`, flags with a value become strings:
+ *   ""                        → {}
+ *   "--chrome"                → { chrome: null }
+ *   "--chrome --debug"        → { chrome: null, debug: null }
+ *   "--chrome --max-turns 5"  → { chrome: null, "max-turns": "5" }
+ */
+export function parseLaunchArgs(args: string): Record<string, string | null> {
+  const result: Record<string, string | null> = {};
+  const tokens = args.trim().split(/\s+/).filter(Boolean);
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    if (token.startsWith("--")) {
+      const key = token.slice(2);
+      if (!key) continue;
+      const next = tokens[i + 1];
+      if (next !== undefined && !next.startsWith("--")) {
+        result[key] = next;
+        i++;
+      } else {
+        result[key] = null;
+      }
+    }
+  }
+  return result;
+}
+
 function buildPromptText(input: ProviderSendTurnInput): string {
   const rawEffort =
     input.modelSelection?.provider === "claudeAgent" ? input.modelSelection.options?.effort : null;
@@ -2680,7 +2709,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ),
       );
       const claudeBinaryPath = claudeSettings.binaryPath;
-      const enableChrome = claudeSettings.enableChrome;
+      const launchArgs = claudeSettings.launchArgs;
       const modelSelection =
         input.modelSelection?.provider === "claudeAgent" ? input.modelSelection : undefined;
       const caps = getClaudeModelCapabilities(modelSelection?.model);
@@ -2720,7 +2749,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         canUseTool,
         env: process.env,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
-        ...(enableChrome ? { extraArgs: { chrome: null } } : {}),
+        ...(Object.keys(parseLaunchArgs(launchArgs)).length > 0
+          ? { extraArgs: parseLaunchArgs(launchArgs) }
+          : {}),
       };
 
       const queryRuntime = yield* Effect.try({
