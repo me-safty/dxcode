@@ -3295,7 +3295,7 @@ export default function ChatView(props: ChatViewProps) {
         className={cn(
           "border-b border-border py-2 sm:py-3 flex items-center",
           usesDesktopChromeHeader
-            ? "drag-region h-[var(--desktop-chrome-titlebar-height)] pl-3 pr-[var(--desktop-chrome-safe-inline-end,0px)]"
+            ? "desktop-chrome desktop-chrome-safe-end drag-region pl-3"
             : "px-3 sm:px-5",
         )}
       >

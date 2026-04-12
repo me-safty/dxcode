@@ -180,6 +180,18 @@ code {
   -webkit-app-region: no-drag;
 }
 
+.desktop-chrome {
+  height: var(--desktop-chrome-titlebar-height);
+}
+
+.desktop-chrome-safe-start {
+  padding-inline-start: max(1rem, var(--desktop-chrome-safe-inline-start, 0px));
+}
+
+.desktop-chrome-safe-end {
+  padding-inline-end: max(1rem, var(--desktop-chrome-safe-inline-end, 0px));
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;

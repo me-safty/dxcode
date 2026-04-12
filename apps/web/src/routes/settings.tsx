@@ -59,7 +59,7 @@ function SettingsContentLayout() {
         {usesDesktopChromeHeader && (
           <div
             className={cn(
-              "drag-region flex h-[var(--desktop-chrome-titlebar-height)] shrink-0 items-center border-b border-border pl-5 pr-[var(--desktop-chrome-safe-inline-end,0px)]",
+              "desktop-chrome desktop-chrome-safe-end drag-region flex shrink-0 items-center border-b border-border pl-5",
             )}
           >
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">

@@ -9,7 +9,7 @@ import {
 
 describe("desktop chrome layout helpers", () => {
   it("computes a safe inline inset from the number of controls", () => {
-    expect(resolveDesktopChromeSafeInlineSize(0)).toBe("1rem");
+    expect(resolveDesktopChromeSafeInlineSize(0)).toBe("0px");
     expect(resolveDesktopChromeSafeInlineSize(2)).toBe("4.5rem");
   });
 
@@ -34,7 +34,7 @@ describe("desktop chrome layout helpers", () => {
       }),
     ).toEqual({
       "--desktop-chrome-safe-inline-start": "90px",
-      "--desktop-chrome-safe-inline-end": "0",
+      "--desktop-chrome-safe-inline-end": "0px",
       "--desktop-chrome-titlebar-height": `${DESKTOP_CHROME_TITLEBAR_HEIGHT_PX}px`,
     });
   });
@@ -56,7 +56,7 @@ describe("desktop chrome layout helpers", () => {
     });
   });
 
-  it("uses safe area env vars for WCO platforms", () => {
+  it("uses titlebar area env vars for WCO platforms", () => {
     expect(
       resolveDesktopChromeRootStyle({
         platform: "windows",
@@ -79,9 +79,9 @@ describe("desktop chrome layout helpers", () => {
         windowControlsLayout: null,
       }),
     ).toEqual({
-      "--desktop-chrome-safe-inline-start": "0",
-      "--desktop-chrome-safe-inline-end": "0",
-      "--desktop-chrome-titlebar-height": "0",
+      "--desktop-chrome-safe-inline-start": "0px",
+      "--desktop-chrome-safe-inline-end": "0px",
+      "--desktop-chrome-titlebar-height": "0px",
     });
   });
 });

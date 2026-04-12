@@ -22,7 +22,7 @@ function DesktopChromeOverlayBank(props: {
   return (
     <div
       className={cn(
-        "fixed top-0 z-50 flex h-[var(--desktop-chrome-titlebar-height)] w-fit items-center",
+        "desktop-chrome fixed top-0 z-50 flex w-fit items-center",
         props.side === "left" ? "left-3" : "right-3",
       )}
     >

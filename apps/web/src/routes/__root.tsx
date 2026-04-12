@@ -14,7 +14,7 @@ import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { DesktopChromeOverlay } from "../components/DesktopChromeOverlay";
-import { resolveDesktopChromeRootStyle } from "../components/desktopChromeLayout";
+import { resolveDesktopChromeRootStyle } from "../desktopChromeLayout";
 import {
   SlowRpcAckToastCoordinator,
   WebSocketConnectionCoordinator,

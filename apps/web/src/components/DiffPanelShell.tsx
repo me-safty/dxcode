@@ -11,10 +11,8 @@ function getDiffPanelHeaderRowClassName(mode: DiffPanelMode) {
   const shouldUseDragRegion = usesDesktopChromeHeader && mode !== "sheet";
   return cn(
     "flex items-center justify-between gap-2",
-    usesDesktopChromeHeader ? "pl-4 pr-[var(--desktop-chrome-safe-inline-end,0px)]" : "px-4",
-    shouldUseDragRegion
-      ? "drag-region h-[var(--desktop-chrome-titlebar-height)] border-b border-border"
-      : "h-12",
+    usesDesktopChromeHeader ? "desktop-chrome-safe-end pl-4" : "px-4",
+    shouldUseDragRegion ? "desktop-chrome drag-region border-b border-border" : "h-12",
   );
 }
 

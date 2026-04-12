@@ -1970,7 +1970,7 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader() {
   );
 
   return usesDesktopChromeHeader ? (
-    <SidebarHeader className="drag-region h-[var(--desktop-chrome-titlebar-height)] flex-row items-center gap-2 px-4 py-0 pl-[max(1em,var(--desktop-chrome-safe-inline-start,0))]">
+    <SidebarHeader className="desktop-chrome desktop-chrome-safe-start drag-region flex-row items-center gap-2 px-4 py-0">
       {wordmark}
     </SidebarHeader>
   ) : (
