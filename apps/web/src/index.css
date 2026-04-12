@@ -140,7 +140,6 @@
   --mask-offset-left: 0px;
   --mask-offset-right: 0px;
   --scroll-buffer: 2rem;
-  --left-mask-width: var(--mask-width);
   --right-mask-width: var(--mask-width);
 
   mask-image:
@@ -163,6 +162,12 @@
     0 var(--scroll-buffer),
     calc(100% - var(--scroll-buffer)) 100%;
   animation-fill-mode: both;
+}
+
+@supports not (animation-timeline: scroll(self inline)) {
+  .scroll-fade-effect-x {
+    --left-mask-width: var(--mask-width);
+  }
 }
 
 /* Suppress all transitions during theme changes */
