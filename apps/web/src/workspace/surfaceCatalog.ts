@@ -1,9 +1,5 @@
-import { TurnId } from "@t3tools/contracts";
-
-import {
-  normalizeWorkspaceRouteSearchString,
-  type WorkspaceRouteSearch,
-} from "../workspaceRouteSearch";
+import type { WorkspaceRouteSearch } from "../workspaceRouteSearch";
+import { parseDiffSurfaceFromSearch, serializeDiffSurfaceToSearch } from "./surfaces/diffSurface";
 import {
   sameDiffSurfaceFocus,
   sameThreadRef,
@@ -15,49 +11,6 @@ import {
   type WorkspaceSurfacePlacement,
   type WorkspaceTarget,
 } from "./types";
-
-export const WORKSPACE_ROUTE_SEARCH_KEYS = ["panel", "panelTurnId", "panelFilePath"] as const;
-
-function parseDiffSurfaceFromSearch(
-  target: WorkspaceTarget,
-  search: WorkspaceRouteSearch,
-): SecondarySurface | null {
-  if (target.kind !== "server" || search.panel !== "diff") {
-    return null;
-  }
-
-  const turnIdRaw = normalizeWorkspaceRouteSearchString(search.panelTurnId);
-  const turnId = turnIdRaw ? TurnId.make(turnIdRaw) : undefined;
-  const filePath =
-    turnId !== undefined ? normalizeWorkspaceRouteSearchString(search.panelFilePath) : undefined;
-
-  return {
-    id: "diff",
-    input: {
-      threadRef: target.threadRef,
-      focus:
-        turnId !== undefined
-          ? {
-              scope: "turn",
-              turnId,
-              ...(filePath ? { filePath } : {}),
-            }
-          : { scope: "conversation" },
-    },
-  };
-}
-
-function serializeDiffSurfaceToSearch(surface: Extract<WorkspaceSurfaceInstance, { id: "diff" }>) {
-  return {
-    panel: "diff",
-    ...(surface.input.focus.scope === "turn"
-      ? {
-          panelTurnId: surface.input.focus.turnId,
-          ...(surface.input.focus.filePath ? { panelFilePath: surface.input.focus.filePath } : {}),
-        }
-      : {}),
-  } satisfies Partial<WorkspaceRouteSearch>;
-}
 
 export function sameWorkspaceSurface(
   left: WorkspaceSurfaceInstance | null | undefined,
@@ -132,6 +85,6 @@ export function serializeWorkspaceSurfaceToSearch(
     case "chat":
       return {};
     case "diff":
-      return serializeDiffSurfaceToSearch(surface);
+      return serializeDiffSurfaceToSearch(surface as SecondarySurface & { id: "diff" });
   }
 }

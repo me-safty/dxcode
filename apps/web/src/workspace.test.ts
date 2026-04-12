@@ -82,6 +82,50 @@ describe("workspace url state", () => {
     });
     expect(resolveWorkspaceState(target, search)).toEqual(diffState);
   });
+
+  it("clears stale focused diff params when the secondary panel changes state", () => {
+    const target = createServerTarget();
+    const initialState = createDefaultWorkspaceState(target);
+    const focusedDiffState: WorkspaceState = {
+      ...initialState,
+      surfaces: {
+        ...initialState.surfaces,
+        secondary: {
+          id: "diff",
+          input: {
+            threadRef: target.threadRef,
+            focus: {
+              scope: "turn",
+              turnId: TEST_TURN_ID,
+              filePath: "src/app.ts",
+            },
+          },
+        },
+      },
+    };
+    const conversationDiffState: WorkspaceState = {
+      ...focusedDiffState,
+      surfaces: {
+        ...focusedDiffState.surfaces,
+        secondary: {
+          id: "diff",
+          input: {
+            threadRef: target.threadRef,
+            focus: { scope: "conversation" },
+          },
+        },
+      },
+    };
+
+    expect(
+      buildWorkspaceRouteSearch(
+        conversationDiffState,
+        buildWorkspaceRouteSearch(focusedDiffState, {}),
+      ),
+    ).toEqual({
+      panel: "diff",
+    });
+  });
 });
 
 describe("workspace store optimistic sync", () => {
@@ -116,5 +160,56 @@ describe("workspace store optimistic sync", () => {
 
     expect(store.getState().optimisticTransitions).toEqual([]);
     expect(selectResolvedWorkspaceState(store.getState())).toEqual(navigatedState);
+  });
+
+  it("updates and closes the secondary surface optimistically", () => {
+    const target = createServerTarget();
+    const initialState = createDefaultWorkspaceState(target);
+    const navigateToState = vi.fn(
+      (_nextState: WorkspaceState, _options?: WorkspaceNavigationOptions) => {},
+    );
+    const store = createWorkspaceStore(initialState, {
+      navigateToState,
+    });
+
+    store.getState().openSurface(
+      "secondary",
+      {
+        id: "diff",
+        input: {
+          threadRef: target.threadRef,
+          focus: { scope: "conversation" },
+        },
+      },
+      { replace: true },
+    );
+
+    store.getState().updateSurface(
+      "secondary",
+      "diff",
+      {
+        threadRef: target.threadRef,
+        focus: {
+          scope: "turn",
+          turnId: TEST_TURN_ID,
+        },
+      },
+      { replace: true },
+    );
+
+    expect(selectResolvedWorkspaceState(store.getState()).surfaces.secondary).toEqual({
+      id: "diff",
+      input: {
+        threadRef: target.threadRef,
+        focus: {
+          scope: "turn",
+          turnId: TEST_TURN_ID,
+        },
+      },
+    });
+
+    store.getState().closeSurface("secondary", { replace: true });
+
+    expect(selectResolvedWorkspaceState(store.getState()).surfaces.secondary).toBeNull();
   });
 });

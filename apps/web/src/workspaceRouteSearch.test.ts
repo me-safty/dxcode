@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { parseWorkspaceRouteSearch, stripWorkspaceRouteSearchParams } from "./workspaceRouteSearch";
+import {
+  clearWorkspaceRouteSearch,
+  mergeWorkspaceRouteSearch,
+  parseWorkspaceRouteSearch,
+  stripWorkspaceRouteSearchParams,
+} from "./workspaceRouteSearch";
 
 describe("parseWorkspaceRouteSearch", () => {
   it("keeps a valid panel value", () => {
@@ -44,6 +49,40 @@ describe("stripWorkspaceRouteSearchParams", () => {
         ["panel", "panelTurnId", "panelFilePath"],
       ),
     ).toEqual({
+      unrelated: "keep-me",
+    });
+  });
+});
+
+describe("workspace panel search helpers", () => {
+  it("clears known workspace panel params while keeping unrelated keys", () => {
+    expect(
+      clearWorkspaceRouteSearch({
+        panel: "diff",
+        panelTurnId: "turn-1",
+        panelFilePath: "src/app.ts",
+        unrelated: "keep-me",
+      }),
+    ).toEqual({
+      unrelated: "keep-me",
+    });
+  });
+
+  it("replaces stale panel params when merging a new panel state", () => {
+    expect(
+      mergeWorkspaceRouteSearch(
+        {
+          panel: "diff",
+          panelTurnId: "turn-1",
+          panelFilePath: "src/app.ts",
+          unrelated: "keep-me",
+        },
+        {
+          panel: "diff",
+        },
+      ),
+    ).toEqual({
+      panel: "diff",
       unrelated: "keep-me",
     });
   });

@@ -177,11 +177,13 @@ import {
 } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import {
-  useWorkspaceActions,
   useWorkspaceSecondarySurface,
-  useWorkspaceStoreApi,
+  useWorkspaceSecondarySurfaceActions,
 } from "./workspace/WorkspaceProvider";
-import { selectResolvedWorkspaceState } from "../workspace/store";
+import {
+  createConversationDiffSurface,
+  createTurnDiffSurface,
+} from "../workspace/surfaces/diffSurface";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -192,34 +194,6 @@ const EMPTY_CHANGED_FILES_EXPANDED_BY_TURN_ID: Record<string, boolean> = {};
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
-
-function useToggleDiffSurface(threadRef: ScopedThreadRef, isServerThread: boolean) {
-  const workspaceStore = useWorkspaceStoreApi();
-  const { closeSurface, openSurface } = useWorkspaceActions();
-
-  return useCallback(() => {
-    if (!isServerThread) {
-      return;
-    }
-
-    if (selectResolvedWorkspaceState(workspaceStore.getState()).surfaces.secondary?.id === "diff") {
-      closeSurface("secondary", { replace: true });
-      return;
-    }
-
-    openSurface(
-      "secondary",
-      {
-        id: "diff",
-        input: {
-          threadRef,
-          focus: { scope: "conversation" },
-        },
-      },
-      { replace: true },
-    );
-  }, [closeSurface, isServerThread, openSurface, threadRef, workspaceStore]);
-}
 
 type WorkspaceAwareChatHeaderProps = Omit<
   ComponentProps<typeof ChatHeader>,
@@ -233,7 +207,14 @@ const WorkspaceAwareChatHeader = memo(function WorkspaceAwareChatHeader(
   props: WorkspaceAwareChatHeaderProps,
 ) {
   const secondarySurface = useWorkspaceSecondarySurface();
-  const onToggleDiff = useToggleDiffSurface(props.threadRef, props.isServerThread);
+  const { toggleSecondarySurface } = useWorkspaceSecondarySurfaceActions();
+  const onToggleDiff = useCallback(() => {
+    if (!props.isServerThread) {
+      return;
+    }
+
+    toggleSecondarySurface(createConversationDiffSurface(props.threadRef), { replace: true });
+  }, [props.isServerThread, props.threadRef, toggleSecondarySurface]);
 
   return (
     <ChatHeader {...props} diffOpen={secondarySurface?.id === "diff"} onToggleDiff={onToggleDiff} />
@@ -667,7 +648,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
-  const { openSurface } = useWorkspaceActions();
+  const { openSecondarySurface, toggleSecondarySurface } = useWorkspaceSecondarySurfaceActions();
   const { resolvedTheme } = useTheme();
   // Granular store selectors — avoid subscribing to prompt changes.
   const composerRuntimeMode = useComposerDraftStore(
@@ -1526,7 +1507,13 @@ export default function ChatView(props: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
     [keybindings, nonTerminalShortcutLabelOptions],
   );
-  const onToggleDiff = useToggleDiffSurface(routeThreadRef, isServerThread);
+  const onToggleDiff = useCallback(() => {
+    if (!isServerThread) {
+      return;
+    }
+
+    toggleSecondarySurface(createConversationDiffSurface(routeThreadRef), { replace: true });
+  }, [isServerThread, routeThreadRef, toggleSecondarySurface]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -3291,19 +3278,11 @@ export default function ChatView(props: ChatViewProps) {
       if (!isServerThread) {
         return;
       }
-      openSurface(
-        "secondary",
-        {
-          id: "diff",
-          input: {
-            threadRef: routeThreadRef,
-            focus: filePath ? { scope: "turn", turnId, filePath } : { scope: "turn", turnId },
-          },
-        },
-        { replace: false },
-      );
+      openSecondarySurface(createTurnDiffSurface(routeThreadRef, turnId, filePath), {
+        replace: false,
+      });
     },
-    [isServerThread, openSurface, routeThreadRef],
+    [isServerThread, openSecondarySurface, routeThreadRef],
   );
   const onRevertUserMessage = useCallback(
     (messageId: MessageId) => {

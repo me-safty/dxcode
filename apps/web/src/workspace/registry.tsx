@@ -8,7 +8,7 @@ import {
   DiffPanelShell,
   type DiffPanelMode,
 } from "../components/DiffPanelShell";
-import { useWorkspaceActions } from "../components/workspace/WorkspaceProvider";
+import { useWorkspaceSecondarySurfaceActions } from "../components/workspace/WorkspaceProvider";
 import type { MainSurface, SecondarySurface, WorkspaceSurfaceInstance } from "./types";
 
 const LazyDiffPanel = lazy(() => import("../components/DiffPanel"));
@@ -27,15 +27,14 @@ function RegisteredDiffSurface(props: {
   surface: Extract<SecondarySurface, { id: "diff" }>;
   renderMode: WorkspaceSecondaryRenderMode;
 }) {
-  const { updateSurface } = useWorkspaceActions();
+  const { updateSecondarySurface } = useWorkspaceSecondarySurfaceActions();
   const diffMode: DiffPanelMode = props.renderMode === "sheet" ? "sheet" : "sidebar";
   const onFocusChange = useCallback(
     (
       focus: Extract<SecondarySurface, { id: "diff" }>["input"]["focus"],
       options?: { replace?: boolean },
     ) => {
-      updateSurface(
-        "secondary",
+      updateSecondarySurface(
         "diff",
         {
           threadRef: props.surface.input.threadRef,
@@ -44,7 +43,7 @@ function RegisteredDiffSurface(props: {
         { replace: options?.replace ?? false },
       );
     },
-    [props.surface.input.threadRef, updateSurface],
+    [props.surface.input.threadRef, updateSecondarySurface],
   );
 
   return (

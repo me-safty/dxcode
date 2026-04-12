@@ -1,11 +1,7 @@
-import {
-  stripWorkspaceRouteSearchParams,
-  type WorkspaceRouteSearch,
-} from "../workspaceRouteSearch";
+import { mergeWorkspaceRouteSearch, type WorkspaceRouteSearch } from "../workspaceRouteSearch";
 import {
   resolveWorkspaceSurfaceFromSearch,
   serializeWorkspaceSurfaceToSearch,
-  WORKSPACE_ROUTE_SEARCH_KEYS,
 } from "./surfaceCatalog";
 import { createDefaultWorkspaceState, type WorkspaceState, type WorkspaceTarget } from "./types";
 
@@ -33,9 +29,8 @@ export function buildWorkspaceRouteSearch<T extends Record<string, unknown>>(
   state: WorkspaceState,
   previous: T,
 ): T & WorkspaceRouteSearch {
-  const rest = stripWorkspaceRouteSearchParams(previous, WORKSPACE_ROUTE_SEARCH_KEYS);
-  return {
-    ...rest,
-    ...serializeWorkspaceSurfaceToSearch(state.surfaces.secondary),
-  };
+  return mergeWorkspaceRouteSearch(
+    previous,
+    serializeWorkspaceSurfaceToSearch(state.surfaces.secondary),
+  );
 }

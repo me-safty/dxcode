@@ -8,8 +8,11 @@ import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../comp
 import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef } from "../threadRoutes";
-import { WORKSPACE_ROUTE_SEARCH_KEYS } from "../workspace/surfaceCatalog";
-import { type WorkspaceRouteSearch, parseWorkspaceRouteSearch } from "../workspaceRouteSearch";
+import {
+  type WorkspaceRouteSearch,
+  parseWorkspaceRouteSearch,
+  WORKSPACE_ROUTE_SEARCH_KEYS,
+} from "../workspaceRouteSearch";
 
 function ChatThreadRouteView() {
   const navigate = useNavigate();
