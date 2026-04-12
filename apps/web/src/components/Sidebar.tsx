@@ -1946,7 +1946,6 @@ function SortableProjectItem({
 }
 
 const SidebarChromeHeader = memo(function SidebarChromeHeader() {
-  const usesCenteredLinuxWordmark = usesCustomLinuxWindowControls;
   const wordmark = (
     <div className="flex items-center gap-2">
       <SidebarTrigger className="shrink-0 md:hidden" />
@@ -1976,38 +1975,21 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader() {
   );
 
   const linuxLeftControlsCount = windowControlsLayout?.left.length ?? 0;
-  const linuxRightControlsCount = windowControlsLayout?.right.length ?? 0;
-  const linuxSidebarHeaderInsetStyle = useMemo(() => {
-    if (!usesCenteredLinuxWordmark) {
-      return undefined;
-    }
+  const linuxWordmarkPaddingStyle = usesCustomLinuxWindowControls
+    ? {
+        paddingLeft:
+          linuxLeftControlsCount === 0 ? undefined : `${linuxLeftControlsCount * 1.75 + 0.5}rem`,
+      }
+    : undefined;
 
-    const paddingLeft =
-      linuxLeftControlsCount === 0 ? undefined : `${linuxLeftControlsCount * 1.75 + 0.5}rem`;
-    const paddingRight =
-      linuxRightControlsCount === 0 ? undefined : `${linuxRightControlsCount * 1.75 + 0.5}rem`;
-
-    return {
-      paddingLeft,
-      paddingRight,
-    };
-  }, [linuxLeftControlsCount, linuxRightControlsCount, usesCenteredLinuxWordmark]);
-
-  const desktopHeaderClassName = useMemo(() => {
-    if (desktopPlatform === "macos") {
-      return "drag-region relative h-[52px] flex-row items-center gap-2 py-0 px-4 pl-[90px]";
-    }
-
-    if (usesCenteredLinuxWordmark) {
-      return "drag-region relative h-[52px] flex-row items-center gap-2 px-3 py-0";
-    }
-
-    if (usesWCO) {
-      return "drag-region relative h-[52px] flex-row items-center gap-2 py-0 titlebar-overlay-safe titlebar-overlay-safe-md";
-    }
-
-    return "drag-region relative h-[52px] flex-row items-center gap-2 px-4 py-0";
-  }, [usesCenteredLinuxWordmark]);
+  const desktopHeaderClassName =
+    desktopPlatform === "macos"
+      ? "bg-background drag-region relative h-[52px] flex-row items-center gap-2 py-0 px-4 pl-[90px]"
+      : usesCustomLinuxWindowControls
+        ? "bg-background drag-region relative h-[52px] flex-row items-center gap-2 px-3 py-0"
+        : usesWCO
+          ? "bg-background drag-region relative h-[52px] flex-row items-center gap-2 py-0 titlebar-overlay-safe titlebar-overlay-safe-md"
+          : "bg-background drag-region relative h-[52px] flex-row items-center gap-2 px-4 py-0";
 
   if (!usesDesktopChromeHeader) {
     return (
@@ -2019,17 +2001,17 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader() {
 
   return (
     <SidebarHeader className={desktopHeaderClassName}>
-      {usesCenteredLinuxWordmark ? (
+      {usesCustomLinuxWindowControls ? (
         <div className="absolute inset-x-3 top-1/2 flex -translate-y-1/2 items-center">
           <LinuxWindowControls />
         </div>
       ) : null}
-      {usesCenteredLinuxWordmark ? (
+      {usesCustomLinuxWindowControls ? (
         <div
-          className="relative z-[1] pointer-events-none flex min-w-0 flex-1 justify-center"
-          style={linuxSidebarHeaderInsetStyle}
+          className="relative z-[1] flex min-w-0 flex-1 items-center"
+          style={linuxWordmarkPaddingStyle}
         >
-          <div className="pointer-events-auto">{wordmark}</div>
+          {wordmark}
         </div>
       ) : (
         wordmark
