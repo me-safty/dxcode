@@ -1,6 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
 import readline from "node:readline";
 
 import {
@@ -1553,6 +1554,14 @@ function assertSupportedCodexCliVersion(input: {
       lower.includes("command not found") ||
       lower.includes("not found")
     ) {
+      // Disambiguate: ENOENT can mean the binary is missing OR the cwd
+      // does not exist.  Check the cwd in the error path so we surface
+      // the right message without a racy preflight.
+      try {
+        fs.accessSync(input.cwd);
+      } catch {
+        throw new Error(`Working directory '${input.cwd}' does not exist or is not accessible.`);
+      }
       throw new Error(`Codex CLI (${input.binaryPath}) is not installed or not executable.`);
     }
     throw new Error(

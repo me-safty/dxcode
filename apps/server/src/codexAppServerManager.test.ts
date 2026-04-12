@@ -470,6 +470,35 @@ describe("startSession", () => {
       manager.stopAll();
     }
   });
+
+  it("reports missing working directory instead of missing binary when cwd does not exist", async () => {
+    const manager = new CodexAppServerManager();
+    const events: Array<{ method: string; kind: string; message?: string }> = [];
+    manager.on("event", (event) => {
+      events.push({
+        method: event.method,
+        kind: event.kind,
+        ...(event.message ? { message: event.message } : {}),
+      });
+    });
+
+    const missingCwd = path.join(os.tmpdir(), `t3code-nonexistent-${randomUUID()}`);
+    try {
+      await expect(
+        manager.startSession({
+          threadId: asThreadId("thread-cwd-missing"),
+          provider: "codex",
+          binaryPath: "codex",
+          cwd: missingCwd,
+          runtimeMode: "full-access",
+        }),
+      ).rejects.toThrow(/Working directory.*does not exist/);
+      expect(events).toHaveLength(1);
+      expect(events[0]?.method).toBe("session/startFailed");
+    } finally {
+      manager.stopAll();
+    }
+  });
 });
 
 describe("sendTurn", () => {
