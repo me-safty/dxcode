@@ -1,5 +1,15 @@
 import { type EnvironmentId, type MessageId, type TurnId } from "@t3tools/contracts";
-import { memo, useCallback, useMemo, type ReactNode } from "react";
+import {
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
@@ -39,6 +49,7 @@ import {
   type ParsedTerminalContextEntry,
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
+import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
 
@@ -47,6 +58,50 @@ import {
   formatInlineTerminalContextLabel,
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
+
+// ---------------------------------------------------------------------------
+// Context — shared state consumed by every row component via useContext.
+// Propagates through LegendList's memo boundaries so each row re-renders
+// independently when the context value changes. `nowIso` is intentionally
+// excluded — self-ticking components (WorkingTimer, LiveElapsed) handle it.
+// ---------------------------------------------------------------------------
+
+/** Volatile Maps accessed via a ref-backed getter so they never bust the
+ *  context identity. Components read the Maps during their own render
+ *  (triggered by data changes), so they always see fresh values. */
+interface TimelineRowMaps {
+  turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
+  revertTurnCountByUserMessageId: Map<MessageId, number>;
+}
+
+interface TimelineRowSharedState {
+  activeTurnInProgress: boolean;
+  activeTurnId: TurnId | null | undefined;
+  isWorking: boolean;
+  isRevertingCheckpoint: boolean;
+  completionSummary: string | null;
+  timestampFormat: TimestampFormat;
+  /** Stable getter — returns the current Maps from a ref. */
+  getMaps: () => TimelineRowMaps;
+  routeThreadKey: string;
+  markdownCwd: string | undefined;
+  resolvedTheme: "light" | "dark";
+  workspaceRoot: string | undefined;
+  activeThreadEnvironmentId: EnvironmentId;
+  onRevertUserMessage: (messageId: MessageId) => void;
+  onImageExpand: (preview: ExpandedImagePreview) => void;
+  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+}
+
+const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
+
+function useTimelineRow() {
+  return useContext(TimelineRowCtx);
+}
+
+// ---------------------------------------------------------------------------
+// Props (public API)
+// ---------------------------------------------------------------------------
 
 interface MessagesTimelineProps {
   hasMessages: boolean;
@@ -59,11 +114,7 @@ interface MessagesTimelineProps {
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
-  nowIso: string;
-  expandedWorkGroups: Record<string, boolean>;
-  onToggleWorkGroup: (groupId: string) => void;
-  changedFilesExpandedByTurnId: Record<string, boolean>;
-  onSetChangedFilesExpanded: (turnId: TurnId, expanded: boolean) => void;
+  routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
@@ -77,6 +128,10 @@ interface MessagesTimelineProps {
   onIsAtEndChange: (isAtEnd: boolean) => void;
 }
 
+// ---------------------------------------------------------------------------
+// MessagesTimeline — list owner
+// ---------------------------------------------------------------------------
+
 export const MessagesTimeline = memo(function MessagesTimeline({
   hasMessages,
   isWorking,
@@ -88,11 +143,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   completionDividerBeforeEntryId,
   completionSummary,
   turnDiffSummaryByAssistantMessageId,
-  nowIso,
-  expandedWorkGroups,
-  onToggleWorkGroup,
-  changedFilesExpandedByTurnId,
-  onSetChangedFilesExpanded,
+  routeThreadKey,
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
@@ -105,7 +156,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   onIsAtEndChange,
 }: MessagesTimelineProps) {
-  const rows = useMemo(
+  const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
         timelineEntries,
@@ -115,6 +166,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       }),
     [timelineEntries, completionDividerBeforeEntryId, isWorking, activeTurnStartedAt],
   );
+  const rows = useStableRows(rawRows);
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -123,7 +175,120 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }
   }, [listRef, onIsAtEndChange]);
 
-  const renderRowContent = (row: TimelineRow) => (
+  // Volatile Maps go into a ref so they never bust the context identity.
+  // Components read them via getMaps() during their own render pass.
+  const mapsRef = useRef<TimelineRowMaps>({
+    turnDiffSummaryByAssistantMessageId,
+    revertTurnCountByUserMessageId,
+  });
+  mapsRef.current = {
+    turnDiffSummaryByAssistantMessageId,
+    revertTurnCountByUserMessageId,
+  };
+  const getMaps = useCallback(() => mapsRef.current, []);
+
+  // Memoised context value — only changes on state transitions, NOT on
+  // every streaming chunk. Callbacks from ChatView are useCallback-stable.
+  const sharedState = useMemo<TimelineRowSharedState>(
+    () => ({
+      activeTurnInProgress,
+      activeTurnId: activeTurnId ?? null,
+      isWorking,
+      isRevertingCheckpoint,
+      completionSummary,
+      timestampFormat,
+      getMaps,
+      routeThreadKey,
+      markdownCwd,
+      resolvedTheme,
+      workspaceRoot,
+      activeThreadEnvironmentId,
+      onRevertUserMessage,
+      onImageExpand,
+      onOpenTurnDiff,
+    }),
+    [
+      activeTurnInProgress,
+      activeTurnId,
+      isWorking,
+      isRevertingCheckpoint,
+      completionSummary,
+      timestampFormat,
+      getMaps,
+      routeThreadKey,
+      markdownCwd,
+      resolvedTheme,
+      workspaceRoot,
+      activeThreadEnvironmentId,
+      onRevertUserMessage,
+      onImageExpand,
+      onOpenTurnDiff,
+    ],
+  );
+
+  // Stable renderItem — no closure deps. Row components read shared state
+  // from TimelineRowCtx, which propagates through LegendList's memo.
+  const renderItem = useCallback(
+    ({ item }: { item: MessagesTimelineRow }) => (
+      <div
+        className="mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden"
+        data-timeline-root="true"
+      >
+        <TimelineRowContent row={item} />
+      </div>
+    ),
+    [],
+  );
+
+  if (!hasMessages && !isWorking) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <p className="text-sm text-muted-foreground/30">
+          Send a message to start the conversation.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <TimelineRowCtx.Provider value={sharedState}>
+      <LegendList<MessagesTimelineRow>
+        ref={listRef}
+        data={rows}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        estimatedItemSize={90}
+        initialScrollAtEnd
+        maintainScrollAtEnd
+        maintainScrollAtEndThreshold={0.1}
+        maintainVisibleContentPosition
+        onScroll={handleScroll}
+        className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+        ListHeaderComponent={<div className="h-3 sm:h-4" />}
+        ListFooterComponent={<div className="h-3 sm:h-4" />}
+      />
+    </TimelineRowCtx.Provider>
+  );
+});
+
+function keyExtractor(item: MessagesTimelineRow) {
+  return item.id;
+}
+
+// ---------------------------------------------------------------------------
+// TimelineRowContent — the actual row component
+// ---------------------------------------------------------------------------
+
+type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
+type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
+type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
+type TimelineRow = MessagesTimelineRow;
+
+function TimelineRowContent({ row }: { row: TimelineRow }) {
+  const ctx = useTimelineRow();
+  const maps = ctx.getMaps();
+
+  return (
     <div
       className={cn(
         "pb-4",
@@ -134,47 +299,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
-      {row.kind === "work" &&
-        (() => {
-          const groupId = row.id;
-          const groupedEntries = row.groupedEntries;
-          const isExpanded = expandedWorkGroups[groupId] ?? false;
-          const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
-          const visibleEntries =
-            hasOverflow && !isExpanded
-              ? groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
-              : groupedEntries;
-          const hiddenCount = groupedEntries.length - visibleEntries.length;
-          const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
-          const showHeader = hasOverflow || !onlyToolEntries;
-          const groupLabel = onlyToolEntries ? "Tool calls" : "Work log";
-
-          return (
-            <div className="rounded-xl border border-border/45 bg-card/25 px-2 py-1.5">
-              {showHeader && (
-                <div className="mb-1.5 flex items-center justify-between gap-2 px-0.5">
-                  <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/55">
-                    {groupLabel} ({groupedEntries.length})
-                  </p>
-                  {hasOverflow && (
-                    <button
-                      type="button"
-                      className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
-                      onClick={() => onToggleWorkGroup(groupId)}
-                    >
-                      {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
-                    </button>
-                  )}
-                </div>
-              )}
-              <div className="space-y-0.5">
-                {visibleEntries.map((workEntry) => (
-                  <SimpleWorkEntryRow key={`work-row:${workEntry.id}`} workEntry={workEntry} />
-                ))}
-              </div>
-            </div>
-          );
-        })()}
+      {row.kind === "work" && (
+        <WorkGroupSection groupId={row.id} groupedEntries={row.groupedEntries} />
+      )}
 
       {row.kind === "message" &&
         row.message.role === "user" &&
@@ -182,7 +309,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           const userImages = row.message.attachments ?? [];
           const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
           const terminalContexts = displayedUserMessage.contexts;
-          const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
+          const canRevertAgentWork = maps.revertTurnCountByUserMessageId.has(row.message.id);
           return (
             <div className="flex justify-end">
               <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
@@ -202,7 +329,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                               onClick={() => {
                                 const preview = buildExpandedImagePreview(userImages, image.id);
                                 if (!preview) return;
-                                onImageExpand(preview);
+                                ctx.onImageExpand(preview);
                               }}
                             >
                               <img
@@ -238,8 +365,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                         type="button"
                         size="xs"
                         variant="outline"
-                        disabled={isRevertingCheckpoint || isWorking}
-                        onClick={() => onRevertUserMessage(row.message.id)}
+                        disabled={ctx.isRevertingCheckpoint || ctx.isWorking}
+                        onClick={() => ctx.onRevertUserMessage(row.message.id)}
                         title="Revert to this message"
                       >
                         <Undo2Icon className="size-3" />
@@ -247,7 +374,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     )}
                   </div>
                   <p className="text-right text-xs text-muted-foreground/50">
-                    {formatTimestamp(row.message.createdAt, timestampFormat)}
+                    {formatTimestamp(row.message.createdAt, ctx.timestampFormat)}
                   </p>
                 </div>
               </div>
@@ -260,10 +387,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         (() => {
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
           const assistantTurnStillInProgress =
-            activeTurnInProgress &&
-            activeTurnId !== null &&
-            activeTurnId !== undefined &&
-            row.message.turnId === activeTurnId;
+            ctx.activeTurnInProgress &&
+            ctx.activeTurnId !== null &&
+            ctx.activeTurnId !== undefined &&
+            row.message.turnId === ctx.activeTurnId;
           const assistantCopyState = resolveAssistantMessageCopyState({
             text: row.message.text ?? null,
             showCopyButton: row.showAssistantCopyButton,
@@ -275,7 +402,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 <div className="my-3 flex items-center gap-3">
                   <span className="h-px flex-1 bg-border" />
                   <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
-                    {completionSummary ? `Response • ${completionSummary}` : "Response"}
+                    {ctx.completionSummary
+                      ? `Response • ${ctx.completionSummary}`
+                      : "Response"}
                   </span>
                   <span className="h-px flex-1 bg-border" />
                 </div>
@@ -283,76 +412,29 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               <div className="min-w-0 px-1 py-0.5">
                 <ChatMarkdown
                   text={messageText}
-                  cwd={markdownCwd}
+                  cwd={ctx.markdownCwd}
                   isStreaming={Boolean(row.message.streaming)}
                 />
-                {(() => {
-                  const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
-                  if (!turnSummary) return null;
-                  const checkpointFiles = turnSummary.files;
-                  if (checkpointFiles.length === 0) return null;
-                  const summaryStat = summarizeTurnDiffStats(checkpointFiles);
-                  const changedFileCountLabel = String(checkpointFiles.length);
-                  const allDirectoriesExpanded =
-                    changedFilesExpandedByTurnId[turnSummary.turnId] ?? true;
-                  return (
-                    <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
-                      <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
-                          <span>Changed files ({changedFileCountLabel})</span>
-                          {hasNonZeroStat(summaryStat) && (
-                            <>
-                              <span className="mx-1">•</span>
-                              <DiffStatLabel
-                                additions={summaryStat.additions}
-                                deletions={summaryStat.deletions}
-                              />
-                            </>
-                          )}
-                        </p>
-                        <div className="flex items-center gap-1.5">
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            data-scroll-anchor-ignore
-                            onClick={() =>
-                              onSetChangedFilesExpanded(turnSummary.turnId, !allDirectoriesExpanded)
-                            }
-                          >
-                            {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            onClick={() =>
-                              onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)
-                            }
-                          >
-                            View diff
-                          </Button>
-                        </div>
-                      </div>
-                      <ChangedFilesTree
-                        key={`changed-files-tree:${turnSummary.turnId}`}
-                        turnId={turnSummary.turnId}
-                        files={checkpointFiles}
-                        allDirectoriesExpanded={allDirectoriesExpanded}
-                        resolvedTheme={resolvedTheme}
-                        onOpenTurnDiff={onOpenTurnDiff}
-                      />
-                    </div>
-                  );
-                })()}
+                <AssistantChangedFilesSection
+                  messageId={row.message.id}
+                  routeThreadKey={ctx.routeThreadKey}
+                  resolvedTheme={ctx.resolvedTheme}
+                  onOpenTurnDiff={ctx.onOpenTurnDiff}
+                />
                 <div className="mt-1.5 flex items-center gap-2">
                   <p className="text-[10px] text-muted-foreground/30">
-                    {formatMessageMeta(
-                      row.message.createdAt,
-                      row.message.streaming
-                        ? formatElapsed(row.durationStart, nowIso)
-                        : formatElapsed(row.durationStart, row.message.completedAt),
-                      timestampFormat,
+                    {row.message.streaming ? (
+                      <LiveMessageMeta
+                        createdAt={row.message.createdAt}
+                        durationStart={row.durationStart}
+                        timestampFormat={ctx.timestampFormat}
+                      />
+                    ) : (
+                      formatMessageMeta(
+                        row.message.createdAt,
+                        formatElapsed(row.durationStart, row.message.completedAt),
+                        ctx.timestampFormat,
+                      )
                     )}
                   </p>
                   {assistantCopyState.visible ? (
@@ -375,9 +457,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         <div className="min-w-0 px-1 py-0.5">
           <ProposedPlanCard
             planMarkdown={row.proposedPlan.planMarkdown}
-            environmentId={activeThreadEnvironmentId}
-            cwd={markdownCwd}
-            workspaceRoot={workspaceRoot}
+            environmentId={ctx.activeThreadEnvironmentId}
+            cwd={ctx.markdownCwd}
+            workspaceRoot={ctx.workspaceRoot}
           />
         </div>
       )}
@@ -391,89 +473,209 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
             </span>
             <span>
-              {row.createdAt
-                ? `Working for ${formatWorkingTimer(row.createdAt, nowIso) ?? "0s"}`
-                : "Working..."}
+              {row.createdAt ? (
+                <>
+                  Working for <WorkingTimer createdAt={row.createdAt} />
+                </>
+              ) : (
+                "Working..."
+              )}
             </span>
           </div>
         </div>
       )}
     </div>
   );
+}
 
-  if (!hasMessages && !isWorking) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-muted-foreground/30">
-          Send a message to start the conversation.
-        </p>
-      </div>
-    );
-  }
+// ---------------------------------------------------------------------------
+// Self-ticking components — bypass LegendList memoisation entirely.
+// Each owns a `nowMs` state value consumed in the render output so the
+// React Compiler cannot elide the re-render as a no-op.
+// ---------------------------------------------------------------------------
+
+/** Live "Working for Xs" label. */
+function WorkingTimer({ createdAt }: { createdAt: string }) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [createdAt]);
+  return <>{formatWorkingTimer(createdAt, new Date(nowMs).toISOString()) ?? "0s"}</>;
+}
+
+/** Live timestamp + elapsed duration for a streaming assistant message. */
+function LiveMessageMeta({
+  createdAt,
+  durationStart,
+  timestampFormat,
+}: {
+  createdAt: string;
+  durationStart: string | null | undefined;
+  timestampFormat: TimestampFormat;
+}) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [durationStart]);
+  const elapsed = durationStart
+    ? formatElapsed(durationStart, new Date(nowMs).toISOString())
+    : null;
+  return <>{formatMessageMeta(createdAt, elapsed, timestampFormat)}</>;
+}
+
+// ---------------------------------------------------------------------------
+// Extracted row sections — own their state / store subscriptions so changes
+// re-render only the affected row, not the entire list.
+// ---------------------------------------------------------------------------
+
+/** Owns its own expand/collapse state so toggling re-renders only this row.
+ *  State resets on unmount which is fine — work groups start collapsed. */
+const WorkGroupSection = memo(function WorkGroupSection({
+  groupId,
+  groupedEntries,
+}: {
+  groupId: string;
+  groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
+  const visibleEntries =
+    hasOverflow && !isExpanded
+      ? groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
+      : groupedEntries;
+  const hiddenCount = groupedEntries.length - visibleEntries.length;
+  const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
+  const showHeader = hasOverflow || !onlyToolEntries;
+  const groupLabel = onlyToolEntries ? "Tool calls" : "Work log";
 
   return (
-    <LegendList<MessagesTimelineRow>
-      ref={listRef}
-      data={rows}
-      keyExtractor={(item) => item.id}
-      renderItem={({ item }) => (
-        <div
-          className="mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden"
-          data-timeline-root="true"
-        >
-          {renderRowContent(item)}
+    <div className="rounded-xl border border-border/45 bg-card/25 px-2 py-1.5">
+      {showHeader && (
+        <div className="mb-1.5 flex items-center justify-between gap-2 px-0.5">
+          <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/55">
+            {groupLabel} ({groupedEntries.length})
+          </p>
+          {hasOverflow && (
+            <button
+              type="button"
+              className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
+              onClick={() => setIsExpanded((v) => !v)}
+            >
+              {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
+            </button>
+          )}
         </div>
       )}
-      estimatedItemSize={90}
-      alignItemsAtEnd
-      initialScrollAtEnd
-      maintainScrollAtEnd
-      maintainScrollAtEndThreshold={0.1}
-      maintainVisibleContentPosition
-      onScroll={handleScroll}
-      className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-      ListHeaderComponent={<div className="h-3 sm:h-4" />}
-      ListFooterComponent={<div className="h-3 sm:h-4" />}
+      <div className="space-y-0.5">
+        {visibleEntries.map((workEntry) => (
+          <SimpleWorkEntryRow key={`work-row:${workEntry.id}`} workEntry={workEntry} />
+        ))}
+      </div>
+    </div>
+  );
+});
+
+/** Subscribes directly to the UI state store for expand/collapse state,
+ *  so toggling re-renders only this component — not the entire list. */
+const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection({
+  messageId,
+  routeThreadKey,
+  resolvedTheme,
+  onOpenTurnDiff,
+}: {
+  messageId: MessageId;
+  routeThreadKey: string;
+  resolvedTheme: "light" | "dark";
+  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+}) {
+  const ctx = useTimelineRow();
+  const turnSummary = ctx.getMaps().turnDiffSummaryByAssistantMessageId.get(messageId);
+  if (!turnSummary) return null;
+  const checkpointFiles = turnSummary.files;
+  if (checkpointFiles.length === 0) return null;
+
+  return (
+    <AssistantChangedFilesSectionInner
+      turnSummary={turnSummary}
+      checkpointFiles={checkpointFiles}
+      routeThreadKey={routeThreadKey}
+      resolvedTheme={resolvedTheme}
+      onOpenTurnDiff={onOpenTurnDiff}
     />
   );
 });
 
-type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
-type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
-type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
-type TimelineRow = MessagesTimelineRow;
+/** Inner component that only mounts when there are actual changed files,
+ *  so the store subscription is unconditional (no hooks after early return). */
+function AssistantChangedFilesSectionInner({
+  turnSummary,
+  checkpointFiles,
+  routeThreadKey,
+  resolvedTheme,
+  onOpenTurnDiff,
+}: {
+  turnSummary: TurnDiffSummary;
+  checkpointFiles: TurnDiffSummary["files"];
+  routeThreadKey: string;
+  resolvedTheme: "light" | "dark";
+  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+}) {
+  const allDirectoriesExpanded = useUiStateStore(
+    (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.turnId] ?? true,
+  );
+  const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
+  const summaryStat = summarizeTurnDiffStats(checkpointFiles);
+  const changedFileCountLabel = String(checkpointFiles.length);
 
-function formatWorkingTimer(startIso: string, endIso: string): string | null {
-  const startedAtMs = Date.parse(startIso);
-  const endedAtMs = Date.parse(endIso);
-  if (!Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs)) {
-    return null;
-  }
-
-  const elapsedSeconds = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
-  if (elapsedSeconds < 60) {
-    return `${elapsedSeconds}s`;
-  }
-
-  const hours = Math.floor(elapsedSeconds / 3600);
-  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
-  const seconds = elapsedSeconds % 60;
-
-  if (hours > 0) {
-    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-  }
-
-  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  return (
+    <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
+          <span>Changed files ({changedFileCountLabel})</span>
+          {hasNonZeroStat(summaryStat) && (
+            <>
+              <span className="mx-1">•</span>
+              <DiffStatLabel additions={summaryStat.additions} deletions={summaryStat.deletions} />
+            </>
+          )}
+        </p>
+        <div className="flex items-center gap-1.5">
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            data-scroll-anchor-ignore
+            onClick={() => setExpanded(routeThreadKey, turnSummary.turnId, !allDirectoriesExpanded)}
+          >
+            {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
+          </Button>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            onClick={() => onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)}
+          >
+            View diff
+          </Button>
+        </div>
+      </div>
+      <ChangedFilesTree
+        key={`changed-files-tree:${turnSummary.turnId}`}
+        turnId={turnSummary.turnId}
+        files={checkpointFiles}
+        allDirectoriesExpanded={allDirectoriesExpanded}
+        resolvedTheme={resolvedTheme}
+        onOpenTurnDiff={onOpenTurnDiff}
+      />
+    </div>
+  );
 }
 
-function formatMessageMeta(
-  createdAt: string,
-  duration: string | null,
-  timestampFormat: TimestampFormat,
-): string {
-  if (!duration) return formatTimestamp(createdAt, timestampFormat);
-  return `${formatTimestamp(createdAt, timestampFormat)} • ${duration}`;
-}
+// ---------------------------------------------------------------------------
+// Leaf components
+// ---------------------------------------------------------------------------
 
 const UserMessageTerminalContextInlineLabel = memo(
   function UserMessageTerminalContextInlineLabel(props: { context: ParsedTerminalContextEntry }) {
@@ -578,6 +780,100 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     </div>
   );
 });
+
+// ---------------------------------------------------------------------------
+// Structural sharing — reuse old row references when data hasn't changed
+// so LegendList (and React) can skip re-rendering unchanged items.
+// ---------------------------------------------------------------------------
+
+/** Returns a structurally-shared copy of `rows`: for each row whose content
+ *  hasn't changed since last call, the previous object reference is reused. */
+function useStableRows(rows: MessagesTimelineRow[]): MessagesTimelineRow[] {
+  const prevById = useRef(new Map<string, MessagesTimelineRow>());
+
+  return useMemo(() => {
+    const prev = prevById.current;
+    const next = new Map<string, MessagesTimelineRow>();
+    let anyChanged = false;
+
+    const result = rows.map((row) => {
+      const prevRow = prev.get(row.id);
+      if (prevRow && isRowUnchanged(prevRow, row)) {
+        next.set(row.id, prevRow);
+        return prevRow;
+      }
+      next.set(row.id, row);
+      anyChanged = true;
+      return row;
+    });
+
+    prevById.current = next;
+    // If nothing changed and length matches, reuse the previous array reference
+    return anyChanged || rows.length !== prev.size ? result : Array.from(prev.values());
+  }, [rows]);
+}
+
+/** Shallow field comparison per row variant — avoids JSON.stringify cost. */
+function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean {
+  if (a.kind !== b.kind || a.id !== b.id) return false;
+
+  switch (a.kind) {
+    case "working":
+      return a.createdAt === (b as typeof a).createdAt;
+
+    case "proposed-plan":
+      return a.proposedPlan === (b as typeof a).proposedPlan;
+
+    case "work":
+      return a.groupedEntries === (b as typeof a).groupedEntries;
+
+    case "message": {
+      const bm = b as typeof a;
+      return (
+        a.message === bm.message &&
+        a.durationStart === bm.durationStart &&
+        a.showCompletionDivider === bm.showCompletionDivider &&
+        a.showAssistantCopyButton === bm.showAssistantCopyButton
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pure helpers
+// ---------------------------------------------------------------------------
+
+function formatWorkingTimer(startIso: string, endIso: string): string | null {
+  const startedAtMs = Date.parse(startIso);
+  const endedAtMs = Date.parse(endIso);
+  if (!Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs)) {
+    return null;
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s`;
+  }
+
+  const hours = Math.floor(elapsedSeconds / 3600);
+  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+  const seconds = elapsedSeconds % 60;
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+function formatMessageMeta(
+  createdAt: string,
+  duration: string | null,
+  timestampFormat: TimestampFormat,
+): string {
+  if (!duration) return formatTimestamp(createdAt, timestampFormat);
+  return `${formatTimestamp(createdAt, timestampFormat)} • ${duration}`;
+}
 
 function workToneIcon(tone: TimelineWorkEntry["tone"]): {
   icon: LucideIcon;

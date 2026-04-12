@@ -174,7 +174,6 @@ const IMAGE_ONLY_BOOTSTRAP_PROMPT =
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
-const EMPTY_CHANGED_FILES_EXPANDED_BY_TURN_ID: Record<string, boolean> = {};
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
@@ -590,17 +589,8 @@ export default function ChatView(props: ChatViewProps) {
   );
   const setStoreThreadError = useStore((store) => store.setError);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
-  const setThreadChangedFilesExpanded = useUiStateStore(
-    (store) => store.setThreadChangedFilesExpanded,
-  );
   const activeThreadLastVisitedAt = useUiStateStore((store) =>
     routeKind === "server" ? store.threadLastVisitedAtById[routeThreadKey] : undefined,
-  );
-  const changedFilesExpandedByTurnId = useUiStateStore((store) =>
-    routeKind === "server"
-      ? (store.threadChangedFilesExpandedById[routeThreadKey] ??
-        EMPTY_CHANGED_FILES_EXPANDED_BY_TURN_ID)
-      : EMPTY_CHANGED_FILES_EXPANDED_BY_TURN_ID,
   );
   const settings = useSettings();
   const setStickyComposerModelSelection = useComposerDraftStore(
@@ -673,14 +663,12 @@ export default function ChatView(props: ChatViewProps) {
   >({});
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
-  const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, boolean>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
   // Used by "Implement in a new thread" to carry the sidebar-open intent across navigation.
   const planSidebarOpenOnNextThreadRef = useRef(false);
-  const [nowTick, setNowTick] = useState(() => Date.now());
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
@@ -980,16 +968,6 @@ export default function ChatView(props: ChatViewProps) {
     [openOrReuseProjectDraftThread],
   );
 
-  const handleSetChangedFilesExpanded = useCallback(
-    (turnId: TurnId, expanded: boolean) => {
-      if (routeKind !== "server") {
-        return;
-      }
-      setThreadChangedFilesExpanded(routeThreadKey, turnId, expanded);
-    },
-    [routeKind, routeThreadKey, setThreadChangedFilesExpanded],
-  );
-
   useEffect(() => {
     if (!serverThread?.id) return;
     if (!latestTurnSettled) return;
@@ -1129,7 +1107,6 @@ export default function ChatView(props: ChatViewProps) {
     threadError: activeThread?.error,
   });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
-  const nowIso = new Date(nowTick).toISOString();
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -1956,17 +1933,19 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   // Scroll helpers — LegendList handles auto-scroll via maintainScrollAtEnd.
-  // These are used for imperative scroll-to-end when sending messages or changing threads.
+  // Call scrollToEnd synchronously so LegendList's internal isAtEnd flips to
+  // true *before* React commits new data.  maintainScrollAtEnd then
+  // auto-scrolls on subsequent data/layout changes without extra retries.
   const scrollToEnd = useCallback((animated = false) => {
     legendListRef.current?.scrollToEnd?.({ animated });
   }, []);
   const onIsAtEndChange = useCallback((isAtEnd: boolean) => {
+    if (isAtEndRef.current === isAtEnd) return;
     isAtEndRef.current = isAtEnd;
     setShowScrollToBottom(!isAtEnd);
   }, []);
 
   useEffect(() => {
-    setExpandedWorkGroups({});
     setPullRequestDialogState(null);
     isAtEndRef.current = true;
     setShowScrollToBottom(false);
@@ -2126,16 +2105,6 @@ export default function ChatView(props: ChatViewProps) {
     storeClearTerminalLaunchContext,
     terminalState.terminalOpen,
   ]);
-
-  useEffect(() => {
-    if (phase !== "running") return;
-    const timer = window.setInterval(() => {
-      setNowTick(Date.now());
-    }, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [phase]);
 
   useEffect(() => {
     if (!activeThreadKey) return;
@@ -2424,14 +2393,12 @@ export default function ChatView(props: ChatViewProps) {
       },
     ]);
     // Sending a message should always bring the latest user turn into view.
-    // Use animated: false — an animated scroll can be interrupted by mid-flight
-    // data changes (server response, composer resize) causing the scroll to
-    // land at the wrong position.
+    // Calling scrollToEnd synchronously (before React commits the new data)
+    // sets LegendList's internal isAtEnd=true, so maintainScrollAtEnd
+    // auto-pins to the new item once the render commits.
     isAtEndRef.current = true;
-    requestAnimationFrame(() => {
-      legendListRef.current?.scrollToEnd?.({ animated: false });
-      setShowScrollToBottom(false);
-    });
+    setShowScrollToBottom(false);
+    scrollToEnd();
 
     setThreadError(threadIdForSend, null);
     if (expiredTerminalContextCount > 0) {
@@ -2823,10 +2790,8 @@ export default function ChatView(props: ChatViewProps) {
         },
       ]);
       isAtEndRef.current = true;
-      requestAnimationFrame(() => {
-        legendListRef.current?.scrollToEnd?.({ animated: false });
-        setShowScrollToBottom(false);
-      });
+      setShowScrollToBottom(false);
+      scrollToEnd();
 
       try {
         await persistThreadSettingsForNextTurn({
@@ -3086,12 +3051,6 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
-  const onToggleWorkGroup = useCallback((groupId: string) => {
-    setExpandedWorkGroups((existing) => ({
-      ...existing,
-      [groupId]: !existing[groupId],
-    }));
-  }, []);
   const onExpandTimelineImage = useCallback((preview: ExpandedImagePreview) => {
     setExpandedImage(preview);
   }, []);
@@ -3117,16 +3076,19 @@ export default function ChatView(props: ChatViewProps) {
     },
     [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
   );
-  const onRevertUserMessage = useCallback(
-    (messageId: MessageId) => {
-      const targetTurnCount = revertTurnCountByUserMessageId.get(messageId);
-      if (typeof targetTurnCount !== "number") {
-        return;
-      }
-      void onRevertToTurnCount(targetTurnCount);
-    },
-    [onRevertToTurnCount, revertTurnCountByUserMessageId],
-  );
+  // Both the Map and the revert handler are read from refs at call-time so
+  // the callback reference is fully stable and never busts context identity.
+  const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
+  revertTurnCountRef.current = revertTurnCountByUserMessageId;
+  const onRevertToTurnCountRef = useRef(onRevertToTurnCount);
+  onRevertToTurnCountRef.current = onRevertToTurnCount;
+  const onRevertUserMessage = useCallback((messageId: MessageId) => {
+    const targetTurnCount = revertTurnCountRef.current.get(messageId);
+    if (typeof targetTurnCount !== "number") {
+      return;
+    }
+    void onRevertToTurnCountRef.current(targetTurnCount);
+  }, []);
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -3196,12 +3158,8 @@ export default function ChatView(props: ChatViewProps) {
               completionDividerBeforeEntryId={completionDividerBeforeEntryId}
               completionSummary={completionSummary}
               turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
-              nowIso={nowIso}
               activeThreadEnvironmentId={activeThread.environmentId}
-              expandedWorkGroups={expandedWorkGroups}
-              onToggleWorkGroup={onToggleWorkGroup}
-              changedFilesExpandedByTurnId={changedFilesExpandedByTurnId}
-              onSetChangedFilesExpanded={handleSetChangedFilesExpanded}
+              routeThreadKey={routeThreadKey}
               onOpenTurnDiff={onOpenTurnDiff}
               revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
               onRevertUserMessage={onRevertUserMessage}
