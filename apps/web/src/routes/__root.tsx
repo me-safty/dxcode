@@ -12,6 +12,7 @@ import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
+import { CommandPalette } from "../components/CommandPalette";
 import { DesktopChromeOverlay } from "../components/DesktopChromeOverlay";
 import {
   type DesktopChromeSafeAreaStyle,
@@ -110,9 +111,11 @@ function RootRouteView() {
         <SlowRpcAckToastCoordinator />
         <div className="relative min-h-dvh" style={desktopChromeStyle}>
           <WebSocketConnectionSurface>
-            <AppSidebarLayout>
-              <Outlet />
-            </AppSidebarLayout>
+            <CommandPalette>
+              <AppSidebarLayout>
+                <Outlet />
+              </AppSidebarLayout>
+            </CommandPalette>
           </WebSocketConnectionSurface>
           {usesCustomWindowControls && windowControlsLayout ? (
             <DesktopChromeOverlay layout={windowControlsLayout} />
