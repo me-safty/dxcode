@@ -17,14 +17,7 @@ function ChatIndexRouteView() {
       )}
 
       {isElectron && (
-        <DesktopTitleBar
-          title="No active thread"
-          contextLabel="Workspace"
-          contextValue="Threads"
-          showContextChip={false}
-          titleAlignment="left"
-          tone={isWindowsElectron ? "default" : "subtle"}
-        />
+        <DesktopTitleBar title="No active thread" tone={isWindowsElectron ? "default" : "subtle"} />
       )}
 
       <div className="flex flex-1 items-center justify-center">

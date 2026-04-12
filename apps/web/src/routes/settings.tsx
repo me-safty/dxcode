@@ -56,10 +56,6 @@ function SettingsContentLayout() {
         {isElectron && (
           <DesktopTitleBar
             title="Settings"
-            contextLabel="Section"
-            contextValue="Settings"
-            showContextChip={isWindowsElectron}
-            titleAlignment={isWindowsElectron ? "center" : "left"}
             tone={isWindowsElectron ? "default" : "subtle"}
             trailing={restoreDefaultsButton}
           />

@@ -3914,10 +3914,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         {isElectron && (
           <DesktopTitleBar
             title="No active thread"
-            contextLabel="Workspace"
-            contextValue="Threads"
-            showContextChip={false}
-            titleAlignment="left"
             tone={isWindowsElectron ? "default" : "subtle"}
           />
         )}
@@ -3935,10 +3931,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {isWindowsElectron ? (
         <DesktopTitleBar
           title={activeThread.title}
-          contextLabel="Project"
-          contextValue={activeProject?.name ?? "None"}
-          showContextChip={false}
-          titleAlignment="left"
           reserveNativeWindowControlsOverlay={!diffOpen}
           {...(activeProject?.name ? { subtitle: activeProject.name } : {})}
           trailing={
