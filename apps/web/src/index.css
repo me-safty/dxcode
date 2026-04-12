@@ -111,6 +111,7 @@
   --mask-offset-top: 0px;
   --mask-offset-bottom: 0px;
   --scroll-buffer: 2rem;
+  --bottom-mask-height: var(--mask-height);
 
   mask-image:
     linear-gradient(to top, transparent, black 90%),
@@ -139,6 +140,7 @@
   --mask-offset-left: 0px;
   --mask-offset-right: 0px;
   --scroll-buffer: 2rem;
+  --right-mask-width: var(--mask-width);
 
   mask-image:
     linear-gradient(to left, transparent, black 90%),
