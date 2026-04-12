@@ -72,6 +72,11 @@ import {
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
 } from "./orchestration/http";
+import {
+  executionBridgeLifecycleCallbacksLive,
+  executionBridgeRunCreateRouteLayer,
+} from "./executionBridge/http";
+import { ExecutionBridgeRunRegistryLive } from "./executionBridge/runStart";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -233,6 +238,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
   attachmentsRouteLayer,
+  executionBridgeRunCreateRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
   otlpTracesProxyRouteLayer,
@@ -281,11 +287,13 @@ export const makeServerLayer = Layer.unwrap(
       HttpRouter.serve(makeRoutesLayer, {
         disableLogger: !config.logWebSocketEvents,
       }),
+      executionBridgeLifecycleCallbacksLive,
       httpListeningLayer,
       runtimeStateLayer,
     );
 
     return serverApplicationLayer.pipe(
+      Layer.provideMerge(ExecutionBridgeRunRegistryLive),
       Layer.provideMerge(RuntimeServicesLive),
       Layer.provideMerge(HttpServerLive),
       Layer.provide(ObservabilityLive),
