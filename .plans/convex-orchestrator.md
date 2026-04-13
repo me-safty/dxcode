@@ -627,7 +627,7 @@ Files changed:
 - [x] `postMessage()` posts threaded comments (existing behavior preserved)
 - [x] `linearAgentSessionId` stored on control thread and reused across continuation runs
 - [x] `@linear/sdk` is a direct dependency
-- [ ] `src/linear/client.ts` is absorbed into the adapter and deleted
+- [x] `src/linear/client.ts` is absorbed into the adapter and deleted
 - [x] Comment webhook path still works (no behavior regression)
 
 ### Status
