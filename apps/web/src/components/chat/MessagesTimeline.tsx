@@ -230,10 +230,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div
-        className="mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden"
-        data-timeline-root="true"
-      >
+      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden" data-timeline-root="true">
         <TimelineRowContent row={item} />
       </div>
     ),
@@ -402,9 +399,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                 <div className="my-3 flex items-center gap-3">
                   <span className="h-px flex-1 bg-border" />
                   <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
-                    {ctx.completionSummary
-                      ? `Response • ${ctx.completionSummary}`
-                      : "Response"}
+                    {ctx.completionSummary ? `Response • ${ctx.completionSummary}` : "Response"}
                   </span>
                   <span className="h-px flex-1 bg-border" />
                 </div>
