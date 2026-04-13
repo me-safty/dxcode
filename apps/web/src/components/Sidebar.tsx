@@ -43,6 +43,7 @@ import {
   type GitStatusResult,
 } from "@t3tools/contracts";
 import {
+  parseScopedThreadKey,
   scopedProjectKey,
   scopedThreadKey,
   scopeProjectRef,
@@ -2884,18 +2885,18 @@ export default function Sidebar() {
     () => getSidebarThreadIdsToPrewarm(visibleSidebarThreadKeys),
     [visibleSidebarThreadKeys],
   );
-  const prewarmedSidebarThreads = useMemo(
+  const prewarmedSidebarThreadRefs = useMemo(
     () =>
       prewarmedSidebarThreadKeys.flatMap((threadKey) => {
-        const thread = sidebarThreadByKey.get(threadKey);
-        return thread ? [thread] : [];
+        const ref = parseScopedThreadKey(threadKey);
+        return ref ? [ref] : [];
       }),
-    [prewarmedSidebarThreadKeys, sidebarThreadByKey],
+    [prewarmedSidebarThreadKeys],
   );
 
   useEffect(() => {
-    const releases = prewarmedSidebarThreads.map((thread) =>
-      retainThreadDetailSubscription(thread.environmentId, thread.id),
+    const releases = prewarmedSidebarThreadRefs.map((ref) =>
+      retainThreadDetailSubscription(ref.environmentId, ref.threadId),
     );
 
     return () => {
@@ -2903,7 +2904,7 @@ export default function Sidebar() {
         release();
       }
     };
-  }, [prewarmedSidebarThreads]);
+  }, [prewarmedSidebarThreadRefs]);
 
   useEffect(() => {
     const clearThreadJumpHints = () => {
