@@ -808,8 +808,7 @@ function useStableRows(rows: MessagesTimelineRow[]): MessagesTimelineRow[] {
     });
 
     prevById.current = next;
-    // If nothing changed and length matches, reuse the previous array reference
-    return anyChanged || rows.length !== prev.size ? result : Array.from(prev.values());
+    return result;
   }, [rows]);
 }
 

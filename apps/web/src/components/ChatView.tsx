@@ -28,8 +28,8 @@ import {
 import { applyClaudePromptEffortPrefix } from "@t3tools/shared/model";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
-import { Debouncer, useDebouncedCallback } from "@tanstack/react-pacer";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Debouncer } from "@tanstack/react-pacer";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
@@ -1938,16 +1938,6 @@ export default function ChatView(props: ChatViewProps) {
     legendListRef.current?.scrollToEnd?.({ animated });
   }, []);
 
-  // Flag set by send handlers — the actual scroll happens in the
-  // useLayoutEffect below, which fires after React commits new data so
-  // LegendList already has the updated rows.
-  const scrollToEndOnCommitRef = useRef(false);
-  useLayoutEffect(() => {
-    if (!scrollToEndOnCommitRef.current) return;
-    scrollToEndOnCommitRef.current = false;
-    legendListRef.current?.scrollToEnd?.({ animated: false });
-  }, [timelineEntries]);
-
   // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
   // thread switches.  LegendList fires scroll events with isAtEnd=false while
   // initialScrollAtEnd is settling; hiding is always immediate.
@@ -2402,6 +2392,14 @@ export default function ChatView(props: ChatViewProps) {
       sizeBytes: image.sizeBytes,
       previewUrl: image.previewUrl,
     }));
+    // Scroll to the current end *before* adding the optimistic message.
+    // This sets LegendList's internal isAtEnd=true so maintainScrollAtEnd
+    // automatically pins to the new item when the data changes.
+    isAtEndRef.current = true;
+    showScrollDebouncer.current.cancel();
+    setShowScrollToBottom(false);
+    await legendListRef.current?.scrollToEnd?.({ animated: false });
+
     setOptimisticUserMessages((existing) => [
       ...existing,
       {
@@ -2413,13 +2411,6 @@ export default function ChatView(props: ChatViewProps) {
         streaming: false,
       },
     ]);
-    // Sending a message should always bring the latest user turn into view.
-    // Flag scroll-to-end — the useLayoutEffect fires after React commits
-    // the optimistic message so LegendList already has the new rows.
-    scrollToEndOnCommitRef.current = true;
-    isAtEndRef.current = true;
-    showScrollDebouncer.current.cancel();
-    setShowScrollToBottom(false);
 
     setThreadError(threadIdForSend, null);
     if (expiredTerminalContextCount > 0) {
@@ -2800,6 +2791,13 @@ export default function ChatView(props: ChatViewProps) {
       sendInFlightRef.current = true;
       beginLocalDispatch({ preparingWorktree: false });
       setThreadError(threadIdForSend, null);
+
+      // Scroll to the current end *before* adding the optimistic message.
+      isAtEndRef.current = true;
+      showScrollDebouncer.current.cancel();
+      setShowScrollToBottom(false);
+      await legendListRef.current?.scrollToEnd?.({ animated: false });
+
       setOptimisticUserMessages((existing) => [
         ...existing,
         {
@@ -2810,10 +2808,6 @@ export default function ChatView(props: ChatViewProps) {
           streaming: false,
         },
       ]);
-      scrollToEndOnCommitRef.current = true;
-      isAtEndRef.current = true;
-      showScrollDebouncer.current.cancel();
-      setShowScrollToBottom(false);
 
       try {
         await persistThreadSettingsForNextTurn({
