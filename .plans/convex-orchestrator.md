@@ -620,15 +620,43 @@ Files changed:
 
 ### Acceptance criteria
 
-- [ ] Agent sessions are created on first comment per control thread
-- [ ] Initial "Preparing..." thought activity posts immediately on session creation
-- [ ] `postActivity()` posts thought/action/response/error to Linear's native agent UI
-- [ ] `updateIssueStatus()` resolves workflow states by name and transitions the issue
-- [ ] `postMessage()` posts threaded comments (existing behavior preserved)
-- [ ] `linearAgentSessionId` stored on control thread and reused across continuation runs
-- [ ] `@linear/sdk` is a direct dependency
+- [x] Agent sessions are created on first comment per control thread
+- [x] Initial "Preparing..." thought activity posts immediately on session creation
+- [x] `postActivity()` posts thought/action/response/error to Linear's native agent UI
+- [x] `updateIssueStatus()` resolves workflow states by name and transitions the issue
+- [x] `postMessage()` posts threaded comments (existing behavior preserved)
+- [x] `linearAgentSessionId` stored on control thread and reused across continuation runs
+- [x] `@linear/sdk` is a direct dependency
 - [ ] `src/linear/client.ts` is absorbed into the adapter and deleted
-- [ ] Comment webhook path still works (no behavior regression)
+- [x] Comment webhook path still works (no behavior regression)
+
+### Status
+
+Implemented on the current branch. E2E verified on [AFF-1659](https://linear.app/affilai/issue/AFF-1659).
+
+### Implementation notes
+
+- `src/linear/client.ts` was not fully deleted — it still contains `exchangeLinearOAuthCode` which `convex/http.ts` imports for the OAuth flow. The `postLinearComment` function was absorbed into the adapter. The remaining OAuth function will be moved when the OAuth flow is refactored.
+- Convex HTTP actions run in a non-Node runtime, so the adapter (which imports `@linear/sdk`) cannot be imported from `convex/http.ts`. Agent session creation and activity posting are called from `convex/linearMvp.ts` (which has `"use node"`) instead.
+- HMAC webhook verification functions (`computeHmacHex`, `constantTimeCompare`, `hasValidLinearSignature`) remain duplicated in `convex/http.ts` (Web Crypto API, no Node required) and `src/adapters/linear.ts`. The HTTP handler uses its own copy since it can't import the adapter.
+- The `issueIdentifier` field (e.g. `AFF-1659`) is extracted from the webhook payload's `data.issue.identifier` or parsed from the comment URL, and passed through to the control thread.
+- Known issue: duplicate completion replies are posted (once from the lifecycle callback handler and once from the reply-if-needed path). To be fixed.
+
+### Implementation footprint
+
+Files created:
+
+- `apps/orchestrator/src/adapters/linear.ts` — `createLinearPlatformAdapter()` factory with `postMessage`, `postActivity`, `createAgentSession`, `updateAgentSession`, `updateIssueStatus`, `verifyWebhook`, `normalizeInbound`
+
+Files changed:
+
+- `apps/orchestrator/convex/linearMvp.ts` — added `"use node"` directive, agent session creation + initial activity posting in `startRunFromLinearWebhook`, switched `postLinearComment` to adapter's `postMessage`
+- `apps/orchestrator/convex/controlThreads.ts` — added `setAgentSessionId` mutation, added `issueIdentifier` to ingress args
+- `apps/orchestrator/convex/schema.ts` — added `linearAgentSessionId` to `controlThreads`
+- `apps/orchestrator/convex/http.ts` — restored HMAC verification functions (can't import adapter from HTTP runtime), removed adapter import
+- `apps/orchestrator/src/linear/ingress.ts` — added `issueIdentifier` extraction from webhook payload and comment URL
+- `apps/orchestrator/src/linear/client.ts` — removed `postLinearComment` (absorbed into adapter), kept `exchangeLinearOAuthCode`
+- `apps/orchestrator/package.json` — added `@linear/sdk`
 
 ### Implementation decisions made
 
