@@ -516,11 +516,45 @@ function toShellSnapshot(snapshot: OrchestrationReadModel) {
   };
 }
 
-function sendShellThreadUpsert(thread: OrchestrationReadModel["threads"][number]): void {
+function updateThreadSessionInSnapshot(
+  snapshot: OrchestrationReadModel,
+  threadId: ThreadId,
+  session: OrchestrationReadModel["threads"][number]["session"],
+): OrchestrationReadModel {
+  return {
+    ...snapshot,
+    snapshotSequence: snapshot.snapshotSequence + 1,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === threadId
+        ? {
+            ...thread,
+            session,
+            updatedAt: NOW_ISO,
+          }
+        : thread,
+    ),
+  };
+}
+
+function sendShellThreadUpsert(
+  threadId: ThreadId,
+  options?: {
+    readonly session?: OrchestrationReadModel["threads"][number]["session"];
+  },
+): void {
+  const thread = fixture.snapshot.threads.find((entry) => entry.id === threadId);
+  if (!thread) {
+    throw new Error(`Expected thread ${threadId} in snapshot.`);
+  }
+
+  const shellThread =
+    options?.session !== undefined
+      ? toShellThread({ ...thread, session: options.session })
+      : toShellThread(thread);
   rpcHarness.emitStreamValue(ORCHESTRATION_WS_METHODS.subscribeShell, {
     kind: "thread-upserted",
     sequence: fixture.snapshot.snapshotSequence,
-    thread: toShellThread(thread),
+    thread: shellThread,
   });
 }
 
@@ -588,41 +622,22 @@ async function waitForAppBootstrap(): Promise<void> {
 async function materializePromotedDraftThreadViaDomainEvent(threadId: ThreadId): Promise<void> {
   await waitForWsClient();
   fixture.snapshot = addThreadToSnapshot(fixture.snapshot, threadId);
-  const thread = fixture.snapshot.threads.find((entry) => entry.id === threadId);
-  if (!thread) {
-    throw new Error(`Expected thread ${threadId} in snapshot.`);
-  }
-  sendShellThreadUpsert(thread);
+  fixture.snapshot = updateThreadSessionInSnapshot(fixture.snapshot, threadId, null);
+  sendShellThreadUpsert(threadId, { session: null });
 }
 
 async function startPromotedServerThreadViaDomainEvent(threadId: ThreadId): Promise<void> {
-  fixture.snapshot = {
-    ...fixture.snapshot,
-    snapshotSequence: fixture.snapshot.snapshotSequence + 1,
-    threads: fixture.snapshot.threads.map((thread) =>
-      thread.id === threadId
-        ? {
-            ...thread,
-            session: {
-              threadId,
-              status: "running",
-              providerName: "codex",
-              runtimeMode: "full-access",
-              activeTurnId: `turn-${threadId}` as TurnId,
-              lastError: null,
-              compacting: false,
-              updatedAt: NOW_ISO,
-            },
-            updatedAt: NOW_ISO,
-          }
-        : thread,
-    ),
-  };
-  const thread = fixture.snapshot.threads.find((entry) => entry.id === threadId);
-  if (!thread) {
-    throw new Error(`Expected thread ${threadId} in snapshot.`);
-  }
-  sendShellThreadUpsert(thread);
+  fixture.snapshot = updateThreadSessionInSnapshot(fixture.snapshot, threadId, {
+    threadId,
+    status: "running",
+    providerName: "codex",
+    runtimeMode: "full-access",
+    activeTurnId: `turn-${threadId}` as TurnId,
+    lastError: null,
+    compacting: false,
+    updatedAt: NOW_ISO,
+  });
+  sendShellThreadUpsert(threadId);
 }
 
 async function promoteDraftThreadViaDomainEvent(threadId: ThreadId): Promise<void> {

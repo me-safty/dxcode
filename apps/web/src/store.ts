@@ -4,7 +4,6 @@ import type {
   OrchestrationCheckpointSummary,
   OrchestrationEvent,
   OrchestrationMessage,
-  OrchestrationProjectShell,
   OrchestrationProposedPlan,
   OrchestrationReadModel,
   OrchestrationSession,
@@ -180,7 +179,9 @@ function mapTurnDiffSummary(checkpoint: OrchestrationCheckpointSummary): TurnDif
 }
 
 function mapProject(
-  project: OrchestrationReadModel["projects"][number],
+  project:
+    | OrchestrationReadModel["projects"][number]
+    | OrchestrationShellSnapshot["projects"][number],
   environmentId: EnvironmentId,
 ): Project {
   return {
@@ -223,26 +224,6 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     additionalDirectories: [...(thread.additionalDirectories ?? [])],
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
-  };
-}
-
-function mapProjectShell(
-  project: OrchestrationProjectShell,
-  environmentId: EnvironmentId,
-): Project {
-  return {
-    id: project.id,
-    environmentId,
-    name: project.title,
-    cwd: project.workspaceRoot,
-    repositoryIdentity: project.repositoryIdentity ?? null,
-    defaultModelSelection: project.defaultModelSelection
-      ? normalizeModelSelection(project.defaultModelSelection)
-      : null,
-    createdAt: project.createdAt,
-    updatedAt: project.updatedAt,
-    scripts: mapProjectScripts(project.scripts),
-    jiraBoard: project.jiraBoard ?? null,
   };
 }
 
@@ -659,6 +640,120 @@ function writeThreadState(
   }
 
   return nextState;
+}
+
+function writeThreadShellState(
+  state: EnvironmentState,
+  nextThread: {
+    shell: ThreadShell;
+    session: ThreadSession | null;
+    turnState: ThreadTurnState;
+    summary: SidebarThreadSummary;
+  },
+): EnvironmentState {
+  let nextState = state;
+  const previousShell = state.threadShellById[nextThread.shell.id];
+  const previousProjectId = previousShell?.projectId;
+  const nextProjectId = nextThread.shell.projectId;
+
+  if (!state.threadIds.includes(nextThread.shell.id)) {
+    nextState = {
+      ...nextState,
+      threadIds: [...nextState.threadIds, nextThread.shell.id],
+    };
+  }
+
+  if (previousProjectId !== nextProjectId) {
+    let threadIdsByProjectId = nextState.threadIdsByProjectId;
+    if (previousProjectId) {
+      const previousIds = threadIdsByProjectId[previousProjectId] ?? EMPTY_THREAD_IDS;
+      const nextIds = removeId(previousIds, nextThread.shell.id);
+      if (nextIds.length === 0) {
+        const { [previousProjectId]: _removed, ...rest } = threadIdsByProjectId;
+        threadIdsByProjectId = rest as Record<ProjectId, ThreadId[]>;
+      } else if (!arraysEqual(previousIds, nextIds)) {
+        threadIdsByProjectId = {
+          ...threadIdsByProjectId,
+          [previousProjectId]: nextIds,
+        };
+      }
+    }
+
+    const projectThreadIds = threadIdsByProjectId[nextProjectId] ?? EMPTY_THREAD_IDS;
+    const nextProjectThreadIds = appendId(projectThreadIds, nextThread.shell.id);
+    if (!arraysEqual(projectThreadIds, nextProjectThreadIds)) {
+      threadIdsByProjectId = {
+        ...threadIdsByProjectId,
+        [nextProjectId]: nextProjectThreadIds,
+      };
+    }
+    if (threadIdsByProjectId !== nextState.threadIdsByProjectId) {
+      nextState = {
+        ...nextState,
+        threadIdsByProjectId,
+      };
+    }
+  }
+
+  if (!threadShellsEqual(previousShell, nextThread.shell)) {
+    nextState = {
+      ...nextState,
+      threadShellById: {
+        ...nextState.threadShellById,
+        [nextThread.shell.id]: nextThread.shell,
+      },
+    };
+  }
+
+  if ((state.threadSessionById[nextThread.shell.id] ?? null) !== nextThread.session) {
+    nextState = {
+      ...nextState,
+      threadSessionById: {
+        ...nextState.threadSessionById,
+        [nextThread.shell.id]: nextThread.session,
+      },
+    };
+  }
+
+  if (
+    !threadTurnStatesEqual(state.threadTurnStateById[nextThread.shell.id], nextThread.turnState)
+  ) {
+    nextState = {
+      ...nextState,
+      threadTurnStateById: {
+        ...nextState.threadTurnStateById,
+        [nextThread.shell.id]: nextThread.turnState,
+      },
+    };
+  }
+
+  if (
+    !sidebarThreadSummariesEqual(
+      state.sidebarThreadSummaryById[nextThread.shell.id],
+      nextThread.summary,
+    )
+  ) {
+    nextState = {
+      ...nextState,
+      sidebarThreadSummaryById: {
+        ...nextState.sidebarThreadSummaryById,
+        [nextThread.shell.id]: nextThread.summary,
+      },
+    };
+  }
+
+  return nextState;
+}
+
+function retainThreadScopedRecord<T>(
+  record: Record<ThreadId, T>,
+  nextThreadIds: ReadonlySet<ThreadId>,
+): Record<ThreadId, T> {
+  return Object.fromEntries(
+    Object.entries(record).flatMap(([threadId, value]) =>
+      nextThreadIds.has(threadId as ThreadId) ? [[threadId, value] as const] : [],
+    ),
+  ) as Record<ThreadId, T>;
 }
 
 function removeThreadState(state: EnvironmentState, threadId: ThreadId): EnvironmentState {
@@ -1194,28 +1289,12 @@ function syncEnvironmentReadModel(
   };
 }
 
-export function syncServerReadModel(
-  state: AppState,
-  readModel: OrchestrationReadModel,
-  environmentId: EnvironmentId,
-): AppState {
-  return commitEnvironmentState(
-    state,
-    environmentId,
-    syncEnvironmentReadModel(
-      getStoredEnvironmentState(state, environmentId),
-      readModel,
-      environmentId,
-    ),
-  );
-}
-
 function syncEnvironmentShellSnapshot(
   state: EnvironmentState,
   snapshot: OrchestrationShellSnapshot,
   environmentId: EnvironmentId,
 ): EnvironmentState {
-  const nextProjects = snapshot.projects.map((project) => mapProjectShell(project, environmentId));
+  const nextProjects = snapshot.projects.map((project) => mapProject(project, environmentId));
   const nextThreadIds = new Set(snapshot.threads.map((thread) => thread.id));
   let nextState: EnvironmentState = {
     ...state,
@@ -1248,6 +1327,22 @@ function syncEnvironmentShellSnapshot(
   }
 
   return nextState;
+}
+
+export function syncServerReadModel(
+  state: AppState,
+  readModel: OrchestrationReadModel,
+  environmentId: EnvironmentId,
+): AppState {
+  return commitEnvironmentState(
+    state,
+    environmentId,
+    syncEnvironmentReadModel(
+      getStoredEnvironmentState(state, environmentId),
+      readModel,
+      environmentId,
+    ),
+  );
 }
 
 export function syncServerShellSnapshot(
@@ -1779,6 +1874,67 @@ function applyEnvironmentOrchestrationEvent(
   return state;
 }
 
+function applyEnvironmentShellEvent(
+  state: EnvironmentState,
+  event: OrchestrationShellStreamEvent,
+  environmentId: EnvironmentId,
+): EnvironmentState {
+  switch (event.kind) {
+    case "project-upserted": {
+      const nextProject = mapProject(event.project, environmentId);
+      const existingProjectId =
+        state.projectIds.find(
+          (projectId) =>
+            projectId === event.project.id ||
+            state.projectById[projectId]?.cwd === event.project.workspaceRoot,
+        ) ?? null;
+      let projectById = state.projectById;
+      let projectIds = state.projectIds;
+
+      if (existingProjectId !== null && existingProjectId !== nextProject.id) {
+        const { [existingProjectId]: _removedProject, ...restProjectById } = state.projectById;
+        projectById = {
+          ...restProjectById,
+          [nextProject.id]: nextProject,
+        };
+        projectIds = state.projectIds.map((projectId) =>
+          projectId === existingProjectId ? nextProject.id : projectId,
+        );
+      } else {
+        projectById = {
+          ...state.projectById,
+          [nextProject.id]: nextProject,
+        };
+        projectIds =
+          existingProjectId === null && !state.projectIds.includes(nextProject.id)
+            ? [...state.projectIds, nextProject.id]
+            : state.projectIds;
+      }
+
+      return {
+        ...state,
+        projectById,
+        projectIds,
+      };
+    }
+    case "project-removed": {
+      if (!state.projectById[event.projectId]) {
+        return state;
+      }
+      const { [event.projectId]: _removedProject, ...projectById } = state.projectById;
+      return {
+        ...state,
+        projectById,
+        projectIds: removeId(state.projectIds, event.projectId),
+      };
+    }
+    case "thread-upserted":
+      return writeThreadShellState(state, mapThreadShell(event.thread, environmentId));
+    case "thread-removed":
+      return removeThreadState(state, event.threadId);
+  }
+}
+
 export function applyOrchestrationEvents(
   state: AppState,
   events: ReadonlyArray<OrchestrationEvent>,
@@ -1802,7 +1958,7 @@ function applyEnvironmentShellEvent(
 ): EnvironmentState {
   switch (event.kind) {
     case "project-upserted": {
-      const nextProject = mapProjectShell(event.project, environmentId);
+      const nextProject = mapProject(event.project, environmentId);
       const existingProjectId =
         state.projectIds.find(
           (projectId) =>
@@ -2032,6 +2188,22 @@ export function applyOrchestrationEvent(
     state,
     environmentId,
     applyEnvironmentOrchestrationEvent(
+      getStoredEnvironmentState(state, environmentId),
+      event,
+      environmentId,
+    ),
+  );
+}
+
+export function applyShellEvent(
+  state: AppState,
+  event: OrchestrationShellStreamEvent,
+  environmentId: EnvironmentId,
+): AppState {
+  return commitEnvironmentState(
+    state,
+    environmentId,
+    applyEnvironmentShellEvent(
       getStoredEnvironmentState(state, environmentId),
       event,
       environmentId,

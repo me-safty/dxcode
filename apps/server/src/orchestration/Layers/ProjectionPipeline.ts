@@ -2,6 +2,7 @@ import {
   ApprovalRequestId,
   type ChatAttachment,
   type OrchestrationEvent,
+  ThreadId,
 } from "@marcode/contracts";
 import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -518,6 +519,48 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       }
     });
 
+    const refreshThreadShellSummary = Effect.fn("refreshThreadShellSummary")(function* (
+      threadId: ThreadId,
+    ) {
+      const existingRow = yield* projectionThreadRepository.getById({
+        threadId,
+      });
+      if (Option.isNone(existingRow)) {
+        return;
+      }
+
+      const [messages, proposedPlans, activities, pendingApprovals] = yield* Effect.all([
+        projectionThreadMessageRepository.listByThreadId({ threadId }),
+        projectionThreadProposedPlanRepository.listByThreadId({ threadId }),
+        projectionThreadActivityRepository.listByThreadId({ threadId }),
+        projectionPendingApprovalRepository.listByThreadId({ threadId }),
+      ]);
+
+      const latestUserMessageAt =
+        messages
+          .filter((message) => message.role === "user")
+          .map((message) => message.createdAt)
+          .toSorted()
+          .at(-1) ?? null;
+
+      const pendingApprovalCount = pendingApprovals.filter(
+        (approval) => approval.status === "pending",
+      ).length;
+      const pendingUserInputCount = derivePendingUserInputCountFromActivities(activities);
+      const hasActionableProposedPlan = deriveHasActionableProposedPlan({
+        latestTurnId: existingRow.value.latestTurnId,
+        proposedPlans,
+      });
+
+      yield* projectionThreadRepository.upsert({
+        ...existingRow.value,
+        latestUserMessageAt,
+        pendingApprovalCount,
+        pendingUserInputCount,
+        hasActionableProposedPlan: hasActionableProposedPlan ? 1 : 0,
+      });
+    });
+
     const applyThreadsProjection: ProjectorDefinition["apply"] = Effect.fn(
       "applyThreadsProjection",
     )(function* (event, attachmentSideEffects) {
@@ -537,6 +580,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             archivedAt: null,
+            latestUserMessageAt: null,
+            pendingApprovalCount: 0,
+            pendingUserInputCount: 0,
+            hasActionableProposedPlan: 0,
             deletedAt: null,
           });
           return;
@@ -644,7 +691,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
         case "thread.message-sent":
         case "thread.proposed-plan-upserted":
-        case "thread.activity-appended": {
+        case "thread.activity-appended":
+        case "thread.approval-response-requested":
+        case "thread.user-input-response-requested": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           });
@@ -655,6 +704,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...existingRow.value,
             updatedAt: event.occurredAt,
           });
+          yield* refreshThreadShellSummary(event.payload.threadId);
           return;
         }
 
@@ -670,6 +720,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             latestTurnId: event.payload.session.activeTurnId,
             updatedAt: event.occurredAt,
           });
+          yield* refreshThreadShellSummary(event.payload.threadId);
           return;
         }
 
@@ -685,6 +736,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             latestTurnId: event.payload.turnId,
             updatedAt: event.occurredAt,
           });
+          yield* refreshThreadShellSummary(event.payload.threadId);
           return;
         }
 
@@ -700,6 +752,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             latestTurnId: null,
             updatedAt: event.occurredAt,
           });
+          yield* refreshThreadShellSummary(event.payload.threadId);
           return;
         }
 

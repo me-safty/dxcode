@@ -74,7 +74,6 @@ import {
   ProjectionSnapshotQuery,
   type ProjectionSnapshotQueryShape,
 } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
-import { PersistenceSqlError } from "./persistence/Errors.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import {
   ProviderRegistry,
@@ -479,9 +478,9 @@ const buildAppUnderTest = (options?: {
           getShellSnapshot: () =>
             Effect.succeed({
               snapshotSequence: 0,
-              updatedAt: new Date().toISOString(),
               projects: [],
               threads: [],
+              updatedAt: new Date(0).toISOString(),
             }),
           getProjectShellById: () => Effect.succeed(Option.none()),
           getThreadShellById: () => Effect.succeed(Option.none()),
