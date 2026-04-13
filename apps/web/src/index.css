@@ -25,6 +25,8 @@
 }
 
 @custom-variant dark (&:is(.dark, .dark *));
+/* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
+@custom-variant wco (&:is(.wco, .wco *));
 
 @theme inline {
   --font-heading: "Klaster Sans", sans-serif;

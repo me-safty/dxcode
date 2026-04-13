@@ -64,7 +64,7 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
+import { cn, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import {
   selectBootstrapCompleteForActiveEnvironment,
   selectProjectByRef,
@@ -2370,8 +2370,11 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 
   return isElectron ? (
     <SidebarHeader
-      className="drag-region h-[52px] flex-row items-center justify-center gap-2 py-0"
-      style={isDesktopFullscreen ? undefined : { paddingLeft: 58 }}
+      className={cn(
+        "drag-region h-[52px] flex-row items-center justify-center gap-2 py-0",
+        !isDesktopFullscreen && "pl-[58px]",
+        "wco:h-[env(titlebar-area-height)] wco:pl-[calc(env(titlebar-area-x)+1em)]",
+      )}
     >
       {wordmark}
     </SidebarHeader>

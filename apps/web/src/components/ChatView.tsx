@@ -464,6 +464,7 @@ interface SubmitComposerTurnInput {
 interface ChatViewProps {
   threadId: ThreadId;
   environmentId?: EnvironmentId;
+  reserveTitleBarControlInset?: boolean;
 }
 
 interface TerminalLaunchContext {
@@ -723,7 +724,11 @@ function PersistentThreadTerminalDrawer({
   );
 }
 
-export default function ChatView({ threadId, environmentId: environmentIdProp }: ChatViewProps) {
+export default function ChatView({
+  threadId,
+  environmentId: environmentIdProp,
+  reserveTitleBarControlInset = true,
+}: ChatViewProps) {
   const { isMobile, state: sidebarState } = useSidebar();
   const sidebarVisible = !isMobile && sidebarState === "expanded";
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -4845,7 +4850,13 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
         className={cn(
           "border-b border-border",
           isElectron && !sidebarVisible ? "pr-3 sm:pr-5 pl-[90px]" : "px-3 sm:px-5",
-          isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
+          isElectron
+            ? cn(
+                "drag-region flex h-[52px] items-center wco:h-[env(titlebar-area-height)]",
+                reserveTitleBarControlInset &&
+                  "wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
+              )
+            : "py-2 sm:py-3",
         )}
       >
         <ChatHeader
