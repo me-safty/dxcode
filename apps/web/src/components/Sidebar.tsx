@@ -745,7 +745,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         : "text-muted-foreground/40"
                     }`}
                   >
-                    {formatRelativeTimeLabel(thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt)}
+                    {formatRelativeTimeLabel(
+                      thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
+                    )}
                   </span>
                 )}
               </span>

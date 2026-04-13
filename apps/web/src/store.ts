@@ -718,7 +718,9 @@ function writeThreadShellState(
     };
   }
 
-  if (!threadSessionsEqual(state.threadSessionById[nextThread.shell.id] ?? null, nextThread.session)) {
+  if (
+    !threadSessionsEqual(state.threadSessionById[nextThread.shell.id] ?? null, nextThread.session)
+  ) {
     nextState = {
       ...nextState,
       threadSessionById: {
