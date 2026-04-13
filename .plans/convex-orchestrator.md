@@ -564,10 +564,33 @@ Remove the Chat SDK scaffold and define the `PlatformAdapter` interface that all
 
 ### Acceptance criteria
 
-- `bun typecheck` passes with chat scaffold removed
-- `PlatformAdapter` interface is defined with inbound, outbound, and lifecycle methods
-- No references to `chat-sdk`, `@chat-adapter`, or `createOrchestratorBot` remain
-- Existing Linear comment flow still works (no behavior change)
+- [x] `bun typecheck` passes with chat scaffold removed
+- [x] `PlatformAdapter` interface is defined with inbound, outbound, and lifecycle methods
+- [x] No references to `chat-sdk`, `@chat-adapter`, or `createOrchestratorBot` remain
+- [x] Existing Linear comment flow still works (no behavior change)
+
+### Status
+
+Implemented on the current branch.
+
+### Implementation footprint
+
+Files deleted:
+
+- `apps/orchestrator/src/chat/bot.ts`
+- `apps/orchestrator/src/chat/state.ts`
+- `apps/orchestrator/src/chat/state.test.ts`
+- `apps/orchestrator/convex/chatState.ts`
+
+Files created:
+
+- `apps/orchestrator/src/adapters/types.ts` — `PlatformAdapter`, `InboundEvent`, `OutboundMessage`, `PlatformThreadRef`, `AgentActivity`, `IssueStatus`, `Attachment`, `ThreadContext`, `PlatformMessageRef`
+
+Files changed:
+
+- `apps/orchestrator/convex/schema.ts` — removed `chatStateLocks`, `chatStateSubscriptions`, `chatStateKv` tables
+- `apps/orchestrator/package.json` — removed `chat` and `@chat-adapter/linear` dependencies
+- `apps/orchestrator/src/index.ts` — removed chat exports
 
 ---
 

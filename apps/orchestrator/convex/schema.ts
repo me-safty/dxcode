@@ -98,25 +98,4 @@ export default defineSchema({
   })
     .index("by_event_id", ["eventId"])
     .index("by_execution_run_id", ["executionRunId"]),
-  chatStateLocks: defineTable({
-    lockKey: v.string(),
-    ownerKey: v.string(),
-    expiresAt: v.number(),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  }).index("by_lock_key", ["lockKey"]),
-  chatStateSubscriptions: defineTable({
-    subscriptionKey: v.string(),
-    threadKey: v.string(),
-    subscriberKey: v.string(),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_subscription_key", ["subscriptionKey"])
-    .index("by_thread_key", ["threadKey"]),
-  chatStateKv: defineTable({
-    kvKey: v.string(),
-    valueJson: v.string(),
-    updatedAt: v.number(),
-  }).index("by_kv_key", ["kvKey"]),
 });
