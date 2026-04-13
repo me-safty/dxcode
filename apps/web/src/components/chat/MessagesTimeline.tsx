@@ -61,18 +61,10 @@ import {
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via useContext.
-// Propagates through LegendList's memo boundaries so each row re-renders
-// independently when the context value changes. `nowIso` is intentionally
-// excluded — self-ticking components (WorkingTimer, LiveElapsed) handle it.
+// Propagates through LegendList's memo boundaries for shared callbacks and
+// non-row-scoped state. `nowIso` is intentionally excluded — self-ticking
+// components (WorkingTimer, LiveElapsed) handle it.
 // ---------------------------------------------------------------------------
-
-/** Volatile Maps accessed via a ref-backed getter so they never bust the
- *  context identity. Components read the Maps during their own render
- *  (triggered by data changes), so they always see fresh values. */
-interface TimelineRowMaps {
-  turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
-  revertTurnCountByUserMessageId: Map<MessageId, number>;
-}
 
 interface TimelineRowSharedState {
   activeTurnInProgress: boolean;
@@ -81,8 +73,6 @@ interface TimelineRowSharedState {
   isRevertingCheckpoint: boolean;
   completionSummary: string | null;
   timestampFormat: TimestampFormat;
-  /** Stable getter — returns the current Maps from a ref. */
-  getMaps: () => TimelineRowMaps;
   routeThreadKey: string;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
@@ -159,8 +149,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         completionDividerBeforeEntryId,
         isWorking,
         activeTurnStartedAt,
+        turnDiffSummaryByAssistantMessageId,
+        revertTurnCountByUserMessageId,
       }),
-    [timelineEntries, completionDividerBeforeEntryId, isWorking, activeTurnStartedAt],
+    [
+      timelineEntries,
+      completionDividerBeforeEntryId,
+      isWorking,
+      activeTurnStartedAt,
+      turnDiffSummaryByAssistantMessageId,
+      revertTurnCountByUserMessageId,
+    ],
   );
   const rows = useStableRows(rawRows);
 
@@ -170,18 +169,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onIsAtEndChange(state.isAtEnd);
     }
   }, [listRef, onIsAtEndChange]);
-
-  // Volatile Maps go into a ref so they never bust the context identity.
-  // Components read them via getMaps() during their own render pass.
-  const mapsRef = useRef<TimelineRowMaps>({
-    turnDiffSummaryByAssistantMessageId,
-    revertTurnCountByUserMessageId,
-  });
-  mapsRef.current = {
-    turnDiffSummaryByAssistantMessageId,
-    revertTurnCountByUserMessageId,
-  };
-  const getMaps = useCallback(() => mapsRef.current, []);
 
   // Memoised context value — only changes on state transitions, NOT on
   // every streaming chunk. Callbacks from ChatView are useCallback-stable.
@@ -193,7 +180,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isRevertingCheckpoint,
       completionSummary,
       timestampFormat,
-      getMaps,
       routeThreadKey,
       markdownCwd,
       resolvedTheme,
@@ -210,7 +196,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       isRevertingCheckpoint,
       completionSummary,
       timestampFormat,
-      getMaps,
       routeThreadKey,
       markdownCwd,
       resolvedTheme,
@@ -279,7 +264,6 @@ type TimelineRow = MessagesTimelineRow;
 
 function TimelineRowContent({ row }: { row: TimelineRow }) {
   const ctx = use(TimelineRowCtx);
-  const maps = ctx.getMaps();
 
   return (
     <div
@@ -300,7 +284,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const userImages = row.message.attachments ?? [];
           const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
           const terminalContexts = displayedUserMessage.contexts;
-          const canRevertAgentWork = maps.revertTurnCountByUserMessageId.has(row.message.id);
+          const canRevertAgentWork = typeof row.revertTurnCount === "number";
           return (
             <div className="flex justify-end">
               <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
@@ -405,7 +389,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   isStreaming={Boolean(row.message.streaming)}
                 />
                 <AssistantChangedFilesSection
-                  messageId={row.message.id}
+                  turnSummary={row.assistantTurnDiffSummary}
                   routeThreadKey={ctx.routeThreadKey}
                   resolvedTheme={ctx.resolvedTheme}
                   onOpenTurnDiff={ctx.onOpenTurnDiff}
@@ -567,18 +551,16 @@ const WorkGroupSection = memo(function WorkGroupSection({
 /** Subscribes directly to the UI state store for expand/collapse state,
  *  so toggling re-renders only this component — not the entire list. */
 const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection({
-  messageId,
+  turnSummary,
   routeThreadKey,
   resolvedTheme,
   onOpenTurnDiff,
 }: {
-  messageId: MessageId;
+  turnSummary: TurnDiffSummary | undefined;
   routeThreadKey: string;
   resolvedTheme: "light" | "dark";
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
-  const ctx = use(TimelineRowCtx);
-  const turnSummary = ctx.getMaps().turnDiffSummaryByAssistantMessageId.get(messageId);
   if (!turnSummary) return null;
   const checkpointFiles = turnSummary.files;
   if (checkpointFiles.length === 0) return null;
@@ -823,7 +805,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.message === bm.message &&
         a.durationStart === bm.durationStart &&
         a.showCompletionDivider === bm.showCompletionDivider &&
-        a.showAssistantCopyButton === bm.showAssistantCopyButton
+        a.showAssistantCopyButton === bm.showAssistantCopyButton &&
+        a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
+        a.revertTurnCount === bm.revertTurnCount
       );
     }
   }
