@@ -785,11 +785,12 @@ const UserMessageBody = memo(function UserMessageBody(props: {
  *  hasn't changed since last call, the previous object reference is reused. */
 function useStableRows(rows: MessagesTimelineRow[]): MessagesTimelineRow[] {
   const prevById = useRef(new Map<string, MessagesTimelineRow>());
+  const prevResult = useRef<MessagesTimelineRow[]>([]);
 
   return useMemo(() => {
     const prev = prevById.current;
     const next = new Map<string, MessagesTimelineRow>();
-    let anyChanged = false;
+    let anyChanged = rows.length !== prev.size;
 
     const result = rows.map((row) => {
       const prevRow = prev.get(row.id);
@@ -803,6 +804,9 @@ function useStableRows(rows: MessagesTimelineRow[]): MessagesTimelineRow[] {
     });
 
     prevById.current = next;
+
+    if (!anyChanged) return prevResult.current;
+    prevResult.current = result;
     return result;
   }, [rows]);
 }
