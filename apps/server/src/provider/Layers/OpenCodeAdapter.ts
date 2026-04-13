@@ -343,6 +343,8 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
           return;
         }
         context.stopped = true;
+        sessions.delete(context.session.threadId);
+        context.server.close();
         const turnId = context.activeTurnId;
         void emitPromise({
           ...buildEventBase({ threadId: context.session.threadId, turnId }),
@@ -361,6 +363,64 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
             exitKind: "error",
           },
         });
+      };
+
+      /** Emit content.delta and item.completed events for an assistant text part. */
+      const emitAssistantTextDelta = async (
+        context: OpenCodeSessionContext,
+        part: Part,
+        turnId: TurnId | undefined,
+        raw: unknown,
+      ): Promise<void> => {
+        const text = textFromPart(part);
+        if (text === undefined) {
+          return;
+        }
+        const previousLength = context.emittedTextLengthByPartId.get(part.id) ?? 0;
+        if (text.length > previousLength) {
+          context.emittedTextLengthByPartId.set(part.id, text.length);
+          await emitPromise({
+            ...buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+              itemId: part.id,
+              createdAt:
+                part.type === "text" || part.type === "reasoning"
+                  ? isoFromEpochMs(part.time?.start)
+                  : undefined,
+              raw,
+            }),
+            type: "content.delta",
+            payload: {
+              streamKind: resolveTextStreamKind(part),
+              delta: text.slice(previousLength),
+            },
+          });
+        }
+
+        if (
+          part.type === "text" &&
+          part.time?.end !== undefined &&
+          !context.completedAssistantPartIds.has(part.id)
+        ) {
+          context.completedAssistantPartIds.add(part.id);
+          await emitPromise({
+            ...buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+              itemId: part.id,
+              createdAt: isoFromEpochMs(part.time.end),
+              raw,
+            }),
+            type: "item.completed",
+            payload: {
+              itemType: "assistant_message",
+              status: "completed",
+              title: "Assistant message",
+              ...(text.length > 0 ? { detail: text } : {}),
+            },
+          });
+        }
       };
 
       const startEventPump = (context: OpenCodeSessionContext) => {
@@ -388,60 +448,11 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
                 case "message.updated": {
                   context.messageRoleById.set(event.properties.info.id, event.properties.info.role);
                   if (event.properties.info.role === "assistant") {
-                    const messageTurnId = turnId;
                     for (const part of context.partById.values()) {
                       if (part.messageID !== event.properties.info.id) {
                         continue;
                       }
-                      const text = textFromPart(part);
-                      if (text === undefined) {
-                        continue;
-                      }
-                      const previousLength = context.emittedTextLengthByPartId.get(part.id) ?? 0;
-                      if (text.length > previousLength) {
-                        context.emittedTextLengthByPartId.set(part.id, text.length);
-                        await emitPromise({
-                          ...buildEventBase({
-                            threadId: context.session.threadId,
-                            turnId: messageTurnId,
-                            itemId: part.id,
-                            createdAt:
-                              part.type === "text" || part.type === "reasoning"
-                                ? isoFromEpochMs(part.time?.start)
-                                : undefined,
-                            raw: event,
-                          }),
-                          type: "content.delta",
-                          payload: {
-                            streamKind: resolveTextStreamKind(part),
-                            delta: text.slice(previousLength),
-                          },
-                        });
-                      }
-
-                      if (
-                        part.type === "text" &&
-                        part.time?.end !== undefined &&
-                        !context.completedAssistantPartIds.has(part.id)
-                      ) {
-                        context.completedAssistantPartIds.add(part.id);
-                        await emitPromise({
-                          ...buildEventBase({
-                            threadId: context.session.threadId,
-                            turnId: messageTurnId,
-                            itemId: part.id,
-                            createdAt: isoFromEpochMs(part.time.end),
-                            raw: event,
-                          }),
-                          type: "item.completed",
-                          payload: {
-                            itemType: "assistant_message",
-                            status: "completed",
-                            title: "Assistant message",
-                            ...(text.length > 0 ? { detail: text } : {}),
-                          },
-                        });
-                      }
+                      await emitAssistantTextDelta(context, part, turnId, event);
                     }
                   }
                   break;
@@ -490,53 +501,8 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
                   context.partById.set(part.id, part);
                   const messageRole = messageRoleForPart(context, part);
 
-                  const text = textFromPart(part);
-                  if (messageRole === "assistant" && text !== undefined) {
-                    const previousLength = context.emittedTextLengthByPartId.get(part.id) ?? 0;
-                    if (text.length > previousLength) {
-                      context.emittedTextLengthByPartId.set(part.id, text.length);
-                      await emitPromise({
-                        ...buildEventBase({
-                          threadId: context.session.threadId,
-                          turnId,
-                          itemId: part.id,
-                          createdAt:
-                            part.type === "text" || part.type === "reasoning"
-                              ? isoFromEpochMs(part.time?.start)
-                              : undefined,
-                          raw: event,
-                        }),
-                        type: "content.delta",
-                        payload: {
-                          streamKind: resolveTextStreamKind(part),
-                          delta: text.slice(previousLength),
-                        },
-                      });
-                    }
-
-                    if (
-                      part.type === "text" &&
-                      part.time?.end !== undefined &&
-                      !context.completedAssistantPartIds.has(part.id)
-                    ) {
-                      context.completedAssistantPartIds.add(part.id);
-                      await emitPromise({
-                        ...buildEventBase({
-                          threadId: context.session.threadId,
-                          turnId,
-                          itemId: part.id,
-                          createdAt: isoFromEpochMs(part.time.end),
-                          raw: event,
-                        }),
-                        type: "item.completed",
-                        payload: {
-                          itemType: "assistant_message",
-                          status: "completed",
-                          title: "Assistant message",
-                          ...(text.length > 0 ? { detail: text } : {}),
-                        },
-                      });
-                    }
+                  if (messageRole === "assistant") {
+                    await emitAssistantTextDelta(context, part, turnId, event);
                   }
 
                   if (part.type === "tool") {
@@ -831,6 +797,16 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
                 cause,
               }),
           });
+
+          // Guard against a concurrent startSession call that may have raced
+          // and already inserted a session while we were awaiting async work.
+          const raceWinner = sessions.get(input.threadId);
+          if (raceWinner) {
+            // Another call won the race – clean up the session we just created
+            // and return the one that is already registered.
+            started.server.close();
+            return raceWinner.session;
+          }
 
           const createdAt = nowIso();
           const session: ProviderSession = {
@@ -1171,7 +1147,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
             (entry) => entry.info.role === "assistant",
           );
           const target =
-            assistantMessages[Math.max(0, assistantMessages.length - Math.max(1, numTurns))] ??
+            assistantMessages[Math.max(0, assistantMessages.length - numTurns - 1)] ??
             null;
           if (target) {
             yield* Effect.tryPromise({

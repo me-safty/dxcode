@@ -695,7 +695,7 @@ describe("GeneralSettingsPanel observability", () => {
   it("shows an OpenCode server URL field in provider settings", async () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
-    await render(
+    mounted = await render(
       <AppAtomRegistryProvider>
         <GeneralSettingsPanel />
       </AppAtomRegistryProvider>,

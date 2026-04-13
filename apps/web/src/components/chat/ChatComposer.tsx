@@ -174,10 +174,10 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 
   return (
     <>
+      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+
       {props.showInteractionModeToggle ? (
         <>
-          <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-
           <Button
             variant="ghost"
             className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"

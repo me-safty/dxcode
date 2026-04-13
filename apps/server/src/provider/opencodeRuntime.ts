@@ -237,7 +237,7 @@ export function buildOpenCodePermissionRules(runtimeMode: RuntimeMode): Permissi
   }
 
   return [
-    { permission: "*", pattern: "*", action: "allow" },
+    { permission: "*", pattern: "*", action: "ask" },
     { permission: "bash", pattern: "*", action: "ask" },
     { permission: "edit", pattern: "*", action: "ask" },
     { permission: "webfetch", pattern: "*", action: "ask" },

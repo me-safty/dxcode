@@ -113,6 +113,15 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
           ) {
             closeSharedServer(existingServer);
           } else {
+            if (sharedServerState.binaryPath !== input.binaryPath) {
+              yield* Effect.logWarning(
+                "OpenCode shared server binary path mismatch: requested " +
+                  input.binaryPath +
+                  " but active server uses " +
+                  sharedServerState.binaryPath +
+                  "; reusing existing server because there are active requests",
+              );
+            }
             sharedServerState.activeRequests += 1;
             return existingServer;
           }

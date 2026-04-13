@@ -1226,7 +1226,7 @@ export function GeneralSettingsPanel() {
                             id={`provider-install-${providerCard.provider}-server-password`}
                             className="mt-1.5"
                             type="password"
-                            autoComplete="current-password"
+                            autoComplete="off"
                             value={providerCard.serverPasswordValue}
                             onChange={(event) =>
                               updateSettings({
