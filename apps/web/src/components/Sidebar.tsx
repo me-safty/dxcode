@@ -120,6 +120,7 @@ import {
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
+  getVisibleSidebarThreads,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
@@ -1140,7 +1141,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       });
     };
     const visibleProjectThreads = sortThreadsForSidebar(
-      projectThreads.filter((thread) => thread.archivedAt === null),
+      getVisibleSidebarThreads(projectThreads),
       threadSortOrder,
     );
     const projectStatus = resolveProjectStatusIndicator(
@@ -2734,10 +2735,7 @@ export default function Sidebar() {
     animatedThreadListsRef.current.add(node);
   }, []);
 
-  const visibleThreads = useMemo(
-    () => sidebarThreads.filter((thread) => thread.archivedAt === null),
-    [sidebarThreads],
-  );
+  const visibleThreads = useMemo(() => getVisibleSidebarThreads(sidebarThreads), [sidebarThreads]);
   const sortedProjects = useMemo(() => {
     const sortableProjects = sidebarProjects.map((project) => ({
       ...project,
@@ -2770,9 +2768,7 @@ export default function Sidebar() {
     () =>
       sortedProjects.flatMap((project) => {
         const projectThreads = sortThreadsForSidebar(
-          (threadsByProjectKey.get(project.projectKey) ?? []).filter(
-            (thread) => thread.archivedAt === null,
-          ),
+          getVisibleSidebarThreads(threadsByProjectKey.get(project.projectKey) ?? []),
           sidebarThreadSortOrder,
         );
         const projectExpanded = projectExpandedById[project.projectKey] ?? true;

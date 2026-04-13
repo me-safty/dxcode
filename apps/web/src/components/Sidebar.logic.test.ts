@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createThreadJumpHintVisibilityController,
-  getSidebarThreadsByIds,
+  getVisibleSidebarThreads,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
@@ -619,8 +619,8 @@ describe("getVisibleThreadsForProject", () => {
   });
 });
 
-describe("getSidebarThreadsByIds", () => {
-  it("filters out archived and missing threads by default", () => {
+describe("getVisibleSidebarThreads", () => {
+  it("filters out archived threads", () => {
     const visibleThread = makeThread({
       id: ThreadId.make("thread-visible"),
       archivedAt: null,
@@ -630,41 +630,9 @@ describe("getSidebarThreadsByIds", () => {
       archivedAt: "2026-03-09T10:11:00.000Z",
     });
 
-    const result = getSidebarThreadsByIds({
-      threadIds: [
-        ThreadId.make("thread-visible"),
-        ThreadId.make("thread-missing"),
-        ThreadId.make("thread-archived"),
-      ],
-      threadsById: {
-        [visibleThread.id]: visibleThread,
-        [archivedThread.id]: archivedThread,
-      },
-    });
+    const result = getVisibleSidebarThreads([visibleThread, archivedThread]);
 
     expect(result).toEqual([visibleThread]);
-  });
-
-  it("can include archived threads for callers that need the full project set", () => {
-    const visibleThread = makeThread({
-      id: ThreadId.make("thread-visible"),
-      archivedAt: null,
-    });
-    const archivedThread = makeThread({
-      id: ThreadId.make("thread-archived"),
-      archivedAt: "2026-03-09T10:11:00.000Z",
-    });
-
-    const result = getSidebarThreadsByIds({
-      threadIds: [visibleThread.id, archivedThread.id],
-      threadsById: {
-        [visibleThread.id]: visibleThread,
-        [archivedThread.id]: archivedThread,
-      },
-      includeArchived: true,
-    });
-
-    expect(result).toEqual([visibleThread, archivedThread]);
   });
 });
 
