@@ -32,6 +32,7 @@ export const startRunFromLinearWebhook = internalAction({
   args: {
     controlThreadId: v.id("controlThreads"),
     issueId: v.string(),
+    issueIdentifier: v.optional(v.string()),
     linearThreadKey: v.string(),
     messageId: v.optional(v.string()),
     authorName: v.optional(v.string()),
@@ -65,7 +66,7 @@ export const startRunFromLinearWebhook = internalAction({
       controlThreadId: args.controlThreadId,
       initialPrompt,
       workspaceRoot,
-      title: `Linear ${args.issueId}`,
+      title: args.issueIdentifier ?? `Linear ${args.issueId}`,
     });
     return accepted;
   },

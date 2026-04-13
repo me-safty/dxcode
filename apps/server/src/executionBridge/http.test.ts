@@ -11,6 +11,7 @@ function makeTrackedRun(overrides?: Partial<TrackedExecutionRun>): TrackedExecut
     startedEventId: null,
     completedEventId: null,
     failedEventId: null,
+    interruptedEventId: null,
     lastTurnId: null,
     ...overrides,
   };

@@ -3,6 +3,7 @@ import { Schema } from "effect";
 
 import { exchangeLinearOAuthCode } from "../src/linear/client.ts";
 import { normalizeLinearWebhookInput } from "../src/linear/ingress.ts";
+import { buildLinearExecutionPrompt } from "../src/linear/replies.ts";
 import {
   buildLinearInstallUrl,
   buildLinearOAuthCallbackUrl,
@@ -222,18 +223,51 @@ http.route({
     }
 
     const result = await ctx.runMutation(internal.controlThreads.upsertFromLinearIngress, ingress);
-    const executionRun =
-      result.eventApplied && result.shouldStartRun
-        ? await ctx.runAction(internal.linearMvp.startRunFromLinearWebhook, {
-            controlThreadId: result.controlThreadId,
+
+    let executionRun:
+      | {
+          readonly acceptedAt: string;
+          readonly controlThreadId: string;
+          readonly executionRunId: string;
+          readonly t3ThreadId: string;
+        }
+      | { readonly [key: string]: unknown }
+      | null = null;
+
+    if (result.eventApplied && result.shouldStartRun) {
+      const existingRuns = await ctx.runQuery(internal.executionRuns.listRunsForControlThread, {
+        controlThreadId: result.controlThreadId,
+        limit: 1,
+      });
+
+      if (existingRuns.length > 0 && existingRuns[0]!.t3ThreadId) {
+        const continueResult = await ctx.runAction(internal.executionRuns.continueWorkerRun, {
+          controlThreadId: result.controlThreadId,
+          prompt: buildLinearExecutionPrompt({
             issueId: ingress.issueId,
             linearThreadKey: ingress.linearThreadKey,
             body: ingress.body,
             ...(ingress.messageId !== undefined ? { messageId: ingress.messageId } : {}),
             ...(ingress.authorName !== undefined ? { authorName: ingress.authorName } : {}),
             ...(ingress.commentUrl !== undefined ? { commentUrl: ingress.commentUrl } : {}),
-          })
-        : null;
+          }),
+        });
+        executionRun = continueResult;
+      } else {
+        executionRun = await ctx.runAction(internal.linearMvp.startRunFromLinearWebhook, {
+          controlThreadId: result.controlThreadId,
+          issueId: ingress.issueId,
+          linearThreadKey: ingress.linearThreadKey,
+          body: ingress.body,
+          ...(ingress.issueIdentifier !== undefined
+            ? { issueIdentifier: ingress.issueIdentifier }
+            : {}),
+          ...(ingress.messageId !== undefined ? { messageId: ingress.messageId } : {}),
+          ...(ingress.authorName !== undefined ? { authorName: ingress.authorName } : {}),
+          ...(ingress.commentUrl !== undefined ? { commentUrl: ingress.commentUrl } : {}),
+        });
+      }
+    }
 
     return Response.json({
       accepted: true,

@@ -54,6 +54,7 @@ import {
   CheckpointDiffQuery,
   type CheckpointDiffQueryShape,
 } from "./checkpointing/Services/CheckpointDiffQuery.ts";
+import { ExecutionBridgeRunRegistry } from "./executionBridge/runStart.ts";
 import { GitCore, type GitCoreShape } from "./git/Services/GitCore.ts";
 import { GitManager, type GitManagerShape } from "./git/Services/GitManager.ts";
 import { GitStatusBroadcasterLive } from "./git/Layers/GitStatusBroadcaster.ts";
@@ -430,6 +431,13 @@ const buildAppUnderTest = (options?: {
               diff: "",
             }),
           ...options?.layers?.checkpointDiffQuery,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ExecutionBridgeRunRegistry)({
+          trackAcceptedRun: () => Effect.void,
+          getTrackedRun: () => Effect.succeed(null),
+          markLifecycleDelivered: () => Effect.void,
         }),
       ),
     );

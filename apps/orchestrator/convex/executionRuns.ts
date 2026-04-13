@@ -1,16 +1,22 @@
 import {
   type ExecutionRunCreateRequest,
+  type ExecutionRunContinueRequest,
+  type ExecutionRunInterruptRequest,
   type RuntimeMode,
   type ModelSelection,
   type ProviderInteractionMode,
 } from "@t3tools/contracts";
 import { v } from "convex/values";
 
+import {
+  canApplyLifecycleEvent,
+  deriveNextStatus,
+  isTerminalStatus,
+} from "../src/executionLifecycle.ts";
+import type { ExecutionRunStatus } from "../src/executionLifecycle.ts";
 import { createT3ExecutionBridgeClient } from "../src/t3/client.ts";
 import { internalAction, internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
-
-type ExecutionRunStatus = "requested" | "accepted" | "started" | "completed" | "failed";
 
 const createRequestedRunArgs = {
   controlThreadId: v.id("controlThreads"),
@@ -98,7 +104,12 @@ export const applyLifecycleEvent = internalMutation({
     eventId: v.string(),
     executionRunId: v.string(),
     controlThreadId: v.string(),
-    type: v.union(v.literal("started"), v.literal("completed"), v.literal("failed")),
+    type: v.union(
+      v.literal("started"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("interrupted"),
+    ),
     occurredAt: v.string(),
     t3ThreadId: v.optional(v.string()),
     t3TurnId: v.optional(v.string()),
@@ -142,8 +153,18 @@ export const applyLifecycleEvent = internalMutation({
     }
 
     const occurredAtMs = Date.parse(args.occurredAt);
-    const nextStatus: ExecutionRunStatus =
-      args.type === "started" ? "started" : args.type === "completed" ? "completed" : "failed";
+    const nextStatus = deriveNextStatus(args.type);
+
+    const transition = canApplyLifecycleEvent({
+      currentStatus: run.status as ExecutionRunStatus,
+      incomingType: args.type,
+    });
+    if (!transition.allowed) {
+      return {
+        applied: false,
+        status: run.status as ExecutionRunStatus,
+      };
+    }
 
     await ctx.db.insert("executionRunEvents", {
       eventId: args.eventId,
@@ -163,7 +184,9 @@ export const applyLifecycleEvent = internalMutation({
       ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
       ...(args.failureSummary !== undefined ? { failureSummary: args.failureSummary } : {}),
       ...(args.type === "started" ? { startedAt: occurredAtMs } : {}),
-      ...(args.type === "completed" || args.type === "failed" ? { completedAt: occurredAtMs } : {}),
+      ...(args.type === "completed" || args.type === "failed" || args.type === "interrupted"
+        ? { completedAt: occurredAtMs }
+        : {}),
     });
 
     return {
@@ -366,5 +389,436 @@ function executionRunStateForReturns() {
     v.literal("started"),
     v.literal("completed"),
     v.literal("failed"),
+    v.literal("interrupted"),
+    v.literal("reconciling"),
   );
 }
+
+export const findStaleRuns = internalQuery({
+  args: {
+    olderThanMs: v.number(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(
+    v.object({
+      executionRunId: v.string(),
+      controlThreadId: v.id("controlThreads"),
+      status: executionRunStateForReturns(),
+      t3ThreadId: v.optional(v.string()),
+      updatedAt: v.number(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const cutoff = Date.now() - args.olderThanMs;
+    const limit = args.limit ?? 20;
+    const rows: any[] = await ctx.db
+      .query("executionRuns")
+      .withIndex("by_updated_at")
+      .order("asc")
+      .take(limit * 4);
+
+    return rows
+      .filter(
+        (row: any) => !isTerminalStatus(row.status as ExecutionRunStatus) && row.updatedAt < cutoff,
+      )
+      .slice(0, limit)
+      .map((row: any) => ({
+        executionRunId: row.executionRunId,
+        controlThreadId: row.controlThreadId,
+        status: row.status,
+        ...(row.t3ThreadId !== undefined ? { t3ThreadId: row.t3ThreadId } : {}),
+        updatedAt: row.updatedAt,
+      }));
+  },
+});
+
+export const markReconciling = internalMutation({
+  args: {
+    executionRunId: v.string(),
+  },
+  returns: v.object({
+    applied: v.boolean(),
+    previousStatus: executionRunStateForReturns(),
+  }),
+  handler: async (ctx, args) => {
+    const run = await ctx.db
+      .query("executionRuns")
+      .withIndex("by_execution_run_id", (query: any) =>
+        query.eq("executionRunId", args.executionRunId),
+      )
+      .unique();
+    if (run === null) {
+      throw new Error(`Execution run ${args.executionRunId} does not exist`);
+    }
+
+    if (isTerminalStatus(run.status as ExecutionRunStatus)) {
+      return { applied: false, previousStatus: run.status };
+    }
+
+    await ctx.db.patch(run._id, {
+      status: "reconciling",
+      updatedAt: Date.now(),
+    });
+    return { applied: true, previousStatus: run.status };
+  },
+});
+
+export const resolveReconciliation = internalMutation({
+  args: {
+    executionRunId: v.string(),
+    resolvedStatus: v.union(v.literal("completed"), v.literal("failed")),
+    failureSummary: v.optional(v.string()),
+  },
+  returns: v.object({
+    applied: v.boolean(),
+    status: executionRunStateForReturns(),
+  }),
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const run = await ctx.db
+      .query("executionRuns")
+      .withIndex("by_execution_run_id", (query: any) =>
+        query.eq("executionRunId", args.executionRunId),
+      )
+      .unique();
+    if (run === null) {
+      throw new Error(`Execution run ${args.executionRunId} does not exist`);
+    }
+
+    if (isTerminalStatus(run.status as ExecutionRunStatus)) {
+      return { applied: false, status: run.status };
+    }
+
+    await ctx.db.patch(run._id, {
+      status: args.resolvedStatus,
+      updatedAt: now,
+      completedAt: now,
+      ...(args.failureSummary !== undefined ? { failureSummary: args.failureSummary } : {}),
+    });
+    return { applied: true, status: args.resolvedStatus };
+  },
+});
+
+const STALE_RUN_THRESHOLD_MS = 10 * 60 * 1000;
+
+export const reconcileStaleRuns = internalAction({
+  args: {
+    olderThanMs: v.optional(v.number()),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(
+    v.object({
+      executionRunId: v.string(),
+      resolved: v.boolean(),
+      resolvedStatus: v.optional(v.string()),
+      reason: v.string(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const olderThanMs = args.olderThanMs ?? STALE_RUN_THRESHOLD_MS;
+    const staleRuns = await ctx.runQuery(internal.executionRuns.findStaleRuns, {
+      olderThanMs,
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+    });
+
+    if (staleRuns.length === 0) {
+      return [];
+    }
+
+    const client = createT3ExecutionBridgeClient();
+    const results: Array<{
+      executionRunId: string;
+      resolved: boolean;
+      resolvedStatus?: string;
+      reason: string;
+    }> = [];
+
+    for (const staleRun of staleRuns) {
+      if (!staleRun.t3ThreadId) {
+        const result = await ctx.runMutation(internal.executionRuns.resolveReconciliation, {
+          executionRunId: staleRun.executionRunId,
+          resolvedStatus: "failed",
+          failureSummary: "Run never received T3 thread assignment and became stale.",
+        });
+        results.push({
+          executionRunId: staleRun.executionRunId,
+          resolved: result.applied,
+          resolvedStatus: "failed",
+          reason: "no_t3_thread",
+        });
+        continue;
+      }
+
+      try {
+        const status = await client.queryRunStatus({
+          executionRunId: staleRun.executionRunId,
+          t3ThreadId: staleRun.t3ThreadId,
+        });
+
+        if (!status.found) {
+          const result = await ctx.runMutation(internal.executionRuns.resolveReconciliation, {
+            executionRunId: staleRun.executionRunId,
+            resolvedStatus: "failed",
+            failureSummary: "T3 has no record of this thread. Worker may have restarted.",
+          });
+          results.push({
+            executionRunId: staleRun.executionRunId,
+            resolved: result.applied,
+            resolvedStatus: "failed",
+            reason: "t3_thread_not_found",
+          });
+          continue;
+        }
+
+        const sessionStatus = status.sessionStatus;
+        if (sessionStatus === "ready" || sessionStatus === "idle" || sessionStatus === "stopped") {
+          const result = await ctx.runMutation(internal.executionRuns.resolveReconciliation, {
+            executionRunId: staleRun.executionRunId,
+            resolvedStatus: "completed",
+          });
+          results.push({
+            executionRunId: staleRun.executionRunId,
+            resolved: result.applied,
+            resolvedStatus: "completed",
+            reason: `t3_session_${sessionStatus}`,
+          });
+        } else if (sessionStatus === "error") {
+          const result = await ctx.runMutation(internal.executionRuns.resolveReconciliation, {
+            executionRunId: staleRun.executionRunId,
+            resolvedStatus: "failed",
+            failureSummary: status.lastError ?? "T3 session ended in error state.",
+          });
+          results.push({
+            executionRunId: staleRun.executionRunId,
+            resolved: result.applied,
+            resolvedStatus: "failed",
+            reason: "t3_session_error",
+          });
+        } else {
+          await ctx.runMutation(internal.executionRuns.markReconciling, {
+            executionRunId: staleRun.executionRunId,
+          });
+          results.push({
+            executionRunId: staleRun.executionRunId,
+            resolved: false,
+            reason: `t3_session_still_${sessionStatus}`,
+          });
+        }
+      } catch (error) {
+        results.push({
+          executionRunId: staleRun.executionRunId,
+          resolved: false,
+          reason: `poll_failed: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    }
+
+    return results;
+  },
+});
+
+export const continueWorkerRun = internalAction({
+  args: {
+    controlThreadId: v.id("controlThreads"),
+    prompt: v.string(),
+  },
+  returns: v.object({
+    executionRunId: v.string(),
+    t3ThreadId: v.string(),
+    acceptedAt: v.string(),
+    newRun: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    const runs: any[] = await ctx.runQuery(internal.executionRuns.listRunsForControlThread, {
+      controlThreadId: args.controlThreadId,
+    });
+
+    if (runs.length === 0) {
+      throw new Error(
+        `No execution runs found for control thread ${args.controlThreadId}. Use startSingleWorkerRun instead.`,
+      );
+    }
+
+    const latestRun = runs[0]!;
+    const client = createT3ExecutionBridgeClient();
+
+    if (!latestRun.t3ThreadId) {
+      throw new Error(
+        `Latest execution run ${latestRun.executionRunId} has no t3ThreadId. Cannot continue.`,
+      );
+    }
+
+    const isActive =
+      latestRun.status === "started" ||
+      latestRun.status === "accepted" ||
+      latestRun.status === "requested";
+
+    if (isActive) {
+      const request: ExecutionRunContinueRequest = {
+        controlThreadId: String(args.controlThreadId),
+        executionRunId: latestRun.executionRunId,
+        t3ThreadId: latestRun.t3ThreadId,
+        prompt: args.prompt,
+        runtimeMode: latestRun.runtimeMode ?? "full-access",
+        interactionMode: latestRun.interactionMode ?? "default",
+      };
+      const accepted = await client.continueExecutionRun(request);
+      return {
+        executionRunId: latestRun.executionRunId,
+        t3ThreadId: accepted.t3ThreadId,
+        acceptedAt: accepted.acceptedAt,
+        newRun: false,
+      };
+    }
+
+    const executionRunId = crypto.randomUUID();
+    const requestedAt = Date.now();
+    const runtimeMode: RuntimeMode = latestRun.runtimeMode ?? "full-access";
+    const interactionMode: ProviderInteractionMode = latestRun.interactionMode ?? "default";
+
+    await ctx.runMutation(internal.executionRuns.createRequestedRun, {
+      controlThreadId: args.controlThreadId,
+      executionRunId,
+      initialPrompt: args.prompt,
+      workspaceRoot: latestRun.workspaceRoot,
+      runtimeMode,
+      interactionMode,
+      requestedAt,
+    });
+
+    const request: ExecutionRunContinueRequest = {
+      controlThreadId: String(args.controlThreadId),
+      executionRunId,
+      t3ThreadId: latestRun.t3ThreadId,
+      prompt: args.prompt,
+      runtimeMode,
+      interactionMode,
+    };
+    const accepted = await client.continueExecutionRun(request);
+
+    await ctx.runMutation(internal.executionRuns.attachT3Acceptance, {
+      executionRunId,
+      t3ThreadId: accepted.t3ThreadId,
+      acceptedAt: Date.parse(accepted.acceptedAt),
+    });
+
+    return {
+      executionRunId,
+      t3ThreadId: accepted.t3ThreadId,
+      acceptedAt: accepted.acceptedAt,
+      newRun: true,
+    };
+  },
+});
+
+export const interruptWorkerRun = internalAction({
+  args: {
+    controlThreadId: v.id("controlThreads"),
+  },
+  returns: v.object({
+    executionRunId: v.string(),
+    t3ThreadId: v.string(),
+    acceptedAt: v.string(),
+    interrupted: v.boolean(),
+    reason: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    const runs: any[] = await ctx.runQuery(internal.executionRuns.listRunsForControlThread, {
+      controlThreadId: args.controlThreadId,
+    });
+
+    if (runs.length === 0) {
+      return {
+        executionRunId: "",
+        t3ThreadId: "",
+        acceptedAt: new Date().toISOString(),
+        interrupted: false,
+        reason: "no_runs",
+      };
+    }
+
+    const latestRun = runs[0]!;
+    const isActive =
+      latestRun.status === "started" ||
+      latestRun.status === "accepted" ||
+      latestRun.status === "requested";
+
+    if (!isActive) {
+      return {
+        executionRunId: latestRun.executionRunId,
+        t3ThreadId: latestRun.t3ThreadId ?? "",
+        acceptedAt: new Date().toISOString(),
+        interrupted: false,
+        reason: `run_already_${latestRun.status}`,
+      };
+    }
+
+    if (!latestRun.t3ThreadId) {
+      return {
+        executionRunId: latestRun.executionRunId,
+        t3ThreadId: "",
+        acceptedAt: new Date().toISOString(),
+        interrupted: false,
+        reason: "no_t3_thread",
+      };
+    }
+
+    const client = createT3ExecutionBridgeClient();
+    const request: ExecutionRunInterruptRequest = {
+      controlThreadId: String(args.controlThreadId),
+      executionRunId: latestRun.executionRunId,
+      t3ThreadId: latestRun.t3ThreadId,
+    };
+
+    const accepted = await client.interruptExecutionRun(request);
+    return {
+      executionRunId: latestRun.executionRunId,
+      t3ThreadId: accepted.t3ThreadId,
+      acceptedAt: accepted.acceptedAt,
+      interrupted: true,
+      reason: "interrupted",
+    };
+  },
+});
+
+export const listRunsForControlThread = internalQuery({
+  args: {
+    controlThreadId: v.id("controlThreads"),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(
+    v.object({
+      executionRunId: v.string(),
+      controlThreadId: v.id("controlThreads"),
+      status: executionRunStateForReturns(),
+      t3ThreadId: v.optional(v.string()),
+      workspaceRoot: v.string(),
+      runtimeMode: v.string(),
+      interactionMode: v.string(),
+      requestedAt: v.number(),
+      updatedAt: v.number(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 5;
+    const rows: any[] = await ctx.db
+      .query("executionRuns")
+      .withIndex("by_control_thread_id", (query: any) =>
+        query.eq("controlThreadId", args.controlThreadId),
+      )
+      .order("desc")
+      .take(limit);
+
+    return rows.map((row: any) => ({
+      executionRunId: row.executionRunId,
+      controlThreadId: row.controlThreadId,
+      status: row.status,
+      ...(row.t3ThreadId !== undefined ? { t3ThreadId: row.t3ThreadId } : {}),
+      workspaceRoot: row.workspaceRoot,
+      runtimeMode: row.runtimeMode,
+      interactionMode: row.interactionMode,
+      requestedAt: row.requestedAt,
+      updatedAt: row.updatedAt,
+    }));
+  },
+});

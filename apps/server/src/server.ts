@@ -75,6 +75,9 @@ import {
 import {
   executionBridgeLifecycleCallbacksLive,
   executionBridgeRunCreateRouteLayer,
+  executionBridgeStatusQueryRouteLayer,
+  executionBridgeContinueRouteLayer,
+  executionBridgeInterruptRouteLayer,
 } from "./executionBridge/http";
 import { ExecutionBridgeRunRegistryLive } from "./executionBridge/runStart";
 
@@ -239,6 +242,9 @@ export const makeRoutesLayer = Layer.mergeAll(
   authWebSocketTokenRouteLayer,
   attachmentsRouteLayer,
   executionBridgeRunCreateRouteLayer,
+  executionBridgeStatusQueryRouteLayer,
+  executionBridgeContinueRouteLayer,
+  executionBridgeInterruptRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
   otlpTracesProxyRouteLayer,

@@ -5,6 +5,7 @@ export interface LinearIngressEnvelope {
   readonly threadKind: LinearThreadKind;
   readonly linearThreadKey: string;
   readonly issueId: string;
+  readonly issueIdentifier?: string;
   readonly commentId?: string;
   readonly messageId?: string;
   readonly teamId?: string;
@@ -27,6 +28,7 @@ interface LinearWebhookCommentData {
   readonly body?: unknown;
   readonly createdAt?: unknown;
   readonly id?: unknown;
+  readonly issue?: { readonly identifier?: unknown };
   readonly issueId?: unknown;
   readonly parentId?: unknown;
   readonly updatedAt?: unknown;
@@ -55,6 +57,12 @@ function previewBody(value: string | undefined) {
   }
 
   return value.length > 240 ? `${value.slice(0, 237)}...` : value;
+}
+
+function extractIssueIdentifierFromUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  const match = url.match(/\/issue\/([A-Z]+-\d+)/);
+  return match?.[1];
 }
 
 function containsLinearBotMention(body: string, botUserName: string | undefined) {
@@ -116,6 +124,8 @@ export function normalizeLinearWebhookInput(
   const eventId = `linear:comment:create:${messageId}:${eventTimestamp}`;
   const bodyPreview = previewBody(body);
   const commentUrl = asTrimmedString(payload.data?.url);
+  const issueIdentifier =
+    asTrimmedString(payload.data?.issue?.identifier) ?? extractIssueIdentifierFromUrl(commentUrl);
   const shouldStartRun =
     body.length > 0 &&
     containsLinearBotMention(body, options?.botUserName) &&
@@ -134,6 +144,7 @@ export function normalizeLinearWebhookInput(
     body,
     receivedAt: Date.now(),
     shouldStartRun,
+    ...(issueIdentifier !== undefined ? { issueIdentifier } : {}),
     ...(authorName !== undefined ? { authorName } : {}),
     ...(bodyPreview !== undefined ? { bodyPreview } : {}),
     ...(commentUrl !== undefined ? { commentUrl } : {}),

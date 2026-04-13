@@ -15,11 +15,14 @@ const executionRunState = v.union(
   v.literal("started"),
   v.literal("completed"),
   v.literal("failed"),
+  v.literal("interrupted"),
+  v.literal("reconciling"),
 );
 const executionLifecycleType = v.union(
   v.literal("started"),
   v.literal("completed"),
   v.literal("failed"),
+  v.literal("interrupted"),
 );
 
 export default defineSchema({
@@ -83,7 +86,8 @@ export default defineSchema({
     linearReplyPostedAt: v.optional(v.number()),
   })
     .index("by_execution_run_id", ["executionRunId"])
-    .index("by_control_thread_id", ["controlThreadId"]),
+    .index("by_control_thread_id", ["controlThreadId"])
+    .index("by_updated_at", ["updatedAt"]),
   executionRunEvents: defineTable({
     eventId: v.string(),
     executionRunId: v.string(),

@@ -1,6 +1,9 @@
 import {
   type ExecutionRunLifecycleEvent,
   ExecutionRunCreateRequest,
+  ExecutionRunContinueRequest,
+  ExecutionRunInterruptRequest,
+  ExecutionRunStatusQuery,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
 import { Effect, Layer, Schema, Stream } from "effect";
@@ -13,6 +16,8 @@ import {
   ExecutionBridgeRunRegistry,
   ExecutionBridgeRunStartError,
   startExecutionRun,
+  continueExecutionRun,
+  interruptExecutionRun,
   type TrackedExecutionRun,
 } from "./runStart.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -90,6 +95,11 @@ function toLifecycleCheckpoint(
       failureSummary: event.payload.session.lastError ?? "Execution run failed.",
     };
   }
+  if (event.payload.session.status === "interrupted") {
+    return {
+      type: "interrupted",
+    };
+  }
   return null;
 }
 
@@ -104,6 +114,8 @@ function hasLifecycleAlreadyBeenDelivered(input: {
       return input.trackedRun.completedEventId !== null;
     case "failed":
       return input.trackedRun.failedEventId !== null;
+    case "interrupted":
+      return input.trackedRun.interruptedEventId !== null;
   }
 }
 
@@ -135,6 +147,84 @@ export const executionBridgeRunCreateRouteLayer = HttpRouter.add(
     yield* authenticateExecutionBridgeRequest;
     const request = yield* HttpServerRequest.schemaBodyJson(ExecutionRunCreateRequest);
     const result = yield* startExecutionRun(request);
+    return HttpServerResponse.jsonUnsafe(result, { status: 202 });
+  }).pipe(
+    Effect.catchTag("ExecutionBridgeAuthError", (error) =>
+      Effect.succeed(respondToExecutionBridgeError(error)),
+    ),
+    Effect.catchTag("ExecutionBridgeRunStartError", (error) =>
+      Effect.succeed(respondToExecutionBridgeError(error)),
+    ),
+  ),
+);
+
+export const executionBridgeStatusQueryRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/execution/runs/status",
+  Effect.gen(function* () {
+    yield* authenticateExecutionBridgeRequest;
+    const query = yield* HttpServerRequest.schemaBodyJson(ExecutionRunStatusQuery);
+    const orchestrationEngine = yield* OrchestrationEngineService;
+    const snapshot = yield* orchestrationEngine.getReadModel();
+    const thread = snapshot.threads.find((t) => String(t.id) === String(query.t3ThreadId));
+
+    if (!thread) {
+      return HttpServerResponse.jsonUnsafe(
+        {
+          executionRunId: query.executionRunId,
+          t3ThreadId: query.t3ThreadId,
+          sessionStatus: "unknown",
+          activeTurnId: null,
+          lastError: null,
+          found: false,
+        },
+        { status: 200 },
+      );
+    }
+
+    return HttpServerResponse.jsonUnsafe(
+      {
+        executionRunId: query.executionRunId,
+        t3ThreadId: query.t3ThreadId,
+        sessionStatus: thread.session?.status ?? "unknown",
+        activeTurnId: thread.session?.activeTurnId ?? null,
+        lastError: thread.session?.lastError ?? null,
+        found: true,
+      },
+      { status: 200 },
+    );
+  }).pipe(
+    Effect.catchTag("ExecutionBridgeAuthError", (error) =>
+      Effect.succeed(respondToExecutionBridgeError(error)),
+    ),
+  ),
+);
+
+export const executionBridgeContinueRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/execution/runs/continue",
+  Effect.gen(function* () {
+    yield* authenticateExecutionBridgeRequest;
+    const request = yield* HttpServerRequest.schemaBodyJson(ExecutionRunContinueRequest);
+    const result = yield* continueExecutionRun(request);
+    return HttpServerResponse.jsonUnsafe(result, { status: 202 });
+  }).pipe(
+    Effect.catchTag("ExecutionBridgeAuthError", (error) =>
+      Effect.succeed(respondToExecutionBridgeError(error)),
+    ),
+    Effect.catchTag("ExecutionBridgeRunStartError", (error) =>
+      Effect.succeed(respondToExecutionBridgeError(error)),
+    ),
+  ),
+);
+
+export const executionBridgeInterruptRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/execution/runs/interrupt",
+  Effect.gen(function* () {
+    yield* authenticateExecutionBridgeRequest;
+    const request = yield* HttpServerRequest.schemaBodyJson(ExecutionRunInterruptRequest);
+    const result = yield* interruptExecutionRun(request);
     return HttpServerResponse.jsonUnsafe(result, { status: 202 });
   }).pipe(
     Effect.catchTag("ExecutionBridgeAuthError", (error) =>

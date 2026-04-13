@@ -3,6 +3,10 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type ExecutionRunCreateRequest,
   type ExecutionRunCreateResponse,
+  type ExecutionRunContinueRequest,
+  type ExecutionRunContinueResponse,
+  type ExecutionRunInterruptRequest,
+  type ExecutionRunInterruptResponse,
   type ExecutionRunLifecycleEvent,
   MessageId,
   type ModelSelection,
@@ -16,7 +20,7 @@ import { getAutoBootstrapDefaultModelSelection } from "../serverRuntimeStartup.t
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 
-export type ExecutionLifecycleCheckpoint = "started" | "completed" | "failed";
+export type ExecutionLifecycleCheckpoint = "started" | "completed" | "failed" | "interrupted";
 
 export interface TrackedExecutionRun {
   readonly controlThreadId: string;
@@ -25,6 +29,7 @@ export interface TrackedExecutionRun {
   readonly startedEventId: string | null;
   readonly completedEventId: string | null;
   readonly failedEventId: string | null;
+  readonly interruptedEventId: string | null;
   readonly lastTurnId: TurnId | null;
 }
 
@@ -84,6 +89,7 @@ const makeExecutionBridgeRunRegistry = Effect.gen(function* () {
         startedEventId: null,
         completedEventId: null,
         failedEventId: null,
+        interruptedEventId: null,
         lastTurnId: null,
       });
       return next;
@@ -107,6 +113,8 @@ const makeExecutionBridgeRunRegistry = Effect.gen(function* () {
         startedEventId: input.type === "started" ? input.eventId : tracked.startedEventId,
         completedEventId: input.type === "completed" ? input.eventId : tracked.completedEventId,
         failedEventId: input.type === "failed" ? input.eventId : tracked.failedEventId,
+        interruptedEventId:
+          input.type === "interrupted" ? input.eventId : tracked.interruptedEventId,
         lastTurnId: input.turnId ?? tracked.lastTurnId,
       });
       return next;
@@ -214,6 +222,90 @@ export const startExecutionRun = (request: ExecutionRunCreateRequest) =>
         new ExecutionBridgeRunStartError({
           message:
             cause instanceof Error ? cause.message : "Failed to dispatch execution bridge run.",
+          status: 400,
+        }),
+    ),
+  );
+
+export const continueExecutionRun = (request: ExecutionRunContinueRequest) =>
+  Effect.gen(function* () {
+    const orchestrationEngine = yield* OrchestrationEngineService;
+    const runRegistry = yield* ExecutionBridgeRunRegistry;
+    const now = new Date().toISOString();
+
+    const threadId = request.t3ThreadId;
+
+    yield* orchestrationEngine.dispatch({
+      type: "thread.turn.start",
+      commandId: CommandId.make(
+        `execution-bridge:turn:continue:${request.executionRunId}:${Date.now()}`,
+      ),
+      threadId,
+      message: {
+        messageId: MessageId.make(`execution-run:continue:${request.executionRunId}:${Date.now()}`),
+        role: "user",
+        text: request.prompt,
+        attachments: [],
+      },
+      runtimeMode: request.runtimeMode,
+      interactionMode: request.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
+      createdAt: now,
+    });
+
+    const existingTracked = yield* runRegistry.getTrackedRun(threadId);
+    if (existingTracked === null || existingTracked.executionRunId !== request.executionRunId) {
+      yield* runRegistry.trackAcceptedRun({
+        controlThreadId: request.controlThreadId,
+        executionRunId: request.executionRunId,
+        threadId,
+      });
+    }
+
+    return {
+      executionRunId: request.executionRunId,
+      t3ThreadId: threadId,
+      acceptedAt: now,
+    } satisfies ExecutionRunContinueResponse;
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ExecutionBridgeRunStartError({
+          message:
+            cause instanceof Error
+              ? cause.message
+              : "Failed to dispatch execution bridge continue.",
+          status: 400,
+        }),
+    ),
+  );
+
+export const interruptExecutionRun = (request: ExecutionRunInterruptRequest) =>
+  Effect.gen(function* () {
+    const orchestrationEngine = yield* OrchestrationEngineService;
+    const now = new Date().toISOString();
+
+    yield* orchestrationEngine.dispatch({
+      type: "thread.turn.interrupt",
+      commandId: CommandId.make(
+        `execution-bridge:turn:interrupt:${request.executionRunId}:${Date.now()}`,
+      ),
+      threadId: request.t3ThreadId,
+      createdAt: now,
+    });
+
+    return {
+      executionRunId: request.executionRunId,
+      t3ThreadId: request.t3ThreadId,
+      acceptedAt: now,
+    } satisfies ExecutionRunInterruptResponse;
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ExecutionBridgeRunStartError({
+          message:
+            cause instanceof Error
+              ? cause.message
+              : "Failed to dispatch execution bridge interrupt.",
           status: 400,
         }),
     ),
