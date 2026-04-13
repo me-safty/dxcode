@@ -37,6 +37,98 @@ interface ControlThreadForReply {
   readonly linearAgentSessionId?: string;
 }
 
+export const handleLinearWebhookIngress = internalAction({
+  args: {
+    eventId: v.string(),
+    linearThreadKey: v.string(),
+    issueId: v.string(),
+    issueIdentifier: v.optional(v.string()),
+    commentId: v.optional(v.string()),
+    messageId: v.optional(v.string()),
+    teamId: v.optional(v.string()),
+    threadKind: v.union(v.literal("issue"), v.literal("comment")),
+    title: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    authorName: v.optional(v.string()),
+    body: v.string(),
+    bodyPreview: v.optional(v.string()),
+    commentUrl: v.optional(v.string()),
+    receivedAt: v.number(),
+    shouldStartRun: v.boolean(),
+  },
+  returns: v.object({
+    controlThreadId: v.string(),
+    threadKey: v.string(),
+    createdThread: v.boolean(),
+    eventApplied: v.boolean(),
+    shouldStartRun: v.boolean(),
+    executionRun: v.optional(
+      v.object({
+        acceptedAt: v.string(),
+        controlThreadId: v.string(),
+        executionRunId: v.string(),
+        t3ThreadId: v.string(),
+      }),
+    ),
+  }),
+  handler: async (ctx, args) => {
+    const result = await ctx.runMutation(internal.controlThreads.upsertFromLinearIngress, args);
+
+    let executionRun:
+      | {
+          readonly acceptedAt: string;
+          readonly controlThreadId: string;
+          readonly executionRunId: string;
+          readonly t3ThreadId: string;
+        }
+      | undefined;
+
+    if (result.eventApplied && result.shouldStartRun) {
+      const existingRuns = await ctx.runQuery(internal.executionRuns.listRunsForControlThread, {
+        controlThreadId: result.controlThreadId,
+        limit: 1,
+      });
+
+      if (existingRuns.length > 0 && existingRuns[0]!.t3ThreadId) {
+        const continueResult = await ctx.runAction(internal.executionRuns.continueWorkerRun, {
+          controlThreadId: result.controlThreadId,
+          prompt: buildLinearExecutionPrompt({
+            issueId: args.issueId,
+            linearThreadKey: args.linearThreadKey,
+            body: args.body,
+            ...(args.messageId !== undefined ? { messageId: args.messageId } : {}),
+            ...(args.authorName !== undefined ? { authorName: args.authorName } : {}),
+            ...(args.commentUrl !== undefined ? { commentUrl: args.commentUrl } : {}),
+          }),
+        });
+        executionRun = {
+          controlThreadId: String(result.controlThreadId),
+          executionRunId: continueResult.executionRunId,
+          t3ThreadId: continueResult.t3ThreadId,
+          acceptedAt: continueResult.acceptedAt,
+        };
+      } else {
+        executionRun = await ctx.runAction(internal.linearOrchestration.startRunFromLinearWebhook, {
+          controlThreadId: result.controlThreadId,
+          issueId: args.issueId,
+          linearThreadKey: args.linearThreadKey,
+          body: args.body,
+          ...(args.issueIdentifier !== undefined ? { issueIdentifier: args.issueIdentifier } : {}),
+          ...(args.messageId !== undefined ? { messageId: args.messageId } : {}),
+          ...(args.authorName !== undefined ? { authorName: args.authorName } : {}),
+          ...(args.commentUrl !== undefined ? { commentUrl: args.commentUrl } : {}),
+        });
+      }
+    }
+
+    return {
+      ...result,
+      controlThreadId: String(result.controlThreadId),
+      ...(executionRun !== undefined ? { executionRun } : {}),
+    };
+  },
+});
+
 export const startRunFromLinearWebhook = internalAction({
   args: {
     controlThreadId: v.id("controlThreads"),
@@ -125,12 +217,11 @@ export const postExecutionReplyIfNeeded = internalAction({
       };
     }
 
-    if (run.linearReplyCommentId !== undefined) {
-      return {
-        posted: false,
-        reason: "already_posted",
-        replyCommentId: run.linearReplyCommentId,
-      };
+    const claim = await ctx.runMutation(internal.executionRuns.claimLinearReplySlot, {
+      executionRunId: args.executionRunId,
+    });
+    if (!claim.claimed) {
+      return { posted: false, reason: "already_claimed" };
     }
 
     const controlThread = (await ctx.runQuery(internal.controlThreads.getControlThread, {
@@ -160,15 +251,18 @@ export const postExecutionReplyIfNeeded = internalAction({
         : {}),
     };
 
-    const messageRef = await adapter.postMessage(threadRef, { markdown: replyBody });
-
+    let replyCommentId: string;
     if (controlThread.linearAgentSessionId) {
       await adapter.postActivity(threadRef, { type: "response", body: replyBody });
+      replyCommentId = `activity:${controlThread.linearAgentSessionId}`;
+    } else {
+      const messageRef = await adapter.postMessage(threadRef, { markdown: replyBody });
+      replyCommentId = messageRef.messageId;
     }
 
     await ctx.runMutation(internal.executionRuns.recordLinearReplyPosted, {
       executionRunId: run.executionRunId,
-      replyCommentId: messageRef.messageId,
+      replyCommentId,
       postedAt: Date.now(),
       bodyPreview: replyBody.slice(0, 240),
     });

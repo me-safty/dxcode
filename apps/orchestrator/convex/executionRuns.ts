@@ -261,6 +261,23 @@ export const startSingleWorkerRun = internalAction({
   },
 });
 
+export const claimLinearReplySlot = internalMutation({
+  args: { executionRunId: v.string() },
+  returns: v.object({ claimed: v.boolean() }),
+  handler: async (ctx, args) => {
+    const run = await ctx.db
+      .query("executionRuns")
+      .withIndex("by_execution_run_id", (query: any) =>
+        query.eq("executionRunId", args.executionRunId),
+      )
+      .unique();
+    if (!run) return { claimed: false };
+    if (run.linearReplyCommentId !== undefined) return { claimed: false };
+    await ctx.db.patch(run._id, { linearReplyCommentId: "__claiming__" });
+    return { claimed: true };
+  },
+});
+
 export const recordLinearReplyPosted = internalMutation({
   args: {
     executionRunId: v.string(),

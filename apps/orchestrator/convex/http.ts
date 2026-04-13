@@ -1,14 +1,14 @@
 import { httpRouter } from "convex/server";
 import { Schema } from "effect";
 
-import { exchangeLinearOAuthCode } from "../src/linear/client.ts";
-import { normalizeLinearWebhookInput } from "../src/linear/ingress.ts";
-import { buildLinearExecutionPrompt } from "../src/linear/replies.ts";
 import {
   buildLinearInstallUrl,
   buildLinearOAuthCallbackUrl,
+  exchangeLinearOAuthCode,
   renderLinearOAuthPage,
 } from "../src/linear/oauth.ts";
+import { normalizeLinearWebhookInput } from "../src/linear/ingress.ts";
+import { hasValidLinearSignature } from "../src/linear/webhookVerification.ts";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { ExecutionRunLifecycleEvent } from "@t3tools/contracts";
@@ -53,44 +53,6 @@ function requireLinearWebhookSecret() {
     ok: true as const,
     secret,
   };
-}
-
-async function computeHmacHex(body: string, secret: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
-  return Array.from(new Uint8Array(signature), (byte) => byte.toString(16).padStart(2, "0")).join(
-    "",
-  );
-}
-
-function constantTimeCompare(left: string, right: string): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-  let mismatch = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index);
-  }
-  return mismatch === 0;
-}
-
-async function hasValidLinearSignature(input: {
-  readonly body: string;
-  readonly request: Request;
-  readonly secret: string;
-}): Promise<boolean> {
-  const signature = input.request.headers.get("linear-signature")?.trim();
-  if (!signature) {
-    return false;
-  }
-  const expected = await computeHmacHex(input.body, input.secret);
-  return constantTimeCompare(expected, signature);
 }
 
 function hasFreshLinearTimestamp(payload: unknown) {
@@ -214,58 +176,15 @@ http.route({
       });
     }
 
-    const result = await ctx.runMutation(internal.controlThreads.upsertFromLinearIngress, ingress);
-
-    let executionRun:
-      | {
-          readonly acceptedAt: string;
-          readonly controlThreadId: string;
-          readonly executionRunId: string;
-          readonly t3ThreadId: string;
-        }
-      | { readonly [key: string]: unknown }
-      | null = null;
-
-    if (result.eventApplied && result.shouldStartRun) {
-      const existingRuns = await ctx.runQuery(internal.executionRuns.listRunsForControlThread, {
-        controlThreadId: result.controlThreadId,
-        limit: 1,
-      });
-
-      if (existingRuns.length > 0 && existingRuns[0]!.t3ThreadId) {
-        const continueResult = await ctx.runAction(internal.executionRuns.continueWorkerRun, {
-          controlThreadId: result.controlThreadId,
-          prompt: buildLinearExecutionPrompt({
-            issueId: ingress.issueId,
-            linearThreadKey: ingress.linearThreadKey,
-            body: ingress.body,
-            ...(ingress.messageId !== undefined ? { messageId: ingress.messageId } : {}),
-            ...(ingress.authorName !== undefined ? { authorName: ingress.authorName } : {}),
-            ...(ingress.commentUrl !== undefined ? { commentUrl: ingress.commentUrl } : {}),
-          }),
-        });
-        executionRun = continueResult;
-      } else {
-        executionRun = await ctx.runAction(internal.linearMvp.startRunFromLinearWebhook, {
-          controlThreadId: result.controlThreadId,
-          issueId: ingress.issueId,
-          linearThreadKey: ingress.linearThreadKey,
-          body: ingress.body,
-          ...(ingress.issueIdentifier !== undefined
-            ? { issueIdentifier: ingress.issueIdentifier }
-            : {}),
-          ...(ingress.messageId !== undefined ? { messageId: ingress.messageId } : {}),
-          ...(ingress.authorName !== undefined ? { authorName: ingress.authorName } : {}),
-          ...(ingress.commentUrl !== undefined ? { commentUrl: ingress.commentUrl } : {}),
-        });
-      }
-    }
+    const result = await ctx.runAction(
+      internal.linearOrchestration.handleLinearWebhookIngress,
+      ingress,
+    );
 
     return Response.json({
       accepted: true,
       ignored: false,
       ...result,
-      ...(executionRun !== null ? { executionRun } : {}),
     });
   }),
 });
@@ -301,7 +220,7 @@ http.route({
       | undefined;
     if (payload.type === "completed" || payload.type === "failed") {
       try {
-        linearReply = await ctx.runAction(internal.linearMvp.postExecutionReplyIfNeeded, {
+        linearReply = await ctx.runAction(internal.linearOrchestration.postExecutionReplyIfNeeded, {
           executionRunId: payload.executionRunId,
         });
       } catch (replyError) {
