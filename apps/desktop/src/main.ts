@@ -2022,6 +2022,10 @@ app
         revealWindow(existingWindow);
         return;
       }
+      if (isDevelopment) {
+        mainWindow = createWindow();
+        return;
+      }
       ensureInitialBackendWindowOpen();
     });
   })
