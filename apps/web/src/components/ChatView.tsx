@@ -1987,6 +1987,14 @@ export default function ChatView(props: ChatViewProps) {
   const scrollToEnd = useCallback((animated = false) => {
     legendListRef.current?.scrollToEnd?.({ animated });
   }, []);
+  const shouldAutoScrollRef = isAtEndRef;
+  const scheduleStickToBottom = useCallback(() => {
+    showScrollDebouncer.current.cancel();
+    setShowScrollToBottom(false);
+    window.requestAnimationFrame(() => {
+      scrollToEnd(false);
+    });
+  }, [scrollToEnd]);
 
   // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
   // thread switches.  LegendList fires scroll events with isAtEnd=false while
