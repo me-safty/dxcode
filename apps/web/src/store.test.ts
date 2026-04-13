@@ -5,12 +5,10 @@ import {
   EnvironmentId,
   EventId,
   MessageId,
-  type OrchestrationShellSnapshot,
   ProjectId,
   ThreadId,
   TurnId,
   type OrchestrationEvent,
-  type OrchestrationReadModel,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
@@ -23,7 +21,6 @@ import {
   selectThreadExistsByRef,
   setThreadBranch,
   selectThreadsAcrossEnvironments,
-  syncServerShellSnapshot,
   type AppState,
   type EnvironmentState,
 } from "./store";
