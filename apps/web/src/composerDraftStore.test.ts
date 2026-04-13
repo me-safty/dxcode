@@ -1046,6 +1046,33 @@ describe("composerDraftStore modelSelection", () => {
     );
   });
 
+  it("preserves the caller-provided base model when options are updated before a draft selection exists", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setProviderModelOptions(
+      threadRef,
+      "codex",
+      {
+        reasoningEffort: "high",
+      },
+      {
+        baseModel: "gpt-5.4-mini",
+        persistSticky: true,
+      },
+    );
+
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider.codex).toEqual(
+      modelSelection("codex", "gpt-5.4-mini", {
+        reasoningEffort: "high",
+      }),
+    );
+    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider.codex).toEqual(
+      modelSelection("codex", "gpt-5.4-mini", {
+        reasoningEffort: "high",
+      }),
+    );
+  });
+
   it("updates only the draft when sticky persistence is disabled", () => {
     const store = useComposerDraftStore.getState();
 

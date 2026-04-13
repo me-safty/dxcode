@@ -342,6 +342,7 @@ interface ComposerDraftStoreState {
     provider: ProviderKind,
     nextProviderOptions: ProviderModelOptions[ProviderKind] | null | undefined,
     options?: {
+      baseModel?: string;
       persistSticky?: boolean;
     },
   ) => void;
@@ -2301,6 +2302,8 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             normalizedProvider,
           );
           const providerOpts = normalizedOpts?.[normalizedProvider];
+          const normalizedBaseModel =
+            normalizeModelSlug(options?.baseModel, normalizedProvider) ?? undefined;
 
           set((state) => {
             const existing = state.draftsByThreadKey[threadKey];
@@ -2312,7 +2315,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             if (providerOpts) {
               nextMap[normalizedProvider] = {
                 provider: normalizedProvider,
-                model: currentForProvider?.model ?? DEFAULT_MODEL_BY_PROVIDER[normalizedProvider],
+                model:
+                  currentForProvider?.model ??
+                  normalizedBaseModel ??
+                  DEFAULT_MODEL_BY_PROVIDER[normalizedProvider],
                 options: providerOpts,
               };
             } else if (currentForProvider?.options) {
@@ -2330,7 +2336,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 base.modelSelectionByProvider[normalizedProvider] ??
                 ({
                   provider: normalizedProvider,
-                  model: DEFAULT_MODEL_BY_PROVIDER[normalizedProvider],
+                  model: normalizedBaseModel ?? DEFAULT_MODEL_BY_PROVIDER[normalizedProvider],
                 } as ModelSelection);
               if (providerOpts) {
                 nextStickyMap[normalizedProvider] = {
