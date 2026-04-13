@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
@@ -326,5 +327,109 @@ describe("deriveMessagesTimelineRows", () => {
 
     expect(userRow?.revertTurnCount).toBe(1);
     expect(assistantRow?.assistantTurnDiffSummary).toBe(assistantTurnDiffSummary);
+  });
+});
+
+describe("computeStableMessagesTimelineRows", () => {
+  it("returns the previous result when row order and content are unchanged", () => {
+    const firstUserMessage = {
+      id: "user-1" as never,
+      role: "user" as const,
+      text: "First",
+      turnId: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      streaming: false,
+    };
+    const secondUserMessage = {
+      id: "user-2" as never,
+      role: "user" as const,
+      text: "Second",
+      turnId: null,
+      createdAt: "2026-01-01T00:00:10Z",
+      streaming: false,
+    };
+
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "entry-user-1",
+          kind: "message",
+          createdAt: firstUserMessage.createdAt,
+          message: firstUserMessage,
+        },
+        {
+          id: "entry-user-2",
+          kind: "message",
+          createdAt: secondUserMessage.createdAt,
+          message: secondUserMessage,
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const initial = computeStableMessagesTimelineRows(rows, {
+      byId: new Map(),
+      result: [],
+    });
+
+    const repeated = computeStableMessagesTimelineRows(rows, initial);
+
+    expect(repeated).toBe(initial);
+    expect(repeated.result).toBe(initial.result);
+  });
+
+  it("returns a new result when row order changes without content changes", () => {
+    const firstUserMessage = {
+      id: "user-1" as never,
+      role: "user" as const,
+      text: "First",
+      turnId: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      streaming: false,
+    };
+    const secondUserMessage = {
+      id: "user-2" as never,
+      role: "user" as const,
+      text: "Second",
+      turnId: null,
+      createdAt: "2026-01-01T00:00:10Z",
+      streaming: false,
+    };
+
+    const firstRows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "entry-user-1",
+          kind: "message",
+          createdAt: firstUserMessage.createdAt,
+          message: firstUserMessage,
+        },
+        {
+          id: "entry-user-2",
+          kind: "message",
+          createdAt: secondUserMessage.createdAt,
+          message: secondUserMessage,
+        },
+      ],
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const initial = computeStableMessagesTimelineRows(firstRows, {
+      byId: new Map(),
+      result: [],
+    });
+
+    const reordered = computeStableMessagesTimelineRows([firstRows[1]!, firstRows[0]!], initial);
+
+    expect(reordered).not.toBe(initial);
+    expect(reordered.result).toEqual([initial.result[1], initial.result[0]]);
   });
 });

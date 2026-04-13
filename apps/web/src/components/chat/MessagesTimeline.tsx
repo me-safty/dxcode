@@ -36,10 +36,12 @@ import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
+  computeStableMessagesTimelineRows,
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
@@ -758,59 +760,16 @@ const UserMessageBody = memo(function UserMessageBody(props: {
 /** Returns a structurally-shared copy of `rows`: for each row whose content
  *  hasn't changed since last call, the previous object reference is reused. */
 function useStableRows(rows: MessagesTimelineRow[]): MessagesTimelineRow[] {
-  const prevById = useRef(new Map<string, MessagesTimelineRow>());
-  const prevResult = useRef<MessagesTimelineRow[]>([]);
+  const prevState = useRef<StableMessagesTimelineRowsState>({
+    byId: new Map<string, MessagesTimelineRow>(),
+    result: [],
+  });
 
   return useMemo(() => {
-    const prev = prevById.current;
-    const next = new Map<string, MessagesTimelineRow>();
-    let anyChanged = rows.length !== prev.size;
-
-    const result = rows.map((row) => {
-      const prevRow = prev.get(row.id);
-      if (prevRow && isRowUnchanged(prevRow, row)) {
-        next.set(row.id, prevRow);
-        return prevRow;
-      }
-      next.set(row.id, row);
-      anyChanged = true;
-      return row;
-    });
-
-    prevById.current = next;
-
-    if (!anyChanged) return prevResult.current;
-    prevResult.current = result;
-    return result;
+    const nextState = computeStableMessagesTimelineRows(rows, prevState.current);
+    prevState.current = nextState;
+    return nextState.result;
   }, [rows]);
-}
-
-/** Shallow field comparison per row variant — avoids JSON.stringify cost. */
-function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean {
-  if (a.kind !== b.kind || a.id !== b.id) return false;
-
-  switch (a.kind) {
-    case "working":
-      return a.createdAt === (b as typeof a).createdAt;
-
-    case "proposed-plan":
-      return a.proposedPlan === (b as typeof a).proposedPlan;
-
-    case "work":
-      return a.groupedEntries === (b as typeof a).groupedEntries;
-
-    case "message": {
-      const bm = b as typeof a;
-      return (
-        a.message === bm.message &&
-        a.durationStart === bm.durationStart &&
-        a.showCompletionDivider === bm.showCompletionDivider &&
-        a.showAssistantCopyButton === bm.showAssistantCopyButton &&
-        a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
-        a.revertTurnCount === bm.revertTurnCount
-      );
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------

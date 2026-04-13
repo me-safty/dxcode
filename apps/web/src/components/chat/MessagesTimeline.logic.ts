@@ -37,6 +37,11 @@ export type MessagesTimelineRow =
     }
   | { kind: "working"; id: string; createdAt: string | null };
 
+export interface StableMessagesTimelineRowsState {
+  byId: Map<string, MessagesTimelineRow>;
+  result: MessagesTimelineRow[];
+}
+
 export function computeMessageDurationStart(
   messages: ReadonlyArray<TimelineDurationMessage>,
 ): Map<string, string> {
@@ -184,4 +189,52 @@ export function deriveMessagesTimelineRows(input: {
   }
 
   return nextRows;
+}
+
+export function computeStableMessagesTimelineRows(
+  rows: MessagesTimelineRow[],
+  previous: StableMessagesTimelineRowsState,
+): StableMessagesTimelineRowsState {
+  const next = new Map<string, MessagesTimelineRow>();
+  let anyChanged = rows.length !== previous.byId.size;
+
+  const result = rows.map((row, index) => {
+    const prevRow = previous.byId.get(row.id);
+    const nextRow = prevRow && isRowUnchanged(prevRow, row) ? prevRow : row;
+    next.set(row.id, nextRow);
+    if (!anyChanged && previous.result[index] !== nextRow) {
+      anyChanged = true;
+    }
+    return nextRow;
+  });
+
+  return anyChanged ? { byId: next, result } : previous;
+}
+
+/** Shallow field comparison per row variant — avoids deep equality cost. */
+function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean {
+  if (a.kind !== b.kind || a.id !== b.id) return false;
+
+  switch (a.kind) {
+    case "working":
+      return a.createdAt === (b as typeof a).createdAt;
+
+    case "proposed-plan":
+      return a.proposedPlan === (b as typeof a).proposedPlan;
+
+    case "work":
+      return a.groupedEntries === (b as typeof a).groupedEntries;
+
+    case "message": {
+      const bm = b as typeof a;
+      return (
+        a.message === bm.message &&
+        a.durationStart === bm.durationStart &&
+        a.showCompletionDivider === bm.showCompletionDivider &&
+        a.showAssistantCopyButton === bm.showAssistantCopyButton &&
+        a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
+        a.revertTurnCount === bm.revertTurnCount
+      );
+    }
+  }
 }
