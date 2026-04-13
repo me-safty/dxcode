@@ -1,6 +1,8 @@
+"use node";
+
 import { v } from "convex/values";
 
-import { postLinearComment } from "../src/linear/client.ts";
+import { createLinearPlatformAdapter } from "../src/adapters/linear.ts";
 import { buildLinearExecutionPrompt, buildLinearLifecycleReply } from "../src/linear/replies.ts";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -26,6 +28,13 @@ interface ExecutionRunForReply {
   readonly linearReplyCommentId?: string;
   readonly status: "requested" | "accepted" | "started" | "completed" | "failed";
   readonly t3ThreadId?: string;
+}
+
+interface ControlThreadForReply {
+  readonly id: Id<"controlThreads">;
+  readonly issueId: string;
+  readonly commentId?: string;
+  readonly linearAgentSessionId?: string;
 }
 
 export const startRunFromLinearWebhook = internalAction({
@@ -61,6 +70,23 @@ export const startRunFromLinearWebhook = internalAction({
       ...(args.authorName !== undefined ? { authorName: args.authorName } : {}),
       ...(args.commentUrl !== undefined ? { commentUrl: args.commentUrl } : {}),
     });
+
+    try {
+      const adapter = createLinearPlatformAdapter();
+      const agentSessionId = await adapter.createAgentSession(args.issueId);
+      if (agentSessionId) {
+        await ctx.runMutation(internal.controlThreads.setAgentSessionId, {
+          controlThreadId: args.controlThreadId,
+          agentSessionId,
+        });
+        await adapter.postActivity(
+          { platform: "linear", issueId: args.issueId, agentSessionId },
+          { type: "thought", body: "Preparing workspace..." },
+        );
+      }
+    } catch {
+      // Agent session creation is best-effort — don't block the run
+    }
 
     const accepted = await ctx.runAction(internal.executionRuns.startSingleWorkerRun, {
       controlThreadId: args.controlThreadId,
@@ -107,9 +133,9 @@ export const postExecutionReplyIfNeeded = internalAction({
       };
     }
 
-    const controlThread = await ctx.runQuery(internal.controlThreads.getControlThread, {
+    const controlThread = (await ctx.runQuery(internal.controlThreads.getControlThread, {
       controlThreadId: run.controlThreadId,
-    });
+    })) as ControlThreadForReply | null;
     if (controlThread === null) {
       return {
         posted: false,
@@ -123,23 +149,34 @@ export const postExecutionReplyIfNeeded = internalAction({
       ...(run.t3ThreadId !== undefined ? { t3ThreadId: run.t3ThreadId } : {}),
       ...(run.failureSummary !== undefined ? { failureSummary: run.failureSummary } : {}),
     });
-    const comment = await postLinearComment({
+
+    const adapter = createLinearPlatformAdapter();
+    const threadRef = {
+      platform: "linear" as const,
       issueId: controlThread.issueId,
-      body: replyBody,
-      ...(controlThread.commentId !== undefined ? { parentId: controlThread.commentId } : {}),
-    });
+      ...(controlThread.commentId !== undefined ? { commentId: controlThread.commentId } : {}),
+      ...(controlThread.linearAgentSessionId !== undefined
+        ? { agentSessionId: controlThread.linearAgentSessionId }
+        : {}),
+    };
+
+    const messageRef = await adapter.postMessage(threadRef, { markdown: replyBody });
+
+    if (controlThread.linearAgentSessionId) {
+      await adapter.postActivity(threadRef, { type: "response", body: replyBody });
+    }
 
     await ctx.runMutation(internal.executionRuns.recordLinearReplyPosted, {
       executionRunId: run.executionRunId,
-      replyCommentId: comment.commentId,
+      replyCommentId: messageRef.messageId,
       postedAt: Date.now(),
-      bodyPreview: comment.body.slice(0, 240),
+      bodyPreview: replyBody.slice(0, 240),
     });
 
     return {
       posted: true,
       reason: "posted",
-      replyCommentId: comment.commentId,
+      replyCommentId: messageRef.messageId,
     };
   },
 });

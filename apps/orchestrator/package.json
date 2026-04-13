@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@convex-dev/agent": "^0.6.1",
+    "@linear/sdk": "^81.0.0",
     "@t3tools/contracts": "workspace:*",
     "convex": "^1.35.1",
     "effect": "catalog:"

@@ -6,6 +6,7 @@ const linearIngressArgs = {
   eventId: v.string(),
   linearThreadKey: v.string(),
   issueId: v.string(),
+  issueIdentifier: v.optional(v.string()),
   commentId: v.optional(v.string()),
   messageId: v.optional(v.string()),
   teamId: v.optional(v.string()),
@@ -141,6 +142,7 @@ export const getControlThread = internalQuery({
       threadKey: v.string(),
       issueId: v.string(),
       commentId: v.optional(v.string()),
+      linearAgentSessionId: v.optional(v.string()),
       state: v.union(
         v.literal("open"),
         v.literal("active"),
@@ -162,10 +164,25 @@ export const getControlThread = internalQuery({
       threadKey: row.linearThreadKey,
       issueId: row.linearIssueId,
       ...(row.linearCommentId !== undefined ? { commentId: row.linearCommentId } : {}),
+      ...(row.linearAgentSessionId !== undefined
+        ? { linearAgentSessionId: row.linearAgentSessionId }
+        : {}),
       state: row.state,
       ...(row.title !== undefined ? { title: row.title } : {}),
       ...(row.summary !== undefined ? { summary: row.summary } : {}),
     };
+  },
+});
+
+export const setAgentSessionId = internalMutation({
+  args: {
+    controlThreadId: v.id("controlThreads"),
+    agentSessionId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.controlThreadId, {
+      linearAgentSessionId: args.agentSessionId,
+    });
   },
 });
 

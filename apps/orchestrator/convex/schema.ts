@@ -35,6 +35,7 @@ export default defineSchema({
     linearTeamId: v.optional(v.string()),
     title: v.optional(v.string()),
     summary: v.optional(v.string()),
+    linearAgentSessionId: v.optional(v.string()),
     state: controlThreadState,
     lastEventId: v.string(),
     lastIngressAt: v.number(),

@@ -603,26 +603,39 @@ Files changed:
 
 ### What to build
 
-1. `apps/orchestrator/src/adapters/linear.ts` — `LinearPlatformAdapter` wrapping `@linear/sdk`:
-  - `normalizeInbound()` — handle both `AgentSessionEvent` (created/prompted) and `Comment` webhooks
-  - `postMessage()` — threaded comments via `linearClient.createComment()`
-  - `postActivity()` — streaming activities via `linearClient.createAgentActivity()` (thought, action, response, error)
-  - `createAgentSession()` — create agent session on issue or comment via `agentSessionCreateOnIssue` / `agentSessionCreateOnComment`
-  - `updateAgentSession()` — update plans and external URLs via `agentSessionUpdate`
-  - `updateIssueStatus()` — change workflow state and assignee via `issue.update()`
-  - `verifyWebhook()` — HMAC-SHA256 signature check
-2. Upgrade `apps/orchestrator/convex/http.ts` `/linear/webhook` to handle `AgentSessionEvent` webhook type alongside existing `Comment` webhooks
-3. Agent session is created immediately on webhook ingress (deterministic, before any LLM call), with an initial "Preparing..." thought activity
-4. Add `@linear/sdk` as direct dependency
-5. Refactor `apps/orchestrator/src/linear/` to delegate to `LinearPlatformAdapter` or replace
+1. `apps/orchestrator/src/adapters/linear.ts` — `createLinearPlatformAdapter()` factory returning a `PlatformAdapter`:
+   - `verifyWebhook()` — moved from inline `http.ts` HMAC logic
+   - `normalizeInbound()` — delegates to existing `normalizeLinearWebhookInput`
+   - `postMessage()` — absorbs `postLinearComment` from `src/linear/client.ts`
+   - `postActivity()` — new, calls `linearClient.createAgentActivity()` (thought, action, response, error)
+   - `createAgentSession()` — new, calls `linearClient.agentSessionCreateOnIssue()`
+   - `updateAgentSession()` — new, update plans and external URLs via `agentSessionUpdate`
+   - `updateIssueStatus()` — new, fetches team workflow states at runtime then calls `issue.update()`. Matches states by name substring (like Cyrus's `fetchWorkflowStates` pattern).
+2. Agent session creation is deterministic, happens on first comment per control thread (`createdThread: true` from upsert), with an initial "Preparing..." thought activity.
+3. `linearAgentSessionId` stored on `controlThreads` table — one session per thread, continuation runs post to the same session.
+4. Add `@linear/sdk` as direct dependency.
+5. Refactor `src/linear/client.ts` into the adapter (delete after absorbing `postLinearComment`). Keep `src/linear/ingress.ts` (normalization), `src/linear/replies.ts` (pure builders), `src/linear/oauth.ts` (OAuth flow).
+6. `LinearClient` instantiated per Convex action from client credentials env vars. No token refresh needed (short-lived stateless actions).
+7. `AgentSessionEvent` inbound webhooks deferred — Phase 8 uses agent sessions outbound-only. Comment webhook remains the trigger path.
 
 ### Acceptance criteria
 
-- `AgentSessionEvent` (created/prompted) webhooks are handled alongside `Comment` webhooks
-- Agent sessions are created immediately when the orchestrator picks up work
-- Streaming activities (thought, action, response, error) post to Linear's native agent UI
-- Issue status changes to "In Review" and assignee changes work
-- Comment webhook path still works as fallback for non-agent interactions
+- [ ] Agent sessions are created on first comment per control thread
+- [ ] Initial "Preparing..." thought activity posts immediately on session creation
+- [ ] `postActivity()` posts thought/action/response/error to Linear's native agent UI
+- [ ] `updateIssueStatus()` resolves workflow states by name and transitions the issue
+- [ ] `postMessage()` posts threaded comments (existing behavior preserved)
+- [ ] `linearAgentSessionId` stored on control thread and reused across continuation runs
+- [ ] `@linear/sdk` is a direct dependency
+- [ ] `src/linear/client.ts` is absorbed into the adapter and deleted
+- [ ] Comment webhook path still works (no behavior regression)
+
+### Implementation decisions made
+
+- Use `@linear/sdk` (`LinearClient`) for all API calls, matching the Cyrus pattern.
+- Factory pattern (`createLinearPlatformAdapter()`) matches existing `createT3ExecutionBridgeClient()` pattern. Instantiated per-action, stateless.
+- Workflow state resolution fetches team states at runtime and matches by name substring — same as Cyrus's `fetchWorkflowStates(teamId)` approach. No env var config for state IDs.
+- Agent sessions are outbound-only for Phase 8. Inbound `AgentSessionEvent` webhooks (assign-to-bot trigger) are a natural follow-up but not blocking.
 
 ---
 
