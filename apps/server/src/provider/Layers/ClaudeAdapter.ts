@@ -20,6 +20,7 @@ import {
   ModelUsage,
   NonNullableUsage,
 } from "@anthropic-ai/claude-agent-sdk";
+import { parseCliArgs } from "@t3tools/shared/cliArgs";
 import {
   ApprovalRequestId,
   type CanonicalItemType,
@@ -505,35 +506,6 @@ const CLAUDE_SETTING_SOURCES = [
   "project",
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
-
-/**
- * Parse a CLI-style launch args string into the SDK's `extraArgs` format.
- *
- * Boolean flags (no value) become `null`, flags with a value become strings:
- *   ""                        → {}
- *   "--chrome"                → { chrome: null }
- *   "--chrome --debug"        → { chrome: null, debug: null }
- *   "--chrome --max-turns 5"  → { chrome: null, "max-turns": "5" }
- */
-export function parseLaunchArgs(args: string): Record<string, string | null> {
-  const result: Record<string, string | null> = {};
-  const tokens = args.trim().split(/\s+/).filter(Boolean);
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i]!;
-    if (token.startsWith("--")) {
-      const key = token.slice(2);
-      if (!key) continue;
-      const next = tokens[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
-        result[key] = next;
-        i++;
-      } else {
-        result[key] = null;
-      }
-    }
-  }
-  return result;
-}
 
 function buildPromptText(input: ProviderSendTurnInput): string {
   const rawEffort =
@@ -2709,7 +2681,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ),
       );
       const claudeBinaryPath = claudeSettings.binaryPath;
-      const extraArgs = parseLaunchArgs(claudeSettings.launchArgs);
+      const extraArgs = parseCliArgs(claudeSettings.launchArgs).flags;
       const modelSelection =
         input.modelSelection?.provider === "claudeAgent" ? input.modelSelection : undefined;
       const caps = getClaudeModelCapabilities(modelSelection?.model);

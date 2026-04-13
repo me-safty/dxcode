@@ -25,7 +25,7 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import { ClaudeAdapter } from "../Services/ClaudeAdapter.ts";
-import { makeClaudeAdapterLive, parseLaunchArgs, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import { makeClaudeAdapterLive, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
 
 class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   private readonly queue: Array<SDKMessage> = [];
@@ -3220,70 +3220,3 @@ describe("ClaudeAdapterLive", () => {
   });
 });
 
-describe("parseLaunchArgs", () => {
-  it("returns empty object for empty string", () => {
-    assert.deepEqual(parseLaunchArgs(""), {});
-  });
-
-  it("returns empty object for whitespace-only string", () => {
-    assert.deepEqual(parseLaunchArgs("   "), {});
-  });
-
-  it("parses --chrome boolean flag", () => {
-    assert.deepEqual(parseLaunchArgs("--chrome"), { chrome: null });
-  });
-
-  it("parses --chrome with --verbose", () => {
-    assert.deepEqual(parseLaunchArgs("--chrome --verbose"), {
-      chrome: null,
-      verbose: null,
-    });
-  });
-
-  it("parses --effort with a value", () => {
-    assert.deepEqual(parseLaunchArgs("--effort high"), { effort: "high" });
-  });
-
-  it("parses --chrome --effort high --debug", () => {
-    assert.deepEqual(parseLaunchArgs("--chrome --effort high --debug"), {
-      chrome: null,
-      effort: "high",
-      debug: null,
-    });
-  });
-
-  it("parses --model with full model name", () => {
-    assert.deepEqual(parseLaunchArgs("--model claude-sonnet-4-6"), {
-      model: "claude-sonnet-4-6",
-    });
-  });
-
-  it("parses --append-system-prompt with value and --chrome", () => {
-    assert.deepEqual(parseLaunchArgs("--append-system-prompt always-think-step-by-step --chrome"), {
-      "append-system-prompt": "always-think-step-by-step",
-      chrome: null,
-    });
-  });
-
-  it("parses --max-budget-usd with numeric value", () => {
-    assert.deepEqual(parseLaunchArgs("--chrome --max-budget-usd 5.00"), {
-      chrome: null,
-      "max-budget-usd": "5.00",
-    });
-  });
-
-  it("handles extra whitespace between tokens", () => {
-    assert.deepEqual(parseLaunchArgs("  --chrome   --verbose  "), {
-      chrome: null,
-      verbose: null,
-    });
-  });
-
-  it("ignores bare -- with no flag name", () => {
-    assert.deepEqual(parseLaunchArgs("--"), {});
-  });
-
-  it("ignores tokens that don't start with --", () => {
-    assert.deepEqual(parseLaunchArgs("chrome"), {});
-  });
-});
