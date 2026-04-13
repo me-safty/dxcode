@@ -296,9 +296,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
-      {row.kind === "work" && (
-        <WorkGroupSection groupId={row.id} groupedEntries={row.groupedEntries} />
-      )}
+      {row.kind === "work" && <WorkGroupSection groupedEntries={row.groupedEntries} />}
 
       {row.kind === "message" &&
         row.message.role === "user" &&
@@ -528,10 +526,8 @@ function LiveMessageMeta({
 /** Owns its own expand/collapse state so toggling re-renders only this row.
  *  State resets on unmount which is fine — work groups start collapsed. */
 const WorkGroupSection = memo(function WorkGroupSection({
-  groupId,
   groupedEntries,
 }: {
-  groupId: string;
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
