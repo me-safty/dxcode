@@ -2492,6 +2492,108 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("keeps the new worktree branch picker anchored at the top when opening with a preselected branch", async () => {
+    const draftId = DraftId.make("draft-branch-picker-scroll-regression");
+    const branches = [
+      {
+        name: "feature/current",
+        current: true,
+        isDefault: false,
+        worktreePath: null,
+      },
+      {
+        name: "main",
+        current: false,
+        isDefault: true,
+        worktreePath: null,
+      },
+      ...Array.from({ length: 48 }, (_, index) => ({
+        name: `feature/${String(index).padStart(2, "0")}`,
+        current: false,
+        isDefault: false,
+        worktreePath: null,
+      })),
+      {
+        name: "feature/selected",
+        current: false,
+        isDefault: false,
+        worktreePath: null,
+      },
+    ];
+
+    useComposerDraftStore.setState({
+      draftThreadsByThreadKey: {
+        [draftId]: {
+          threadId: THREAD_ID,
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          logicalProjectKey: PROJECT_DRAFT_KEY,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: "feature/selected",
+          worktreePath: null,
+          envMode: "worktree",
+        },
+      },
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {
+        [PROJECT_DRAFT_KEY]: draftId,
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+      initialPath: `/draft/${draftId}`,
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.gitListBranches) {
+          return {
+            isRepo: true,
+            hasOriginRemote: true,
+            nextCursor: null,
+            totalCount: branches.length,
+            branches,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const branchButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "From feature/selected",
+          ) as HTMLButtonElement | null,
+        'Unable to find branch selector button with "From feature/selected".',
+      );
+      branchButton.click();
+
+      await waitForElement(
+        () => document.querySelector<HTMLInputElement>('input[placeholder="Search branches..."]'),
+        "Unable to find branch search input.",
+      );
+
+      const popup = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-slot="combobox-popup"]'),
+        "Unable to find the branch picker popup.",
+      );
+
+      await vi.waitFor(
+        () => {
+          const popupSpans = Array.from(popup.querySelectorAll("span"));
+          expect(
+            popupSpans.some((element) => element.textContent?.trim() === "feature/current"),
+          ).toBe(true);
+          expect(popupSpans.some((element) => element.textContent?.trim() === "main")).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("surrounds selected plain text and preserves the inner selection for repeated wrapping", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

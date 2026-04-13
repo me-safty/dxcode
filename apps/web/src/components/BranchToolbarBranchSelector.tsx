@@ -546,7 +546,9 @@ export function BranchToolbarBranchSelector({
       autoHighlight
       virtualized={shouldVirtualizeBranchList}
       onItemHighlighted={(_value, eventDetails) => {
-        if (!isBranchMenuOpen || eventDetails.index < 0) return;
+        if (!isBranchMenuOpen || eventDetails.index < 0 || eventDetails.reason !== "keyboard") {
+          return;
+        }
         branchListRef.current?.scrollIndexIntoView?.({
           index: eventDetails.index,
           animated: false,
