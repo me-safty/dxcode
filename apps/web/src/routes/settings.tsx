@@ -2,7 +2,6 @@ import { RotateCcwIcon } from "lucide-react";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
-import { StartupPendingSurface } from "../components/StartupPendingSurface";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { Button } from "../components/ui/button";
 import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
@@ -94,14 +93,4 @@ export const Route = createFileRoute("/settings")({
     }
   },
   component: SettingsRouteLayout,
-  pendingComponent: SettingsRoutePendingView,
 });
-
-function SettingsRoutePendingView() {
-  return (
-    <StartupPendingSurface
-      title="Connecting to T3 Server"
-      detail="Connecting to the local server before loading server and editor settings."
-    />
-  );
-}

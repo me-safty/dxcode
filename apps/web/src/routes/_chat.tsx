@@ -1,7 +1,6 @@
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-import { StartupPendingSurface } from "../components/StartupPendingSurface";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import {
@@ -114,9 +113,4 @@ export const Route = createFileRoute("/_chat")({
     }
   },
   component: ChatRouteLayout,
-  pendingComponent: ChatRoutePendingView,
 });
-
-function ChatRoutePendingView() {
-  return <StartupPendingSurface />;
-}
