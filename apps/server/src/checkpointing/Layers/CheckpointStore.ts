@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import { Effect, Layer, FileSystem, Path } from "effect";
 
 import { CheckpointInvariantError } from "../Errors.ts";
+import { extractSubmoduleChanges } from "../Diffs.ts";
 import { GitCommandError } from "@t3tools/contracts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";
@@ -86,6 +87,138 @@ const makeCheckpointStore = Effect.gen(function* () {
         Effect.catch(() => Effect.succeed(false)),
       );
 
+  /**
+   * Detect submodules with dirty working trees and create temporary commits
+   * inside each one, then update the parent's temp index so `git write-tree`
+   * captures the submodule's actual file state instead of its stale HEAD.
+   */
+  const captureSubmoduleSnapshots = Effect.fn("captureSubmoduleSnapshots")(function* (
+    cwd: string,
+    tempDir: string,
+    parentEnv: NodeJS.ProcessEnv,
+  ) {
+    // Detect submodule paths via .gitmodules config.
+    const submoduleListResult = yield* git.execute({
+      operation: "CheckpointStore.captureSubmoduleSnapshots.list",
+      cwd,
+      args: ["config", "--file", ".gitmodules", "--get-regexp", "^submodule\\..*\\.path$"],
+      allowNonZeroExit: true,
+    });
+    if (submoduleListResult.code !== 0 || submoduleListResult.stdout.trim().length === 0) {
+      return;
+    }
+
+    // Parse "submodule.<name>.path <value>" lines.
+    const submodulePaths: string[] = [];
+    for (const line of submoduleListResult.stdout.split(/\r?\n/g)) {
+      const parts = line.trim().split(/\s+/);
+      const subPath = parts.at(-1);
+      if (subPath && subPath.length > 0) {
+        submodulePaths.push(subPath);
+      }
+    }
+    if (submodulePaths.length === 0) return;
+
+    yield* Effect.all(
+      submodulePaths.map((subPath) =>
+        captureOneSubmoduleSnapshot(cwd, subPath, tempDir, parentEnv).pipe(
+          Effect.catch(() => Effect.void),
+        ),
+      ),
+      { concurrency: "unbounded" },
+    );
+  });
+
+  /**
+   * For a single submodule, create a temp commit from its working tree and
+   * update the parent's temp index to reference it.
+   */
+  const captureOneSubmoduleSnapshot = Effect.fn("captureOneSubmoduleSnapshot")(function* (
+    parentCwd: string,
+    submodulePath: string,
+    tempDir: string,
+    parentEnv: NodeJS.ProcessEnv,
+  ) {
+    const subCwd = path.join(parentCwd, submodulePath);
+
+    // Check that the submodule is an initialized git repo.
+    const isRepo = yield* git
+      .execute({
+        operation: "CheckpointStore.captureOneSubmoduleSnapshot.isRepo",
+        cwd: subCwd,
+        args: ["rev-parse", "--is-inside-work-tree"],
+        allowNonZeroExit: true,
+      })
+      .pipe(Effect.map((r) => r.code === 0 && r.stdout.trim() === "true"));
+    if (!isRepo) return;
+
+    // Check if the submodule has any dirty changes (staged or unstaged).
+    const statusResult = yield* git.execute({
+      operation: "CheckpointStore.captureOneSubmoduleSnapshot.status",
+      cwd: subCwd,
+      args: ["status", "--porcelain"],
+      allowNonZeroExit: true,
+    });
+    if (statusResult.code !== 0 || statusResult.stdout.trim().length === 0) {
+      return; // Clean submodule, nothing to snapshot.
+    }
+
+    // Create a temp index for the submodule and capture its working tree.
+    const subTempIndex = path.join(tempDir, `sub-index-${randomUUID()}`);
+    const subEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      GIT_INDEX_FILE: subTempIndex,
+      GIT_AUTHOR_NAME: "T3 Code",
+      GIT_AUTHOR_EMAIL: "t3code@users.noreply.github.com",
+      GIT_COMMITTER_NAME: "T3 Code",
+      GIT_COMMITTER_EMAIL: "t3code@users.noreply.github.com",
+    };
+
+    // Populate the temp index from the submodule's HEAD.
+    const subHasHead = yield* hasHeadCommit(subCwd);
+    if (subHasHead) {
+      yield* git.execute({
+        operation: "CheckpointStore.captureOneSubmoduleSnapshot.readTree",
+        cwd: subCwd,
+        args: ["read-tree", "HEAD"],
+        env: subEnv,
+      });
+    }
+
+    yield* git.execute({
+      operation: "CheckpointStore.captureOneSubmoduleSnapshot.add",
+      cwd: subCwd,
+      args: ["add", "-A", "--", "."],
+      env: subEnv,
+    });
+
+    const subTreeResult = yield* git.execute({
+      operation: "CheckpointStore.captureOneSubmoduleSnapshot.writeTree",
+      cwd: subCwd,
+      args: ["write-tree"],
+      env: subEnv,
+    });
+    const subTreeOid = subTreeResult.stdout.trim();
+    if (subTreeOid.length === 0) return;
+
+    const subCommitResult = yield* git.execute({
+      operation: "CheckpointStore.captureOneSubmoduleSnapshot.commitTree",
+      cwd: subCwd,
+      args: ["commit-tree", subTreeOid, "-m", "t3 submodule checkpoint snapshot"],
+      env: subEnv,
+    });
+    const subCommitOid = subCommitResult.stdout.trim();
+    if (subCommitOid.length === 0) return;
+
+    // Update the parent's temp index to point to this new submodule commit.
+    yield* git.execute({
+      operation: "CheckpointStore.captureOneSubmoduleSnapshot.updateParentIndex",
+      cwd: parentCwd,
+      args: ["update-index", "--cacheinfo", `160000,${subCommitOid},${submodulePath}`],
+      env: parentEnv,
+    });
+  });
+
   const captureCheckpoint: CheckpointStoreShape["captureCheckpoint"] = Effect.fn(
     "captureCheckpoint",
   )(function* (input) {
@@ -120,6 +253,12 @@ const makeCheckpointStore = Effect.gen(function* () {
           args: ["add", "-A", "--", "."],
           env: commitEnv,
         });
+
+        // Capture dirty submodule working trees into temporary commits so that
+        // the parent checkpoint tree reflects their actual file state.
+        yield* captureSubmoduleSnapshots(input.cwd, tempDir, commitEnv).pipe(
+          Effect.catch(() => Effect.void),
+        );
 
         const writeTreeResult = yield* git.execute({
           operation,
@@ -246,6 +385,49 @@ const makeCheckpointStore = Effect.gen(function* () {
         cwd: input.cwd,
         args: ["diff", "--patch", "--minimal", "--no-color", fromCommitOid, toCommitOid],
       });
+
+      // Expand submodule diffs: for each submodule whose commit changed, run
+      // git diff inside the submodule directory and append the file-level patch.
+      const submoduleChanges = extractSubmoduleChanges(result.stdout);
+      if (submoduleChanges.length > 0) {
+        const expansions = yield* Effect.all(
+          submoduleChanges.map((sub) => {
+            if (!sub.fromCommit || !sub.toCommit) return Effect.succeed("");
+            const subCwd = path.join(input.cwd, sub.path);
+            return git
+              .execute({
+                operation: "CheckpointStore.diffSubmodule",
+                cwd: subCwd,
+                args: [
+                  "diff",
+                  "--patch",
+                  "--minimal",
+                  "--no-color",
+                  "--ignore-submodules=all",
+                  sub.fromCommit,
+                  sub.toCommit,
+                ],
+              })
+              .pipe(
+                Effect.map((r) => {
+                  if (r.stdout.trim().length === 0) return "";
+                  // Rewrite paths in the submodule diff to be relative to parent.
+                  return r.stdout.replace(
+                    /^(diff --git a\/)(.+?)( b\/)(.+)/gm,
+                    `$1${sub.path}/$2$3${sub.path}/$4`,
+                  );
+                }),
+                Effect.catch(() => Effect.succeed("")),
+              );
+          }),
+          { concurrency: "unbounded" },
+        );
+
+        const expandedPatch = expansions.filter((p) => p.length > 0).join("\n");
+        if (expandedPatch.length > 0) {
+          return `${result.stdout}\n${expandedPatch}`;
+        }
+      }
 
       return result.stdout;
     },
