@@ -10,15 +10,6 @@ const host = process.env.HOST?.trim() || "localhost";
 const configuredHttpUrl = process.env.VITE_HTTP_URL?.trim();
 const configuredWsUrl = process.env.VITE_WS_URL?.trim();
 const sourcemapEnv = process.env.T3CODE_WEB_SOURCEMAP?.trim().toLowerCase();
-const autoCodeSplittingEnv = process.env.T3CODE_WEB_AUTO_CODE_SPLITTING?.trim().toLowerCase();
-const autoCodeSplitting =
-  autoCodeSplittingEnv === undefined
-    ? true
-    : !(
-        autoCodeSplittingEnv === "0" ||
-        autoCodeSplittingEnv === "false" ||
-        autoCodeSplittingEnv === "no"
-      );
 
 const buildSourcemap =
   sourcemapEnv === "0" || sourcemapEnv === "false"
@@ -53,7 +44,7 @@ const devProxyTarget = resolveDevProxyTarget(configuredWsUrl);
 export default defineConfig({
   plugins: [
     tanstackRouter({
-      autoCodeSplitting,
+      autoCodeSplitting: true,
     }),
     react(),
     babel({
