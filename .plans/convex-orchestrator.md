@@ -663,7 +663,19 @@ Files changed:
 - Use `@linear/sdk` (`LinearClient`) for all API calls, matching the Cyrus pattern.
 - Factory pattern (`createLinearPlatformAdapter()`) matches existing `createT3ExecutionBridgeClient()` pattern. Instantiated per-action, stateless.
 - Workflow state resolution fetches team states at runtime and matches by name substring — same as Cyrus's `fetchWorkflowStates(teamId)` approach. No env var config for state IDs.
-- Agent sessions are outbound-only for Phase 8. Inbound `AgentSessionEvent` webhooks (assign-to-bot trigger) are a natural follow-up but not blocking.
+- Agent sessions are outbound AND inbound: `AgentSessionEvent` with action `prompted` is handled by the ingress normalizer, routing follow-up prompts through the continuation path. Stop signals (`signal: "stop"`) trigger `interruptWorkerRun`.
+- When an agent session exists, completion replies use `response` activity (not comment) to avoid duplicate visible entries in Linear's UI.
+- Reply dedup uses a `claimLinearReplySlot` mutex mutation that atomically claims the reply slot before posting.
+
+### Post-implementation cleanup
+
+The following cleanup was done after the initial Phase 8 implementation:
+
+1. **Deduplicated HMAC verification** — extracted `src/linear/webhookVerification.ts` shared by `convex/http.ts` and the adapter.
+2. **Renamed `linearMvp.ts` → `linearOrchestration.ts`** — consolidated webhook routing logic from `http.ts` into `handleLinearWebhookIngress` action.
+3. **Deleted ghost file `src/linear/client.ts`** — moved `exchangeLinearOAuthCode` to `src/linear/oauth.ts`.
+4. **Fixed duplicate reply bug** — when agent session exists, post `response` activity instead of comment + activity. Added `claimLinearReplySlot` mutex.
+5. **Added `AgentSessionEvent` inbound handling** — `normalizeLinearWebhookInput` now handles `type: "AgentSessionEvent"` with `action: "prompted"`, routing user prompts from the agent session UI as follow-up/continuation events. Stop signals (`signal: "stop"`) trigger run interruption.
 
 ---
 

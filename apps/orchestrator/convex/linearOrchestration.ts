@@ -121,6 +121,12 @@ export const handleLinearWebhookIngress = internalAction({
       }
     }
 
+    if (result.eventApplied && !result.shouldStartRun && args.body === "__stop__") {
+      await ctx.runAction(internal.executionRuns.interruptWorkerRun, {
+        controlThreadId: result.controlThreadId,
+      });
+    }
+
     return {
       ...result,
       controlThreadId: String(result.controlThreadId),

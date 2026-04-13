@@ -40,6 +40,21 @@ interface LinearWebhookPayload {
   readonly actor?: LinearWebhookActor;
   readonly data?: LinearWebhookCommentData;
   readonly type?: unknown;
+  readonly agentSession?: {
+    readonly id?: unknown;
+    readonly issue?: {
+      readonly id?: unknown;
+      readonly identifier?: unknown;
+      readonly title?: unknown;
+    };
+    readonly comment?: { readonly id?: unknown };
+  };
+  readonly agentActivity?: {
+    readonly id?: unknown;
+    readonly content?: { readonly body?: unknown };
+    readonly signal?: unknown;
+  };
+  readonly createdAt?: unknown;
 }
 
 function asTrimmedString(value: unknown): string | undefined {
@@ -105,6 +120,11 @@ export function normalizeLinearWebhookInput(
   }
 
   const payload = input as LinearWebhookPayload;
+
+  if (payload.type === "AgentSessionEvent" && payload.action === "prompted") {
+    return normalizeAgentSessionPrompted(payload);
+  }
+
   if (payload.type !== "Comment" || payload.action !== "create") {
     return null;
   }
@@ -152,3 +172,33 @@ export function normalizeLinearWebhookInput(
 }
 
 export { containsLinearBotMention };
+
+function normalizeAgentSessionPrompted(
+  payload: LinearWebhookPayload,
+): LinearIngressEnvelope | null {
+  const issueId = asTrimmedString(payload.agentSession?.issue?.id);
+  if (!issueId) return null;
+
+  const body = asTrimmedString(payload.agentActivity?.content?.body) ?? "";
+  if (body.length === 0) return null;
+
+  const signal = asTrimmedString(payload.agentActivity?.signal);
+  const activityId = asTrimmedString(payload.agentActivity?.id) ?? crypto.randomUUID();
+  const sessionId = asTrimmedString(payload.agentSession?.id);
+  const issueIdentifier = asTrimmedString(payload.agentSession?.issue?.identifier);
+  const eventTimestamp = asTrimmedString(payload.createdAt) ?? "unknown";
+  const eventId = `linear:agent-session:prompted:${activityId}:${eventTimestamp}`;
+
+  return {
+    eventId,
+    threadKind: "issue",
+    linearThreadKey: `linear:${issueId}`,
+    issueId,
+    body: signal === "stop" ? "__stop__" : body,
+    receivedAt: Date.now(),
+    shouldStartRun: signal !== "stop",
+    ...(issueIdentifier !== undefined ? { issueIdentifier } : {}),
+    ...(sessionId !== undefined ? { messageId: activityId } : {}),
+    ...(signal === "stop" ? { summary: "User requested stop via agent session" } : {}),
+  };
+}
