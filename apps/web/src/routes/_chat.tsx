@@ -118,10 +118,5 @@ export const Route = createFileRoute("/_chat")({
 });
 
 function ChatRoutePendingView() {
-  return (
-    <StartupPendingSurface
-      title="Connecting to T3 Server"
-      detail="Waiting for the local server to finish connecting before loading your threads."
-    />
-  );
+  return <StartupPendingSurface />;
 }

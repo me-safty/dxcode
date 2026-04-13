@@ -319,6 +319,9 @@ function relaunchDesktopApp(reason: string): void {
 }
 
 function writeDesktopLogHeader(message: string): void {
+  if (!app.isPackaged) {
+    console.log(`[desktop] ${message}`);
+  }
   if (!desktopLogSink) return;
   desktopLogSink.write(`[${logTimestamp()}] [${logScope("desktop")}] ${message}\n`);
 }
@@ -549,15 +552,22 @@ function initializePackagedLogging(): void {
 }
 
 function captureBackendOutput(child: ChildProcess.ChildProcess): void {
-  if (!app.isPackaged || backendLogSink === null) return;
-  const writeChunk = (chunk: unknown): void => {
-    if (!backendLogSink) return;
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "utf8");
-    backendLogSink.write(buffer);
-    backendListeningDetector?.push(buffer);
+  const attachStream = (
+    stream: NodeJS.ReadableStream | null | undefined,
+    output: NodeJS.WriteStream,
+  ): void => {
+    stream?.on("data", (chunk: unknown) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "utf8");
+      backendLogSink?.write(buffer);
+      backendListeningDetector?.push(buffer);
+      if (!app.isPackaged) {
+        output.write(buffer);
+      }
+    });
   };
-  child.stdout?.on("data", writeChunk);
-  child.stderr?.on("data", writeChunk);
+
+  attachStream(child.stdout, process.stdout);
+  attachStream(child.stderr, process.stderr);
 }
 
 initializePackagedLogging();
@@ -1312,7 +1322,7 @@ function startBackend(): void {
     return;
   }
 
-  const captureBackendLogs = app.isPackaged && backendLogSink !== null;
+  const captureBackendLogs = !isDevelopment;
   const child = ChildProcess.spawn(process.execPath, [backendEntry, "--bootstrap-fd", "3"], {
     cwd: resolveBackendCwd(),
     // In Electron main, process.execPath points to the Electron binary.
@@ -1812,7 +1822,7 @@ function createWindow(): BrowserWindow {
     height: 780,
     minWidth: 840,
     minHeight: 620,
-    show: isDevelopment,
+    show: false,
     autoHideMenuBar: true,
     backgroundColor: getInitialWindowBackgroundColor(),
     ...getIconOption(),
@@ -1886,20 +1896,21 @@ function createWindow(): BrowserWindow {
     window.setTitle(APP_DISPLAY_NAME);
     emitUpdateState();
   });
-  if (!isDevelopment) {
-    const reveal = () => {
-      revealWindow(window);
-    };
-    window.webContents.once("did-finish-load", reveal);
-    window.once("ready-to-show", reveal);
-  }
+
+  let initialRevealScheduled = false;
+  const revealInitialWindow = () => {
+    if (initialRevealScheduled) {
+      return;
+    }
+    initialRevealScheduled = true;
+    revealWindow(window);
+  };
+
+  window.once("ready-to-show", revealInitialWindow);
 
   if (isDevelopment) {
     void window.loadURL(resolveDesktopDevServerUrl());
     window.webContents.openDevTools({ mode: "detach" });
-    setImmediate(() => {
-      revealWindow(window);
-    });
   } else {
     void window.loadURL(backendHttpUrl);
   }

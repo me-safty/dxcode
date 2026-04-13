@@ -1,9 +1,10 @@
+console.log("main.tsx loaded at", new Date().toISOString());
+
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
 
-import "@xterm/xterm/css/xterm.css";
 import "./index.css";
 
 import { isElectron } from "./env";
@@ -27,3 +28,5 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <RouterProvider router={router} />
   </React.StrictMode>,
 );
+
+console.log("main.tsx rendered at", new Date().toISOString());

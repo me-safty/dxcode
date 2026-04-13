@@ -29,6 +29,46 @@ const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+let staticClientRequestSequence = 0;
+
+export type StaticClientResponseSource =
+  | "dev-redirect"
+  | "invalid-request-url"
+  | "no-static-dir"
+  | "invalid-static-path"
+  | "static-file"
+  | "spa-fallback"
+  | "static-read-error";
+
+export function summarizeStaticClientLog(args: {
+  readonly requestId: string;
+  readonly requestPath: string;
+  readonly status: number;
+  readonly source: StaticClientResponseSource;
+  readonly startedAt: number;
+  readonly finishedAt: number;
+}) {
+  return {
+    requestId: args.requestId,
+    requestPath: args.requestPath,
+    requestType: pathLooksLikeAsset(args.requestPath) ? "asset" : "shell",
+    status: args.status,
+    source: args.source,
+    durationMs: Math.max(0, args.finishedAt - args.startedAt),
+  } as const;
+}
+
+function pathLooksLikeAsset(pathname: string): boolean {
+  const normalizedPath = pathname.trim();
+  if (normalizedPath === "/" || normalizedPath.endsWith("/")) {
+    return false;
+  }
+  const lastSlashIndex = normalizedPath.lastIndexOf("/");
+  const lastDotIndex = normalizedPath.lastIndexOf(".");
+  return lastDotIndex > lastSlashIndex;
+}
+
+const nextStaticClientRequestId = () => `static-${++staticClientRequestSequence}`;
 
 export const browserApiCorsLayer = HttpRouter.cors({
   allowedMethods: ["GET", "POST", "OPTIONS"],
@@ -224,24 +264,61 @@ export const staticAndDevRouteLayer = HttpRouter.add(
   "GET",
   "*",
   Effect.gen(function* () {
+    const requestId = nextStaticClientRequestId();
+    const startedAt = Date.now();
     const request = yield* HttpServerRequest.HttpServerRequest;
     const url = HttpServerRequest.toURL(request);
+    const requestPath = Option.isSome(url) ? url.value.pathname : "<invalid-url>";
+    yield* Effect.logInfo("web client request inbound", {
+      requestId,
+      requestPath,
+    });
+
+    const logOutbound = (
+      status: number,
+      source: StaticClientResponseSource,
+      response: HttpServerResponse.HttpServerResponse,
+    ) =>
+      Effect.logInfo(
+        "web client request outbound",
+        summarizeStaticClientLog({
+          requestId,
+          requestPath,
+          status,
+          source,
+          startedAt,
+          finishedAt: Date.now(),
+        }),
+      ).pipe(Effect.as(response));
+
     if (Option.isNone(url)) {
-      return HttpServerResponse.text("Bad Request", { status: 400 });
+      return yield* logOutbound(
+        400,
+        "invalid-request-url",
+        HttpServerResponse.text("Bad Request", { status: 400 }),
+      );
     }
 
     const config = yield* ServerConfig;
     if (config.devUrl && isLoopbackHostname(url.value.hostname)) {
-      return HttpServerResponse.redirect(resolveDevRedirectUrl(config.devUrl, url.value), {
-        status: 302,
-      });
+      return yield* logOutbound(
+        302,
+        "dev-redirect",
+        HttpServerResponse.redirect(resolveDevRedirectUrl(config.devUrl, url.value), {
+          status: 302,
+        }),
+      );
     }
 
     const staticDir = config.staticDir ?? (config.devUrl ? yield* resolveStaticDir() : undefined);
     if (!staticDir) {
-      return HttpServerResponse.text("No static directory configured and no dev URL set.", {
-        status: 503,
-      });
+      return yield* logOutbound(
+        503,
+        "no-static-dir",
+        HttpServerResponse.text("No static directory configured and no dev URL set.", {
+          status: 503,
+        }),
+      );
     }
 
     const fileSystem = yield* FileSystem.FileSystem;
@@ -258,7 +335,11 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       hasPathTraversalSegment ||
       staticRelativePath.includes("\0")
     ) {
-      return HttpServerResponse.text("Invalid static file path", { status: 400 });
+      return yield* logOutbound(
+        400,
+        "invalid-static-path",
+        HttpServerResponse.text("Invalid static file path", { status: 400 }),
+      );
     }
 
     const isWithinStaticRoot = (candidate: string) =>
@@ -267,14 +348,22 @@ export const staticAndDevRouteLayer = HttpRouter.add(
 
     let filePath = path.resolve(staticRoot, staticRelativePath);
     if (!isWithinStaticRoot(filePath)) {
-      return HttpServerResponse.text("Invalid static file path", { status: 400 });
+      return yield* logOutbound(
+        400,
+        "invalid-static-path",
+        HttpServerResponse.text("Invalid static file path", { status: 400 }),
+      );
     }
 
     const ext = path.extname(filePath);
     if (!ext) {
       filePath = path.resolve(filePath, "index.html");
       if (!isWithinStaticRoot(filePath)) {
-        return HttpServerResponse.text("Invalid static file path", { status: 400 });
+        return yield* logOutbound(
+          400,
+          "invalid-static-path",
+          HttpServerResponse.text("Invalid static file path", { status: 400 }),
+        );
       }
     }
 
@@ -287,12 +376,20 @@ export const staticAndDevRouteLayer = HttpRouter.add(
         .readFile(indexPath)
         .pipe(Effect.catch(() => Effect.succeed(null)));
       if (!indexData) {
-        return HttpServerResponse.text("Not Found", { status: 404 });
+        return yield* logOutbound(
+          404,
+          "spa-fallback",
+          HttpServerResponse.text("Not Found", { status: 404 }),
+        );
       }
-      return HttpServerResponse.uint8Array(indexData, {
-        status: 200,
-        contentType: "text/html; charset=utf-8",
-      });
+      return yield* logOutbound(
+        200,
+        "spa-fallback",
+        HttpServerResponse.uint8Array(indexData, {
+          status: 200,
+          contentType: "text/html; charset=utf-8",
+        }),
+      );
     }
 
     const contentType = Mime.getType(filePath) ?? "application/octet-stream";
@@ -300,12 +397,20 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       .readFile(filePath)
       .pipe(Effect.catch(() => Effect.succeed(null)));
     if (!data) {
-      return HttpServerResponse.text("Internal Server Error", { status: 500 });
+      return yield* logOutbound(
+        500,
+        "static-read-error",
+        HttpServerResponse.text("Internal Server Error", { status: 500 }),
+      );
     }
 
-    return HttpServerResponse.uint8Array(data, {
-      status: 200,
-      contentType,
-    });
+    return yield* logOutbound(
+      200,
+      "static-file",
+      HttpServerResponse.uint8Array(data, {
+        status: 200,
+        contentType,
+      }),
+    );
   }),
 );

@@ -29,7 +29,17 @@ import { applyClaudePromptEffortPrefix } from "@t3tools/shared/model";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
@@ -95,7 +105,6 @@ import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
-import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { ChevronDownIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { toastManager } from "./ui/toast";
@@ -130,7 +139,7 @@ import {
   type TerminalContextSelection,
 } from "../lib/terminalContext";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
-import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import type { ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
@@ -178,6 +187,25 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const LazyThreadTerminalDrawer = lazy(() => import("./ThreadTerminalDrawer"));
+const LazyChatComposer = lazy(async () => {
+  const module = await import("./chat/ChatComposer");
+  return { default: module.ChatComposer };
+});
+
+function ChatComposerLoadingShell() {
+  return (
+    <div className="mx-auto w-full min-w-0 max-w-208">
+      <div className="rounded-[22px] border border-border/60 bg-card/80 p-3 shadow-xs">
+        <div className="h-24 rounded-[18px] bg-muted/45" />
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div className="h-8 w-36 rounded-full bg-muted/50" />
+          <div className="h-8 w-24 rounded-full bg-muted/50" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
 
@@ -549,29 +577,31 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
 
   return (
     <div className={visible ? undefined : "hidden"}>
-      <ThreadTerminalDrawer
-        threadRef={threadRef}
-        threadId={threadId}
-        cwd={cwd}
-        worktreePath={effectiveWorktreePath}
-        runtimeEnv={runtimeEnv}
-        visible={visible}
-        height={terminalState.terminalHeight}
-        terminalIds={terminalState.terminalIds}
-        activeTerminalId={terminalState.activeTerminalId}
-        terminalGroups={terminalState.terminalGroups}
-        activeTerminalGroupId={terminalState.activeTerminalGroupId}
-        focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
-        onSplitTerminal={splitTerminal}
-        onNewTerminal={createNewTerminal}
-        splitShortcutLabel={visible ? splitShortcutLabel : undefined}
-        newShortcutLabel={visible ? newShortcutLabel : undefined}
-        closeShortcutLabel={visible ? closeShortcutLabel : undefined}
-        onActiveTerminalChange={activateTerminal}
-        onCloseTerminal={closeTerminal}
-        onHeightChange={setTerminalHeight}
-        onAddTerminalContext={handleAddTerminalContext}
-      />
+      <Suspense fallback={null}>
+        <LazyThreadTerminalDrawer
+          threadRef={threadRef}
+          threadId={threadId}
+          cwd={cwd}
+          worktreePath={effectiveWorktreePath}
+          runtimeEnv={runtimeEnv}
+          visible={visible}
+          height={terminalState.terminalHeight}
+          terminalIds={terminalState.terminalIds}
+          activeTerminalId={terminalState.activeTerminalId}
+          terminalGroups={terminalState.terminalGroups}
+          activeTerminalGroupId={terminalState.activeTerminalGroupId}
+          focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
+          onSplitTerminal={splitTerminal}
+          onNewTerminal={createNewTerminal}
+          splitShortcutLabel={visible ? splitShortcutLabel : undefined}
+          newShortcutLabel={visible ? newShortcutLabel : undefined}
+          closeShortcutLabel={visible ? closeShortcutLabel : undefined}
+          onActiveTerminalChange={activateTerminal}
+          onCloseTerminal={closeTerminal}
+          onHeightChange={setTerminalHeight}
+          onAddTerminalContext={handleAddTerminalContext}
+        />
+      </Suspense>
     </div>
   );
 });
@@ -3269,71 +3299,73 @@ export default function ChatView(props: ChatViewProps) {
 
           {/* Input bar */}
           <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
-            <ChatComposer
-              ref={composerRef}
-              composerDraftTarget={composerDraftTarget}
-              environmentId={environmentId}
-              routeKind={routeKind}
-              routeThreadRef={routeThreadRef}
-              draftId={draftId}
-              activeThreadId={activeThreadId}
-              activeThreadEnvironmentId={activeThread?.environmentId}
-              activeThread={activeThread}
-              isServerThread={isServerThread}
-              isLocalDraftThread={isLocalDraftThread}
-              phase={phase}
-              isConnecting={isConnecting}
-              isSendBusy={isSendBusy}
-              isPreparingWorktree={isPreparingWorktree}
-              activePendingApproval={activePendingApproval}
-              pendingApprovals={pendingApprovals}
-              pendingUserInputs={pendingUserInputs}
-              activePendingProgress={activePendingProgress}
-              activePendingResolvedAnswers={activePendingResolvedAnswers}
-              activePendingIsResponding={activePendingIsResponding}
-              activePendingDraftAnswers={activePendingDraftAnswers}
-              activePendingQuestionIndex={activePendingQuestionIndex}
-              respondingRequestIds={respondingRequestIds}
-              showPlanFollowUpPrompt={showPlanFollowUpPrompt}
-              activeProposedPlan={activeProposedPlan}
-              activePlan={activePlan as { turnId?: TurnId } | null}
-              sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
-              planSidebarOpen={planSidebarOpen}
-              runtimeMode={runtimeMode}
-              interactionMode={interactionMode}
-              lockedProvider={lockedProvider}
-              providerStatuses={providerStatuses as ServerProvider[]}
-              activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
-              activeThreadModelSelection={activeThread?.modelSelection}
-              activeThreadActivities={activeThread?.activities}
-              resolvedTheme={resolvedTheme}
-              settings={settings}
-              gitCwd={gitCwd}
-              promptRef={promptRef}
-              composerImagesRef={composerImagesRef}
-              composerTerminalContextsRef={composerTerminalContextsRef}
-              shouldAutoScrollRef={isAtEndRef}
-              scheduleStickToBottom={scrollToEnd}
-              onSend={onSend}
-              onInterrupt={onInterrupt}
-              onImplementPlanInNewThread={onImplementPlanInNewThread}
-              onRespondToApproval={onRespondToApproval}
-              onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
-              onAdvanceActivePendingUserInput={onAdvanceActivePendingUserInput}
-              onPreviousActivePendingUserInputQuestion={onPreviousActivePendingUserInputQuestion}
-              onChangeActivePendingUserInputCustomAnswer={
-                onChangeActivePendingUserInputCustomAnswer
-              }
-              onProviderModelSelect={onProviderModelSelect}
-              toggleInteractionMode={toggleInteractionMode}
-              handleRuntimeModeChange={handleRuntimeModeChange}
-              handleInteractionModeChange={handleInteractionModeChange}
-              togglePlanSidebar={togglePlanSidebar}
-              focusComposer={focusComposer}
-              scheduleComposerFocus={scheduleComposerFocus}
-              setThreadError={setThreadError}
-              onExpandImage={onExpandTimelineImage}
-            />
+            <Suspense fallback={<ChatComposerLoadingShell />}>
+              <LazyChatComposer
+                ref={composerRef}
+                composerDraftTarget={composerDraftTarget}
+                environmentId={environmentId}
+                routeKind={routeKind}
+                routeThreadRef={routeThreadRef}
+                draftId={draftId}
+                activeThreadId={activeThreadId}
+                activeThreadEnvironmentId={activeThread?.environmentId}
+                activeThread={activeThread}
+                isServerThread={isServerThread}
+                isLocalDraftThread={isLocalDraftThread}
+                phase={phase}
+                isConnecting={isConnecting}
+                isSendBusy={isSendBusy}
+                isPreparingWorktree={isPreparingWorktree}
+                activePendingApproval={activePendingApproval}
+                pendingApprovals={pendingApprovals}
+                pendingUserInputs={pendingUserInputs}
+                activePendingProgress={activePendingProgress}
+                activePendingResolvedAnswers={activePendingResolvedAnswers}
+                activePendingIsResponding={activePendingIsResponding}
+                activePendingDraftAnswers={activePendingDraftAnswers}
+                activePendingQuestionIndex={activePendingQuestionIndex}
+                respondingRequestIds={respondingRequestIds}
+                showPlanFollowUpPrompt={showPlanFollowUpPrompt}
+                activeProposedPlan={activeProposedPlan}
+                activePlan={activePlan as { turnId?: TurnId } | null}
+                sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
+                planSidebarOpen={planSidebarOpen}
+                runtimeMode={runtimeMode}
+                interactionMode={interactionMode}
+                lockedProvider={lockedProvider}
+                providerStatuses={providerStatuses as ServerProvider[]}
+                activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
+                activeThreadModelSelection={activeThread?.modelSelection}
+                activeThreadActivities={activeThread?.activities}
+                resolvedTheme={resolvedTheme}
+                settings={settings}
+                gitCwd={gitCwd}
+                promptRef={promptRef}
+                composerImagesRef={composerImagesRef}
+                composerTerminalContextsRef={composerTerminalContextsRef}
+                shouldAutoScrollRef={shouldAutoScrollRef}
+                scheduleStickToBottom={scheduleStickToBottom}
+                onSend={onSend}
+                onInterrupt={onInterrupt}
+                onImplementPlanInNewThread={onImplementPlanInNewThread}
+                onRespondToApproval={onRespondToApproval}
+                onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
+                onAdvanceActivePendingUserInput={onAdvanceActivePendingUserInput}
+                onPreviousActivePendingUserInputQuestion={onPreviousActivePendingUserInputQuestion}
+                onChangeActivePendingUserInputCustomAnswer={
+                  onChangeActivePendingUserInputCustomAnswer
+                }
+                onProviderModelSelect={onProviderModelSelect}
+                toggleInteractionMode={toggleInteractionMode}
+                handleRuntimeModeChange={handleRuntimeModeChange}
+                handleInteractionModeChange={handleInteractionModeChange}
+                togglePlanSidebar={togglePlanSidebar}
+                focusComposer={focusComposer}
+                scheduleComposerFocus={scheduleComposerFocus}
+                setThreadError={setThreadError}
+                onExpandImage={onExpandTimelineImage}
+              />
+            </Suspense>
           </div>
 
           {isGitRepo && (

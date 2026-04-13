@@ -9,6 +9,9 @@
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <script>
+      console.log("index.html loaded at", new Date().toISOString());
+    </script>
+    <script>
       (() => {
         const LIGHT_BACKGROUND = "#ffffff";
         const DARK_BACKGROUND = "#161616";
@@ -57,6 +60,134 @@
         background: #161616;
         color: #f5f5f5;
       }
+
+      body {
+        overflow: hidden;
+      }
+
+      .startup-splash {
+        display: flex;
+        min-height: 100%;
+        align-items: center;
+        justify-content: center;
+        padding: 32px;
+        background:
+          radial-gradient(circle at top, rgba(59, 130, 246, 0.08), transparent 32%),
+          radial-gradient(circle at bottom, rgba(16, 185, 129, 0.08), transparent 28%), #ffffff;
+      }
+
+      html.dark .startup-splash {
+        background:
+          radial-gradient(circle at top, rgba(96, 165, 250, 0.14), transparent 32%),
+          radial-gradient(circle at bottom, rgba(52, 211, 153, 0.12), transparent 28%), #161616;
+      }
+
+      .startup-splash__panel {
+        width: min(100%, 480px);
+        border: 1px solid rgba(38, 38, 38, 0.08);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.86);
+        padding: 28px 28px 24px;
+        box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+        backdrop-filter: blur(16px);
+      }
+
+      html.dark .startup-splash__panel {
+        border-color: rgba(245, 245, 245, 0.08);
+        background: rgba(22, 22, 22, 0.88);
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.32);
+      }
+
+      .startup-splash__eyebrow {
+        margin: 0 0 10px;
+        color: rgba(82, 82, 91, 0.92);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      html.dark .startup-splash__eyebrow {
+        color: rgba(212, 212, 216, 0.88);
+      }
+
+      .startup-splash__title {
+        margin: 0;
+        color: #18181b;
+        font-size: 44px;
+        font-weight: 700;
+        line-height: 0.96;
+      }
+
+      html.dark .startup-splash__title {
+        color: #fafafa;
+      }
+
+      .startup-splash__detail {
+        margin: 18px 0 0;
+        color: rgba(82, 82, 91, 0.94);
+        font-size: 16px;
+        line-height: 1.55;
+      }
+
+      html.dark .startup-splash__detail {
+        color: rgba(212, 212, 216, 0.9);
+      }
+
+      .startup-splash__status {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 22px;
+        color: rgba(63, 63, 70, 0.96);
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      html.dark .startup-splash__status {
+        color: rgba(228, 228, 231, 0.92);
+      }
+
+      .startup-splash__dot {
+        width: 10px;
+        height: 10px;
+        flex: 0 0 auto;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #2563eb, #10b981);
+        box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.34);
+        animation: startup-pulse 1.6s ease-out infinite;
+      }
+
+      @keyframes startup-pulse {
+        0% {
+          transform: scale(0.94);
+          box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.34);
+        }
+
+        70% {
+          transform: scale(1);
+          box-shadow: 0 0 0 12px rgba(37, 99, 235, 0);
+        }
+
+        100% {
+          transform: scale(0.94);
+          box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+        }
+      }
+
+      @media (max-width: 640px) {
+        .startup-splash {
+          padding: 20px;
+        }
+
+        .startup-splash__panel {
+          padding: 24px 20px 20px;
+        }
+
+        .startup-splash__title {
+          font-size: 36px;
+        }
+      }
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -67,7 +198,21 @@
     <title>T3 Code (Alpha)</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="startup-splash" aria-label="Starting T3 Code">
+        <section class="startup-splash__panel">
+          <p class="startup-splash__eyebrow">T3 Code (Alpha)</p>
+          <h1 class="startup-splash__title">Starting T3 Code</h1>
+          <p class="startup-splash__detail">
+            Preparing the local workspace and connecting to the desktop runtime.
+          </p>
+          <div class="startup-splash__status">
+            <span class="startup-splash__dot" aria-hidden="true"></span>
+            <span>Launching local environment</span>
+          </div>
+        </section>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
