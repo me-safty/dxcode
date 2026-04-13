@@ -2072,12 +2072,17 @@ export default function ChatView(props: ChatViewProps) {
   });
 
   useEffect(() => {
+    setPendingServerThreadEnvMode(null);
+    setPendingServerThreadBranch(undefined);
+  }, [activeThread?.id]);
+
+  useEffect(() => {
     if (canOverrideServerThreadEnvMode) {
       return;
     }
     setPendingServerThreadEnvMode(null);
     setPendingServerThreadBranch(undefined);
-  }, [canOverrideServerThreadEnvMode, activeThread?.id]);
+  }, [canOverrideServerThreadEnvMode]);
 
   useEffect(() => {
     if (!activeThreadId) {

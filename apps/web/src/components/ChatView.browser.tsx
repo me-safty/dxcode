@@ -2323,7 +2323,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      await page.getByText("Current checkout", { exact: true }).click();
+      (await waitForButtonByText("Current checkout")).click();
       await page.getByText("New worktree", { exact: true }).click();
 
       await vi.waitFor(
@@ -2422,7 +2422,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      await page.getByText("Current checkout", { exact: true }).click();
+      (await waitForButtonByText("Current checkout")).click();
       await page.getByText("New worktree", { exact: true }).click();
       await page.getByText("From main", { exact: true }).click();
       await page.getByText("release/next", { exact: true }).click();
@@ -2458,6 +2458,107 @@ describe("ChatView timeline estimator parity (full app)", () => {
             | undefined;
 
           expect(turnStartRequest?.bootstrap?.prepareWorktree?.baseBranch).toBe("release/next");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("clears pending worktree overrides when switching empty server threads", async () => {
+    const secondThreadId = "thread-browser-test-second" as ThreadId;
+    const snapshot = addThreadToSnapshot(createDraftOnlySnapshot(), THREAD_ID);
+    const snapshotWithSecondThread = addThreadToSnapshot(snapshot, secondThreadId);
+    const snapshotWithTwoThreads = {
+      ...snapshotWithSecondThread,
+      threads: snapshotWithSecondThread.threads.map((thread) => {
+        if (thread.id === THREAD_ID) {
+          return Object.assign({}, thread, { session: null, title: "Thread alpha" });
+        }
+        if (thread.id === secondThreadId) {
+          return Object.assign({}, thread, { session: null, title: "Thread beta" });
+        }
+        return thread;
+      }),
+    };
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: snapshotWithTwoThreads,
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.gitListBranches) {
+          return {
+            isRepo: true,
+            hasOriginRemote: true,
+            nextCursor: null,
+            totalCount: 2,
+            branches: [
+              {
+                name: "main",
+                current: true,
+                isDefault: true,
+                worktreePath: null,
+              },
+              {
+                name: "release/next",
+                current: false,
+                isDefault: false,
+                worktreePath: null,
+              },
+            ],
+          };
+        }
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      (await waitForButtonByText("Current checkout")).click();
+      await page.getByText("New worktree", { exact: true }).click();
+      await page.getByText("From main", { exact: true }).click();
+      await page.getByText("release/next", { exact: true }).click();
+
+      await vi.waitFor(
+        () => {
+          expect(findButtonByText("From release/next")).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await mounted.router.navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          threadId: secondThreadId,
+        },
+      });
+
+      await waitForURL(
+        mounted.router,
+        (path) => path === serverThreadPath(secondThreadId),
+        "Route should switch to the second empty server thread.",
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(findButtonByText("Current checkout")).toBeTruthy();
+          expect(findButtonByText("From release/next")).toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      (await waitForButtonByText("Current checkout")).click();
+      await page.getByText("New worktree", { exact: true }).click();
+
+      await vi.waitFor(
+        () => {
+          expect(findButtonByText("From main")).toBeTruthy();
+          expect(findButtonByText("From release/next")).toBeNull();
         },
         { timeout: 8_000, interval: 16 },
       );
