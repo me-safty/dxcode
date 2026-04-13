@@ -2,8 +2,8 @@ import { type EnvironmentId, type MessageId, type TurnId } from "@t3tools/contra
 import {
   createContext,
   memo,
+  use,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -94,10 +94,6 @@ interface TimelineRowSharedState {
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
-
-function useTimelineRow() {
-  return useContext(TimelineRowCtx);
-}
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -282,7 +278,7 @@ type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["grouped
 type TimelineRow = MessagesTimelineRow;
 
 function TimelineRowContent({ row }: { row: TimelineRow }) {
-  const ctx = useTimelineRow();
+  const ctx = use(TimelineRowCtx);
   const maps = ctx.getMaps();
 
   return (
@@ -581,7 +577,7 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
   resolvedTheme: "light" | "dark";
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
-  const ctx = useTimelineRow();
+  const ctx = use(TimelineRowCtx);
   const turnSummary = ctx.getMaps().turnDiffSummaryByAssistantMessageId.get(messageId);
   if (!turnSummary) return null;
   const checkpointFiles = turnSummary.files;
