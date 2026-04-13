@@ -119,11 +119,13 @@ export function resolveCodexModelForAccount(
   account: CodexAccountSnapshot,
   availableModels?: ReadonlySet<string>,
 ): string | undefined {
+  const hasTrustedAvailableModels = (availableModels?.size ?? 0) > 0;
+
   if (!model) {
     return model;
   }
 
-  if (availableModels?.has(model)) {
+  if (hasTrustedAvailableModels && availableModels?.has(model)) {
     return model;
   }
 
@@ -131,5 +133,7 @@ export function resolveCodexModelForAccount(
     return model;
   }
 
-  return availableModels?.has(CODEX_DEFAULT_MODEL) === false ? model : CODEX_DEFAULT_MODEL;
+  return hasTrustedAvailableModels && availableModels?.has(CODEX_DEFAULT_MODEL) === false
+    ? model
+    : CODEX_DEFAULT_MODEL;
 }

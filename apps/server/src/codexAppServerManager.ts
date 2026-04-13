@@ -511,9 +511,12 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       try {
         const modelListResponse = await this.sendRequest(context, "model/list", {});
         console.log("codex model/list response", modelListResponse);
-        context.availableModels = new Set(
-          parseCodexModelListResult(modelListResponse).map((model) => model.slug),
+        const availableModels = parseCodexModelListResult(modelListResponse).map(
+          (model) => model.slug,
         );
+        if (availableModels.length > 0) {
+          context.availableModels = new Set(availableModels);
+        }
       } catch (error) {
         console.log("codex model/list failed", error);
       }

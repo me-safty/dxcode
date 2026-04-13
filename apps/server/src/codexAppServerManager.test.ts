@@ -385,6 +385,20 @@ describe("resolveCodexModelForAccount", () => {
     ).toBe("gpt-5.3-codex-spark");
   });
 
+  it("falls back from spark to default when the app-server model set is empty", () => {
+    expect(
+      resolveCodexModelForAccount(
+        "gpt-5.3-codex-spark",
+        {
+          type: "chatgpt",
+          planType: "unknown",
+          sparkEnabled: false,
+        },
+        new Set(),
+      ),
+    ).toBe("gpt-5.3-codex");
+  });
+
   it("falls back from spark to default for api key auth", () => {
     expect(
       resolveCodexModelForAccount("gpt-5.3-codex-spark", {
