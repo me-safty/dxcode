@@ -803,7 +803,14 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
           const raceWinner = sessions.get(input.threadId);
           if (raceWinner) {
             // Another call won the race – clean up the session we just created
-            // and return the one that is already registered.
+            // (including the remote SDK session) and return the existing one.
+            yield* Effect.tryPromise({
+              try: () =>
+                started.client.session
+                  .abort({ sessionID: started.openCodeSession.id })
+                  .catch(() => undefined),
+              catch: () => undefined,
+            }).pipe(Effect.ignore);
             started.server.close();
             return raceWinner.session;
           }
@@ -1147,8 +1154,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
             (entry) => entry.info.role === "assistant",
           );
           const target =
-            assistantMessages[Math.max(0, assistantMessages.length - numTurns - 1)] ??
-            null;
+            assistantMessages[Math.max(0, assistantMessages.length - numTurns - 1)] ?? null;
           if (target) {
             yield* Effect.tryPromise({
               try: () =>

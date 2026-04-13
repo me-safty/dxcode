@@ -193,7 +193,16 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
     }
 
     const settings = yield* serverSettingsService.getSettings.pipe(
-      Effect.map((value) => value.providers.opencode),
+      Effect.map(
+        (value) =>
+          value.providers?.opencode ?? {
+            enabled: true,
+            binaryPath: "opencode",
+            serverUrl: "",
+            serverPassword: "",
+            customModels: [],
+          },
+      ),
       Effect.orElseSucceed(() => ({
         enabled: true,
         binaryPath: "opencode",
