@@ -27,20 +27,24 @@ const decodeDesktopPackageJson = Schema.decodeUnknownEffect(
   Schema.fromJsonString(DesktopPackageJsonSchema),
 );
 
-const resolveNightlyBaseVersion = (version: string) => version.replace(/[-+].*$/, "");
+export const resolveNightlyBaseVersion = (version: string) => version.replace(/[-+].*$/, "");
 
-const resolveNightlyReleaseMetadata = (
+export const resolveNightlyReleaseMetadata = (
   baseVersion: string,
   date: string,
   runNumber: number,
   sha: string,
-) => ({
-  baseVersion,
-  version: `${baseVersion}-nightly.${date}.${runNumber}`,
-  tag: `nightly-v${baseVersion}-nightly.${date}.${runNumber}`,
-  name: `T3 Code Nightly ${baseVersion}-nightly.${date}.${runNumber}`,
-  shortSha: sha.slice(0, 12),
-});
+) => {
+  const shortSha = sha.slice(0, 12);
+  const version = `${baseVersion}-nightly.${date}.${runNumber}`;
+  return {
+    baseVersion,
+    version,
+    tag: `nightly-v${version}`,
+    name: `T3 Code Nightly ${version} (${shortSha})`,
+    shortSha,
+  };
+};
 
 const readDesktopBaseVersion = Effect.fn("readDesktopBaseVersion")(function* (
   rootDir: string | undefined,
@@ -111,7 +115,9 @@ const command = Command.make(
     ),
 ).pipe(Command.withDescription("Resolve nightly release version metadata."));
 
-Command.run(command, { version: "0.0.0" }).pipe(
-  Effect.provide(NodeServices.layer),
-  NodeRuntime.runMain,
-);
+if (import.meta.main) {
+  Command.run(command, { version: "0.0.0" }).pipe(
+    Effect.provide(NodeServices.layer),
+    NodeRuntime.runMain,
+  );
+}

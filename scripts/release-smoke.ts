@@ -135,6 +135,11 @@ try {
     "tag=nightly-v9.9.9-nightly.20260413.321",
     "Expected nightly metadata to contain the derived nightly tag.",
   );
+  assertContains(
+    nightlyReleaseMetadata,
+    "name=T3 Code Nightly 9.9.9-nightly.20260413.321 (abcdef123456)",
+    "Expected nightly metadata to include the short commit SHA in the release name.",
+  );
 
   const { arm64Path, x64Path } = writeMacManifestFixtures(tempRoot);
   execFileSync(

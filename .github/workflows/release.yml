@@ -35,6 +35,7 @@ jobs:
       version: ${{ steps.release_meta.outputs.version }}
       tag: ${{ steps.release_meta.outputs.tag }}
       release_name: ${{ steps.release_meta.outputs.name }}
+      short_sha: ${{ steps.release_meta.outputs.short_sha }}
       cli_dist_tag: ${{ steps.release_meta.outputs.cli_dist_tag }}
       is_prerelease: ${{ steps.release_meta.outputs.is_prerelease }}
       make_latest: ${{ steps.release_meta.outputs.make_latest }}
