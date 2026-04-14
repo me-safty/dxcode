@@ -4,6 +4,7 @@
     "slug": "t3-code",
     "scheme": "t3code",
     "version": "0.1.0",
+    "newArchEnabled": true,
     "runtimeVersion": {
       "policy": "appVersion"
     },
