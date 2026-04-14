@@ -18,6 +18,14 @@ const DateSchema = Schema.String.check(Schema.isPattern(/^\d{8}$/));
 const RunNumberSchema = Schema.FiniteFromString.check(Schema.isGreaterThanOrEqualTo(1));
 const ShaSchema = Schema.String.check(Schema.isPattern(/^[0-9a-f]{7,40}$/i));
 
+const resolveNightlyReleaseMetadata = (date: string, runNumber: number, sha: string) => ({
+  baseVersion: desktopPackageJson.version,
+  version: `${desktopPackageJson.version}-nightly.${date}.${runNumber}`,
+  tag: `nightly-v${desktopPackageJson.version}-nightly.${date}.${runNumber}`,
+  name: `T3 Code Nightly ${desktopPackageJson.version}-nightly.${date}.${runNumber}`,
+  shortSha: sha.slice(0, 12),
+});
+
 const writeOutput = Effect.fn("writeOutput")(function* (
   metadata: NightlyReleaseMetadata,
   writeGithubOutput: boolean,
@@ -64,16 +72,7 @@ const command = Command.make(
     ),
   },
   ({ date, runNumber, sha, githubOutput }) =>
-    writeOutput(
-      {
-        baseVersion: desktopPackageJson.version,
-        version: `${desktopPackageJson.version}-nightly.${date}.${runNumber}`,
-        tag: `nightly-v${desktopPackageJson.version}-nightly.${date}.${runNumber}`,
-        name: `T3 Code Nightly ${desktopPackageJson.version}-nightly.${date}.${runNumber}`,
-        shortSha: sha.slice(0, 12),
-      },
-      githubOutput,
-    ),
+    writeOutput(resolveNightlyReleaseMetadata(date, runNumber, sha), githubOutput),
 ).pipe(Command.withDescription("Resolve nightly release version metadata."));
 
 Command.run(command, {
