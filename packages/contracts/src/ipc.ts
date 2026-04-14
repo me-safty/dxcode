@@ -73,6 +73,7 @@ export type DesktopUpdateStatus =
 
 export type DesktopRuntimeArch = "arm64" | "x64" | "other";
 export type DesktopTheme = "light" | "dark" | "system";
+export type DesktopUpdateChannel = "latest" | "nightly";
 
 export interface DesktopRuntimeInfo {
   hostArch: DesktopRuntimeArch;
@@ -83,6 +84,7 @@ export interface DesktopRuntimeInfo {
 export interface DesktopUpdateState {
   enabled: boolean;
   status: DesktopUpdateStatus;
+  channel: DesktopUpdateChannel;
   currentVersion: string;
   hostArch: DesktopRuntimeArch;
   appArch: DesktopRuntimeArch;
@@ -154,6 +156,7 @@ export interface DesktopBridge {
   openExternal: (url: string) => Promise<boolean>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
+  setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;

@@ -23,22 +23,13 @@ const BuildArch = Schema.Literals(["arm64", "x64", "universal"]);
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("..", import.meta.url))),
 );
-const ProductionMacIconSource = Effect.zipWith(
-  RepoRoot,
-  Effect.service(Path.Path),
-  (repoRoot, path) => path.join(repoRoot, BRAND_ASSET_PATHS.productionMacIconPng),
-);
-const ProductionLinuxIconSource = Effect.zipWith(
-  RepoRoot,
-  Effect.service(Path.Path),
-  (repoRoot, path) => path.join(repoRoot, BRAND_ASSET_PATHS.productionLinuxIconPng),
-);
-const ProductionWindowsIconSource = Effect.zipWith(
-  RepoRoot,
-  Effect.service(Path.Path),
-  (repoRoot, path) => path.join(repoRoot, BRAND_ASSET_PATHS.productionWindowsIconIco),
-);
 const encodeJsonString = Schema.encodeEffect(Schema.UnknownFromJsonString);
+
+interface DesktopBuildIconAssets {
+  readonly macIconPng: string;
+  readonly linuxIconPng: string;
+  readonly windowsIconIco: string;
+}
 
 interface PlatformConfig {
   readonly cliFlag: "--mac" | "--linux" | "--win";
@@ -329,14 +320,13 @@ function generateMacIconSet(
   });
 }
 
-function stageMacIcons(stageResourcesDir: string, verbose: boolean) {
+function stageMacIcons(stageResourcesDir: string, sourcePng: string, verbose: boolean) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const iconSource = yield* ProductionMacIconSource;
-    if (!(yield* fs.exists(iconSource))) {
+    if (!(yield* fs.exists(sourcePng))) {
       return yield* new BuildScriptError({
-        message: `Production icon source is missing at ${iconSource}`,
+        message: `Desktop macOS icon source is missing at ${sourcePng}`,
       });
     }
 
@@ -350,42 +340,40 @@ function stageMacIcons(stageResourcesDir: string, verbose: boolean) {
     yield* runCommand(
       ChildProcess.make({
         ...commandOutputOptions(verbose),
-      })`sips -z 512 512 ${iconSource} --out ${iconPngPath}`,
+      })`sips -z 512 512 ${sourcePng} --out ${iconPngPath}`,
     );
 
-    yield* generateMacIconSet(iconSource, iconIcnsPath, tmpRoot, path, verbose);
+    yield* generateMacIconSet(sourcePng, iconIcnsPath, tmpRoot, path, verbose);
   });
 }
 
-function stageLinuxIcons(stageResourcesDir: string) {
+function stageLinuxIcons(stageResourcesDir: string, sourcePng: string) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const iconSource = yield* ProductionLinuxIconSource;
-    if (!(yield* fs.exists(iconSource))) {
+    if (!(yield* fs.exists(sourcePng))) {
       return yield* new BuildScriptError({
-        message: `Production icon source is missing at ${iconSource}`,
+        message: `Desktop Linux icon source is missing at ${sourcePng}`,
       });
     }
 
     const iconPath = path.join(stageResourcesDir, "icon.png");
-    yield* fs.copyFile(iconSource, iconPath);
+    yield* fs.copyFile(sourcePng, iconPath);
   });
 }
 
-function stageWindowsIcons(stageResourcesDir: string) {
+function stageWindowsIcons(stageResourcesDir: string, sourceIco: string) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const iconSource = yield* ProductionWindowsIconSource;
-    if (!(yield* fs.exists(iconSource))) {
+    if (!(yield* fs.exists(sourceIco))) {
       return yield* new BuildScriptError({
-        message: `Production Windows icon source is missing at ${iconSource}`,
+        message: `Desktop Windows icon source is missing at ${sourceIco}`,
       });
     }
 
     const iconPath = path.join(stageResourcesDir, "icon.ico");
-    yield* fs.copyFile(iconSource, iconPath);
+    yield* fs.copyFile(sourceIco, iconPath);
   });
 }
 
@@ -446,7 +434,8 @@ function resolveGitHubPublishConfig():
       readonly provider: "github";
       readonly owner: string;
       readonly repo: string;
-      readonly releaseType: "release";
+      readonly releaseType: "release" | "prerelease";
+      readonly channel?: "nightly";
     }
   | undefined {
   const rawRepo =
@@ -466,10 +455,31 @@ function resolveGitHubPublishConfig():
   };
 }
 
+export function resolveDesktopUpdateChannel(version: string): "latest" | "nightly" {
+  return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
+}
+
+export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIconAssets {
+  if (resolveDesktopUpdateChannel(version) === "nightly") {
+    return {
+      macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
+      linuxIconPng: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
+      windowsIconIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
+    };
+  }
+
+  return {
+    macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
+    linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
+    windowsIconIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
+  };
+}
+
 const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   platform: typeof BuildPlatform.Type,
   target: string,
   productName: string,
+  version: string,
   signed: boolean,
   mockUpdates: boolean,
   mockUpdateServerPort: string | undefined,
@@ -482,9 +492,18 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       buildResources: "apps/desktop/resources",
     },
   };
+  const updateChannel = resolveDesktopUpdateChannel(version);
   const publishConfig = resolveGitHubPublishConfig();
   if (publishConfig) {
-    buildConfig.publish = [publishConfig];
+    buildConfig.publish = [
+      updateChannel === "nightly"
+        ? {
+            ...publishConfig,
+            releaseType: "prerelease" as const,
+            channel: "nightly" as const,
+          }
+        : publishConfig,
+    ];
   } else if (mockUpdates) {
     buildConfig.publish = [
       {
@@ -533,20 +552,21 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
 const assertPlatformBuildResources = Effect.fn("assertPlatformBuildResources")(function* (
   platform: typeof BuildPlatform.Type,
   stageResourcesDir: string,
+  iconAssets: DesktopBuildIconAssets,
   verbose: boolean,
 ) {
   if (platform === "mac") {
-    yield* stageMacIcons(stageResourcesDir, verbose);
+    yield* stageMacIcons(stageResourcesDir, iconAssets.macIconPng, verbose);
     return;
   }
 
   if (platform === "linux") {
-    yield* stageLinuxIcons(stageResourcesDir);
+    yield* stageLinuxIcons(stageResourcesDir, iconAssets.linuxIconPng);
     return;
   }
 
   if (platform === "win") {
-    yield* stageWindowsIcons(stageResourcesDir);
+    yield* stageWindowsIcons(stageResourcesDir, iconAssets.windowsIconIco);
   }
 });
 
@@ -614,6 +634,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   });
 
   const appVersion = options.version ?? serverPackageJson.version;
+  const iconAssets = resolveDesktopBuildIconAssets(appVersion);
   const commitHash = resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
@@ -665,7 +686,16 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
   yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
 
-  yield* assertPlatformBuildResources(options.platform, stageResourcesDir, options.verbose);
+  yield* assertPlatformBuildResources(
+    options.platform,
+    stageResourcesDir,
+    {
+      macIconPng: join(repoRoot, iconAssets.macIconPng),
+      linuxIconPng: join(repoRoot, iconAssets.linuxIconPng),
+      windowsIconIco: join(repoRoot, iconAssets.windowsIconIco),
+    },
+    options.verbose,
+  );
 
   // electron-builder is filtering out stageResourcesDir directory in the AppImage for production
   yield* fs.copy(stageResourcesDir, path.join(stageAppDir, "apps/desktop/prod-resources"));
@@ -683,6 +713,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       options.platform,
       options.target,
       desktopPackageJson.productName ?? "T3 Code",
+      appVersion,
       options.signed,
       options.mockUpdates,
       options.mockUpdateServerPort,

@@ -1,6 +1,12 @@
-import { appendFileSync, readFileSync } from "node:fs";
+#!/usr/bin/env node
+
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { Data, Effect, FileSystem, Option, Path } from "effect";
+import { Command, Flag } from "effect/unstable/cli";
 
 interface ResolveNightlyReleaseOptions {
   readonly date: string;
@@ -16,6 +22,11 @@ interface NightlyReleaseMetadata {
   readonly name: string;
   readonly shortSha: string;
 }
+
+class NightlyReleaseError extends Data.TaggedError("NightlyReleaseError")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
 
 function validateDate(date: string): string {
   if (!/^\d{8}$/.test(date)) {
@@ -38,35 +49,73 @@ function validateSha(sha: string): string {
   return sha.toLowerCase();
 }
 
-function resolveBaseVersion(rootDir: string): string {
-  const packageJsonPath = resolve(rootDir, "apps/desktop/package.json");
-  const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
-    version?: unknown;
-  };
+export const resolveNightlyReleaseMetadata = Effect.fn("resolveNightlyReleaseMetadata")(function* (
+  options: ResolveNightlyReleaseOptions,
+) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+
+  const rootDir = path.resolve(options.rootDir ?? process.cwd());
+  const packageJsonPath = path.join(rootDir, "apps/desktop/package.json");
+  const packageJsonRaw = yield* fs.readFileString(packageJsonPath).pipe(
+    Effect.mapError(
+      (cause) =>
+        new NightlyReleaseError({
+          message: `Failed to read ${packageJsonPath}.`,
+          cause,
+        }),
+    ),
+  );
+
+  const packageJson = yield* Effect.try({
+    try: () => JSON.parse(packageJsonRaw) as { version?: unknown },
+    catch: (cause) =>
+      new NightlyReleaseError({
+        message: `Failed to parse ${packageJsonPath}.`,
+        cause,
+      }),
+  });
+
   if (typeof packageJson.version !== "string") {
-    throw new Error(`Missing string version in ${packageJsonPath}.`);
+    return yield* new NightlyReleaseError({
+      message: `Missing string version in ${packageJsonPath}.`,
+    });
   }
 
   const match = packageJson.version.match(/^(\d+\.\d+\.\d+)/);
   if (!match) {
-    throw new Error(
-      `Desktop package version '${packageJson.version}' does not start with X.Y.Z semver core.`,
-    );
+    return yield* new NightlyReleaseError({
+      message: `Desktop package version '${packageJson.version}' does not start with X.Y.Z semver core.`,
+    });
   }
 
-  const [baseVersion] = match;
-  return baseVersion;
-}
+  const date = yield* Effect.try({
+    try: () => validateDate(options.date),
+    catch: (cause) =>
+      new NightlyReleaseError({
+        message: cause instanceof Error ? cause.message : "Invalid nightly release date.",
+        cause,
+      }),
+  });
+  const runNumber = yield* Effect.try({
+    try: () => validateRunNumber(options.runNumber),
+    catch: (cause) =>
+      new NightlyReleaseError({
+        message: cause instanceof Error ? cause.message : "Invalid nightly run number.",
+        cause,
+      }),
+  });
+  const sha = yield* Effect.try({
+    try: () => validateSha(options.sha),
+    catch: (cause) =>
+      new NightlyReleaseError({
+        message: cause instanceof Error ? cause.message : "Invalid nightly release sha.",
+        cause,
+      }),
+  });
 
-export function resolveNightlyReleaseMetadata(
-  options: ResolveNightlyReleaseOptions,
-): NightlyReleaseMetadata {
-  const rootDir = resolve(options.rootDir ?? process.cwd());
-  const date = validateDate(options.date);
-  const runNumber = validateRunNumber(options.runNumber);
-  const sha = validateSha(options.sha);
+  const [baseVersion] = match;
   const shortSha = sha.slice(0, 12);
-  const baseVersion = resolveBaseVersion(rootDir);
   const version = `${baseVersion}-nightly.${date}.${runNumber}`;
 
   return {
@@ -75,123 +124,72 @@ export function resolveNightlyReleaseMetadata(
     tag: `nightly-v${version}`,
     name: `T3 Code Nightly ${version} (${shortSha})`,
     shortSha,
-  };
-}
+  } satisfies NightlyReleaseMetadata;
+});
 
-function parseArgs(argv: ReadonlyArray<string>): {
-  readonly date: string;
-  readonly runNumber: string;
-  readonly sha: string;
-  readonly rootDir?: string;
-  readonly writeGithubOutput: boolean;
-} {
-  let date: string | undefined;
-  let runNumber: string | undefined;
-  let sha: string | undefined;
-  let rootDir: string | undefined;
-  let writeGithubOutput = false;
+const writeOutput = Effect.fn("writeOutput")(function* (
+  metadata: NightlyReleaseMetadata,
+  writeGithubOutput: boolean,
+) {
+  const fs = yield* FileSystem.FileSystem;
 
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-    if (argument === undefined) {
-      continue;
-    }
-
-    if (argument === "--github-output") {
-      writeGithubOutput = true;
-      continue;
-    }
-
-    if (argument === "--date") {
-      date = argv[index + 1];
-      if (!date) {
-        throw new Error("Missing value for --date.");
-      }
-      index += 1;
-      continue;
-    }
-
-    if (argument === "--run-number") {
-      runNumber = argv[index + 1];
-      if (!runNumber) {
-        throw new Error("Missing value for --run-number.");
-      }
-      index += 1;
-      continue;
-    }
-
-    if (argument === "--sha") {
-      sha = argv[index + 1];
-      if (!sha) {
-        throw new Error("Missing value for --sha.");
-      }
-      index += 1;
-      continue;
-    }
-
-    if (argument === "--root") {
-      rootDir = argv[index + 1];
-      if (!rootDir) {
-        throw new Error("Missing value for --root.");
-      }
-      index += 1;
-      continue;
-    }
-
-    throw new Error(`Unknown argument: ${argument}`);
-  }
-
-  if (!date || !runNumber || !sha) {
-    throw new Error(
-      "Usage: node scripts/resolve-nightly-release.ts --date <YYYYMMDD> --run-number <n> --sha <git-sha> [--root <path>] [--github-output]",
-    );
-  }
-
-  return {
-    date,
-    runNumber,
-    sha,
-    ...(rootDir === undefined ? {} : { rootDir }),
-    writeGithubOutput,
-  };
-}
-
-function writeMetadata(metadata: NightlyReleaseMetadata, writeGithubOutput: boolean): void {
-  const entries = {
-    base_version: metadata.baseVersion,
-    version: metadata.version,
-    tag: metadata.tag,
-    name: metadata.name,
-    short_sha: metadata.shortSha,
-  };
+  const entries = [
+    ["base_version", metadata.baseVersion],
+    ["version", metadata.version],
+    ["tag", metadata.tag],
+    ["name", metadata.name],
+    ["short_sha", metadata.shortSha],
+  ] as const;
 
   if (writeGithubOutput) {
     const githubOutputPath = process.env.GITHUB_OUTPUT;
     if (!githubOutputPath) {
-      throw new Error("GITHUB_OUTPUT is required when --github-output is set.");
+      return yield* new NightlyReleaseError({
+        message: "GITHUB_OUTPUT is required when --github-output is set.",
+      });
     }
 
-    for (const [key, value] of Object.entries(entries)) {
-      appendFileSync(githubOutputPath, `${key}=${value}\n`);
-    }
+    const serialized = entries.map(([key, value]) => `${key}=${value}\n`).join("");
+    yield* fs.writeFileString(githubOutputPath, serialized, { flag: "a" });
     return;
   }
 
-  for (const [key, value] of Object.entries(entries)) {
-    console.log(`${key}=${value}`);
+  for (const [key, value] of entries) {
+    yield* Effect.sync(() => {
+      console.log(`${key}=${value}`);
+    });
   }
-}
+});
+
+const command = Command.make(
+  "resolve-nightly-release",
+  {
+    date: Flag.string("date").pipe(Flag.withDescription("Nightly build date in YYYYMMDD.")),
+    runNumber: Flag.string("run-number").pipe(Flag.withDescription("GitHub Actions run number.")),
+    sha: Flag.string("sha").pipe(Flag.withDescription("Commit sha for the nightly build.")),
+    rootDir: Flag.string("root").pipe(
+      Flag.optional,
+      Flag.withDescription("Repository root override."),
+    ),
+    githubOutput: Flag.boolean("github-output").pipe(
+      Flag.withDescription("Write values to GITHUB_OUTPUT instead of stdout."),
+      Flag.withDefault(false),
+    ),
+  },
+  ({ date, runNumber, sha, rootDir, githubOutput }) =>
+    resolveNightlyReleaseMetadata({
+      date,
+      runNumber,
+      sha,
+      ...(Option.isSome(rootDir) ? { rootDir: rootDir.value } : {}),
+    }).pipe(Effect.flatMap((metadata) => writeOutput(metadata, githubOutput))),
+).pipe(Command.withDescription("Resolve nightly release version metadata."));
 
 const isMain =
   process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isMain) {
-  const { date, runNumber, sha, rootDir, writeGithubOutput } = parseArgs(process.argv.slice(2));
-  const metadata = resolveNightlyReleaseMetadata({
-    date,
-    runNumber,
-    sha,
-    ...(rootDir === undefined ? {} : { rootDir }),
-  });
-  writeMetadata(metadata, writeGithubOutput);
+  Command.run(command, {
+    version: "0.0.0",
+  }).pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain);
 }

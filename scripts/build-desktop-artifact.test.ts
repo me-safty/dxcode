@@ -2,9 +2,33 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { ConfigProvider, Effect, Option } from "effect";
 
-import { resolveBuildOptions } from "./build-desktop-artifact.ts";
+import {
+  resolveBuildOptions,
+  resolveDesktopBuildIconAssets,
+  resolveDesktopUpdateChannel,
+} from "./build-desktop-artifact.ts";
+import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+  it("resolves the dedicated nightly updater channel from nightly versions", () => {
+    assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42"), "nightly");
+    assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
+  });
+
+  it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {
+    assert.deepStrictEqual(resolveDesktopBuildIconAssets("0.0.17"), {
+      macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
+      linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
+      windowsIconIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
+    });
+
+    assert.deepStrictEqual(resolveDesktopBuildIconAssets("0.0.17-nightly.20260413.42"), {
+      macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
+      linuxIconPng: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
+      windowsIconIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
+    });
+  });
+
   it.effect("preserves explicit false boolean flags over true env defaults", () =>
     Effect.gen(function* () {
       const resolved = yield* resolveBuildOptions({

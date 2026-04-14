@@ -194,16 +194,17 @@ jobs:
             "release/*.AppImage" \
             "release/*.exe" \
             "release/*.blockmap" \
-            "release/latest*.yml"; do
+            "release/*.yml"; do
             for file in $pattern; do
               cp "$file" release-publish/
             done
           done
 
           if [[ "${{ matrix.platform }}" == "mac" && "${{ matrix.arch }}" != "arm64" ]]; then
-            if [[ -f release-publish/latest-mac.yml ]]; then
-              mv release-publish/latest-mac.yml "release-publish/latest-mac-${{ matrix.arch }}.yml"
-            fi
+            shopt -s nullglob
+            for manifest in release-publish/*-mac.yml; do
+              mv "$manifest" "${manifest%.yml}-${{ matrix.arch }}.yml"
+            done
           fi
 
       - name: Upload build artifacts
@@ -238,10 +239,14 @@ jobs:
 
       - name: Merge macOS updater manifests
         run: |
-          node scripts/merge-mac-update-manifests.ts \
-            release-assets/latest-mac.yml \
-            release-assets/latest-mac-x64.yml
-          rm -f release-assets/latest-mac-x64.yml
+          shopt -s nullglob
+          for x64_manifest in release-assets/*-mac-x64.yml; do
+            arm64_manifest="${x64_manifest%-x64.yml}.yml"
+            if [[ -f "$arm64_manifest" ]]; then
+              node scripts/merge-mac-update-manifests.ts "$arm64_manifest" "$x64_manifest"
+              rm -f "$x64_manifest"
+            fi
+          done
 
       - name: Publish nightly prerelease
         uses: softprops/action-gh-release@v2
@@ -258,5 +263,5 @@ jobs:
             release-assets/*.AppImage
             release-assets/*.exe
             release-assets/*.blockmap
-            release-assets/latest*.yml
+            release-assets/*.yml
           fail_on_unmatched_files: true

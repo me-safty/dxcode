@@ -30,6 +30,7 @@ This document covers how to run desktop releases from one tag, first without sig
   - release name includes the short commit SHA
   - `make_latest` is always `false`
 - Uses the current `apps/desktop/package.json` semver core (`X.Y.Z`) as the nightly base, then appends a nightly prerelease suffix.
+- Publishes Electron auto-update metadata to the dedicated `nightly` updater channel, so desktop users can opt into that track independently from stable.
 - Does not publish the CLI package to npm.
 - Does not commit version bumps back to `main`.
 
