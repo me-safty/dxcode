@@ -2,9 +2,8 @@
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Config, Effect, FileSystem, Schema } from "effect";
+import { Config, Effect, FileSystem, Option, Path, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 
 interface NightlyReleaseMetadata {
   readonly baseVersion: string;
@@ -17,13 +16,43 @@ interface NightlyReleaseMetadata {
 const DateSchema = Schema.String.check(Schema.isPattern(/^\d{8}$/));
 const RunNumberSchema = Schema.FiniteFromString.check(Schema.isGreaterThanOrEqualTo(1));
 const ShaSchema = Schema.String.check(Schema.isPattern(/^[0-9a-f]{7,40}$/i));
+const DesktopPackageJsonSchema = Schema.Struct({
+  version: Schema.NonEmptyString,
+});
 
-const resolveNightlyReleaseMetadata = (date: string, runNumber: number, sha: string) => ({
-  baseVersion: desktopPackageJson.version,
-  version: `${desktopPackageJson.version}-nightly.${date}.${runNumber}`,
-  tag: `nightly-v${desktopPackageJson.version}-nightly.${date}.${runNumber}`,
-  name: `T3 Code Nightly ${desktopPackageJson.version}-nightly.${date}.${runNumber}`,
+const RepoRoot = Effect.service(Path.Path).pipe(
+  Effect.flatMap((path) => path.fromFileUrl(new URL("..", import.meta.url))),
+);
+const decodeDesktopPackageJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(DesktopPackageJsonSchema),
+);
+
+const resolveNightlyBaseVersion = (version: string) => version.replace(/[-+].*$/, "");
+
+const resolveNightlyReleaseMetadata = (
+  baseVersion: string,
+  date: string,
+  runNumber: number,
+  sha: string,
+) => ({
+  baseVersion,
+  version: `${baseVersion}-nightly.${date}.${runNumber}`,
+  tag: `nightly-v${baseVersion}-nightly.${date}.${runNumber}`,
+  name: `T3 Code Nightly ${baseVersion}-nightly.${date}.${runNumber}`,
   shortSha: sha.slice(0, 12),
+});
+
+const readDesktopBaseVersion = Effect.fn("readDesktopBaseVersion")(function* (
+  rootDir: string | undefined,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const workspaceRoot = rootDir ? path.resolve(rootDir) : yield* RepoRoot;
+  const packageJsonPath = path.join(workspaceRoot, "apps/desktop/package.json");
+  const packageJson = yield* fs
+    .readFileString(packageJsonPath)
+    .pipe(Effect.flatMap(decodeDesktopPackageJson));
+  return resolveNightlyBaseVersion(packageJson.version);
 });
 
 const writeOutput = Effect.fn("writeOutput")(function* (
@@ -70,9 +99,16 @@ const command = Command.make(
       Flag.withDescription("Write values to GITHUB_OUTPUT instead of stdout."),
       Flag.withDefault(false),
     ),
+    root: Flag.string("root").pipe(
+      Flag.withDescription("Workspace root used to resolve apps/desktop/package.json."),
+      Flag.optional,
+    ),
   },
-  ({ date, runNumber, sha, githubOutput }) =>
-    writeOutput(resolveNightlyReleaseMetadata(date, runNumber, sha), githubOutput),
+  ({ date, runNumber, sha, githubOutput, root }) =>
+    readDesktopBaseVersion(Option.getOrUndefined(root)).pipe(
+      Effect.map((baseVersion) => resolveNightlyReleaseMetadata(baseVersion, date, runNumber, sha)),
+      Effect.flatMap((metadata) => writeOutput(metadata, githubOutput)),
+    ),
 ).pipe(Command.withDescription("Resolve nightly release version metadata."));
 
 Command.run(command, { version: "0.0.0" }).pipe(
