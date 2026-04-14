@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useThemeColor } from "../../../lib/useThemeColor";
 
 import { AppText as Text } from "../../../components/AppText";
+import { buildThreadReviewRoutePath } from "../../../lib/routes";
 import { useGitStatus } from "../../../state/use-git-status";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../use-selected-thread-git-actions";
@@ -220,12 +221,7 @@ export function GitOverviewSheet() {
             title="Review changes"
             subtitle="Inspect turn diffs, worktree changes, and base branch diff"
             disabled={busy || !isRepo}
-            onPress={() =>
-              router.push({
-                pathname: "/threads/[environmentId]/[threadId]/git/review",
-                params: { environmentId, threadId },
-              })
-            }
+            onPress={() => router.push(buildThreadReviewRoutePath({ environmentId, threadId }))}
           />
           <View className="ml-12 h-px" style={{ backgroundColor: borderColor }} />
           <SheetListRow

@@ -4,6 +4,9 @@ import { useResolveClassNames } from "uniwind";
 
 export default function ThreadLayout() {
   const sheetStyle = StyleSheet.flatten(useResolveClassNames("bg-sheet"));
+  const headerBg = {
+    backgroundColor: (sheetStyle as { backgroundColor?: string })?.backgroundColor,
+  };
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
@@ -36,6 +39,18 @@ export default function ThreadLayout() {
           presentation: "formSheet" as const,
           sheetAllowedDetents: [0.4],
           sheetGrabberVisible: true,
+        }}
+      />
+      <Stack.Screen
+        name="review"
+        options={{
+          animation: "slide_from_right",
+          contentStyle: sheetStyle,
+          headerShown: true,
+          headerTitle: "Files changed",
+          headerBackTitle: "",
+          headerShadowVisible: false,
+          headerStyle: headerBg,
         }}
       />
     </Stack>

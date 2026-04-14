@@ -8,6 +8,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import Stack from "expo-router/stack";
 import { useCallback, useMemo } from "react";
 import { Alert, Linking } from "react-native";
+import { buildThreadReviewRoutePath } from "../../lib/routes";
 
 function truncateMiddle(value: string, maxLength: number): string {
   if (value.length <= maxLength) {
@@ -186,12 +187,7 @@ export function ThreadGitControls(props: {
         <Stack.Toolbar.MenuAction
           icon="text.bubble"
           disabled={!isRepo}
-          onPress={() =>
-            router.push({
-              pathname: "/threads/[environmentId]/[threadId]/git/review",
-              params: { environmentId, threadId },
-            })
-          }
+          onPress={() => router.push(buildThreadReviewRoutePath({ environmentId, threadId }))}
           subtitle="Turn diffs and worktree changes"
         >
           <Stack.Toolbar.Label>Review changes</Stack.Toolbar.Label>
