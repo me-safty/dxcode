@@ -164,9 +164,11 @@
   animation-fill-mode: both;
 }
 
-@supports not (animation-timeline: scroll(self inline)) {
-  .scroll-fade-effect-x {
-    --left-mask-width: var(--mask-width);
+@layer utilities {
+  @supports not (animation-timeline: scroll(self inline)) {
+    .scroll-fade-effect-x[data-scroll-fade-left="true"] {
+      --left-mask-width: var(--mask-width);
+    }
   }
 }
 

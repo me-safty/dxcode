@@ -461,6 +461,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
         <ScrollFadeEffect
           ref={turnStripRef}
           orientation="horizontal"
+          data-scroll-fade-left={canScrollTurnStripLeft ? "true" : undefined}
           className={cn(
             "turn-chip-strip flex gap-1 px-8 py-0.5",
             "[--mask-width:1.75rem] [--mask-offset-left:2rem] [--mask-offset-right:2rem]",

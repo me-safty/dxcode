@@ -737,10 +737,13 @@ export default function ChatView(props: ChatViewProps) {
   );
   const legendListRef = useRef<LegendListRef | null>(null);
   const isAtEndRef = useRef(true);
-  const initialMessagesAsideWidthPx = useMemo(
-    () => getLocalStorageItem(CHAT_DIFF_INLINE_WIDTH_STORAGE_KEY, Schema.Finite),
-    [],
-  );
+  const initialMessagesAsideWidthPx = useMemo(() => {
+    try {
+      return getLocalStorageItem(CHAT_DIFF_INLINE_WIDTH_STORAGE_KEY, Schema.Finite);
+    } catch {
+      return null;
+    }
+  }, []);
   const splitContentRef = useRef<HTMLDivElement | null>(null);
   const messagesAsideContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesAsideWidthRef = useRef<number | null>(initialMessagesAsideWidthPx);
