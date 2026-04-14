@@ -33,17 +33,27 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it("falls back to the default mock update port when the configured port is blank", () => {
     assert.equal(resolveMockUpdateServerUrl(undefined), "http://localhost:3000");
-    assert.equal(resolveMockUpdateServerUrl(""), "http://localhost:3000");
-    assert.equal(resolveMockUpdateServerUrl("   "), "http://localhost:3000");
-    assert.equal(resolveMockUpdateServerUrl("4123"), "http://localhost:4123");
+    assert.equal(resolveMockUpdateServerUrl(4123), "http://localhost:4123");
   });
 
-  it("rejects non-numeric or out-of-range mock update ports", () => {
-    assert.throws(() => resolveMockUpdateServerPort("abc"), /Invalid mock update server port/);
-    assert.throws(() => resolveMockUpdateServerPort("12.5"), /Invalid mock update server port/);
-    assert.throws(() => resolveMockUpdateServerPort("0"), /Invalid mock update server port/);
-    assert.throws(() => resolveMockUpdateServerPort("65536"), /Invalid mock update server port/);
-  });
+  it.effect("normalizes mock update server ports from env-style strings", () =>
+    Effect.gen(function* () {
+      assert.equal(yield* resolveMockUpdateServerPort(undefined), undefined);
+      assert.equal(yield* resolveMockUpdateServerPort(""), undefined);
+      assert.equal(yield* resolveMockUpdateServerPort("   "), undefined);
+      assert.equal(yield* resolveMockUpdateServerPort("4123"), 4123);
+    }),
+  );
+
+  it.effect("rejects non-numeric or out-of-range mock update ports", () =>
+    Effect.gen(function* () {
+      const invalidPorts = ["abc", "12.5", "0", "65536"];
+      for (const port of invalidPorts) {
+        const exit = yield* Effect.exit(resolveMockUpdateServerPort(port));
+        assert.equal(exit._tag, "Failure");
+      }
+    }),
+  );
 
   it.effect("preserves explicit false boolean flags over true env defaults", () =>
     Effect.gen(function* () {

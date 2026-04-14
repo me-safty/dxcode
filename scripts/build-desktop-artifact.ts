@@ -66,7 +66,7 @@ interface BuildCliInput {
   readonly signed: Option.Option<boolean>;
   readonly verbose: Option.Option<boolean>;
   readonly mockUpdates: Option.Option<boolean>;
-  readonly mockUpdateServerPort: Option.Option<string>;
+  readonly mockUpdateServerPort: Option.Option<number>;
 }
 
 function detectHostBuildPlatform(hostPlatform: string): typeof BuildPlatform.Type | undefined {
@@ -156,7 +156,7 @@ interface ResolvedBuildOptions {
   readonly signed: boolean;
   readonly verbose: boolean;
   readonly mockUpdates: boolean;
-  readonly mockUpdateServerPort: string | undefined;
+  readonly mockUpdateServerPort: number | undefined;
 }
 
 interface StagePackageJson {
@@ -204,10 +204,30 @@ const BuildEnvConfig = Config.all({
   mockUpdateServerPort: Config.string("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
 });
 
+const ValidMockUpdateServerPort = Schema.makeFilter(
+  (port: number) => Number.isInteger(port) || "Expected an integer mock update server port.",
+);
+const MockUpdateServerPortSchema = Schema.NumberFromString.check(
+  ValidMockUpdateServerPort,
+  Schema.isBetween({ minimum: 1, maximum: 65535 }),
+);
+const decodeMockUpdateServerPort = Schema.decodeUnknownEffect(MockUpdateServerPortSchema);
+
 const resolveBooleanFlag = (flag: Option.Option<boolean>, envValue: boolean) =>
   Option.getOrElse(flag, () => envValue);
 const mergeOptions = <A>(a: Option.Option<A>, b: Option.Option<A>, defaultValue: A) =>
   Option.getOrElse(a, () => Option.getOrElse(b, () => defaultValue));
+
+export const resolveMockUpdateServerPort = Effect.fn("resolveMockUpdateServerPort")(function* (
+  mockUpdateServerPort: string | undefined,
+) {
+  const port = mockUpdateServerPort?.trim();
+  if (!port) {
+    return undefined;
+  }
+
+  return yield* decodeMockUpdateServerPort(port);
+});
 
 export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
   input: BuildCliInput,
@@ -245,11 +265,17 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
   const verbose = resolveBooleanFlag(input.verbose, env.verbose);
 
   const mockUpdates = resolveBooleanFlag(input.mockUpdates, env.mockUpdates);
-  const mockUpdateServerPort = mergeOptions(
-    input.mockUpdateServerPort,
-    env.mockUpdateServerPort,
-    undefined,
-  );
+  const mockUpdateServerPort =
+    Option.getOrUndefined(input.mockUpdateServerPort) ??
+    (yield* resolveMockUpdateServerPort(Option.getOrUndefined(env.mockUpdateServerPort)).pipe(
+      Effect.mapError(
+        (cause) =>
+          new BuildScriptError({
+            message: "Invalid mock update server port.",
+            cause,
+          }),
+      ),
+    ));
 
   return {
     platform,
@@ -476,26 +502,8 @@ export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIcon
   };
 }
 
-export function resolveMockUpdateServerPort(mockUpdateServerPort: string | undefined): number {
-  const port = mockUpdateServerPort?.trim();
-  if (!port) {
-    return 3000;
-  }
-
-  if (!/^\d+$/.test(port)) {
-    throw new Error(`Invalid mock update server port '${mockUpdateServerPort}'.`);
-  }
-
-  const parsedPort = Number(port);
-  if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
-    throw new Error(`Invalid mock update server port '${mockUpdateServerPort}'.`);
-  }
-
-  return parsedPort;
-}
-
-export function resolveMockUpdateServerUrl(mockUpdateServerPort: string | undefined): string {
-  return `http://localhost:${resolveMockUpdateServerPort(mockUpdateServerPort)}`;
+export function resolveMockUpdateServerUrl(mockUpdateServerPort: number | undefined): string {
+  return `http://localhost:${mockUpdateServerPort ?? 3000}`;
 }
 
 const createBuildConfig = Effect.fn("createBuildConfig")(function* (
@@ -505,7 +513,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   version: string,
   signed: boolean,
   mockUpdates: boolean,
-  mockUpdateServerPort: string | undefined,
+  mockUpdateServerPort: number | undefined,
 ) {
   const buildConfig: Record<string, unknown> = {
     appId: "com.t3tools.t3code",
@@ -520,18 +528,10 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (publishConfig) {
     buildConfig.publish = [publishConfig];
   } else if (mockUpdates) {
-    const mockUpdateServerUrl = yield* Effect.try({
-      try: () => resolveMockUpdateServerUrl(mockUpdateServerPort),
-      catch: (cause) =>
-        new BuildScriptError({
-          message: "Invalid mock update server URL configuration.",
-          cause,
-        }),
-    });
     buildConfig.publish = [
       {
         provider: "generic",
-        url: mockUpdateServerUrl,
+        url: resolveMockUpdateServerUrl(mockUpdateServerPort),
       },
     ];
   }
@@ -883,7 +883,8 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.withDescription("Enable mock updates (env: T3CODE_DESKTOP_MOCK_UPDATES)."),
     Flag.optional,
   ),
-  mockUpdateServerPort: Flag.string("mock-update-server-port").pipe(
+  mockUpdateServerPort: Flag.integer("mock-update-server-port").pipe(
+    Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
     Flag.withDescription("Mock update server port (env: T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT)."),
     Flag.optional,
   ),
