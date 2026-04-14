@@ -95,7 +95,7 @@ try {
     },
   );
 
-  execFileSync("bun", ["install", "--lockfile-only", "--ignore-scripts"], {
+  execFileSync("bun", ["install", "--ignore-scripts"], {
     cwd: tempRoot,
     stdio: "inherit",
   });
