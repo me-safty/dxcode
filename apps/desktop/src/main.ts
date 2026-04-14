@@ -980,6 +980,18 @@ function resolveResourcePath(fileName: string): string | null {
 }
 
 function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
+  if (isDevelopment && process.platform === "darwin" && ext === "png") {
+    const developmentDockIconPath = Path.join(
+      ROOT_DIR,
+      "assets",
+      "dev",
+      "blueprint-macos-1024.png",
+    );
+    if (FS.existsSync(developmentDockIconPath)) {
+      return developmentDockIconPath;
+    }
+  }
+
   return resolveResourcePath(`icon.${ext}`);
 }
 
