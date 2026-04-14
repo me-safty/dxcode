@@ -14,9 +14,9 @@ export const ScrollFadeEffect = forwardRef<HTMLDivElement, ScrollFadeEffectProps
         ref={ref}
         data-orientation={orientation}
         className={cn(
-          "data-[orientation=horizontal]:overflow-x-auto data-[orientation=horizontal]:overflow-y-hidden",
-          "data-[orientation=vertical]:overflow-y-auto data-[orientation=vertical]:overflow-x-hidden",
-          "data-[orientation=horizontal]:scroll-fade-effect-x data-[orientation=vertical]:scroll-fade-effect-y",
+          orientation === "horizontal"
+            ? "scroll-fade-effect-x overflow-x-auto overflow-y-hidden"
+            : "scroll-fade-effect-y overflow-x-hidden overflow-y-auto",
           className,
         )}
         {...props}
