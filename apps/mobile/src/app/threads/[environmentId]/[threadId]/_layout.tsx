@@ -53,6 +53,17 @@ export default function ThreadLayout() {
           headerStyle: headerBg,
         }}
       />
+      <Stack.Screen
+        name="review-comment"
+        options={{
+          contentStyle: sheetStyle,
+          gestureEnabled: true,
+          headerShown: false,
+          presentation: "formSheet" as const,
+          sheetAllowedDetents: [0.72, 0.92],
+          sheetGrabberVisible: true,
+        }}
+      />
     </Stack>
   );
 }

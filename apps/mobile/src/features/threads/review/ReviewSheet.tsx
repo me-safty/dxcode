@@ -3,11 +3,13 @@ import {
   type GitReviewDiffSection,
   type OrchestrationCheckpointSummary,
 } from "@t3tools/contracts";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import Stack from "expo-router/stack";
 import { SymbolView } from "expo-symbols";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   Text as NativeText,
@@ -17,13 +19,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AppText as Text, AppTextInput as TextInput } from "../../../components/AppText";
-import { ControlPill } from "../../../components/ControlPill";
+import { AppText as Text } from "../../../components/AppText";
 import { cn } from "../../../lib/cn";
+import { useThemeColor } from "../../../lib/useThemeColor";
 import { getEnvironmentClient } from "../../../state/use-remote-environment-registry";
 import { useSelectedThreadDetail } from "../../../state/use-thread-detail";
 import { useThreadSelection } from "../../../state/use-thread-selection";
-import { appendReviewCommentToDraft } from "../use-thread-composer-state";
 import {
   buildReviewParsedDiff,
   getReadyReviewCheckpoints,
@@ -39,40 +40,37 @@ import {
   type ReviewHighlightedFile,
   type ReviewHighlightedToken,
 } from "./shikiReviewHighlighter";
+import {
+  buildReviewCommentTarget,
+  clearReviewCommentTarget,
+  formatReviewSelectedRangeLabel,
+  getReviewChangeMarker,
+  getReviewUnifiedLineNumber,
+  getSelectedReviewCommentLines,
+  setReviewCommentTarget,
+  type ReviewCommentTarget,
+  useReviewCommentTarget,
+} from "./reviewCommentSelection";
 
-interface ActiveCommentTarget {
+interface PendingCommentSelection {
   readonly sectionTitle: string;
   readonly filePath: string;
-  readonly line: ReviewRenderableLineRow;
+  readonly lines: ReadonlyArray<ReviewRenderableLineRow>;
+  readonly anchorIndex: number;
 }
 
-function formatCommentContext(target: ActiveCommentTarget, comment: string): string {
-  const lineLabel =
-    target.line.newLineNumber !== null
-      ? `new line ${target.line.newLineNumber}`
-      : target.line.oldLineNumber !== null
-        ? `old line ${target.line.oldLineNumber}`
-        : "file";
-
-  return [
-    "Review comment:",
-    `Source: ${target.sectionTitle}`,
-    `File: ${target.filePath}`,
-    `Line: ${lineLabel}`,
-    `Comment: ${comment.trim()}`,
-  ].join("\n");
-}
+const REVIEW_MONO_FONT_FAMILY = Platform.select({
+  ios: "ui-monospace",
+  android: "monospace",
+  default: "monospace",
+});
+const IOS_NAV_BAR_HEIGHT = 44;
+const REVIEW_HEADER_SPACING = 32;
 
 function changeTone(change: ReviewRenderableLineRow["change"]): string {
   if (change === "add") return "bg-emerald-500/12";
   if (change === "delete") return "bg-rose-500/12";
   return "bg-card";
-}
-
-function changeMarker(change: ReviewRenderableLineRow["change"]): string {
-  if (change === "add") return "+";
-  if (change === "delete") return "-";
-  return " ";
 }
 
 function changeTypeLabel(type: ReviewRenderableFile["changeType"]): string {
@@ -90,20 +88,61 @@ function changeTypeLabel(type: ReviewRenderableFile["changeType"]): string {
   }
 }
 
+function formatHeaderDiffSummary(parsedDiff: ReturnType<typeof buildReviewParsedDiff>): {
+  readonly additions: string | null;
+  readonly deletions: string | null;
+} {
+  if (parsedDiff.kind !== "files") {
+    return { additions: null, deletions: null };
+  }
+
+  return {
+    additions: `+${parsedDiff.additions}`,
+    deletions: `-${parsedDiff.deletions}`,
+  };
+}
+
+function shouldAutoExpandFile(file: ReviewRenderableFile): boolean {
+  return file.additions + file.deletions <= 20 && file.rows.length <= 40;
+}
+
+function getDefaultExpandedFileIds(
+  files: ReadonlyArray<ReviewRenderableFile>,
+): ReadonlyArray<string> {
+  const autoExpanded = files.filter(shouldAutoExpandFile).map((file) => file.id);
+  if (autoExpanded.length > 0) {
+    return autoExpanded;
+  }
+  return files.length === 1 ? [files[0]!.id] : [];
+}
+
+function renderVisibleWhitespace(value: string): string {
+  const expandedTabs = value.replace(/\t/g, "    ");
+  return expandedTabs.replace(/^( +)/, (leading) => leading.replaceAll(" ", "\u00A0"));
+}
+
 function DiffTokenText(props: {
   readonly tokens: ReadonlyArray<ReviewHighlightedToken> | null;
   readonly fallback: string;
 }) {
   if (!props.tokens || props.tokens.length === 0) {
     return (
-      <Text className="font-mono text-[12px] leading-[19px] text-foreground">
-        {props.fallback || " "}
-      </Text>
+      <NativeText
+        selectable
+        className="text-[12px] leading-[19px] text-foreground"
+        style={{ fontFamily: REVIEW_MONO_FONT_FAMILY }}
+      >
+        {renderVisibleWhitespace(props.fallback || " ")}
+      </NativeText>
     );
   }
 
   return (
-    <Text className="font-mono text-[12px] leading-[19px] text-foreground">
+    <NativeText
+      selectable
+      className="text-[12px] leading-[19px] text-foreground"
+      style={{ fontFamily: REVIEW_MONO_FONT_FAMILY }}
+    >
       {(() => {
         let offset = 0;
 
@@ -126,16 +165,17 @@ function DiffTokenText(props: {
               selectable
               style={{
                 color: token.color ?? undefined,
+                fontFamily: REVIEW_MONO_FONT_FAMILY,
                 fontWeight,
                 fontStyle,
               }}
             >
-              {token.content.length > 0 ? token.content : " "}
+              {token.content.length > 0 ? renderVisibleWhitespace(token.content) : " "}
             </NativeText>
           );
         });
       })()}
-    </Text>
+    </NativeText>
   );
 }
 
@@ -143,128 +183,238 @@ function ReviewLineRow(props: {
   readonly line: ReviewRenderableLineRow;
   readonly tokens: ReadonlyArray<ReviewHighlightedToken> | null;
   readonly viewportWidth: number;
+  readonly selectionState: "anchor" | "selected" | null;
   readonly onComment: () => void;
+  readonly onStartRangeSelection: () => void;
 }) {
+  const lineNumber = getReviewUnifiedLineNumber(props.line);
+
   return (
-    <View
+    <Pressable
       className={cn(
         "flex-row items-start border-b border-border/60",
         changeTone(props.line.change),
+        props.selectionState === "anchor" && "bg-sky-500/16",
+        props.selectionState === "selected" && "bg-amber-300/28",
       )}
+      accessibilityRole="button"
+      accessibilityLabel={
+        lineNumber !== null
+          ? props.selectionState === "anchor"
+            ? `Range starts on line ${lineNumber}`
+            : `Add comment on line ${lineNumber}`
+          : "Add comment on line"
+      }
+      delayLongPress={220}
+      onLongPress={props.onStartRangeSelection}
+      onPress={props.onComment}
       style={{ minWidth: props.viewportWidth }}
     >
-      <Text className="w-11 px-2 py-2 text-right text-[11px] font-t3-medium text-foreground-muted">
-        {props.line.oldLineNumber ?? ""}
+      <Text className="w-9 px-1 py-2 text-right text-[11px] font-t3-medium text-foreground-muted">
+        {lineNumber ?? ""}
       </Text>
-      <Text className="w-11 px-2 py-2 text-right text-[11px] font-t3-medium text-foreground-muted">
-        {props.line.newLineNumber ?? ""}
+      <Text
+        className="px-0.5 py-2 text-center font-mono text-[12px] text-foreground-muted"
+        style={{ width: 18 }}
+      >
+        {getReviewChangeMarker(props.line.change)}
       </Text>
-      <Text className="w-5 px-1 py-2 text-center font-mono text-[12px] text-foreground-muted">
-        {changeMarker(props.line.change)}
-      </Text>
-      <View className="min-w-0 flex-1 flex-shrink-0 px-2 py-2">
+      <View className="min-w-0 flex-1 flex-shrink-0 px-1 py-2">
         <DiffTokenText tokens={props.tokens} fallback={props.line.content} />
       </View>
-      <Pressable
-        className="px-2 py-2"
-        accessibilityRole="button"
-        accessibilityLabel="Comment on line"
-        onPress={props.onComment}
-      >
-        <SymbolView name="text.bubble" size={15} tintColor="#8a8a8a" type="monochrome" />
-      </Pressable>
-    </View>
+    </Pressable>
   );
 }
 
 function ReviewFileCard(props: {
   readonly file: ReviewRenderableFile;
   readonly expanded: boolean;
-  readonly highlightedFile: ReviewHighlightedFile | null;
-  readonly viewportWidth: number;
   readonly onToggle: () => void;
-  readonly onSelectLine: (line: ReviewRenderableLineRow) => void;
 }) {
   return (
-    <View className="overflow-hidden rounded-[18px] border border-border bg-card">
-      <Pressable className="gap-3 px-4 py-3" onPress={props.onToggle}>
-        <View className="flex-row items-start gap-3">
+    <View className="border-b border-border bg-card" style={{ zIndex: 1 }}>
+      <Pressable className="flex-row items-start gap-2 px-3 py-3" onPress={props.onToggle}>
+        <View className="pt-0.5">
           <SymbolView
             name={props.expanded ? "chevron.down" : "chevron.right"}
             size={14}
             tintColor="#8a8a8a"
             type="monochrome"
           />
-          <View className="min-w-0 flex-1 gap-1">
-            <Text className="font-mono text-[13px] leading-[18px] text-foreground">
-              {props.file.path}
-            </Text>
-            {props.file.previousPath && props.file.previousPath !== props.file.path ? (
-              <Text className="font-mono text-[11px] leading-[16px] text-foreground-muted">
-                {props.file.previousPath}
-              </Text>
-            ) : null}
-          </View>
         </View>
-        <View className="ml-5 flex-row items-center gap-3">
+        <View className="min-w-0 flex-1 gap-1">
+          <Text className="font-mono text-[13px] leading-[18px] text-foreground">
+            {props.file.path}
+          </Text>
+          {props.file.previousPath && props.file.previousPath !== props.file.path ? (
+            <Text className="font-mono text-[11px] leading-[16px] text-foreground-muted">
+              {props.file.previousPath}
+            </Text>
+          ) : null}
+        </View>
+        <View className="items-end gap-1 pl-2">
           <Text className="text-[11px] font-t3-bold uppercase text-foreground-muted">
             {changeTypeLabel(props.file.changeType)}
           </Text>
-          <Text className="text-[12px] font-t3-bold text-emerald-600">+{props.file.additions}</Text>
-          <Text className="text-[12px] font-t3-bold text-rose-600">-{props.file.deletions}</Text>
+          <View className="flex-row items-center gap-2">
+            <Text className="text-[12px] font-t3-bold text-emerald-600">
+              +{props.file.additions}
+            </Text>
+            <Text className="text-[12px] font-t3-bold text-rose-600">-{props.file.deletions}</Text>
+          </View>
         </View>
       </Pressable>
+    </View>
+  );
+}
 
-      {props.expanded ? (
-        <ScrollView
-          horizontal
-          bounces={false}
-          showsHorizontalScrollIndicator={false}
-          className="border-t border-border"
-        >
-          <View style={{ minWidth: props.viewportWidth }}>
-            {props.file.rows.map((row) => {
-              if (row.kind === "hunk") {
-                return (
-                  <View
-                    key={row.id}
-                    className="border-b border-border/60 bg-sky-500/10 px-4 py-2"
-                    style={{ minWidth: props.viewportWidth }}
-                  >
-                    <Text className="font-mono text-[12px] leading-[18px] text-sky-700 dark:text-sky-300">
-                      {row.header}
-                      {row.context ? ` ${row.context}` : ""}
-                    </Text>
-                  </View>
-                );
+function ReviewFileBody(props: {
+  readonly file: ReviewRenderableFile;
+  readonly sectionTitle: string;
+  readonly highlightedFile: ReviewHighlightedFile | null;
+  readonly viewportWidth: number;
+  readonly pendingSelection: PendingCommentSelection | null;
+  readonly selectedTarget: ReviewCommentTarget | null;
+  readonly onPressLine: (
+    line: ReviewRenderableLineRow,
+    availableLines: ReadonlyArray<ReviewRenderableLineRow>,
+    lineIndex: number,
+  ) => void;
+  readonly onStartRangeSelection: (
+    line: ReviewRenderableLineRow,
+    availableLines: ReadonlyArray<ReviewRenderableLineRow>,
+    lineIndex: number,
+  ) => void;
+}) {
+  const commentableLines = props.file.rows.filter(
+    (row): row is ReviewRenderableLineRow => row.kind === "line",
+  );
+  const anchorLineId =
+    props.pendingSelection &&
+    props.pendingSelection.sectionTitle === props.sectionTitle &&
+    props.pendingSelection.filePath === props.file.path
+      ? (props.pendingSelection.lines[props.pendingSelection.anchorIndex]?.id ?? null)
+      : null;
+  const selectedLineIds =
+    props.selectedTarget &&
+    props.selectedTarget.sectionTitle === props.sectionTitle &&
+    props.selectedTarget.filePath === props.file.path
+      ? new Set(getSelectedReviewCommentLines(props.selectedTarget).map((line) => line.id))
+      : null;
+
+  return (
+    <ScrollView
+      horizontal
+      bounces={false}
+      showsHorizontalScrollIndicator={false}
+      className="border-b border-border bg-card"
+    >
+      <View style={{ minWidth: props.viewportWidth }}>
+        {props.file.rows.map((row) => {
+          if (row.kind === "hunk") {
+            return (
+              <View
+                key={row.id}
+                className="border-b border-border/60 bg-sky-500/10 px-2 py-2"
+                style={{ minWidth: props.viewportWidth }}
+              >
+                <Text className="font-mono text-[12px] leading-[18px] text-sky-700 dark:text-sky-300">
+                  {row.header}
+                  {row.context ? ` ${row.context}` : ""}
+                </Text>
+              </View>
+            );
+          }
+
+          const tokens =
+            row.change === "delete"
+              ? (props.highlightedFile?.deletionLines[row.deletionTokenIndex ?? -1] ?? null)
+              : (props.highlightedFile?.additionLines[row.additionTokenIndex ?? -1] ?? null);
+
+          return (
+            <ReviewLineRow
+              key={row.id}
+              line={row}
+              tokens={tokens}
+              viewportWidth={props.viewportWidth}
+              selectionState={
+                anchorLineId === row.id
+                  ? "anchor"
+                  : selectedLineIds?.has(row.id)
+                    ? "selected"
+                    : null
               }
+              onComment={() => {
+                const lineIndex = commentableLines.findIndex(
+                  (candidate) => candidate.id === row.id,
+                );
+                props.onPressLine(row, commentableLines, lineIndex >= 0 ? lineIndex : 0);
+              }}
+              onStartRangeSelection={() => {
+                const lineIndex = commentableLines.findIndex(
+                  (candidate) => candidate.id === row.id,
+                );
+                props.onStartRangeSelection(row, commentableLines, lineIndex >= 0 ? lineIndex : 0);
+              }}
+            />
+          );
+        })}
+      </View>
+    </ScrollView>
+  );
+}
 
-              const tokens =
-                row.change === "delete"
-                  ? (props.highlightedFile?.deletionLines[row.deletionTokenIndex ?? -1] ?? null)
-                  : (props.highlightedFile?.additionLines[row.additionTokenIndex ?? -1] ?? null);
+function ReviewSelectionActionBar(props: {
+  readonly target: ReviewCommentTarget | null;
+  readonly bottomInset: number;
+  readonly onOpenComment: () => void;
+  readonly onClear: () => void;
+}) {
+  if (!props.target || props.target.startIndex === props.target.endIndex) {
+    return null;
+  }
 
-              return (
-                <ReviewLineRow
-                  key={row.id}
-                  line={row}
-                  tokens={tokens}
-                  viewportWidth={props.viewportWidth}
-                  onComment={() => props.onSelectLine(row)}
-                />
-              );
-            })}
-          </View>
-        </ScrollView>
-      ) : null}
+  return (
+    <View
+      pointerEvents="box-none"
+      style={{
+        position: "absolute",
+        left: 18,
+        right: 18,
+        bottom: Math.max(props.bottomInset, 10) + 18,
+        flexDirection: "row",
+        justifyContent: "center",
+        gap: 10,
+      }}
+    >
+      <Pressable
+        className="min-h-[48px] flex-1 flex-row items-center justify-center gap-2 rounded-full bg-blue-600 px-5"
+        onPress={props.onOpenComment}
+      >
+        <SymbolView name="text.bubble" size={16} tintColor="#ffffff" type="monochrome" />
+        <Text className="text-[15px] font-t3-bold text-white">
+          Comment on {formatReviewSelectedRangeLabel(props.target)}
+        </Text>
+      </Pressable>
+
+      <Pressable
+        className="h-12 w-12 items-center justify-center rounded-full bg-blue-600"
+        onPress={props.onClear}
+      >
+        <SymbolView name="xmark" size={16} tintColor="#ffffff" type="monochrome" />
+      </Pressable>
     </View>
   );
 }
 
 export function ReviewSheet() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const colorScheme = useColorScheme();
+  const headerForeground = String(useThemeColor("--color-foreground"));
+  const headerMuted = String(useThemeColor("--color-foreground-muted"));
+  const headerIcon = String(useThemeColor("--color-icon"));
   const { environmentId, threadId } = useLocalSearchParams<{
     environmentId: string;
     threadId: string;
@@ -277,14 +427,15 @@ export function ReviewSheet() {
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [loadingGitDiffs, setLoadingGitDiffs] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expandedFileIdBySection, setExpandedFileIdBySection] = useState<
-    Record<string, string | null>
+  const [expandedFileIdsBySection, setExpandedFileIdsBySection] = useState<
+    Record<string, ReadonlyArray<string> | undefined>
   >({});
   const [highlightedFileByKey, setHighlightedFileByKey] = useState<
     Record<string, ReviewHighlightedFile>
   >({});
-  const [activeCommentTarget, setActiveCommentTarget] = useState<ActiveCommentTarget | null>(null);
-  const [commentText, setCommentText] = useState("");
+  const [pendingCommentSelection, setPendingCommentSelection] =
+    useState<PendingCommentSelection | null>(null);
+  const activeCommentTarget = useReviewCommentTarget();
 
   const cwd = selectedThread?.worktreePath ?? selectedThreadProject?.workspaceRoot ?? null;
   const readyCheckpoints = useMemo(
@@ -314,24 +465,29 @@ export function ReviewSheet() {
 
   const selectedSection =
     reviewSections.find((section) => section.id === selectedSectionId) ?? reviewSections[0] ?? null;
+  const topContentInset = insets.top + IOS_NAV_BAR_HEIGHT;
   const parsedDiff = useMemo(
     () => buildReviewParsedDiff(selectedSection?.diff, selectedSection?.id ?? "mobile-review"),
     [selectedSection?.diff, selectedSection?.id],
   );
+  const headerDiffSummary = useMemo(() => formatHeaderDiffSummary(parsedDiff), [parsedDiff]);
 
   const selectedTheme = (colorScheme === "dark" ? "dark" : "light") satisfies ReviewDiffTheme;
-  const expandedFileId =
-    selectedSectionId && parsedDiff.kind === "files"
-      ? (expandedFileIdBySection[selectedSectionId] ?? parsedDiff.files[0]?.id ?? null)
-      : null;
-  const expandedFile =
-    parsedDiff.kind === "files"
-      ? (parsedDiff.files.find((file) => file.id === expandedFileId) ?? parsedDiff.files[0] ?? null)
-      : null;
-  const highlightedFileKey =
-    selectedSection && expandedFile
-      ? `${selectedSection.id}:${selectedTheme}:${expandedFile.cacheKey}`
-      : null;
+  const expandedFileIds = useMemo(
+    () =>
+      selectedSection?.id && parsedDiff.kind === "files"
+        ? (expandedFileIdsBySection[selectedSection.id] ??
+          getDefaultExpandedFileIds(parsedDiff.files))
+        : [],
+    [expandedFileIdsBySection, parsedDiff, selectedSection?.id],
+  );
+  const expandedFiles = useMemo(
+    () =>
+      parsedDiff.kind === "files"
+        ? parsedDiff.files.filter((file) => expandedFileIds.includes(file.id))
+        : [],
+    [expandedFileIds, parsedDiff],
+  );
 
   const loadGitDiffs = useCallback(async () => {
     if (!environmentId || !cwd) {
@@ -442,32 +598,56 @@ export function ReviewSheet() {
       return;
     }
 
-    setExpandedFileIdBySection((current) => {
-      const currentFileId = current[selectedSectionId];
-      if (currentFileId && parsedDiff.files.some((file) => file.id === currentFileId)) {
-        return current;
+    setExpandedFileIdsBySection((current) => {
+      const existing = current[selectedSectionId];
+      if (existing !== undefined) {
+        const validIds = existing.filter((id) => parsedDiff.files.some((file) => file.id === id));
+        if (validIds.length === existing.length) {
+          return current;
+        }
+        return { ...current, [selectedSectionId]: validIds };
       }
-      return { ...current, [selectedSectionId]: parsedDiff.files[0]?.id ?? null };
+
+      return {
+        ...current,
+        [selectedSectionId]: getDefaultExpandedFileIds(parsedDiff.files),
+      };
     });
   }, [parsedDiff, selectedSectionId]);
 
   useEffect(() => {
-    if (!highlightedFileKey || !expandedFile || highlightedFileByKey[highlightedFileKey]) {
+    if (!selectedSection || expandedFiles.length === 0) {
+      return;
+    }
+
+    const filesToHighlight = expandedFiles.filter((file) => {
+      const key = `${selectedSection.id}:${selectedTheme}:${file.cacheKey}`;
+      return highlightedFileByKey[key] === undefined;
+    });
+    if (filesToHighlight.length === 0) {
       return;
     }
 
     let cancelled = false;
-    void highlightReviewFile(expandedFile, selectedTheme)
-      .then((result) => {
+    void Promise.all(
+      filesToHighlight.map(
+        async (file) =>
+          [
+            `${selectedSection.id}:${selectedTheme}:${file.cacheKey}`,
+            await highlightReviewFile(file, selectedTheme),
+          ] as const,
+      ),
+    )
+      .then((entries) => {
         if (!cancelled) {
           setHighlightedFileByKey((current) => ({
             ...current,
-            [highlightedFileKey]: result,
+            ...Object.fromEntries(entries),
           }));
         }
       })
       .catch(() => {
-        if (!cancelled) {
+        if (cancelled) {
           return;
         }
       });
@@ -475,7 +655,7 @@ export function ReviewSheet() {
     return () => {
       cancelled = true;
     };
-  }, [expandedFile, highlightedFileByKey, highlightedFileKey, selectedTheme]);
+  }, [expandedFiles, highlightedFileByKey, selectedSection, selectedTheme]);
 
   const refreshSelectedSection = useCallback(async () => {
     if (!selectedSection) {
@@ -493,231 +673,328 @@ export function ReviewSheet() {
     await loadGitDiffs();
   }, [checkpointBySectionId, loadGitDiffs, loadTurnDiff, selectedSection]);
 
-  const submitComment = useCallback(() => {
-    if (!activeCommentTarget || commentText.trim().length === 0 || !environmentId || !threadId) {
-      return;
-    }
+  const reviewContent = useMemo(() => {
+    const children: ReactElement[] = [];
+    const stickyHeaderIndices: number[] = [];
 
-    appendReviewCommentToDraft({
-      environmentId,
-      threadId,
-      text: formatCommentContext(activeCommentTarget, commentText),
-    });
-    setActiveCommentTarget(null);
-    setCommentText("");
-  }, [activeCommentTarget, commentText, environmentId, threadId]);
-
-  return (
-    <View className="flex-1 bg-sheet">
-      <View className="gap-4 px-5 pb-4 pt-4">
-        <View className="flex-row items-start gap-3">
-          <View className="min-w-0 flex-1 gap-1">
-            <Text className="text-[18px] font-t3-bold text-foreground">
-              {selectedSection?.title ?? "Files changed"}
-            </Text>
-            <Text className="text-[12px] leading-[18px] text-foreground-muted">
-              {selectedSection?.subtitle ??
-                "Inspect turn diffs, worktree changes, and branch drift."}
-            </Text>
-          </View>
-          <ControlPill
-            icon="arrow.clockwise"
-            disabled={
-              loadingGitDiffs ||
-              (selectedSection?.kind === "turn" && loadingTurnIds[selectedSection.id] === true)
-            }
-            onPress={() => void refreshSelectedSection()}
-          />
-        </View>
-
-        <ScrollView
-          horizontal
-          bounces={false}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ gap: 8, paddingRight: 20 }}
-        >
-          {reviewSections.map((section) => {
-            const selected = section.id === selectedSection?.id;
-            return (
-              <Pressable
-                key={section.id}
-                className={cn(
-                  "min-h-[40px] rounded-full border px-4 py-2",
-                  selected ? "border-foreground bg-foreground" : "border-border bg-card",
-                )}
-                onPress={() => setSelectedSectionId(section.id)}
-              >
-                <View className="flex-row items-center gap-2">
-                  <Text
-                    className={cn(
-                      "text-[12px] font-t3-bold",
-                      selected ? "text-background" : "text-foreground",
-                    )}
-                  >
-                    {section.title}
-                  </Text>
-                  {section.isLoading ? (
-                    <ActivityIndicator size="small" color={selected ? "#ffffff" : "#8a8a8a"} />
-                  ) : null}
-                </View>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-
-        {parsedDiff.kind === "files" ? (
-          <View className="rounded-[18px] border border-border bg-card px-4 py-3">
-            <View className="flex-row items-end justify-between gap-3">
-              <View className="gap-1">
-                <Text className="text-[12px] font-t3-bold uppercase text-foreground-muted">
-                  Files changed
-                </Text>
-                <Text className="text-[15px] font-t3-bold text-foreground">
-                  {parsedDiff.fileCount} file{parsedDiff.fileCount === 1 ? "" : "s"}
-                </Text>
-              </View>
-              <View className="flex-row items-center gap-3">
-                <Text className="text-[18px] font-t3-bold text-emerald-600">
-                  +{parsedDiff.additions}
-                </Text>
-                <Text className="text-[18px] font-t3-bold text-rose-600">
-                  -{parsedDiff.deletions}
-                </Text>
-              </View>
-            </View>
-          </View>
-        ) : null}
-      </View>
-
-      {error ? (
-        <View className="mx-5 mb-4 rounded-[18px] border border-border bg-card px-4 py-3">
+    if (error) {
+      children.push(
+        <View key="review-error" className="border-b border-border bg-card px-4 py-3">
           <Text className="text-[13px] font-t3-bold text-foreground">Review unavailable</Text>
           <Text className="text-[12px] leading-[18px] text-foreground-muted">{error}</Text>
-        </View>
-      ) : null}
+        </View>,
+      );
+    }
 
-      {parsedDiff.kind !== "empty" && parsedDiff.notice ? (
-        <View className="mx-5 mb-4 rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/40">
+    if (parsedDiff.kind !== "empty" && parsedDiff.notice) {
+      children.push(
+        <View
+          key="review-notice"
+          className="border-b border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/40"
+        >
           <Text className="text-[12px] font-t3-bold uppercase text-amber-700 dark:text-amber-300">
             Partial diff
           </Text>
           <Text className="text-[12px] leading-[18px] text-amber-800 dark:text-amber-200">
             {parsedDiff.notice}
           </Text>
-        </View>
-      ) : null}
+        </View>,
+      );
+    }
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        style={{ flex: 1 }}
-        contentContainerStyle={{
-          paddingHorizontal: 20,
-          paddingBottom: Math.max(insets.bottom, 18) + (activeCommentTarget ? 168 : 18),
-          gap: 12,
-        }}
-      >
-        {!selectedSection ? (
-          <View className="rounded-[18px] border border-border bg-card px-4 py-5">
-            <Text className="text-[14px] font-t3-bold text-foreground">No review diffs</Text>
-            <Text className="text-[12px] leading-[18px] text-foreground-muted">
-              This thread has no ready turn diffs and the worktree diff is empty.
-            </Text>
-          </View>
-        ) : selectedSection.isLoading && selectedSection.diff === null ? (
-          <View className="items-center gap-3 rounded-[18px] border border-border bg-card px-4 py-6">
-            <ActivityIndicator size="small" />
-            <Text className="text-[12px] text-foreground-muted">Loading diff…</Text>
-          </View>
-        ) : parsedDiff.kind === "empty" ? (
-          <View className="rounded-[18px] border border-border bg-card px-4 py-5">
-            <Text className="text-[14px] font-t3-bold text-foreground">No changes</Text>
-            <Text className="text-[12px] leading-[18px] text-foreground-muted">
-              {selectedSection.subtitle ?? "This diff is empty."}
-            </Text>
-          </View>
-        ) : parsedDiff.kind === "raw" ? (
-          <View className="gap-3 rounded-[18px] border border-border bg-card px-4 py-4">
-            <Text className="text-[12px] leading-[18px] text-foreground-muted">
-              {parsedDiff.reason}
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}>
-              <Text selectable className="font-mono text-[12px] leading-[19px] text-foreground">
-                {parsedDiff.text}
-              </Text>
-            </ScrollView>
-          </View>
-        ) : (
-          parsedDiff.files.map((file) => {
-            const isExpanded = file.id === expandedFileId;
-            const fileHighlightKey =
-              selectedSection !== null
-                ? `${selectedSection.id}:${selectedTheme}:${file.cacheKey}`
-                : null;
-            const fileHighlights =
-              fileHighlightKey !== null ? (highlightedFileByKey[fileHighlightKey] ?? null) : null;
-
-            return (
-              <ReviewFileCard
-                key={file.id}
-                file={file}
-                expanded={isExpanded}
-                highlightedFile={isExpanded ? fileHighlights : null}
-                viewportWidth={Math.max(width - 40, 280)}
-                onToggle={() =>
-                  setExpandedFileIdBySection((current) => ({
-                    ...current,
-                    [selectedSection.id]: current[selectedSection.id] === file.id ? null : file.id,
-                  }))
-                }
-                onSelectLine={(line) =>
-                  setActiveCommentTarget({
-                    sectionTitle: selectedSection.title,
-                    filePath: file.path,
-                    line,
-                  })
-                }
-              />
-            );
-          })
-        )}
-      </ScrollView>
-
-      {activeCommentTarget ? (
-        <View
-          className="border-t border-border bg-sheet px-5 py-4"
-          style={{ paddingBottom: Math.max(insets.bottom, 14) }}
-        >
-          <Text className="text-[13px] font-t3-bold text-foreground">
-            Comment on {activeCommentTarget.filePath}
+    if (!selectedSection) {
+      children.push(
+        <View key="review-empty-state" className="border-b border-border bg-card px-4 py-5">
+          <Text className="text-[14px] font-t3-bold text-foreground">No review diffs</Text>
+          <Text className="text-[12px] leading-[18px] text-foreground-muted">
+            This thread has no ready turn diffs and the worktree diff is empty.
           </Text>
-          <TextInput
-            multiline
-            className="mt-2 min-h-[72px] rounded-[18px] border border-border bg-card px-3 py-3 text-[14px] text-foreground"
-            placeholder="What should the agent know?"
-            value={commentText}
-            onChangeText={setCommentText}
-          />
-          <View className="mt-3 flex-row gap-3">
-            <Pressable
-              className="min-h-[44px] flex-1 items-center justify-center rounded-[18px] border border-border bg-card"
-              onPress={() => {
-                setActiveCommentTarget(null);
-                setCommentText("");
-              }}
+        </View>,
+      );
+      return { children, stickyHeaderIndices };
+    }
+
+    if (selectedSection.isLoading && selectedSection.diff === null) {
+      children.push(
+        <View
+          key="review-loading"
+          className="items-center gap-3 border-b border-border bg-card px-4 py-6"
+        >
+          <ActivityIndicator size="small" />
+          <Text className="text-[12px] text-foreground-muted">Loading diff…</Text>
+        </View>,
+      );
+      return { children, stickyHeaderIndices };
+    }
+
+    if (parsedDiff.kind === "empty") {
+      children.push(
+        <View key="review-no-changes" className="border-b border-border bg-card px-4 py-5">
+          <Text className="text-[14px] font-t3-bold text-foreground">No changes</Text>
+          <Text className="text-[12px] leading-[18px] text-foreground-muted">
+            {selectedSection.subtitle ?? "This diff is empty."}
+          </Text>
+        </View>,
+      );
+      return { children, stickyHeaderIndices };
+    }
+
+    if (parsedDiff.kind === "raw") {
+      children.push(
+        <View key="review-raw" className="gap-3 border-b border-border bg-card px-4 py-4">
+          <Text className="text-[12px] leading-[18px] text-foreground-muted">
+            {parsedDiff.reason}
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}>
+            <Text selectable className="font-mono text-[12px] leading-[19px] text-foreground">
+              {parsedDiff.text}
+            </Text>
+          </ScrollView>
+        </View>,
+      );
+      return { children, stickyHeaderIndices };
+    }
+
+    parsedDiff.files.forEach((file) => {
+      const isExpanded = expandedFileIds.includes(file.id);
+      const fileHighlightKey = `${selectedSection.id}:${selectedTheme}:${file.cacheKey}`;
+      const fileHighlights = highlightedFileByKey[fileHighlightKey] ?? null;
+
+      stickyHeaderIndices.push(children.length);
+      children.push(
+        <ReviewFileCard
+          key={`review-file-header:${file.id}`}
+          file={file}
+          expanded={isExpanded}
+          onToggle={() =>
+            setExpandedFileIdsBySection((current) => {
+              const existing =
+                current[selectedSection.id] ?? getDefaultExpandedFileIds(parsedDiff.files);
+              const next = existing.includes(file.id)
+                ? existing.filter((id) => id !== file.id)
+                : [...existing, file.id];
+              return {
+                ...current,
+                [selectedSection.id]: next,
+              };
+            })
+          }
+        />,
+      );
+
+      if (isExpanded) {
+        children.push(
+          <ReviewFileBody
+            key={`review-file-body:${file.id}`}
+            file={file}
+            sectionTitle={selectedSection.title}
+            highlightedFile={fileHighlights}
+            pendingSelection={pendingCommentSelection}
+            selectedTarget={activeCommentTarget}
+            viewportWidth={Math.max(width, 280)}
+            onPressLine={(_line, availableLines, lineIndex) => {
+              if (pendingCommentSelection) {
+                if (
+                  pendingCommentSelection.sectionTitle === selectedSection.title &&
+                  pendingCommentSelection.filePath === file.path
+                ) {
+                  setReviewCommentTarget(
+                    buildReviewCommentTarget(
+                      {
+                        sectionTitle: pendingCommentSelection.sectionTitle,
+                        filePath: pendingCommentSelection.filePath,
+                        lines: pendingCommentSelection.lines,
+                      },
+                      pendingCommentSelection.anchorIndex,
+                      lineIndex,
+                    ),
+                  );
+                  setPendingCommentSelection(null);
+                  return;
+                }
+
+                clearReviewCommentTarget();
+                setPendingCommentSelection({
+                  sectionTitle: selectedSection.title,
+                  filePath: file.path,
+                  lines: availableLines,
+                  anchorIndex: lineIndex,
+                });
+                return;
+              }
+
+              setReviewCommentTarget({
+                sectionTitle: selectedSection.title,
+                filePath: file.path,
+                lines: availableLines,
+                startIndex: lineIndex,
+                endIndex: lineIndex,
+              });
+              if (environmentId && threadId) {
+                router.push({
+                  pathname: "/threads/[environmentId]/[threadId]/review-comment",
+                  params: { environmentId, threadId },
+                });
+              }
+            }}
+            onStartRangeSelection={(_line, availableLines, lineIndex) => {
+              clearReviewCommentTarget();
+              setPendingCommentSelection({
+                sectionTitle: selectedSection.title,
+                filePath: file.path,
+                lines: availableLines,
+                anchorIndex: lineIndex,
+              });
+            }}
+          />,
+        );
+      }
+    });
+
+    return { children, stickyHeaderIndices };
+  }, [
+    activeCommentTarget,
+    error,
+    expandedFileIds,
+    highlightedFileByKey,
+    pendingCommentSelection,
+    parsedDiff,
+    router,
+    selectedSection,
+    selectedTheme,
+    threadId,
+    width,
+    environmentId,
+  ]);
+
+  return (
+    <>
+      <Stack.Screen
+        options={{
+          headerTransparent: true,
+          headerShadowVisible: false,
+          headerTintColor: headerIcon,
+          headerStyle: {
+            backgroundColor: "transparent",
+          },
+          headerTitle: () => (
+            <View style={{ alignItems: "center" }}>
+              <NativeText
+                numberOfLines={1}
+                style={{
+                  fontFamily: "DMSans_700Bold",
+                  fontSize: 18,
+                  fontWeight: "900",
+                  color: headerForeground,
+                  letterSpacing: -0.4,
+                }}
+              >
+                Files Changed
+              </NativeText>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                {headerDiffSummary.additions && headerDiffSummary.deletions ? (
+                  <>
+                    <NativeText
+                      style={{
+                        fontFamily: "DMSans_700Bold",
+                        fontSize: 12,
+                        fontWeight: "700",
+                        color: "#16a34a",
+                      }}
+                    >
+                      {headerDiffSummary.additions}
+                    </NativeText>
+                    <NativeText
+                      style={{
+                        fontFamily: "DMSans_700Bold",
+                        fontSize: 12,
+                        fontWeight: "700",
+                        color: "#e11d48",
+                      }}
+                    >
+                      {headerDiffSummary.deletions}
+                    </NativeText>
+                  </>
+                ) : (
+                  <NativeText
+                    numberOfLines={1}
+                    style={{
+                      fontFamily: "DMSans_700Bold",
+                      fontSize: 12,
+                      fontWeight: "700",
+                      color: headerMuted,
+                    }}
+                  >
+                    {selectedSection?.title ?? "Review changes"}
+                  </NativeText>
+                )}
+              </View>
+            </View>
+          ),
+        }}
+      />
+
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Menu icon="ellipsis.circle" title="Select diff" separateBackground>
+          {reviewSections.map((section) => (
+            <Stack.Toolbar.MenuAction
+              key={section.id}
+              icon={section.id === selectedSection?.id ? "checkmark" : "circle"}
+              onPress={() => setSelectedSectionId(section.id)}
+              subtitle={section.subtitle ?? undefined}
             >
-              <Text className="text-[12px] font-t3-bold uppercase text-foreground">Cancel</Text>
-            </Pressable>
-            <Pressable
-              className="min-h-[44px] flex-1 items-center justify-center rounded-[18px] bg-foreground"
-              onPress={submitComment}
-            >
-              <Text className="text-[12px] font-t3-bold uppercase text-background">
-                Add to next turn
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
-    </View>
+              <Stack.Toolbar.Label>{section.title}</Stack.Toolbar.Label>
+            </Stack.Toolbar.MenuAction>
+          ))}
+          <Stack.Toolbar.MenuAction
+            icon="arrow.clockwise"
+            disabled={
+              loadingGitDiffs ||
+              (selectedSection?.kind === "turn" && loadingTurnIds[selectedSection.id] === true)
+            }
+            onPress={() => void refreshSelectedSection()}
+            subtitle="Reload current diff"
+          >
+            <Stack.Toolbar.Label>Refresh</Stack.Toolbar.Label>
+          </Stack.Toolbar.MenuAction>
+        </Stack.Toolbar.Menu>
+      </Stack.Toolbar>
+
+      <View className="flex-1 bg-sheet">
+        <ScrollView
+          contentInsetAdjustmentBehavior="never"
+          contentInset={{ top: topContentInset }}
+          contentOffset={{ x: 0, y: -topContentInset }}
+          scrollIndicatorInsets={{ top: topContentInset }}
+          showsVerticalScrollIndicator={false}
+          style={{ flex: 1 }}
+          stickyHeaderIndices={reviewContent.stickyHeaderIndices}
+          stickyHeaderHiddenOnScroll={false}
+          contentContainerStyle={{
+            paddingTop: REVIEW_HEADER_SPACING,
+            paddingBottom: Math.max(insets.bottom, 18) + 18,
+          }}
+        >
+          {reviewContent.children}
+        </ScrollView>
+
+        <ReviewSelectionActionBar
+          target={activeCommentTarget}
+          bottomInset={insets.bottom}
+          onOpenComment={() => {
+            if (activeCommentTarget && environmentId && threadId) {
+              router.push({
+                pathname: "/threads/[environmentId]/[threadId]/review-comment",
+                params: { environmentId, threadId },
+              });
+            }
+          }}
+          onClear={() => {
+            clearReviewCommentTarget();
+            setPendingCommentSelection(null);
+          }}
+        />
+      </View>
+    </>
   );
 }
