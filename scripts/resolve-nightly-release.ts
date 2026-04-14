@@ -75,6 +75,7 @@ const command = Command.make(
     writeOutput(resolveNightlyReleaseMetadata(date, runNumber, sha), githubOutput),
 ).pipe(Command.withDescription("Resolve nightly release version metadata."));
 
-Command.run(command, {
-  version: "0.0.0",
-}).pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain);
+Command.run(command, { version: "0.0.0" }).pipe(
+  Effect.provide(NodeServices.layer),
+  NodeRuntime.runMain,
+);
