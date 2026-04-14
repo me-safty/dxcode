@@ -18,6 +18,21 @@ This document covers how to run desktop releases from one tag, first without sig
 - Publishes the CLI package (`apps/server`, npm package `t3`) with OIDC trusted publishing.
 - Signing is optional and auto-detected per platform from secrets.
 
+## Nightly builds
+
+- Workflow: `.github/workflows/nightly-release.yml`
+- Triggers:
+  - scheduled every day at `09:00 UTC`
+  - manual `workflow_dispatch`
+- Runs the same desktop quality gates and artifact matrix as the tagged release flow.
+- Publishes a GitHub prerelease only:
+  - tag format: `nightly-vX.Y.Z-nightly.YYYYMMDD.<run_number>`
+  - release name includes the short commit SHA
+  - `make_latest` is always `false`
+- Uses the current `apps/desktop/package.json` semver core (`X.Y.Z`) as the nightly base, then appends a nightly prerelease suffix.
+- Does not publish the CLI package to npm.
+- Does not commit version bumps back to `main`.
+
 ## Desktop auto-update notes
 
 - Runtime updater: `electron-updater` in `apps/desktop/src/main.ts`.
