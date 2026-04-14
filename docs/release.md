@@ -31,7 +31,7 @@ This document covers how to run desktop releases from one tag, first without sig
   - `make_latest` is always `false`
 - Uses the current `apps/desktop/package.json` semver core (`X.Y.Z`) as the nightly base, then appends a nightly prerelease suffix.
 - Publishes Electron auto-update metadata to the dedicated `nightly` updater channel, so desktop users can opt into that track independently from stable.
-- Does not publish the CLI package to npm.
+- Publishes the CLI package (`apps/server`, npm package `t3`) to the `nightly` npm dist-tag using the same nightly version.
 - Does not commit version bumps back to `main`.
 
 ## Desktop auto-update notes
@@ -69,6 +69,7 @@ Checklist:
    - Repository: this repo
    - Workflow file: `.github/workflows/release.yml`
    - Environment (if used): match your npm trusted publishing config
+   - Add a second trusted publisher entry for `.github/workflows/nightly-release.yml` if nightly CLI publishes should also use OIDC.
 3. Ensure npm account and org policies allow trusted publishing for the package.
 4. Create release tag `vX.Y.Z` and push; workflow will:
    - set `apps/server/package.json` version to `X.Y.Z`
