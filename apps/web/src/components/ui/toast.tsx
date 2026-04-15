@@ -12,6 +12,7 @@ import {
   InfoIcon,
   LoaderCircleIcon,
   TriangleAlertIcon,
+  XIcon,
 } from "lucide-react";
 
 import { cn } from "~/lib/utils";
@@ -31,6 +32,7 @@ export type ThreadToastData = {
   tooltipStyle?: boolean;
   dismissAfterVisibleMs?: number;
   hideCopyButton?: boolean;
+  showCloseButton?: boolean;
 };
 
 const toastManager = Toast.createToastManager<ThreadToastData>();
@@ -302,9 +304,23 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                 dismissAfterVisibleMs={toast.data?.dismissAfterVisibleMs}
                 toastId={toast.id}
               />
+              {toast.data?.showCloseButton ? (
+                <button
+                  aria-label="Dismiss notification"
+                  className={cn(
+                    buttonVariants({ size: "icon-xs", variant: "ghost" }),
+                    "absolute top-2 right-2 z-10 size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground",
+                  )}
+                  onClick={() => toastManager.close(toast.id)}
+                  type="button"
+                >
+                  <XIcon className="size-3" />
+                </button>
+              ) : null}
               <Toast.Content
                 className={cn(
                   "pointer-events-auto flex items-center justify-between gap-1.5 overflow-hidden px-3.5 py-3 text-sm transition-opacity duration-250 data-expanded:opacity-100",
+                  toast.data?.showCloseButton ? "pr-8" : null,
                   hideCollapsedContent &&
                     "not-data-expanded:pointer-events-none not-data-expanded:opacity-0",
                 )}
@@ -397,12 +413,30 @@ function AnchoredToasts() {
                   data-slot="toast-popup"
                   toast={toast}
                 >
+                  {toast.data?.showCloseButton ? (
+                    <button
+                      aria-label="Dismiss notification"
+                      className={cn(
+                        buttonVariants({ size: "icon-xs", variant: "ghost" }),
+                        "absolute top-2 right-2 z-10 size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => anchoredToastManager.close(toast.id)}
+                      type="button"
+                    >
+                      <XIcon className="size-3" />
+                    </button>
+                  ) : null}
                   {tooltipStyle ? (
                     <Toast.Content className="pointer-events-auto px-2 py-1">
                       <Toast.Title data-slot="toast-title" />
                     </Toast.Content>
                   ) : (
-                    <Toast.Content className="pointer-events-auto flex items-center justify-between gap-1.5 overflow-hidden px-3.5 py-3 text-sm">
+                    <Toast.Content
+                      className={cn(
+                        "pointer-events-auto flex items-center justify-between gap-1.5 overflow-hidden px-3.5 py-3 text-sm",
+                        toast.data?.showCloseButton ? "pr-8" : null,
+                      )}
+                    >
                       <div className="flex min-w-0 flex-1 gap-2">
                         {Icon && (
                           <div

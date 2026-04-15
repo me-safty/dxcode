@@ -373,6 +373,9 @@ export function SlowRpcAckToastCoordinator() {
       timeout: 0,
       title: "Some requests are slow",
       type: "warning" as const,
+      data: {
+        showCloseButton: true,
+      },
     };
 
     if (toastIdRef.current) {
