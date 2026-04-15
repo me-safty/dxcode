@@ -440,4 +440,83 @@ describe("ProviderSessionReaper", () => {
       reapedThreadId,
     ]);
   });
+
+  it("continues reaping other sessions when one stop attempt defects", async () => {
+    const defectThreadId = ThreadId.make("thread-reaper-stop-defect");
+    const reapedThreadId = ThreadId.make("thread-reaper-stop-after-defect");
+    const now = new Date().toISOString();
+    const harness = await createHarness({
+      readModel: makeReadModel([
+        {
+          id: defectThreadId,
+          session: {
+            threadId: defectThreadId,
+            status: "ready",
+            providerName: "claudeAgent",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: now,
+          },
+        },
+        {
+          id: reapedThreadId,
+          session: {
+            threadId: reapedThreadId,
+            status: "ready",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: now,
+          },
+        },
+      ]),
+      stopSessionImplementation: (request) =>
+        request.threadId === defectThreadId
+          ? Effect.die(new Error("simulated stop defect"))
+          : Effect.void,
+    });
+    const repository = await runtime!.runPromise(Effect.service(ProviderSessionRuntimeRepository));
+
+    await runtime!.runPromise(
+      repository.upsert({
+        threadId: defectThreadId,
+        providerName: "claudeAgent",
+        adapterKey: "claudeAgent",
+        runtimeMode: "full-access",
+        status: "running",
+        lastSeenAt: "2026-04-14T00:00:00.000Z",
+        resumeCursor: {
+          opaque: "resume-defect",
+        },
+        runtimePayload: null,
+      }),
+    );
+    await runtime!.runPromise(
+      repository.upsert({
+        threadId: reapedThreadId,
+        providerName: "codex",
+        adapterKey: "codex",
+        runtimeMode: "full-access",
+        status: "running",
+        lastSeenAt: "2026-04-14T00:01:00.000Z",
+        resumeCursor: {
+          opaque: "resume-after-defect",
+        },
+        runtimePayload: null,
+      }),
+    );
+
+    const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper));
+    scope = await Effect.runPromise(Scope.make("sequential"));
+    await Effect.runPromise(reaper.start().pipe(Scope.provide(scope)));
+
+    await waitFor(() => harness.stopSession.mock.calls.length === 2);
+
+    expect(harness.stopSession.mock.calls.map(([request]) => request.threadId)).toEqual([
+      defectThreadId,
+      reapedThreadId,
+    ]);
+  });
 });

@@ -75,12 +75,12 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
             }),
           ),
           Effect.as(true),
-          Effect.catch((error: unknown) =>
+          Effect.catchCause((cause) =>
             Effect.logWarning("provider.session.reaper.stop-failed", {
               threadId: binding.threadId,
               provider: binding.provider,
               idleDurationMs,
-              error,
+              cause,
             }).pipe(Effect.as(false)),
           ),
         );
