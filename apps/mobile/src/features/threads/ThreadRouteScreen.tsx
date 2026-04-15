@@ -10,7 +10,7 @@ import { dismissGitActionResult, useGitActionProgress } from "../../state/use-gi
 
 import { EmptyState } from "../../components/EmptyState";
 import { LoadingScreen } from "../../components/LoadingScreen";
-import { buildThreadRoutePath } from "../../lib/routes";
+import { buildThreadDiffPath, buildThreadRoutePath } from "../../lib/routes";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { connectionTone } from "../connection/connectionTone";
 
@@ -114,6 +114,11 @@ export function ThreadRouteScreen() {
   const handleOpenDrawer = useCallback(() => {
     setDrawerVisible(true);
   }, []);
+
+  const handleOpenDiffPanel = useCallback(() => {
+    if (!environmentId || !threadId) return;
+    void router.push(buildThreadDiffPath({ environmentId, threadId }));
+  }, [environmentId, threadId, router]);
 
   const handleOpenConnectionEditor = useCallback(() => {
     void router.push("/connections");
@@ -252,6 +257,7 @@ export function ThreadRouteScreen() {
           projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}
           selectedThreadQueueCount={composer.selectedThreadQueueCount}
           onOpenDrawer={handleOpenDrawer}
+          onOpenDiffPanel={handleOpenDiffPanel}
           onOpenConnectionEditor={handleOpenConnectionEditor}
           onChangeDraftMessage={composer.onChangeDraftMessage}
           onPickDraftImages={composer.onPickDraftImages}

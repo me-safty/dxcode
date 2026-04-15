@@ -84,6 +84,7 @@ export interface ThreadDetailScreenProps {
   ) => void;
   readonly onSubmitUserInput: () => Promise<void>;
   readonly showContent?: boolean;
+  readonly onOpenDiffPanel?: () => void;
 }
 
 function latestStreamingAssistantMessage(
@@ -191,7 +192,7 @@ const WorkingDurationPill = memo(function WorkingDurationPill(props: {
 });
 
 export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: ThreadDetailScreenProps) {
-  const { onOpenDrawer, onRefresh } = props;
+  const { onOpenDrawer, onOpenDiffPanel, onRefresh } = props;
 
   const insets = useSafeAreaInsets();
   const agentLabel = `${props.selectedThread.modelSelection.provider} agent`;
@@ -213,6 +214,11 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     void Haptics.selectionAsync();
     onOpenDrawer();
   }, [onOpenDrawer]);
+
+  const completeDiffPanelGesture = useCallback(() => {
+    void Haptics.selectionAsync();
+    onOpenDiffPanel?.();
+  }, [onOpenDiffPanel]);
 
   const handleRefresh = useCallback(async (): Promise<void> => {
     if (refreshing) {
@@ -244,6 +250,27 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     [completeDrawerGesture, isSplitLayout],
   );
 
+  // Swipe right-to-left anywhere on the screen to open the diff panel.
+  const diffPanelGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(!isSplitLayout && !!onOpenDiffPanel)
+        .activeOffsetX(-20)
+        .failOffsetY([-16, 16])
+        .onEnd((event) => {
+          "worklet";
+          if (event.translationX < -56 || event.velocityX < -500) {
+            runOnJS(completeDiffPanelGesture)();
+          }
+        }),
+    [completeDiffPanelGesture, isSplitLayout, onOpenDiffPanel],
+  );
+
+  const combinedGesture = useMemo(
+    () => Gesture.Race(headerDrawerGesture, diffPanelGesture),
+    [headerDrawerGesture, diffPanelGesture],
+  );
+
   const handleOverlayLayout = useCallback((event: LayoutChangeEvent) => {
     const nextHeight = Math.ceil(event.nativeEvent.layout.height);
     setMeasuredOverlayHeight((current) =>
@@ -252,7 +279,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   }, []);
 
   return (
-    <GestureDetector gesture={headerDrawerGesture}>
+    <GestureDetector gesture={combinedGesture}>
       <View className="flex-1">
         {showContent ? (
           <ThreadFeed
