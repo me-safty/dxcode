@@ -48,6 +48,7 @@ import {
 import {
   appendBrowsePathSegment,
   canNavigateUp,
+  ensureBrowseDirectoryPath,
   findProjectByPath,
   getBrowseDirectoryPath,
   getBrowseLeafPathSegment,
@@ -115,6 +116,19 @@ function getLocalFileManagerName(platform: string): string {
     return "Explorer";
   }
   return "Files";
+}
+
+function getEnvironmentBrowsePlatform(os: string | null | undefined): string {
+  if (os === "windows") {
+    return "Win32";
+  }
+  if (os === "darwin") {
+    return "MacIntel";
+  }
+  if (os === "linux") {
+    return "Linux";
+  }
+  return typeof navigator === "undefined" ? "" : navigator.platform;
 }
 
 interface AddProjectEnvironmentOption {
@@ -196,7 +210,6 @@ function OpenCommandPaletteDialog() {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const isActionsOnly = deferredQuery.startsWith(">");
-  const isBrowsing = isFilesystemBrowseQuery(query);
   const queryClient = useQueryClient();
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const settings = useSettings();
@@ -207,7 +220,6 @@ function OpenCommandPaletteDialog() {
   const keybindings = useServerKeybindings();
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
   const currentView = viewStack.at(-1) ?? null;
-  const paletteMode = getCommandPaletteMode({ currentView, isBrowsing });
   const [browseGeneration, setBrowseGeneration] = useState(0);
   const [addProjectEnvironmentId, setAddProjectEnvironmentId] = useState<EnvironmentId | null>(
     null,
@@ -269,6 +281,36 @@ function OpenCommandPaletteDialog() {
   ]);
   const defaultAddProjectEnvironmentId = addProjectEnvironmentOptions[0]?.environmentId ?? null;
   const browseEnvironmentId = addProjectEnvironmentId ?? defaultAddProjectEnvironmentId;
+  const browseEnvironmentPlatform = useMemo(() => {
+    const os =
+      browseEnvironmentId && primaryEnvironmentId && browseEnvironmentId === primaryEnvironmentId
+        ? (readPrimaryEnvironmentDescriptor()?.platform.os ?? null)
+        : browseEnvironmentId
+          ? (savedEnvironmentRuntimeById[browseEnvironmentId]?.descriptor?.platform.os ??
+            savedEnvironmentRuntimeById[browseEnvironmentId]?.serverConfig?.environment.platform
+              .os ??
+            null)
+          : null;
+    return getEnvironmentBrowsePlatform(os);
+  }, [browseEnvironmentId, primaryEnvironmentId, savedEnvironmentRuntimeById]);
+  const isBrowsing = isFilesystemBrowseQuery(query, browseEnvironmentPlatform);
+  const paletteMode = getCommandPaletteMode({ currentView, isBrowsing });
+  const getAddProjectInitialQueryForEnvironment = useCallback(
+    (environmentId: EnvironmentId | null): string => {
+      const environmentSettings =
+        environmentId && primaryEnvironmentId && environmentId === primaryEnvironmentId
+          ? settings
+          : environmentId
+            ? savedEnvironmentRuntimeById[environmentId]?.serverConfig?.settings
+            : null;
+      const baseDirectory = environmentSettings?.addProjectBaseDirectory?.trim() ?? "";
+      if (baseDirectory.length === 0) {
+        return "~/";
+      }
+      return ensureBrowseDirectoryPath(baseDirectory);
+    },
+    [primaryEnvironmentId, savedEnvironmentRuntimeById, settings],
+  );
 
   const projectCwdById = useMemo(
     () => new Map<ProjectId, string>(projects.map((project) => [project.id, project.cwd])),
@@ -511,14 +553,17 @@ function OpenCommandPaletteDialog() {
     }
   }
 
-  function startAddProjectBrowse(environmentId: EnvironmentId): void {
-    setAddProjectEnvironmentId(environmentId);
-    pushPaletteView({
-      addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
-      groups: [],
-      initialQuery: "~/",
-    });
-  }
+  const startAddProjectBrowse = useCallback(
+    (environmentId: EnvironmentId): void => {
+      setAddProjectEnvironmentId(environmentId);
+      pushPaletteView({
+        addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
+        groups: [],
+        initialQuery: getAddProjectInitialQueryForEnvironment(environmentId),
+      });
+    },
+    [getAddProjectInitialQueryForEnvironment],
+  );
 
   const addProjectEnvironmentItems: CommandPaletteActionItem[] = addProjectEnvironmentOptions.map(
     (option) => ({
@@ -570,6 +615,7 @@ function OpenCommandPaletteDialog() {
     addProjectEnvironmentGroups,
     addProjectEnvironmentOptions.length,
     defaultAddProjectEnvironmentId,
+    startAddProjectBrowse,
   ]);
 
   useEffect(() => {
@@ -674,7 +720,7 @@ function OpenCommandPaletteDialog() {
       const api = readEnvironmentApi(browseEnvironmentId);
       if (!api) return;
 
-      if (isUnsupportedWindowsProjectPath(rawCwd.trim(), navigator.platform)) {
+      if (isUnsupportedWindowsProjectPath(rawCwd.trim(), browseEnvironmentPlatform)) {
         toastManager.add({
           type: "error",
           title: "Failed to add project",
@@ -750,6 +796,7 @@ function OpenCommandPaletteDialog() {
     },
     [
       browseEnvironmentId,
+      browseEnvironmentPlatform,
       currentProjectCwdForBrowse,
       handleNewThread,
       navigate,

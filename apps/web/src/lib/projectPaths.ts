@@ -211,6 +211,19 @@ export function getBrowseDirectoryPath(currentPath: string): string {
   return currentPath.slice(0, lastSeparatorIndex + 1);
 }
 
+export function ensureBrowseDirectoryPath(currentPath: string): string {
+  const trimmed = currentPath.trim();
+  if (trimmed.length === 0) {
+    return trimmed;
+  }
+
+  if (hasTrailingPathSeparator(trimmed)) {
+    return trimmed;
+  }
+
+  return `${trimmed}${preferredPathSeparator(trimmed)}`;
+}
+
 export function getBrowseParentPath(currentPath: string): string | null {
   const trimmed = trimTrailingPathSeparators(currentPath);
   const absolutePath = splitAbsolutePath(trimmed);

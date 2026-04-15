@@ -4318,6 +4318,69 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("starts add project browse mode from the configured base directory", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-sidebar-add-project-custom-base-dir" as MessageId,
+        targetText: "sidebar add project custom base directory",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          settings: {
+            ...nextFixture.serverConfig.settings,
+            addProjectBaseDirectory: "~/Development",
+          },
+        };
+      },
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.filesystemBrowse) {
+          if (body.partialPath === "~/Development/") {
+            return {
+              parentPath: "~/Development/",
+              entries: [{ name: "codething", fullPath: "~/Development/codething" }],
+            };
+          }
+
+          return {
+            parentPath: "~/",
+            entries: [{ name: "Development", fullPath: "~/Development" }],
+          };
+        }
+
+        return undefined;
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+
+      await page.getByTestId("sidebar-add-project-trigger").click();
+
+      const palette = page.getByTestId("command-palette");
+      await expect.element(palette).toBeInTheDocument();
+
+      const browseInput = await waitForCommandPaletteInput(ADD_PROJECT_SUBMENU_PLACEHOLDER);
+      await expect.element(browseInput).toHaveValue("~/Development/");
+
+      await vi.waitFor(
+        () => {
+          expect(
+            wsRequests.some(
+              (request) =>
+                request._tag === WS_METHODS.filesystemBrowse &&
+                request.partialPath === "~/Development/",
+            ),
+          ).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("shows create-folder affordances for missing project paths", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -4449,6 +4512,18 @@ describe("ChatView timeline estimator parity (full app)", () => {
           environmentId: REMOTE_ENVIRONMENT_ID,
           label: "Staging",
         },
+        serverConfig: {
+          ...fixture.serverConfig,
+          environment: {
+            ...fixture.serverConfig.environment,
+            environmentId: REMOTE_ENVIRONMENT_ID,
+            label: "Staging",
+          },
+          settings: {
+            ...fixture.serverConfig.settings,
+            addProjectBaseDirectory: "~/workspaces",
+          },
+        },
         connectedAt: NOW_ISO,
       });
 
@@ -4464,10 +4539,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await palette.getByText("Staging", { exact: true }).click();
 
       const browseInput = await waitForCommandPaletteInput(ADD_PROJECT_SUBMENU_PLACEHOLDER);
+      await expect.element(browseInput).toHaveValue("~/workspaces/");
 
       await vi.waitFor(
         () => {
-          expect(remoteBrowseMock).toHaveBeenCalledWith({ partialPath: "~/" });
+          expect(remoteBrowseMock).toHaveBeenCalledWith({ partialPath: "~/workspaces/" });
         },
         { timeout: 8_000, interval: 16 },
       );
