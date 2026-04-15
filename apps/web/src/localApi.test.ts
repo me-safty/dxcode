@@ -499,6 +499,19 @@ describe("wsApi", () => {
     expect(showContextMenu).toHaveBeenCalledWith(items, undefined);
   });
 
+  it("forwards folder picker options to the desktop bridge", async () => {
+    const pickFolder = vi.fn().mockResolvedValue("/tmp/project");
+    getWindowForTest().desktopBridge = makeDesktopBridge({ pickFolder });
+
+    const { createLocalApi } = await import("./localApi");
+    const api = createLocalApi(rpcClientMock as never);
+
+    await expect(api.dialogs.pickFolder({ initialPath: "/tmp/workspace" })).resolves.toBe(
+      "/tmp/project",
+    );
+    expect(pickFolder).toHaveBeenCalledWith({ initialPath: "/tmp/workspace" });
+  });
+
   it("falls back to the browser context menu helper when the desktop bridge is missing", async () => {
     showContextMenuFallbackMock.mockResolvedValue("rename");
     const { createLocalApi } = await import("./localApi");

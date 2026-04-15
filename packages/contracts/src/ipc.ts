@@ -132,6 +132,10 @@ export interface DesktopServerExposureState {
   advertisedHost: string | null;
 }
 
+export interface PickFolderOptions {
+  initialPath?: string | null;
+}
+
 export interface DesktopBridge {
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
   getClientSettings: () => Promise<ClientSettings | null>;
@@ -145,7 +149,7 @@ export interface DesktopBridge {
   removeSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<void>;
   getServerExposureState: () => Promise<DesktopServerExposureState>;
   setServerExposureMode: (mode: DesktopServerExposureMode) => Promise<DesktopServerExposureState>;
-  pickFolder: () => Promise<string | null>;
+  pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
   showContextMenu: <T extends string>(
@@ -173,7 +177,7 @@ export interface DesktopBridge {
  */
 export interface LocalApi {
   dialogs: {
-    pickFolder: () => Promise<string | null>;
+    pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
     confirm: (message: string) => Promise<boolean>;
   };
   shell: {
