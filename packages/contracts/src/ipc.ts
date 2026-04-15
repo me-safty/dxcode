@@ -18,6 +18,7 @@ import type {
   GitStatusResult,
   GitCreateBranchResult,
 } from "./git";
+import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem";
 import type {
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
@@ -227,6 +228,9 @@ export interface EnvironmentApi {
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
+  };
+  filesystem: {
+    browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
   };
   git: {
     listBranches: (input: GitListBranchesInput) => Promise<GitListBranchesResult>;
