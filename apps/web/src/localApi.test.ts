@@ -51,6 +51,9 @@ const rpcClientMock = {
     searchEntries: vi.fn(),
     writeFile: vi.fn(),
   },
+  filesystem: {
+    browse: vi.fn(),
+  },
   shell: {
     openInEditor: vi.fn(),
   },
@@ -412,6 +415,25 @@ describe("wsApi", () => {
       cwd: "/tmp/project",
       relativePath: "plan.md",
       contents: "# Plan\n",
+    });
+  });
+
+  it("forwards filesystem browse requests to the RPC client", async () => {
+    rpcClientMock.filesystem.browse.mockResolvedValue({
+      parentPath: "/tmp/project/",
+      entries: [],
+    });
+    const { createEnvironmentApi } = await import("./environmentApi");
+
+    const api = createEnvironmentApi(rpcClientMock as never);
+    await api.filesystem.browse({
+      partialPath: "/tmp/project/",
+      cwd: "/tmp/project",
+    });
+
+    expect(rpcClientMock.filesystem.browse).toHaveBeenCalledWith({
+      partialPath: "/tmp/project/",
+      cwd: "/tmp/project",
     });
   });
 
