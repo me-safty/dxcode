@@ -55,7 +55,7 @@ import {
 } from "../lib/projectPaths";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { getLatestThreadForProject } from "../lib/threadSort";
-import { cn, newCommandId, newProjectId } from "../lib/utils";
+import { cn, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import {
   selectProjectsAcrossEnvironments,
   selectSidebarThreadsAcrossEnvironments,
@@ -606,16 +606,26 @@ function OpenCommandPaletteDialog() {
 
   const inputPlaceholder = getCommandPaletteInputPlaceholder(paletteMode);
   const isSubmenu = paletteMode === "submenu" || paletteMode === "submenu-browse";
+  const hasHighlightedBrowseItem = highlightedItemValue?.startsWith("browse:") ?? false;
+  const canSubmitBrowsePath = isBrowsing && !relativePathNeedsActiveProject;
+  const useMetaForMod = isMacPlatform(navigator.platform);
+  const submitModifierLabel = useMetaForMod ? "\u2318" : "Ctrl";
+  const addShortcutLabel = hasHighlightedBrowseItem ? `${submitModifierLabel} Enter` : "Enter";
+
+  function isPrimaryModifierPressed(event: KeyboardEvent<HTMLInputElement>): boolean {
+    return useMetaForMod ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+  }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-    if (
-      isBrowsing &&
+    const shouldSubmitBrowsePath =
+      canSubmitBrowsePath &&
       event.key === "Enter" &&
-      !highlightedItemValue?.startsWith("browse:") &&
-      !relativePathNeedsActiveProject
-    ) {
+      (!hasHighlightedBrowseItem || isPrimaryModifierPressed(event));
+
+    if (shouldSubmitBrowsePath) {
       event.preventDefault();
       void handleAddProject(resolvedAddProjectPath);
+      return;
     }
 
     if (event.key === "Backspace" && query === "" && isSubmenu) {
@@ -698,7 +708,8 @@ function OpenCommandPaletteDialog() {
               variant="outline"
               size="xs"
               tabIndex={-1}
-              className="absolute end-2.5 top-1/2 -translate-y-1/2"
+              className="absolute end-2.5 top-1/2 gap-1.5 -translate-y-1/2"
+              aria-label={`Add (${addShortcutLabel})`}
               disabled={relativePathNeedsActiveProject}
               onMouseDown={(event) => {
                 event.preventDefault();
@@ -709,14 +720,20 @@ function OpenCommandPaletteDialog() {
                 }
                 void handleAddProject(resolvedAddProjectPath);
               }}
+              title={`Add (${addShortcutLabel})`}
             >
-              Add
+              <span>Add</span>
+              <KbdGroup className="pointer-events-none items-center gap-1">
+                {hasHighlightedBrowseItem ? <Kbd>{submitModifierLabel}</Kbd> : null}
+                <Kbd>Enter</Kbd>
+              </KbdGroup>
             </Button>
           ) : null}
         </div>
         <CommandPanel className="max-h-[min(28rem,70vh)]">
           <CommandPaletteResults
             groups={displayedGroups}
+            highlightedItemValue={highlightedItemValue}
             isActionsOnly={isActionsOnly}
             keybindings={keybindings}
             onExecuteItem={executeItem}
@@ -736,10 +753,12 @@ function OpenCommandPaletteDialog() {
               </Kbd>
               <span className={cn("text-muted-foreground/80")}>Navigate</span>
             </KbdGroup>
-            <KbdGroup className="items-center gap-1.5">
-              <Kbd>Enter</Kbd>
-              <span className={cn("text-muted-foreground/80")}>Select</span>
-            </KbdGroup>
+            {!canSubmitBrowsePath || hasHighlightedBrowseItem ? (
+              <KbdGroup className="items-center gap-1.5">
+                <Kbd>Enter</Kbd>
+                <span className={cn("text-muted-foreground/80")}>Select</span>
+              </KbdGroup>
+            ) : null}
             {isSubmenu ? (
               <KbdGroup className="items-center gap-1.5">
                 <Kbd>Backspace</Kbd>

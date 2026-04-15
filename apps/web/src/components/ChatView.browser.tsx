@@ -70,6 +70,7 @@ const PROJECT_KEY = scopedProjectKey(scopeProjectRef(LOCAL_ENVIRONMENT_ID, PROJE
 const NOW_ISO = "2026-03-04T12:00:00.000Z";
 const BASE_TIME_MS = Date.parse(NOW_ISO);
 const ATTACHMENT_SVG = "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'></svg>";
+const ADD_PROJECT_SUBMENU_PLACEHOLDER = "Enter path (e.g. ~/projects/my-app)";
 
 interface TestFixture {
   snapshot: OrchestrationReadModel;
@@ -1381,6 +1382,44 @@ async function waitForCommandPaletteShortcutLabel(): Promise<void> {
     () => document.querySelector('[data-testid="command-palette-trigger"] kbd'),
     "Command palette shortcut label did not render.",
   );
+}
+
+async function waitForCommandPaletteInput(placeholder: string): Promise<HTMLInputElement> {
+  return waitForElement(
+    () => document.querySelector(`input[placeholder="${placeholder}"]`) as HTMLInputElement | null,
+    `Command palette input with placeholder "${placeholder}" did not render.`,
+  );
+}
+
+function getCommandPaletteLegendEntries(): string[] {
+  const footer = document.querySelector('[data-slot="command-footer"]');
+  if (!footer) {
+    return [];
+  }
+
+  return Array.from(footer.querySelectorAll('[data-slot="kbd-group"]'))
+    .map((group) =>
+      Array.from(group.children)
+        .map((child) => child.textContent?.trim() ?? "")
+        .filter((value) => value.length > 0)
+        .join(" "),
+    )
+    .filter((value) => value.length > 0);
+}
+
+async function dispatchInputKey(
+  input: HTMLInputElement,
+  init: Pick<KeyboardEventInit, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">,
+): Promise<void> {
+  input.focus();
+  input.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    }),
+  );
+  await waitForLayout();
 }
 
 async function mountChatView(options: {
@@ -4074,6 +4113,244 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await expect
         .element(palette.getByText("New thread in Project", { exact: true }))
         .not.toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("adds a project from browse mode with Enter when no directory is highlighted", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-command-palette-add-project-enter" as MessageId,
+        targetText: "command palette add project enter",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "commandPalette.toggle",
+              shortcut: {
+                key: "k",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false,
+                modKey: true,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.filesystemBrowse) {
+          if (body.partialPath === "~/Development/") {
+            return {
+              parentPath: "~/Development/",
+              entries: [
+                { name: "alpha", fullPath: "~/Development/alpha" },
+                { name: "beta", fullPath: "~/Development/beta" },
+              ],
+            };
+          }
+
+          return {
+            parentPath: "~/",
+            entries: [{ name: "Development", fullPath: "~/Development" }],
+          };
+        }
+
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+
+        return undefined;
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      await waitForCommandPaletteShortcutLabel();
+      const palette = page.getByTestId("command-palette");
+      await openCommandPaletteFromTrigger();
+
+      await expect.element(palette).toBeInTheDocument();
+      await palette.getByText("Add project", { exact: true }).click();
+
+      const browseInput = await waitForCommandPaletteInput(ADD_PROJECT_SUBMENU_PLACEHOLDER);
+      await page.getByPlaceholder(ADD_PROJECT_SUBMENU_PLACEHOLDER).fill("~/Development/");
+      await expect.element(palette.getByText("alpha", { exact: true })).toBeInTheDocument();
+
+      await expect
+        .element(palette.getByRole("button", { name: "Add (Enter)" }))
+        .toBeInTheDocument();
+
+      await dispatchInputKey(browseInput, { key: "Enter" });
+
+      await vi.waitFor(
+        () => {
+          const dispatchRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "project.create",
+          ) as
+            | {
+                _tag: string;
+                type?: string;
+                workspaceRoot?: string;
+                title?: string;
+              }
+            | undefined;
+
+          expect(dispatchRequest).toMatchObject({
+            _tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+            type: "project.create",
+            workspaceRoot: "~/Development",
+            title: "Development",
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Route should have changed to a new draft thread after adding a project with Enter.",
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("adds a project from browse mode with Mod+Enter when a directory is highlighted", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-command-palette-add-project-mod-enter" as MessageId,
+        targetText: "command palette add project mod enter",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "commandPalette.toggle",
+              shortcut: {
+                key: "k",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false,
+                modKey: true,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.filesystemBrowse) {
+          if (body.partialPath === "~/Development/") {
+            return {
+              parentPath: "~/Development/",
+              entries: [
+                { name: "alpha", fullPath: "~/Development/alpha" },
+                { name: "beta", fullPath: "~/Development/beta" },
+              ],
+            };
+          }
+
+          return {
+            parentPath: "~/",
+            entries: [{ name: "Development", fullPath: "~/Development" }],
+          };
+        }
+
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+
+        return undefined;
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      await waitForCommandPaletteShortcutLabel();
+      const palette = page.getByTestId("command-palette");
+      await openCommandPaletteFromTrigger();
+
+      await expect.element(palette).toBeInTheDocument();
+      await palette.getByText("Add project", { exact: true }).click();
+
+      const browseInput = await waitForCommandPaletteInput(ADD_PROJECT_SUBMENU_PLACEHOLDER);
+      await page.getByPlaceholder(ADD_PROJECT_SUBMENU_PLACEHOLDER).fill("~/Development/");
+      await expect.element(palette.getByText("alpha", { exact: true })).toBeInTheDocument();
+
+      await dispatchInputKey(browseInput, { key: "ArrowDown" });
+
+      const addButtonLabel = isMacPlatform(navigator.platform)
+        ? "Add (\u2318 Enter)"
+        : "Add (Ctrl Enter)";
+      await vi.waitFor(
+        () => {
+          const legendEntries = getCommandPaletteLegendEntries();
+          expect(legendEntries).toContain("Enter Select");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      await expect
+        .element(palette.getByRole("button", { name: addButtonLabel }))
+        .toBeInTheDocument();
+
+      await dispatchInputKey(browseInput, {
+        key: "Enter",
+        metaKey: isMacPlatform(navigator.platform),
+        ctrlKey: !isMacPlatform(navigator.platform),
+      });
+
+      await vi.waitFor(
+        () => {
+          const dispatchRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "project.create",
+          ) as
+            | {
+                _tag: string;
+                type?: string;
+                workspaceRoot?: string;
+                title?: string;
+              }
+            | undefined;
+
+          expect(dispatchRequest).toMatchObject({
+            _tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+            type: "project.create",
+            workspaceRoot: "~/Development",
+            title: "Development",
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Route should have changed to a new draft thread after adding a project with Mod+Enter.",
+      );
     } finally {
       await mounted.cleanup();
     }
