@@ -1243,9 +1243,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         },
       });
     };
-    const hasOverflowingThreads = visibleProjectThreads.length > THREAD_PREVIEW_LIMIT;
+    const hasActiveFilter = threadFilterQuery.length > 0;
+    // When filtering, show all matches — no preview limit or overflow
+    const hasOverflowingThreads = !hasActiveFilter && visibleProjectThreads.length > THREAD_PREVIEW_LIMIT;
     const previewThreads =
-      isThreadListExpanded || !hasOverflowingThreads
+      hasActiveFilter || isThreadListExpanded || !hasOverflowingThreads
         ? visibleProjectThreads
         : visibleProjectThreads.slice(0, THREAD_PREVIEW_LIMIT);
     const visibleThreadKeys = new Set(
@@ -1253,7 +1255,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       ),
     );
-    const hasActiveFilter = threadFilterQuery.length > 0;
     const renderedThreads = hasActiveFilter
       ? visibleProjectThreads
       : pinnedCollapsedThread
@@ -1261,10 +1262,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         : visibleProjectThreads.filter((thread) =>
             visibleThreadKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
           );
-    const hiddenThreads = visibleProjectThreads.filter(
-      (thread) =>
-        !visibleThreadKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
-    );
+    const hiddenThreads = hasActiveFilter
+      ? []
+      : visibleProjectThreads.filter(
+          (thread) =>
+            !visibleThreadKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
+        );
     return {
       hasOverflowingThreads,
       hiddenThreadStatus: resolveProjectStatusIndicator(
