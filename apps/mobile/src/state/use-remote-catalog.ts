@@ -70,9 +70,9 @@ export function useRemoteCatalog() {
     () =>
       Arr.sort(
         Object.values(savedConnectionsById).flatMap((connection) =>
-          (shellSnapshotStates[connection.environmentId]?.data?.threads ?? []).map((thread) =>
-            scopeThreadShell(connection.environmentId, thread),
-          ),
+          (shellSnapshotStates[connection.environmentId]?.data?.threads ?? [])
+            .filter((thread) => thread.archivedAt === null)
+            .map((thread) => scopeThreadShell(connection.environmentId, thread)),
         ),
         threadsSortOrder,
       ),
