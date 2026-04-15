@@ -12,6 +12,7 @@ import { isLatestTurnSettled } from "../session-logic";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
+export const PROJECT_DELETE_CONFIRMATION_PHRASE = "permanently delete";
 // Visible sidebar rows are prewarmed into the thread-detail cache so opening a
 // nearby thread usually reuses an already-hot subscription.
 export const SIDEBAR_THREAD_PREWARM_LIMIT = 10;
@@ -158,6 +159,14 @@ export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
 export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null): boolean {
   if (target === null) return true;
   return !target.closest(THREAD_SELECTION_SAFE_SELECTOR);
+}
+
+export function shouldRequireProjectDeleteConfirmation(threadCount: number): boolean {
+  return threadCount > 0;
+}
+
+export function matchesProjectDeleteConfirmationPhrase(input: string): boolean {
+  return input.trim().replace(/\s+/g, " ").toLowerCase() === PROJECT_DELETE_CONFIRMATION_PHRASE;
 }
 
 export function resolveSidebarNewThreadEnvMode(input: {

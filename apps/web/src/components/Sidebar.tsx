@@ -102,6 +102,16 @@ import {
 } from "./desktopUpdate.logic";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
 import { Menu, MenuGroup, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
@@ -122,8 +132,11 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import {
   getSidebarThreadIdsToPrewarm,
+  matchesProjectDeleteConfirmationPhrase,
+  PROJECT_DELETE_CONFIRMATION_PHRASE,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
+  shouldRequireProjectDeleteConfirmation,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
@@ -1141,6 +1154,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const [renamingThreadKey, setRenamingThreadKey] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
   const [confirmingArchiveThreadKey, setConfirmingArchiveThreadKey] = useState<string | null>(null);
+  const [projectDeleteDialogOpen, setProjectDeleteDialogOpen] = useState(false);
+  const [projectDeleteConfirmationInput, setProjectDeleteConfirmationInput] = useState("");
+  const [projectDeletePending, setProjectDeletePending] = useState(false);
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const confirmArchiveButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -1318,6 +1334,72 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [suppressProjectClickAfterDragRef, suppressProjectClickForContextMenuRef],
   );
 
+  const closeProjectDeleteDialog = useCallback(() => {
+    if (projectDeletePending) {
+      return;
+    }
+    setProjectDeleteDialogOpen(false);
+    setProjectDeleteConfirmationInput("");
+  }, [projectDeletePending]);
+
+  const deleteProject = useCallback(
+    async ({ deleteThreads }: { deleteThreads: boolean }) => {
+      setProjectDeletePending(true);
+      try {
+        const projectDraftThread = getDraftThreadByProjectRef(
+          scopeProjectRef(project.environmentId, project.id),
+        );
+        if (projectDraftThread) {
+          clearComposerDraftForThread(projectDraftThread.draftId);
+        }
+        if (deleteThreads) {
+          const deletedThreadKeys = new Set(
+            projectThreads.map((thread) =>
+              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+            ),
+          );
+          for (const thread of projectThreads) {
+            await deleteThread(scopeThreadRef(thread.environmentId, thread.id), {
+              deletedThreadKeys,
+            });
+          }
+        }
+        clearProjectDraftThreadId(scopeProjectRef(project.environmentId, project.id));
+        const projectApi = readEnvironmentApi(project.environmentId);
+        if (!projectApi) {
+          throw new Error("Project API unavailable.");
+        }
+        await projectApi.orchestration.dispatchCommand({
+          type: "project.delete",
+          commandId: newCommandId(),
+          projectId: project.id,
+        });
+        setProjectDeleteDialogOpen(false);
+        setProjectDeleteConfirmationInput("");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error removing project.";
+        console.error("Failed to remove project", { projectId: project.id, error });
+        toastManager.add({
+          type: "error",
+          title: `Failed to remove "${project.name}"`,
+          description: message,
+        });
+      } finally {
+        setProjectDeletePending(false);
+      }
+    },
+    [
+      clearComposerDraftForThread,
+      clearProjectDraftThreadId,
+      deleteThread,
+      getDraftThreadByProjectRef,
+      project.environmentId,
+      project.id,
+      project.name,
+      projectThreads,
+    ],
+  );
+
   const handleProjectButtonContextMenu = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
@@ -1342,55 +1424,21 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         }
         if (clicked !== "delete") return;
 
-        if (projectThreads.length > 0) {
-          toastManager.add({
-            type: "warning",
-            title: "Project is not empty",
-            description: "Delete all threads in this project before removing it.",
-          });
+        if (shouldRequireProjectDeleteConfirmation(projectThreads.length)) {
+          setProjectDeleteConfirmationInput("");
+          setProjectDeleteDialogOpen(true);
           return;
         }
 
         const confirmed = await api.dialogs.confirm(`Remove project "${project.name}"?`);
         if (!confirmed) return;
-
-        try {
-          const projectDraftThread = getDraftThreadByProjectRef(
-            scopeProjectRef(project.environmentId, project.id),
-          );
-          if (projectDraftThread) {
-            clearComposerDraftForThread(projectDraftThread.draftId);
-          }
-          clearProjectDraftThreadId(scopeProjectRef(project.environmentId, project.id));
-          const projectApi = readEnvironmentApi(project.environmentId);
-          if (!projectApi) {
-            throw new Error("Project API unavailable.");
-          }
-          await projectApi.orchestration.dispatchCommand({
-            type: "project.delete",
-            commandId: newCommandId(),
-            projectId: project.id,
-          });
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "Unknown error removing project.";
-          console.error("Failed to remove project", { projectId: project.id, error });
-          toastManager.add({
-            type: "error",
-            title: `Failed to remove "${project.name}"`,
-            description: message,
-          });
-        }
+        await deleteProject({ deleteThreads: false });
       })();
     },
     [
-      clearComposerDraftForThread,
-      clearProjectDraftThreadId,
       copyPathToClipboard,
-      getDraftThreadByProjectRef,
+      deleteProject,
       project.cwd,
-      project.environmentId,
-      project.id,
       project.name,
       projectThreads.length,
       suppressProjectClickForContextMenuRef,
@@ -1693,6 +1741,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     ],
   );
 
+  const projectDeleteThreadCount = projectThreads.length;
+  const projectDeleteConfirmationSatisfied = matchesProjectDeleteConfirmationPhrase(
+    projectDeleteConfirmationInput,
+  );
+  const projectDeleteThreadLabel = `${projectDeleteThreadCount} thread${
+    projectDeleteThreadCount === 1 ? "" : "s"
+  }`;
+
   return (
     <>
       <div className="group/project-header relative">
@@ -1817,6 +1873,60 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         expandThreadListForProject={expandThreadListForProject}
         collapseThreadListForProject={collapseThreadListForProject}
       />
+
+      <Dialog
+        open={projectDeleteDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeProjectDeleteDialog();
+            return;
+          }
+          setProjectDeleteDialogOpen(true);
+        }}
+      >
+        <DialogPopup showCloseButton={!projectDeletePending}>
+          <DialogHeader>
+            <DialogTitle>Delete "{project.name}"?</DialogTitle>
+            <DialogDescription>
+              Remove this project and permanently delete its {projectDeleteThreadLabel}.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Type <code>{PROJECT_DELETE_CONFIRMATION_PHRASE}</code> to confirm.
+            </p>
+            <Input
+              autoFocus
+              aria-label="Project delete confirmation"
+              placeholder={PROJECT_DELETE_CONFIRMATION_PHRASE}
+              value={projectDeleteConfirmationInput}
+              onChange={(event) => {
+                setProjectDeleteConfirmationInput(event.target.value);
+              }}
+            />
+          </DialogPanel>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={projectDeletePending}
+              onClick={closeProjectDeleteDialog}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={!projectDeleteConfirmationSatisfied || projectDeletePending}
+              onClick={() => {
+                void deleteProject({ deleteThreads: true });
+              }}
+            >
+              {projectDeletePending ? "Deleting..." : "Delete project"}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
     </>
   );
 });

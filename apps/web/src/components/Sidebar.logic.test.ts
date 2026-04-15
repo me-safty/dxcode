@@ -10,12 +10,15 @@ import {
   getProjectSortTimestamp,
   hasUnseenCompletion,
   isContextMenuPointerDown,
+  matchesProjectDeleteConfirmationPhrase,
   orderItemsByPreferredIds,
+  PROJECT_DELETE_CONFIRMATION_PHRASE,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  shouldRequireProjectDeleteConfirmation,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
@@ -161,6 +164,23 @@ describe("shouldClearThreadSelectionOnMouseDown", () => {
     } as unknown as HTMLElement;
 
     expect(shouldClearThreadSelectionOnMouseDown(unrelated)).toBe(true);
+  });
+});
+
+describe("project deletion confirmation", () => {
+  it("requires typed confirmation when the project still has threads", () => {
+    expect(shouldRequireProjectDeleteConfirmation(0)).toBe(false);
+    expect(shouldRequireProjectDeleteConfirmation(1)).toBe(true);
+  });
+
+  it("accepts the confirmation phrase with trimmed, case-insensitive input", () => {
+    expect(matchesProjectDeleteConfirmationPhrase(PROJECT_DELETE_CONFIRMATION_PHRASE)).toBe(true);
+    expect(matchesProjectDeleteConfirmationPhrase("  Permanently   Delete  ")).toBe(true);
+  });
+
+  it("rejects partial or incorrect confirmation phrases", () => {
+    expect(matchesProjectDeleteConfirmationPhrase("delete")).toBe(false);
+    expect(matchesProjectDeleteConfirmationPhrase("permanently-delete")).toBe(false);
   });
 });
 
