@@ -1,4 +1,16 @@
-import { Cause, Duration, Effect, FileSystem, Layer, Option, Path, Queue, Ref, Schema, Stream } from "effect";
+import {
+  Cause,
+  Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Queue,
+  Ref,
+  Schema,
+  Stream,
+} from "effect";
 import {
   type AuthAccessStreamEvent,
   AuthSessionId,
@@ -805,7 +817,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
 
               // Determine if the input ends with a separator (directory mode) or if it's a prefix (file mode)
               const endsWithSep = /[\\/]$/.test(input.partialPath) || input.partialPath === "~";
-              const parentDir = endsWithSep ? resolvedInputPath : pathService.dirname(resolvedInputPath);
+              const parentDir = endsWithSep
+                ? resolvedInputPath
+                : pathService.dirname(resolvedInputPath);
               const prefix = endsWithSep ? "" : pathService.basename(resolvedInputPath);
 
               // Read the directory
@@ -824,7 +838,8 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               const filtered = names
                 .filter(
                   (name: string) =>
-                    name.toLowerCase().startsWith(lowerPrefix) && (showHidden || !name.startsWith(".")),
+                    name.toLowerCase().startsWith(lowerPrefix) &&
+                    (showHidden || !name.startsWith(".")),
                 )
                 .sort((left: string, right: string) => left.localeCompare(right));
 

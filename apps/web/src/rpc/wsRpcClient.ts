@@ -149,8 +149,7 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.projectsWriteFile](input)),
     },
     filesystem: {
-      browse: (input) =>
-        transport.request((client) => client[WS_METHODS.filesystemBrowse](input)),
+      browse: (input) => transport.request((client) => client[WS_METHODS.filesystemBrowse](input)),
     },
     shell: {
       openInEditor: (input) =>

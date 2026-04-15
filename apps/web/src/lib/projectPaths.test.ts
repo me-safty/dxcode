@@ -43,6 +43,7 @@ describe("projectPaths", () => {
   it("infers project titles from normalized paths", () => {
     expect(inferProjectTitleFromPath("/repo/app/")).toBe("app");
     expect(inferProjectTitleFromPath("C:\\Work\\Repo\\")).toBe("Repo");
+    expect(inferProjectTitleFromPath("/home/user\\project/")).toBe("user\\project");
   });
 
   it("detects browse queries across supported path styles", () => {
@@ -76,16 +77,23 @@ describe("projectPaths", () => {
     expect(resolveProjectPathForDispatch("./docs", "/repo/app")).toBe("/repo/app/docs");
     expect(resolveProjectPathForDispatch("../docs", "/repo/app")).toBe("/repo/docs");
     expect(resolveProjectPathForDispatch("./Repo", "C:\\Work")).toBe("C:\\Work\\Repo");
+    expect(resolveProjectPathForDispatch("./docs", "/home/user\\project")).toBe(
+      "/home/user\\project/docs",
+    );
   });
 
   it("navigates browse paths with matching separators", () => {
     expect(appendBrowsePathSegment("/repo/", "src")).toBe("/repo/src/");
     expect(appendBrowsePathSegment("C:\\Work\\", "Repo")).toBe("C:\\Work\\Repo\\");
+    expect(appendBrowsePathSegment("/home/user\\project/", "docs")).toBe(
+      "/home/user\\project/docs/",
+    );
     expect(getBrowseParentPath("/repo/src/")).toBe("/repo/");
     expect(getBrowseParentPath("C:\\Work\\Repo\\")).toBe("C:\\Work\\");
     expect(getBrowseParentPath("\\\\server\\share\\")).toBeNull();
     expect(getBrowseParentPath("\\\\server\\share\\repo\\")).toBe("\\\\server\\share\\");
     expect(getBrowseParentPath("C:\\")).toBeNull();
+    expect(getBrowseParentPath("/home/user\\project/docs/")).toBe("/home/user\\project/");
   });
 
   it("detects browse path boundaries", () => {
@@ -95,6 +103,8 @@ describe("projectPaths", () => {
     expect(getBrowseDirectoryPath("/repo/src/")).toBe("/repo/src/");
     expect(getBrowseLeafPathSegment("/repo/src")).toBe("src");
     expect(getBrowseLeafPathSegment("C:\\Work\\Repo\\Docs")).toBe("Docs");
+    expect(getBrowseDirectoryPath("/home/user\\project/docs")).toBe("/home/user\\project/");
+    expect(getBrowseLeafPathSegment("/home/user\\project/docs")).toBe("docs");
   });
 
   it("only allows browse-up after entering a directory", () => {
