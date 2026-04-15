@@ -1345,6 +1345,7 @@ function applyEnvironmentOrchestrationEvent(
             startedAt: latestTurn.startedAt ?? event.payload.createdAt,
             completedAt: latestTurn.completedAt ?? event.payload.createdAt,
             assistantMessageId: latestTurn.assistantMessageId,
+            sourceProposedPlan: thread.pendingSourceProposedPlan,
           }),
           updatedAt: event.occurredAt,
         };
