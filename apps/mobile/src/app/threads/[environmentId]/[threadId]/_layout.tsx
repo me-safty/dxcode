@@ -55,6 +55,19 @@ export default function ThreadLayout() {
         }}
       />
       <Stack.Screen
+        name="diff"
+        options={{
+          animation: "slide_from_right",
+          contentStyle: sheetStyle,
+          headerBackButtonDisplayMode: "minimal",
+          headerShown: true,
+          headerTitle: "Turn Diff",
+          headerBackTitle: "",
+          headerShadowVisible: false,
+          headerStyle: headerBg,
+        }}
+      />
+      <Stack.Screen
         name="review-comment"
         options={{
           contentStyle: sheetStyle,
