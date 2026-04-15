@@ -1,16 +1,4 @@
-import {
-  Cause,
-  Duration,
-  Effect,
-  FileSystem,
-  Layer,
-  Option,
-  Path,
-  Queue,
-  Ref,
-  Schema,
-  Stream,
-} from "effect";
+import { Cause, Duration, Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
 import {
   type AuthAccessStreamEvent,
   AuthSessionId,
@@ -35,7 +23,6 @@ import {
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
-import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -76,7 +63,6 @@ import {
   type SessionCredentialChange,
 } from "./auth/Services/SessionCredentialService";
 import { respondToAuthError } from "./auth/http";
-import { expandHomePath } from "./os-jank";
 
 function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   OrchestrationEvent,
@@ -786,84 +772,15 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.filesystemBrowse]: (input) =>
           observeRpcEffect(
             WS_METHODS.filesystemBrowse,
-            Effect.gen(function* () {
-              const fileSystem = yield* FileSystem.FileSystem;
-              const pathService = yield* Path.Path;
-
-              if (process.platform !== "win32" && isWindowsAbsolutePath(input.partialPath)) {
-                return yield* Effect.fail(
+            workspaceEntries.browse(input).pipe(
+              Effect.mapError(
+                (cause) =>
                   new FilesystemBrowseError({
-                    message: "Windows-style paths are only supported on Windows.",
+                    message: cause.detail,
+                    cause,
                   }),
-                );
-              }
-
-              // Resolve the input path
-              let resolvedInputPath: string;
-              if (!isExplicitRelativePath(input.partialPath)) {
-                resolvedInputPath = yield* expandHomePath(input.partialPath);
-                resolvedInputPath = pathService.resolve(resolvedInputPath);
-              } else {
-                if (!input.cwd) {
-                  return yield* Effect.fail(
-                    new FilesystemBrowseError({
-                      message: "Relative filesystem browse paths require a current project.",
-                    }),
-                  );
-                }
-                const expandedCwd = yield* expandHomePath(input.cwd);
-                resolvedInputPath = pathService.resolve(expandedCwd, input.partialPath);
-              }
-
-              // Determine if the input ends with a separator (directory mode) or if it's a prefix (file mode)
-              const endsWithSep = /[\\/]$/.test(input.partialPath) || input.partialPath === "~";
-              const parentDir = endsWithSep
-                ? resolvedInputPath
-                : pathService.dirname(resolvedInputPath);
-              const prefix = endsWithSep ? "" : pathService.basename(resolvedInputPath);
-
-              // Read the directory
-              const names: Array<string> = yield* fileSystem.readDirectory(parentDir).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new FilesystemBrowseError({
-                      message: `Unable to browse '${parentDir}': ${Cause.pretty(Cause.fail(cause)).trim()}`,
-                    }),
-                ),
-              );
-
-              // Filter and sort entries
-              const showHidden = endsWithSep || prefix.startsWith(".");
-              const lowerPrefix = prefix.toLowerCase();
-              const filtered = names
-                .filter(
-                  (name: string) =>
-                    name.toLowerCase().startsWith(lowerPrefix) &&
-                    (showHidden || !name.startsWith(".")),
-                )
-                .sort((left: string, right: string) => left.localeCompare(right));
-
-              // Get stats for each entry to filter to directories only
-              const entries = yield* Effect.forEach(
-                filtered,
-                (name: string) =>
-                  fileSystem.stat(pathService.join(parentDir, name)).pipe(
-                    Effect.match({
-                      onFailure: () => null,
-                      onSuccess: (s) =>
-                        s.type === "Directory"
-                          ? { name, fullPath: pathService.join(parentDir, name) }
-                          : null,
-                    }),
-                  ),
-                { concurrency: 16 },
-              );
-
-              return {
-                parentPath: parentDir,
-                entries: entries.filter((e): e is { name: string; fullPath: string } => e !== null),
-              };
-            }),
+              ),
+            ),
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.subscribeGitStatus]: (input) =>
