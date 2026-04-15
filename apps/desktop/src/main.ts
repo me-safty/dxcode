@@ -1768,9 +1768,14 @@ function registerIpcHandlers(): void {
     }
 
     applyAutoUpdaterChannel(nextChannel);
+    const allowDowngrade = autoUpdater.allowDowngrade;
     // An explicit channel switch should allow the immediate nightly->stable rollback path.
     autoUpdater.allowDowngrade = true;
-    await checkForUpdates("channel-change");
+    try {
+      await checkForUpdates("channel-change");
+    } finally {
+      autoUpdater.allowDowngrade = allowDowngrade;
+    }
     return updateState;
   });
 
