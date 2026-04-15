@@ -1,14 +1,20 @@
 import { Stack, useRouter } from "expo-router";
-import { useState } from "react";
-import { Pressable, Text as RNText, View, useColorScheme } from "react-native";
+import { useCallback, useState } from "react";
+import { Alert, Pressable, Text as RNText, View, useColorScheme } from "react-native";
 import { useThemeColor } from "../lib/useThemeColor";
 
+import type { EnvironmentScopedThreadShell } from "@t3tools/client-runtime";
+import { EnvironmentConnectionState } from "@t3tools/client-runtime";
+import { CommandId } from "@t3tools/contracts";
 import { buildThreadRoutePath } from "../lib/routes";
+import { uuidv4 } from "../lib/uuid";
 import { ConnectionStatusDot } from "../features/connection/ConnectionStatusDot";
 import { useRemoteCatalog } from "../state/use-remote-catalog";
-import { useRemoteEnvironmentState } from "../state/use-remote-environment-registry";
+import {
+  getEnvironmentClient,
+  useRemoteEnvironmentState,
+} from "../state/use-remote-environment-registry";
 import { HomeScreen } from "../features/home/HomeScreen";
-import { EnvironmentConnectionState } from "@t3tools/client-runtime";
 
 /* ─── Connection pill label ──────────────────────────────────────────── */
 
@@ -31,6 +37,22 @@ export default function HomeRouteScreen() {
   const isDark = useColorScheme() === "dark";
   const iconColor = String(useThemeColor("--color-icon"));
   const secondaryFg = isDark ? "#a3a3a3" : "#525252";
+
+  const handleArchiveThread = useCallback((thread: EnvironmentScopedThreadShell) => {
+    if (thread.session?.status === "running") {
+      Alert.alert("Cannot archive", "Stop the running thread before archiving.");
+      return;
+    }
+
+    const client = getEnvironmentClient(thread.environmentId);
+    if (!client) return;
+
+    void client.orchestration.dispatchCommand({
+      type: "thread.archive",
+      commandId: CommandId.make(uuidv4()),
+      threadId: thread.id,
+    });
+  }, []);
 
   return (
     <>
@@ -133,6 +155,7 @@ export default function HomeRouteScreen() {
         onSelectThread={(thread) => {
           router.push(buildThreadRoutePath(thread));
         }}
+        onArchiveThread={handleArchiveThread}
       />
     </>
   );

@@ -16,6 +16,7 @@ import { scopedProjectKey } from "../../lib/scopedEntities";
 import { relativeTime } from "../../lib/time";
 import { useGitStatus } from "../../state/use-git-status";
 import { threadStatusTone } from "../threads/threadPresentation";
+import { SwipeableThreadRow } from "./SwipeableThreadRow";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -25,6 +26,7 @@ interface HomeScreenProps {
   readonly savedConnectionsById: Readonly<Record<string, SavedRemoteConnection>>;
   readonly searchQuery: string;
   readonly onSelectThread: (thread: EnvironmentScopedThreadShell) => void;
+  readonly onArchiveThread: (thread: EnvironmentScopedThreadShell) => void;
 }
 
 interface ProjectGroup {
@@ -328,13 +330,17 @@ export function HomeScreen(props: HomeScreenProps) {
                 style={{ borderCurve: "continuous" }}
               >
                 {visibleThreads.map((thread, i) => (
-                  <ThreadRow
+                  <SwipeableThreadRow
                     key={`${thread.environmentId}:${thread.id}`}
-                    thread={thread}
-                    projectCwd={group.project.workspaceRoot}
-                    onPress={() => props.onSelectThread(thread)}
-                    isLast={i === visibleThreads.length - 1}
-                  />
+                    onArchive={() => props.onArchiveThread(thread)}
+                  >
+                    <ThreadRow
+                      thread={thread}
+                      projectCwd={group.project.workspaceRoot}
+                      onPress={() => props.onSelectThread(thread)}
+                      isLast={i === visibleThreads.length - 1}
+                    />
+                  </SwipeableThreadRow>
                 ))}
               </View>
             </View>
