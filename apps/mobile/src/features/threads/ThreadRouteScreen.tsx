@@ -10,7 +10,7 @@ import { dismissGitActionResult, useGitActionProgress } from "../../state/use-gi
 
 import { EmptyState } from "../../components/EmptyState";
 import { LoadingScreen } from "../../components/LoadingScreen";
-import { buildThreadDiffPath, buildThreadRoutePath } from "../../lib/routes";
+import { buildThreadReviewRoutePath, buildThreadRoutePath } from "../../lib/routes";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { connectionTone } from "../connection/connectionTone";
 
@@ -117,7 +117,7 @@ export function ThreadRouteScreen() {
 
   const handleOpenDiffPanel = useCallback(() => {
     if (!environmentId || !threadId) return;
-    void router.push(buildThreadDiffPath({ environmentId, threadId }));
+    void router.push(buildThreadReviewRoutePath({ environmentId, threadId }));
   }, [environmentId, threadId, router]);
 
   const handleOpenConnectionEditor = useCallback(() => {

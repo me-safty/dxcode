@@ -29,12 +29,6 @@ export function buildThreadReviewRoutePath(
   return `${buildThreadRoutePath(input)}/review`;
 }
 
-export function buildThreadDiffPath(
-  input: ThreadRouteInput | PlainThreadRouteInput,
-): string {
-  return `${buildThreadRoutePath(input)}/diff`;
-}
-
 export function dismissRoute(router: Router) {
   if (router.canGoBack()) {
     router.back();
