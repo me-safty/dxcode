@@ -36,6 +36,7 @@ jobs:
       tag: ${{ steps.release_meta.outputs.tag }}
       release_name: ${{ steps.release_meta.outputs.name }}
       short_sha: ${{ steps.release_meta.outputs.short_sha }}
+      previous_tag: ${{ steps.previous_tag.outputs.previous_tag }}
       cli_dist_tag: ${{ steps.release_meta.outputs.cli_dist_tag }}
       is_prerelease: ${{ steps.release_meta.outputs.is_prerelease }}
       make_latest: ${{ steps.release_meta.outputs.make_latest }}
@@ -43,6 +44,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -119,6 +122,14 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      - id: previous_tag
+        name: Resolve previous release tag
+        run: |
+          node scripts/resolve-previous-release-tag.ts \
+            --channel "${{ steps.release_meta.outputs.release_channel }}" \
+            --current-tag "${{ steps.release_meta.outputs.tag }}" \
+            --github-output
 
   build:
     name: Build ${{ matrix.label }}
@@ -337,6 +348,27 @@ jobs:
           done
 
       - name: Publish release
+        if: needs.preflight.outputs.previous_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ needs.preflight.outputs.ref }}
+          name: ${{ needs.preflight.outputs.release_name }}
+          generate_release_notes: true
+          previous_tag: ${{ needs.preflight.outputs.previous_tag }}
+          prerelease: ${{ needs.preflight.outputs.is_prerelease }}
+          make_latest: ${{ needs.preflight.outputs.make_latest }}
+          files: |
+            release-assets/*.dmg
+            release-assets/*.zip
+            release-assets/*.AppImage
+            release-assets/*.exe
+            release-assets/*.blockmap
+            release-assets/*.yml
+          fail_on_unmatched_files: true
+
+      - name: Publish first release
+        if: needs.preflight.outputs.previous_tag == ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.preflight.outputs.tag }}
