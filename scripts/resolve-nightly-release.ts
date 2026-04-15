@@ -14,7 +14,10 @@ interface NightlyReleaseMetadata {
 }
 
 const DateSchema = Schema.String.check(Schema.isPattern(/^\d{8}$/));
-const RunNumberSchema = Schema.FiniteFromString.check(Schema.isGreaterThanOrEqualTo(1));
+const RunNumberSchema = Schema.FiniteFromString.check(
+  Schema.isInt(),
+  Schema.isGreaterThanOrEqualTo(1),
+);
 const ShaSchema = Schema.String.check(Schema.isPattern(/^[0-9a-f]{7,40}$/i));
 const DesktopPackageJsonSchema = Schema.Struct({
   version: Schema.NonEmptyString,

@@ -204,11 +204,8 @@ const BuildEnvConfig = Config.all({
   mockUpdateServerPort: Config.string("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
 });
 
-const ValidMockUpdateServerPort = Schema.makeFilter(
-  (port: number) => Number.isInteger(port) || "Expected an integer mock update server port.",
-);
 const MockUpdateServerPortSchema = Schema.NumberFromString.check(
-  ValidMockUpdateServerPort,
+  Schema.isInt(),
   Schema.isBetween({ minimum: 1, maximum: 65535 }),
 );
 const decodeMockUpdateServerPort = Schema.decodeUnknownEffect(MockUpdateServerPortSchema);
