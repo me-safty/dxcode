@@ -552,9 +552,8 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               const normalizedCommand = yield* normalizeDispatchCommand(command);
               const result = yield* dispatchNormalizedCommand(normalizedCommand);
               if (normalizedCommand.type === "thread.archive") {
-                const readModel = yield* orchestrationEngine.getReadModel();
-                const thread = readModel.threads.find(
-                  (candidate) => candidate.id === normalizedCommand.threadId,
+                const thread = Option.getOrNull(
+                  yield* projectionSnapshotQuery.getThreadShellById(normalizedCommand.threadId),
                 );
 
                 if (thread?.session && thread.session.status !== "stopped") {

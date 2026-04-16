@@ -11,6 +11,7 @@ import {
   KeybindingRule,
   MessageId,
   OpenError,
+  type OrchestrationThreadShell,
   TerminalNotRunningError,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -163,6 +164,32 @@ const makeDefaultOrchestrationReadModel = () => {
         deletedAt: null,
       },
     ],
+  };
+};
+
+const makeDefaultOrchestrationThreadShell = (
+  overrides: Partial<OrchestrationThreadShell> = {},
+): OrchestrationThreadShell => {
+  const now = new Date().toISOString();
+  return {
+    id: defaultThreadId,
+    projectId: defaultProjectId,
+    title: "Default Thread",
+    modelSelection: defaultModelSelection,
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    latestTurn: null,
+    createdAt: now,
+    updatedAt: now,
+    archivedAt: null,
+    session: null,
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
+    ...overrides,
   };
 };
 
@@ -2950,7 +2977,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const threadId = ThreadId.make("thread-archive");
       const effects: string[] = [];
       const dispatchedCommands: Array<OrchestrationCommand> = [];
-      const baseReadModel = makeDefaultOrchestrationReadModel();
       const now = new Date().toISOString();
 
       yield* buildAppUnderTest({
@@ -2968,12 +2994,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 effects.push(`dispatch:${command.type}`);
                 return { sequence: dispatchedCommands.length };
               }),
-            getReadModel: () =>
-              Effect.succeed({
-                ...baseReadModel,
-                threads: [
-                  {
-                    ...baseReadModel.threads[0]!,
+          },
+          projectionSnapshotQuery: {
+            getThreadShellById: () =>
+              Effect.succeed(
+                Option.some(
+                  makeDefaultOrchestrationThreadShell({
                     id: threadId,
                     updatedAt: now,
                     session: {
@@ -2985,9 +3011,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                       lastError: null,
                       updatedAt: now,
                     },
-                  },
-                ],
-              }),
+                  }),
+                ),
+              ),
           },
         },
       });
@@ -3022,7 +3048,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const threadId = ThreadId.make("thread-archive-no-session");
       const effects: string[] = [];
       const dispatchedCommands: Array<OrchestrationCommand> = [];
-      const baseReadModel = makeDefaultOrchestrationReadModel();
 
       yield* buildAppUnderTest({
         layers: {
@@ -3039,17 +3064,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 effects.push(`dispatch:${command.type}`);
                 return { sequence: dispatchedCommands.length };
               }),
-            getReadModel: () =>
-              Effect.succeed({
-                ...baseReadModel,
-                threads: [
-                  {
-                    ...baseReadModel.threads[0]!,
-                    id: threadId,
-                    session: null,
-                  },
-                ],
-              }),
+          },
+          projectionSnapshotQuery: {
+            getThreadShellById: () =>
+              Effect.succeed(
+                Option.some(makeDefaultOrchestrationThreadShell({ id: threadId, session: null })),
+              ),
           },
         },
       });
@@ -3081,7 +3101,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         const threadId = ThreadId.make("thread-archive-stopped-session");
         const effects: string[] = [];
         const dispatchedCommands: Array<OrchestrationCommand> = [];
-        const baseReadModel = makeDefaultOrchestrationReadModel();
         const now = new Date().toISOString();
 
         yield* buildAppUnderTest({
@@ -3099,12 +3118,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   effects.push(`dispatch:${command.type}`);
                   return { sequence: dispatchedCommands.length };
                 }),
-              getReadModel: () =>
-                Effect.succeed({
-                  ...baseReadModel,
-                  threads: [
-                    {
-                      ...baseReadModel.threads[0]!,
+            },
+            projectionSnapshotQuery: {
+              getThreadShellById: () =>
+                Effect.succeed(
+                  Option.some(
+                    makeDefaultOrchestrationThreadShell({
                       id: threadId,
                       updatedAt: now,
                       session: {
@@ -3116,9 +3135,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                         lastError: null,
                         updatedAt: now,
                       },
-                    },
-                  ],
-                }),
+                    }),
+                  ),
+                ),
             },
           },
         });
@@ -3148,7 +3167,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const threadId = ThreadId.make("thread-archive-stop-failure");
       const effects: string[] = [];
       const dispatchedCommands: Array<OrchestrationCommand> = [];
-      const baseReadModel = makeDefaultOrchestrationReadModel();
       const now = new Date().toISOString();
 
       yield* buildAppUnderTest({
@@ -3173,12 +3191,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }
               return Effect.succeed({ sequence: dispatchedCommands.length });
             },
-            getReadModel: () =>
-              Effect.succeed({
-                ...baseReadModel,
-                threads: [
-                  {
-                    ...baseReadModel.threads[0]!,
+          },
+          projectionSnapshotQuery: {
+            getThreadShellById: () =>
+              Effect.succeed(
+                Option.some(
+                  makeDefaultOrchestrationThreadShell({
                     id: threadId,
                     updatedAt: now,
                     session: {
@@ -3190,9 +3208,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                       lastError: null,
                       updatedAt: now,
                     },
-                  },
-                ],
-              }),
+                  }),
+                ),
+              ),
           },
         },
       });
@@ -3226,7 +3244,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const threadId = ThreadId.make("thread-archive-stop-defect");
       const effects: string[] = [];
       const dispatchedCommands: Array<OrchestrationCommand> = [];
-      const baseReadModel = makeDefaultOrchestrationReadModel();
       const now = new Date().toISOString();
 
       yield* buildAppUnderTest({
@@ -3246,12 +3263,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }
               return Effect.succeed({ sequence: dispatchedCommands.length });
             },
-            getReadModel: () =>
-              Effect.succeed({
-                ...baseReadModel,
-                threads: [
-                  {
-                    ...baseReadModel.threads[0]!,
+          },
+          projectionSnapshotQuery: {
+            getThreadShellById: () =>
+              Effect.succeed(
+                Option.some(
+                  makeDefaultOrchestrationThreadShell({
                     id: threadId,
                     updatedAt: now,
                     session: {
@@ -3263,9 +3280,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                       lastError: null,
                       updatedAt: now,
                     },
-                  },
-                ],
-              }),
+                  }),
+                ),
+              ),
           },
         },
       });
