@@ -456,9 +456,17 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           threadId,
           existingStatus: existingContext.session.status,
         }).pipe(this.runPromise);
-        this.disposeSession(existingContext, {
-          emitLifecycleEvent: false,
-        });
+        try {
+          this.disposeSession(existingContext, {
+            emitLifecycleEvent: false,
+          });
+        } catch (error) {
+          await Effect.logWarning("codex app-server failed to dispose existing session", {
+            threadId,
+            existingStatus: existingContext.session.status,
+            cause: error instanceof Error ? error.message : String(error),
+          }).pipe(this.runPromise);
+        }
       }
 
       const resolvedCwd = input.cwd ?? process.cwd();
