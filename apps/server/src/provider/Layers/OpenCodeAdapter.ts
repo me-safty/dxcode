@@ -54,6 +54,7 @@ interface OpenCodeSessionContext {
   readonly pendingQuestions: Map<string, QuestionRequest>;
   readonly messageRoleById: Map<string, "user" | "assistant">;
   readonly partById: Map<string, Part>;
+  readonly emittedTextByPartId: Map<string, string>;
   readonly emittedTextLengthByPartId: Map<string, number>;
   readonly completedAssistantPartIds: Set<string>;
   readonly turns: Array<OpenCodeTurnSnapshot>;
@@ -234,6 +235,59 @@ function textFromPart(part: Part): string | undefined {
   }
 }
 
+function commonPrefixLength(left: string, right: string): number {
+  let index = 0;
+  while (index < left.length && index < right.length && left[index] === right[index]) {
+    index += 1;
+  }
+  return index;
+}
+
+function suffixPrefixOverlap(text: string, delta: string): number {
+  const maxLength = Math.min(text.length, delta.length);
+  for (let length = maxLength; length > 0; length -= 1) {
+    if (text.endsWith(delta.slice(0, length))) {
+      return length;
+    }
+  }
+  return 0;
+}
+
+function resolveLatestAssistantText(previousText: string | undefined, nextText: string): string {
+  if (previousText && previousText.length > nextText.length && previousText.startsWith(nextText)) {
+    return previousText;
+  }
+  return nextText;
+}
+
+export function mergeOpenCodeAssistantText(
+  previousText: string | undefined,
+  nextText: string,
+): {
+  readonly latestText: string;
+  readonly deltaToEmit: string;
+} {
+  const latestText = resolveLatestAssistantText(previousText, nextText);
+  return {
+    latestText,
+    deltaToEmit: latestText.slice(commonPrefixLength(previousText ?? "", latestText)),
+  };
+}
+
+export function appendOpenCodeAssistantTextDelta(
+  previousText: string,
+  delta: string,
+): {
+  readonly nextText: string;
+  readonly deltaToEmit: string;
+} {
+  const deltaToEmit = delta.slice(suffixPrefixOverlap(previousText, delta));
+  return {
+    nextText: previousText + deltaToEmit,
+    deltaToEmit,
+  };
+}
+
 function isoFromEpochMs(value: number | undefined): string | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return undefined;
@@ -353,7 +407,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
             message,
             class: "transport_error",
           },
-        });
+        }).catch(() => undefined);
         void emitPromise({
           ...buildEventBase({ threadId: context.session.threadId, turnId }),
           type: "session.exited",
@@ -362,7 +416,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
             recoverable: false,
             exitKind: "error",
           },
-        });
+        }).catch(() => undefined);
       };
 
       /** Emit content.delta and item.completed events for an assistant text part. */
@@ -376,9 +430,19 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
         if (text === undefined) {
           return;
         }
-        const previousLength = context.emittedTextLengthByPartId.get(part.id) ?? 0;
-        if (text.length > previousLength) {
-          context.emittedTextLengthByPartId.set(part.id, text.length);
+        const previousText = context.emittedTextByPartId.get(part.id);
+        const { latestText, deltaToEmit } = mergeOpenCodeAssistantText(previousText, text);
+        context.emittedTextByPartId.set(part.id, latestText);
+        context.emittedTextLengthByPartId.set(part.id, latestText.length);
+        if (latestText !== text) {
+          context.partById.set(
+            part.id,
+            (part.type === "text" || part.type === "reasoning"
+              ? { ...part, text: latestText }
+              : part) satisfies Part,
+          );
+        }
+        if (deltaToEmit.length > 0) {
           await emitPromise({
             ...buildEventBase({
               threadId: context.session.threadId,
@@ -393,7 +457,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
             type: "content.delta",
             payload: {
               streamKind: resolveTextStreamKind(part),
-              delta: text.slice(previousLength),
+              delta: deltaToEmit,
             },
           });
         }
@@ -417,7 +481,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
               itemType: "assistant_message",
               status: "completed",
               title: "Assistant message",
-              ...(text.length > 0 ? { detail: text } : {}),
+              ...(latestText.length > 0 ? { detail: latestText } : {}),
             },
           });
         }
@@ -465,7 +529,10 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
 
                 case "message.part.delta": {
                   const existingPart = context.partById.get(event.properties.partID);
-                  const role = existingPart ? messageRoleForPart(context, existingPart) : undefined;
+                  if (!existingPart) {
+                    break;
+                  }
+                  const role = messageRoleForPart(context, existingPart);
                   if (role !== "assistant") {
                     break;
                   }
@@ -474,12 +541,25 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
                   if (delta.length === 0) {
                     break;
                   }
-                  const previousLength =
-                    context.emittedTextLengthByPartId.get(event.properties.partID) ?? 0;
-                  context.emittedTextLengthByPartId.set(
-                    event.properties.partID,
-                    previousLength + delta.length,
+                  const previousText =
+                    context.emittedTextByPartId.get(event.properties.partID) ??
+                    textFromPart(existingPart) ??
+                    "";
+                  const { nextText, deltaToEmit } = appendOpenCodeAssistantTextDelta(
+                    previousText,
+                    delta,
                   );
+                  if (deltaToEmit.length === 0) {
+                    break;
+                  }
+                  context.emittedTextByPartId.set(event.properties.partID, nextText);
+                  context.emittedTextLengthByPartId.set(event.properties.partID, nextText.length);
+                  if (existingPart.type === "text" || existingPart.type === "reasoning") {
+                    context.partById.set(event.properties.partID, {
+                      ...existingPart,
+                      text: nextText,
+                    });
+                  }
                   await emitPromise({
                     ...buildEventBase({
                       threadId: context.session.threadId,
@@ -490,7 +570,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
                     type: "content.delta",
                     payload: {
                       streamKind,
-                      delta,
+                      delta: deltaToEmit,
                     },
                   });
                   break;
@@ -836,6 +916,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
             pendingPermissions: new Map(),
             pendingQuestions: new Map(),
             partById: new Map(),
+            emittedTextByPartId: new Map(),
             emittedTextLengthByPartId: new Map(),
             messageRoleById: new Map(),
             completedAssistantPartIds: new Set(),
@@ -1153,25 +1234,22 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
           const assistantMessages = (messages.data ?? []).filter(
             (entry) => entry.info.role === "assistant",
           );
-          const target =
-            assistantMessages[Math.max(0, assistantMessages.length - numTurns - 1)] ?? null;
-          if (target) {
-            yield* Effect.tryPromise({
-              try: () =>
-                context.client.session.revert({
-                  sessionID: context.openCodeSessionId,
-                  messageID: target.info.id,
-                }),
-              catch: (cause) =>
-                new ProviderAdapterRequestError({
-                  provider: PROVIDER,
-                  method: "session.revert",
-                  detail:
-                    cause instanceof Error ? cause.message : "Failed to revert OpenCode turn.",
-                  cause,
-                }),
-            });
-          }
+          const targetIndex = assistantMessages.length - numTurns - 1;
+          const target = targetIndex >= 0 ? assistantMessages[targetIndex] : null;
+          yield* Effect.tryPromise({
+            try: () =>
+              context.client.session.revert({
+                sessionID: context.openCodeSessionId,
+                ...(target ? { messageID: target.info.id } : {}),
+              }),
+            catch: (cause) =>
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "session.revert",
+                detail: cause instanceof Error ? cause.message : "Failed to revert OpenCode turn.",
+                cause,
+              }),
+          });
 
           return yield* readThread(threadId);
         },
