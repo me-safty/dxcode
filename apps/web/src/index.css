@@ -4,9 +4,12 @@
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
 @custom-variant wco (&:is(.wco, .wco *));
 
-@theme inline {
+@theme {
   --font-sans: var(--app-font-ui);
   --font-mono: var(--app-font-code);
+}
+
+@theme inline {
   --animate-skeleton: skeleton 2s -1s infinite linear;
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);

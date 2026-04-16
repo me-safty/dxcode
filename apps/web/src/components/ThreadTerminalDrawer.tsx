@@ -47,6 +47,7 @@ import { selectTerminalEventEntries, useTerminalStateStore } from "../terminalSt
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
 const MULTI_CLICK_SELECTION_ACTION_DELAY_MS = 260;
+const TERMINAL_FONT_CHANGE_DEBOUNCE_MS = 150;
 
 function maxDrawerHeight(): number {
   if (typeof window === "undefined") return DEFAULT_THREAD_TERMINAL_HEIGHT;
@@ -532,32 +533,52 @@ export function TerminalViewport({
     window.addEventListener("mouseup", handleMouseUp);
     mount.addEventListener("pointerdown", handlePointerDown);
 
-    const themeObserver = new MutationObserver(() => {
+    let pendingFontChangeTimer: number | null = null;
+
+    const applyPendingFontChange = () => {
+      pendingFontChangeTimer = null;
       const activeTerminal = terminalRef.current;
       const activeFitAddon = fitAddonRef.current;
       if (!activeTerminal || !activeFitAddon) return;
 
       const nextFontFamily = getResolvedCodeFontFamily();
-      const hasFontFamilyChanged = activeTerminal.options.fontFamily !== nextFontFamily;
+      if (activeTerminal.options.fontFamily === nextFontFamily) return;
+
+      const wasAtBottom =
+        activeTerminal.buffer.active.viewportY >= activeTerminal.buffer.active.baseY;
+      activeTerminal.options.fontFamily = nextFontFamily;
+      activeFitAddon.fit();
+      if (wasAtBottom) {
+        activeTerminal.scrollToBottom();
+      }
+      void api.terminal
+        .resize({
+          threadId,
+          terminalId,
+          cols: activeTerminal.cols,
+          rows: activeTerminal.rows,
+        })
+        .catch(() => undefined);
+    };
+
+    const scheduleFontChange = () => {
+      if (pendingFontChangeTimer !== null) {
+        window.clearTimeout(pendingFontChangeTimer);
+      }
+      pendingFontChangeTimer = window.setTimeout(
+        applyPendingFontChange,
+        TERMINAL_FONT_CHANGE_DEBOUNCE_MS,
+      );
+    };
+
+    const themeObserver = new MutationObserver(() => {
+      const activeTerminal = terminalRef.current;
+      if (!activeTerminal) return;
 
       activeTerminal.options.theme = terminalThemeFromApp(containerRef.current);
 
-      if (hasFontFamilyChanged) {
-        const wasAtBottom =
-          activeTerminal.buffer.active.viewportY >= activeTerminal.buffer.active.baseY;
-        activeTerminal.options.fontFamily = nextFontFamily;
-        activeFitAddon.fit();
-        if (wasAtBottom) {
-          activeTerminal.scrollToBottom();
-        }
-        void api.terminal
-          .resize({
-            threadId,
-            terminalId,
-            cols: activeTerminal.cols,
-            rows: activeTerminal.rows,
-          })
-          .catch(() => undefined);
+      if (getResolvedCodeFontFamily() !== activeTerminal.options.fontFamily) {
+        scheduleFontChange();
       }
 
       activeTerminal.refresh(0, activeTerminal.rows - 1);
@@ -745,6 +766,10 @@ export function TerminalViewport({
       window.removeEventListener("mouseup", handleMouseUp);
       mount.removeEventListener("pointerdown", handlePointerDown);
       themeObserver.disconnect();
+      if (pendingFontChangeTimer !== null) {
+        window.clearTimeout(pendingFontChangeTimer);
+        pendingFontChangeTimer = null;
+      }
       terminalRef.current = null;
       fitAddonRef.current = null;
       terminal.dispose();

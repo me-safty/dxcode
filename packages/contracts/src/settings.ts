@@ -2,12 +2,15 @@ import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas";
+import { DEFAULT_CODE_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY } from "./fontDefaults";
 import {
   ClaudeModelOptions,
   CodexModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
 } from "./model";
 import { ModelSelection } from "./orchestration";
+
+export { DEFAULT_CODE_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY };
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -22,11 +25,6 @@ export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "upda
 export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at"]);
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
-
-export const DEFAULT_UI_FONT_FAMILY =
-  '"DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
-export const DEFAULT_CODE_FONT_FAMILY =
-  '"SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace';
 
 export const ClientSettingsSchema = Schema.Struct({
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
