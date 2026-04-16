@@ -486,22 +486,35 @@ function MarkdownCodeBlock({
   const wrapLabel = wrapped ? "Disable line wrap" : "Wrap lines";
   const copyLabel = copied ? "Copied" : "Copy code";
   const handleCopy = useCallback(() => {
-    if (typeof navigator === "undefined" || navigator.clipboard == null) {
+    const onSuccess = () => {
+      if (copiedTimerRef.current != null) {
+        clearTimeout(copiedTimerRef.current);
+      }
+      setCopied(true);
+      copiedTimerRef.current = setTimeout(() => {
+        setCopied(false);
+        copiedTimerRef.current = null;
+      }, 1200);
+    };
+
+    if (typeof navigator !== "undefined" && navigator.clipboard != null) {
+      void navigator.clipboard.writeText(code).then(onSuccess).catch(() => undefined);
       return;
     }
-    void navigator.clipboard
-      .writeText(code)
-      .then(() => {
-        if (copiedTimerRef.current != null) {
-          clearTimeout(copiedTimerRef.current);
-        }
-        setCopied(true);
-        copiedTimerRef.current = setTimeout(() => {
-          setCopied(false);
-          copiedTimerRef.current = null;
-        }, 1200);
-      })
-      .catch(() => undefined);
+
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = code;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      onSuccess();
+    } catch {
+      // Ignore clipboard failures in unsupported browser contexts.
+    }
   }, [code]);
 
   useEffect(
