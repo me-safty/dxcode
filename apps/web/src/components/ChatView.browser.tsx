@@ -658,20 +658,32 @@ function createProjectDeletionSnapshot(options: {
       },
     ],
     threads: [
-      ...Array.from({ length: options.archivedThreadCount }, (_, index) => ({
-        ...secondaryProjectThread,
-        id: `thread-delete-archived-${index + 1}` as ThreadId,
-        projectId: SIDEBAR_DELETE_PROJECT_ID,
-        title: `Archived thread ${index + 1}`,
-        archivedAt: isoAt(2_000 + index),
-      })),
-      ...Array.from({ length: options.activeThreadCount }, (_, index) => ({
-        ...secondaryProjectThread,
-        id: `thread-delete-active-${index + 1}` as ThreadId,
-        projectId: SIDEBAR_DELETE_PROJECT_ID,
-        title: `Active thread ${index + 1}`,
-        archivedAt: null,
-      })),
+      ...Array.from({ length: options.archivedThreadCount }, (_, index) => {
+        const threadId = `thread-delete-archived-${index + 1}` as ThreadId;
+        return {
+          ...secondaryProjectThread,
+          id: threadId,
+          projectId: SIDEBAR_DELETE_PROJECT_ID,
+          title: `Archived thread ${index + 1}`,
+          archivedAt: isoAt(2_000 + index),
+          session: secondaryProjectThread.session
+            ? { ...secondaryProjectThread.session, threadId }
+            : null,
+        };
+      }),
+      ...Array.from({ length: options.activeThreadCount }, (_, index) => {
+        const threadId = `thread-delete-active-${index + 1}` as ThreadId;
+        return {
+          ...secondaryProjectThread,
+          id: threadId,
+          projectId: SIDEBAR_DELETE_PROJECT_ID,
+          title: `Active thread ${index + 1}`,
+          archivedAt: null,
+          session: secondaryProjectThread.session
+            ? { ...secondaryProjectThread.session, threadId }
+            : null,
+        };
+      }),
       {
         ...secondaryProjectThread,
         projectId: SIDEBAR_OTHER_PROJECT_ID,
@@ -1812,15 +1824,17 @@ describe("ChatView timeline estimator parity (full app)", () => {
         expect(confirm).toHaveBeenCalledWith(`Remove project "${SIDEBAR_DELETE_PROJECT_NAME}"?`);
       });
 
-      const dispatchRequest = wsRequests.find(
-        (request) =>
-          request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
-          request.type === "project.delete",
-      ) as { _tag: string; type?: string; projectId?: string } | undefined;
-      expect(dispatchRequest).toMatchObject({
-        _tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
-        type: "project.delete",
-        projectId: SIDEBAR_DELETE_PROJECT_ID,
+      await vi.waitFor(() => {
+        const dispatchRequest = wsRequests.find(
+          (request) =>
+            request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+            request.type === "project.delete",
+        ) as { _tag: string; type?: string; projectId?: string } | undefined;
+        expect(dispatchRequest).toMatchObject({
+          _tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+          type: "project.delete",
+          projectId: SIDEBAR_DELETE_PROJECT_ID,
+        });
       });
       expect(document.body.textContent).not.toContain(
         "Delete or archive all active threads in this project before removing it.",
