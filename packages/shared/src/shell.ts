@@ -510,10 +510,10 @@ const isExecutableFile = Effect.fn("shell.isExecutableFile")(function* (
   return canExecuteFile(filePath);
 });
 
-const resolveCommandPathForPlatform = Effect.fn("shell.resolveCommandPathForPlatform")(function* (
+const resolveCommandPathsForPlatform = Effect.fn("shell.resolveCommandPathsForPlatform")(function* (
   command: string,
   options: CommandAvailabilityOptions & { readonly platform: NodeJS.Platform },
-): Effect.fn.Return<string, CommandResolutionError, FileSystem.FileSystem | Path.Path> {
+): Effect.fn.Return<ReadonlyArray<string>, never, FileSystem.FileSystem | Path.Path> {
   const path = yield* Path.Path;
   const platform = options.platform;
   const env = options.env ?? process.env;
@@ -525,18 +525,28 @@ const resolveCommandPathForPlatform = Effect.fn("shell.resolveCommandPathForPlat
     path.extname,
   );
 
+  const seenPaths = new Set<string>();
+  const addResolvedPath = (resolvedPaths: string[], candidatePath: string): void => {
+    const normalized = platform === "win32" ? candidatePath.toLowerCase() : candidatePath;
+    if (!seenPaths.has(normalized)) {
+      seenPaths.add(normalized);
+      resolvedPaths.push(candidatePath);
+    }
+  };
+
   if (command.includes("/") || command.includes("\\")) {
+    const resolvedPaths: string[] = [];
     for (const candidate of commandCandidates) {
       if (yield* isExecutableFile(candidate, platform, windowsPathExtensions)) {
-        return candidate;
+        addResolvedPath(resolvedPaths, candidate);
       }
     }
-    return yield* new CommandResolutionError({ command, reason: "not-found" });
+    return resolvedPaths;
   }
 
   const pathValue = resolvePathEnvironmentVariable(env);
   if (pathValue.length === 0) {
-    return yield* new CommandResolutionError({ command, reason: "not-found" });
+    return [];
   }
   const pathEntries: string[] = [];
   for (const entry of pathValue.split(pathDelimiterForPlatform(platform))) {
@@ -546,25 +556,35 @@ const resolveCommandPathForPlatform = Effect.fn("shell.resolveCommandPathForPlat
     }
   }
 
+  const resolvedPaths: string[] = [];
   for (const pathEntry of pathEntries) {
     for (const candidate of commandCandidates) {
       const candidatePath = path.join(pathEntry, candidate);
       if (yield* isExecutableFile(candidatePath, platform, windowsPathExtensions)) {
-        return candidatePath;
+        addResolvedPath(resolvedPaths, candidatePath);
       }
     }
   }
-  return yield* new CommandResolutionError({ command, reason: "not-found" });
+  return resolvedPaths;
+});
+
+export const resolveCommandPaths = Effect.fn("shell.resolveCommandPaths")(function* (
+  command: string,
+  options: CommandAvailabilityOptions = {},
+) {
+  return yield* resolveCommandPathsForPlatform(command, {
+    env: options.env ?? (yield* HostProcessEnvironment),
+    platform: yield* HostProcessPlatform,
+  });
 });
 
 export const resolveCommandPath = Effect.fn("shell.resolveCommandPath")(function* (
   command: string,
   options: CommandAvailabilityOptions = {},
 ) {
-  return yield* resolveCommandPathForPlatform(command, {
-    env: options.env ?? (yield* HostProcessEnvironment),
-    platform: yield* HostProcessPlatform,
-  });
+  const paths = yield* resolveCommandPaths(command, options);
+  const first = paths[0];
+  return first ?? (yield* new CommandResolutionError({ command, reason: "not-found" }));
 });
 
 export const resolveSpawnCommand = Effect.fn("shell.resolveSpawnCommand")(function* (

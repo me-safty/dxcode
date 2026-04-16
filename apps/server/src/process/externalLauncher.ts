@@ -13,7 +13,11 @@ import {
   type LaunchEditorInput,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { isCommandAvailable, resolveSpawnCommand } from "@t3tools/shared/shell";
+import {
+  isCommandAvailable,
+  resolveCommandPaths,
+  resolveSpawnCommand,
+} from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -33,6 +37,7 @@ export type { LaunchEditorInput };
 interface EditorLaunch {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
+  readonly env?: NodeJS.ProcessEnv;
 }
 
 interface ProcessLaunch {
@@ -152,6 +157,45 @@ const resolveAvailableCommand = Effect.fn("externalLauncher.resolveAvailableComm
   }
   return Option.none();
 });
+
+function isLikelyPrereleaseZedPath(filePath: string): boolean {
+  const normalized = filePath.toLowerCase();
+  return normalized.includes("nightly") || normalized.includes("preview");
+}
+
+const resolvePreferredZedLaunch = Effect.fn("externalLauncher.resolvePreferredZedLaunch")(
+  function* (commands: ReadonlyArray<string>, platform: NodeJS.Platform, env: NodeJS.ProcessEnv) {
+    const path = yield* Path.Path;
+    const resolvedCommands: Array<{ command: string; resolvedPath: string }> = [];
+    for (const command of commands) {
+      const resolvedPaths = yield* resolveCommandPaths(command, { env });
+      resolvedCommands.push(...resolvedPaths.map((resolvedPath) => ({ command, resolvedPath })));
+    }
+
+    const selected =
+      resolvedCommands.find(({ resolvedPath }) => !isLikelyPrereleaseZedPath(resolvedPath)) ??
+      resolvedCommands[0];
+    if (!selected) return Option.none<Pick<EditorLaunch, "command" | "env">>();
+
+    const firstForCommand = resolvedCommands.find(({ command }) => command === selected.command);
+    if (firstForCommand?.resolvedPath === selected.resolvedPath) {
+      return Option.some({ command: selected.command });
+    }
+
+    const selectedDir = path.dirname(selected.resolvedPath);
+    const existingPath = env.PATH ?? env.Path ?? env.path ?? "";
+    const nextPath = existingPath
+      ? `${selectedDir}${platform === "win32" ? ";" : ":"}${existingPath}`
+      : selectedDir;
+    return Option.some({
+      command: selected.command,
+      env:
+        platform === "win32"
+          ? { ...env, PATH: nextPath, Path: nextPath }
+          : { ...env, PATH: nextPath },
+    });
+  },
+);
 
 function encodeUtf16LeBase64(input: string): string {
   const bytes = new Uint8Array(input.length * 2);
@@ -327,12 +371,16 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
   }
 
   if (editorDef.commands) {
-    const command = Option.getOrElse(
-      yield* resolveAvailableCommand(editorDef.commands, env),
-      () => editorDef.commands[0],
-    );
+    const preferredZedLaunch =
+      editorDef.id === "zed"
+        ? yield* resolvePreferredZedLaunch(editorDef.commands, platform, env)
+        : Option.none<Pick<EditorLaunch, "command" | "env">>();
+    const availableCommand = yield* resolveAvailableCommand(editorDef.commands, env);
+    const selected = Option.getOrElse(preferredZedLaunch, () => ({
+      command: Option.getOrElse(availableCommand, () => editorDef.commands[0]),
+    }));
     return {
-      command,
+      ...selected,
       args: resolveEditorArgs(editorDef, input.cwd),
     };
   }
@@ -373,7 +421,7 @@ const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProcess")(fu
   ExternalLauncherError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
-  const env = yield* readCommandLookupEnv;
+  const env = launch.env ?? (yield* readCommandLookupEnv);
   if (!(yield* isCommandAvailable(launch.command, { env }))) {
     return yield* new ExternalLauncherError({
       message: `Editor command not found: ${launch.command}`,
@@ -387,6 +435,7 @@ const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProcess")(fu
       args: spawnCommand.args,
       options: {
         detached: true,
+        env,
         shell: spawnCommand.shell,
         stdin: "ignore",
         stdout: "ignore",
