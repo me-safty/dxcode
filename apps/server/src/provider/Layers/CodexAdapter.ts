@@ -268,7 +268,11 @@ function itemTitle(itemType: CanonicalItemType, item?: CodexLifecycleItem): stri
 }
 
 function itemDetail(item: CodexLifecycleItem): string | undefined {
+  const itemType = toCanonicalItemType(item.type);
+  const itemRecord = item as Record<string, unknown>;
+  const action = itemRecord.action as Record<string, unknown> | undefined;
   const candidates = [
+    ...(itemType === "web_search" ? [itemRecord.query, action?.query, action?.url] : []),
     "command" in item ? item.command : undefined,
     "title" in item ? item.title : undefined,
     "summary" in item ? item.summary : undefined,
@@ -276,6 +280,7 @@ function itemDetail(item: CodexLifecycleItem): string | undefined {
     "path" in item ? item.path : undefined,
     "prompt" in item ? item.prompt : undefined,
   ];
+
   for (const candidate of candidates) {
     const trimmed = typeof candidate === "string" ? trimText(candidate) : undefined;
     if (!trimmed) continue;
