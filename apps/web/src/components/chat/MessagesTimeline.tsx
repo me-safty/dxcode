@@ -287,7 +287,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
       className={cn(
-        "pb-4",
+        row.kind === "message" && row.message.role === "user" ? "pb-8" : "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
       )}
       data-timeline-row-id={row.id}
@@ -306,70 +306,74 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const canRevertAgentWork = typeof row.revertTurnCount === "number";
           return (
             <div className="flex justify-end">
-              <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
-                {userImages.length > 0 && (
-                  <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-                    {userImages.map(
-                      (image: NonNullable<TimelineMessage["attachments"]>[number]) => (
-                        <div
-                          key={image.id}
-                          className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+              <div className="group relative w-fit max-w-[80%] pb-8">
+                <div className="rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+                  {userImages.length > 0 && (
+                    <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
+                      {userImages.map(
+                        (image: NonNullable<TimelineMessage["attachments"]>[number]) => (
+                          <div
+                            key={image.id}
+                            className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                          >
+                            {image.previewUrl ? (
+                              <button
+                                type="button"
+                                className="h-full w-full cursor-zoom-in"
+                                aria-label={`Preview ${image.name}`}
+                                onClick={() => {
+                                  const preview = buildExpandedImagePreview(userImages, image.id);
+                                  if (!preview) return;
+                                  ctx.onImageExpand(preview);
+                                }}
+                              >
+                                <img
+                                  src={image.previewUrl}
+                                  alt={image.name}
+                                  className="block h-auto max-h-[220px] w-full object-cover"
+                                />
+                              </button>
+                            ) : (
+                              <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                                {image.name}
+                              </div>
+                            )}
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  )}
+                  {(displayedUserMessage.visibleText.trim().length > 0 ||
+                    terminalContexts.length > 0) && (
+                    <UserMessageBody
+                      text={displayedUserMessage.visibleText}
+                      terminalContexts={terminalContexts}
+                    />
+                  )}
+                </div>
+                <div className="pointer-events-none absolute right-0 bottom-0 flex items-center gap-2 whitespace-nowrap opacity-0 transition-opacity duration-200 group-focus-within:opacity-100 group-hover:opacity-100">
+                  <div className="pointer-events-none flex items-center gap-2 whitespace-nowrap">
+                    <p className="text-right text-xs text-muted-foreground/50">
+                      {formatTimestamp(row.message.createdAt, ctx.timestampFormat)}
+                    </p>
+                    <div className="pointer-events-auto flex items-center gap-1.5">
+                      {displayedUserMessage.copyText && (
+                        <MessageCopyButton text={displayedUserMessage.copyText} />
+                      )}
+                      {canRevertAgentWork && (
+                        <Button
+                          type="button"
+                          size="xs"
+                          variant="outline"
+                          disabled={ctx.isRevertingCheckpoint || ctx.isWorking}
+                          onClick={() => ctx.onRevertUserMessage(row.message.id)}
+                          title="Revert to this message"
                         >
-                          {image.previewUrl ? (
-                            <button
-                              type="button"
-                              className="h-full w-full cursor-zoom-in"
-                              aria-label={`Preview ${image.name}`}
-                              onClick={() => {
-                                const preview = buildExpandedImagePreview(userImages, image.id);
-                                if (!preview) return;
-                                ctx.onImageExpand(preview);
-                              }}
-                            >
-                              <img
-                                src={image.previewUrl}
-                                alt={image.name}
-                                className="block h-auto max-h-[220px] w-full object-cover"
-                              />
-                            </button>
-                          ) : (
-                            <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                              {image.name}
-                            </div>
-                          )}
-                        </div>
-                      ),
-                    )}
+                          <Undo2Icon className="size-3" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                )}
-                {(displayedUserMessage.visibleText.trim().length > 0 ||
-                  terminalContexts.length > 0) && (
-                  <UserMessageBody
-                    text={displayedUserMessage.visibleText}
-                    terminalContexts={terminalContexts}
-                  />
-                )}
-                <div className="mt-1.5 flex items-center justify-end gap-2">
-                  <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
-                    {displayedUserMessage.copyText && (
-                      <MessageCopyButton text={displayedUserMessage.copyText} />
-                    )}
-                    {canRevertAgentWork && (
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        disabled={ctx.isRevertingCheckpoint || ctx.isWorking}
-                        onClick={() => ctx.onRevertUserMessage(row.message.id)}
-                        title="Revert to this message"
-                      >
-                        <Undo2Icon className="size-3" />
-                      </Button>
-                    )}
-                  </div>
-                  <p className="text-right text-xs text-muted-foreground/50">
-                    {formatTimestamp(row.message.createdAt, ctx.timestampFormat)}
-                  </p>
                 </div>
               </div>
             </div>
@@ -431,12 +435,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   </p>
                   {assistantCopyState.visible ? (
                     <div className="flex items-center opacity-0 transition-opacity duration-200  group-hover/assistant:opacity-100">
-                      <MessageCopyButton
-                        text={assistantCopyState.text ?? ""}
-                        size="icon-xs"
-                        variant="outline"
-                        className="border-border/50 bg-background/35 text-muted-foreground/45 shadow-none hover:border-border/70 hover:bg-background/55 hover:text-muted-foreground/70"
-                      />
+                      <MessageCopyButton text={assistantCopyState.text ?? ""} />
                     </div>
                   ) : null}
                 </div>

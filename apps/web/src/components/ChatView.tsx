@@ -3182,11 +3182,11 @@ export default function ChatView(props: ChatViewProps) {
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background dark:bg-neutral-950">
       {/* Top bar */}
       <header
         className={cn(
-          "border-b border-border px-3 sm:px-5",
+          "px-3 sm:px-5",
           isElectron
             ? cn(
                 "drag-region flex h-[52px] items-center wco:h-[env(titlebar-area-height)]",
