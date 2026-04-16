@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { Duration, Effect, FileSystem, Layer } from "effect";
@@ -11,6 +13,8 @@ import {
 } from "./RepositoryIdentityResolver.ts";
 
 const normalizePathSeparators = (value: string) => value.replaceAll("\\", "/");
+const normalizeResolvedPath = (value: string) =>
+  normalizePathSeparators(realpathSync.native(value));
 
 const git = (cwd: string, args: ReadonlyArray<string>) =>
   Effect.promise(() => runProcess("git", ["-C", cwd, ...args]));
@@ -43,7 +47,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
 
       expect(identity).not.toBeNull();
       expect(identity?.canonicalKey).toBe("github.com/t3tools/t3code");
-      expect(normalizePathSeparators(identity?.rootPath ?? "")).toBe(normalizePathSeparators(cwd));
+      expect(normalizeResolvedPath(identity?.rootPath ?? "")).toBe(normalizeResolvedPath(cwd));
       expect(identity?.displayName).toBe("t3tools/t3code");
       expect(identity?.provider).toBe("github");
       expect(identity?.owner).toBe("t3tools");
@@ -68,9 +72,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
 
       expect(identity).not.toBeNull();
       expect(identity?.canonicalKey).toBe("github.com/t3tools/t3code");
-      expect(normalizePathSeparators(identity?.rootPath ?? "")).toBe(
-        normalizePathSeparators(repoRoot),
-      );
+      expect(normalizeResolvedPath(identity?.rootPath ?? "")).toBe(normalizeResolvedPath(repoRoot));
     }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
   );
 
