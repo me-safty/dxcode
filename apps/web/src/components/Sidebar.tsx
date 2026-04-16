@@ -2199,21 +2199,25 @@ function ProjectSortMenu({
     setThreadPreviewInput(String(threadPreviewCount));
   }, [threadPreviewCount]);
 
-  const commitThreadPreviewCount = useCallback(
+  const resolveThreadPreviewInputValue = useCallback(
     (nextValue: string) => {
       const parsedValue = Number.parseInt(nextValue, 10);
-      if (!Number.isInteger(parsedValue)) {
-        setThreadPreviewInput(String(threadPreviewCount));
-        return;
-      }
+      return Number.isInteger(parsedValue)
+        ? clampSidebarThreadPreviewCount(parsedValue)
+        : threadPreviewCount;
+    },
+    [threadPreviewCount],
+  );
 
-      const clampedValue = clampSidebarThreadPreviewCount(parsedValue);
+  const commitThreadPreviewCount = useCallback(
+    (nextValue: string) => {
+      const clampedValue = resolveThreadPreviewInputValue(nextValue);
       setThreadPreviewInput(String(clampedValue));
       if (clampedValue !== threadPreviewCount) {
         onThreadPreviewCountChange(clampedValue);
       }
     },
-    [onThreadPreviewCountChange, threadPreviewCount],
+    [onThreadPreviewCountChange, resolveThreadPreviewInputValue, threadPreviewCount],
   );
 
   return (
@@ -2278,9 +2282,11 @@ function ProjectSortMenu({
               className="size-7 shrink-0"
               aria-label="Decrease visible thread count"
               disabled={threadPreviewCount <= MIN_SIDEBAR_THREAD_PREVIEW_COUNT}
-              onClick={() =>
-                onThreadPreviewCountChange(clampSidebarThreadPreviewCount(threadPreviewCount - 1))
-              }
+              onClick={() => {
+                commitThreadPreviewCount(
+                  String(resolveThreadPreviewInputValue(threadPreviewInput) - 1),
+                );
+              }}
             >
               <MinusIcon className="size-3.5" />
             </Button>
@@ -2316,9 +2322,11 @@ function ProjectSortMenu({
               className="size-7 shrink-0"
               aria-label="Increase visible thread count"
               disabled={threadPreviewCount >= MAX_SIDEBAR_THREAD_PREVIEW_COUNT}
-              onClick={() =>
-                onThreadPreviewCountChange(clampSidebarThreadPreviewCount(threadPreviewCount + 1))
-              }
+              onClick={() => {
+                commitThreadPreviewCount(
+                  String(resolveThreadPreviewInputValue(threadPreviewInput) + 1),
+                );
+              }}
             >
               <PlusIcon className="size-3.5" />
             </Button>
