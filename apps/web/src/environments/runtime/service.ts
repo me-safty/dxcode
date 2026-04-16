@@ -24,6 +24,8 @@ import {
   markPromotedDraftThreadsByRef,
   useComposerDraftStore,
 } from "~/composerDraftStore";
+import { getClientSettingsSnapshot } from "~/hooks/useSettings";
+import { playTurnCompletionSound } from "~/lib/notificationSound";
 import { ensureLocalApi } from "~/localApi";
 import { collectActiveTerminalThreadIds } from "~/lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "~/orchestrationEventEffects";
@@ -538,7 +540,49 @@ function applyRecoveredEventBatch(
     void activeService?.queryInvalidationThrottler.maybeExecute();
   }
 
+  // Snapshot turn states before the store update for completion sound detection
+  const turnCompletionCandidateThreadIds = new Set<string>();
+  for (const event of events) {
+    if (
+      (event.type === "thread.message-sent" && event.payload.role === "assistant" && !event.payload.streaming) ||
+      event.type === "thread.session-set"
+    ) {
+      turnCompletionCandidateThreadIds.add(event.payload.threadId);
+    }
+  }
+  const preBatchTurnStates = new Map<string, string | undefined>();
+  if (turnCompletionCandidateThreadIds.size > 0) {
+    const state = useStore.getState();
+    for (const threadId of turnCompletionCandidateThreadIds) {
+      const thread = selectThreadByRef(state, scopeThreadRef(environmentId, threadId as ThreadId));
+      preBatchTurnStates.set(threadId, thread?.latestTurn?.state);
+    }
+  }
+
   useStore.getState().applyOrchestrationEvents(uiEvents, environmentId);
+
+  // Fire completion sound if a thread's turn completed AND the session is no
+  // longer actively running.  In agentic workflows the session may complete one
+  // turn and immediately start the next — we only want the sound when the agent
+  // has truly finished (session settled to a non-running state).
+  if (preBatchTurnStates.size > 0) {
+    const clientSettings = getClientSettingsSnapshot();
+    if (clientSettings.enableTurnCompletionSound) {
+      const postState = useStore.getState();
+      for (const [threadId, prevTurnState] of preBatchTurnStates) {
+        if (prevTurnState === "completed") continue;
+        const thread = selectThreadByRef(postState, scopeThreadRef(environmentId, threadId as ThreadId));
+        if (thread?.latestTurn?.state !== "completed") continue;
+        // Only play when the session is no longer actively running — if the
+        // agent immediately kicked off another turn the session would still be
+        // "running" or "connecting" and we should wait.
+        const sessionStatus = thread.session?.status;
+        if (sessionStatus === "running" || sessionStatus === "connecting") continue;
+        playTurnCompletionSound(clientSettings.turnCompletionSound);
+        break; // One sound per batch is enough
+      }
+    }
+  }
   if (needsProjectUiSync) {
     const projects = selectProjectsAcrossEnvironments(useStore.getState());
     useUiStateStore.getState().syncProjects(

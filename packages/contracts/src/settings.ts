@@ -23,6 +23,22 @@ export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 
+export const CompletionSoundOption = Schema.Literals([
+  "chime",
+  "ping",
+  "bell",
+  "synth",
+  "xylophone",
+  "t3",
+  "t3-voice",
+  "celebration",
+  "arcade",
+  "bubble",
+  "cosmic",
+]);
+export type CompletionSoundOption = typeof CompletionSoundOption.Type;
+export const DEFAULT_COMPLETION_SOUND: CompletionSoundOption = "chime";
+
 export const ClientSettingsSchema = Schema.Struct({
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
@@ -35,6 +51,12 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
+  ),
+  enableTurnCompletionSound: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+  ),
+  turnCompletionSound: CompletionSoundOption.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_COMPLETION_SOUND)),
   ),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;

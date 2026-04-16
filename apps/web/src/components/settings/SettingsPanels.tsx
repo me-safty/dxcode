@@ -4,6 +4,7 @@ import {
   ChevronDownIcon,
   InfoIcon,
   LoaderIcon,
+  PlayIcon,
   PlusIcon,
   RefreshCwIcon,
   XIcon,
@@ -63,6 +64,12 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import {
+  COMPLETION_SOUND_LABELS,
+  COMPLETION_SOUND_OPTIONS,
+  type CompletionSound,
+  playTurnCompletionSound,
+} from "../../lib/notificationSound";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -854,6 +861,100 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        <SettingsRow
+          title="Sound on task completion"
+          description="Play a notification sound when a thread's turn finishes."
+          resetAction={
+            settings.enableTurnCompletionSound !==
+              DEFAULT_UNIFIED_SETTINGS.enableTurnCompletionSound ||
+            settings.turnCompletionSound !==
+              DEFAULT_UNIFIED_SETTINGS.turnCompletionSound ? (
+              <SettingResetButton
+                label="sound on task completion"
+                onClick={() =>
+                  updateSettings({
+                    enableTurnCompletionSound:
+                      DEFAULT_UNIFIED_SETTINGS.enableTurnCompletionSound,
+                    turnCompletionSound:
+                      DEFAULT_UNIFIED_SETTINGS.turnCompletionSound,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={settings.enableTurnCompletionSound}
+                onCheckedChange={(checked) =>
+                  updateSettings({ enableTurnCompletionSound: Boolean(checked) })
+                }
+                aria-label="Play sound on task completion"
+              />
+            </div>
+          }
+        />
+
+        {settings.enableTurnCompletionSound && (
+          <SettingsRow
+            title="Notification sound"
+            description="Choose which sound to play."
+            control={
+              <div className="flex items-center gap-2">
+                <Select
+                  value={settings.turnCompletionSound}
+                  onValueChange={(value) => {
+                    if (
+                      COMPLETION_SOUND_OPTIONS.includes(
+                        value as CompletionSound,
+                      )
+                    ) {
+                      updateSettings({
+                        turnCompletionSound: value as CompletionSound,
+                      });
+                      playTurnCompletionSound(value as CompletionSound);
+                    }
+                  }}
+                >
+                  <SelectTrigger
+                    className="w-full sm:w-40"
+                    aria-label="Notification sound"
+                  >
+                    <SelectValue>
+                      {
+                        COMPLETION_SOUND_LABELS[
+                          settings.turnCompletionSound
+                        ]
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    {COMPLETION_SOUND_OPTIONS.map((sound) => (
+                      <SelectItem
+                        key={sound}
+                        hideIndicator
+                        value={sound}
+                      >
+                        {COMPLETION_SOUND_LABELS[sound]}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() =>
+                    playTurnCompletionSound(settings.turnCompletionSound)
+                  }
+                  aria-label="Preview notification sound"
+                >
+                  <PlayIcon className="size-4" />
+                </Button>
+              </div>
+            }
+          />
+        )}
 
         <SettingsRow
           title="Assistant output"

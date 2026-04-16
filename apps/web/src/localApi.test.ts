@@ -535,6 +535,8 @@ describe("wsApi", () => {
       sidebarProjectSortOrder: "manual",
       sidebarThreadSortOrder: "created_at",
       timestampFormat: "24-hour",
+      enableTurnCompletionSound: true,
+      turnCompletionSound: "chime",
     });
     const setClientSettings = vi.fn().mockResolvedValue(undefined);
     const getSavedEnvironmentRegistry = vi.fn().mockResolvedValue([]);
@@ -563,6 +565,8 @@ describe("wsApi", () => {
       sidebarProjectSortOrder: "manual",
       sidebarThreadSortOrder: "created_at",
       timestampFormat: "24-hour",
+      enableTurnCompletionSound: true,
+      turnCompletionSound: "chime",
     });
     await api.persistence.getSavedEnvironmentRegistry();
     await api.persistence.setSavedEnvironmentRegistry([]);
@@ -581,6 +585,8 @@ describe("wsApi", () => {
       sidebarProjectSortOrder: "manual",
       sidebarThreadSortOrder: "created_at",
       timestampFormat: "24-hour",
+      enableTurnCompletionSound: true,
+      turnCompletionSound: "chime",
     });
     expect(getSavedEnvironmentRegistry).toHaveBeenCalledWith();
     expect(setSavedEnvironmentRegistry).toHaveBeenCalledWith([]);
@@ -600,6 +606,8 @@ describe("wsApi", () => {
       sidebarProjectSortOrder: "manual",
       sidebarThreadSortOrder: "created_at",
       timestampFormat: "24-hour",
+      enableTurnCompletionSound: true,
+      turnCompletionSound: "chime",
     });
     await api.persistence.setSavedEnvironmentRegistry([
       {
@@ -623,6 +631,8 @@ describe("wsApi", () => {
       sidebarProjectSortOrder: "manual",
       sidebarThreadSortOrder: "created_at",
       timestampFormat: "24-hour",
+      enableTurnCompletionSound: true,
+      turnCompletionSound: "chime",
     });
     await expect(api.persistence.getSavedEnvironmentRegistry()).resolves.toEqual([
       {
