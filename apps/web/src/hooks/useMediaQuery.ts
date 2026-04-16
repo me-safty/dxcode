@@ -85,3 +85,8 @@ export function useMediaQuery(query: BreakpointQuery | MediaQueryInput | (string
 export function useIsMobile(): boolean {
   return useMediaQuery("max-md");
 }
+
+/** Returns `true` when the primary pointing device is coarse (finger / stylus). */
+export function useIsTouchDevice(): boolean {
+  return useMediaQuery({ pointer: "coarse" });
+}

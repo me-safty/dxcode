@@ -102,6 +102,7 @@ import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
+import { useIsTouchDevice } from "../../hooks/useMediaQuery";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -515,6 +516,11 @@ export const ChatComposer = memo(
       setThreadError,
       onExpandImage,
     } = props;
+
+    // ------------------------------------------------------------------
+    // Touch device detection (for Enter-to-send vs. Enter-to-newline)
+    // ------------------------------------------------------------------
+    const isTouchDevice = useIsTouchDevice();
 
     // ------------------------------------------------------------------
     // Store subscriptions (prompt / images / terminal contexts)
@@ -1500,9 +1506,15 @@ export const ChatComposer = memo(
           return true;
         }
       }
-      if (key === "Enter" && !event.shiftKey) {
-        void onSend();
-        return true;
+      if (key === "Enter") {
+        // On touch devices, bare Enter inserts a newline;
+        // Cmd/Ctrl+Enter sends. On desktop, bare Enter sends.
+        const shouldSend = isTouchDevice ? event.metaKey || event.ctrlKey : !event.shiftKey;
+        if (shouldSend) {
+          void onSend();
+          return true;
+        }
+        return false;
       }
       return false;
     };
