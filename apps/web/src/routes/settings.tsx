@@ -3,6 +3,7 @@ import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
+import { AppSurfaceHeader } from "../components/AppSurfaceHeader";
 import { Button } from "../components/ui/button";
 import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
 import { isElectron } from "../env";
@@ -31,8 +32,12 @@ function SettingsContentLayout() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-app-surface text-foreground isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-app-surface text-foreground">
-        {!isElectron && (
-          <header className="relative z-10 bg-app-surface px-3 py-2 after:pointer-events-none after:absolute after:inset-x-0 after:top-[calc(100%-1px)] after:z-0 after:h-6 after:bg-linear-to-b after:from-app-surface after:from-35% after:to-transparent after:content-[''] [&>*]:relative [&>*]:z-10 sm:px-5">
+        <AppSurfaceHeader
+          compact
+          reserveTitleBarControlInset
+          className={isElectron ? "px-5 sm:px-5" : undefined}
+        >
+          {!isElectron ? (
             <div className="flex items-center gap-2">
               <SidebarTrigger className="size-7 shrink-0 md:hidden" />
               <span className="text-sm font-medium text-foreground">Settings</span>
@@ -48,27 +53,25 @@ function SettingsContentLayout() {
                 </Button>
               </div>
             </div>
-          </header>
-        )}
-
-        {isElectron && (
-          <div className="drag-region relative z-10 flex h-[52px] shrink-0 items-center bg-app-surface px-5 after:pointer-events-none after:absolute after:inset-x-0 after:top-[calc(100%-1px)] after:z-0 after:h-6 after:bg-linear-to-b after:from-app-surface after:from-35% after:to-transparent after:content-[''] [&>*]:relative [&>*]:z-10 wco:h-[env(titlebar-area-height)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]">
-            <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
-              Settings
-            </span>
-            <div className="ms-auto flex items-center gap-2">
-              <Button
-                size="xs"
-                variant="outline"
-                disabled={changedSettingLabels.length === 0}
-                onClick={() => void restoreDefaults()}
-              >
-                <RotateCcwIcon className="size-3.5" />
-                Restore defaults
-              </Button>
-            </div>
-          </div>
-        )}
+          ) : (
+            <>
+              <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
+                Settings
+              </span>
+              <div className="ms-auto flex items-center gap-2">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={changedSettingLabels.length === 0}
+                  onClick={() => void restoreDefaults()}
+                >
+                  <RotateCcwIcon className="size-3.5" />
+                  Restore defaults
+                </Button>
+              </div>
+            </>
+          )}
+        </AppSurfaceHeader>
 
         <div key={restoreSignal} className="min-h-0 flex flex-1 flex-col">
           <Outlet />
