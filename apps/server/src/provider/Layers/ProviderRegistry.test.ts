@@ -986,6 +986,20 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         }),
       );
 
+      it.effect("handles single-quoted provider section keys", () =>
+        Effect.gen(function* () {
+          yield* withTempCodexHome(
+            [
+              "model_provider = 'codex-lb'",
+              "",
+              "[model_providers.'codex-lb']",
+              "env_key = 'CODEX_LB_API_KEY'",
+            ].join("\n"),
+          );
+          assert.strictEqual(yield* readCodexConfigModelProviderEnvKey(), "CODEX_LB_API_KEY");
+        }),
+      );
+
       it.effect("ignores env_key values for inactive providers", () =>
         Effect.gen(function* () {
           yield* withTempCodexHome(

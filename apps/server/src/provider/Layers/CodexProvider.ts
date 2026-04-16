@@ -259,29 +259,35 @@ export function parseAuthStatusFromOutput(result: CommandResult): {
   };
 }
 
+const readCodexConfigProviderSelection = Effect.fn("readCodexConfigProviderSelection")(
+  function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const settingsService = yield* ServerSettingsService;
+    const codexHome = yield* settingsService.getSettings.pipe(
+      Effect.map(
+        (settings) =>
+          settings.providers.codex.homePath ||
+          process.env.CODEX_HOME ||
+          path.join(OS.homedir(), ".codex"),
+      ),
+    );
+    const configPath = path.join(codexHome, "config.toml");
+
+    const content = yield* fileSystem
+      .readFileString(configPath)
+      .pipe(Effect.orElseSucceed(() => undefined));
+    if (content === undefined) {
+      return undefined;
+    }
+
+    return parseCodexConfigProviderSelection(content);
+  },
+);
+
 export const readCodexConfigModelProvider = Effect.fn("readCodexConfigModelProvider")(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const settingsService = yield* ServerSettingsService;
-  const codexHome = yield* settingsService.getSettings.pipe(
-    Effect.map(
-      (settings) =>
-        settings.providers.codex.homePath ||
-        process.env.CODEX_HOME ||
-        path.join(OS.homedir(), ".codex"),
-    ),
-  );
-  const configPath = path.join(codexHome, "config.toml");
-
-  const content = yield* fileSystem
-    .readFileString(configPath)
-    .pipe(Effect.orElseSucceed(() => undefined));
-  if (content === undefined) {
-    return undefined;
-  }
-
-  const parsed = parseCodexConfigProviderSelection(content);
-  return parsed.modelProvider;
+  const parsed = yield* readCodexConfigProviderSelection();
+  return parsed?.modelProvider;
 });
 
 function parseCodexConfigProviderSelection(content: string): {
@@ -313,10 +319,7 @@ function parseCodexConfigProviderSelection(content: string): {
     if (!envKeyMatch || currentSection === undefined) continue;
     if (!currentSection.startsWith(MODEL_PROVIDERS_SECTION_PREFIX)) continue;
 
-    const provider = currentSection
-      .slice(MODEL_PROVIDERS_SECTION_PREFIX.length)
-      .replace(/^"(.+)"$/, "$1")
-      .trim();
+    const provider = normalizeTomlKey(currentSection.slice(MODEL_PROVIDERS_SECTION_PREFIX.length));
     const envKey = envKeyMatch[1];
     if (!envKey) continue;
     if (!provider) continue;
@@ -329,30 +332,16 @@ function parseCodexConfigProviderSelection(content: string): {
   };
 }
 
+function normalizeTomlKey(value: string): string {
+  const trimmed = value.trim();
+  const quotedMatch = trimmed.match(/^(['"])(.*)\1$/);
+  return quotedMatch?.[2] ?? trimmed;
+}
+
 export const readCodexConfigModelProviderEnvKey = Effect.fn("readCodexConfigModelProviderEnvKey")(
   function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const settingsService = yield* ServerSettingsService;
-    const codexHome = yield* settingsService.getSettings.pipe(
-      Effect.map(
-        (settings) =>
-          settings.providers.codex.homePath ||
-          process.env.CODEX_HOME ||
-          path.join(OS.homedir(), ".codex"),
-      ),
-    );
-    const configPath = path.join(codexHome, "config.toml");
-
-    const content = yield* fileSystem
-      .readFileString(configPath)
-      .pipe(Effect.orElseSucceed(() => undefined));
-    if (content === undefined) {
-      return undefined;
-    }
-
-    const parsed = parseCodexConfigProviderSelection(content);
-    return parsed.modelProvider ? parsed.envKeyByProvider.get(parsed.modelProvider) : undefined;
+    const parsed = yield* readCodexConfigProviderSelection();
+    return parsed?.modelProvider ? parsed.envKeyByProvider.get(parsed.modelProvider) : undefined;
   },
 );
 
@@ -526,10 +515,13 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
         }).pipe(Effect.orElseSucceed(() => undefined))
       : undefined) ?? [];
 
-  if (yield* hasCustomModelProvider) {
-    const envKey = yield* readCodexConfigModelProviderEnvKey().pipe(
-      Effect.orElseSucceed(() => undefined),
-    );
+  const customProviderSelection = yield* readCodexConfigProviderSelection().pipe(
+    Effect.orElseSucceed(() => undefined),
+  );
+  const customModelProvider = customProviderSelection?.modelProvider;
+
+  if (customModelProvider !== undefined && !OPENAI_AUTH_PROVIDERS.has(customModelProvider)) {
+    const envKey = customProviderSelection?.envKeyByProvider.get(customModelProvider);
     if (envKey && !process.env[envKey]) {
       return buildServerProvider({
         provider: PROVIDER,
