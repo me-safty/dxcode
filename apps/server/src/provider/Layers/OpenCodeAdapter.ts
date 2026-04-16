@@ -17,6 +17,7 @@ import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -65,7 +66,10 @@ interface OpenCodeSessionContext {
   readonly eventsAbortController: AbortController;
 }
 
-export interface OpenCodeAdapterLiveOptions {}
+export interface OpenCodeAdapterLiveOptions {
+  readonly nativeEventLogPath?: string;
+  readonly nativeEventLogger?: EventNdjsonLogger;
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -384,6 +388,13 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
       const serverConfig = yield* ServerConfig;
       const serverSettings = yield* ServerSettingsService;
       const services = yield* Effect.context<never>();
+      const nativeEventLogger =
+        _options?.nativeEventLogger ??
+        (_options?.nativeEventLogPath !== undefined
+          ? yield* makeEventNdjsonLogger(_options.nativeEventLogPath, {
+              stream: "native",
+            })
+          : undefined);
       const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
       const sessions = new Map<ThreadId, OpenCodeSessionContext>();
 
@@ -391,6 +402,16 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
         Queue.offer(runtimeEvents, event).pipe(Effect.asVoid);
       const emitPromise = (event: ProviderRuntimeEvent) =>
         emit(event).pipe(Effect.runPromiseWith(services));
+      const writeNativeEventPromise = (
+        threadId: ThreadId,
+        event: {
+          readonly observedAt: string;
+          readonly event: Record<string, unknown>;
+        },
+      ) =>
+        (nativeEventLogger ? nativeEventLogger.write(event, threadId) : Effect.void).pipe(
+          Effect.runPromiseWith(services),
+        );
 
       const emitUnexpectedExit = (context: OpenCodeSessionContext, message: string) => {
         if (context.stopped) {
@@ -507,6 +528,17 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
               }
 
               const turnId = context.activeTurnId;
+              await writeNativeEventPromise(context.session.threadId, {
+                observedAt: nowIso(),
+                event: {
+                  provider: PROVIDER,
+                  threadId: context.session.threadId,
+                  providerThreadId: context.openCodeSessionId,
+                  type: event.type,
+                  ...(turnId ? { turnId } : {}),
+                  payload: event,
+                },
+              });
 
               switch (event.type) {
                 case "message.updated": {

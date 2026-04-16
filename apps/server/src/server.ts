@@ -153,7 +153,9 @@ const ProviderLayerLive = Layer.unwrap(
     const claudeAdapterLayer = makeClaudeAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     );
-    const openCodeAdapterLayer = makeOpenCodeAdapterLive();
+    const openCodeAdapterLayer = makeOpenCodeAdapterLive(
+      nativeEventLogger ? { nativeEventLogger } : undefined,
+    );
     const adapterRegistryLayer = ProviderAdapterRegistryLive.pipe(
       Layer.provide(codexAdapterLayer),
       Layer.provide(claudeAdapterLayer),

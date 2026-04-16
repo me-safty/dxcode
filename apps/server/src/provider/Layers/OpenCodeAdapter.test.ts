@@ -35,6 +35,7 @@ const runtimeMock = vi.hoisted(() => {
     revertCalls: [] as Array<{ sessionID: string; messageID?: string }>,
     promptAsyncError: null as Error | null,
     messages: [] as MessageEntry[],
+    subscribedEvents: [] as unknown[],
   };
 
   return {
@@ -47,6 +48,7 @@ const runtimeMock = vi.hoisted(() => {
       state.revertCalls.length = 0;
       state.promptAsyncError = null;
       state.messages = [];
+      state.subscribedEvents = [];
     },
   };
 });
@@ -108,7 +110,13 @@ vi.mock("../opencodeRuntime.ts", async () => {
           ),
         },
         event: {
-          subscribe: vi.fn(async () => await new Promise<never>(() => {})),
+          subscribe: vi.fn(async () => ({
+            stream: (async function* () {
+              for (const event of runtimeMock.state.subscribedEvents) {
+                yield event;
+              }
+            })(),
+          })),
         },
       }),
     ),
@@ -144,6 +152,9 @@ const OpenCodeAdapterTestLayer = makeOpenCodeAdapterLive().pipe(
 beforeEach(() => {
   runtimeMock.reset();
 });
+
+const sleep = (ms: number) =>
+  Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
 it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
   it.effect("reuses a configured OpenCode server URL instead of spawning a local server", () =>
@@ -264,6 +275,95 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         ["Hello", " world", "!"],
       );
       assert.equal(secondUpdate.latestText, "Hello world!");
+    }),
+  );
+
+  it.effect("writes provider-native observability records using the session thread id", () =>
+    Effect.gen(function* () {
+      const nativeEvents: Array<{
+        readonly event?: {
+          readonly provider?: string;
+          readonly threadId?: string;
+          readonly providerThreadId?: string;
+          readonly type?: string;
+        };
+      }> = [];
+      const nativeThreadIds: Array<string | null> = [];
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            info: {
+              id: "msg-native-log",
+              role: "assistant",
+            },
+          },
+        },
+      ];
+
+      const nativeEventLogger = {
+        filePath: "memory://opencode-native-events",
+        write: (event: unknown, threadId: ThreadId | null) => {
+          nativeEvents.push(event as (typeof nativeEvents)[number]);
+          nativeThreadIds.push(threadId ?? null);
+          return Effect.void;
+        },
+        close: () => Effect.void,
+      };
+
+      const adapterLayer = makeOpenCodeAdapterLive({ nativeEventLogger }).pipe(
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(
+          ServerSettingsService.layerTest({
+            providers: {
+              opencode: {
+                binaryPath: "fake-opencode",
+                serverUrl: "http://127.0.0.1:9999",
+                serverPassword: "secret-password",
+              },
+            },
+          }),
+        ),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+
+      const session = yield* Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+        const started = yield* adapter.startSession({
+          provider: "opencode",
+          threadId: asThreadId("thread-native-log"),
+          runtimeMode: "full-access",
+        });
+        yield* sleep(10);
+        return started;
+      }).pipe(Effect.provide(adapterLayer));
+
+      assert.equal(session.threadId, "thread-native-log");
+      assert.equal(nativeEvents.length > 0, true);
+      assert.equal(
+        nativeEvents.some((record) => record.event?.provider === "opencode"),
+        true,
+      );
+      assert.equal(
+        nativeEvents.some(
+          (record) => record.event?.providerThreadId === "http://127.0.0.1:9999/session",
+        ),
+        true,
+      );
+      assert.equal(
+        nativeEvents.some((record) => record.event?.threadId === "thread-native-log"),
+        true,
+      );
+      assert.equal(
+        nativeEvents.some((record) => record.event?.type === "message.updated"),
+        true,
+      );
+      assert.equal(
+        nativeThreadIds.every((threadId) => threadId === "thread-native-log"),
+        true,
+      );
     }),
   );
 });
