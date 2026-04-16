@@ -19,10 +19,7 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import {
-  DEFAULT_UNIFIED_SETTINGS,
-  type SidebarProjectGroupingMode,
-} from "@t3tools/contracts/settings";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
@@ -101,12 +98,6 @@ const TIMESTAMP_FORMAT_LABELS = {
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
-
-const PROJECT_GROUPING_LABELS: Record<SidebarProjectGroupingMode, string> = {
-  repository: "Repository",
-  repository_path: "Repository path",
-  separate: "Separate projects",
-};
 
 type InstallProviderSettings = {
   provider: ProviderKind;
@@ -835,51 +826,6 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
                 <SelectItem hideIndicator value="24-hour">
                   {TIMESTAMP_FORMAT_LABELS["24-hour"]}
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
-
-        <SettingsRow
-          title="Project grouping"
-          description="Choose how projects are grouped into sidebar rows by default."
-          resetAction={
-            settings.sidebarProjectGroupingMode !==
-            DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode ? (
-              <SettingResetButton
-                label="project grouping"
-                onClick={() =>
-                  updateSettings({
-                    sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.sidebarProjectGroupingMode}
-              onValueChange={(value) => {
-                if (value === "repository" || value === "repository_path" || value === "separate") {
-                  updateSettings({ sidebarProjectGroupingMode: value });
-                }
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-48" aria-label="Project grouping mode">
-                <SelectValue>
-                  {PROJECT_GROUPING_LABELS[settings.sidebarProjectGroupingMode]}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="repository">
-                  {PROJECT_GROUPING_LABELS.repository}
-                </SelectItem>
-                <SelectItem hideIndicator value="repository_path">
-                  {PROJECT_GROUPING_LABELS.repository_path}
-                </SelectItem>
-                <SelectItem hideIndicator value="separate">
-                  {PROJECT_GROUPING_LABELS.separate}
                 </SelectItem>
               </SelectPopup>
             </Select>
