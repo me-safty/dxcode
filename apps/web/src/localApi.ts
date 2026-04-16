@@ -17,6 +17,7 @@ import { type WsRpcClient } from "./rpc/wsRpcClient";
 import { showContextMenuFallback } from "./contextMenuFallback";
 import {
   readBrowserClientSettings,
+  removeBrowserClientSettings,
   readBrowserSavedEnvironmentRegistry,
   readBrowserSavedEnvironmentSecret,
   removeBrowserSavedEnvironmentSecret,
@@ -27,13 +28,18 @@ import {
 
 let cachedApi: LocalApi | undefined;
 
-function mirrorBrowserClientSettings(settings: ClientSettings | null | undefined): void {
-  if (!settings) {
+function syncBrowserClientSettingsCache(settings: ClientSettings | null | undefined): void {
+  if (settings) {
+    try {
+      writeBrowserClientSettings(settings);
+    } catch {
+      // Desktop persistence is authoritative; localStorage is only a bootstrap cache.
+    }
     return;
   }
 
   try {
-    writeBrowserClientSettings(settings);
+    removeBrowserClientSettings();
   } catch {
     // Desktop persistence is authoritative; localStorage is only a bootstrap cache.
   }
@@ -82,7 +88,7 @@ export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
       getClientSettings: async () => {
         if (window.desktopBridge) {
           const settings = await window.desktopBridge.getClientSettings();
-          mirrorBrowserClientSettings(settings);
+          syncBrowserClientSettingsCache(settings);
           return settings;
         }
         return readBrowserClientSettings();
@@ -90,7 +96,7 @@ export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
       setClientSettings: async (settings) => {
         if (window.desktopBridge) {
           await window.desktopBridge.setClientSettings(settings);
-          mirrorBrowserClientSettings(settings);
+          syncBrowserClientSettingsCache(settings);
           return;
         }
         writeBrowserClientSettings(settings);

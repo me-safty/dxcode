@@ -1,4 +1,5 @@
 import { EnvironmentId, type PersistedSavedEnvironmentRecord } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const testEnvironmentId = EnvironmentId.make("environment-1");
@@ -49,6 +50,55 @@ afterEach(() => {
 });
 
 describe("clientPersistenceStorage", () => {
+  it("salvages partially invalid browser client settings", async () => {
+    const testWindow = getTestWindow();
+    const { CLIENT_SETTINGS_STORAGE_KEY, readBrowserClientSettings } =
+      await import("./clientPersistenceStorage");
+
+    testWindow.localStorage.setItem(
+      CLIENT_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        ...DEFAULT_CLIENT_SETTINGS,
+        confirmThreadArchive: "invalid",
+        confirmThreadDelete: false,
+        diffWordWrap: true,
+        sidebarProjectSortOrder: "manual",
+        sidebarThreadSortOrder: "created_at",
+        timestampFormat: "24-hour",
+      }),
+    );
+
+    expect(readBrowserClientSettings()).toEqual({
+      ...DEFAULT_CLIENT_SETTINGS,
+      confirmThreadArchive: false,
+      confirmThreadDelete: false,
+      diffWordWrap: true,
+      sidebarProjectSortOrder: "manual",
+      sidebarThreadSortOrder: "created_at",
+      timestampFormat: "24-hour",
+    });
+    expect(JSON.parse(testWindow.localStorage.getItem(CLIENT_SETTINGS_STORAGE_KEY)!)).toEqual({
+      ...DEFAULT_CLIENT_SETTINGS,
+      confirmThreadArchive: false,
+      confirmThreadDelete: false,
+      diffWordWrap: true,
+      sidebarProjectSortOrder: "manual",
+      sidebarThreadSortOrder: "created_at",
+      timestampFormat: "24-hour",
+    });
+  });
+
+  it("clears corrupt browser client settings payloads", async () => {
+    const testWindow = getTestWindow();
+    const { CLIENT_SETTINGS_STORAGE_KEY, readBrowserClientSettings } =
+      await import("./clientPersistenceStorage");
+
+    testWindow.localStorage.setItem(CLIENT_SETTINGS_STORAGE_KEY, "{");
+
+    expect(readBrowserClientSettings()).toBeNull();
+    expect(testWindow.localStorage.getItem(CLIENT_SETTINGS_STORAGE_KEY)).toBeNull();
+  });
+
   it("stores browser secrets inline with the saved environment record", async () => {
     const testWindow = getTestWindow();
     const {

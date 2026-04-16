@@ -584,6 +584,26 @@ describe("wsApi", () => {
     expect(removeSavedEnvironmentSecret).toHaveBeenCalledWith("environment-local");
   });
 
+  it("clears stale browser client settings when desktop persistence has no settings", async () => {
+    const staleSettings = {
+      ...DEFAULT_CLIENT_SETTINGS,
+      uiFontFamily: '"IBM Plex Sans", sans-serif',
+      codeFontFamily: '"JetBrains Mono", monospace',
+    };
+    const getClientSettings = vi.fn().mockResolvedValue(null);
+    getWindowForTest().desktopBridge = makeDesktopBridge({ getClientSettings });
+
+    const { createLocalApi } = await import("./localApi");
+    const { readBrowserClientSettings, writeBrowserClientSettings } =
+      await import("./clientPersistenceStorage");
+    writeBrowserClientSettings(staleSettings);
+
+    const api = createLocalApi(rpcClientMock as never);
+
+    await expect(api.persistence.getClientSettings()).resolves.toBeNull();
+    expect(readBrowserClientSettings()).toBeNull();
+  });
+
   it("falls back to browser storage for persistence when the desktop bridge is missing", async () => {
     const { createLocalApi } = await import("./localApi");
     const api = createLocalApi(rpcClientMock as never);

@@ -1,13 +1,17 @@
 import {
-  ClientSettingsSchema,
   EnvironmentId,
   type ClientSettings,
   type EnvironmentId as EnvironmentIdValue,
   type PersistedSavedEnvironmentRecord,
 } from "@t3tools/contracts";
+import { normalizeClientSettings, parseClientSettings } from "@t3tools/shared/clientSettings";
 import * as Schema from "effect/Schema";
 
-import { getLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
+import {
+  getLocalStorageItem,
+  removeLocalStorageItem,
+  setLocalStorageItem,
+} from "./hooks/useLocalStorage";
 
 export const CLIENT_SETTINGS_STORAGE_KEY = "t3code:client-settings:v1";
 export const SAVED_ENVIRONMENT_REGISTRY_STORAGE_KEY = "t3code:saved-environment-registry:v1";
@@ -53,8 +57,25 @@ export function readBrowserClientSettings(): ClientSettings | null {
   }
 
   try {
-    return getLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY, ClientSettingsSchema);
+    const rawSettings = window.localStorage.getItem(CLIENT_SETTINGS_STORAGE_KEY);
+    if (!rawSettings) {
+      return null;
+    }
+
+    const settings = normalizeClientSettings(JSON.parse(rawSettings));
+    if (!settings) {
+      removeBrowserClientSettings();
+      return null;
+    }
+
+    writeBrowserClientSettings(settings);
+    return settings;
   } catch {
+    try {
+      removeBrowserClientSettings();
+    } catch {
+      // Ignore cleanup errors and fall back to defaults in memory.
+    }
     return null;
   }
 }
@@ -64,7 +85,20 @@ export function writeBrowserClientSettings(settings: ClientSettings): void {
     return;
   }
 
-  setLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY, settings, ClientSettingsSchema);
+  const validatedSettings = parseClientSettings(settings);
+  if (!validatedSettings) {
+    throw new Error("Invalid browser client settings.");
+  }
+
+  window.localStorage.setItem(CLIENT_SETTINGS_STORAGE_KEY, JSON.stringify(validatedSettings));
+}
+
+export function removeBrowserClientSettings(): void {
+  if (!hasWindow()) {
+    return;
+  }
+
+  removeLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY);
 }
 
 function readBrowserSavedEnvironmentRegistryDocument(): BrowserSavedEnvironmentRegistryDocument {

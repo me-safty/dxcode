@@ -1,19 +1,13 @@
 import * as FS from "node:fs";
 import * as Path from "node:path";
 
-import {
-  ClientSettingsSchema,
-  type ClientSettings,
-  type PersistedSavedEnvironmentRecord,
-} from "@t3tools/contracts";
+import { type ClientSettings, type PersistedSavedEnvironmentRecord } from "@t3tools/contracts";
+import { normalizeClientSettings } from "@t3tools/shared/clientSettings";
 import { Predicate } from "effect";
-import * as Schema from "effect/Schema";
 
 interface ClientSettingsDocument {
   readonly settings: ClientSettings;
 }
-
-const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
 
 interface PersistedSavedEnvironmentStorageRecord extends PersistedSavedEnvironmentRecord {
   readonly encryptedBearerToken?: string;
@@ -91,15 +85,7 @@ function toPersistedSavedEnvironmentRecord(
 
 export function readClientSettings(settingsPath: string): ClientSettings | null {
   const rawSettings = readJsonFile<ClientSettingsDocument>(settingsPath)?.settings;
-  if (rawSettings === undefined) {
-    return null;
-  }
-
-  try {
-    return decodeClientSettings(rawSettings);
-  } catch {
-    return null;
-  }
+  return rawSettings === undefined ? null : normalizeClientSettings(rawSettings);
 }
 
 export function writeClientSettings(settingsPath: string, settings: ClientSettings): void {

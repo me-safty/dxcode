@@ -100,6 +100,34 @@ describe("clientPersistence", () => {
     expect(readClientSettings(settingsPath)).toEqual(clientSettings);
   });
 
+  it("falls back only invalid client setting fields to defaults", () => {
+    const settingsPath = makeTempPath("client-settings.json");
+
+    fs.writeFileSync(
+      settingsPath,
+      `${JSON.stringify({
+        settings: {
+          confirmThreadArchive: "invalid",
+          confirmThreadDelete: false,
+          diffWordWrap: true,
+          uiFontFamily: "",
+          codeFontFamily: "",
+          sidebarProjectSortOrder: "manual",
+          sidebarThreadSortOrder: "created_at",
+          timestampFormat: "24-hour",
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    expect(readClientSettings(settingsPath)).toEqual({
+      ...clientSettings,
+      confirmThreadArchive: false,
+      uiFontFamily: "",
+      codeFontFamily: "",
+    });
+  });
+
   it("persists and reloads saved environment metadata", () => {
     const registryPath = makeTempPath("saved-environments.json");
 
