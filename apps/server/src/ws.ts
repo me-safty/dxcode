@@ -550,19 +550,24 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ORCHESTRATION_WS_METHODS.dispatchCommand,
             Effect.gen(function* () {
               const normalizedCommand = yield* normalizeDispatchCommand(command);
+              const shouldStopSessionAfterArchive =
+                normalizedCommand.type === "thread.archive"
+                  ? yield* projectionSnapshotQuery
+                      .getThreadShellById(normalizedCommand.threadId)
+                      .pipe(
+                        Effect.map(
+                          Option.match({
+                            onNone: () => false,
+                            onSome: (thread) =>
+                              thread.session !== null && thread.session.status !== "stopped",
+                          }),
+                        ),
+                        Effect.catch(() => Effect.succeed(false)),
+                      )
+                  : false;
               const result = yield* dispatchNormalizedCommand(normalizedCommand);
               if (normalizedCommand.type === "thread.archive") {
-                const existingSessionStatus = yield* projectionSnapshotQuery
-                  .getThreadShellById(normalizedCommand.threadId)
-                  .pipe(
-                    Effect.map(Option.flatMapNullishOr((thread) => thread.session?.status)),
-                    Effect.catch(() => Effect.succeedNone),
-                  );
-
-                if (
-                  Option.isSome(existingSessionStatus) &&
-                  existingSessionStatus.value !== "stopped"
-                ) {
+                if (shouldStopSessionAfterArchive) {
                   yield* Effect.gen(function* () {
                     const stopCommand = yield* normalizeDispatchCommand({
                       type: "thread.session.stop",

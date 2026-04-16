@@ -3043,6 +3043,84 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("checks session status before archiving removes the thread from active lookups", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-archive-precheck");
+      const effects: string[] = [];
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const now = new Date().toISOString();
+      let archived = false;
+
+      yield* buildAppUnderTest({
+        layers: {
+          terminalManager: {
+            close: (input) =>
+              Effect.sync(() => {
+                effects.push(`terminal.close:${input.threadId}`);
+              }),
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                effects.push(`dispatch:${command.type}`);
+                if (command.type === "thread.archive") {
+                  archived = true;
+                }
+                return { sequence: dispatchedCommands.length };
+              }),
+          },
+          projectionSnapshotQuery: {
+            getThreadShellById: () =>
+              Effect.sync(() => {
+                effects.push(`query:thread-shell:${archived ? "archived" : "active"}`);
+                return archived
+                  ? Option.none()
+                  : Option.some(
+                      makeDefaultOrchestrationThreadShell({
+                        id: threadId,
+                        updatedAt: now,
+                        session: {
+                          threadId,
+                          status: "ready",
+                          providerName: "claudeAgent",
+                          runtimeMode: "full-access",
+                          activeTurnId: null,
+                          lastError: null,
+                          updatedAt: now,
+                        },
+                      }),
+                    );
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const dispatchResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.archive",
+            commandId: CommandId.make("cmd-thread-archive-precheck"),
+            threadId,
+          }),
+        ),
+      );
+
+      assert.equal(dispatchResult.sequence, 1);
+      assert.deepEqual(effects, [
+        "query:thread-shell:active",
+        "dispatch:thread.archive",
+        "dispatch:thread.session.stop",
+        `terminal.close:${threadId}`,
+      ]);
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        ["thread.archive", "thread.session.stop"],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("archives without dispatching session stop when the thread has no session", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("thread-archive-no-session");
