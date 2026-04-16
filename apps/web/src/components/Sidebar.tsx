@@ -2798,7 +2798,7 @@ export default function Sidebar() {
       resolveEnvironmentLabel: (environmentId) => {
         const rt = savedEnvironmentRuntimeById[environmentId];
         const saved = savedEnvironmentRegistry[environmentId];
-        return rt?.descriptor?.label ?? saved?.label ?? environmentId;
+        return rt?.descriptor?.label ?? saved?.label ?? null;
       },
     });
   }, [
