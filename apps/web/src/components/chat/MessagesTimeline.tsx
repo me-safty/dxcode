@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -112,6 +113,7 @@ interface MessagesTimelineProps {
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
+  chatFontSize: number;
   workspaceRoot: string | undefined;
   onIsAtEndChange: (isAtEnd: boolean) => void;
 }
@@ -140,6 +142,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   markdownCwd,
   resolvedTheme,
   timestampFormat,
+  chatFontSize,
   workspaceRoot,
   onIsAtEndChange,
 }: MessagesTimelineProps) {
@@ -249,21 +252,26 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   return (
     <TimelineRowCtx.Provider value={sharedState}>
-      <LegendList<MessagesTimelineRow>
-        ref={listRef}
-        data={rows}
-        keyExtractor={keyExtractor}
-        renderItem={renderItem}
-        estimatedItemSize={90}
-        initialScrollAtEnd
-        maintainScrollAtEnd
-        maintainScrollAtEndThreshold={0.1}
-        maintainVisibleContentPosition
-        onScroll={handleScroll}
-        className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-        ListHeaderComponent={<div className="h-3 sm:h-4" />}
-        ListFooterComponent={<div className="h-3 sm:h-4" />}
-      />
+      <div
+        className="h-full"
+        style={{ "--chat-font-size": `${chatFontSize}px` } as CSSProperties}
+      >
+        <LegendList<MessagesTimelineRow>
+          ref={listRef}
+          data={rows}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          estimatedItemSize={90}
+          initialScrollAtEnd
+          maintainScrollAtEnd
+          maintainScrollAtEndThreshold={0.1}
+          maintainVisibleContentPosition
+          onScroll={handleScroll}
+          className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+          ListHeaderComponent={<div className="h-3 sm:h-4" />}
+          ListFooterComponent={<div className="h-3 sm:h-4" />}
+        />
+      </div>
     </TimelineRowCtx.Provider>
   );
 });
@@ -333,7 +341,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                               />
                             </button>
                           ) : (
-                            <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                            <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-chat-xxs text-muted-foreground/70">
                               {image.name}
                             </div>
                           )}
@@ -367,7 +375,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                       </Button>
                     )}
                   </div>
-                  <p className="text-right text-xs text-muted-foreground/50">
+                  <p className="text-right text-chat-xs text-muted-foreground/50">
                     {formatTimestamp(row.message.createdAt, ctx.timestampFormat)}
                   </p>
                 </div>
@@ -395,7 +403,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
               {row.showCompletionDivider && (
                 <div className="my-3 flex items-center gap-3">
                   <span className="h-px flex-1 bg-border" />
-                  <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
+                  <span className="rounded-full border border-border bg-background px-2.5 py-1 text-chat-xxxs uppercase tracking-[0.14em] text-muted-foreground/80">
                     {ctx.completionSummary ? `Response • ${ctx.completionSummary}` : "Response"}
                   </span>
                   <span className="h-px flex-1 bg-border" />
@@ -414,7 +422,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   onOpenTurnDiff={ctx.onOpenTurnDiff}
                 />
                 <div className="mt-1.5 flex items-center gap-2">
-                  <p className="text-[10px] text-muted-foreground/30">
+                  <p className="text-chat-xxxs text-muted-foreground/30">
                     {row.message.streaming ? (
                       <LiveMessageMeta
                         createdAt={row.message.createdAt}
@@ -458,7 +466,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
 
       {row.kind === "working" && (
         <div className="py-0.5 pl-1.5">
-          <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
+          <div className="flex items-center gap-2 pt-1 text-chat-xxs text-muted-foreground/70">
             <span className="inline-flex items-center gap-[3px]">
               <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
               <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
@@ -545,13 +553,13 @@ const WorkGroupSection = memo(function WorkGroupSection({
     <div className="rounded-xl border border-border/45 bg-card/25 px-2 py-1.5">
       {showHeader && (
         <div className="mb-1.5 flex items-center justify-between gap-2 px-0.5">
-          <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/55">
+          <p className="text-chat-mini uppercase tracking-[0.16em] text-muted-foreground/55">
             {groupLabel} ({groupedEntries.length})
           </p>
           {hasOverflow && (
             <button
               type="button"
-              className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
+              className="text-chat-mini uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
               onClick={() => setIsExpanded((v) => !v)}
             >
               {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
@@ -625,7 +633,7 @@ function AssistantChangedFilesSectionInner({
   return (
     <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
+        <p className="text-chat-xxxs uppercase tracking-[0.12em] text-muted-foreground/65">
           <span>Changed files ({changedFileCountLabel})</span>
           {hasNonZeroStat(summaryStat) && (
             <>
@@ -729,7 +737,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         }
 
         return (
-          <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+          <div className="whitespace-pre-wrap wrap-break-word text-chat-body leading-relaxed text-foreground">
             {inlineNodes}
           </div>
         );
@@ -757,7 +765,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     }
 
     return (
-      <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+      <div className="whitespace-pre-wrap wrap-break-word text-chat-body leading-relaxed text-foreground">
         {inlineNodes}
       </div>
     );
@@ -768,7 +776,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   }
 
   return (
-    <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+    <div className="whitespace-pre-wrap wrap-break-word text-chat-body leading-relaxed text-foreground">
       {props.text}
     </div>
   );
@@ -956,7 +964,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           <div className="max-w-full">
             <p
               className={cn(
-                "truncate text-xs leading-5",
+                "truncate text-chat-xs leading-5",
                 workToneClass(workEntry.tone),
                 preview ? "text-muted-foreground/70" : "",
               )}
@@ -983,7 +991,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                       className="max-w-[min(56rem,calc(100vw-2rem))] px-0 py-0"
                       side="top"
                     >
-                      <div className="max-w-[min(56rem,calc(100vw-2rem))] overflow-x-auto px-1.5 py-1 font-mono text-[11px] leading-4 whitespace-nowrap">
+                      <div className="max-w-[min(56rem,calc(100vw-2rem))] overflow-x-auto px-1.5 py-1 font-mono text-chat-xxs leading-4 whitespace-nowrap">
                         {rawCommand}
                       </div>
                     </TooltipPopup>
@@ -1002,7 +1010,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             return (
               <span
                 key={`${workEntry.id}:${filePath}`}
-                className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
+                className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-chat-xxxs text-muted-foreground/75"
                 title={displayPath}
               >
                 {displayPath}
@@ -1010,7 +1018,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             );
           })}
           {(workEntry.changedFiles?.length ?? 0) > 4 && (
-            <span className="px-1 text-[10px] text-muted-foreground/55">
+            <span className="px-1 text-chat-xxxs text-muted-foreground/55">
               +{(workEntry.changedFiles?.length ?? 0) - 4}
             </span>
           )}

@@ -611,6 +611,7 @@ export default function ChatView(props: ChatViewProps) {
     (store) => store.setStickyModelSelection,
   );
   const timestampFormat = settings.timestampFormat;
+  const chatFontSize = settings.chatFontSize;
   const navigate = useNavigate();
   const rawSearch = useSearch({
     strict: false,
@@ -3268,6 +3269,7 @@ export default function ChatView(props: ChatViewProps) {
               markdownCwd={gitCwd ?? undefined}
               resolvedTheme={resolvedTheme}
               timestampFormat={timestampFormat}
+              chatFontSize={chatFontSize}
               workspaceRoot={activeWorkspaceRoot}
               onIsAtEndChange={onIsAtEndChange}
             />
