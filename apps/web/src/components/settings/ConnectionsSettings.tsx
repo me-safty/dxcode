@@ -1218,7 +1218,7 @@ export function ConnectionsSettings() {
                 }
               >
                 {showCustomNetworkHostnameInput ? (
-                  <div className="grid gap-1.5 pb-4">
+                  <div className="grid gap-1.5 pt-2 pb-4">
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-medium text-foreground">
                         Custom hostname or URL
