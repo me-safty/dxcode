@@ -164,7 +164,7 @@ import {
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelection } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { deriveLogicalProjectKey } from "../logicalProject";
+import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
 import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
@@ -1138,6 +1138,63 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
     timelineThread?.session ?? null,
   );
   const activeProject = useProjectById(activeThread?.projectId);
+
+  // Compute the list of environments this logical project spans, used to
+  // drive the environment picker in BranchToolbar.
+  const allProjects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((s) => s.byId);
+  const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
+  const projectGroupingSettings = useSettings((settings) => ({
+    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
+    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
+  }));
+  const logicalProjectEnvironments = useMemo(() => {
+    if (!activeProject) return [];
+    const logicalKey = deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
+    const memberProjects = allProjects.filter(
+      (p) => deriveLogicalProjectKeyFromSettings(p, projectGroupingSettings) === logicalKey,
+    );
+    const seen = new Set<string>();
+    const envs: Array<{
+      environmentId: EnvironmentId;
+      projectId: ProjectId;
+      label: string;
+      isPrimary: boolean;
+    }> = [];
+    for (const p of memberProjects) {
+      if (seen.has(p.environmentId)) continue;
+      seen.add(p.environmentId);
+      const isPrimary = p.environmentId === primaryEnvironmentId;
+      const savedRecord = savedEnvironmentRegistry[p.environmentId];
+      const runtimeState = savedEnvironmentRuntimeById[p.environmentId];
+      const label = resolveEnvironmentOptionLabel({
+        isPrimary,
+        environmentId: p.environmentId,
+        runtimeLabel: runtimeState?.descriptor?.label ?? null,
+        savedLabel: savedRecord?.label ?? null,
+      });
+      envs.push({
+        environmentId: p.environmentId,
+        projectId: p.id,
+        label,
+        isPrimary,
+      });
+    }
+    // Sort: primary first, then alphabetical
+    envs.sort((a, b) => {
+      if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
+      return a.label.localeCompare(b.label);
+    });
+    return envs;
+  }, [
+    activeProject,
+    allProjects,
+    projectGroupingSettings,
+    primaryEnvironmentId,
+    savedEnvironmentRegistry,
+    savedEnvironmentRuntimeById,
+  ]);
+  const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;
 
   const openPullRequestDialog = useCallback(
     (reference?: string) => {

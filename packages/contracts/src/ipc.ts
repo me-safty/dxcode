@@ -79,6 +79,7 @@ export interface ContextMenuItem<T extends string = string> {
   label: string;
   destructive?: boolean;
   disabled?: boolean;
+  children?: readonly ContextMenuItem<T>[];
 }
 
 export type DesktopUpdateStatus =
