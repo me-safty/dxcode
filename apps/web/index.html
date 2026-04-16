@@ -28,9 +28,9 @@
           return probe.style.fontFamily ? trimmedValue : fallback;
         };
 
-        const storedClientSettings = window.localStorage.getItem(CLIENT_SETTINGS_STORAGE_KEY);
-        if (storedClientSettings) {
-          try {
+        try {
+          const storedClientSettings = window.localStorage.getItem(CLIENT_SETTINGS_STORAGE_KEY);
+          if (storedClientSettings) {
             const clientSettings = JSON.parse(storedClientSettings);
             document.documentElement.style.setProperty(
               "--app-font-ui",
@@ -40,8 +40,8 @@
               "--app-font-code",
               resolveFontFamily(clientSettings?.codeFontFamily, DEFAULT_CODE_FONT_FAMILY),
             );
-          } catch {}
-        }
+          }
+        } catch {}
 
         try {
           const storedTheme = window.localStorage.getItem("t3code:theme");

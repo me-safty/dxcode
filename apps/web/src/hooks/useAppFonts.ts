@@ -5,7 +5,7 @@ import {
   type ClientSettings,
 } from "@t3tools/contracts/settings";
 
-import { useSettings } from "./useSettings";
+import { useClientSettingsHydrated, useSettings } from "./useSettings";
 
 function resolveFontFamily(value: string | null | undefined, fallback: string): string {
   const trimmedValue = value?.trim();
@@ -55,8 +55,10 @@ export function getResolvedCodeFontFamily(): string {
 export function useAppFonts(): void {
   const uiFontFamily = useSettings((settings) => settings.uiFontFamily);
   const codeFontFamily = useSettings((settings) => settings.codeFontFamily);
+  const isHydrated = useClientSettingsHydrated();
 
   useEffect(() => {
+    if (!isHydrated) return;
     applyAppFonts({ uiFontFamily, codeFontFamily });
-  }, [codeFontFamily, uiFontFamily]);
+  }, [codeFontFamily, isHydrated, uiFontFamily]);
 }

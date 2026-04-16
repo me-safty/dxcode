@@ -1,4 +1,5 @@
 import type { ContextMenuItem, LocalApi } from "@t3tools/contracts";
+import type { ClientSettings } from "@t3tools/contracts/settings";
 
 import { resetGitStatusStateForTests } from "./lib/gitStatusState";
 import { resetRequestLatencyStateForTests } from "./rpc/requestLatencyState";
@@ -25,6 +26,18 @@ import {
 } from "./clientPersistenceStorage";
 
 let cachedApi: LocalApi | undefined;
+
+function mirrorBrowserClientSettings(settings: ClientSettings | null | undefined): void {
+  if (!settings) {
+    return;
+  }
+
+  try {
+    writeBrowserClientSettings(settings);
+  } catch {
+    // Desktop persistence is authoritative; localStorage is only a bootstrap cache.
+  }
+}
 
 export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
   return {
@@ -68,13 +81,17 @@ export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
     persistence: {
       getClientSettings: async () => {
         if (window.desktopBridge) {
-          return window.desktopBridge.getClientSettings();
+          const settings = await window.desktopBridge.getClientSettings();
+          mirrorBrowserClientSettings(settings);
+          return settings;
         }
         return readBrowserClientSettings();
       },
       setClientSettings: async (settings) => {
         if (window.desktopBridge) {
-          return window.desktopBridge.setClientSettings(settings);
+          await window.desktopBridge.setClientSettings(settings);
+          mirrorBrowserClientSettings(settings);
+          return;
         }
         writeBrowserClientSettings(settings);
       },
