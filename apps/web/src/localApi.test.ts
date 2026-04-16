@@ -11,6 +11,7 @@ import {
   type TerminalEvent,
   ThreadId,
 } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
@@ -528,13 +529,17 @@ describe("wsApi", () => {
   });
 
   it("reads and writes persistence through the desktop bridge when available", async () => {
-    const getClientSettings = vi.fn().mockResolvedValue({
+    const clientSettings = {
+      ...DEFAULT_CLIENT_SETTINGS,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
       diffWordWrap: true,
-      sidebarProjectSortOrder: "manual",
-      sidebarThreadSortOrder: "created_at",
-      timestampFormat: "24-hour",
+      sidebarProjectSortOrder: "manual" as const,
+      sidebarThreadSortOrder: "created_at" as const,
+      timestampFormat: "24-hour" as const,
+    };
+    const getClientSettings = vi.fn().mockResolvedValue({
+      ...clientSettings,
     });
     const setClientSettings = vi.fn().mockResolvedValue(undefined);
     const getSavedEnvironmentRegistry = vi.fn().mockResolvedValue([]);
@@ -553,17 +558,13 @@ describe("wsApi", () => {
     });
 
     const { createLocalApi } = await import("./localApi");
+    const { readBrowserClientSettings } = await import("./clientPersistenceStorage");
     const api = createLocalApi(rpcClientMock as never);
 
     await api.persistence.getClientSettings();
-    await api.persistence.setClientSettings({
-      confirmThreadArchive: true,
-      confirmThreadDelete: false,
-      diffWordWrap: true,
-      sidebarProjectSortOrder: "manual",
-      sidebarThreadSortOrder: "created_at",
-      timestampFormat: "24-hour",
-    });
+    expect(readBrowserClientSettings()).toEqual(clientSettings);
+
+    await api.persistence.setClientSettings(clientSettings);
     await api.persistence.getSavedEnvironmentRegistry();
     await api.persistence.setSavedEnvironmentRegistry([]);
     await api.persistence.getSavedEnvironmentSecret(EnvironmentId.make("environment-local"));
@@ -574,14 +575,8 @@ describe("wsApi", () => {
     await api.persistence.removeSavedEnvironmentSecret(EnvironmentId.make("environment-local"));
 
     expect(getClientSettings).toHaveBeenCalledWith();
-    expect(setClientSettings).toHaveBeenCalledWith({
-      confirmThreadArchive: true,
-      confirmThreadDelete: false,
-      diffWordWrap: true,
-      sidebarProjectSortOrder: "manual",
-      sidebarThreadSortOrder: "created_at",
-      timestampFormat: "24-hour",
-    });
+    expect(setClientSettings).toHaveBeenCalledWith(clientSettings);
+    expect(readBrowserClientSettings()).toEqual(clientSettings);
     expect(getSavedEnvironmentRegistry).toHaveBeenCalledWith();
     expect(setSavedEnvironmentRegistry).toHaveBeenCalledWith([]);
     expect(getSavedEnvironmentSecret).toHaveBeenCalledWith("environment-local");
@@ -589,11 +584,32 @@ describe("wsApi", () => {
     expect(removeSavedEnvironmentSecret).toHaveBeenCalledWith("environment-local");
   });
 
+  it("clears stale browser client settings when desktop persistence has no settings", async () => {
+    const staleSettings = {
+      ...DEFAULT_CLIENT_SETTINGS,
+      uiFontFamily: '"IBM Plex Sans", sans-serif',
+      codeFontFamily: '"JetBrains Mono", monospace',
+    };
+    const getClientSettings = vi.fn().mockResolvedValue(null);
+    getWindowForTest().desktopBridge = makeDesktopBridge({ getClientSettings });
+
+    const { createLocalApi } = await import("./localApi");
+    const { readBrowserClientSettings, writeBrowserClientSettings } =
+      await import("./clientPersistenceStorage");
+    writeBrowserClientSettings(staleSettings);
+
+    const api = createLocalApi(rpcClientMock as never);
+
+    await expect(api.persistence.getClientSettings()).resolves.toBeNull();
+    expect(readBrowserClientSettings()).toBeNull();
+  });
+
   it("falls back to browser storage for persistence when the desktop bridge is missing", async () => {
     const { createLocalApi } = await import("./localApi");
     const api = createLocalApi(rpcClientMock as never);
 
     await api.persistence.setClientSettings({
+      ...DEFAULT_CLIENT_SETTINGS,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
       diffWordWrap: true,
@@ -617,6 +633,7 @@ describe("wsApi", () => {
     );
 
     await expect(api.persistence.getClientSettings()).resolves.toEqual({
+      ...DEFAULT_CLIENT_SETTINGS,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
       diffWordWrap: true,

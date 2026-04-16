@@ -20,7 +20,6 @@ import {
 } from "electron";
 import type { MenuItemConstructorOptions, OpenDialogOptions } from "electron";
 import type {
-  ClientSettings,
   DesktopTheme,
   DesktopAppBranding,
   DesktopServerExposureMode,
@@ -34,6 +33,7 @@ import type {
 import { autoUpdater } from "electron-updater";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
+import { parseClientSettings } from "@t3tools/shared/clientSettings";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort";
@@ -1579,11 +1579,12 @@ function registerIpcHandlers(): void {
 
   ipcMain.removeHandler(SET_CLIENT_SETTINGS_CHANNEL);
   ipcMain.handle(SET_CLIENT_SETTINGS_CHANNEL, async (_event, rawSettings: unknown) => {
-    if (typeof rawSettings !== "object" || rawSettings === null) {
+    const settings = parseClientSettings(rawSettings);
+    if (!settings) {
       throw new Error("Invalid client settings payload.");
     }
 
-    writeClientSettings(CLIENT_SETTINGS_PATH, rawSettings as ClientSettings);
+    writeClientSettings(CLIENT_SETTINGS_PATH, settings);
   });
 
   ipcMain.removeHandler(GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL);

@@ -1,4 +1,5 @@
 import type { ContextMenuItem, LocalApi } from "@t3tools/contracts";
+import type { ClientSettings } from "@t3tools/contracts/settings";
 
 import { resetGitStatusStateForTests } from "./lib/gitStatusState";
 import { resetRequestLatencyStateForTests } from "./rpc/requestLatencyState";
@@ -16,6 +17,7 @@ import { type WsRpcClient } from "./rpc/wsRpcClient";
 import { showContextMenuFallback } from "./contextMenuFallback";
 import {
   readBrowserClientSettings,
+  removeBrowserClientSettings,
   readBrowserSavedEnvironmentRegistry,
   readBrowserSavedEnvironmentSecret,
   removeBrowserSavedEnvironmentSecret,
@@ -25,6 +27,23 @@ import {
 } from "./clientPersistenceStorage";
 
 let cachedApi: LocalApi | undefined;
+
+function syncBrowserClientSettingsCache(settings: ClientSettings | null | undefined): void {
+  if (settings) {
+    try {
+      writeBrowserClientSettings(settings);
+    } catch {
+      // Desktop persistence is authoritative; localStorage is only a bootstrap cache.
+    }
+    return;
+  }
+
+  try {
+    removeBrowserClientSettings();
+  } catch {
+    // Desktop persistence is authoritative; localStorage is only a bootstrap cache.
+  }
+}
 
 export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
   return {
@@ -68,13 +87,17 @@ export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
     persistence: {
       getClientSettings: async () => {
         if (window.desktopBridge) {
-          return window.desktopBridge.getClientSettings();
+          const settings = await window.desktopBridge.getClientSettings();
+          syncBrowserClientSettingsCache(settings);
+          return settings;
         }
         return readBrowserClientSettings();
       },
       setClientSettings: async (settings) => {
         if (window.desktopBridge) {
-          return window.desktopBridge.setClientSettings(settings);
+          await window.desktopBridge.setClientSettings(settings);
+          syncBrowserClientSettingsCache(settings);
+          return;
         }
         writeBrowserClientSettings(settings);
       },

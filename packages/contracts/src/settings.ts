@@ -2,12 +2,15 @@ import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas";
+import { DEFAULT_CODE_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY } from "./fontDefaults";
 import {
   ClaudeModelOptions,
   CodexModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
 } from "./model";
 import { ModelSelection } from "./orchestration";
+
+export { DEFAULT_CODE_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY };
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -27,6 +30,12 @@ export const ClientSettingsSchema = Schema.Struct({
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  uiFontFamily: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_UI_FONT_FAMILY)),
+  ),
+  codeFontFamily: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_CODE_FONT_FAMILY)),
+  ),
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_SORT_ORDER)),
   ),

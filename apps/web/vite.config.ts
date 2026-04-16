@@ -2,8 +2,18 @@ import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
-import { defineConfig } from "vite";
+import { DEFAULT_CODE_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY } from "@t3tools/contracts/fontDefaults";
+import { defineConfig, type Plugin } from "vite";
 import pkg from "./package.json" with { type: "json" };
+
+const bootstrapConstantsPlugin = (): Plugin => ({
+  name: "t3code:bootstrap-constants",
+  transformIndexHtml(html) {
+    return html
+      .replaceAll("__T3_DEFAULT_UI_FONT_FAMILY__", JSON.stringify(DEFAULT_UI_FONT_FAMILY))
+      .replaceAll("__T3_DEFAULT_CODE_FONT_FAMILY__", JSON.stringify(DEFAULT_CODE_FONT_FAMILY));
+  },
+});
 
 const port = Number(process.env.PORT ?? 5733);
 const host = process.env.HOST?.trim() || "localhost";
@@ -54,6 +64,7 @@ export default defineConfig({
       presets: [reactCompilerPreset()],
     }),
     tailwindcss(),
+    bootstrapConstantsPlugin(),
   ],
   optimizeDeps: {
     include: ["@pierre/diffs", "@pierre/diffs/react", "@pierre/diffs/worker/worker.js"],
