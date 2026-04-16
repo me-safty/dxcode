@@ -10,6 +10,8 @@ import {
   RepositoryIdentityResolverLive,
 } from "./RepositoryIdentityResolver.ts";
 
+const normalizePathSeparators = (value: string) => value.replaceAll("\\", "/");
+
 const git = (cwd: string, args: ReadonlyArray<string>) =>
   Effect.promise(() => runProcess("git", ["-C", cwd, ...args]));
 
@@ -41,10 +43,34 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
 
       expect(identity).not.toBeNull();
       expect(identity?.canonicalKey).toBe("github.com/t3tools/t3code");
+      expect(normalizePathSeparators(identity?.rootPath ?? "")).toBe(normalizePathSeparators(cwd));
       expect(identity?.displayName).toBe("t3tools/t3code");
       expect(identity?.provider).toBe("github");
       expect(identity?.owner).toBe("t3tools");
       expect(identity?.name).toBe("t3code");
+    }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
+  );
+
+  it.effect("returns the git top-level root path when resolving from a nested workspace", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const repoRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-nested-root-test-",
+      });
+      const nestedWorkspace = `${repoRoot}/packages/web`;
+
+      yield* fileSystem.makeDirectory(nestedWorkspace, { recursive: true });
+      yield* git(repoRoot, ["init"]);
+      yield* git(repoRoot, ["remote", "add", "origin", "git@github.com:T3Tools/t3code.git"]);
+
+      const resolver = yield* RepositoryIdentityResolver;
+      const identity = yield* resolver.resolve(nestedWorkspace);
+
+      expect(identity).not.toBeNull();
+      expect(identity?.canonicalKey).toBe("github.com/t3tools/t3code");
+      expect(normalizePathSeparators(identity?.rootPath ?? "")).toBe(
+        normalizePathSeparators(repoRoot),
+      );
     }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
   );
 

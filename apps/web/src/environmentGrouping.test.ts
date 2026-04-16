@@ -273,6 +273,78 @@ describe("environment grouping", () => {
       expect(deriveLogicalProjectKey(primary)).toBe(deriveLogicalProjectKey(remote));
     });
 
+    it("does not group repo root and nested projects from the same repository", () => {
+      const rootProject = makeProject({
+        id: sharedProjectPrimaryId,
+        environmentId: primaryEnvId,
+        name: "shared-repo",
+        cwd: "/workspace/repo",
+        repositoryIdentity: {
+          canonicalKey: SHARED_REPO_CANONICAL_KEY,
+          rootPath: "/workspace/repo",
+          locator: {
+            source: "git-remote",
+            remoteName: "origin",
+            remoteUrl: "https://github.com/example/shared-repo.git",
+          },
+        },
+      });
+      const nestedProject = makeProject({
+        id: localOnlyProjectId,
+        environmentId: primaryEnvId,
+        name: "web",
+        cwd: "/workspace/repo/apps/web",
+        repositoryIdentity: {
+          canonicalKey: SHARED_REPO_CANONICAL_KEY,
+          rootPath: "/workspace/repo",
+          locator: {
+            source: "git-remote",
+            remoteName: "origin",
+            remoteUrl: "https://github.com/example/shared-repo.git",
+          },
+        },
+      });
+
+      expect(deriveLogicalProjectKey(rootProject)).toBe(SHARED_REPO_CANONICAL_KEY);
+      expect(deriveLogicalProjectKey(nestedProject)).toBe(`${SHARED_REPO_CANONICAL_KEY}::apps/web`);
+    });
+
+    it("groups matching nested project paths across environments when repo roots differ", () => {
+      const primary = makeProject({
+        id: sharedProjectPrimaryId,
+        environmentId: primaryEnvId,
+        name: "web",
+        cwd: "/workspace/repo/apps/web",
+        repositoryIdentity: {
+          canonicalKey: SHARED_REPO_CANONICAL_KEY,
+          rootPath: "/workspace/repo",
+          locator: {
+            source: "git-remote",
+            remoteName: "origin",
+            remoteUrl: "https://github.com/example/shared-repo.git",
+          },
+        },
+      });
+      const remote = makeProject({
+        id: sharedProjectRemoteId,
+        environmentId: remoteEnvId,
+        name: "web",
+        cwd: "/srv/checkout/apps/web",
+        repositoryIdentity: {
+          canonicalKey: SHARED_REPO_CANONICAL_KEY,
+          rootPath: "/srv/checkout",
+          locator: {
+            source: "git-remote",
+            remoteName: "origin",
+            remoteUrl: "https://github.com/example/shared-repo.git",
+          },
+        },
+      });
+
+      expect(deriveLogicalProjectKey(primary)).toBe(`${SHARED_REPO_CANONICAL_KEY}::apps/web`);
+      expect(deriveLogicalProjectKey(primary)).toBe(deriveLogicalProjectKey(remote));
+    });
+
     it("does NOT group projects without shared canonical key", () => {
       const local = makeProject({
         id: localOnlyProjectId,
