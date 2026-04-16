@@ -121,7 +121,6 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import {
   buildSidebarProjectSnapshots,
-  getProjectDeletionBlockingThreads,
   getSidebarThreadIdsToPrewarm,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
@@ -1411,7 +1410,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           });
         }
 
-        const blockingThreads = getProjectDeletionBlockingThreads(deletionProjectThreads);
+        const blockingThreads = deletionProjectThreads.filter(
+          (thread) => thread.archivedAt === null,
+        );
 
         if (blockingThreads.length > 0) {
           toastManager.add({

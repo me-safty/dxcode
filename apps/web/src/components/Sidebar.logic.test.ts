@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildSidebarProjectSnapshots,
   createThreadJumpHintVisibilityController,
-  getProjectDeletionBlockingThreads,
   getSidebarThreadIdsToPrewarm,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
@@ -28,7 +27,6 @@ import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   type Project,
-  type SidebarThreadSummary,
   type Thread,
 } from "../types";
 
@@ -740,33 +738,6 @@ describe("buildSidebarProjectSnapshots", () => {
   });
 });
 
-describe("getProjectDeletionBlockingThreads", () => {
-  it("ignores archived threads when evaluating project removal blockers", () => {
-    const threads = [
-      makeSidebarThreadSummary({
-        id: ThreadId.make("thread-archived-only"),
-        archivedAt: "2026-03-09T10:10:00.000Z",
-      }),
-    ];
-
-    expect(getProjectDeletionBlockingThreads(threads)).toEqual([]);
-  });
-
-  it("keeps active threads as project removal blockers", () => {
-    const archivedThread = makeSidebarThreadSummary({
-      id: ThreadId.make("thread-archived"),
-      archivedAt: "2026-03-09T10:10:00.000Z",
-    });
-    const activeThread = makeSidebarThreadSummary({
-      id: ThreadId.make("thread-active"),
-    });
-
-    expect(getProjectDeletionBlockingThreads([archivedThread, activeThread])).toEqual([
-      activeThread,
-    ]);
-  });
-});
-
 function makeProject(overrides: Partial<Project> = {}): Project {
   const { defaultModelSelection, ...rest } = overrides;
   return {
@@ -783,30 +754,6 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     updatedAt: "2026-03-09T10:00:00.000Z",
     scripts: [],
     ...rest,
-  };
-}
-
-function makeSidebarThreadSummary(
-  overrides: Partial<SidebarThreadSummary> = {},
-): SidebarThreadSummary {
-  return {
-    id: ThreadId.make("thread-summary-1"),
-    environmentId: localEnvironmentId,
-    projectId: ProjectId.make("project-1"),
-    title: "Thread",
-    interactionMode: DEFAULT_INTERACTION_MODE,
-    session: null,
-    createdAt: "2026-03-09T10:00:00.000Z",
-    archivedAt: null,
-    updatedAt: "2026-03-09T10:00:00.000Z",
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
-    latestUserMessageAt: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
-    ...overrides,
   };
 }
 

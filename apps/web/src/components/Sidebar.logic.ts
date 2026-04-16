@@ -160,12 +160,6 @@ export function buildSidebarProjectSnapshots(input: {
   return result;
 }
 
-export function getProjectDeletionBlockingThreads(
-  projectThreads: readonly SidebarThreadSummary[],
-): SidebarThreadSummary[] {
-  return projectThreads.filter((thread) => thread.archivedAt === null);
-}
-
 export function createThreadJumpHintVisibilityController(input: {
   delayMs: number;
   onVisibilityChange: (visible: boolean) => void;
