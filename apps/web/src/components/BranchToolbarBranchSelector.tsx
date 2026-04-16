@@ -3,14 +3,7 @@ import type { EnvironmentApi, EnvironmentId, GitBranch, ThreadId } from "@t3tool
 import { type QueryClient, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronDownIcon } from "lucide-react";
-import {
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { readEnvironmentApi } from "../environmentApi";
 import { readLocalApi } from "../localApi";

@@ -2243,6 +2243,12 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
             { timeoutMs: 10_000, allowNonZeroExit: true },
           );
         });
+      const readStashList = () =>
+        runGitStdout("GitCore.stashAndCheckout.stashList", input.cwd, ["stash", "list"]).pipe(
+          Effect.map((stdout) => stdout.trim()),
+        );
+
+      const stashListBefore = yield* readStashList();
 
       yield* executeGit(
         "GitCore.stashAndCheckout.stash",
@@ -2250,6 +2256,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
         ["stash", "push", "-u", "-m", `t3code: stash before switching to ${input.branch}`],
         { timeoutMs: 15_000, fallbackErrorMessage: "git stash failed" },
       );
+      const stashEntryCreated = (yield* readStashList()) !== stashListBefore;
 
       const checkoutExit = yield* Effect.exit(
         checkoutBranch(input).pipe(
@@ -2266,6 +2273,10 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
         ),
       );
       if (Exit.isFailure(checkoutExit)) {
+        if (!stashEntryCreated) {
+          return yield* Effect.failCause(checkoutExit.cause);
+        }
+
         const restoreResult = yield* executeGit(
           "GitCore.stashAndCheckout.restoreOriginalBranch",
           input.cwd,
@@ -2284,6 +2295,10 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
         }
 
         return yield* Effect.failCause(checkoutExit.cause);
+      }
+
+      if (!stashEntryCreated) {
+        return;
       }
 
       const popResult = yield* executeGit(

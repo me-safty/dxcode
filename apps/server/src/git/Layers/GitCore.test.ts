@@ -1655,6 +1655,29 @@ it.layer(TestLayer)("git integration", (it) => {
       }),
     );
 
+    it.effect("skips stash pop when stash push creates no entry", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(tmp);
+        const core = yield* GitCore;
+
+        yield* core.createBranch({ cwd: tmp, branch: "feature" });
+        yield* core.checkoutBranch({ cwd: tmp, branch: "feature" });
+        yield* writeTextFile(path.join(tmp, "feature.txt"), "feature content\n");
+        yield* git(tmp, ["add", "."]);
+        yield* git(tmp, ["commit", "-m", "add feature file"]);
+        yield* core.checkoutBranch({ cwd: tmp, branch: initialBranch });
+
+        yield* core.stashAndCheckout({ cwd: tmp, branch: "feature" });
+
+        const branches = yield* core.listBranches({ cwd: tmp });
+        expect(branches.branches.find((b) => b.current)!.name).toBe("feature");
+
+        const stashList = yield* git(tmp, ["stash", "list"]);
+        expect(stashList.trim()).toBe("");
+      }),
+    );
+
     it.effect("includes descriptive stash message", () =>
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();
