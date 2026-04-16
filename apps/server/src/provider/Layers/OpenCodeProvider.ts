@@ -108,6 +108,49 @@ function formatOpenCodeProbeError(input: {
   };
 }
 
+const makePendingOpenCodeProvider = (openCodeSettings: OpenCodeSettings): ServerProvider => {
+  const checkedAt = new Date().toISOString();
+  const models = providerModelsFromSettings(
+    [],
+    PROVIDER,
+    openCodeSettings.customModels,
+    DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+  );
+
+  if (!openCodeSettings.enabled) {
+    return buildServerProvider({
+      provider: PROVIDER,
+      enabled: false,
+      checkedAt,
+      models,
+      probe: {
+        installed: false,
+        version: null,
+        status: "warning",
+        auth: { status: "unknown" },
+        message:
+          openCodeSettings.serverUrl.trim().length > 0
+            ? "OpenCode is disabled in T3 Code settings. A server URL is configured."
+            : "OpenCode is disabled in T3 Code settings.",
+      },
+    });
+  }
+
+  return buildServerProvider({
+    provider: PROVIDER,
+    enabled: true,
+    checkedAt,
+    models,
+    probe: {
+      installed: false,
+      version: null,
+      status: "warning",
+      auth: { status: "unknown" },
+      message: "OpenCode provider status has not been checked in this session yet.",
+    },
+  });
+};
+
 export function checkOpenCodeProviderStatus(input: {
   readonly settings: OpenCodeSettings;
   readonly cwd: string;
@@ -263,6 +306,7 @@ export function makeOpenCodeProviderLive() {
           Stream.map((settings) => settings.providers.opencode),
         ),
         haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
+        initialSnapshot: makePendingOpenCodeProvider,
         checkProvider: getProviderSettings.pipe(
           Effect.flatMap((settings) =>
             checkOpenCodeProviderStatus({

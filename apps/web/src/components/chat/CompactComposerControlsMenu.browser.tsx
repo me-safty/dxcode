@@ -123,6 +123,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
     <CompactComposerControlsMenu
       activePlan={false}
       interactionMode="default"
+      planSidebarLabel="Plan"
       planSidebarOpen={false}
       runtimeMode="approval-required"
       showInteractionModeToggle
@@ -275,6 +276,7 @@ describe("CompactComposerControlsMenu", () => {
       <CompactComposerControlsMenu
         activePlan={false}
         interactionMode="default"
+        planSidebarLabel="Plan"
         planSidebarOpen={false}
         runtimeMode="approval-required"
         showInteractionModeToggle={false}
