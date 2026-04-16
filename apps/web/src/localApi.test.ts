@@ -538,6 +538,18 @@ describe("wsApi", () => {
     await expect(api.shell.getPathForFile(file)).resolves.toBeNull();
   });
 
+  it("normalizes empty dropped-file paths from the desktop bridge to null", async () => {
+    const getPathForFile = vi.fn().mockReturnValue("");
+    getWindowForTest().desktopBridge = makeDesktopBridge({ getPathForFile });
+
+    const { createLocalApi } = await import("./localApi");
+    const api = createLocalApi(rpcClientMock as never);
+    const file = new File(['{"hello":"world"}'], "input.json", { type: "application/json" });
+
+    await expect(api.shell.getPathForFile(file)).resolves.toBeNull();
+    expect(getPathForFile).toHaveBeenCalledWith(file);
+  });
+
   it("falls back to the browser context menu helper when the desktop bridge is missing", async () => {
     showContextMenuFallbackMock.mockResolvedValue("rename");
     const { createLocalApi } = await import("./localApi");

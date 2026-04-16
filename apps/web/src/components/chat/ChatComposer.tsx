@@ -1556,7 +1556,7 @@ export const ChatComposer = memo(
           nonImageFiles.map(async (file) => {
             try {
               const resolvedPath = await localApi?.shell.getPathForFile(file);
-              return formatComposerFileReference(resolvedPath ?? file.name);
+              return formatComposerFileReference(resolvedPath || file.name);
             } catch {
               return formatComposerFileReference(file.name);
             }
