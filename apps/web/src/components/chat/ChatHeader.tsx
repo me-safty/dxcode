@@ -79,6 +79,7 @@ export const ChatHeader = memo(function ChatHeader({
           <TooltipTrigger
             render={
               <h2
+                dir="auto"
                 aria-label={activeThreadTitle}
                 className="min-w-0 flex-1 basis-40 truncate text-sm font-medium text-foreground"
               >
