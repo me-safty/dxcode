@@ -6,16 +6,14 @@ import {
 } from "@t3tools/contracts";
 import {
   isClaudeUltrathinkPrompt,
-  normalizeClaudeModelOptionsWithCapabilities,
-  normalizeCodexModelOptionsWithCapabilities,
+  normalizeProviderModelOptionsWithCapabilities,
   resolveEffort,
+  trimOrNull,
 } from "@t3tools/shared/model";
 import type { ReactNode } from "react";
+
 import type { DraftId } from "../../composerDraftStore";
-import {
-  getProviderModelCapabilities,
-  normalizeCursorModelOptionsWithCapabilities,
-} from "../../providerModels";
+import { getProviderModelCapabilities } from "../../providerModels";
 import { shouldRenderTraitsControls, TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
 
 export type ComposerProviderStateInput = {
@@ -45,7 +43,12 @@ type TraitsRenderInput = {
   onPromptChange: (prompt: string) => void;
 };
 
+export type ComposerProviderControls = {
+  showInteractionModeToggle: boolean;
+};
+
 type ProviderRegistryEntry = {
+  controls: ComposerProviderControls;
   getState: (input: ComposerProviderStateInput) => ComposerProviderState;
   renderTraitsMenuContent: (input: TraitsRenderInput) => ReactNode;
   renderTraitsPicker: (input: TraitsRenderInput) => ReactNode;
@@ -97,7 +100,6 @@ function getProviderStateFromCapabilities(
   const { provider, model, models, prompt, modelOptions } = input;
   const caps = getProviderModelCapabilities(models, model, provider);
   const providerOptions = modelOptions?.[provider];
-
   const rawEffort = providerOptions
     ? "effort" in providerOptions
       ? providerOptions.effort
@@ -105,16 +107,21 @@ function getProviderStateFromCapabilities(
         ? providerOptions.reasoningEffort
         : "reasoning" in providerOptions
           ? providerOptions.reasoning
-          : null
+          : "variant" in providerOptions
+            ? providerOptions.variant
+            : null
     : null;
-
-  const promptEffort = resolveEffort(caps, rawEffort) ?? null;
-  const normalizedOptions = {
-    codex: normalizeCodexModelOptionsWithCapabilities(caps, providerOptions),
-    cursor: normalizeCursorModelOptionsWithCapabilities(caps, providerOptions),
-    claudeAgent: normalizeClaudeModelOptionsWithCapabilities(caps, providerOptions),
-  }[provider];
-
+  const normalizedOptions = normalizeProviderModelOptionsWithCapabilities(
+    provider,
+    caps,
+    providerOptions,
+  );
+  const promptEffort =
+    provider === "opencode"
+      ? (trimOrNull(
+          normalizedOptions && "variant" in normalizedOptions ? normalizedOptions.variant : null,
+        ) ?? null)
+      : (resolveEffort(caps, rawEffort) ?? null);
   const ultrathinkActive =
     caps.promptInjectedEffortLevels.length > 0 && isClaudeUltrathinkPrompt(prompt);
 
@@ -130,27 +137,40 @@ function getProviderStateFromCapabilities(
   };
 }
 
+const DEFAULT_PROVIDER_CONTROLS: ComposerProviderControls = {
+  showInteractionModeToggle: true,
+};
+
+function createProviderRegistryEntry(
+  provider: ProviderKind,
+  controls?: Partial<ComposerProviderControls>,
+): ProviderRegistryEntry {
+  return {
+    controls: {
+      ...DEFAULT_PROVIDER_CONTROLS,
+      ...controls,
+    },
+    getState: (input) => getProviderStateFromCapabilities(input),
+    renderTraitsMenuContent: (input) => renderTraitsControl(TraitsMenuContent, provider, input),
+    renderTraitsPicker: (input) => renderTraitsControl(TraitsPicker, provider, input),
+  };
+}
+
 const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
-  codex: {
-    getState: (input) => getProviderStateFromCapabilities(input),
-    renderTraitsMenuContent: (input) => renderTraitsControl(TraitsMenuContent, "codex", input),
-    renderTraitsPicker: (input) => renderTraitsControl(TraitsPicker, "codex", input),
-  },
-  claudeAgent: {
-    getState: (input) => getProviderStateFromCapabilities(input),
-    renderTraitsMenuContent: (input) =>
-      renderTraitsControl(TraitsMenuContent, "claudeAgent", input),
-    renderTraitsPicker: (input) => renderTraitsControl(TraitsPicker, "claudeAgent", input),
-  },
-  cursor: {
-    getState: (input) => getProviderStateFromCapabilities(input),
-    renderTraitsMenuContent: (input) => renderTraitsControl(TraitsMenuContent, "cursor", input),
-    renderTraitsPicker: (input) => renderTraitsControl(TraitsPicker, "cursor", input),
-  },
+  codex: createProviderRegistryEntry("codex"),
+  claudeAgent: createProviderRegistryEntry("claudeAgent"),
+  cursor: createProviderRegistryEntry("cursor"),
+  opencode: createProviderRegistryEntry("opencode", {
+    showInteractionModeToggle: false,
+  }),
 };
 
 export function getComposerProviderState(input: ComposerProviderStateInput): ComposerProviderState {
   return composerProviderRegistry[input.provider].getState(input);
+}
+
+export function getComposerProviderControls(provider: ProviderKind): ComposerProviderControls {
+  return composerProviderRegistry[provider].controls;
 }
 
 export function renderProviderTraitsMenuContent(input: {

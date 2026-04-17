@@ -18,6 +18,7 @@ import {
 import { ClaudeAdapter } from "../Services/ClaudeAdapter.ts";
 import { CodexAdapter } from "../Services/CodexAdapter.ts";
 import { CursorAdapter } from "../Services/CursorAdapter.ts";
+import { OpenCodeAdapter } from "../Services/OpenCodeAdapter.ts";
 
 export interface ProviderAdapterRegistryLiveOptions {
   readonly adapters?: ReadonlyArray<ProviderAdapterShape<ProviderAdapterError>>;
@@ -26,10 +27,16 @@ export interface ProviderAdapterRegistryLiveOptions {
 const makeProviderAdapterRegistry = Effect.fn("makeProviderAdapterRegistry")(function* (
   options?: ProviderAdapterRegistryLiveOptions,
 ) {
+  const cursorAdapterOption = yield* Effect.serviceOption(CursorAdapter);
   const adapters =
     options?.adapters !== undefined
       ? options.adapters
-      : [yield* CodexAdapter, yield* ClaudeAdapter, yield* CursorAdapter];
+      : [
+          yield* CodexAdapter,
+          yield* ClaudeAdapter,
+          yield* OpenCodeAdapter,
+          ...(cursorAdapterOption._tag === "Some" ? [cursorAdapterOption.value] : []),
+        ];
   const byProvider = new Map(adapters.map((adapter) => [adapter.provider, adapter]));
 
   const getByProvider: ProviderAdapterRegistryShape["getByProvider"] = (provider) => {

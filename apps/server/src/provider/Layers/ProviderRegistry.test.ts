@@ -35,6 +35,7 @@ import {
   mergeProviderSnapshot,
   ProviderRegistryLive,
 } from "./ProviderRegistry.ts";
+import { OpenCodeProvider } from "../Services/OpenCodeProvider.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
@@ -44,6 +45,19 @@ process.env.T3CODE_CURSOR_ENABLED = "1";
 // ── Test helpers ────────────────────────────────────────────────────
 
 const encoder = new TextEncoder();
+const fakeOpenCodeSnapshot: ServerProvider = {
+  provider: "opencode",
+  status: "warning",
+  enabled: true,
+  installed: false,
+  auth: { status: "unknown" },
+  checkedAt: "2026-03-25T00:00:00.000Z",
+  version: null,
+  models: [],
+  slashCommands: [],
+  skills: [],
+  message: "OpenCode test stub",
+};
 
 function mockHandle(result: { stdout: string; stderr: string; code: number }) {
   return ChildProcessSpawner.makeHandle({
@@ -698,12 +712,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
               }),
             ),
           );
-          const runtimeServices = yield* Layer.build(
-            Layer.mergeAll(
-              Layer.succeed(ServerSettingsService, serverSettings),
-              providerRegistryLayer,
-            ),
-          ).pipe(Scope.provide(scope));
+          const runtimeServices = yield* Layer.build(providerRegistryLayer).pipe(
+            Scope.provide(scope),
+          );
 
           yield* Effect.gen(function* () {
             const registry = yield* ProviderRegistry;
@@ -740,6 +751,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
               }),
             ),
             Layer.provideMerge(
+              Layer.succeed(OpenCodeProvider, {
+                getSnapshot: Effect.succeed(fakeOpenCodeSnapshot),
+                refresh: Effect.succeed(fakeOpenCodeSnapshot),
+                streamChanges: Stream.empty,
+              }),
+            ),
+            Layer.provideMerge(
               mockCommandSpawnerLayer((command, args) => {
                 const joined = args.join(" ");
                 if (joined === "--version") {
@@ -768,12 +786,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
               }),
             ),
           );
-          const runtimeServices = yield* Layer.build(
-            Layer.mergeAll(
-              Layer.succeed(ServerSettingsService, serverSettings),
-              providerRegistryLayer,
-            ),
-          ).pipe(Scope.provide(scope));
+          const runtimeServices = yield* Layer.build(providerRegistryLayer).pipe(
+            Scope.provide(scope),
+          );
 
           yield* Effect.gen(function* () {
             const registry = yield* ProviderRegistry;
@@ -866,7 +881,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
 
             assert.deepStrictEqual(
               providers.map((provider) => provider.provider),
-              ["codex", "claudeAgent"],
+              ["codex", "claudeAgent", "opencode"],
             );
             assert.strictEqual(cursorSpawned, false);
           }).pipe(Effect.provide(runtimeServices));
