@@ -51,7 +51,6 @@ import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment.ts";
-import { isCursorEnabled } from "./cursorFeatureFlag.ts";
 import {
   authBearerBootstrapRouteLayer,
   authBootstrapRouteLayer,
@@ -163,15 +162,13 @@ const ProviderLayerLive = Layer.unwrap(
     const cursorAdapterLayer = makeCursorAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     );
-    const adapterRegistryBase = ProviderAdapterRegistryLive.pipe(
+    const adapterRegistryLayer = ProviderAdapterRegistryLive.pipe(
       Layer.provide(codexAdapterLayer),
       Layer.provide(claudeAdapterLayer),
       Layer.provide(openCodeAdapterLayer),
+      Layer.provide(cursorAdapterLayer),
       Layer.provideMerge(ProviderSessionDirectoryLayerLive),
     );
-    const adapterRegistryLayer = isCursorEnabled()
-      ? adapterRegistryBase.pipe(Layer.provide(cursorAdapterLayer))
-      : adapterRegistryBase;
     return makeProviderServiceLive(
       canonicalEventLogger ? { canonicalEventLogger } : undefined,
     ).pipe(

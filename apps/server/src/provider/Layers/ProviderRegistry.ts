@@ -7,7 +7,6 @@ import type { ProviderKind, ServerProvider } from "@t3tools/contracts";
 import { Effect, Equal, FileSystem, Layer, Path, PubSub, Ref, Stream } from "effect";
 
 import { ServerConfig } from "../../config.ts";
-import { isCursorEnabled } from "../../cursorFeatureFlag.ts";
 import { ClaudeProviderLive } from "./ClaudeProvider.ts";
 import { CodexProviderLive } from "./CodexProvider.ts";
 import { CursorProviderLive } from "./CursorProvider.ts";
@@ -95,18 +94,9 @@ const ProviderRegistryLiveBase = Layer.effect(
     const config = yield* ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const cursorEnabled = isCursorEnabled();
-    const cursorProviderOption = yield* Effect.serviceOption(CursorProvider);
-    const cursorProvider =
-      cursorEnabled && cursorProviderOption._tag === "Some" ? cursorProviderOption.value : null;
-    const cursorProviderSource = cursorProvider
-      ? ({
-          provider: "cursor",
-          getSnapshot: cursorProvider.getSnapshot,
-          refresh: cursorProvider.refresh,
-          streamChanges: cursorProvider.streamChanges,
-        } satisfies ProviderSnapshotSource)
-      : null;
+
+    const cursorProvider = yield* CursorProvider;
+
     const providerSources = [
       {
         provider: "codex",
@@ -126,11 +116,14 @@ const ProviderRegistryLiveBase = Layer.effect(
         refresh: openCodeProvider.refresh,
         streamChanges: openCodeProvider.streamChanges,
       },
-      ...(cursorProviderSource ? [cursorProviderSource] : []),
+      {
+        provider: "cursor",
+        getSnapshot: cursorProvider.getSnapshot,
+        refresh: cursorProvider.refresh,
+        streamChanges: cursorProvider.streamChanges,
+      },
     ] satisfies ReadonlyArray<ProviderSnapshotSource>;
-    const activeProviders = PROVIDER_CACHE_IDS.filter(
-      (provider) => provider !== "cursor" || cursorEnabled,
-    );
+    const activeProviders = PROVIDER_CACHE_IDS;
     const changesPubSub = yield* Effect.acquireRelease(
       PubSub.unbounded<ReadonlyArray<ServerProvider>>(),
       PubSub.shutdown,
@@ -289,10 +282,8 @@ const ProviderRegistryLiveBase = Layer.effect(
 
 export const ProviderRegistryLive = Layer.unwrap(
   Effect.sync(() =>
-    (isCursorEnabled()
-      ? ProviderRegistryLiveBase.pipe(Layer.provideMerge(CursorProviderLive))
-      : ProviderRegistryLiveBase
-    ).pipe(
+    ProviderRegistryLiveBase.pipe(
+      Layer.provideMerge(CursorProviderLive),
       Layer.provideMerge(CodexProviderLive),
       Layer.provideMerge(ClaudeProviderLive),
       Layer.provideMerge(OpenCodeProviderLive),

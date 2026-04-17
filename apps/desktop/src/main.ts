@@ -445,7 +445,6 @@ async function waitForBackendHttpReady(
   try {
     await waitForHttpReady(baseUrl, {
       ...options,
-      path: options?.path ?? "/.well-known/t3/environment",
       signal: controller.signal,
     });
   } finally {
