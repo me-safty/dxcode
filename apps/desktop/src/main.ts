@@ -677,7 +677,7 @@ let lastLoggedDownloadMilestone = -1;
 let activeUpdateCheckChannel: DesktopUpdateChannel | null = null;
 let activeUpdateCheckCollector: {
   readonly candidates: DesktopUpdateCandidate[];
-  lastProviderCandidateChannel: DesktopUpdateChannel | null;
+  lastProviderCheckChannel: DesktopUpdateChannel | null;
   olderNightlyCandidate: boolean;
 } | null = null;
 
@@ -1257,9 +1257,9 @@ async function checkForUpdatesOnChannel(
 
 async function restoreSelectedUpdateCandidateProvider(
   candidate: DesktopUpdateCandidate,
-  lastProviderCandidateChannel: DesktopUpdateChannel | null,
+  lastProviderCheckChannel: DesktopUpdateChannel | null,
 ): Promise<void> {
-  if (candidate.channel === lastProviderCandidateChannel) {
+  if (candidate.channel === lastProviderCheckChannel) {
     return;
   }
 
@@ -1269,7 +1269,7 @@ async function restoreSelectedUpdateCandidateProvider(
 async function checkNightlyAndStableFeeds(): Promise<void> {
   const collector = {
     candidates: [] as DesktopUpdateCandidate[],
-    lastProviderCandidateChannel: null as DesktopUpdateChannel | null,
+    lastProviderCheckChannel: null as DesktopUpdateChannel | null,
     olderNightlyCandidate: false,
   };
   const errors: string[] = [];
@@ -1280,6 +1280,7 @@ async function checkNightlyAndStableFeeds(): Promise<void> {
     for (const channel of checkedChannels) {
       try {
         await checkForUpdatesOnChannel(channel);
+        collector.lastProviderCheckChannel = channel;
       } catch (error: unknown) {
         if (channel === "nightly" && isMissingNightlyFeedCandidateError(error)) {
           console.info("[desktop-updater] Nightly feed has no newer candidate.");
@@ -1299,7 +1300,7 @@ async function checkNightlyAndStableFeeds(): Promise<void> {
     if (selectedCandidate) {
       await restoreSelectedUpdateCandidateProvider(
         selectedCandidate,
-        collector.lastProviderCandidateChannel,
+        collector.lastProviderCheckChannel,
       );
       setUpdateState(
         reduceDesktopUpdateStateOnUpdateAvailable(
@@ -1509,7 +1510,6 @@ function configureAutoUpdater(): void {
         channel: checkedChannel,
         version: info.version,
       });
-      activeUpdateCheckCollector.lastProviderCandidateChannel = checkedChannel;
       return;
     }
 
