@@ -25,7 +25,7 @@ export default Effect.gen(function* () {
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS auth_sessions (
-      session_id TEXT PRIMARY KEY,
+      session_fingerprint TEXT PRIMARY KEY CHECK(length(session_fingerprint) = 64),
       subject TEXT NOT NULL,
       role TEXT NOT NULL,
       method TEXT NOT NULL,
