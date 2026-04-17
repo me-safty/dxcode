@@ -694,7 +694,7 @@ function makeCursorAdapter(options?: CursorAdapterLiveOptions) {
           };
 
           const nf = yield* Stream.runDrain(
-            Stream.mapEffect(acp.events, (event) =>
+            Stream.mapEffect(acp.getEvents(), (event) =>
               Effect.gen(function* () {
                 switch (event._tag) {
                   case "ModeChanged":

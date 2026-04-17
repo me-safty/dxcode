@@ -72,7 +72,7 @@ describe("AcpSessionRuntime", () => {
       });
       expect(promptResult).toMatchObject({ stopReason: "end_turn" });
 
-      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.events, 4)));
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 4)));
       expect(notes).toHaveLength(4);
       expect(notes.map((note) => note._tag)).toEqual([
         "PlanUpdated",
@@ -120,7 +120,7 @@ describe("AcpSessionRuntime", () => {
       });
       expect(promptResult).toMatchObject({ stopReason: "end_turn" });
 
-      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.events, 7)));
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 7)));
       expect(notes.map((note) => note._tag)).toEqual([
         "AssistantItemStarted",
         "ContentDelta",
@@ -181,7 +181,7 @@ describe("AcpSessionRuntime", () => {
       });
       expect(promptResult).toMatchObject({ stopReason: "end_turn" });
 
-      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.events, 1)));
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 1)));
       expect(notes.map((note) => note._tag)).toEqual(["ToolCallUpdated"]);
       const toolCall = notes[0];
       expect(toolCall?._tag).toBe("ToolCallUpdated");
