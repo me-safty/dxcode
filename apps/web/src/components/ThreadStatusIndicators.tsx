@@ -175,7 +175,7 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
           <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
         </Tooltip>
       ) : null}
-      {threadStatus ? <ThreadStatusLabel status={threadStatus} compact /> : null}
+      {threadStatus ? <ThreadStatusLabel status={threadStatus} /> : null}
     </span>
   );
 }
