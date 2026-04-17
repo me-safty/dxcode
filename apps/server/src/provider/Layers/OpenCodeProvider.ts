@@ -111,6 +111,14 @@ function formatOpenCodeProbeError(input: {
     };
   }
 
+  if (lower.includes("invalid code signature") || lower.includes("corrupted")) {
+    return {
+      installed: true,
+      message:
+        "macOS killed the OpenCode process due to an invalid code signature. The binary may be corrupted — try reinstalling OpenCode.",
+    };
+  }
+
   return {
     installed: true,
     message: detail

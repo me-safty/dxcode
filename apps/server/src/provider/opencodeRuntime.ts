@@ -1,5 +1,8 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import * as FS from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
+import * as OS from "node:os";
+import * as Path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type {
@@ -297,8 +300,9 @@ export async function findAvailablePort(): Promise<number> {
   return port;
 }
 
-function detectMacosQuarantineHint(binaryPath: string): string | null {
+function detectMacosSigkillHint(binaryPath: string): string | null {
   try {
+    // Check for quarantine xattr first.
     const resolvedPath = execFileSync("which", [binaryPath], {
       encoding: "utf8",
       timeout: 3_000,
@@ -312,6 +316,28 @@ function detectMacosQuarantineHint(binaryPath: string): string | null {
         `macOS quarantine is blocking the OpenCode binary. ` +
         `Run: xattr -d com.apple.quarantine ${resolvedPath}`
       );
+    }
+
+    // Look for a recent crash report with the termination reason.
+    const crashDir = Path.join(
+      OS.homedir(),
+      "Library/Logs/DiagnosticReports",
+    );
+    const binaryName = Path.basename(resolvedPath);
+    const recentReports = FS.readdirSync(crashDir)
+      .filter((f) => f.startsWith(binaryName) && f.endsWith(".ips"))
+      .sort()
+      .reverse()
+      .slice(0, 1);
+
+    for (const report of recentReports) {
+      const content = FS.readFileSync(Path.join(crashDir, report), "utf8");
+      if (content.includes('"namespace":"CODESIGNING"')) {
+        return (
+          "macOS killed the process due to an invalid code signature. " +
+          "The binary may be corrupted — try reinstalling OpenCode."
+        );
+      }
     }
   } catch {
     // Best-effort detection — don't fail the original error path.
@@ -391,7 +417,7 @@ export async function startOpenCodeServerProcess(input: {
         : `code: ${code ?? "unknown"}`;
       const hint =
         signal === "SIGKILL" && process.platform === "darwin"
-          ? detectMacosQuarantineHint(input.binaryPath)
+          ? detectMacosSigkillHint(input.binaryPath)
           : null;
       reject(
         new Error(
