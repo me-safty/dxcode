@@ -470,6 +470,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       }
 
       const resolvedCwd = input.cwd ?? process.cwd();
+
       const session: ProviderSession = {
         provider: "codex",
         status: "connecting",

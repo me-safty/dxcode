@@ -931,7 +931,23 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
         allowNonZeroExit: true,
         timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
       },
-    ).pipe(Effect.asVoid);
+    ).pipe(
+      Effect.flatMap((result) => {
+        if (result.code === 0) {
+          return Effect.void;
+        }
+
+        const stderr = result.stderr.trim();
+        return Effect.fail(
+          createGitCommandError(
+            "GitCore.fetchRemoteForStatus",
+            fetchCwd,
+            ["--git-dir", gitCommonDir, "fetch", "--quiet", "--no-tags", remoteName],
+            stderr.length > 0 ? stderr : "git fetch failed",
+          ),
+        );
+      }),
+    );
   };
 
   const resolveGitCommonDir = Effect.fn("resolveGitCommonDir")(function* (cwd: string) {

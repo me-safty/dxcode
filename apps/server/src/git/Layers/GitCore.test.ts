@@ -1732,14 +1732,13 @@ it.layer(TestLayer)("git integration", (it) => {
         const core = yield* makeIsolatedGitCore((input) => {
           if (input.args[0] === "--git-dir" && input.args[2] === "fetch") {
             refreshFetchAttempts += 1;
-            return Effect.fail(
-              new GitCommandError({
-                operation: "git.test.statusRefreshFailure",
-                command: `git ${input.args.join(" ")}`,
-                cwd: input.cwd,
-                detail: "simulated fetch timeout",
-              }),
-            );
+            return Effect.succeed({
+              code: 128,
+              stdout: "",
+              stderr: "simulated fetch timeout",
+              stdoutTruncated: false,
+              stderrTruncated: false,
+            });
           }
           return realGitCore.execute(input);
         });
