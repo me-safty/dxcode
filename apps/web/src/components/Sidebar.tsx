@@ -11,6 +11,12 @@ import {
   TerminalIcon,
   TriangleAlertIcon,
 } from "lucide-react";
+import {
+  prStatusIndicator,
+  resolveThreadPr,
+  terminalStatusFromRunningIds,
+  ThreadStatusLabel,
+} from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
@@ -225,122 +231,6 @@ type SidebarProjectSnapshot = Project & {
   /** Labels for remote environments this project lives in. */
   remoteEnvironmentLabels: readonly string[];
 };
-interface TerminalStatusIndicator {
-  label: "Terminal process running";
-  colorClass: string;
-  pulse: boolean;
-}
-
-interface PrStatusIndicator {
-  label: "PR open" | "PR closed" | "PR merged" | "MR open" | "MR closed" | "MR merged";
-  colorClass: string;
-  tooltip: string;
-  url: string;
-}
-
-type ThreadPr = GitStatusResult["pr"];
-
-function ThreadStatusLabel({
-  status,
-  compact = false,
-}: {
-  status: ThreadStatusPill;
-  compact?: boolean;
-}) {
-  if (compact) {
-    return (
-      <span
-        title={status.label}
-        className={`inline-flex size-3.5 shrink-0 items-center justify-center ${status.colorClass}`}
-      >
-        <span
-          className={`size-[9px] rounded-full ${status.dotClass} ${
-            status.pulse ? "animate-pulse" : ""
-          }`}
-        />
-        <span className="sr-only">{status.label}</span>
-      </span>
-    );
-  }
-
-  return (
-    <span
-      title={status.label}
-      className={`inline-flex items-center gap-1 text-[10px] ${status.colorClass}`}
-    >
-      <span
-        className={`h-1.5 w-1.5 rounded-full ${status.dotClass} ${
-          status.pulse ? "animate-pulse" : ""
-        }`}
-      />
-      <span className="hidden md:inline">{status.label}</span>
-    </span>
-  );
-}
-
-function terminalStatusFromRunningIds(
-  runningTerminalIds: string[],
-): TerminalStatusIndicator | null {
-  if (runningTerminalIds.length === 0) {
-    return null;
-  }
-  return {
-    label: "Terminal process running",
-    colorClass: "text-teal-600 dark:text-teal-300/90",
-    pulse: true,
-  };
-}
-
-type GitHostProvider = NonNullable<GitStatusResult["gitHostProvider"]>;
-
-interface ThreadPrWithProvider {
-  pr: ThreadPr;
-  gitHostProvider: GitHostProvider | undefined;
-}
-
-function prStatusIndicator(input: ThreadPrWithProvider): PrStatusIndicator | null {
-  const { pr, gitHostProvider } = input;
-  if (!pr) return null;
-
-  const label = gitHostProvider === "gitlab" ? "MR" : "PR";
-
-  if (pr.state === "open") {
-    return {
-      label: `${label} open`,
-      colorClass: "text-emerald-600 dark:text-emerald-300/90",
-      tooltip: `#${pr.number} ${label} open: ${pr.title}`,
-      url: pr.url,
-    };
-  }
-  if (pr.state === "closed") {
-    return {
-      label: `${label} closed`,
-      colorClass: "text-zinc-500 dark:text-zinc-400/80",
-      tooltip: `#${pr.number} ${label} closed: ${pr.title}`,
-      url: pr.url,
-    };
-  }
-  if (pr.state === "merged") {
-    return {
-      label: `${label} merged`,
-      colorClass: "text-violet-600 dark:text-violet-300/90",
-      tooltip: `#${pr.number} ${label} merged: ${pr.title}`,
-      url: pr.url,
-    };
-  }
-  return null;
-}
-
-function resolveThreadPr(
-  threadBranch: string | null,
-  gitStatus: GitStatusResult | null,
-): ThreadPr | null {
-  if (threadBranch === null || gitStatus === null || gitStatus.branch !== threadBranch) {
-    return null;
-  }
-
-  return gitStatus.pr ?? null;
-}
 
 interface SidebarThreadRowProps {
   thread: SidebarThreadSummary;
