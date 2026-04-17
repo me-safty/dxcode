@@ -124,6 +124,7 @@ const DiffPanelInlineSidebar = (props: {
         collapsible="offcanvas"
         className="border-l border-border bg-card text-foreground"
         resizable={{
+          defaultWidth: DIFF_INLINE_DEFAULT_WIDTH,
           minWidth: DIFF_INLINE_SIDEBAR_MIN_WIDTH,
           shouldAcceptWidth: shouldAcceptInlineSidebarWidth,
           storageKey: DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,

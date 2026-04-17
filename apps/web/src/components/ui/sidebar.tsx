@@ -39,6 +39,7 @@ type SidebarContextProps = {
 };
 
 type SidebarResizableOptions = {
+  defaultWidth?: number | string;
   maxWidth?: number;
   minWidth?: number;
   onResize?: (width: number) => void;
@@ -54,6 +55,7 @@ type SidebarResizableOptions = {
 };
 
 type SidebarResolvedResizableOptions = {
+  defaultWidth: number | string | null;
   maxWidth: number;
   minWidth: number;
   onResize?: (width: number) => void;
@@ -192,6 +194,7 @@ function Sidebar({
 
     const options = typeof resizable === "boolean" ? {} : resizable;
     return {
+      defaultWidth: options.defaultWidth ?? null,
       maxWidth: options.maxWidth ?? Number.POSITIVE_INFINITY,
       minWidth: options.minWidth ?? SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH,
       storageKey: options.storageKey ?? null,
@@ -283,7 +286,7 @@ function Sidebar({
             // Adjust the padding for floating and inset variants.
             variant === "floating" || variant === "inset"
               ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
-              : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
+              : "group-data-[collapsible=icon]:w-(--sidebar-width-icon)",
             className,
           )}
           data-slot="sidebar-container"
@@ -328,11 +331,29 @@ function clampSidebarWidth(width: number, options: SidebarResolvedResizableOptio
   return Math.max(options.minWidth, Math.min(width, options.maxWidth));
 }
 
+function resolveCssWidthToPixels(width: string, context: HTMLElement): number {
+  const parsedWidth = Number.parseFloat(width);
+  if (Number.isFinite(parsedWidth) && width.trim().endsWith("px")) {
+    return parsedWidth;
+  }
+
+  const measure = document.createElement("div");
+  measure.style.position = "absolute";
+  measure.style.visibility = "hidden";
+  measure.style.pointerEvents = "none";
+  measure.style.width = width;
+  context.append(measure);
+  const measuredWidth = measure.getBoundingClientRect().width;
+  measure.remove();
+  return measuredWidth;
+}
+
 function SidebarRail({
   className,
   onClick,
   onPointerCancel,
   onPointerDown,
+  onDoubleClick,
   onPointerMove,
   onPointerUp,
   ...props
@@ -340,6 +361,7 @@ function SidebarRail({
   const { open, toggleSidebar } = useSidebar();
   const sidebarInstance = React.useContext(SidebarInstanceContext);
   const railRef = React.useRef<HTMLButtonElement | null>(null);
+  const defaultWidthRef = React.useRef<number | null>(null);
   const suppressClickRef = React.useRef(false);
   const resizeStateRef = React.useRef<{
     moved: boolean;
@@ -536,6 +558,52 @@ function SidebarRail({
     [onClick, open, resolvedResizable, toggleSidebar],
   );
 
+  const handleDoubleClick = React.useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      onDoubleClick?.(event);
+      if (event.defaultPrevented) return;
+      if (!resolvedResizable || !open) return;
+
+      const rail = railRef.current;
+      const wrapper = rail?.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
+      const defaultWidth = defaultWidthRef.current;
+      if (!wrapper || defaultWidth === null) {
+        return;
+      }
+
+      const resetWidth = clampSidebarWidth(defaultWidth, resolvedResizable);
+      wrapper.style.setProperty("--sidebar-width", `${resetWidth}px`);
+      if (resolvedResizable.storageKey && typeof window !== "undefined") {
+        setLocalStorageItem(resolvedResizable.storageKey, resetWidth, Schema.Finite);
+      }
+      resolvedResizable.onResize?.(resetWidth);
+      suppressClickRef.current = true;
+      event.preventDefault();
+    },
+    [onDoubleClick, open, resolvedResizable],
+  );
+
+  React.useEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+    const wrapper = rail.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
+    if (!wrapper) return;
+
+    const configuredDefaultWidth = resolvedResizable?.defaultWidth;
+    const defaultWidth =
+      typeof configuredDefaultWidth === "number"
+        ? configuredDefaultWidth
+        : configuredDefaultWidth ??
+          getComputedStyle(wrapper).getPropertyValue("--sidebar-width").trim();
+    if (!defaultWidth) return;
+
+    const resolvedDefaultWidth =
+      typeof defaultWidth === "number" ? defaultWidth : resolveCssWidthToPixels(defaultWidth, wrapper);
+    if (resolvedDefaultWidth > 0) {
+      defaultWidthRef.current = resolvedDefaultWidth;
+    }
+  }, [resolvedResizable]);
+
   React.useEffect(() => {
     if (!resolvedResizable?.storageKey || typeof window === "undefined") return;
     const rail = railRef.current;
@@ -569,7 +637,7 @@ function SidebarRail({
       aria-label={railLabel}
       className={cn(
         /* disable pointer events only when offcanvas sidebar is collapsed, that's when the rail sits over the native scrollbar on windows and linux. icon mode stays fully clickable. */
-        "-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=right]:left-0 sm:flex [[data-collapsible=offcanvas][data-state=collapsed]_&]:pointer-events-none",
+        "-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 transition-colors duration-150 after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-border/80 after:opacity-0 after:content-[''] after:transition-opacity after:duration-150 hover:after:opacity-100 active:after:opacity-100 dark:after:bg-white/18 group-data-[side=right]:left-0 sm:flex [[data-collapsible=offcanvas][data-state=collapsed]_&]:pointer-events-none",
         "in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
         "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
         "group-data-[collapsible=offcanvas]:translate-x-0 hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:after:left-full",
@@ -580,6 +648,7 @@ function SidebarRail({
       data-sidebar="rail"
       data-slot="sidebar-rail"
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       onPointerCancel={handlePointerCancel}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
