@@ -427,7 +427,7 @@ const make = Effect.gen(function* () {
     const requestedModelSelection =
       input.modelSelection ?? threadModelSelections.get(input.threadId) ?? thread.modelSelection;
     const modelForTurn =
-      sessionModelSwitch === "unsupported"
+      sessionModelSwitch === "unsupported" && input.modelSelection === undefined
         ? activeSession?.model !== undefined
           ? {
               ...requestedModelSelection,
