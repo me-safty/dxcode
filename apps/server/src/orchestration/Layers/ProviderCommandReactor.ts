@@ -98,7 +98,7 @@ function findProviderAdapterRequestError(
 
 function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
   const error = findProviderAdapterRequestError(cause);
-  if (Schema.is(ProviderAdapterRequestError)(error)) {
+  if (error) {
     const detail = error.detail.toLowerCase();
     return (
       detail.includes("unknown pending approval request") ||
@@ -114,7 +114,7 @@ function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderService
 
 function isUnknownPendingUserInputRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
   const error = findProviderAdapterRequestError(cause);
-  if (Schema.is(ProviderAdapterRequestError)(error)) {
+  if (error) {
     return error.detail.toLowerCase().includes("unknown pending user-input request");
   }
   return Cause.pretty(cause).toLowerCase().includes("unknown pending user-input request");
@@ -211,7 +211,7 @@ const make = Effect.gen(function* () {
       ? failReason.error
       : undefined;
     if (providerError) {
-      return providerError.message;
+      return providerError.detail;
     }
     return Cause.pretty(cause);
   };
