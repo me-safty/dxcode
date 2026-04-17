@@ -1609,6 +1609,7 @@ function ComposerPromptEditorInner({
         <PlainTextPlugin
           contentEditable={
             <ContentEditable
+              dir="auto"
               className={cn(
                 "block max-h-50 min-h-17.5 w-full overflow-y-auto whitespace-pre-wrap wrap-break-word bg-transparent text-[16px] leading-relaxed text-foreground focus:outline-none sm:text-[14px]",
                 className,
