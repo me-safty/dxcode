@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 
-import { AnalyticsService } from "../Services/AnalyticsService";
+import { AnalyticsService } from "../Services/AnalyticsService.ts";
 
 export const AnalyticsServiceNoopLive = Layer.succeed(AnalyticsService, {
   record: () => Effect.void,

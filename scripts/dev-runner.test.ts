@@ -1,8 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { homedir } from "node:os";
-import { resolve } from "node:path";
+import * as NodeOS from "node:os";
 import { assert, describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Path } from "effect";
 
 import {
   checkPortAvailabilityOnHosts,
@@ -49,6 +48,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
   describe("createDevRunnerEnv", () => {
     it.effect("defaults MARCODE_HOME to ~/.marcode when not provided", () =>
       Effect.gen(function* () {
+        const path = yield* Path.Path;
         const env = yield* createDevRunnerEnv({
           mode: "dev",
           baseEnv: {},
@@ -64,12 +64,13 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.MARCODE_HOME, resolve(homedir(), ".marcode"));
+        assert.equal(env.MARCODE_HOME, path.resolve(NodeOS.homedir(), ".marcode"));
       }),
     );
 
     it.effect("supports explicit typed overrides", () =>
       Effect.gen(function* () {
+        const path = yield* Path.Path;
         const env = yield* createDevRunnerEnv({
           mode: "dev:server",
           baseEnv: {},
@@ -85,7 +86,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: new URL("http://localhost:7331"),
         });
 
-        assert.equal(env.MARCODE_HOME, resolve("/tmp/custom-marcode"));
+        assert.equal(env.MARCODE_HOME, path.resolve("/tmp/custom-marcode"));
         assert.equal(env.MARCODE_PORT, "4222");
         assert.equal(env.VITE_HTTP_URL, "http://localhost:4222");
         assert.equal(env.VITE_WS_URL, "ws://localhost:4222");
@@ -146,6 +147,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
     it.effect("uses custom marcodeHome when provided", () =>
       Effect.gen(function* () {
+        const path = yield* Path.Path;
         const env = yield* createDevRunnerEnv({
           mode: "dev",
           baseEnv: {},
@@ -161,12 +163,13 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.MARCODE_HOME, resolve("/tmp/my-marcode"));
+        assert.equal(env.MARCODE_HOME, path.resolve("/tmp/my-marcode"));
       }),
     );
 
     it.effect("pins desktop dev to a stable backend port and websocket url", () =>
       Effect.gen(function* () {
+        const path = yield* Path.Path;
         const env = yield* createDevRunnerEnv({
           mode: "dev:desktop",
           baseEnv: {
@@ -189,7 +192,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.MARCODE_HOME, resolve("/tmp/my-marcode"));
+        assert.equal(env.MARCODE_HOME, path.resolve("/tmp/my-marcode"));
         assert.equal(env.PORT, "5733");
         assert.equal(env.VITE_DEV_SERVER_URL, "http://127.0.0.1:5733");
         assert.equal(env.HOST, "127.0.0.1");

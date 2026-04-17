@@ -12,7 +12,7 @@ import {
   readPathFromLoginShell,
   resolveKnownWindowsCliDirs,
   resolveWindowsEnvironment,
-} from "./shell";
+} from "./shell.ts";
 
 describe("extractPathFromShellOutput", () => {
   it("extracts the path between capture markers", () => {

@@ -22,7 +22,7 @@ import {
   TerminalSessionStatus,
   TerminalWriteInput,
 } from "@marcode/contracts";
-import { PtyProcess } from "./PTY";
+import { PtyProcess } from "./PTY.ts";
 import { Effect, Context } from "effect";
 
 export {

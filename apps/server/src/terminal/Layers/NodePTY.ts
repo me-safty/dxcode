@@ -7,7 +7,7 @@ import {
   type PtyAdapterShape,
   type PtyExitEvent,
   type PtyProcess,
-} from "../Services/PTY";
+} from "../Services/PTY.ts";
 
 let didEnsureSpawnHelperExecutable = false;
 
@@ -52,7 +52,11 @@ export const ensureNodePtySpawnHelperExecutable = Effect.fn(function* (explicitP
 });
 
 class NodePtyProcess implements PtyProcess {
-  constructor(private readonly process: import("node-pty").IPty) {}
+  private readonly process: import("node-pty").IPty;
+
+  constructor(process: import("node-pty").IPty) {
+    this.process = process;
+  }
 
   get pid(): number {
     return this.process.pid;
