@@ -70,7 +70,7 @@ export default defineConfig({
     port,
     strictPort: true,
     ...(devProxyTarget
-        ? {
+      ? {
           proxy: {
             "/.well-known": {
               target: devProxyTarget,
