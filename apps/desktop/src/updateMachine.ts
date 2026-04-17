@@ -81,6 +81,7 @@ export function reduceDesktopUpdateStateOnUpdateAvailable(
 export function reduceDesktopUpdateStateOnNoUpdate(
   state: DesktopUpdateState,
   checkedAt: string,
+  message: string | null = null,
 ): DesktopUpdateState {
   return {
     ...state,
@@ -89,7 +90,7 @@ export function reduceDesktopUpdateStateOnNoUpdate(
     downloadedVersion: null,
     downloadPercent: null,
     checkedAt,
-    message: null,
+    message,
     errorContext: null,
     canRetry: false,
   };

@@ -117,6 +117,22 @@ describe("updateMachine", () => {
     expect(state.errorContext).toBeNull();
   });
 
+  it("can preserve a non-error no-update message", () => {
+    const state = reduceDesktopUpdateStateOnNoUpdate(
+      {
+        ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "nightly"),
+        enabled: true,
+        status: "checking",
+      },
+      "2026-03-04T00:00:00.000Z",
+      "Nightly build is older than current build",
+    );
+
+    expect(state.status).toBe("up-to-date");
+    expect(state.message).toBe("Nightly build is older than current build");
+    expect(state.errorContext).toBeNull();
+  });
+
   it("tracks available, download start, and progress cleanly", () => {
     const available = reduceDesktopUpdateStateOnUpdateAvailable(
       {

@@ -5,6 +5,7 @@ import {
   canCheckForUpdate,
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
+  getDesktopUpdateAvailableLabel,
   getDesktopUpdateButtonTooltip,
   getDesktopUpdateInstallConfirmationMessage,
   isDesktopUpdateButtonDisabled,
@@ -214,6 +215,24 @@ describe("desktop update UI helpers", () => {
         downloadedVersion: "1.1.1",
       }),
     ).toContain("Install update 1.1.1 and restart T3 Code?");
+  });
+
+  it("includes the update version in the visible available label", () => {
+    expect(
+      getDesktopUpdateAvailableLabel({
+        availableVersion: "1.1.0",
+        downloadedVersion: null,
+      }),
+    ).toBe("Update available: 1.1.0");
+  });
+
+  it("prefers the downloaded version in the visible available label", () => {
+    expect(
+      getDesktopUpdateAvailableLabel({
+        availableVersion: "1.1.0",
+        downloadedVersion: "1.1.1",
+      }),
+    ).toBe("Update available: 1.1.1");
   });
 
   it("falls back to generic install confirmation copy when no version is available", () => {

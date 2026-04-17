@@ -25,6 +25,7 @@ import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
 import {
   canCheckForUpdate,
+  getDesktopUpdateAvailableLabel,
   getDesktopUpdateButtonTooltip,
   getDesktopUpdateInstallConfirmationMessage,
   isDesktopUpdateButtonDisabled,
@@ -239,6 +240,50 @@ function AboutVersionSection() {
   const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
   const selectedUpdateChannel = updateState?.channel ?? "latest";
 
+  const showNoUpdatesFoundToast = useCallback((state: NonNullable<typeof updateState>) => {
+    toastManager.add({
+      type: "info",
+      title: state.message ?? "No updates found",
+      description: `Current version: ${state.currentVersion}`,
+      timeout: 0,
+      data: { hideCopyButton: true, dismissAfterVisibleMs: 5_000 },
+    });
+  }, []);
+
+  const pollManualUpdateCheckToast = useCallback(
+    (bridge: NonNullable<typeof window.desktopBridge>) => {
+      if (typeof bridge.getUpdateState !== "function") return;
+
+      let attempts = 0;
+      const poll = () => {
+        attempts += 1;
+        void bridge
+          .getUpdateState()
+          .then((state) => {
+            setDesktopUpdateStateQueryData(queryClient, state);
+            if (state.availableVersion || state.downloadedVersion) return;
+            if (state.status !== "checking") {
+              showNoUpdatesFoundToast(state);
+              return;
+            }
+            if (attempts < 20) {
+              window.setTimeout(poll, 250);
+              return;
+            }
+            showNoUpdatesFoundToast(state);
+          })
+          .catch(() => {
+            if (attempts < 20) {
+              window.setTimeout(poll, 250);
+            }
+          });
+      };
+
+      window.setTimeout(poll, 250);
+    },
+    [queryClient, showNoUpdatesFoundToast],
+  );
+
   const handleUpdateChannelChange = useCallback(
     (channel: DesktopUpdateChannel) => {
       const bridge = window.desktopBridge;
@@ -326,7 +371,17 @@ function AboutVersionSection() {
             description:
               result.state.message ?? "Automatic updates are not available in this build.",
           });
+          return;
         }
+
+        if (result.state.availableVersion || result.state.downloadedVersion) {
+          return;
+        }
+        if (result.state.status === "checking") {
+          pollManualUpdateCheckToast(bridge);
+          return;
+        }
+        showNoUpdatesFoundToast(result.state);
       })
       .catch((error: unknown) => {
         toastManager.add({
@@ -335,7 +390,7 @@ function AboutVersionSection() {
           description: error instanceof Error ? error.message : "Update check failed.",
         });
       });
-  }, [queryClient, updateState]);
+  }, [pollManualUpdateCheckToast, queryClient, showNoUpdatesFoundToast, updateState]);
 
   const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
   const buttonTooltip = updateState ? getDesktopUpdateButtonTooltip(updateState) : null;
@@ -348,13 +403,12 @@ function AboutVersionSection() {
   const statusLabel: Record<string, string> = {
     checking: "Checking…",
     downloading: "Downloading…",
-    "up-to-date": "Up to Date",
   };
   const buttonLabel =
     actionLabel[action] ?? statusLabel[updateState?.status ?? ""] ?? "Check for Updates";
   const description =
-    action === "download" || action === "install"
-      ? "Update available."
+    updateState && (action === "download" || action === "install")
+      ? getDesktopUpdateAvailableLabel(updateState)
       : "Current version of the application.";
 
   return (

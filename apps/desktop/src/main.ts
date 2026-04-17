@@ -32,6 +32,7 @@ import type {
   DesktopUpdateState,
 } from "@t3tools/contracts";
 import { autoUpdater } from "electron-updater";
+import type { UpdateCheckResult } from "electron-updater";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
 import { RotatingFileSink } from "@t3tools/shared/logging";
@@ -58,7 +59,13 @@ import { showDesktopConfirmDialog } from "./confirmDialog.ts";
 import { resolveDesktopServerExposure } from "./serverExposure.ts";
 import { syncShellEnvironment } from "./syncShellEnvironment.ts";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState.ts";
-import { doesVersionMatchDesktopUpdateChannel } from "./updateChannels.ts";
+import {
+  type DesktopUpdateCandidate,
+  doesVersionMatchDesktopUpdateChannel,
+  isDesktopVersionOlderThanCurrent,
+  isNightlyDesktopVersion,
+  selectBestDesktopUpdateCandidate,
+} from "./updateChannels.ts";
 import { ServerListeningDetector } from "./serverListeningDetector.ts";
 import {
   createInitialDesktopUpdateState,
@@ -89,6 +96,8 @@ const UPDATE_SET_CHANNEL_CHANNEL = "desktop:update-set-channel";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
+const NIGHTLY_BUILD_OLDER_MESSAGE = "Nightly build is older than current build";
+const NO_NEWER_NIGHTLY_BUILD_MESSAGE = "No newer nightly build";
 const GET_APP_BRANDING_CHANNEL = "desktop:get-app-branding";
 const GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL = "desktop:get-local-environment-bootstrap";
 const GET_CLIENT_SETTINGS_CHANNEL = "desktop:get-client-settings";
@@ -125,7 +134,7 @@ const LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const LOG_FILE_MAX_FILES = 10;
 const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
 const SERVER_SETTINGS_PATH = Path.join(STATE_DIR, "settings.json");
-const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
+const AUTO_UPDATE_STARTUP_DELAY_MS = 2_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 function resolvePickFolderDefaultPath(rawOptions: unknown): string | undefined {
@@ -664,6 +673,13 @@ let updateDownloadInFlight = false;
 let updateInstallInFlight = false;
 let updaterConfigured = false;
 let updateState: DesktopUpdateState = initialUpdateState();
+let lastLoggedDownloadMilestone = -1;
+let activeUpdateCheckChannel: DesktopUpdateChannel | null = null;
+let activeUpdateCheckCollector: {
+  readonly candidates: DesktopUpdateCandidate[];
+  lastProviderCandidateChannel: DesktopUpdateChannel | null;
+  olderNightlyCandidate: boolean;
+} | null = null;
 
 function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
   if (updateInstallInFlight) return "install";
@@ -1122,6 +1138,20 @@ function clearUpdatePollTimer(): void {
   }
 }
 
+function isUserInitiatedUpdateCheck(reason: string): boolean {
+  return reason === "web-ui" || reason === "menu" || reason === "channel-change";
+}
+
+function cancelPendingStartupUpdateCheck(reason: string): void {
+  if (!updateStartupTimer || !isUserInitiatedUpdateCheck(reason)) {
+    return;
+  }
+
+  clearTimeout(updateStartupTimer);
+  updateStartupTimer = null;
+  console.info(`[desktop-updater] Canceled pending startup update check (${reason}).`);
+}
+
 function revealWindow(window: BrowserWindow): void {
   if (window.isDestroyed()) {
     return;
@@ -1165,12 +1195,16 @@ function createBaseUpdateState(
   };
 }
 
-function applyAutoUpdaterChannel(channel: DesktopUpdateChannel): void {
+function applyAutoUpdaterChannel(
+  channel: DesktopUpdateChannel,
+  options: { readonly allowDowngrade?: boolean } = {},
+): void {
+  const allowDowngrade = options.allowDowngrade ?? channel === "nightly";
   autoUpdater.channel = channel;
   autoUpdater.allowPrerelease = channel === "nightly";
-  autoUpdater.allowDowngrade = channel === "nightly";
+  autoUpdater.allowDowngrade = allowDowngrade;
   console.info(
-    `[desktop-updater] Using update channel '${channel}' (allowPrerelease=${channel === "nightly"}, allowDowngrade=${channel === "nightly"}).`,
+    `[desktop-updater] Using update channel '${channel}' (allowPrerelease=${channel === "nightly"}, allowDowngrade=${allowDowngrade}).`,
   );
 }
 
@@ -1189,7 +1223,121 @@ function shouldEnableAutoUpdates(): boolean {
   );
 }
 
+function shouldCheckBothNightlyAndStableFeeds(): boolean {
+  return updateState.channel === "nightly";
+}
+
+function resolveNightlyNoUpdateMessage(olderNightlyCandidate: boolean): string | null {
+  if (updateState.channel === "nightly" && !isNightlyDesktopVersion(updateState.currentVersion)) {
+    return NO_NEWER_NIGHTLY_BUILD_MESSAGE;
+  }
+  return olderNightlyCandidate ? NIGHTLY_BUILD_OLDER_MESSAGE : null;
+}
+
+function isMissingNightlyFeedCandidateError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const code = "code" in error && typeof error.code === "string" ? error.code : null;
+  return (
+    code === "ERR_UPDATER_NO_PUBLISHED_VERSIONS" ||
+    code === "ERR_UPDATER_CHANNEL_FILE_NOT_FOUND" ||
+    error.message.includes("No published versions on GitHub")
+  );
+}
+
+async function checkForUpdatesOnChannel(
+  channel: DesktopUpdateChannel,
+  options: { readonly allowDowngrade?: boolean } = {},
+): Promise<UpdateCheckResult | null> {
+  activeUpdateCheckChannel = channel;
+  applyAutoUpdaterChannel(channel, options);
+  return autoUpdater.checkForUpdates();
+}
+
+async function restoreSelectedUpdateCandidateProvider(
+  candidate: DesktopUpdateCandidate,
+  lastProviderCandidateChannel: DesktopUpdateChannel | null,
+): Promise<void> {
+  if (candidate.channel === lastProviderCandidateChannel) {
+    return;
+  }
+
+  await checkForUpdatesOnChannel(candidate.channel);
+}
+
+async function checkNightlyAndStableFeeds(): Promise<void> {
+  const collector = {
+    candidates: [] as DesktopUpdateCandidate[],
+    lastProviderCandidateChannel: null as DesktopUpdateChannel | null,
+    olderNightlyCandidate: false,
+  };
+  const errors: string[] = [];
+  activeUpdateCheckCollector = collector;
+
+  try {
+    const checkedChannels: DesktopUpdateChannel[] = ["latest", "nightly"];
+    for (const channel of checkedChannels) {
+      try {
+        await checkForUpdatesOnChannel(channel);
+      } catch (error: unknown) {
+        if (channel === "nightly" && isMissingNightlyFeedCandidateError(error)) {
+          console.info("[desktop-updater] Nightly feed has no newer candidate.");
+          continue;
+        }
+
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(`${channel}: ${message}`);
+        console.error(`[desktop-updater] Failed to check ${channel} feed: ${message}`);
+      }
+    }
+
+    const selectedCandidate = selectBestDesktopUpdateCandidate(
+      collector.candidates,
+      updateState.currentVersion,
+    );
+    if (selectedCandidate) {
+      await restoreSelectedUpdateCandidateProvider(
+        selectedCandidate,
+        collector.lastProviderCandidateChannel,
+      );
+      setUpdateState(
+        reduceDesktopUpdateStateOnUpdateAvailable(
+          updateState,
+          selectedCandidate.version,
+          new Date().toISOString(),
+        ),
+      );
+      lastLoggedDownloadMilestone = -1;
+      console.info(
+        `[desktop-updater] Selected ${selectedCandidate.version} from '${selectedCandidate.channel}' feed.`,
+      );
+      return;
+    }
+
+    if (errors.length > 0) {
+      throw new Error(errors.join("; "));
+    }
+
+    setUpdateState(
+      reduceDesktopUpdateStateOnNoUpdate(
+        updateState,
+        new Date().toISOString(),
+        resolveNightlyNoUpdateMessage(collector.olderNightlyCandidate),
+      ),
+    );
+    lastLoggedDownloadMilestone = -1;
+    console.info("[desktop-updater] No updates available.");
+  } finally {
+    activeUpdateCheckCollector = null;
+    activeUpdateCheckChannel = null;
+    applyAutoUpdaterChannel(updateState.channel);
+  }
+}
+
 async function checkForUpdates(reason: string): Promise<boolean> {
+  cancelPendingStartupUpdateCheck(reason);
+
   if (isQuitting || !updaterConfigured || updateCheckInFlight) return false;
   if (updateState.status === "downloading" || updateState.status === "downloaded") {
     console.info(
@@ -1202,7 +1350,14 @@ async function checkForUpdates(reason: string): Promise<boolean> {
   console.info(`[desktop-updater] Checking for updates (${reason})...`);
 
   try {
-    await autoUpdater.checkForUpdates();
+    if (shouldCheckBothNightlyAndStableFeeds()) {
+      await checkNightlyAndStableFeeds();
+    } else {
+      await checkForUpdatesOnChannel(
+        updateState.channel,
+        reason === "channel-change" ? { allowDowngrade: true } : {},
+      );
+    }
     return true;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1212,6 +1367,7 @@ async function checkForUpdates(reason: string): Promise<boolean> {
     console.error(`[desktop-updater] Failed to check for updates: ${message}`);
     return true;
   } finally {
+    activeUpdateCheckChannel = null;
     updateCheckInFlight = false;
   }
 }
@@ -1303,7 +1459,6 @@ function configureAutoUpdater(): void {
   autoUpdater.autoInstallOnAppQuit = false;
   applyAutoUpdaterChannel(desktopSettings.updateChannel);
   autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
-  let lastLoggedDownloadMilestone = -1;
 
   if (isArm64HostRunningIntelBuild(desktopRuntimeInfo)) {
     console.info(
@@ -1315,12 +1470,46 @@ function configureAutoUpdater(): void {
     console.info("[desktop-updater] Looking for updates...");
   });
   autoUpdater.on("update-available", (info) => {
-    if (!doesVersionMatchDesktopUpdateChannel(info.version, updateState.channel)) {
+    const checkedChannel = activeUpdateCheckChannel ?? updateState.channel;
+    if (!doesVersionMatchDesktopUpdateChannel(info.version, checkedChannel)) {
       console.info(
-        `[desktop-updater] Ignoring ${info.version} because it does not match the selected '${updateState.channel}' channel.`,
+        `[desktop-updater] Ignoring ${info.version} because it does not match the checked '${checkedChannel}' channel.`,
       );
+      if (activeUpdateCheckCollector) {
+        return;
+      }
       setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
       lastLoggedDownloadMilestone = -1;
+      return;
+    }
+    if (
+      checkedChannel === "nightly" &&
+      isDesktopVersionOlderThanCurrent(info.version, updateState.currentVersion)
+    ) {
+      console.info(
+        `[desktop-updater] Ignoring ${info.version} because it is older than current version ${updateState.currentVersion}.`,
+      );
+      if (activeUpdateCheckCollector) {
+        activeUpdateCheckCollector.olderNightlyCandidate = true;
+        return;
+      }
+      setUpdateState(
+        reduceDesktopUpdateStateOnNoUpdate(
+          updateState,
+          new Date().toISOString(),
+          NIGHTLY_BUILD_OLDER_MESSAGE,
+        ),
+      );
+      lastLoggedDownloadMilestone = -1;
+      return;
+    }
+
+    if (activeUpdateCheckCollector) {
+      activeUpdateCheckCollector.candidates.push({
+        channel: checkedChannel,
+        version: info.version,
+      });
+      activeUpdateCheckCollector.lastProviderCandidateChannel = checkedChannel;
       return;
     }
 
@@ -1335,6 +1524,9 @@ function configureAutoUpdater(): void {
     console.info(`[desktop-updater] Update available: ${info.version}`);
   });
   autoUpdater.on("update-not-available", () => {
+    if (activeUpdateCheckCollector) {
+      return;
+    }
     setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
     lastLoggedDownloadMilestone = -1;
     console.info("[desktop-updater] No updates available.");
