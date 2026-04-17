@@ -57,6 +57,7 @@ import { isBackendReadinessAborted, waitForHttpReady } from "./backendReadiness"
 import { showDesktopConfirmDialog } from "./confirmDialog";
 import { resolveDesktopServerExposure } from "./serverExposure";
 import { syncShellEnvironment } from "./syncShellEnvironment";
+import { waitForBackendStartupReady } from "./backendStartupReadiness";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
 import { ServerListeningDetector } from "./serverListeningDetector";
 import {
@@ -465,51 +466,13 @@ function cancelBackendReadinessWait(): void {
 }
 
 async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" | "http"> {
-  const httpReadyPromise = waitForBackendHttpReady(baseUrl, {
-    timeoutMs: 60_000,
-  });
-  const listeningPromise = backendListeningDetector?.promise;
-
-  if (!listeningPromise) {
-    await httpReadyPromise;
-    return "http";
-  }
-
-  return await new Promise<"listening" | "http">((resolve, reject) => {
-    let settled = false;
-
-    const settleResolve = (source: "listening" | "http") => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (source === "listening") {
-        cancelBackendReadinessWait();
-      }
-      resolve(source);
-    };
-
-    const settleReject = (error: unknown) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      reject(error);
-    };
-
-    listeningPromise.then(
-      () => settleResolve("listening"),
-      (error) => settleReject(error),
-    );
-    httpReadyPromise.then(
-      () => settleResolve("http"),
-      (error) => {
-        if (settled && isBackendReadinessAborted(error)) {
-          return;
-        }
-        settleReject(error);
-      },
-    );
+  return await waitForBackendStartupReady({
+    listeningPromise: backendListeningDetector?.promise ?? null,
+    waitForHttpReady: () =>
+      waitForBackendHttpReady(baseUrl, {
+        timeoutMs: 60_000,
+      }),
+    cancelHttpWait: cancelBackendReadinessWait,
   });
 }
 
@@ -2092,9 +2055,9 @@ async function bootstrap(): Promise<void> {
   if (isDevelopment) {
     mainWindow = createWindow({ deferLoad: true });
     writeDesktopLogHeader("bootstrap main window created (deferred load)");
-    void waitForBackendHttpReady(backendHttpUrl)
-      .then(() => {
-        writeDesktopLogHeader("bootstrap backend ready");
+    void waitForBackendWindowReady(backendHttpUrl)
+      .then((source) => {
+        writeDesktopLogHeader(`bootstrap backend ready source=${source}`);
         if (mainWindow && !mainWindow.isDestroyed()) {
           void mainWindow.loadURL(resolveDesktopDevServerUrl());
           writeDesktopLogHeader("bootstrap dev URL loaded after backend ready");
