@@ -90,6 +90,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           type="submit"
           size="sm"
           className={cn("rounded-full", compact ? "px-3" : "px-4")}
+          onPointerDown={(e) => e.preventDefault()}
           disabled={
             pendingAction.isResponding ||
             (pendingAction.isLastQuestion ? !pendingAction.isComplete : !pendingAction.canAdvance)
@@ -128,6 +129,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           type="submit"
           size="sm"
           className={cn("rounded-full", compact ? "h-9 px-3 sm:h-8" : "h-9 px-4 sm:h-8")}
+          onPointerDown={(e) => e.preventDefault()}
           disabled={isSendBusy || isConnecting}
         >
           {isConnecting || isSendBusy ? "Sending..." : "Refine"}
@@ -141,6 +143,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           type="submit"
           size="sm"
           className="h-9 rounded-l-full rounded-r-none px-4 sm:h-8"
+          onPointerDown={(e) => e.preventDefault()}
           disabled={isSendBusy || isConnecting}
         >
           {isConnecting || isSendBusy ? "Sending..." : "Implement"}
@@ -176,6 +179,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     <button
       type="submit"
       className="flex h-9 w-9 enabled:cursor-pointer items-center justify-center rounded-full bg-primary/90 text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105 disabled:pointer-events-none disabled:opacity-30 disabled:hover:scale-100 sm:h-8 sm:w-8"
+      onPointerDown={(e) => e.preventDefault()}
       disabled={isSendBusy || isConnecting || !hasSendableContent}
       aria-label={
         isConnecting

@@ -102,7 +102,7 @@ import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
-import { useIsTouchDevice } from "../../hooks/useMediaQuery";
+import { useIsTouchDevice, useMediaQuery } from "../../hooks/useMediaQuery";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -523,6 +523,13 @@ export const ChatComposer = memo(
     const isTouchDevice = useIsTouchDevice();
 
     // ------------------------------------------------------------------
+    // Mobile collapsed composer state
+    // ------------------------------------------------------------------
+    const [isComposerFocused, setIsComposerFocused] = useState(false);
+    const isMobileViewport = useMediaQuery("max-sm");
+    const isComposerCollapsedMobile = isMobileViewport && !isComposerFocused;
+
+    // ------------------------------------------------------------------
     // Store subscriptions (prompt / images / terminal contexts)
     // ------------------------------------------------------------------
     const composerDraft = useComposerThreadDraft(composerDraftTarget);
@@ -667,7 +674,9 @@ export const ChatComposer = memo(
     // ------------------------------------------------------------------
     const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
     const composerFormRef = useRef<HTMLFormElement>(null);
+    const composerSurfaceRef = useRef<HTMLDivElement>(null);
     const composerFormHeightRef = useRef(0);
+    const composerBlurFrameRef = useRef<number | null>(null);
     const composerSelectLockRef = useRef(false);
     const composerMenuOpenRef = useRef(false);
     const composerMenuItemsRef = useRef<ComposerCommandItem[]>([]);
@@ -1723,6 +1732,36 @@ export const ChatComposer = memo(
       ],
     );
 
+    // ------------------------------------------------------------------
+    // Mobile collapse: blur scheduling
+    // ------------------------------------------------------------------
+    const scheduleComposerCollapseCheck = useCallback(() => {
+      if (composerBlurFrameRef.current !== null) {
+        window.cancelAnimationFrame(composerBlurFrameRef.current);
+      }
+      composerBlurFrameRef.current = window.requestAnimationFrame(() => {
+        composerBlurFrameRef.current = null;
+        const composerSurface = composerSurfaceRef.current;
+        const activeElement = document.activeElement;
+        if (
+          composerSurface &&
+          activeElement instanceof Node &&
+          composerSurface.contains(activeElement)
+        ) {
+          return;
+        }
+        setIsComposerFocused(false);
+      });
+    }, []);
+
+    useEffect(() => {
+      return () => {
+        if (composerBlurFrameRef.current !== null) {
+          window.cancelAnimationFrame(composerBlurFrameRef.current);
+        }
+      };
+    }, []);
+
     // Render
     // ------------------------------------------------------------------
     return (
@@ -1743,43 +1782,104 @@ export const ChatComposer = memo(
           onDrop={onComposerDrop}
         >
           <div
+            ref={composerSurfaceRef}
             className={cn(
               "rounded-[20px] border bg-card transition-colors duration-200 has-focus-visible:border-ring/45",
               isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border",
               composerProviderState.composerSurfaceClassName,
             )}
+            onFocusCapture={() => {
+              if (composerBlurFrameRef.current !== null) {
+                window.cancelAnimationFrame(composerBlurFrameRef.current);
+                composerBlurFrameRef.current = null;
+              }
+              setIsComposerFocused(true);
+            }}
+            onBlurCapture={() => {
+              scheduleComposerCollapseCheck();
+            }}
+            onClick={() => {
+              if (isComposerCollapsedMobile) {
+                setIsComposerFocused(true);
+                requestAnimationFrame(() => {
+                  composerEditorRef.current?.focusAtEnd();
+                });
+              }
+            }}
           >
-            {activePendingApproval ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                <ComposerPendingApprovalPanel
-                  approval={activePendingApproval}
-                  pendingCount={pendingApprovals.length}
-                />
+            {!isComposerCollapsedMobile &&
+              (activePendingApproval ? (
+                <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+                  <ComposerPendingApprovalPanel
+                    approval={activePendingApproval}
+                    pendingCount={pendingApprovals.length}
+                  />
+                </div>
+              ) : pendingUserInputs.length > 0 ? (
+                <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+                  <ComposerPendingUserInputPanel
+                    pendingUserInputs={pendingUserInputs}
+                    respondingRequestIds={respondingRequestIds}
+                    answers={activePendingDraftAnswers}
+                    questionIndex={activePendingQuestionIndex}
+                    onToggleOption={onSelectActivePendingUserInputOption}
+                    onAdvance={onAdvanceActivePendingUserInput}
+                  />
+                </div>
+              ) : showPlanFollowUpPrompt && activeProposedPlan ? (
+                <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+                  <ComposerPlanFollowUpBanner
+                    key={activeProposedPlan.id}
+                    planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
+                  />
+                </div>
+              ) : null)}
+
+            {/* Collapsed mobile preview */}
+            {isComposerCollapsedMobile && (
+              <div className="flex items-center justify-between gap-2 px-3 py-2">
+                <span
+                  className={cn(
+                    "min-w-0 truncate text-[14px]",
+                    (activePendingProgress ? activePendingProgress.customAnswer : prompt.trim())
+                      ? "text-foreground"
+                      : "text-muted-foreground/35",
+                  )}
+                >
+                  {activePendingProgress
+                    ? activePendingProgress.customAnswer ||
+                      "Type your own answer, or leave this blank to use the selected option"
+                    : prompt.trim() || "Ask anything..."}
+                </span>
+                <button
+                  type="button"
+                  className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/90 text-primary-foreground disabled:opacity-30"
+                  disabled={isSendBusy || isConnecting || !composerSendState.hasSendableContent}
+                  aria-label="Send message"
+                  onPointerDown={(e) => e.preventDefault()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void onSend();
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path
+                      d="M8 3L8 13M8 3L4 7M8 3L12 7"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
               </div>
-            ) : pendingUserInputs.length > 0 ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                <ComposerPendingUserInputPanel
-                  pendingUserInputs={pendingUserInputs}
-                  respondingRequestIds={respondingRequestIds}
-                  answers={activePendingDraftAnswers}
-                  questionIndex={activePendingQuestionIndex}
-                  onToggleOption={onSelectActivePendingUserInputOption}
-                  onAdvance={onAdvanceActivePendingUserInput}
-                />
-              </div>
-            ) : showPlanFollowUpPrompt && activeProposedPlan ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                <ComposerPlanFollowUpBanner
-                  key={activeProposedPlan.id}
-                  planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
-                />
-              </div>
-            ) : null}
+            )}
 
             <div
               className={cn(
                 "relative px-3 pb-2 sm:px-4",
                 hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
+                isComposerCollapsedMobile && "hidden",
               )}
             >
               {composerMenuOpen && !isComposerApprovalState && (
@@ -1801,7 +1901,8 @@ export const ChatComposer = memo(
                 </div>
               )}
 
-              {!isComposerApprovalState &&
+              {!isComposerCollapsedMobile &&
+                !isComposerApprovalState &&
                 pendingUserInputs.length === 0 &&
                 composerImages.length > 0 && (
                   <div className="mb-3 flex flex-wrap gap-2">
@@ -1904,7 +2005,7 @@ export const ChatComposer = memo(
             </div>
 
             {/* Bottom toolbar */}
-            {activePendingApproval ? (
+            {isComposerCollapsedMobile ? null : activePendingApproval ? (
               <div className="flex items-center justify-end gap-2 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
                 <ComposerPendingApprovalActions
                   requestId={activePendingApproval.requestId}
