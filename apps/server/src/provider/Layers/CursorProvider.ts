@@ -531,6 +531,7 @@ export const discoverCursorModelCapabilitiesViaAcp = (
             }),
           ).pipe(
             Effect.timeout(CURSOR_ACP_MODEL_CAPABILITY_TIMEOUT),
+            Effect.retry({ times: 3 }),
             Effect.withSpan("cursor-acp-model-capability-probe"),
             Effect.catchCause((cause) =>
               Effect.logWarning("Cursor ACP capability probe failed", {
