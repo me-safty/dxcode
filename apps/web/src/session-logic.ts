@@ -1,3 +1,5 @@
+import * as Option from "effect/Option";
+import * as Arr from "effect/Array";
 import {
   ApprovalRequestId,
   isToolLifecycleItemType,
@@ -30,7 +32,7 @@ export const PROVIDER_OPTIONS: Array<{
   { value: "codex", label: "Codex", available: true },
   { value: "claudeAgent", label: "Claude", available: true },
   { value: "opencode", label: "OpenCode", available: true },
-  { value: "cursor", label: "Cursor", available: false },
+  { value: "cursor", label: "Cursor", available: true },
 ];
 
 export interface WorkLogEntry {
@@ -353,12 +355,11 @@ export function deriveActivePlanState(
   const allPlanActivities = ordered.filter((activity) => activity.kind === "turn.plan.updated");
   // Prefer plan from the current turn; fall back to the most recent plan from any turn
   // so that TodoWrite tasks persist across follow-up messages.
-  const latest =
-    (latestTurnId
-      ? allPlanActivities.filter((activity) => activity.turnId === latestTurnId).at(-1)
-      : undefined) ??
-    allPlanActivities.at(-1) ??
-    null;
+  const latest = Option.getOrNull(
+    latestTurnId
+      ? Arr.findLast(allPlanActivities, (activity) => activity.turnId === latestTurnId)
+      : Arr.last(allPlanActivities),
+  );
   if (!latest) {
     return null;
   }
