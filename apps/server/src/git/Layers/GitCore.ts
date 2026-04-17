@@ -351,6 +351,19 @@ function parseDefaultBranchFromRemoteHeadRef(value: string, remoteName: string):
   return branch.length > 0 ? branch : null;
 }
 
+function dirtyWorktreeDetailsFromCause(
+  cause: unknown,
+): { branch: string; conflictingFiles: ReadonlyArray<string> } | undefined {
+  if (!Schema.is(GitCheckoutDirtyWorktreeError)(cause)) {
+    return undefined;
+  }
+
+  return {
+    branch: cause.branch,
+    conflictingFiles: [...cause.conflictingFiles],
+  };
+}
+
 function createGitCommandError(
   operation: string,
   cwd: string,
@@ -358,11 +371,13 @@ function createGitCommandError(
   detail: string,
   cause?: unknown,
 ): GitCommandError {
+  const dirtyWorktree = dirtyWorktreeDetailsFromCause(cause);
   return new GitCommandError({
     operation,
     command: commandLabel(args),
     cwd,
     detail,
+    ...(dirtyWorktree ? { dirtyWorktree } : {}),
     ...(cause !== undefined ? { cause } : {}),
   });
 }
@@ -2198,6 +2213,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
               input.cwd,
               ["checkout", input.branch],
               e.message,
+              e,
             ),
           ),
         ),
@@ -2267,6 +2283,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
                 input.cwd,
                 ["checkout", input.branch],
                 e.message,
+                e,
               ),
             ),
           ),

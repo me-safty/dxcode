@@ -1806,6 +1806,43 @@ it.layer(TestLayer)("git integration", (it) => {
         expect(branchesAfter.branches.find((b) => b.current)!.name).toBe(initialBranch);
       }),
     );
+
+    it.effect("includes dirty worktree metadata when ignored files block checkout", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(tmp);
+        const core = yield* GitCore;
+
+        yield* writeTextFile(path.join(tmp, ".gitignore"), "ignored/\n");
+        yield* git(tmp, ["add", ".gitignore"]);
+        yield* git(tmp, ["commit", "-m", "ignore generated files"]);
+
+        yield* core.createBranch({ cwd: tmp, branch: "other" });
+        yield* core.checkoutBranch({ cwd: tmp, branch: "other" });
+        yield* makeDirectory(path.join(tmp, "ignored"));
+        yield* writeTextFile(path.join(tmp, "ignored/output.log"), "tracked on other\n");
+        yield* git(tmp, ["add", "-f", "ignored/output.log"]);
+        yield* git(tmp, ["commit", "-m", "track ignored file"]);
+        yield* core.checkoutBranch({ cwd: tmp, branch: initialBranch });
+
+        yield* makeDirectory(path.join(tmp, "ignored"));
+        yield* writeTextFile(path.join(tmp, "ignored/output.log"), "local ignored file\n");
+
+        const result = yield* Effect.result(core.stashAndCheckout({ cwd: tmp, branch: "other" }));
+        expect(result._tag).toBe("Failure");
+        if (result._tag !== "Failure") {
+          return;
+        }
+
+        expect(Schema.is(GitCommandError)(result.failure)).toBe(true);
+        if (!Schema.is(GitCommandError)(result.failure)) {
+          return;
+        }
+
+        expect(result.failure.dirtyWorktree?.branch).toBe("other");
+        expect(result.failure.dirtyWorktree?.conflictingFiles).toContain("ignored/output.log");
+      }),
+    );
   });
 
   describe("stashDrop", () => {

@@ -57,9 +57,56 @@ function toBranchActionErrorMessage(error: unknown): string {
 
 const DIRTY_WORKTREE_ERROR_PATTERN = /Uncommitted changes block checkout to ([^:]+): (.+)/;
 
+function readDirtyWorktreeDetails(
+  error: unknown,
+): { branch: string; conflictingFiles: string[] } | null {
+  if (!error || typeof error !== "object" || !("dirtyWorktree" in error)) {
+    return null;
+  }
+
+  const dirtyWorktree = (error as { dirtyWorktree?: unknown }).dirtyWorktree;
+  if (!dirtyWorktree || typeof dirtyWorktree !== "object") {
+    return null;
+  }
+
+  const branch =
+    "branch" in dirtyWorktree ? (dirtyWorktree as { branch?: unknown }).branch : undefined;
+  const conflictingFiles =
+    "conflictingFiles" in dirtyWorktree
+      ? (dirtyWorktree as { conflictingFiles?: unknown }).conflictingFiles
+      : undefined;
+  if (typeof branch !== "string" || !Array.isArray(conflictingFiles)) {
+    return null;
+  }
+  if (!conflictingFiles.every((file) => typeof file === "string")) {
+    return null;
+  }
+
+  return {
+    branch,
+    conflictingFiles: [...conflictingFiles],
+  };
+}
+
 function parseDirtyWorktreeError(error: unknown): { branch: string; files: string[] } | null {
-  const message = error instanceof Error ? error.message : String(error);
-  const match = DIRTY_WORKTREE_ERROR_PATTERN.exec(message);
+  const dirtyWorktree = readDirtyWorktreeDetails(error);
+  if (dirtyWorktree) {
+    return {
+      branch: dirtyWorktree.branch,
+      files: dirtyWorktree.conflictingFiles,
+    };
+  }
+
+  const detail =
+    error &&
+    typeof error === "object" &&
+    "detail" in error &&
+    typeof (error as { detail?: unknown }).detail === "string"
+      ? (error as { detail: string }).detail
+      : error instanceof Error
+        ? error.message
+        : String(error);
+  const match = DIRTY_WORKTREE_ERROR_PATTERN.exec(detail);
   if (!match?.[1] || !match[2]) return null;
   return {
     branch: match[1],

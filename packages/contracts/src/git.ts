@@ -332,11 +332,18 @@ export const GitPullResult = Schema.Struct({
 export type GitPullResult = typeof GitPullResult.Type;
 
 // RPC / domain errors
+export const GitDirtyWorktreeDetails = Schema.Struct({
+  branch: Schema.String,
+  conflictingFiles: Schema.Array(Schema.String),
+});
+export type GitDirtyWorktreeDetails = typeof GitDirtyWorktreeDetails.Type;
+
 export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()("GitCommandError", {
   operation: Schema.String,
   command: Schema.String,
   cwd: Schema.String,
   detail: Schema.String,
+  dirtyWorktree: Schema.optional(GitDirtyWorktreeDetails),
   cause: Schema.optional(Schema.Defect),
 }) {
   override get message(): string {
