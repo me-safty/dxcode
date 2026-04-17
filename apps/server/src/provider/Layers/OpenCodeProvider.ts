@@ -23,8 +23,11 @@ import {
 const PROVIDER = "opencode" as const;
 
 class OpenCodeProbePromiseError extends Error {
-  constructor(override readonly cause: unknown) {
+  override readonly cause: unknown;
+
+  constructor(cause: unknown) {
     super(cause instanceof Error ? cause.message : String(cause));
+    this.cause = cause;
     this.name = "OpenCodeProbePromiseError";
   }
 }

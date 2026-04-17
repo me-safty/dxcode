@@ -28,13 +28,13 @@ import {
   hasCustomModelProvider,
   parseAuthStatusFromOutput,
   readCodexConfigModelProvider,
-} from "./CodexProvider";
-import { checkClaudeProviderStatus, parseClaudeAuthStatusFromOutput } from "./ClaudeProvider";
-import { haveProvidersChanged, ProviderRegistryLive } from "./ProviderRegistry";
-import { OpenCodeProvider } from "../Services/OpenCodeProvider";
-import { ServerConfig } from "../../config";
-import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings";
-import { ProviderRegistry } from "../Services/ProviderRegistry";
+} from "./CodexProvider.ts";
+import { checkClaudeProviderStatus, parseClaudeAuthStatusFromOutput } from "./ClaudeProvider.ts";
+import { haveProvidersChanged, ProviderRegistryLive } from "./ProviderRegistry.ts";
+import { OpenCodeProvider } from "../Services/OpenCodeProvider.ts";
+import { ServerConfig } from "../../config.ts";
+import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings.ts";
+import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -610,12 +610,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
               }),
             ),
           );
-          const runtimeServices = yield* Layer.build(
-            Layer.mergeAll(
-              Layer.succeed(ServerSettingsService, serverSettings),
-              providerRegistryLayer,
-            ),
-          ).pipe(Scope.provide(scope));
+          const runtimeServices = yield* Layer.build(providerRegistryLayer).pipe(
+            Scope.provide(scope),
+          );
 
           yield* Effect.gen(function* () {
             const registry = yield* ProviderRegistry;
@@ -667,12 +664,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
               }),
             ),
           );
-          const runtimeServices = yield* Layer.build(
-            Layer.mergeAll(
-              Layer.succeed(ServerSettingsService, serverSettings),
-              providerRegistryLayer,
-            ),
-          ).pipe(Scope.provide(scope));
+          const runtimeServices = yield* Layer.build(providerRegistryLayer).pipe(
+            Scope.provide(scope),
+          );
 
           yield* Effect.gen(function* () {
             const registry = yield* ProviderRegistry;
