@@ -11,7 +11,6 @@ import {
   normalizeClaudeModelOptionsWithCapabilities,
   normalizeCodexModelOptionsWithCapabilities,
   normalizeModelSlug,
-  resolveApiModelId,
   resolveContextWindow,
   resolveEffort,
   resolveModelSlugForProvider,
@@ -193,41 +192,6 @@ describe("resolveContextWindow", () => {
   it("returns undefined for models with no context window options", () => {
     expect(resolveContextWindow(codexCaps, undefined)).toBeUndefined();
     expect(resolveContextWindow(codexCaps, "1m")).toBeUndefined();
-  });
-});
-
-describe("resolveApiModelId", () => {
-  it("appends [1m] suffix for 1m context window", () => {
-    expect(
-      resolveApiModelId({
-        provider: "claudeAgent",
-        model: "claude-opus-4-6",
-        options: { contextWindow: "1m" },
-      }),
-    ).toBe("claude-opus-4-6[1m]");
-  });
-
-  it("returns the model as-is for 200k context window", () => {
-    expect(
-      resolveApiModelId({
-        provider: "claudeAgent",
-        model: "claude-opus-4-6",
-        options: { contextWindow: "200k" },
-      }),
-    ).toBe("claude-opus-4-6");
-  });
-
-  it("returns the model as-is when no context window is set", () => {
-    expect(resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6" })).toBe(
-      "claude-opus-4-6",
-    );
-    expect(
-      resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6", options: {} }),
-    ).toBe("claude-opus-4-6");
-  });
-
-  it("returns the model as-is for Codex selections", () => {
-    expect(resolveApiModelId({ provider: "codex", model: "gpt-5.4" })).toBe("gpt-5.4");
   });
 });
 
