@@ -316,12 +316,14 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       yield* adapter.stopSession(threadId);
 
       const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
-      const modeRequest = requests.find(
-        (entry) =>
-          entry.method === "session/set_mode" ||
-          (entry.method === "session/set_config_option" &&
-            (entry.params as Record<string, unknown> | undefined)?.configId === "mode"),
-      );
+      const modeRequest = requests
+        .toReversed()
+        .find(
+          (entry) =>
+            entry.method === "session/set_mode" ||
+            (entry.method === "session/set_config_option" &&
+              (entry.params as Record<string, unknown> | undefined)?.configId === "mode"),
+        );
       assert.isDefined(modeRequest);
       assert.equal(
         (modeRequest?.params as Record<string, unknown> | undefined)?.sessionId,
@@ -335,6 +337,80 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         ),
       );
     }),
+  );
+
+  it.effect(
+    "applies initial model and mode configuration during startSession and skips repeating it on first send",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* CursorAdapter;
+        const serverSettings = yield* ServerSettingsService;
+        const threadId = ThreadId.make("cursor-initial-config-probe");
+        const tempDir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "cursor-acp-")));
+        const requestLogPath = path.join(tempDir, "requests.ndjson");
+        const argvLogPath = path.join(tempDir, "argv.txt");
+        yield* Effect.promise(() => writeFile(requestLogPath, "", "utf8"));
+        const wrapperPath = yield* Effect.promise(() =>
+          makeProbeWrapper(requestLogPath, argvLogPath),
+        );
+        yield* serverSettings.updateSettings({
+          providers: { cursor: { binaryPath: wrapperPath } },
+        });
+
+        const modelSelection = {
+          provider: "cursor" as const,
+          model: "gpt-5.4",
+          options: {
+            reasoning: "xhigh" as const,
+            contextWindow: "1m",
+            fastMode: true,
+          },
+        };
+
+        yield* adapter.startSession({
+          threadId,
+          provider: "cursor",
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+          modelSelection,
+        });
+
+        yield* Effect.promise(() => waitForFileContent(requestLogPath));
+
+        const requestsAfterStart = yield* Effect.promise(() => readJsonLines(requestLogPath));
+        const configIdsAfterStart = requestsAfterStart.flatMap((entry) =>
+          entry.method === "session/set_config_option" &&
+          typeof (entry.params as Record<string, unknown> | undefined)?.configId === "string"
+            ? [String((entry.params as Record<string, unknown>).configId)]
+            : [],
+        );
+        assert.deepStrictEqual(configIdsAfterStart, [
+          "model",
+          "reasoning",
+          "context",
+          "fast",
+          "mode",
+        ]);
+
+        yield* adapter.sendTurn({
+          threadId,
+          input: "hello mock",
+          attachments: [],
+          modelSelection,
+          interactionMode: "default",
+        });
+        yield* adapter.stopSession(threadId);
+
+        const finalRequests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+        const finalConfigIds = finalRequests.flatMap((entry) =>
+          entry.method === "session/set_config_option" &&
+          typeof (entry.params as Record<string, unknown> | undefined)?.configId === "string"
+            ? [String((entry.params as Record<string, unknown>).configId)]
+            : [],
+        );
+        assert.deepStrictEqual(finalConfigIds, ["model", "reasoning", "context", "fast", "mode"]);
+        assert.equal(finalRequests.filter((entry) => entry.method === "session/prompt").length, 1);
+      }),
   );
 
   it.effect(

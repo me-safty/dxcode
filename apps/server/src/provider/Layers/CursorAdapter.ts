@@ -7,6 +7,7 @@ import * as nodePath from "node:path";
 
 import {
   ApprovalRequestId,
+  type CursorModelOptions,
   EventId,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
@@ -212,6 +213,55 @@ function resolveRequestedModeId(input: {
     modeState.availableModes.find((mode) => !isPlanMode(mode))?.id ??
     modeState.currentModeId
   );
+}
+
+function applyRequestedSessionConfiguration<E>(input: {
+  readonly runtime: AcpSessionRuntimeShape;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode | undefined;
+  readonly modelSelection:
+    | {
+        readonly model: string;
+        readonly options?: CursorModelOptions | null | undefined;
+      }
+    | undefined;
+  readonly mapError: (context: {
+    readonly cause: import("effect-acp/errors").AcpError;
+    readonly method: "session/set_config_option" | "session/set_mode";
+  }) => E;
+}): Effect.Effect<void, E> {
+  return Effect.gen(function* () {
+    if (input.modelSelection) {
+      yield* applyCursorAcpModelSelection({
+        runtime: input.runtime,
+        model: input.modelSelection.model,
+        modelOptions: input.modelSelection.options,
+        mapError: ({ cause }) =>
+          input.mapError({
+            cause,
+            method: "session/set_config_option",
+          }),
+      });
+    }
+
+    const requestedModeId = resolveRequestedModeId({
+      interactionMode: input.interactionMode,
+      runtimeMode: input.runtimeMode,
+      modeState: yield* input.runtime.getModeState,
+    });
+    if (!requestedModeId) {
+      return;
+    }
+
+    yield* input.runtime.setMode(requestedModeId).pipe(
+      Effect.mapError((cause) =>
+        input.mapError({
+          cause,
+          method: "session/set_mode",
+        }),
+      ),
+    );
+  });
 }
 
 function selectAutoApprovedPermissionOption(
@@ -604,6 +654,15 @@ function makeCursorAdapter(options?: CursorAdapterLiveOptions) {
             ),
           );
 
+          yield* applyRequestedSessionConfiguration({
+            runtime: acp,
+            runtimeMode: input.runtimeMode,
+            interactionMode: undefined,
+            modelSelection: cursorModelSelection,
+            mapError: ({ cause, method }) =>
+              mapAcpToAdapterError(PROVIDER, input.threadId, method, cause),
+          });
+
           const now = yield* nowIso;
           const session: ProviderSession = {
             provider: PROVIDER,
@@ -759,12 +818,19 @@ function makeCursorAdapter(options?: CursorAdapterLiveOptions) {
           input.modelSelection?.provider === "cursor" ? input.modelSelection : undefined;
         const model = turnModelSelection?.model ?? ctx.session.model;
         const resolvedModel = resolveCursorAcpBaseModelId(model);
-        yield* applyCursorAcpModelSelection({
+        yield* applyRequestedSessionConfiguration({
           runtime: ctx.acp,
-          model,
-          modelOptions: turnModelSelection?.options,
-          mapError: ({ cause }) =>
-            mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_config_option", cause),
+          runtimeMode: ctx.session.runtimeMode,
+          interactionMode: input.interactionMode,
+          modelSelection:
+            model === undefined
+              ? undefined
+              : {
+                  model,
+                  options: turnModelSelection?.options,
+                },
+          mapError: ({ cause, method }) =>
+            mapAcpToAdapterError(PROVIDER, input.threadId, method, cause),
         });
         ctx.activeTurnId = turnId;
         ctx.lastPlanFingerprint = undefined;
@@ -773,23 +839,6 @@ function makeCursorAdapter(options?: CursorAdapterLiveOptions) {
           activeTurnId: turnId,
           updatedAt: yield* nowIso,
         };
-
-        const requestedModeId = resolveRequestedModeId({
-          interactionMode: input.interactionMode,
-          runtimeMode: ctx.session.runtimeMode,
-          modeState: yield* ctx.acp.getModeState,
-        });
-        if (requestedModeId) {
-          yield* Effect.ignore(
-            ctx.acp
-              .setMode(requestedModeId)
-              .pipe(
-                Effect.mapError((error) =>
-                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_mode", error),
-                ),
-              ),
-          );
-        }
 
         yield* offerRuntimeEvent({
           type: "turn.started",

@@ -309,32 +309,47 @@ const makeAcpSessionRuntime = (
         | EffectAcpSchema.ResumeSessionResponse,
     ): Effect.Effect<void> => Ref.set(configOptionsRef, sessionConfigOptionsFromSetup(response));
 
+    const updateCurrentModeId = (modeId: string): Effect.Effect<void> =>
+      Ref.update(modeStateRef, (current) =>
+        current ? { ...current, currentModeId: modeId } : current,
+      );
+
     const setConfigOption = (
       configId: string,
       value: string | boolean,
     ): Effect.Effect<EffectAcpSchema.SetSessionConfigOptionResponse, EffectAcpErrors.AcpError> =>
       validateConfigOptionValue(configId, value).pipe(
         Effect.flatMap(() => getStartedState),
-        Effect.flatMap((started) => {
-          const requestPayload =
-            typeof value === "boolean"
-              ? ({
-                  sessionId: started.sessionId,
-                  configId,
-                  type: "boolean",
-                  value,
-                } satisfies EffectAcpSchema.SetSessionConfigOptionRequest)
-              : ({
-                  sessionId: started.sessionId,
-                  configId,
-                  value: String(value),
-                } satisfies EffectAcpSchema.SetSessionConfigOptionRequest);
-          return runLoggedRequest(
-            "session/set_config_option",
-            requestPayload,
-            acp.agent.setSessionConfigOption(requestPayload),
-          ).pipe(Effect.tap((response) => updateConfigOptions(response)));
-        }),
+        Effect.flatMap((started) =>
+          Ref.get(configOptionsRef).pipe(
+            Effect.flatMap((configOptions) => {
+              const existing = findSessionConfigOption(configOptions, configId);
+              if (existing && configOptionCurrentValueMatches(existing, value)) {
+                return Effect.succeed({
+                  configOptions,
+                } satisfies EffectAcpSchema.SetSessionConfigOptionResponse);
+              }
+              const requestPayload =
+                typeof value === "boolean"
+                  ? ({
+                      sessionId: started.sessionId,
+                      configId,
+                      type: "boolean",
+                      value,
+                    } satisfies EffectAcpSchema.SetSessionConfigOptionRequest)
+                  : ({
+                      sessionId: started.sessionId,
+                      configId,
+                      value: String(value),
+                    } satisfies EffectAcpSchema.SetSessionConfigOptionRequest);
+              return runLoggedRequest(
+                "session/set_config_option",
+                requestPayload,
+                acp.agent.setSessionConfigOption(requestPayload),
+              ).pipe(Effect.tap((response) => updateConfigOptions(response)));
+            }),
+          ),
+        ),
       );
 
     const startOnce = Effect.gen(function* () {
@@ -501,7 +516,17 @@ const makeAcpSessionRuntime = (
         Effect.flatMap((started) => acp.agent.cancel({ sessionId: started.sessionId })),
       ),
       setMode: (modeId) =>
-        getStartedState.pipe(Effect.flatMap(() => setConfigOption("mode", modeId))),
+        Ref.get(modeStateRef).pipe(
+          Effect.flatMap((modeState) => {
+            if (modeState?.currentModeId === modeId) {
+              return Effect.succeed({} satisfies EffectAcpSchema.SetSessionModeResponse);
+            }
+            return setConfigOption("mode", modeId).pipe(
+              Effect.tap(() => updateCurrentModeId(modeId)),
+              Effect.as({} satisfies EffectAcpSchema.SetSessionModeResponse),
+            );
+          }),
+        ),
       setConfigOption,
       setModel: (model) =>
         getStartedState.pipe(
@@ -522,6 +547,20 @@ function sessionConfigOptionsFromSetup(
     | undefined,
 ): ReadonlyArray<EffectAcpSchema.SessionConfigOption> {
   return response?.configOptions ?? [];
+}
+
+function configOptionCurrentValueMatches(
+  configOption: EffectAcpSchema.SessionConfigOption,
+  value: string | boolean,
+): boolean {
+  const currentValue = configOption.currentValue;
+  if (configOption.type === "boolean") {
+    return currentValue === value;
+  }
+  if (typeof currentValue !== "string") {
+    return false;
+  }
+  return currentValue.trim() === String(value).trim();
 }
 
 const handleSessionUpdate = ({
