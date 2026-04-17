@@ -230,7 +230,11 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       const sessions = yield* adapter.listSessions();
 
       assert.equal(error._tag, "ProviderAdapterProcessError");
-      assert.equal(error.detail, "close failed");
+      assert.equal(error.detail, "Failed to stop 2 OpenCode sessions.");
+      assert.deepEqual(runtimeMock.state.closeCalls, [
+        "http://127.0.0.1:9999",
+        "http://127.0.0.1:9999",
+      ]);
       assert.deepEqual(sessions, []);
     }),
   );
@@ -422,6 +426,61 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         nativeThreadIds.every((threadId) => threadId === "thread-native-log"),
         true,
       );
+    }),
+  );
+
+  it.effect("keeps the event pump alive when native event logging fails", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            info: {
+              id: "msg-native-log-failure",
+              role: "assistant",
+            },
+          },
+        },
+      ];
+
+      const nativeEventLogger = {
+        filePath: "memory://opencode-native-events",
+        write: () => Effect.die(new Error("native log write failed")),
+        close: () => Effect.void,
+      };
+
+      const adapterLayer = makeOpenCodeAdapterLive({ nativeEventLogger }).pipe(
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(
+          ServerSettingsService.layerTest({
+            providers: {
+              opencode: {
+                binaryPath: "fake-opencode",
+                serverUrl: "http://127.0.0.1:9999",
+                serverPassword: "secret-password",
+              },
+            },
+          }),
+        ),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+
+      const sessions = yield* Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+        yield* adapter.startSession({
+          provider: "opencode",
+          threadId: asThreadId("thread-native-log-failure"),
+          runtimeMode: "full-access",
+        });
+        yield* sleep(10);
+        return yield* adapter.listSessions();
+      }).pipe(Effect.provide(adapterLayer));
+
+      assert.equal(sessions.length, 1);
+      assert.equal(sessions[0]?.threadId, "thread-native-log-failure");
+      assert.deepEqual(runtimeMock.state.closeCalls, []);
     }),
   );
 });

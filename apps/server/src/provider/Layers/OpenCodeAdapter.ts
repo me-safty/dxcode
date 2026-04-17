@@ -411,6 +411,13 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
         (nativeEventLogger ? nativeEventLogger.write(event, threadId) : Effect.void).pipe(
           Effect.runPromiseWith(services),
         );
+      const writeNativeEventBestEffort = (
+        threadId: ThreadId,
+        event: {
+          readonly observedAt: string;
+          readonly event: Record<string, unknown>;
+        },
+      ) => writeNativeEventPromise(threadId, event).catch(() => undefined);
 
       const emitUnexpectedExit = (context: OpenCodeSessionContext, message: string) => {
         if (context.stopped) {
@@ -523,7 +530,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
               }
 
               const turnId = context.activeTurnId;
-              await writeNativeEventPromise(context.session.threadId, {
+              await writeNativeEventBestEffort(context.session.threadId, {
                 observedAt: nowIso(),
                 event: {
                   provider: PROVIDER,
@@ -1285,7 +1292,21 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
           try: async () => {
             const contexts = [...sessions.values()];
             sessions.clear();
-            await Promise.all(contexts.map((context) => stopOpenCodeContext(context)));
+            const results = await Promise.allSettled(
+              contexts.map((context) => stopOpenCodeContext(context)),
+            );
+            const errors = results
+              .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+              .map((result) => result.reason);
+            if (errors.length === 1) {
+              throw errors[0];
+            }
+            if (errors.length > 1) {
+              throw new AggregateError(
+                errors,
+                `Failed to stop ${errors.length} OpenCode sessions.`,
+              );
+            }
           },
           catch: (cause) =>
             new ProviderAdapterProcessError({

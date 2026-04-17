@@ -159,6 +159,13 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     ],
   },
 ];
+const findTestProvider = (provider: ServerProvider["provider"]) => {
+  const testProvider = TEST_PROVIDERS.find((candidate) => candidate.provider === provider);
+  if (!testProvider) {
+    throw new Error(`Missing test provider fixture: ${provider}`);
+  }
+  return testProvider;
+};
 
 function ClaudeTraitsPickerHarness(props: {
   model: string;
@@ -573,7 +580,7 @@ async function mountOpenCodePicker(props: { model?: string; options?: OpenCodeMo
   const screen = await render(
     <TraitsPicker
       provider="opencode"
-      models={TEST_PROVIDERS[1]!.models}
+      models={findTestProvider("opencode").models}
       threadRef={threadRef}
       model={model}
       prompt=""

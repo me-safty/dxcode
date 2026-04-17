@@ -300,13 +300,20 @@ export async function findAvailablePort(): Promise<number> {
   return port;
 }
 
-function detectMacosSigkillHint(binaryPath: string): string | null {
+export function resolveOpenCodeBinaryPath(binaryPath: string): string {
+  if (Path.isAbsolute(binaryPath)) {
+    return binaryPath;
+  }
+  return execFileSync("which", [binaryPath], {
+    encoding: "utf8",
+    timeout: 3_000,
+  }).trim();
+}
+
+export function detectMacosSigkillHint(binaryPath: string): string | null {
   try {
     // Check for quarantine xattr first.
-    const resolvedPath = execFileSync("which", [binaryPath], {
-      encoding: "utf8",
-      timeout: 3_000,
-    }).trim();
+    const resolvedPath = resolveOpenCodeBinaryPath(binaryPath);
     const xattr = execFileSync("xattr", ["-l", resolvedPath], {
       encoding: "utf8",
       timeout: 3_000,
@@ -319,15 +326,12 @@ function detectMacosSigkillHint(binaryPath: string): string | null {
     }
 
     // Look for a recent crash report with the termination reason.
-    const crashDir = Path.join(
-      OS.homedir(),
-      "Library/Logs/DiagnosticReports",
-    );
+    const crashDir = Path.join(OS.homedir(), "Library/Logs/DiagnosticReports");
     const binaryName = Path.basename(resolvedPath);
     const recentReports = FS.readdirSync(crashDir)
       .filter((f) => f.startsWith(binaryName) && f.endsWith(".ips"))
-      .sort()
-      .reverse()
+      .toSorted()
+      .toReversed()
       .slice(0, 1);
 
     for (const report of recentReports) {
@@ -412,9 +416,7 @@ export async function startOpenCodeServerProcess(input: {
 
     const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
       cleanup();
-      const exitReason = signal
-        ? `signal: ${signal}`
-        : `code: ${code ?? "unknown"}`;
+      const exitReason = signal ? `signal: ${signal}` : `code: ${code ?? "unknown"}`;
       const hint =
         signal === "SIGKILL" && process.platform === "darwin"
           ? detectMacosSigkillHint(input.binaryPath)
