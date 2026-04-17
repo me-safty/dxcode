@@ -189,6 +189,29 @@ export function checkOpenCodeProviderStatus(input: {
   };
 
   return Effect.gen(function* () {
+    if (!input.settings.enabled) {
+      return buildServerProvider({
+        provider: PROVIDER,
+        enabled: false,
+        checkedAt,
+        models: providerModelsFromSettings(
+          [],
+          PROVIDER,
+          customModels,
+          DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+        ),
+        probe: {
+          installed: false,
+          version: null,
+          status: "warning",
+          auth: { status: "unknown" },
+          message: isExternalServer
+            ? "OpenCode is disabled in T3 Code settings. A server URL is configured."
+            : "OpenCode is disabled in T3 Code settings.",
+        },
+      });
+    }
+
     let version: string | null = null;
     if (!isExternalServer) {
       const versionExit = yield* Effect.exit(
@@ -205,29 +228,6 @@ export function checkOpenCodeProviderStatus(input: {
         return fallback(Cause.squash(versionExit.cause));
       }
       version = parseGenericCliVersion(versionExit.value.stdout) ?? null;
-    }
-
-    if (!input.settings.enabled) {
-      return buildServerProvider({
-        provider: PROVIDER,
-        enabled: false,
-        checkedAt,
-        models: providerModelsFromSettings(
-          [],
-          PROVIDER,
-          customModels,
-          DEFAULT_OPENCODE_MODEL_CAPABILITIES,
-        ),
-        probe: {
-          installed: true,
-          version,
-          status: "warning",
-          auth: { status: "unknown" },
-          message: isExternalServer
-            ? "OpenCode is disabled in T3 Code settings. A server URL is configured."
-            : "OpenCode is disabled in T3 Code settings.",
-        },
-      });
     }
 
     const inventoryExit = yield* Effect.exit(
