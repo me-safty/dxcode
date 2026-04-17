@@ -516,7 +516,7 @@ export const discoverCursorModelCapabilitiesViaAcp = (
               yield* Effect.annotateCurrentSpan({
                 "cursor.acp.model.value": modelSlug,
                 "cursor.acp.model.currentValue": probeCurrentModelValue,
-                "cursor.acp.config_option_id": probeModelOption?.id,
+                "cursor.acp.config_option_id": probeModelOption?.id ?? modelOption.id,
               });
               const nextConfigOptions =
                 probeCurrentModelValue === modelSlug
