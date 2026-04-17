@@ -190,15 +190,15 @@ jobs:
 
       - name: Install Spectre-mitigated MSVC libs
         if: matrix.platform == 'win'
-        shell: bash
+        shell: pwsh
         run: |
-          vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          installPath = & $vswhere -products * -latest -property installationPath
-          setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
-          Start-Process -FilePath $setupExe `   
-           -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `               
-           "Microsoft.VisualStudio.Component.VC.Tools.x86.x64.Spectre", "--quiet", "--norestart" `
-           -Wait -PassThru -NoNewWindow
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+             $installPath = & $vswhere -products * -latest -property installationPath
+             $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+             Start-Process -FilePath $setupExe `   
+              -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `               
+              "Microsoft.VisualStudio.Component.VC.Tools.x86.x64.Spectre", "--quiet", "--norestart" `
+              -Wait -PassThru -NoNewWindow
 
       - name: Build desktop artifact
         shell: bash
