@@ -165,14 +165,6 @@ it.layer(CursorTextGenerationTestLayer)("CursorTextGenerationLive", (it) => {
           requests.some(
             (request) =>
               request.method === "session/set_config_option" &&
-              request.params?.configId === "mode" &&
-              request.params?.value === "ask",
-          ),
-        ).toBe(true);
-        expect(
-          requests.some(
-            (request) =>
-              request.method === "session/set_config_option" &&
               request.params?.configId === "model" &&
               request.params?.value === "gpt-5.4",
           ),

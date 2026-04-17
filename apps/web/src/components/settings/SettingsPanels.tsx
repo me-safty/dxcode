@@ -56,6 +56,7 @@ import {
 } from "../../store";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
 import { cn } from "../../lib/utils";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
@@ -103,6 +104,7 @@ const TIMESTAMP_FORMAT_LABELS = {
 type InstallProviderSettings = {
   provider: ProviderKind;
   title: string;
+  badgeLabel?: string;
   binaryPlaceholder: string;
   binaryDescription: ReactNode;
   serverUrlPlaceholder?: string;
@@ -133,6 +135,7 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
   {
     provider: "cursor",
     title: "Cursor",
+    badgeLabel: "Early Access",
     binaryPlaceholder: "Cursor agent binary path",
     binaryDescription: "Path to the Cursor agent binary",
   },
@@ -773,6 +776,7 @@ export function GeneralSettingsPanel() {
     return {
       provider: providerSettings.provider,
       title: providerSettings.title,
+      badgeLabel: providerSettings.badgeLabel,
       binaryPlaceholder: providerSettings.binaryPlaceholder,
       binaryDescription: providerSettings.binaryDescription,
       serverUrlPlaceholder: providerSettings.serverUrlPlaceholder,
@@ -1170,6 +1174,11 @@ export function GeneralSettingsPanel() {
                         className={cn("size-2 shrink-0 rounded-full", providerCard.statusStyle.dot)}
                       />
                       <h3 className="text-sm font-medium text-foreground">{providerDisplayName}</h3>
+                      {providerCard.badgeLabel ? (
+                        <Badge variant="warning" size="sm" className="shrink-0">
+                          {providerCard.badgeLabel}
+                        </Badge>
+                      ) : null}
                       {providerCard.versionLabel ? (
                         <code className="text-xs text-muted-foreground">
                           {providerCard.versionLabel}
