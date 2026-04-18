@@ -886,7 +886,9 @@ const WorkspacePanel = memo(function WorkspacePanel({
                       </div>
                       <Menu>
                         <MenuTrigger
-                          render={<Button size="icon-xs" variant="ghost" aria-label="Task actions" />}
+                          render={
+                            <Button size="icon-xs" variant="ghost" aria-label="Task actions" />
+                          }
                         >
                           <Rows3Icon className="size-3.5" />
                         </MenuTrigger>
@@ -995,7 +997,9 @@ const WorkspacePanel = memo(function WorkspacePanel({
                           <span className={statusToneClass(selectedArtifact.status)}>
                             {selectedArtifact.status}
                           </span>
-                          <span>{formatTimestamp(selectedArtifact.completedAt, timestampFormat)}</span>
+                          <span>
+                            {formatTimestamp(selectedArtifact.completedAt, timestampFormat)}
+                          </span>
                         </>
                       ) : null}
                     </div>
@@ -1040,7 +1044,8 @@ const WorkspacePanel = memo(function WorkspacePanel({
                           Loading document preview...
                         </div>
                       ) : selectedDocumentContent ? (
-                        activeDocumentViewMode === "preview" && selectedDescriptor.category === "note" ? (
+                        activeDocumentViewMode === "preview" &&
+                        selectedDescriptor.category === "note" ? (
                           <div className="rounded-2xl border border-border/55 bg-background/70 p-5">
                             <ChatMarkdown
                               cwd={markdownCwd}
@@ -1233,7 +1238,8 @@ const WorkspacePanel = memo(function WorkspacePanel({
                   </div>
                 )}
 
-                {(selectedArtifact?.turnId || firstDiffCapableArtifact?.turnId) && onOpenTurnDiff ? (
+                {(selectedArtifact?.turnId || firstDiffCapableArtifact?.turnId) &&
+                onOpenTurnDiff ? (
                   <div className="rounded-2xl border border-border/55 bg-background/55 p-3">
                     <p className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground/55 uppercase">
                       Advanced

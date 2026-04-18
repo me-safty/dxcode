@@ -95,6 +95,7 @@ const PROVIDER_MENU_ORDER: Record<ProviderKind, number> = {
   codex: 1,
   opencode: 2,
   cursor: 3,
+  pi: 4,
 };
 
 function projectKey(project: Project): string {
@@ -326,7 +327,11 @@ export function NoActiveThreadState() {
                           }
                         }}
                         onKeyDown={(event) => {
-                          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+                          if (
+                            event.key !== "Enter" ||
+                            event.shiftKey ||
+                            event.nativeEvent.isComposing
+                          ) {
                             return;
                           }
                           event.preventDefault();
@@ -372,7 +377,10 @@ export function NoActiveThreadState() {
                                 onValueChange={(value) => setSelectedProjectId(value)}
                               >
                                 {orderedProjects.map((project) => (
-                                  <MenuRadioItem key={projectKey(project)} value={projectKey(project)}>
+                                  <MenuRadioItem
+                                    key={projectKey(project)}
+                                    value={projectKey(project)}
+                                  >
                                     <div className="min-w-0">
                                       <div className="truncate font-medium">{project.name}</div>
                                       <div className="truncate text-xs text-muted-foreground/80">
@@ -423,7 +431,9 @@ export function NoActiveThreadState() {
                                       ) : null}
                                     </div>
                                     {provider.provider === selectedProvider ? (
-                                      <span className="text-xs text-muted-foreground/75">Selected</span>
+                                      <span className="text-xs text-muted-foreground/75">
+                                        Selected
+                                      </span>
                                     ) : null}
                                   </MenuItem>
                                 );
@@ -464,20 +474,20 @@ export function NoActiveThreadState() {
                                 setInteractionMode(value as ProviderInteractionMode)
                               }
                             >
-                              {(Object.keys(INTERACTION_MODE_COPY) as ProviderInteractionMode[]).map(
-                                (mode) => (
-                                  <MenuRadioItem key={mode} value={mode}>
-                                    <div className="min-w-0">
-                                      <div className="font-medium">
-                                        {INTERACTION_MODE_COPY[mode].label}
-                                      </div>
-                                      <div className="text-xs text-muted-foreground/80">
-                                        {INTERACTION_MODE_COPY[mode].description}
-                                      </div>
+                              {(
+                                Object.keys(INTERACTION_MODE_COPY) as ProviderInteractionMode[]
+                              ).map((mode) => (
+                                <MenuRadioItem key={mode} value={mode}>
+                                  <div className="min-w-0">
+                                    <div className="font-medium">
+                                      {INTERACTION_MODE_COPY[mode].label}
                                     </div>
-                                  </MenuRadioItem>
-                                ),
-                              )}
+                                    <div className="text-xs text-muted-foreground/80">
+                                      {INTERACTION_MODE_COPY[mode].description}
+                                    </div>
+                                  </div>
+                                </MenuRadioItem>
+                              ))}
                             </MenuRadioGroup>
                           </MenuPopup>
                         </Menu>

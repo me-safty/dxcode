@@ -63,6 +63,13 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     placeholder: "openai/gpt-5",
     example: "anthropic/claude-sonnet-4-5-20250929",
   },
+  pi: {
+    provider: "pi",
+    title: "pi",
+    description: "Save additional pi model slugs in `provider/model` format.",
+    placeholder: "anthropic/claude-sonnet-4-6",
+    example: "openai/gpt-5",
+  },
 };
 
 export const MODEL_PROVIDER_SETTINGS = Object.values(PROVIDER_CUSTOM_MODEL_CONFIG);
@@ -194,6 +201,12 @@ export function getCustomModelOptionsByProvider(
       providers,
       "opencode",
       selectedProvider === "opencode" ? selectedModel : undefined,
+    ),
+    pi: getAppModelOptions(
+      settings,
+      providers,
+      "pi",
+      selectedProvider === "pi" ? selectedModel : undefined,
     ),
   };
 }
