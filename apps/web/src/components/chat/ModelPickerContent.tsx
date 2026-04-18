@@ -96,20 +96,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   // Get visible favorite models (respecting search/provider filter)
   const visibleFavoriteModels = useMemo(() => {
-    if (!searchQuery.trim() && selectedProvider !== "all") {
-      // No search and not in "all" mode: show favorites in dedicated section
+    if (!searchQuery.trim() && (selectedProvider === "all" || selectedProvider === "favorites")) {
+      // No search and viewing all models or in favorites mode: show favorites in dedicated section
       let result = favoriteModels;
 
       if (props.lockedProvider !== null) {
         result = result.filter((m) => m.provider === props.lockedProvider);
-      } else if (selectedProvider !== "favorites") {
-        result = result.filter((m) => m.provider === selectedProvider);
       }
 
       return result;
     }
 
-    // With search or in "all" mode: don't show separate section
+    // With search, when provider is filtered, or in other modes: don't show separate section
     return [];
   }, [favoriteModels, searchQuery, selectedProvider, props.lockedProvider]);
 
