@@ -213,16 +213,16 @@ describe("ProviderModelPicker", () => {
 
       // Click on Codex provider in sidebar
       const buttons = await page.getByTitle("Codex").all();
-      if (buttons.length > 0) {
-        await buttons[0]!.click();
+      // Ensure the sidebar button is present — fail loudly if it's not.
+      expect(buttons.length).toBeGreaterThan(0);
+      await buttons[0]!.click();
 
-        // Now should only show Codex models
-        await vi.waitFor(() => {
-          const text = document.body.textContent ?? "";
-          expect(text).toContain("GPT-5 Codex");
-          expect(text).not.toContain("Claude Opus 4.6");
-        });
-      }
+      // Now should only show Codex models
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("GPT-5 Codex");
+        expect(text).not.toContain("Claude Opus 4.6");
+      });
     } finally {
       await mounted.cleanup();
     }
