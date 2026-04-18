@@ -87,6 +87,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
           onClick={() => handleProviderClick("favorites")}
           title="Favorites"
           type="button"
+          aria-label="Favorites"
         >
           <StarIcon className="size-5 shrink-0" />
         </button>
