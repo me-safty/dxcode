@@ -17,7 +17,7 @@ import {
   MenuSubTrigger,
   MenuTrigger,
 } from "../ui/menu";
-import { ClaudeAI, CursorIcon, type Icon, OpenAI, OpenCodeIcon } from "../Icons";
+import { ClaudeAI, CursorIcon, type Icon, OpenAI, OpenCodeIcon, PiIcon } from "../Icons";
 import { describeProviderAvailability, formatProviderDisplayLabel } from "../../coworkShell";
 import { cn } from "~/lib/utils";
 const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderKind, Icon>> = {
@@ -25,6 +25,7 @@ const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderKind, Icon>> = {
   claudeAgent: ClaudeAI,
   opencode: OpenCodeIcon,
   cursor: CursorIcon,
+  pi: PiIcon,
 };
 
 function providerIconClassName(provider: ProviderKind, fallbackClassName: string): string {

@@ -565,3 +565,18 @@ export const OpenCodeIcon: Icon = (props) => (
     </defs>
   </svg>
 );
+
+/**
+ * pi coding agent logo — stylised P-with-dot. Uses `currentColor` fill so it
+ * picks up the text color from the surrounding element (matching how the
+ * other provider icons behave in the picker).
+ */
+export const PiIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 800 800" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+    <path
+      fillRule="evenodd"
+      d="M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z"
+    />
+    <path d="M517.36 400 H634.72 V634.72 H517.36 Z" />
+  </svg>
+);

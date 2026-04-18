@@ -67,41 +67,147 @@ export const DEFAULT_PI_MODEL_CAPABILITIES: ModelCapabilities = {
 export const PI_MIN_RECOMMENDED_VERSION = "0.60.0";
 
 /**
- * Baseline model slugs surfaced when pi is installed. Users can add more via
- * PiSettings.customModels; Slice 3 will enrich this by querying pi directly.
+ * Fallback model slugs surfaced when pi is installed but `pi --list-models`
+ * enumeration fails (CLI missing flag, pi auth not yet ready, etc.). These
+ * use pi's real bare-slug format so `pi --model <slug>` accepts them.
+ *
+ * Prefer the dynamically-loaded catalog from `loadPiModelCatalog`; this list
+ * is only a last-resort fallback.
  */
 export const DEFAULT_PI_BUILTIN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
-    slug: "anthropic/claude-sonnet-4-6",
+    slug: "gpt-5.4",
+    name: "openai-codex/gpt-5.4",
+    isCustom: false,
+    capabilities: DEFAULT_PI_MODEL_CAPABILITIES,
+  },
+  {
+    slug: "claude-sonnet-4-6",
     name: "anthropic/claude-sonnet-4-6",
     isCustom: false,
     capabilities: DEFAULT_PI_MODEL_CAPABILITIES,
   },
   {
-    slug: "anthropic/claude-opus-4-7",
-    name: "anthropic/claude-opus-4-7",
-    isCustom: false,
-    capabilities: DEFAULT_PI_MODEL_CAPABILITIES,
-  },
-  {
-    slug: "anthropic/claude-haiku-4-5",
+    slug: "claude-haiku-4-5",
     name: "anthropic/claude-haiku-4-5",
     isCustom: false,
     capabilities: DEFAULT_PI_MODEL_CAPABILITIES,
   },
-  {
-    slug: "openai/gpt-5",
-    name: "openai/gpt-5",
-    isCustom: false,
-    capabilities: DEFAULT_PI_MODEL_CAPABILITIES,
-  },
-  {
-    slug: "google/gemini-2.5-pro",
-    name: "google/gemini-2.5-pro",
-    isCustom: false,
-    capabilities: DEFAULT_PI_MODEL_CAPABILITIES,
-  },
 ];
+
+/**
+ * Default pi model when no other slug has been supplied. Must be a bare pi
+ * slug (no `provider/` prefix) that pi's CLI accepts via `--model`. We pick
+ * `gpt-5.4` because ChatGPT Plus/Pro Codex subscriptions are the most
+ * broadly usable backend through pi today (Claude Pro/Max tokens are
+ * blocked by Anthropic for third-party apps).
+ */
+export const DEFAULT_PI_MODEL_SLUG = "gpt-5.4";
+
+/**
+ * Strip any `<provider>/` prefix from a pi model slug. Pi's CLI expects bare
+ * model names (e.g. `gpt-5.4`, `claude-3-5-sonnet-20240620`) but older UI
+ * state or custom-model settings may have persisted `openai/gpt-5` style
+ * slugs. Accept both forms for backwards compatibility.
+ */
+export function normalizePiModelSlug(slug: string): string {
+  const trimmed = slug.trim();
+  const slash = trimmed.indexOf("/");
+  return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
+}
+
+export interface PiCatalogEntry {
+  /** pi backend this model routes through (e.g. `anthropic`, `openai-codex`, `google`). */
+  readonly backend: string;
+  /** Bare model slug pi accepts via --model. */
+  readonly model: string;
+  /** Raw context-window label (e.g. "200K") as reported by pi. */
+  readonly context: string;
+  /** Raw max-output label (e.g. "64K") as reported by pi. */
+  readonly maxOut: string;
+  readonly supportsThinking: boolean;
+  readonly supportsImages: boolean;
+}
+
+/**
+ * Parse the fixed-column text table emitted by `pi --list-models`. The table
+ * format is:
+ *
+ *   provider      model                       context  max-out  thinking  images
+ *   anthropic     claude-3-5-sonnet-20240620  200K     8.2K     no        yes
+ *   ...
+ *
+ * plus a trailing `(n/m)` pagination marker and occasional blank lines. We
+ * skip the header and pagination; everything else with 6 whitespace-separated
+ * tokens starting with a known-ish backend name becomes an entry.
+ */
+export function parsePiListModels(output: string): ReadonlyArray<PiCatalogEntry> {
+  const entries: Array<PiCatalogEntry> = [];
+  const lines = output.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (line.length === 0) continue;
+    if (line.startsWith("(")) continue; // `(12/32)` pagination marker
+    if (line.startsWith("Only showing")) continue;
+    const tokens = line.split(/\s+/);
+    if (tokens.length < 6) continue;
+    const [backend, model, context, maxOut, thinking, images] = tokens;
+    if (!backend || !model || !context || !maxOut || !thinking || !images) continue;
+    if (backend === "provider" && model === "model") continue; // header row
+    if (thinking !== "yes" && thinking !== "no") continue;
+    if (images !== "yes" && images !== "no") continue;
+    entries.push({
+      backend,
+      model,
+      context,
+      maxOut,
+      supportsThinking: thinking === "yes",
+      supportsImages: images === "yes",
+    });
+  }
+  return entries;
+}
+
+/**
+ * Run `pi --list-models` and return the parsed catalog. On any failure
+ * (missing pi, no configured keys, CLI error) returns an empty array so the
+ * caller can fall back to DEFAULT_PI_BUILTIN_MODELS.
+ */
+export async function loadPiModelCatalog(input: {
+  readonly binaryPath: string;
+}): Promise<ReadonlyArray<PiCatalogEntry>> {
+  try {
+    const result = await runPiCommand({
+      binaryPath: input.binaryPath,
+      args: ["--list-models"],
+    });
+    // pi writes the table to stdout on success; keep stderr as a fallback.
+    const source = result.stdout.trim().length > 0 ? result.stdout : result.stderr;
+    return parsePiListModels(source);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Convert a parsed pi catalog into ServerProviderModel entries for the
+ * provider snapshot. The slug is pi's bare model name (what pi --model
+ * expects); the display name is `{backend}/{model}` so users can tell which
+ * backend a model routes through in the picker.
+ */
+export function piCatalogToServerModels(
+  entries: ReadonlyArray<PiCatalogEntry>,
+): ReadonlyArray<ServerProviderModel> {
+  return entries.map((entry) => ({
+    slug: entry.model,
+    name: `${entry.backend}/${entry.model}`,
+    isCustom: false,
+    capabilities: {
+      ...DEFAULT_PI_MODEL_CAPABILITIES,
+      supportsThinkingToggle: entry.supportsThinking,
+    },
+  }));
+}
 
 export interface PiBackendOption {
   /** Stable id matching pi's `--provider <name>` flag. */

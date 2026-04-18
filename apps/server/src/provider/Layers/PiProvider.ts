@@ -15,8 +15,10 @@ import {
   DEFAULT_PI_BUILTIN_MODELS,
   DEFAULT_PI_MODEL_CAPABILITIES,
   detectPiAuth,
+  loadPiModelCatalog,
   PI_BACKEND_OPTIONS,
   PI_MIN_RECOMMENDED_VERSION,
+  piCatalogToServerModels,
   readPiOAuthKeys,
   resolvePiAuthFilePath,
   runPiCommand,
@@ -211,8 +213,17 @@ export function checkPiProviderStatus(input: {
       oauthKeys,
     });
 
+    // Pi's `--list-models` only shows models the user has configured keys for,
+    // so the dynamic catalog is the authoritative list. Fall back to the
+    // hardcoded slugs only if enumeration fails entirely (no pi auth, CLI
+    // error).
+    const dynamicCatalog = yield* Effect.promise(() => loadPiModelCatalog({ binaryPath }));
+    const builtInModels =
+      dynamicCatalog.length > 0
+        ? piCatalogToServerModels(dynamicCatalog)
+        : DEFAULT_PI_BUILTIN_MODELS;
     const models = providerModelsFromSettings(
-      DEFAULT_PI_BUILTIN_MODELS,
+      builtInModels,
       PROVIDER,
       customModels,
       DEFAULT_PI_MODEL_CAPABILITIES,

@@ -37,8 +37,10 @@ import {
 import { PiAdapter, type PiAdapterShape } from "../Services/PiAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
+import { DEFAULT_PI_MODEL_SLUG, normalizePiModelSlug } from "../piRuntime.ts";
+
 const PROVIDER = "pi" as const;
-const DEFAULT_MODEL = "anthropic/claude-sonnet-4-6";
+const DEFAULT_MODEL = DEFAULT_PI_MODEL_SLUG;
 
 export interface PiAdapterLiveOptions {
   readonly nativeEventLogPath?: string;
@@ -488,7 +490,11 @@ export function makePiAdapterLive(options?: PiAdapterLiveOptions) {
 
           const modelSelection =
             input.modelSelection?.provider === PROVIDER ? input.modelSelection : undefined;
-          const model = modelSelection?.model ?? ctx.session.model ?? DEFAULT_MODEL;
+          const rawModel = modelSelection?.model ?? ctx.session.model ?? DEFAULT_MODEL;
+          // pi's CLI expects bare slugs (e.g. `gpt-5.4`), not `openai/gpt-5`
+          // style. Strip any `provider/` prefix for backwards compatibility
+          // with older composer state.
+          const model = normalizePiModelSlug(rawModel);
 
           const piSettings = yield* serverSettings.getSettings.pipe(
             Effect.map((s) => s.providers.pi),
