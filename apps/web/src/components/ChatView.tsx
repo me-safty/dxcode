@@ -132,7 +132,7 @@ import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
-import WorkspacePanel from "./WorkspacePanel";
+import WorkspaceRail from "./workspace/WorkspaceRail";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
@@ -678,6 +678,13 @@ export default function ChatView(props: ChatViewProps) {
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  // When true, the workspace rail breaks out of the flex row and overlays the
+  // chat column entirely (only the left sidebar stays visible). User toggles
+  // this via the Expand button in the rail header.
+  const [workspaceRailExpanded, setWorkspaceRailExpanded] = useState(false);
+  const toggleWorkspaceRailExpanded = useCallback(() => {
+    setWorkspaceRailExpanded((prev) => !prev);
+  }, []);
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
@@ -1833,7 +1840,9 @@ export default function ChatView(props: ChatViewProps) {
       if (typeof window === "undefined") {
         return true;
       }
-      return nextWidth <= window.innerWidth * 0.6;
+      // Hard cap at 80% of the viewport so the chat column can never be
+      // squeezed off-screen by an aggressive drag.
+      return nextWidth <= window.innerWidth * 0.8;
     },
     [],
   );
@@ -3067,15 +3076,19 @@ export default function ChatView(props: ChatViewProps) {
         provider: resolvedProvider,
         model: resolvedModel,
       };
-      setComposerDraftModelSelection(
-        scopeThreadRef(activeThread.environmentId, activeThread.id),
-        nextModelSelection,
-      );
+      // Must use `composerDraftTarget` (matches the read key in
+      // `composerActiveProvider`) rather than scopeThreadRef — for draft
+      // threads the composer draft is keyed by DraftId, not ScopedThreadRef,
+      // and writing to the scoped key meant the composer never saw the
+      // provider change (so turns still dispatched with the pre-click
+      // provider).
+      setComposerDraftModelSelection(composerDraftTarget, nextModelSelection);
       setStickyComposerModelSelection(nextModelSelection);
       scheduleComposerFocus();
     },
     [
       activeThread,
+      composerDraftTarget,
       lockedProvider,
       scheduleComposerFocus,
       setComposerDraftModelSelection,
@@ -3188,7 +3201,7 @@ export default function ChatView(props: ChatViewProps) {
         onDismiss={() => setThreadError(activeThread.id, null)}
       />
       {/* Main content area with optional plan sidebar */}
-      <div className="flex min-h-0 min-w-0 flex-1">
+      <div className="relative flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
@@ -3351,14 +3364,28 @@ export default function ChatView(props: ChatViewProps) {
         </div>
         {/* end chat column */}
 
-        {/* Workspace panel */}
+        {/* Workspace rail.
+            In normal mode it sits in the flex row to the right of the chat.
+            In expanded mode it absolutely overlays the row from edge to edge,
+            covering the chat column entirely (the left sidebar — outside this
+            row — stays visible). The user shrinks back via the Minimize
+            button in the rail header. */}
         {!shouldUsePlanSidebarSheet ? (
           <SidebarProvider
             defaultOpen={false}
             open={planSidebarOpen}
             onOpenChange={handleWorkspacePanelOpenChange}
-            className="w-auto min-h-0 flex-none bg-transparent"
-            style={{ "--sidebar-width": WORKSPACE_INLINE_DEFAULT_WIDTH } as CSSProperties}
+            className={cn(
+              "min-h-0 bg-transparent",
+              workspaceRailExpanded
+                ? "absolute inset-y-0 right-0 left-0 z-30 w-auto"
+                : "w-auto flex-none",
+            )}
+            style={
+              {
+                "--sidebar-width": workspaceRailExpanded ? "100%" : WORKSPACE_INLINE_DEFAULT_WIDTH,
+              } as CSSProperties
+            }
           >
             <Sidebar
               side="right"
@@ -3370,7 +3397,7 @@ export default function ChatView(props: ChatViewProps) {
               }}
             >
               {planSidebarOpen ? (
-                <WorkspacePanel
+                <WorkspaceRail
                   open={planSidebarOpen}
                   activePlan={activePlan}
                   activeProposedPlan={sidebarProposedPlan}
@@ -3386,6 +3413,8 @@ export default function ChatView(props: ChatViewProps) {
                   focusedPath={workspacePanelFocusedPath}
                   threadId={activeThread.id}
                   mode="sidebar"
+                  expanded={workspaceRailExpanded}
+                  onToggleExpanded={toggleWorkspaceRailExpanded}
                   onClose={closePlanSidebar}
                   onOpenTurnDiff={onOpenTurnDiff}
                   onAddTextToChat={addWorkspaceTextToComposer}
@@ -3418,7 +3447,7 @@ export default function ChatView(props: ChatViewProps) {
         ))}
       {shouldUsePlanSidebarSheet ? (
         <RightPanelSheet open={planSidebarOpen} onClose={closePlanSidebar}>
-          <WorkspacePanel
+          <WorkspaceRail
             open={planSidebarOpen}
             activePlan={activePlan}
             activeProposedPlan={sidebarProposedPlan}
