@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   clearThreadUi,
+  dismissThreadStatus,
   markThreadUnread,
   reorderProjects,
   setProjectExpanded,
@@ -18,6 +19,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectOrder: [],
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
+    threadDismissedStatusKeyById: {},
     ...overrides,
   };
 }
@@ -48,6 +50,17 @@ describe("uiStateStore pure functions", () => {
     const next = markThreadUnread(initialState, threadId, null);
 
     expect(next).toBe(initialState);
+  });
+
+  it("dismissThreadStatus stores the active dismissal key per thread", () => {
+    const threadId = ThreadId.make("thread-1");
+    const initialState = makeUiState();
+
+    const next = dismissThreadStatus(initialState, threadId, "Plan Ready:turn-1");
+
+    expect(next.threadDismissedStatusKeyById).toEqual({
+      [threadId]: "Plan Ready:turn-1",
+    });
   });
 
   it("reorderProjects moves a project to a target index", () => {
@@ -254,6 +267,10 @@ describe("uiStateStore pure functions", () => {
           "turn-2": false,
         },
       },
+      threadDismissedStatusKeyById: {
+        [thread1]: "Plan Ready:turn-1",
+        [thread2]: "Pending Approval:turn-2",
+      },
     });
 
     const next = syncThreads(initialState, [{ key: thread1 }]);
@@ -265,6 +282,9 @@ describe("uiStateStore pure functions", () => {
       [thread1]: {
         "turn-1": false,
       },
+    });
+    expect(next.threadDismissedStatusKeyById).toEqual({
+      [thread1]: "Plan Ready:turn-1",
     });
   });
 
@@ -310,12 +330,16 @@ describe("uiStateStore pure functions", () => {
           "turn-1": false,
         },
       },
+      threadDismissedStatusKeyById: {
+        [thread1]: "Plan Ready:turn-1",
+      },
     });
 
     const next = clearThreadUi(initialState, thread1);
 
     expect(next.threadLastVisitedAtById).toEqual({});
     expect(next.threadChangedFilesExpandedById).toEqual({});
+    expect(next.threadDismissedStatusKeyById).toEqual({});
   });
 
   it("setThreadChangedFilesExpanded stores collapsed turns per thread", () => {
