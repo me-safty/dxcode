@@ -1,86 +1,161 @@
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import readline from "node:readline";
-import type { ServerProviderSkill } from "@t3tools/contracts";
-import { readCodexAccountSnapshot, type CodexAccountSnapshot } from "./codexAccount.ts";
-import { expandHomePath } from "../pathExpansion.ts";
+import type {
+  ModelCapabilities,
+  ServerProviderModel,
+  ServerProviderSkill,
+} from "@t3tools/contracts";
+import { Effect, Layer } from "effect";
+import * as CodexClient from "effect-codex-app-server/client";
+import type * as EffectCodexSchema from "effect-codex-app-server/schema";
+import type { Mutable } from "effect/Types";
 
-interface JsonRpcProbeResponse {
-  readonly id?: unknown;
-  readonly result?: unknown;
-  readonly error?: {
-    readonly message?: unknown;
-  };
-}
-
-export interface CodexDiscoverySnapshot {
-  readonly account: CodexAccountSnapshot;
+export interface CodexAppServerProviderSnapshot {
+  readonly account: EffectCodexSchema.V2GetAccountResponse;
+  readonly version: string | undefined;
+  readonly models: ReadonlyArray<ServerProviderModel>;
   readonly skills: ReadonlyArray<ServerProviderSkill>;
 }
 
-function readErrorMessage(response: JsonRpcProbeResponse): string | undefined {
-  return typeof response.error?.message === "string" ? response.error.message : undefined;
+const REASONING_EFFORT_LABELS: Record<
+  EffectCodexSchema.V2ModelListResponse__ReasoningEffort,
+  string
+> = {
+  none: "None",
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra High",
+};
+
+export function codexAccountAuthLabel(account: EffectCodexSchema.V2GetAccountResponse["account"]) {
+  if (!account) return undefined;
+  if (account.type === "apiKey") return "OpenAI API Key";
+
+  switch (account.planType) {
+    case "free":
+      return "ChatGPT Free Subscription";
+    case "go":
+      return "ChatGPT Go Subscription";
+    case "plus":
+      return "ChatGPT Plus Subscription";
+    case "pro":
+      return "ChatGPT Pro Subscription";
+    case "team":
+      return "ChatGPT Team Subscription";
+    case "self_serve_business_usage_based":
+    case "business":
+      return "ChatGPT Business Subscription";
+    case "enterprise_cbp_usage_based":
+    case "enterprise":
+      return "ChatGPT Enterprise Subscription";
+    case "edu":
+      return "ChatGPT Edu Subscription";
+    case "unknown":
+      return "ChatGPT Subscription";
+    default:
+      account.planType satisfies never;
+      return undefined;
+  }
 }
 
-function readObject(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+function mapCodexModelCapabilities(
+  model: EffectCodexSchema.V2ModelListResponse__Model,
+): ModelCapabilities {
+  return {
+    reasoningEffortLevels: model.supportedReasoningEfforts.map(({ reasoningEffort }) => ({
+      value: reasoningEffort,
+      label: REASONING_EFFORT_LABELS[reasoningEffort],
+      ...(reasoningEffort === model.defaultReasoningEffort ? { isDefault: true } : {}),
+    })),
+    supportsFastMode: (model.additionalSpeedTiers ?? []).includes("fast"),
+    supportsThinkingToggle: false,
+    contextWindowOptions: [],
+    promptInjectedEffortLevels: [],
+  };
 }
 
-function readArray(value: unknown): ReadonlyArray<unknown> | undefined {
-  return Array.isArray(value) ? value : undefined;
+const toDisplayName = (model: EffectCodexSchema.V2ModelListResponse__Model): string => {
+  // Capitalize 'gpt' to 'GPT-' and capitalize any letter following a dash
+  return model.displayName
+    .replace(/^gpt/i, "GPT") // Handle start with 'gpt' or 'GPT'
+    .replace(/-([a-z])/g, (_, c) => "-" + c.toUpperCase());
+};
+
+function parseCodexModelListResponse(
+  response: EffectCodexSchema.V2ModelListResponse,
+): ReadonlyArray<ServerProviderModel> {
+  return response.data.map((model) => ({
+    slug: model.model,
+    name: toDisplayName(model),
+    isCustom: false,
+    capabilities: mapCodexModelCapabilities(model),
+  }));
 }
 
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
+function appendCustomCodexModels(
+  models: ReadonlyArray<ServerProviderModel>,
+  customModels: ReadonlyArray<string>,
+): ReadonlyArray<ServerProviderModel> {
+  if (customModels.length === 0) {
+    return models;
+  }
+
+  const seen = new Set(models.map((model) => model.slug));
+  const fallbackCapabilities = models.find((model) => model.capabilities)?.capabilities ?? null;
+  const customEntries: ServerProviderModel[] = [];
+  for (const rawModel of customModels) {
+    const slug = rawModel.trim();
+    if (!slug || seen.has(slug)) {
+      continue;
+    }
+    seen.add(slug);
+    customEntries.push({
+      slug,
+      name: slug,
+      isCustom: true,
+      capabilities: fallbackCapabilities,
+    });
+  }
+  return customEntries.length === 0 ? models : [...models, ...customEntries];
 }
 
-function nonEmptyTrimmed(value: unknown): string | undefined {
-  const candidate = readString(value)?.trim();
-  return candidate ? candidate : undefined;
-}
+function parseCodexSkillsListResponse(
+  response: EffectCodexSchema.V2SkillsListResponse,
+  cwd: string,
+): ReadonlyArray<ServerProviderSkill> {
+  const matchingEntry = response.data.find((entry) => entry.cwd === cwd);
+  const skills = matchingEntry
+    ? matchingEntry.skills
+    : response.data.flatMap((entry) => entry.skills);
 
-function parseCodexSkillsResult(result: unknown, cwd: string): ReadonlyArray<ServerProviderSkill> {
-  const resultRecord = readObject(result);
-  const dataBuckets = readArray(resultRecord?.data) ?? [];
-  const matchingBucket = dataBuckets.find(
-    (value) => nonEmptyTrimmed(readObject(value)?.cwd) === cwd,
-  );
-  const rawSkills =
-    readArray(readObject(matchingBucket)?.skills) ?? readArray(resultRecord?.skills) ?? [];
+  return skills.map((skill) => {
+    const shortDescription =
+      skill.shortDescription ?? skill.interface?.shortDescription ?? undefined;
 
-  return rawSkills.flatMap((value) => {
-    const skill = readObject(value);
-    const display = readObject(skill?.interface);
-    const name = nonEmptyTrimmed(skill?.name);
-    const path = nonEmptyTrimmed(skill?.path);
-    if (!name || !path) {
-      return [];
+    const parsedSkill: Mutable<ServerProviderSkill> = {
+      name: skill.name,
+      path: skill.path,
+      enabled: skill.enabled,
+    };
+
+    if (skill.description) {
+      parsedSkill.description = skill.description;
+    }
+    if (skill.scope) {
+      parsedSkill.scope = skill.scope;
+    }
+    if (skill.interface?.displayName) {
+      parsedSkill.displayName = skill.interface.displayName;
+    }
+    if (shortDescription) {
+      parsedSkill.shortDescription = shortDescription;
     }
 
-    return [
-      {
-        name,
-        path,
-        enabled: skill?.enabled !== false,
-        ...(nonEmptyTrimmed(skill?.description)
-          ? { description: nonEmptyTrimmed(skill?.description) }
-          : {}),
-        ...(nonEmptyTrimmed(skill?.scope) ? { scope: nonEmptyTrimmed(skill?.scope) } : {}),
-        ...(nonEmptyTrimmed(display?.displayName)
-          ? { displayName: nonEmptyTrimmed(display?.displayName) }
-          : {}),
-        ...(nonEmptyTrimmed(skill?.shortDescription) || nonEmptyTrimmed(display?.shortDescription)
-          ? {
-              shortDescription:
-                nonEmptyTrimmed(skill?.shortDescription) ??
-                nonEmptyTrimmed(display?.shortDescription),
-            }
-          : {}),
-      } satisfies ServerProviderSkill,
-    ];
+    return parsedSkill;
   });
 }
 
-export function buildCodexInitializeParams() {
+export function buildCodexInitializeParams(): EffectCodexSchema.V1InitializeParams {
   return {
     clientInfo: {
       name: "t3code_desktop",
@@ -90,153 +165,79 @@ export function buildCodexInitializeParams() {
     capabilities: {
       experimentalApi: true,
     },
-  } as const;
+  };
 }
 
-export function killCodexChildProcess(child: ChildProcessWithoutNullStreams): void {
-  if (process.platform === "win32" && child.pid !== undefined) {
-    try {
-      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-      return;
-    } catch {
-      // Fall through to direct kill when taskkill is unavailable.
-    }
-  }
+const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
+  client: CodexClient.CodexAppServerClientShape,
+) {
+  const models: ServerProviderModel[] = [];
+  let cursor: string | null | undefined = undefined;
 
-  child.kill();
-}
+  do {
+    const response: EffectCodexSchema.V2ModelListResponse = yield* client.request(
+      "model/list",
+      cursor ? { cursor } : {},
+    );
+    models.push(...parseCodexModelListResponse(response));
+    cursor = response.nextCursor;
+  } while (cursor);
 
-export async function probeCodexDiscovery(input: {
-  readonly binaryPath: string;
-  readonly homePath?: string;
-  readonly cwd: string;
-  readonly signal?: AbortSignal;
-}): Promise<CodexDiscoverySnapshot> {
-  return await new Promise((resolve, reject) => {
-    const child = spawn(input.binaryPath, ["app-server"], {
-      env: {
-        ...process.env,
-        ...(input.homePath ? { CODEX_HOME: expandHomePath(input.homePath) } : {}),
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: process.platform === "win32",
-    });
-    const output = readline.createInterface({ input: child.stdout });
+  return models;
+});
 
-    let completed = false;
-    let account: CodexAccountSnapshot | undefined;
-    let skills: ReadonlyArray<ServerProviderSkill> | undefined;
-
-    const cleanup = () => {
-      output.removeAllListeners();
-      output.close();
-      child.removeAllListeners();
-      if (!child.killed) {
-        killCodexChildProcess(child);
-      }
-    };
-
-    const finish = (callback: () => void) => {
-      if (completed) return;
-      completed = true;
-      cleanup();
-      callback();
-    };
-
-    const fail = (error: unknown) =>
-      finish(() =>
-        reject(
-          error instanceof Error
-            ? error
-            : new Error(`Codex discovery probe failed: ${String(error)}.`),
-        ),
-      );
-
-    const maybeResolve = () => {
-      if (account && skills !== undefined) {
-        const resolvedAccount = account;
-        const resolvedSkills = skills;
-        finish(() => resolve({ account: resolvedAccount, skills: resolvedSkills }));
-      }
-    };
-
-    if (input.signal?.aborted) {
-      fail(new Error("Codex discovery probe aborted."));
-      return;
-    }
-    input.signal?.addEventListener("abort", () =>
-      fail(new Error("Codex discovery probe aborted.")),
+export const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(
+  function* (input: {
+    readonly binaryPath: string;
+    readonly homePath?: string;
+    readonly cwd: string;
+    readonly customModels?: ReadonlyArray<string>;
+  }) {
+    const clientContext = yield* Layer.build(
+      CodexClient.layerCommand({
+        command: input.binaryPath,
+        args: ["app-server"],
+        cwd: input.cwd,
+        ...(input.homePath ? { env: { CODEX_HOME: input.homePath } } : {}),
+      }),
+    );
+    const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
+      Effect.provide(clientContext),
     );
 
-    const writeMessage = (message: unknown) => {
-      if (!child.stdin.writable) {
-        fail(new Error("Cannot write to codex app-server stdin."));
-        return;
-      }
+    const initialize = yield* client.request("initialize", buildCodexInitializeParams());
+    yield* client.notify("initialized", undefined);
 
-      child.stdin.write(`${JSON.stringify(message)}\n`);
-    };
+    // Extract the version string after the first '/' in userAgent, up to the next space or the end
+    const versionMatch = initialize.userAgent.match(/\/([^\s]+)/);
+    const version = versionMatch ? versionMatch[1] : undefined;
 
-    output.on("line", (line) => {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        fail(new Error("Received invalid JSON from codex app-server during discovery probe."));
-        return;
-      }
+    const accountResponse = yield* client.request("account/read", {});
+    if (!accountResponse.account && accountResponse.requiresOpenaiAuth) {
+      return {
+        account: accountResponse,
+        version,
+        models: appendCustomCodexModels([], input.customModels ?? []),
+        skills: [],
+      } satisfies CodexAppServerProviderSnapshot;
+    }
 
-      if (!parsed || typeof parsed !== "object") {
-        return;
-      }
+    const [skillsResponse, models] = yield* Effect.all(
+      [
+        client.request("skills/list", {
+          cwds: [input.cwd],
+        }),
+        requestAllCodexModels(client),
+      ],
+      { concurrency: "unbounded" },
+    );
 
-      const response = parsed as JsonRpcProbeResponse;
-      if (response.id === 1) {
-        const errorMessage = readErrorMessage(response);
-        if (errorMessage) {
-          fail(new Error(`initialize failed: ${errorMessage}`));
-          return;
-        }
-
-        writeMessage({ method: "initialized" });
-        writeMessage({ id: 2, method: "skills/list", params: { cwds: [input.cwd] } });
-        writeMessage({ id: 3, method: "account/read", params: {} });
-        return;
-      }
-
-      if (response.id === 2) {
-        const errorMessage = readErrorMessage(response);
-        skills = errorMessage ? [] : parseCodexSkillsResult(response.result, input.cwd);
-        maybeResolve();
-        return;
-      }
-
-      if (response.id === 3) {
-        const errorMessage = readErrorMessage(response);
-        if (errorMessage) {
-          fail(new Error(`account/read failed: ${errorMessage}`));
-          return;
-        }
-
-        account = readCodexAccountSnapshot(response.result);
-        maybeResolve();
-      }
-    });
-
-    child.once("error", fail);
-    child.once("exit", (code, signal) => {
-      if (completed) return;
-      fail(
-        new Error(
-          `codex app-server exited before probe completed (code=${code ?? "null"}, signal=${signal ?? "null"}).`,
-        ),
-      );
-    });
-
-    writeMessage({
-      id: 1,
-      method: "initialize",
-      params: buildCodexInitializeParams(),
-    });
-  });
-}
+    return {
+      account: accountResponse,
+      version,
+      models: appendCustomCodexModels(models, input.customModels ?? []),
+      skills: parseCodexSkillsListResponse(skillsResponse, input.cwd),
+    } satisfies CodexAppServerProviderSnapshot;
+  },
+  Effect.scoped,
+);
