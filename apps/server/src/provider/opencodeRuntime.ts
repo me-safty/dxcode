@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import * as FS from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import * as OS from "node:os";
@@ -42,14 +42,14 @@ export const DEFAULT_OPENCODE_MODEL_CAPABILITIES: ModelCapabilities = {
 export interface OpenCodeServerProcess {
   readonly url: string;
   readonly process: ChildProcess;
-  close(): void;
+  close(): Promise<void>;
 }
 
 export interface OpenCodeServerConnection {
   readonly url: string;
   readonly process: ChildProcess | null;
   readonly external: boolean;
-  close(): void;
+  close(): Promise<void>;
 }
 
 function buildOpenCodeBasicAuthorizationHeader(password: string): string {
@@ -349,6 +349,103 @@ export function detectMacosSigkillHint(binaryPath: string): string | null {
   return null;
 }
 
+class OpenCodeServerExitTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OpenCodeServerExitTimeoutError";
+  }
+}
+
+function hasChildExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+function signalOpenCodeServerProcess(
+  child: ChildProcess,
+  signal: NodeJS.Signals = "SIGTERM",
+): void {
+  if (child.pid === undefined) {
+    return;
+  }
+
+  if (process.platform === "win32") {
+    try {
+      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+      return;
+    } catch {
+      child.kill(signal);
+      return;
+    }
+  }
+
+  try {
+    process.kill(-child.pid, signal);
+    return;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ESRCH" && code !== "EINVAL" && code !== "EPERM") {
+      throw error;
+    }
+  }
+
+  child.kill(signal);
+}
+
+function waitForOpenCodeServerExit(child: ChildProcess, timeoutMs: number): Promise<void> {
+  if (hasChildExited(child)) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(
+        new OpenCodeServerExitTimeoutError(
+          `Timed out waiting for OpenCode server process ${child.pid ?? "unknown"} to exit.`,
+        ),
+      );
+    }, timeoutMs);
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      child.off("close", onClose);
+      child.off("error", onError);
+    };
+
+    const onClose = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+
+    child.once("close", onClose);
+    child.once("error", onError);
+  });
+}
+
+async function stopOpenCodeServerProcess(child: ChildProcess): Promise<void> {
+  if (hasChildExited(child)) {
+    return;
+  }
+
+  signalOpenCodeServerProcess(child, "SIGTERM");
+  try {
+    await waitForOpenCodeServerExit(child, 1_000);
+    return;
+  } catch (error) {
+    if (!(error instanceof OpenCodeServerExitTimeoutError)) {
+      throw error;
+    }
+  }
+
+  signalOpenCodeServerProcess(child, "SIGKILL");
+  await waitForOpenCodeServerExit(child, 4_000);
+}
+
 export async function startOpenCodeServerProcess(input: {
   readonly binaryPath: string;
   readonly port?: number;
@@ -361,6 +458,7 @@ export async function startOpenCodeServerProcess(input: {
   const args = ["serve", `--hostname=${hostname}`, `--port=${port}`];
   const child = spawn(input.binaryPath, args, {
     stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
     env: {
       ...process.env,
       OPENCODE_CONFIG_CONTENT: JSON.stringify({}),
@@ -372,18 +470,16 @@ export async function startOpenCodeServerProcess(input: {
 
   let stdout = "";
   let stderr = "";
-  let closed = false;
+  let closePromise: Promise<void> | undefined;
   const close = () => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    child.kill();
+    closePromise ??= stopOpenCodeServerProcess(child);
+    return closePromise;
   };
 
   const url = await new Promise<string>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      close();
+      cleanup();
+      void close().catch(() => undefined);
       reject(new Error(`Timed out waiting for OpenCode server start after ${timeoutMs}ms.`));
     }, timeoutMs);
 
@@ -461,7 +557,7 @@ export async function connectToOpenCodeServer(input: {
       url: serverUrl,
       process: null,
       external: true,
-      close() {},
+      close: async () => {},
     };
   }
 
@@ -476,7 +572,7 @@ export async function connectToOpenCodeServer(input: {
     url: server.url,
     process: server.process,
     external: false,
-    close: () => server.close(),
+    close: async () => server.close(),
   };
 }
 

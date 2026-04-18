@@ -377,7 +377,7 @@ async function stopOpenCodeContext(context: OpenCodeSessionContext): Promise<voi
       .abort({ sessionID: context.openCodeSessionId })
       .catch(() => undefined);
   } catch {}
-  context.server.close();
+  await context.server.close();
 }
 
 export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
@@ -425,7 +425,7 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
         }
         context.stopped = true;
         sessions.delete(context.session.threadId);
-        context.server.close();
+        void context.server.close().catch(() => undefined);
         const turnId = context.activeTurnId;
         void emitPromise({
           ...buildEventBase({ threadId: context.session.threadId, turnId }),
@@ -924,7 +924,10 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
                   .catch(() => undefined),
               catch: () => undefined,
             }).pipe(Effect.ignore);
-            started.server.close();
+            yield* Effect.tryPromise({
+              try: () => started.server.close(),
+              catch: () => undefined,
+            }).pipe(Effect.ignore);
             return raceWinner.session;
           }
 
@@ -1316,6 +1319,10 @@ export function makeOpenCodeAdapterLive(_options?: OpenCodeAdapterLiveOptions) {
               cause,
             }),
         });
+
+      yield* Effect.addFinalizer(() =>
+        stopAll().pipe(Effect.ignore, Effect.andThen(Queue.shutdown(runtimeEvents))),
+      );
 
       return {
         provider: PROVIDER,

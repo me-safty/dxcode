@@ -46,7 +46,7 @@ vi.mock("../../provider/opencodeRuntime.ts", async () => {
       return {
         url,
         process: {} as ChildProcess,
-        close: () => {
+        close: async () => {
           runtimeMock.state.closeCalls.push(url);
         },
       };

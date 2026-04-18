@@ -41,7 +41,7 @@ vi.mock("../opencodeRuntime.ts", async () => {
       url: serverUrl ?? "http://127.0.0.1:4301",
       process: null,
       external: Boolean(serverUrl),
-      close() {},
+      close: async () => {},
     })),
     createOpenCodeSdkClient: vi.fn(() => ({})),
     loadOpenCodeInventory: vi.fn(async () => {

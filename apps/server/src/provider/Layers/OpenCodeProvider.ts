@@ -270,7 +270,7 @@ export function checkOpenCodeProviderStatus(input: {
             },
             catch: toOpenCodeProbeError,
           }),
-        (server) => Effect.sync(() => server.close()),
+        (server) => Effect.promise(() => server.close()),
       ),
     );
     if (inventoryExit._tag === "Failure") {

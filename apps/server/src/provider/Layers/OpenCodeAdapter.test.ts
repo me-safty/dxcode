@@ -70,14 +70,14 @@ vi.mock("../opencodeRuntime.ts", async () => {
         process: {
           once() {},
         },
-        close() {},
+        close: async () => {},
       };
     }),
     connectToOpenCodeServer: vi.fn(async ({ serverUrl }: { serverUrl?: string }) => ({
       url: serverUrl ?? "http://127.0.0.1:4301",
       process: null,
       external: Boolean(serverUrl),
-      close() {
+      close: async () => {
         runtimeMock.state.closeCalls.push(serverUrl ?? "http://127.0.0.1:4301");
         if (runtimeMock.state.closeError) {
           throw runtimeMock.state.closeError;
@@ -480,7 +480,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
 
       assert.equal(sessions.length, 1);
       assert.equal(sessions[0]?.threadId, "thread-native-log-failure");
-      assert.deepEqual(runtimeMock.state.closeCalls, []);
+      assert.deepEqual(runtimeMock.state.closeCalls, ["http://127.0.0.1:9999"]);
     }),
   );
 });

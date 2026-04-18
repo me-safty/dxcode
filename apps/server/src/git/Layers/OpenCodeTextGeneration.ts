@@ -56,13 +56,14 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
     idleCloseFiber: null,
   };
 
-  const closeSharedServer = (server: OpenCodeServerProcess) => {
-    if (sharedServerState.server === server) {
-      sharedServerState.server = null;
-      sharedServerState.binaryPath = null;
-    }
-    server.close();
-  };
+  const closeSharedServer = (server: OpenCodeServerProcess) =>
+    Effect.promise(async () => {
+      if (sharedServerState.server === server) {
+        sharedServerState.server = null;
+        sharedServerState.binaryPath = null;
+      }
+      await server.close();
+    });
 
   const cancelIdleCloseFiber = Effect.fn("cancelIdleCloseFiber")(function* () {
     const idleCloseFiber = sharedServerState.idleCloseFiber;
@@ -79,12 +80,12 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
     const fiber = yield* Effect.sleep(Duration.millis(OPENCODE_TEXT_GENERATION_IDLE_TTL_MS)).pipe(
       Effect.andThen(
         sharedServerMutex.withPermit(
-          Effect.sync(() => {
+          Effect.gen(function* () {
             if (sharedServerState.server !== server || sharedServerState.activeRequests > 0) {
               return;
             }
             sharedServerState.idleCloseFiber = null;
-            closeSharedServer(server);
+            yield* closeSharedServer(server);
           }),
         ),
       ),
@@ -111,7 +112,7 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
             sharedServerState.binaryPath !== input.binaryPath &&
             sharedServerState.activeRequests === 0
           ) {
-            closeSharedServer(existingServer);
+            yield* closeSharedServer(existingServer);
           } else {
             if (sharedServerState.binaryPath !== input.binaryPath) {
               yield* Effect.logWarning(
@@ -166,7 +167,7 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
         sharedServerState.binaryPath = null;
         sharedServerState.activeRequests = 0;
         if (server !== null) {
-          server.close();
+          yield* Effect.promise(() => server.close());
         }
       }),
     ),
