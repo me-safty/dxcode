@@ -36,10 +36,33 @@ vi.mock("../../environments/runtime", () => {
   };
 
   return {
-    getPrimaryEnvironmentConnection: () => primaryConnection,
-    resetEnvironmentServiceForTests: vi.fn(),
+    getEnvironmentHttpBaseUrl: () => "http://localhost:3000",
+    getSavedEnvironmentRecord: () => null,
+    getSavedEnvironmentRuntimeState: () => null,
+    hasSavedEnvironmentRegistryHydrated: () => true,
+    listSavedEnvironmentRecords: () => [],
     resetSavedEnvironmentRegistryStoreForTests: vi.fn(),
     resetSavedEnvironmentRuntimeStoreForTests: vi.fn(),
+    resolveEnvironmentHttpUrl: (_environmentId: unknown, path: string) =>
+      new URL(path, "http://localhost:3000").toString(),
+    waitForSavedEnvironmentRegistryHydration: async () => undefined,
+    addSavedEnvironment: vi.fn(),
+    disconnectSavedEnvironment: vi.fn(),
+    ensureEnvironmentConnectionBootstrapped: async () => undefined,
+    getPrimaryEnvironmentConnection: () => primaryConnection,
+    readEnvironmentConnection: () => primaryConnection,
+    reconnectSavedEnvironment: vi.fn(),
+    removeSavedEnvironment: vi.fn(),
+    requireEnvironmentConnection: () => primaryConnection,
+    resetEnvironmentServiceForTests: vi.fn(),
+    startEnvironmentConnectionService: vi.fn(),
+    subscribeEnvironmentConnections: () => () => {},
+    useSavedEnvironmentRegistryStore: (
+      selector: (state: { byId: Record<string, never> }) => unknown,
+    ) => selector({ byId: {} }),
+    useSavedEnvironmentRuntimeStore: (
+      selector: (state: { byId: Record<string, never> }) => unknown,
+    ) => selector({ byId: {} }),
   };
 });
 
