@@ -10,6 +10,9 @@
  * @module piRuntime
  */
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join as joinPath } from "node:path";
 import type { ModelCapabilities, ServerProviderModel } from "@t3tools/contracts";
 
 export interface PiCommandResult {
@@ -107,52 +110,81 @@ export interface PiBackendOption {
   readonly label: string;
   /** Environment variables pi will read for this backend, in priority order. */
   readonly envVars: ReadonlyArray<string>;
-  /** Short instruction for the setup UI when no env var is detected. */
+  /**
+   * Keys pi writes into `~/.pi/agent/auth.json` when the user runs
+   * `pi` → `/login` for this backend. Presence of any key here means
+   * the user has an OAuth session without setting any env var.
+   */
+  readonly oauthKeys: ReadonlyArray<string>;
+  /** Short instruction for the setup UI when no env var or OAuth is detected. */
   readonly setupHint: string;
 }
 
 export const PI_BACKEND_OPTIONS: ReadonlyArray<PiBackendOption> = [
   {
     id: "anthropic",
-    label: "Anthropic (Claude)",
+    label: "Anthropic (Claude Pro/Max)",
     envVars: ["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+    oauthKeys: ["anthropic"],
     setupHint:
-      "Export ANTHROPIC_API_KEY (or ANTHROPIC_OAUTH_TOKEN from a Claude Pro/Max session) before starting the server.",
+      "Run `pi` in a terminal and type `/login` to connect Claude Pro/Max, or export ANTHROPIC_API_KEY before starting the server.",
   },
   {
     id: "openai",
-    label: "OpenAI (GPT)",
+    label: "ChatGPT Plus/Pro (Codex Subscription)",
     envVars: ["OPENAI_API_KEY"],
-    setupHint: "Export OPENAI_API_KEY before starting the server.",
+    oauthKeys: ["openai-codex"],
+    setupHint:
+      "Run `pi` in a terminal and type `/login` to connect a ChatGPT Plus/Pro account, or export OPENAI_API_KEY.",
   },
   {
     id: "google",
-    label: "Google (Gemini)",
+    label: "Google Cloud Code Assist (Gemini)",
     envVars: ["GEMINI_API_KEY"],
-    setupHint: "Export GEMINI_API_KEY before starting the server.",
+    oauthKeys: ["google-cca", "google"],
+    setupHint:
+      "Run `pi` in a terminal and type `/login`, or export GEMINI_API_KEY before starting the server.",
+  },
+  {
+    id: "github-copilot",
+    label: "GitHub Copilot",
+    envVars: [],
+    oauthKeys: ["github-copilot"],
+    setupHint: "Run `pi` in a terminal and type `/login` to connect GitHub Copilot.",
+  },
+  {
+    id: "antigravity",
+    label: "Antigravity (Gemini 3, Claude, GPT-OSS)",
+    envVars: [],
+    oauthKeys: ["antigravity"],
+    setupHint: "Run `pi` in a terminal and type `/login` to connect Antigravity.",
   },
   {
     id: "groq",
     label: "Groq",
     envVars: ["GROQ_API_KEY"],
+    oauthKeys: [],
     setupHint: "Export GROQ_API_KEY before starting the server.",
   },
   {
     id: "openrouter",
     label: "OpenRouter",
     envVars: ["OPENROUTER_API_KEY"],
+    oauthKeys: [],
     setupHint: "Export OPENROUTER_API_KEY before starting the server.",
   },
   {
     id: "xai",
     label: "xAI (Grok)",
     envVars: ["XAI_API_KEY"],
+    oauthKeys: [],
     setupHint: "Export XAI_API_KEY before starting the server.",
   },
   {
     id: "mistral",
     label: "Mistral",
     envVars: ["MISTRAL_API_KEY"],
+    oauthKeys: [],
     setupHint: "Export MISTRAL_API_KEY before starting the server.",
   },
 ];
@@ -165,61 +197,170 @@ export function findPiBackendOption(backendId: string): PiBackendOption | undefi
   return PI_BACKEND_OPTIONS.find((option) => option.id === trimmed);
 }
 
-export interface PiAuthDetection {
-  readonly authenticated: boolean;
-  readonly detectedEnvVar: string | undefined;
-  readonly checkedBackend: PiBackendOption | undefined;
+/**
+ * Resolve the pi auth storage file. pi reads `PI_CODING_AGENT_DIR` or
+ * defaults to `~/.pi/agent`. The file is `auth.json` inside that dir.
+ */
+export function resolvePiAuthFilePath(env: NodeJS.ProcessEnv): string {
+  const configured = env.PI_CODING_AGENT_DIR?.trim();
+  const base =
+    configured && configured.length > 0 ? configured : joinPath(homedir(), ".pi", "agent");
+  return joinPath(base, "auth.json");
 }
 
 /**
- * Decide whether pi has a usable credential, based on the user's configured
- * defaultProvider and the live process env. If defaultProvider is empty, we
- * fall back to "any recognized pi backend env var is present."
+ * Read the set of provider keys present in pi's auth.json. We only inspect
+ * top-level keys — never token values — and tolerate a missing or malformed
+ * file by returning an empty set.
+ */
+export function readPiOAuthKeys(authFilePath: string): ReadonlySet<string> {
+  try {
+    const raw = readFileSync(authFilePath, "utf8");
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return new Set();
+    }
+    const keys = new Set<string>();
+    for (const key of Object.keys(parsed)) {
+      const value = (parsed as Record<string, unknown>)[key];
+      if (value !== undefined && value !== null) {
+        keys.add(key);
+      }
+    }
+    return keys;
+  } catch {
+    return new Set();
+  }
+}
+
+export type PiAuthSource = "env-var" | "oauth-file";
+
+export interface PiAuthDetection {
+  readonly authenticated: boolean;
+  readonly source: PiAuthSource | undefined;
+  readonly detectedEnvVar: string | undefined;
+  readonly detectedOAuthKey: string | undefined;
+  readonly checkedBackend: PiBackendOption | undefined;
+  /**
+   * All backends that look logged in across both env vars and OAuth file,
+   * so the UI can show a per-backend status grid.
+   */
+  readonly availableBackends: ReadonlyArray<PiBackendOption>;
+}
+
+function backendMatchesEnv(option: PiBackendOption, env: NodeJS.ProcessEnv): string | undefined {
+  for (const envVar of option.envVars) {
+    const value = env[envVar];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return envVar;
+    }
+  }
+  return undefined;
+}
+
+function backendMatchesOAuth(
+  option: PiBackendOption,
+  oauthKeys: ReadonlySet<string>,
+): string | undefined {
+  for (const key of option.oauthKeys) {
+    if (oauthKeys.has(key)) {
+      return key;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Decide whether pi has a usable credential. Detection order:
+ *   1. If `defaultProvider` is set, check env vars then OAuth file for that
+ *      backend only.
+ *   2. Otherwise, scan all backends and pick the first one with any signal,
+ *      preferring env vars over OAuth (env vars are explicit user intent).
  *
- * We intentionally do NOT auto-adopt Codex/Claude credentials here: users may
- * want pi pointed at a different account or provider entirely.
+ * We intentionally do NOT auto-adopt Codex/Claude credentials from this app's
+ * own provider stores — pi can point at a different account or provider.
  */
 export function detectPiAuth(input: {
   readonly defaultProvider: string;
   readonly env: NodeJS.ProcessEnv;
+  readonly oauthKeys: ReadonlySet<string>;
 }): PiAuthDetection {
+  const availableBackends = PI_BACKEND_OPTIONS.filter(
+    (option) =>
+      backendMatchesEnv(option, input.env) !== undefined ||
+      backendMatchesOAuth(option, input.oauthKeys) !== undefined,
+  );
+
   const configured = findPiBackendOption(input.defaultProvider);
 
   if (configured) {
-    for (const envVar of configured.envVars) {
-      const value = input.env[envVar];
-      if (typeof value === "string" && value.trim().length > 0) {
-        return {
-          authenticated: true,
-          detectedEnvVar: envVar,
-          checkedBackend: configured,
-        };
-      }
+    const envHit = backendMatchesEnv(configured, input.env);
+    if (envHit) {
+      return {
+        authenticated: true,
+        source: "env-var",
+        detectedEnvVar: envHit,
+        detectedOAuthKey: undefined,
+        checkedBackend: configured,
+        availableBackends,
+      };
+    }
+    const oauthHit = backendMatchesOAuth(configured, input.oauthKeys);
+    if (oauthHit) {
+      return {
+        authenticated: true,
+        source: "oauth-file",
+        detectedEnvVar: undefined,
+        detectedOAuthKey: oauthHit,
+        checkedBackend: configured,
+        availableBackends,
+      };
     }
     return {
       authenticated: false,
+      source: undefined,
       detectedEnvVar: undefined,
+      detectedOAuthKey: undefined,
       checkedBackend: configured,
+      availableBackends,
     };
   }
 
   for (const option of PI_BACKEND_OPTIONS) {
-    for (const envVar of option.envVars) {
-      const value = input.env[envVar];
-      if (typeof value === "string" && value.trim().length > 0) {
-        return {
-          authenticated: true,
-          detectedEnvVar: envVar,
-          checkedBackend: option,
-        };
-      }
+    const envHit = backendMatchesEnv(option, input.env);
+    if (envHit) {
+      return {
+        authenticated: true,
+        source: "env-var",
+        detectedEnvVar: envHit,
+        detectedOAuthKey: undefined,
+        checkedBackend: option,
+        availableBackends,
+      };
+    }
+  }
+
+  for (const option of PI_BACKEND_OPTIONS) {
+    const oauthHit = backendMatchesOAuth(option, input.oauthKeys);
+    if (oauthHit) {
+      return {
+        authenticated: true,
+        source: "oauth-file",
+        detectedEnvVar: undefined,
+        detectedOAuthKey: oauthHit,
+        checkedBackend: option,
+        availableBackends,
+      };
     }
   }
 
   return {
     authenticated: false,
+    source: undefined,
     detectedEnvVar: undefined,
+    detectedOAuthKey: undefined,
     checkedBackend: undefined,
+    availableBackends,
   };
 }
 

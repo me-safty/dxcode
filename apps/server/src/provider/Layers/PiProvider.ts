@@ -17,6 +17,8 @@ import {
   detectPiAuth,
   PI_BACKEND_OPTIONS,
   PI_MIN_RECOMMENDED_VERSION,
+  readPiOAuthKeys,
+  resolvePiAuthFilePath,
   runPiCommand,
 } from "../piRuntime.ts";
 
@@ -55,13 +57,39 @@ function formatPiProbeError(cause: unknown): {
 }
 
 function buildSetupMessage(backendLabel: string, envVars: ReadonlyArray<string>): string {
+  if (envVars.length === 0) {
+    return `pi is installed. Run \`pi\` in a terminal and type \`/login\` to connect ${backendLabel}, or pick a different backend in settings.`;
+  }
   const joined = envVars.join(" or ");
-  return `pi is installed. Export ${joined} to use ${backendLabel}, or pick a different backend in settings.`;
+  return `pi is installed. Connect ${backendLabel} by running \`pi\` → \`/login\` in a terminal, or export ${joined} before starting the server.`;
 }
 
 function buildNoBackendConfiguredMessage(): string {
   const options = PI_BACKEND_OPTIONS.map((option) => option.label).join(", ");
-  return `pi is installed but no backend is configured. Choose one in settings (${options}) and export the matching key.`;
+  return `pi is installed but no backend is configured. Run \`pi\` → \`/login\` in a terminal to connect one of: ${options}.`;
+}
+
+function buildAuthenticatedMessage(input: {
+  readonly backendLabel: string;
+  readonly source: "env-var" | "oauth-file" | undefined;
+  readonly detectedEnvVar: string | undefined;
+  readonly detectedOAuthKey: string | undefined;
+  readonly availableLabels: ReadonlyArray<string>;
+  readonly versionTooOld: boolean;
+  readonly version: string | null;
+}): string {
+  const via =
+    input.source === "env-var" && input.detectedEnvVar
+      ? ` via ${input.detectedEnvVar}`
+      : input.source === "oauth-file" && input.detectedOAuthKey
+        ? ` via pi login (${input.detectedOAuthKey})`
+        : "";
+  const others = input.availableLabels.filter((label) => label !== input.backendLabel);
+  const alsoAvailable = others.length > 0 ? ` Also available: ${others.join(", ")}.` : "";
+  const versionNote = input.versionTooOld
+    ? ` Note: pi ${input.version ?? "(unknown)"} is older than the recommended ${PI_MIN_RECOMMENDED_VERSION}.`
+    : "";
+  return `pi is ready using ${input.backendLabel}${via}.${alsoAvailable}${versionNote}`;
 }
 
 const makePendingPiProvider = (piSettings: PiSettings): ServerProvider => {
@@ -175,9 +203,11 @@ export function checkPiProviderStatus(input: {
       parseGenericCliVersion(versionExit.value.stderr) ??
       null;
 
+    const oauthKeys = readPiOAuthKeys(resolvePiAuthFilePath(process.env));
     const auth = detectPiAuth({
       defaultProvider: input.settings.defaultProvider,
       env: process.env,
+      oauthKeys,
     });
 
     const models = providerModelsFromSettings(
@@ -210,10 +240,7 @@ export function checkPiProviderStatus(input: {
     }
 
     const backendLabel = auth.checkedBackend?.label ?? "pi backend";
-    const via = auth.detectedEnvVar ? ` via ${auth.detectedEnvVar}` : "";
-    const versionSuffix = versionTooOld
-      ? ` Note: pi ${version ?? "(unknown)"} is older than the recommended ${PI_MIN_RECOMMENDED_VERSION}.`
-      : "";
+    const availableLabels = auth.availableBackends.map((option) => option.label);
     return buildServerProvider({
       provider: PROVIDER,
       enabled: true,
@@ -226,8 +253,17 @@ export function checkPiProviderStatus(input: {
         auth: {
           status: "authenticated",
           type: "pi",
+          ...(auth.source === "oauth-file" ? { label: "pi login" } : {}),
         },
-        message: `pi is ready using ${backendLabel}${via}.${versionSuffix}`,
+        message: buildAuthenticatedMessage({
+          backendLabel,
+          source: auth.source,
+          detectedEnvVar: auth.detectedEnvVar,
+          detectedOAuthKey: auth.detectedOAuthKey,
+          availableLabels,
+          versionTooOld,
+          version,
+        }),
       },
     });
   });
