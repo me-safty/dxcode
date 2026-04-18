@@ -19,6 +19,7 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 interface PersistedUiState {
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
+  threadDismissedStatusKeyById?: Record<string, string>;
 }
 
 export interface UiProjectState {
@@ -28,6 +29,7 @@ export interface UiProjectState {
 
 export interface UiThreadState {
   threadLastVisitedAtById: Record<string, string>;
+  threadDismissedStatusKeyById: Record<string, string>;
 }
 
 export interface UiState extends UiProjectState, UiThreadState {}
@@ -46,6 +48,7 @@ const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
   threadLastVisitedAtById: {},
+  threadDismissedStatusKeyById: {},
 };
 
 const persistedExpandedProjectCwds = new Set<string>();
@@ -70,11 +73,35 @@ function readPersistedState(): UiState {
       }
       return initialState;
     }
-    hydratePersistedProjectState(JSON.parse(raw) as PersistedUiState);
-    return initialState;
+    const parsed = JSON.parse(raw) as PersistedUiState;
+    hydratePersistedProjectState(parsed);
+    return {
+      ...initialState,
+      threadDismissedStatusKeyById: sanitizePersistedThreadDismissedStatusKeys(
+        parsed.threadDismissedStatusKeyById,
+      ),
+    };
   } catch {
     return initialState;
   }
+}
+
+function sanitizePersistedThreadDismissedStatusKeys(
+  value: PersistedUiState["threadDismissedStatusKeyById"],
+): Record<string, string> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      ([threadId, statusKey]) =>
+        typeof threadId === "string" &&
+        threadId.length > 0 &&
+        typeof statusKey === "string" &&
+        statusKey.length > 0,
+    ),
+  );
 }
 
 function hydratePersistedProjectState(parsed: PersistedUiState): void {
@@ -107,11 +134,17 @@ function persistState(state: UiState): void {
       const cwd = currentProjectCwdById.get(projectId);
       return cwd ? [cwd] : [];
     });
+    const threadDismissedStatusKeyById = Object.fromEntries(
+      Object.entries(state.threadDismissedStatusKeyById).filter(
+        ([threadId, statusKey]) => threadId.length > 0 && statusKey.length > 0,
+      ),
+    );
     window.localStorage.setItem(
       PERSISTED_STATE_KEY,
       JSON.stringify({
         expandedProjectCwds,
         projectOrderCwds,
+        threadDismissedStatusKeyById,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -261,12 +294,21 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
       nextThreadLastVisitedAtById[thread.id] = thread.seedVisitedAt;
     }
   }
-  if (recordsEqual(state.threadLastVisitedAtById, nextThreadLastVisitedAtById)) {
+  const nextThreadDismissedStatusKeyById = Object.fromEntries(
+    Object.entries(state.threadDismissedStatusKeyById).filter(([threadId]) =>
+      retainedThreadIds.has(threadId as ThreadId),
+    ),
+  );
+  if (
+    recordsEqual(state.threadLastVisitedAtById, nextThreadLastVisitedAtById) &&
+    recordsEqual(state.threadDismissedStatusKeyById, nextThreadDismissedStatusKeyById)
+  ) {
     return state;
   }
   return {
     ...state,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
+    threadDismissedStatusKeyById: nextThreadDismissedStatusKeyById,
   };
 }
 
@@ -307,24 +349,53 @@ export function markThreadUnread(
   if (state.threadLastVisitedAtById[threadId] === unreadVisitedAt) {
     return state;
   }
+  const nextThreadDismissedStatusKeyById = { ...state.threadDismissedStatusKeyById };
+  delete nextThreadDismissedStatusKeyById[threadId];
   return {
     ...state,
     threadLastVisitedAtById: {
       ...state.threadLastVisitedAtById,
       [threadId]: unreadVisitedAt,
     },
+    threadDismissedStatusKeyById: nextThreadDismissedStatusKeyById,
+  };
+}
+
+export function dismissThreadStatus(
+  state: UiState,
+  threadId: ThreadId,
+  statusKey: string | null | undefined,
+): UiState {
+  if (!statusKey) {
+    return state;
+  }
+  if (state.threadDismissedStatusKeyById[threadId] === statusKey) {
+    return state;
+  }
+  return {
+    ...state,
+    threadDismissedStatusKeyById: {
+      ...state.threadDismissedStatusKeyById,
+      [threadId]: statusKey,
+    },
   };
 }
 
 export function clearThreadUi(state: UiState, threadId: ThreadId): UiState {
-  if (!(threadId in state.threadLastVisitedAtById)) {
+  if (
+    !(threadId in state.threadLastVisitedAtById) &&
+    !(threadId in state.threadDismissedStatusKeyById)
+  ) {
     return state;
   }
   const nextThreadLastVisitedAtById = { ...state.threadLastVisitedAtById };
+  const nextThreadDismissedStatusKeyById = { ...state.threadDismissedStatusKeyById };
   delete nextThreadLastVisitedAtById[threadId];
+  delete nextThreadDismissedStatusKeyById[threadId];
   return {
     ...state,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
+    threadDismissedStatusKeyById: nextThreadDismissedStatusKeyById,
   };
 }
 
@@ -386,6 +457,7 @@ interface UiStateStore extends UiState {
   syncThreads: (threads: readonly SyncThreadInput[]) => void;
   markThreadVisited: (threadId: ThreadId, visitedAt?: string) => void;
   markThreadUnread: (threadId: ThreadId, latestTurnCompletedAt: string | null | undefined) => void;
+  dismissThreadStatus: (threadId: ThreadId, statusKey: string | null | undefined) => void;
   clearThreadUi: (threadId: ThreadId) => void;
   toggleProject: (projectId: ProjectId) => void;
   setProjectExpanded: (projectId: ProjectId, expanded: boolean) => void;
@@ -400,6 +472,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => markThreadVisited(state, threadId, visitedAt)),
   markThreadUnread: (threadId, latestTurnCompletedAt) =>
     set((state) => markThreadUnread(state, threadId, latestTurnCompletedAt)),
+  dismissThreadStatus: (threadId, statusKey) =>
+    set((state) => dismissThreadStatus(state, threadId, statusKey)),
   clearThreadUi: (threadId) => set((state) => clearThreadUi(state, threadId)),
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),
   setProjectExpanded: (projectId, expanded) =>

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   clearThreadUi,
+  dismissThreadStatus,
   markThreadUnread,
   reorderProjects,
   setProjectExpanded,
@@ -16,6 +17,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectExpandedById: {},
     projectOrder: [],
     threadLastVisitedAtById: {},
+    threadDismissedStatusKeyById: {},
     ...overrides,
   };
 }
@@ -46,6 +48,17 @@ describe("uiStateStore pure functions", () => {
     const next = markThreadUnread(initialState, threadId, null);
 
     expect(next).toBe(initialState);
+  });
+
+  it("dismissThreadStatus stores the active dismissal key per thread", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const initialState = makeUiState();
+
+    const next = dismissThreadStatus(initialState, threadId, "Plan Ready:turn-1");
+
+    expect(next.threadDismissedStatusKeyById).toEqual({
+      [threadId]: "Plan Ready:turn-1",
+    });
   });
 
   it("reorderProjects moves a project to a target index", () => {
@@ -137,12 +150,19 @@ describe("uiStateStore pure functions", () => {
         [thread1]: "2026-02-25T12:35:00.000Z",
         [thread2]: "2026-02-25T12:36:00.000Z",
       },
+      threadDismissedStatusKeyById: {
+        [thread1]: "Plan Ready:turn-1",
+        [thread2]: "Pending Approval:turn-2",
+      },
     });
 
     const next = syncThreads(initialState, [{ id: thread1 }]);
 
     expect(next.threadLastVisitedAtById).toEqual({
       [thread1]: "2026-02-25T12:35:00.000Z",
+    });
+    expect(next.threadDismissedStatusKeyById).toEqual({
+      [thread1]: "Plan Ready:turn-1",
     });
   });
 
@@ -183,10 +203,14 @@ describe("uiStateStore pure functions", () => {
       threadLastVisitedAtById: {
         [thread1]: "2026-02-25T12:35:00.000Z",
       },
+      threadDismissedStatusKeyById: {
+        [thread1]: "Plan Ready:turn-1",
+      },
     });
 
     const next = clearThreadUi(initialState, thread1);
 
     expect(next.threadLastVisitedAtById).toEqual({});
+    expect(next.threadDismissedStatusKeyById).toEqual({});
   });
 });

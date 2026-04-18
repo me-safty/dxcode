@@ -9,6 +9,7 @@ import {
   SquarePenIcon,
   TerminalIcon,
   TriangleAlertIcon,
+  XIcon,
 } from "lucide-react";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { autoAnimate } from "@formkit/auto-animate";
@@ -285,6 +286,7 @@ interface SidebarThreadRowProps {
     position: { x: number; y: number },
   ) => Promise<void>;
   clearSelection: () => void;
+  clearThreadNotification: (threadId: ThreadId) => void;
   commitRename: (threadId: ThreadId, newTitle: string, originalTitle: string) => Promise<void>;
   cancelRename: () => void;
   attemptArchiveThread: (threadId: ThreadId) => Promise<void>;
@@ -294,6 +296,9 @@ interface SidebarThreadRowProps {
 function SidebarThreadRow(props: SidebarThreadRowProps) {
   const thread = useSidebarThreadSummaryById(props.threadId);
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[props.threadId]);
+  const dismissedStatusKey = useUiStateStore(
+    (state) => state.threadDismissedStatusKeyById[props.threadId],
+  );
   const runningTerminalIds = useTerminalStateStore(
     (state) =>
       selectThreadTerminalState(state.terminalStateByThreadId, props.threadId).runningTerminalIds,
@@ -313,6 +318,7 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
+      dismissedStatusKey,
       lastVisitedAt,
     },
   });
@@ -320,9 +326,10 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
   const prStatus = prStatusIndicator(pr);
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const isConfirmingArchive = props.confirmingArchiveThreadId === thread.id && !isThreadRunning;
+  const hasHoverThreadActions = threadStatus?.dismissible || !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
-    : !isThreadRunning
+    : hasHoverThreadActions
       ? "pointer-events-none transition-opacity duration-150 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
       : "pointer-events-none";
 
@@ -398,7 +405,7 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
               <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
             </Tooltip>
           )}
-          {threadStatus && <ThreadStatusLabel status={threadStatus} />}
+          {threadStatus ? <ThreadStatusLabel status={threadStatus} /> : null}
           {props.renamingThreadId === thread.id ? (
             <input
               ref={props.onRenamingInputMount}
@@ -468,58 +475,84 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
               >
                 Confirm
               </button>
-            ) : !isThreadRunning ? (
-              props.appSettingsConfirmThreadArchive ? (
-                <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
-                  <button
-                    type="button"
-                    data-thread-selection-safe
-                    data-testid={`thread-archive-${thread.id}`}
-                    aria-label={`Archive ${thread.title}`}
-                    className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                    onPointerDown={(event) => {
-                      event.stopPropagation();
-                    }}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      props.setConfirmingArchiveThreadId(thread.id);
-                      requestAnimationFrame(() => {
-                        props.confirmArchiveButtonRefs.current.get(thread.id)?.focus();
-                      });
-                    }}
-                  >
-                    <ArchiveIcon className="size-3.5" />
-                  </button>
+            ) : hasHoverThreadActions ? (
+              <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                <div className="inline-flex items-center gap-0.5">
+                  {threadStatus?.dismissible ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            data-thread-selection-safe
+                            data-testid={`thread-clear-notification-${thread.id}`}
+                            aria-label={`Clear notification for ${thread.title}`}
+                            className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                            onPointerDown={(event) => {
+                              event.stopPropagation();
+                            }}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              props.clearThreadNotification(thread.id);
+                            }}
+                          >
+                            <XIcon className="size-3" />
+                          </button>
+                        }
+                      />
+                      <TooltipPopup side="top">Clear notification</TooltipPopup>
+                    </Tooltip>
+                  ) : null}
+                  {!isThreadRunning && props.appSettingsConfirmThreadArchive ? (
+                    <button
+                      type="button"
+                      data-thread-selection-safe
+                      data-testid={`thread-archive-${thread.id}`}
+                      aria-label={`Archive ${thread.title}`}
+                      className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                      onPointerDown={(event) => {
+                        event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        props.setConfirmingArchiveThreadId(thread.id);
+                        requestAnimationFrame(() => {
+                          props.confirmArchiveButtonRefs.current.get(thread.id)?.focus();
+                        });
+                      }}
+                    >
+                      <ArchiveIcon className="size-3.5" />
+                    </button>
+                  ) : !isThreadRunning ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            data-thread-selection-safe
+                            data-testid={`thread-archive-${thread.id}`}
+                            aria-label={`Archive ${thread.title}`}
+                            className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                            onPointerDown={(event) => {
+                              event.stopPropagation();
+                            }}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              void props.attemptArchiveThread(thread.id);
+                            }}
+                          >
+                            <ArchiveIcon className="size-3.5" />
+                          </button>
+                        }
+                      />
+                      <TooltipPopup side="top">Archive</TooltipPopup>
+                    </Tooltip>
+                  ) : null}
                 </div>
-              ) : (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
-                        <button
-                          type="button"
-                          data-thread-selection-safe
-                          data-testid={`thread-archive-${thread.id}`}
-                          aria-label={`Archive ${thread.title}`}
-                          className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                          onPointerDown={(event) => {
-                            event.stopPropagation();
-                          }}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            void props.attemptArchiveThread(thread.id);
-                          }}
-                        >
-                          <ArchiveIcon className="size-3.5" />
-                        </button>
-                      </div>
-                    }
-                  />
-                  <TooltipPopup side="top">Archive</TooltipPopup>
-                </Tooltip>
-              )
+              </div>
             ) : null}
             <span className={threadMetaClassName}>
               {props.showThreadJumpHints && props.jumpLabel ? (
@@ -677,13 +710,21 @@ export default function Sidebar() {
   const projects = useStore((store) => store.projects);
   const sidebarThreadsById = useStore((store) => store.sidebarThreadsById);
   const threadIdsByProjectId = useStore((store) => store.threadIdsByProjectId);
-  const { projectExpandedById, projectOrder, threadLastVisitedAtById } = useUiStateStore(
+  const {
+    projectExpandedById,
+    projectOrder,
+    threadDismissedStatusKeyById,
+    threadLastVisitedAtById,
+  } = useUiStateStore(
     useShallow((store) => ({
       projectExpandedById: store.projectExpandedById,
       projectOrder: store.projectOrder,
+      threadDismissedStatusKeyById: store.threadDismissedStatusKeyById,
       threadLastVisitedAtById: store.threadLastVisitedAtById,
     })),
   );
+  const dismissThreadStatus = useUiStateStore((store) => store.dismissThreadStatus);
+  const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const markThreadUnread = useUiStateStore((store) => store.markThreadUnread);
   const toggleProject = useUiStateStore((store) => store.toggleProject);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
@@ -1088,6 +1129,30 @@ export default function Sidebar() {
       });
     },
   });
+  const clearThreadNotification = useCallback(
+    (threadId: ThreadId) => {
+      const thread = sidebarThreadsById[threadId];
+      if (!thread) {
+        return;
+      }
+      const threadStatus = resolveThreadStatusPill({
+        thread: {
+          ...thread,
+          dismissedStatusKey: useUiStateStore.getState().threadDismissedStatusKeyById[threadId],
+          lastVisitedAt: useUiStateStore.getState().threadLastVisitedAtById[threadId],
+        },
+      });
+      if (!threadStatus?.dismissible) {
+        return;
+      }
+      if (threadStatus.label === "Completed") {
+        markThreadVisited(threadId, thread.latestTurn?.completedAt ?? undefined);
+        return;
+      }
+      dismissThreadStatus(threadId, threadStatus.dismissalKey);
+    },
+    [dismissThreadStatus, markThreadVisited, sidebarThreadsById],
+  );
   const handleThreadContextMenu = useCallback(
     async (threadId: ThreadId, position: { x: number; y: number }) => {
       const api = readNativeApi();
@@ -1096,9 +1161,19 @@ export default function Sidebar() {
       if (!thread) return;
       const threadWorkspacePath =
         thread.worktreePath ?? projectCwdById.get(thread.projectId) ?? null;
+      const threadStatus = resolveThreadStatusPill({
+        thread: {
+          ...thread,
+          dismissedStatusKey: useUiStateStore.getState().threadDismissedStatusKeyById[threadId],
+          lastVisitedAt: useUiStateStore.getState().threadLastVisitedAtById[threadId],
+        },
+      });
       const clicked = await api.contextMenu.show(
         [
           { id: "rename", label: "Rename thread" },
+          ...(threadStatus?.dismissible
+            ? [{ id: "clear-notification", label: "Clear notification" }]
+            : []),
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
@@ -1118,6 +1193,10 @@ export default function Sidebar() {
 
       if (clicked === "mark-unread") {
         markThreadUnread(threadId, thread.latestTurn?.completedAt);
+        return;
+      }
+      if (clicked === "clear-notification") {
+        clearThreadNotification(threadId);
         return;
       }
       if (clicked === "copy-path") {
@@ -1152,6 +1231,7 @@ export default function Sidebar() {
     },
     [
       appSettings.confirmThreadDelete,
+      clearThreadNotification,
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
@@ -1440,6 +1520,7 @@ export default function Sidebar() {
           resolveThreadStatusPill({
             thread: {
               ...thread,
+              dismissedStatusKey: threadDismissedStatusKeyById[thread.id],
               lastVisitedAt: threadLastVisitedAtById[thread.id],
             },
           });
@@ -1497,6 +1578,7 @@ export default function Sidebar() {
       routeThreadId,
       sortedProjects,
       sidebarThreadsById,
+      threadDismissedStatusKeyById,
       threadIdsByProjectId,
       threadLastVisitedAtById,
     ],
@@ -1817,6 +1899,7 @@ export default function Sidebar() {
                 handleMultiSelectContextMenu={handleMultiSelectContextMenu}
                 handleThreadContextMenu={handleThreadContextMenu}
                 clearSelection={clearSelection}
+                clearThreadNotification={clearThreadNotification}
                 commitRename={commitRename}
                 cancelRename={cancelRename}
                 attemptArchiveThread={attemptArchiveThread}
