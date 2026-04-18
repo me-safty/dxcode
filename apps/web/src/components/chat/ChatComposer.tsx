@@ -1926,6 +1926,9 @@ export const ChatComposer = memo(
                     lockedProvider={lockedProvider}
                     providers={providerStatuses}
                     modelOptionsByProvider={modelOptionsByProvider}
+                    showOpenCodeProviderInModelName={
+                      settings.providers.opencode.showProviderInModelName
+                    }
                     {...(composerProviderState.modelPickerIconClassName
                       ? {
                           activeProviderIconClassName:

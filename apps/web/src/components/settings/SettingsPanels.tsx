@@ -1379,6 +1379,38 @@ export function GeneralSettingsPanel() {
                       </div>
                     ) : null}
 
+                    {providerCard.provider === "opencode" ? (
+                      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                        <div className="flex items-center justify-between gap-3">
+                          <label
+                            htmlFor="provider-install-opencode-show-provider"
+                            className="text-xs font-medium text-foreground"
+                          >
+                            Show provider in model name
+                          </label>
+                          <Switch
+                            id="provider-install-opencode-show-provider"
+                            checked={settings.providers.opencode.showProviderInModelName}
+                            onCheckedChange={(checked) =>
+                              updateSettings({
+                                providers: {
+                                  ...settings.providers,
+                                  opencode: {
+                                    ...settings.providers.opencode,
+                                    showProviderInModelName: checked,
+                                  },
+                                },
+                              })
+                            }
+                          />
+                        </div>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          Prefix the model name with its upstream provider (e.g. &quot;Anthropic ·
+                          Claude Sonnet 4.5&quot;).
+                        </span>
+                      </div>
+                    ) : null}
+
                     {providerCard.homePathKey ? (
                       <div className="border-t border-border/60 px-4 py-3 sm:px-5">
                         <label

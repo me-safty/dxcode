@@ -106,6 +106,7 @@ function createBaseServerConfig(): ServerConfig {
           serverUrl: "",
           serverPassword: "",
           customModels: [],
+          showProviderInModelName: false,
         },
       },
     },

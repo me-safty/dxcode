@@ -22,6 +22,13 @@ import { ClaudeAI, CursorIcon, Gemini, Icon, OpenAI, OpenCodeIcon } from "../Ico
 import { cn } from "~/lib/utils";
 import { getProviderSnapshot } from "../../providerModels";
 
+function stripOpenCodeProviderPrefix(name: string): string {
+  const separator = " · ";
+  const index = name.indexOf(separator);
+  if (index < 0) return name;
+  return name.slice(index + separator.length);
+}
+
 function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
   value: ProviderKind;
   label: string;
@@ -59,6 +66,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   disabled?: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
+  showOpenCodeProviderInModelName?: boolean;
   onProviderModelChange: (provider: ProviderKind, model: string) => void;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -66,6 +74,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const selectedProviderOptions = props.modelOptionsByProvider[activeProvider];
   const selectedModelLabel =
     selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
+  const displayModelLabel =
+    activeProvider === "opencode" && !props.showOpenCodeProviderInModelName
+      ? stripOpenCodeProviderPrefix(selectedModelLabel)
+      : selectedModelLabel;
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[activeProvider];
   const handleModelChange = (provider: ProviderKind, value: string) => {
     if (props.disabled) return;
@@ -120,7 +132,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               props.activeProviderIconClassName,
             )}
           />
-          <span className="min-w-0 flex-1 truncate">{selectedModelLabel}</span>
+          <span className="min-w-0 flex-1 truncate">{displayModelLabel}</span>
           <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
         </span>
       </MenuTrigger>
