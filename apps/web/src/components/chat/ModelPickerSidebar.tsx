@@ -11,7 +11,6 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   selectedProvider: ProviderKind | "all" | "favorites";
   onSelectProvider: (provider: ProviderKind | "all" | "favorites") => void;
   providers?: ReadonlyArray<ServerProvider>;
-  modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
 }) {
   const handleProviderClick = (provider: ProviderKind | "all" | "favorites") => {
     props.onSelectProvider(provider);

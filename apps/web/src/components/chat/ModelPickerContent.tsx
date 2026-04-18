@@ -176,7 +176,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           selectedProvider={selectedProvider}
           onSelectProvider={handleSelectProvider}
           {...(props.providers && { providers: props.providers })}
-          modelOptionsByProvider={props.modelOptionsByProvider}
         />
       )}
 
