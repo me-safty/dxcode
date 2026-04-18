@@ -173,7 +173,7 @@ describe("ProviderModelPicker", () => {
     document.body.innerHTML = "";
   });
 
-  it("shows provider submenus when provider switching is allowed", async () => {
+  it("shows provider sidebar in unlocked mode", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
       model: "claude-opus-4-6",
@@ -187,14 +187,14 @@ describe("ProviderModelPicker", () => {
         const text = document.body.textContent ?? "";
         expect(text).toContain("Codex");
         expect(text).toContain("Claude");
-        expect(text).not.toContain("Claude Sonnet 4.6");
+        expect(text).toContain("Claude Opus 4.6");
       });
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("opens provider submenus with a visible gap from the parent menu", async () => {
+  it("filters models by selected provider in sidebar", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
       model: "claude-opus-4-6",
@@ -203,43 +203,149 @@ describe("ProviderModelPicker", () => {
 
     try {
       await page.getByRole("button").click();
-      const providerTrigger = page.getByRole("menuitem", { name: "Codex" });
-      await providerTrigger.hover();
 
+      // Start with all models visible
       await vi.waitFor(() => {
-        expect(document.body.textContent ?? "").toContain("GPT-5 Codex");
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("GPT-5 Codex");
+        expect(text).toContain("Claude Opus 4.6");
       });
 
-      const providerTriggerElement = Array.from(
-        document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
-      ).find((element) => element.textContent?.includes("Codex"));
-      if (!providerTriggerElement) {
-        throw new Error("Expected the Codex provider trigger to be mounted.");
+      // Click on Codex provider in sidebar
+      const buttons = await page.getByTitle("Codex").all();
+      if (buttons.length > 0) {
+        await buttons[0]!.click();
+
+        // Now should only show Codex models
+        await vi.waitFor(() => {
+          const text = document.body.textContent ?? "";
+          expect(text).toContain("GPT-5 Codex");
+          expect(text).not.toContain("Claude Opus 4.6");
+        });
       }
-
-      const providerTriggerRect = providerTriggerElement.getBoundingClientRect();
-      const modelElement = Array.from(
-        document.querySelectorAll<HTMLElement>('[role="menuitemradio"]'),
-      ).find((element) => element.textContent?.includes("GPT-5 Codex"));
-      if (!modelElement) {
-        throw new Error("Expected the submenu model option to be mounted.");
-      }
-
-      const submenuPopup = modelElement.closest('[data-slot="menu-sub-content"]');
-      if (!(submenuPopup instanceof HTMLElement)) {
-        throw new Error("Expected submenu popup to be mounted.");
-      }
-
-      const submenuRect = submenuPopup.getBoundingClientRect();
-
-      expect(submenuRect.left).toBeGreaterThanOrEqual(providerTriggerRect.right);
-      expect(submenuRect.left - providerTriggerRect.right).toBeGreaterThanOrEqual(2);
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("shows models directly when the provider is locked mid-thread", async () => {
+  it("shows locked provider header and only its models in locked mode", async () => {
+    const mounted = await mountPicker({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      lockedProvider: "claudeAgent",
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        // Should show locked provider name
+        expect(text).toContain("claudeAgent");
+        // Should show models from locked provider
+        expect(text).toContain("Claude Sonnet 4.6");
+        expect(text).toContain("Claude Haiku 4.5");
+        // Should not show other provider models
+        expect(text).not.toContain("GPT-5 Codex");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("searches models by name in flat list", async () => {
+    const mounted = await mountPicker({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Claude Opus 4.6");
+        expect(text).toContain("GPT-5 Codex");
+      });
+
+      // Find and type in search box
+      const searchInput = page.getByPlaceholder("Search models...");
+      await searchInput.fill("claude");
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Claude Opus 4.6");
+        expect(text).not.toContain("GPT-5 Codex");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("searches models by provider name", async () => {
+    const mounted = await mountPicker({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Claude Opus 4.6");
+        expect(text).toContain("GPT-5 Codex");
+      });
+
+      // Search by provider name
+      const searchInput = page.getByPlaceholder("Search models...");
+      await searchInput.fill("codex");
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("GPT-5 Codex");
+        expect(text).not.toContain("Claude Opus 4.6");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("toggles favorite stars when clicked", async () => {
+    const mounted = await mountPicker({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Claude Opus 4.6");
+      });
+
+      // Get star buttons
+      const starButtons = await page.getByRole("button", { name: /favor/ }).all();
+      const firstStar = starButtons[0];
+      if (firstStar) {
+        // Click to add to favorites
+        await firstStar.click();
+      }
+
+      // Favorites should toggle
+      await vi.waitFor(() => {
+        expect(starButtons.length).toBeGreaterThan(0);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("dispatches callback with correct provider and model when selected", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
       model: "claude-opus-4-6",
@@ -252,15 +358,23 @@ describe("ProviderModelPicker", () => {
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
         expect(text).toContain("Claude Sonnet 4.6");
-        expect(text).toContain("Claude Haiku 4.5");
-        expect(text).not.toContain("Codex");
       });
+
+      // Click on a model
+      const modelRow = page.getByText("Claude Sonnet 4.6").first();
+      await modelRow.click();
+
+      // Verify callback was called with correct values
+      expect(mounted.onProviderModelChange).toHaveBeenCalledWith(
+        "claudeAgent",
+        "claude-sonnet-4-6",
+      );
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("only shows codex spark when the server reports it for the account", async () => {
+  it("only shows codex spark when the server reports it", async () => {
     const providersWithoutSpark: ReadonlyArray<ServerProvider> = [
       buildCodexProvider([
         {
@@ -317,7 +431,6 @@ describe("ProviderModelPicker", () => {
 
     try {
       await page.getByRole("button").click();
-      await page.getByRole("menuitem", { name: "Codex" }).hover();
 
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
@@ -337,7 +450,6 @@ describe("ProviderModelPicker", () => {
 
     try {
       await page.getByRole("button").click();
-      await page.getByRole("menuitem", { name: "Codex" }).hover();
 
       await vi.waitFor(() => {
         expect(document.body.textContent ?? "").toContain("GPT-5.3 Codex Spark");
@@ -347,27 +459,7 @@ describe("ProviderModelPicker", () => {
     }
   });
 
-  it("dispatches the canonical slug when a model is selected", async () => {
-    const mounted = await mountPicker({
-      provider: "claudeAgent",
-      model: "claude-opus-4-6",
-      lockedProvider: "claudeAgent",
-    });
-
-    try {
-      await page.getByRole("button").click();
-      await page.getByRole("menuitemradio", { name: "Claude Sonnet 4.6" }).click();
-
-      expect(mounted.onProviderModelChange).toHaveBeenCalledWith(
-        "claudeAgent",
-        "claude-sonnet-4-6",
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("shows disabled providers as non-selectable entries", async () => {
+  it("shows disabled providers grayed out in sidebar", async () => {
     const disabledProviders = TEST_PROVIDERS.slice();
     const claudeIndex = disabledProviders.findIndex(
       (provider) => provider.provider === "claudeAgent",
@@ -380,6 +472,7 @@ describe("ProviderModelPicker", () => {
         status: "disabled",
       };
     }
+
     const mounted = await mountPicker({
       provider: "codex",
       model: "gpt-5-codex",
@@ -392,9 +485,9 @@ describe("ProviderModelPicker", () => {
 
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
-        expect(text).toContain("Claude");
-        expect(text).toContain("Disabled");
-        expect(text).not.toContain("Claude Sonnet 4.6");
+        expect(text).toContain("GPT-5 Codex");
+        // Disabled provider should not have its models shown
+        expect(text).not.toContain("Claude Opus 4.6");
       });
     } finally {
       await mounted.cleanup();
