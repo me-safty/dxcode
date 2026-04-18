@@ -1,11 +1,47 @@
 import { type ProviderKind, type ServerProvider } from "@t3tools/contracts";
+import { EnvironmentId } from "@t3tools/contracts";
 import { page } from "vitest/browser";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { getCustomModelOptionsByProvider } from "../../modelSelection";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import { __resetLocalApiForTests } from "../../localApi";
+
+// Mock the environments/runtime module to provide a mock primary environment connection
+vi.mock("../../environments/runtime", () => {
+  const primaryConnection = {
+    kind: "primary" as const,
+    knownEnvironment: {
+      id: "environment-local",
+      label: "Local environment",
+      source: "manual" as const,
+      environmentId: EnvironmentId.make("environment-local"),
+      target: {
+        httpBaseUrl: "http://localhost:3000",
+        wsBaseUrl: "ws://localhost:3000",
+      },
+    },
+    environmentId: EnvironmentId.make("environment-local"),
+    client: {
+      server: {
+        getConfig: vi.fn(),
+        updateSettings: vi.fn(),
+      },
+    },
+    ensureBootstrapped: async () => undefined,
+    reconnect: async () => undefined,
+    dispose: async () => undefined,
+  };
+
+  return {
+    getPrimaryEnvironmentConnection: () => primaryConnection,
+    resetEnvironmentServiceForTests: vi.fn(),
+    resetSavedEnvironmentRegistryStoreForTests: vi.fn(),
+    resetSavedEnvironmentRuntimeStoreForTests: vi.fn(),
+  };
+});
 
 function effort(value: string, isDefault = false) {
   return {
@@ -179,8 +215,14 @@ function getModelPickerListText() {
 }
 
 describe("ProviderModelPicker", () => {
-  afterEach(() => {
+  beforeEach(async () => {
+    // Reset test environment before each test
+    await __resetLocalApiForTests();
+  });
+
+  afterEach(async () => {
     document.body.innerHTML = "";
+    await __resetLocalApiForTests();
   });
 
   it("shows provider sidebar in unlocked mode", async () => {
