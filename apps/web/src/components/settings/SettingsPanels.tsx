@@ -1383,13 +1383,13 @@ export function GeneralSettingsPanel() {
                       <div className="border-t border-border/60 px-4 py-3 sm:px-5">
                         <div className="flex items-center justify-between gap-3">
                           <label
-                            htmlFor="provider-install-opencode-show-provider"
+                            htmlFor="provider-install-opencode-show-provider-in-composer"
                             className="text-xs font-medium text-foreground"
                           >
-                            Show provider in model name
+                            Show provider in model name in composer
                           </label>
                           <Switch
-                            id="provider-install-opencode-show-provider"
+                            id="provider-install-opencode-show-provider-in-composer"
                             checked={settings.providers.opencode.showProviderInModelName}
                             onCheckedChange={(checked) =>
                               updateSettings({
