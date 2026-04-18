@@ -397,6 +397,45 @@ function parseDirtyWorktreeFiles(stderr: string): string[] | null {
     .filter((line) => line.length > 0);
 }
 
+function buildTrackedPathPrefixes(paths: readonly string[]): Set<string> {
+  const prefixes = new Set<string>();
+
+  for (const path of paths) {
+    const segments = path
+      .trim()
+      .split("/")
+      .filter((segment) => segment.length > 0);
+    let prefix = "";
+
+    for (const segment of segments) {
+      prefix = prefix.length > 0 ? `${prefix}/${segment}` : segment;
+      prefixes.add(prefix);
+    }
+  }
+
+  return prefixes;
+}
+
+function pathConflictsWithTrackedPrefixes(
+  path: string,
+  trackedPrefixes: ReadonlySet<string>,
+): boolean {
+  const segments = path
+    .trim()
+    .split("/")
+    .filter((segment) => segment.length > 0);
+  let prefix = "";
+
+  for (const segment of segments) {
+    prefix = prefix.length > 0 ? `${prefix}/${segment}` : segment;
+    if (trackedPrefixes.has(prefix)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function quoteGitCommand(args: ReadonlyArray<string>): string {
   return `git ${args.join(" ")}`;
 }
@@ -2098,104 +2137,121 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     return { branch: targetBranch };
   });
 
-  const checkoutBranch: GitCoreShape["checkoutBranch"] = Effect.fn("checkoutBranch")(
-    function* (input) {
-      const [localInputExists, remoteExists] = yield* Effect.all(
-        [
-          executeGit(
-            "GitCore.checkoutBranch.localInputExists",
-            input.cwd,
-            ["show-ref", "--verify", "--quiet", `refs/heads/${input.branch}`],
-            {
-              timeoutMs: 5_000,
-              allowNonZeroExit: true,
-            },
-          ).pipe(Effect.map((result) => result.code === 0)),
-          executeGit(
-            "GitCore.checkoutBranch.remoteExists",
-            input.cwd,
-            ["show-ref", "--verify", "--quiet", `refs/remotes/${input.branch}`],
-            {
-              timeoutMs: 5_000,
-              allowNonZeroExit: true,
-            },
-          ).pipe(Effect.map((result) => result.code === 0)),
-        ],
-        { concurrency: "unbounded" },
-      );
+  const resolveCheckoutBranchPlan = Effect.fn("resolveCheckoutBranchPlan")(function* (input: {
+    cwd: string;
+    branch: string;
+  }) {
+    const [localInputExists, remoteExists] = yield* Effect.all(
+      [
+        executeGit(
+          "GitCore.checkoutBranch.localInputExists",
+          input.cwd,
+          ["show-ref", "--verify", "--quiet", `refs/heads/${input.branch}`],
+          {
+            timeoutMs: 5_000,
+            allowNonZeroExit: true,
+          },
+        ).pipe(Effect.map((result) => result.code === 0)),
+        executeGit(
+          "GitCore.checkoutBranch.remoteExists",
+          input.cwd,
+          ["show-ref", "--verify", "--quiet", `refs/remotes/${input.branch}`],
+          {
+            timeoutMs: 5_000,
+            allowNonZeroExit: true,
+          },
+        ).pipe(Effect.map((result) => result.code === 0)),
+      ],
+      { concurrency: "unbounded" },
+    );
 
-      const localTrackingBranch = remoteExists
+    const localTrackingBranch = remoteExists
+      ? yield* executeGit(
+          "GitCore.checkoutBranch.localTrackingBranch",
+          input.cwd,
+          ["for-each-ref", "--format=%(refname:short)\t%(upstream:short)", "refs/heads"],
+          {
+            timeoutMs: 5_000,
+            allowNonZeroExit: true,
+          },
+        ).pipe(
+          Effect.map((result) =>
+            result.code === 0
+              ? parseTrackingBranchByUpstreamRef(result.stdout, input.branch)
+              : null,
+          ),
+        )
+      : null;
+
+    const localTrackedBranchCandidate = deriveLocalBranchNameFromRemoteRef(input.branch);
+    const localTrackedBranchTargetExists =
+      remoteExists && localTrackedBranchCandidate
         ? yield* executeGit(
-            "GitCore.checkoutBranch.localTrackingBranch",
+            "GitCore.checkoutBranch.localTrackedBranchTargetExists",
             input.cwd,
-            ["for-each-ref", "--format=%(refname:short)\t%(upstream:short)", "refs/heads"],
+            ["show-ref", "--verify", "--quiet", `refs/heads/${localTrackedBranchCandidate}`],
             {
               timeoutMs: 5_000,
               allowNonZeroExit: true,
             },
-          ).pipe(
-            Effect.map((result) =>
-              result.code === 0
-                ? parseTrackingBranchByUpstreamRef(result.stdout, input.branch)
-                : null,
-            ),
-          )
-        : null;
+          ).pipe(Effect.map((result) => result.code === 0))
+        : false;
 
-      const localTrackedBranchCandidate = deriveLocalBranchNameFromRemoteRef(input.branch);
-      const localTrackedBranchTargetExists =
-        remoteExists && localTrackedBranchCandidate
-          ? yield* executeGit(
-              "GitCore.checkoutBranch.localTrackedBranchTargetExists",
-              input.cwd,
-              ["show-ref", "--verify", "--quiet", `refs/heads/${localTrackedBranchCandidate}`],
-              {
-                timeoutMs: 5_000,
-                allowNonZeroExit: true,
-              },
-            ).pipe(Effect.map((result) => result.code === 0))
-          : false;
-
-      const checkoutArgs = localInputExists
+    const checkoutArgs = localInputExists
+      ? ["checkout", input.branch]
+      : remoteExists && !localTrackingBranch && localTrackedBranchTargetExists
         ? ["checkout", input.branch]
-        : remoteExists && !localTrackingBranch && localTrackedBranchTargetExists
-          ? ["checkout", input.branch]
-          : remoteExists && !localTrackingBranch
-            ? ["checkout", "--track", input.branch]
-            : remoteExists && localTrackingBranch
-              ? ["checkout", localTrackingBranch]
-              : ["checkout", input.branch];
+        : remoteExists && !localTrackingBranch
+          ? ["checkout", "--track", input.branch]
+          : remoteExists && localTrackingBranch
+            ? ["checkout", localTrackingBranch]
+            : ["checkout", input.branch];
 
-      const checkoutResult = yield* executeGit(
+    const checkoutRef = localTrackingBranch ?? input.branch;
+
+    return { checkoutArgs, checkoutRef };
+  });
+
+  const checkoutBranchWithArgs = Effect.fn("checkoutBranchWithArgs")(function* (
+    input: { cwd: string; branch: string },
+    checkoutArgs: readonly string[],
+  ) {
+    const checkoutResult = yield* executeGit(
+      "GitCore.checkoutBranch.checkout",
+      input.cwd,
+      checkoutArgs,
+      { timeoutMs: 10_000, allowNonZeroExit: true },
+    );
+    if (checkoutResult.code !== 0) {
+      const dirtyFiles = parseDirtyWorktreeFiles(checkoutResult.stderr);
+      if (dirtyFiles && dirtyFiles.length > 0) {
+        return yield* new GitCheckoutDirtyWorktreeError({
+          branch: input.branch,
+          cwd: input.cwd,
+          conflictingFiles: dirtyFiles,
+        });
+      }
+      const stderr = checkoutResult.stderr.trim();
+      return yield* createGitCommandError(
         "GitCore.checkoutBranch.checkout",
         input.cwd,
         checkoutArgs,
-        { timeoutMs: 10_000, allowNonZeroExit: true },
+        stderr.length > 0 ? stderr : "git checkout failed",
       );
-      if (checkoutResult.code !== 0) {
-        const dirtyFiles = parseDirtyWorktreeFiles(checkoutResult.stderr);
-        if (dirtyFiles && dirtyFiles.length > 0) {
-          return yield* new GitCheckoutDirtyWorktreeError({
-            branch: input.branch,
-            cwd: input.cwd,
-            conflictingFiles: dirtyFiles,
-          });
-        }
-        const stderr = checkoutResult.stderr.trim();
-        return yield* createGitCommandError(
-          "GitCore.checkoutBranch.checkout",
-          input.cwd,
-          checkoutArgs,
-          stderr.length > 0 ? stderr : "git checkout failed",
-        );
-      }
+    }
 
-      const branch = yield* runGitStdout("GitCore.checkoutBranch.currentBranch", input.cwd, [
-        "branch",
-        "--show-current",
-      ]).pipe(Effect.map((stdout) => stdout.trim() || null));
+    const branch = yield* runGitStdout("GitCore.checkoutBranch.currentBranch", input.cwd, [
+      "branch",
+      "--show-current",
+    ]).pipe(Effect.map((stdout) => stdout.trim() || null));
 
-      return { branch };
+    return { branch };
+  });
+
+  const checkoutBranch: GitCoreShape["checkoutBranch"] = Effect.fn("checkoutBranch")(
+    function* (input) {
+      const { checkoutArgs } = yield* resolveCheckoutBranchPlan(input);
+      return yield* checkoutBranchWithArgs(input, checkoutArgs);
     },
   );
 
@@ -2225,6 +2281,8 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
 
   const stashAndCheckout: GitCoreShape["stashAndCheckout"] = (input) =>
     Effect.gen(function* () {
+      const { checkoutArgs, checkoutRef } = yield* resolveCheckoutBranchPlan(input);
+
       const cleanupFailedStashPop = () =>
         Effect.gen(function* () {
           const stashFiles = yield* executeGit(
@@ -2274,20 +2332,85 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       );
       const stashEntryCreated = (yield* readStashList()) !== stashListBefore;
 
+      const ignoredFilesResult = yield* executeGit(
+        "GitCore.stashAndCheckout.ignoredFiles",
+        input.cwd,
+        ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
+        {
+          timeoutMs: 10_000,
+          allowNonZeroExit: true,
+          maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+          truncateOutputAtMaxBytes: true,
+        },
+      );
+      const ignoredFiles =
+        ignoredFilesResult.code === 0
+          ? splitNullSeparatedPaths(ignoredFilesResult.stdout, ignoredFilesResult.stdoutTruncated)
+          : [];
+      const ignoredCheckoutConflicts =
+        ignoredFiles.length === 0
+          ? []
+          : yield* executeGit(
+              "GitCore.stashAndCheckout.checkoutTree",
+              input.cwd,
+              ["ls-tree", "-r", "--name-only", "-z", checkoutRef],
+              {
+                timeoutMs: 10_000,
+                allowNonZeroExit: true,
+                maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+                truncateOutputAtMaxBytes: true,
+              },
+            ).pipe(
+              Effect.map((result) =>
+                result.code === 0
+                  ? splitNullSeparatedPaths(result.stdout, result.stdoutTruncated)
+                  : [],
+              ),
+              Effect.map((trackedPaths) => {
+                if (trackedPaths.length === 0) {
+                  return [];
+                }
+
+                const trackedPrefixes = buildTrackedPathPrefixes(trackedPaths);
+                return ignoredFiles.filter((path) =>
+                  pathConflictsWithTrackedPrefixes(path, trackedPrefixes),
+                );
+              }),
+            );
+
+      const dirtyWorktreeError =
+        ignoredCheckoutConflicts.length > 0
+          ? new GitCheckoutDirtyWorktreeError({
+              branch: checkoutRef,
+              cwd: input.cwd,
+              conflictingFiles: ignoredCheckoutConflicts,
+            })
+          : null;
+
       const checkoutExit = yield* Effect.exit(
-        checkoutBranch(input).pipe(
-          Effect.catchTag("GitCheckoutDirtyWorktreeError", (e) =>
-            Effect.fail(
+        dirtyWorktreeError
+          ? Effect.fail(
               createGitCommandError(
                 "GitCore.stashAndCheckout.checkout",
                 input.cwd,
                 ["checkout", input.branch],
-                e.message,
-                e,
+                dirtyWorktreeError.message,
+                dirtyWorktreeError,
+              ),
+            )
+          : checkoutBranchWithArgs(input, checkoutArgs).pipe(
+              Effect.catchTag("GitCheckoutDirtyWorktreeError", (e) =>
+                Effect.fail(
+                  createGitCommandError(
+                    "GitCore.stashAndCheckout.checkout",
+                    input.cwd,
+                    ["checkout", input.branch],
+                    e.message,
+                    e,
+                  ),
+                ),
               ),
             ),
-          ),
-        ),
       );
       if (Exit.isFailure(checkoutExit)) {
         if (!stashEntryCreated) {
