@@ -55,6 +55,7 @@ interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
+  onOpenWorkspaceFile?: (path: string) => boolean | void;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -248,6 +249,7 @@ interface MarkdownFileLinkProps {
   filePath: string;
   label: string;
   theme: "light" | "dark";
+  onOpenWorkspaceFile?: ((path: string) => boolean | void) | undefined;
   className?: string | undefined;
 }
 
@@ -338,9 +340,13 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   filePath,
   label,
   theme,
+  onOpenWorkspaceFile,
   className,
 }: MarkdownFileLinkProps) {
   const handleOpen = useCallback(() => {
+    if (onOpenWorkspaceFile?.(targetPath)) {
+      return;
+    }
     const api = readLocalApi();
     if (!api) {
       toastManager.add({
@@ -357,7 +363,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         description: error instanceof Error ? error.message : "An error occurred.",
       });
     });
-  }, [targetPath]);
+  }, [onOpenWorkspaceFile, targetPath]);
 
   const handleCopy = useCallback((value: string, title: string) => {
     if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
@@ -466,11 +472,12 @@ function areMarkdownFileLinkPropsEqual(
     previous.filePath === next.filePath &&
     previous.label === next.label &&
     previous.theme === next.theme &&
+    previous.onOpenWorkspaceFile === next.onOpenWorkspaceFile &&
     previous.className === next.className
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+function ChatMarkdown({ text, cwd, isStreaming = false, onOpenWorkspaceFile }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownFileLinkMetaByHref = useMemo(() => {
@@ -523,6 +530,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
             filePath={fileLinkMeta.filePath}
             label={labelParts.join(" · ")}
             theme={resolvedTheme}
+            onOpenWorkspaceFile={onOpenWorkspaceFile}
             className={props.className}
           />
         );
@@ -554,6 +562,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
       fileLinkParentSuffixByPath,
       isStreaming,
       markdownFileLinkMetaByHref,
+      onOpenWorkspaceFile,
       resolvedTheme,
     ],
   );

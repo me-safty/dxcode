@@ -497,8 +497,26 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     },
   );
 
+  const list: WorkspaceEntriesShape["list"] = Effect.fn("WorkspaceEntries.list")(function* (input) {
+    const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+    return yield* Cache.get(workspaceIndexCache, normalizedCwd).pipe(
+      Effect.map((index) => {
+        const limit = Math.max(0, Math.floor(input.limit));
+        return {
+          entries: index.entries.slice(0, limit).map(({ path, kind, parentPath }) => ({
+            path,
+            kind,
+            ...(parentPath ? { parentPath } : {}),
+          })),
+          truncated: index.truncated || index.entries.length > limit,
+        };
+      }),
+    );
+  });
+
   return {
     browse,
+    list,
     invalidate,
     search,
   } satisfies WorkspaceEntriesShape;

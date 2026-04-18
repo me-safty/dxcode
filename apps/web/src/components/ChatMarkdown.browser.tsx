@@ -138,4 +138,28 @@ describe("ChatMarkdown", () => {
       await screen.unmount();
     }
   });
+
+  it("lets file chips open the workspace viewer instead of the editor when provided", async () => {
+    const filePath = "/Users/yashsingh/p/t3code/apps/web/src/components/ChatMarkdown.tsx";
+    const onOpenWorkspaceFile = vi.fn(() => true);
+    const screen = await render(
+      <ChatMarkdown
+        text={`[ChatMarkdown.tsx](file://${filePath})`}
+        cwd="/repo/project"
+        onOpenWorkspaceFile={onOpenWorkspaceFile}
+      />,
+    );
+
+    try {
+      const link = page.getByRole("link", { name: "ChatMarkdown.tsx" });
+      await link.click();
+
+      await vi.waitFor(() => {
+        expect(onOpenWorkspaceFile).toHaveBeenCalledWith(filePath);
+      });
+      expect(openInPreferredEditorMock).not.toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+    }
+  });
 });

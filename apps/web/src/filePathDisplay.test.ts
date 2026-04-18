@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { formatWorkspaceRelativePath } from "./filePathDisplay";
+import {
+  buildWorkspaceBreadcrumbSegments,
+  formatWorkspaceRelativePath,
+  resolveWorkspaceSelectionPath,
+} from "./filePathDisplay";
 
 describe("formatWorkspaceRelativePath", () => {
   it("formats absolute workspace paths from the workspace root", () => {
@@ -37,5 +41,32 @@ describe("formatWorkspaceRelativePath", () => {
         "C:/Users/mike/dev-stuff/t3code",
       ),
     ).toBe("t3code/apps/web/src/session-logic.ts:501:9");
+  });
+
+  it("builds breadcrumb segments from the workspace root instead of the filesystem root", () => {
+    expect(
+      buildWorkspaceBreadcrumbSegments(
+        "/Users/me/projects/DriveAgent/docs/google-workspace-v2-plan.md",
+        "/Users/me/projects/DriveAgent",
+      ),
+    ).toEqual(["DriveAgent", "docs", "google-workspace-v2-plan.md"]);
+  });
+
+  it("resolves an absolute path inside the workspace to a workspace-relative selection path", () => {
+    expect(
+      resolveWorkspaceSelectionPath(
+        "/Users/me/projects/DriveAgent/docs/google-workspace-v2-plan.md:12",
+        "/Users/me/projects/DriveAgent",
+      ),
+    ).toBe("docs/google-workspace-v2-plan.md");
+  });
+
+  it("resolves a path already rooted at the workspace label", () => {
+    expect(
+      resolveWorkspaceSelectionPath(
+        "DriveAgent/docs/google-workspace-v2-plan.md",
+        "/Users/me/projects/DriveAgent",
+      ),
+    ).toBe("docs/google-workspace-v2-plan.md");
   });
 });

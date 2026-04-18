@@ -1,7 +1,8 @@
-import { PROVIDER_DISPLAY_NAMES, type ServerProvider } from "@t3tools/contracts";
+import { type ServerProvider } from "@t3tools/contracts";
 import { memo } from "react";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { CircleAlertIcon } from "lucide-react";
+import { formatProviderDisplayLabel } from "../../coworkShell";
 
 export const ProviderStatusBanner = memo(function ProviderStatusBanner({
   status,
@@ -12,12 +13,12 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
     return null;
   }
 
-  const providerLabel = PROVIDER_DISPLAY_NAMES[status.provider] ?? status.provider;
+  const providerLabel = formatProviderDisplayLabel(status.provider);
   const defaultMessage =
     status.status === "error"
-      ? `${providerLabel} provider is unavailable.`
-      : `${providerLabel} provider has limited availability.`;
-  const title = `${providerLabel} provider status`;
+      ? `${providerLabel} is currently unavailable.`
+      : `${providerLabel} has limited availability.`;
+  const title = `${providerLabel} agent status`;
 
   return (
     <div className="pt-3 mx-auto max-w-3xl">

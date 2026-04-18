@@ -24,7 +24,6 @@ import {
   HammerIcon,
   type LucideIcon,
   SquarePenIcon,
-  TerminalIcon,
   Undo2Icon,
   WrenchIcon,
   ZapIcon,
@@ -61,6 +60,7 @@ import {
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
+import { COWORK_SHELL } from "../../coworkShell";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via useContext.
@@ -84,6 +84,7 @@ interface TimelineRowSharedState {
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onOpenWorkspaceFile: ((path: string) => boolean | void) | undefined;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -114,6 +115,7 @@ interface MessagesTimelineProps {
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  onOpenWorkspaceFile?: (path: string) => boolean | void;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +144,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   timestampFormat,
   workspaceRoot,
   onIsAtEndChange,
+  onOpenWorkspaceFile,
 }: MessagesTimelineProps) {
   const rawRows = useMemo(
     () =>
@@ -207,6 +210,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      ...(onOpenWorkspaceFile ? { onOpenWorkspaceFile } : { onOpenWorkspaceFile: undefined }),
     }),
     [
       activeTurnInProgress,
@@ -223,6 +227,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onOpenWorkspaceFile,
     ],
   );
 
@@ -406,6 +411,9 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   text={messageText}
                   cwd={ctx.markdownCwd}
                   isStreaming={Boolean(row.message.streaming)}
+                  {...(ctx.onOpenWorkspaceFile
+                    ? { onOpenWorkspaceFile: ctx.onOpenWorkspaceFile }
+                    : {})}
                 />
                 <AssistantChangedFilesSection
                   turnSummary={row.assistantTurnDiffSummary}
@@ -537,21 +545,20 @@ const WorkGroupSection = memo(function WorkGroupSection({
       ? groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
       : groupedEntries;
   const hiddenCount = groupedEntries.length - visibleEntries.length;
-  const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
-  const showHeader = hasOverflow || !onlyToolEntries;
-  const groupLabel = onlyToolEntries ? "Tool calls" : "Work log";
+  const showHeader = hasOverflow || groupedEntries.length > 1;
+  const groupLabel = resolveWorkGroupLabel(groupedEntries);
 
   return (
-    <div className="rounded-xl border border-border/45 bg-card/25 px-2 py-1.5">
+    <div className="rounded-[22px] border border-border/45 bg-card/68 px-2.5 py-2 shadow-[0_16px_40px_-28px_rgba(0,0,0,0.55)] backdrop-blur">
       {showHeader && (
-        <div className="mb-1.5 flex items-center justify-between gap-2 px-0.5">
-          <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/55">
+        <div className="mb-2 flex items-center justify-between gap-2 px-1">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/58">
             {groupLabel} ({groupedEntries.length})
           </p>
           {hasOverflow && (
             <button
               type="button"
-              className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
+              className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
               onClick={() => setIsExpanded((v) => !v)}
             >
               {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
@@ -623,10 +630,10 @@ function AssistantChangedFilesSectionInner({
   const changedFileCountLabel = String(checkpointFiles.length);
 
   return (
-    <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
+    <div className="mt-2 rounded-[20px] border border-border/80 bg-card/72 p-3 shadow-[0_16px_40px_-28px_rgba(0,0,0,0.55)]">
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
-          <span>Changed files ({changedFileCountLabel})</span>
+          <span>Outputs ({changedFileCountLabel})</span>
           {hasNonZeroStat(summaryStat) && (
             <>
               <span className="mx-1">•</span>
@@ -644,14 +651,6 @@ function AssistantChangedFilesSectionInner({
           >
             {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
           </Button>
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            onClick={() => onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)}
-          >
-            View diff
-          </Button>
         </div>
       </div>
       <ChangedFilesTree
@@ -660,7 +659,7 @@ function AssistantChangedFilesSectionInner({
         files={checkpointFiles}
         allDirectoriesExpanded={allDirectoriesExpanded}
         resolvedTheme={resolvedTheme}
-        onOpenTurnDiff={onOpenTurnDiff}
+        {...(!COWORK_SHELL.hideDiffSurfaces ? { onOpenTurnDiff } : {})}
       />
     </div>
   );
@@ -865,12 +864,25 @@ function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
   return "text-muted-foreground/40";
 }
 
+function resolveWorkGroupLabel(groupedEntries: ReadonlyArray<TimelineWorkEntry>): string {
+  if (groupedEntries.some((entry) => (entry.changedFiles?.length ?? 0) > 0)) {
+    return "Output activity";
+  }
+  if (groupedEntries.some((entry) => entry.itemType === "web_search")) {
+    return "Research activity";
+  }
+  if (groupedEntries.some((entry) => entry.requestKind !== undefined)) {
+    return "Review needed";
+  }
+  return "Progress feed";
+}
+
 function workEntryPreview(
   workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
   workspaceRoot: string | undefined,
 ) {
-  if (workEntry.command) return workEntry.command;
   if (workEntry.detail) return workEntry.detail;
+  if (workEntry.command) return workEntry.command;
   if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
   const [firstPath] = workEntry.changedFiles ?? [];
   if (!firstPath) return null;
@@ -891,12 +903,12 @@ function workEntryRawCommand(
 }
 
 function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
-  if (workEntry.requestKind === "command") return TerminalIcon;
+  if (workEntry.requestKind === "command") return HammerIcon;
   if (workEntry.requestKind === "file-read") return EyeIcon;
   if (workEntry.requestKind === "file-change") return SquarePenIcon;
 
   if (workEntry.itemType === "command_execution" || workEntry.command) {
-    return TerminalIcon;
+    return HammerIcon;
   }
   if (workEntry.itemType === "file_change" || (workEntry.changedFiles?.length ?? 0) > 0) {
     return SquarePenIcon;
@@ -924,6 +936,17 @@ function capitalizePhrase(value: string): string {
 }
 
 function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
+  if (workEntry.requestKind === "command") return "Approval needed";
+  if (workEntry.requestKind === "file-read") return "Workspace access";
+  if (workEntry.requestKind === "file-change") return "Edit approval";
+  if (workEntry.itemType === "file_change" || (workEntry.changedFiles?.length ?? 0) > 0) {
+    return "Updated files";
+  }
+  if (workEntry.itemType === "web_search") return "Collected sources";
+  if (workEntry.itemType === "image_view") return "Reviewed image";
+  if (workEntry.itemType === "command_execution" || workEntry.command) {
+    return "Worked in workspace";
+  }
   if (!workEntry.toolTitle) {
     return capitalizePhrase(normalizeCompactToolLabel(workEntry.label));
   }

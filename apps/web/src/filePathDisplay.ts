@@ -55,3 +55,47 @@ export function formatWorkspaceRelativePath(
   if (!line) return displayPath;
   return `${displayPath}:${line}${column ? `:${column}` : ""}`;
 }
+
+export function buildWorkspaceBreadcrumbSegments(
+  pathWithPosition: string,
+  workspaceRoot: string | undefined,
+): string[] {
+  const displayPath = formatWorkspaceRelativePath(pathWithPosition, workspaceRoot);
+  const { path } = splitPathAndPosition(displayPath);
+  return normalizePathSeparators(path)
+    .split("/")
+    .filter((segment) => segment.length > 0);
+}
+
+export function resolveWorkspaceSelectionPath(
+  pathWithPosition: string,
+  workspaceRoot: string | undefined,
+): string | null {
+  const { path } = splitPathAndPosition(pathWithPosition);
+  const normalizedPath = canonicalizeWindowsDrivePath(normalizePathSeparators(path));
+
+  if (!workspaceRoot) {
+    return normalizedPath.startsWith("/") ? null : stripRelativePrefixes(normalizedPath);
+  }
+
+  const normalizedWorkspaceRoot = canonicalizeWindowsDrivePath(
+    normalizePathSeparators(trimTrailingPathSeparators(workspaceRoot)),
+  );
+  const workspaceLabel = basenameOfPath(normalizedWorkspaceRoot);
+  const workspaceRootWithSlash = `${normalizedWorkspaceRoot}/`;
+  const workspaceLabelWithSlash = `${workspaceLabel}/`;
+
+  if (normalizedPath === normalizedWorkspaceRoot) {
+    return "";
+  }
+  if (normalizedPath.startsWith(workspaceRootWithSlash)) {
+    return normalizedPath.slice(workspaceRootWithSlash.length);
+  }
+  if (normalizedPath.startsWith(workspaceLabelWithSlash)) {
+    return normalizedPath.slice(workspaceLabelWithSlash.length);
+  }
+  if (!normalizedPath.startsWith("/")) {
+    return stripRelativePrefixes(normalizedPath);
+  }
+  return null;
+}

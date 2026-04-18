@@ -5,16 +5,15 @@ import {
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
+  type ProjectId,
   type ProjectScript,
   type ProviderKind,
-  type ProjectId,
   type ProviderApprovalDecision,
   type ServerProvider,
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type ThreadId,
   type TurnId,
-  type KeybindingCommand,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   RuntimeMode,
@@ -30,7 +29,7 @@ import { applyClaudePromptEffortPrefix, createModelSelection } from "@t3tools/sh
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
@@ -97,18 +96,11 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { ChevronDownIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { toastManager } from "./ui/toast";
-import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
-import { type NewProjectScriptInput } from "./ProjectScriptsControl";
-import {
-  commandForProjectScript,
-  nextProjectScriptId,
-  projectScriptIdFromCommand,
-} from "~/projectScripts";
+import { projectScriptIdFromCommand } from "~/projectScripts";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
@@ -140,6 +132,7 @@ import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
+import WorkspacePanel from "./WorkspacePanel";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
@@ -167,14 +160,14 @@ import {
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useComposerHandleContext } from "../composerHandleContext";
-import {
-  useServerAvailableEditors,
-  useServerConfig,
-  useServerKeybindings,
-} from "~/rpc/serverState";
+import { useServerConfig, useServerKeybindings } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
+import { deriveWorkspaceArtifacts } from "../workspaceArtifacts";
+import { COWORK_SHELL } from "../coworkShell";
+import { formatWorkspaceRelativePath, resolveWorkspaceSelectionPath } from "../filePathDisplay";
+import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -182,6 +175,8 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const WORKSPACE_INLINE_DEFAULT_WIDTH = "clamp(24rem,38vw,48rem)";
+const WORKSPACE_INLINE_SIDEBAR_MIN_WIDTH = 22 * 16;
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
 
@@ -664,6 +659,7 @@ export default function ChatView(props: ChatViewProps) {
   const composerRef = useComposerHandleContext() ?? localComposerRef;
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
+  const [workspacePanelFocusedPath, setWorkspacePanelFocusedPath] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
@@ -700,7 +696,7 @@ export default function ChatView(props: ChatViewProps) {
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null);
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
-  const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
+  const [, setLastInvokedScriptByProjectId] = useLocalStorage(
     LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
     {},
     LastInvokedScriptByProjectSchema,
@@ -790,7 +786,7 @@ export default function ChatView(props: ChatViewProps) {
     composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
-  const diffOpen = rawSearch.diff === "1";
+  const diffOpen = !COWORK_SHELL.hideDiffSurfaces && rawSearch.diff === "1";
   const activeThreadId = activeThread?.id ?? null;
   const activeThreadRef = useMemo(
     () => (activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null),
@@ -1126,7 +1122,7 @@ export default function ChatView(props: ChatViewProps) {
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
-  const planSidebarLabel = sidebarProposedPlan || interactionMode === "plan" ? "Plan" : "Tasks";
+  const planSidebarLabel = "Workspace";
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
@@ -1354,6 +1350,26 @@ export default function ChatView(props: ChatViewProps) {
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
+  const workspaceArtifacts = useMemo(
+    () => deriveWorkspaceArtifacts({ turnDiffSummaries, workEntries: workLogEntries }),
+    [turnDiffSummaries, workLogEntries],
+  );
+  const latestWorkspaceArtifact = workspaceArtifacts[0] ?? null;
+  const currentWorkspacePanelKey = useMemo(() => {
+    if (activePlan?.turnId) {
+      return `plan:${activePlan.turnId}`;
+    }
+    if (sidebarProposedPlan?.turnId) {
+      return `plan:${sidebarProposedPlan.turnId}`;
+    }
+    if (latestWorkspaceArtifact?.turnId) {
+      return `artifact:${latestWorkspaceArtifact.turnId}`;
+    }
+    if (latestWorkspaceArtifact) {
+      return `artifact:${latestWorkspaceArtifact.path}:${latestWorkspaceArtifact.completedAt}`;
+    }
+    return "__dismissed__";
+  }, [activePlan?.turnId, latestWorkspaceArtifact, sidebarProposedPlan?.turnId]);
   const turnDiffSummaryByAssistantMessageId = useMemo(() => {
     const byMessageId = new Map<MessageId, TurnDiffSummary>();
     for (const summary of turnDiffSummaries) {
@@ -1422,7 +1438,6 @@ export default function ChatView(props: ChatViewProps) {
     : null;
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
   const keybindings = useServerKeybindings();
-  const availableEditors = useServerAvailableEditors();
   const activeProviderStatus = useMemo(
     () => providerStatuses.find((status) => status.provider === selectedProvider) ?? null,
     [selectedProvider, providerStatuses],
@@ -1430,6 +1445,10 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+  const canShowWorkspacePanel =
+    Boolean(activeWorkspaceRoot) ||
+    workspaceArtifacts.length > 0 ||
+    Boolean(activePlan || sidebarProposedPlan || planSidebarOpen);
   const activeTerminalLaunchContext =
     terminalLaunchContext?.threadId === activeThreadId
       ? terminalLaunchContext
@@ -1445,19 +1464,6 @@ export default function ChatView(props: ChatViewProps) {
     }),
     [terminalState.terminalOpen],
   );
-  const nonTerminalShortcutLabelOptions = useMemo(
-    () => ({
-      context: {
-        terminalFocus: false,
-        terminalOpen: Boolean(terminalState.terminalOpen),
-      },
-    }),
-    [terminalState.terminalOpen],
-  );
-  const terminalToggleShortcutLabel = useMemo(
-    () => shortcutLabelForCommand(keybindings, "terminal.toggle"),
-    [keybindings],
-  );
   const splitTerminalShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "terminal.split", terminalShortcutLabelOptions),
     [keybindings, terminalShortcutLabelOptions],
@@ -1469,10 +1475,6 @@ export default function ChatView(props: ChatViewProps) {
   const closeTerminalShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "terminal.close", terminalShortcutLabelOptions),
     [keybindings, terminalShortcutLabelOptions],
-  );
-  const diffPanelShortcutLabel = useMemo(
-    () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
-    [keybindings, nonTerminalShortcutLabelOptions],
   );
   const onToggleDiff = useCallback(() => {
     if (!isServerThread) {
@@ -1566,6 +1568,26 @@ export default function ChatView(props: ChatViewProps) {
   const addTerminalContextToDraft = useCallback((selection: TerminalContextSelection) => {
     composerRef.current?.addTerminalContext(selection);
   }, []);
+  const addWorkspaceTextToComposer = useCallback(
+    (input: { path: string; text: string }) => {
+      const snippet = [
+        `From ${formatWorkspaceRelativePath(input.path, activeWorkspaceRoot)}:`,
+        '"""',
+        input.text.trim(),
+        '"""',
+      ].join("\n");
+      const nextPrompt =
+        promptRef.current.trim().length > 0
+          ? `${promptRef.current.trimEnd()}\n\n${snippet}`
+          : snippet;
+      promptRef.current = nextPrompt;
+      setComposerDraftPrompt(composerDraftTarget, nextPrompt);
+      window.requestAnimationFrame(() => {
+        composerRef.current?.focusAt(nextPrompt.length);
+      });
+    },
+    [activeWorkspaceRoot, composerDraftTarget, setComposerDraftPrompt],
+  );
   const setTerminalOpen = useCallback(
     (open: boolean) => {
       if (!activeThreadRef) return;
@@ -1732,139 +1754,6 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
-  const persistProjectScripts = useCallback(
-    async (input: {
-      projectId: ProjectId;
-      projectCwd: string;
-      previousScripts: ProjectScript[];
-      nextScripts: ProjectScript[];
-      keybinding?: string | null;
-      keybindingCommand: KeybindingCommand;
-    }) => {
-      const api = readEnvironmentApi(environmentId);
-      if (!api) return;
-
-      await api.orchestration.dispatchCommand({
-        type: "project.meta.update",
-        commandId: newCommandId(),
-        projectId: input.projectId,
-        scripts: input.nextScripts,
-      });
-
-      const keybindingRule = decodeProjectScriptKeybindingRule({
-        keybinding: input.keybinding,
-        command: input.keybindingCommand,
-      });
-
-      if (isElectron && keybindingRule) {
-        const localApi = readLocalApi();
-        if (!localApi) {
-          throw new Error("Local API unavailable.");
-        }
-        await localApi.server.upsertKeybinding(keybindingRule);
-      }
-    },
-    [environmentId],
-  );
-  const saveProjectScript = useCallback(
-    async (input: NewProjectScriptInput) => {
-      if (!activeProject) return;
-      const nextId = nextProjectScriptId(
-        input.name,
-        activeProject.scripts.map((script) => script.id),
-      );
-      const nextScript: ProjectScript = {
-        id: nextId,
-        name: input.name,
-        command: input.command,
-        icon: input.icon,
-        runOnWorktreeCreate: input.runOnWorktreeCreate,
-      };
-      const nextScripts = input.runOnWorktreeCreate
-        ? [
-            ...activeProject.scripts.map((script) =>
-              script.runOnWorktreeCreate ? { ...script, runOnWorktreeCreate: false } : script,
-            ),
-            nextScript,
-          ]
-        : [...activeProject.scripts, nextScript];
-
-      await persistProjectScripts({
-        projectId: activeProject.id,
-        projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
-        nextScripts,
-        keybinding: input.keybinding,
-        keybindingCommand: commandForProjectScript(nextId),
-      });
-    },
-    [activeProject, persistProjectScripts],
-  );
-  const updateProjectScript = useCallback(
-    async (scriptId: string, input: NewProjectScriptInput) => {
-      if (!activeProject) return;
-      const existingScript = activeProject.scripts.find((script) => script.id === scriptId);
-      if (!existingScript) {
-        throw new Error("Script not found.");
-      }
-
-      const updatedScript: ProjectScript = {
-        ...existingScript,
-        name: input.name,
-        command: input.command,
-        icon: input.icon,
-        runOnWorktreeCreate: input.runOnWorktreeCreate,
-      };
-      const nextScripts = activeProject.scripts.map((script) =>
-        script.id === scriptId
-          ? updatedScript
-          : input.runOnWorktreeCreate
-            ? { ...script, runOnWorktreeCreate: false }
-            : script,
-      );
-
-      await persistProjectScripts({
-        projectId: activeProject.id,
-        projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
-        nextScripts,
-        keybinding: input.keybinding,
-        keybindingCommand: commandForProjectScript(scriptId),
-      });
-    },
-    [activeProject, persistProjectScripts],
-  );
-  const deleteProjectScript = useCallback(
-    async (scriptId: string) => {
-      if (!activeProject) return;
-      const nextScripts = activeProject.scripts.filter((script) => script.id !== scriptId);
-
-      const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name;
-
-      try {
-        await persistProjectScripts({
-          projectId: activeProject.id,
-          projectCwd: activeProject.cwd,
-          previousScripts: activeProject.scripts,
-          nextScripts,
-          keybinding: null,
-          keybindingCommand: commandForProjectScript(scriptId),
-        });
-        toastManager.add({
-          type: "success",
-          title: `Deleted action "${deletedName ?? "Unknown"}"`,
-        });
-      } catch (error) {
-        toastManager.add({
-          type: "error",
-          title: "Could not delete action",
-          description: error instanceof Error ? error.message : "An unexpected error occurred.",
-        });
-      }
-    },
-    [activeProject, persistProjectScripts],
-  );
-
   const handleRuntimeModeChange = useCallback(
     (mode: RuntimeMode) => {
       if (mode === runtimeMode) return;
@@ -1908,19 +1797,59 @@ export default function ChatView(props: ChatViewProps) {
   const togglePlanSidebar = useCallback(() => {
     setPlanSidebarOpen((open) => {
       if (open) {
-        planSidebarDismissedForTurnRef.current =
-          activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
+        planSidebarDismissedForTurnRef.current = currentWorkspacePanelKey;
       } else {
         planSidebarDismissedForTurnRef.current = null;
       }
       return !open;
     });
-  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+  }, [currentWorkspacePanelKey]);
   const closePlanSidebar = useCallback(() => {
     setPlanSidebarOpen(false);
-    planSidebarDismissedForTurnRef.current =
-      activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+    planSidebarDismissedForTurnRef.current = currentWorkspacePanelKey;
+  }, [currentWorkspacePanelKey]);
+  const handleWorkspacePanelOpenChange = useCallback(
+    (open: boolean) => {
+      if (open) {
+        planSidebarDismissedForTurnRef.current = null;
+        setPlanSidebarOpen(true);
+        return;
+      }
+      closePlanSidebar();
+    },
+    [closePlanSidebar],
+  );
+  const shouldAcceptWorkspaceSidebarWidth = useCallback(
+    ({
+      nextWidth,
+    }: {
+      currentWidth: number;
+      nextWidth: number;
+      rail: HTMLButtonElement;
+      side: "left" | "right";
+      sidebarRoot: HTMLElement;
+      wrapper: HTMLElement;
+    }) => {
+      if (typeof window === "undefined") {
+        return true;
+      }
+      return nextWidth <= window.innerWidth * 0.6;
+    },
+    [],
+  );
+  const openWorkspaceFileInPanel = useCallback(
+    (path: string) => {
+      const selectionPath = resolveWorkspaceSelectionPath(path, activeWorkspaceRoot);
+      if (!selectionPath) {
+        return false;
+      }
+      planSidebarDismissedForTurnRef.current = null;
+      setWorkspacePanelFocusedPath(selectionPath);
+      setPlanSidebarOpen(true);
+      return true;
+    },
+    [activeWorkspaceRoot],
+  );
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -2012,17 +1941,25 @@ export default function ChatView(props: ChatViewProps) {
     planSidebarDismissedForTurnRef.current = null;
   }, [activeThread?.id]);
 
-  // Auto-open the plan sidebar when plan/todo steps arrive for the current turn.
-  // Don't auto-open for plans carried over from a previous turn (the user can open manually).
+  // Auto-open the workspace panel for new plans and for the latest completed turn's outputs.
   useEffect(() => {
-    if (!activePlan) return;
     if (planSidebarOpen) return;
     const latestTurnId = activeLatestTurn?.turnId ?? null;
-    if (latestTurnId && activePlan.turnId !== latestTurnId) return;
-    const turnKey = activePlan.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-    if (planSidebarDismissedForTurnRef.current === turnKey) return;
+    const shouldAutoOpenForPlan =
+      !!activePlan &&
+      (!latestTurnId || activePlan.turnId === null || activePlan.turnId === latestTurnId);
+    const shouldAutoOpenForArtifacts =
+      !!latestTurnId && latestWorkspaceArtifact?.turnId === latestTurnId;
+    if (!shouldAutoOpenForPlan && !shouldAutoOpenForArtifacts) return;
+    if (planSidebarDismissedForTurnRef.current === currentWorkspacePanelKey) return;
     setPlanSidebarOpen(true);
-  }, [activePlan, activeLatestTurn?.turnId, planSidebarOpen, sidebarProposedPlan?.turnId]);
+  }, [
+    activePlan,
+    activeLatestTurn?.turnId,
+    currentWorkspacePanelKey,
+    latestWorkspaceArtifact?.turnId,
+    planSidebarOpen,
+  ]);
 
   useEffect(() => {
     setIsRevertingCheckpoint(false);
@@ -2241,6 +2178,9 @@ export default function ChatView(props: ChatViewProps) {
       if (!command) return;
 
       if (command === "terminal.toggle") {
+        if (COWORK_SHELL.hideTerminalSurfaces) {
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         toggleTerminalVisibility();
@@ -2248,6 +2188,9 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "terminal.split") {
+        if (COWORK_SHELL.hideTerminalSurfaces) {
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         if (!terminalState.terminalOpen) {
@@ -2258,6 +2201,9 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "terminal.close") {
+        if (COWORK_SHELL.hideTerminalSurfaces) {
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         if (!terminalState.terminalOpen) return;
@@ -2266,6 +2212,9 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "terminal.new") {
+        if (COWORK_SHELL.hideTerminalSurfaces) {
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         if (!terminalState.terminalOpen) {
@@ -2276,6 +2225,9 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "diff.toggle") {
+        if (COWORK_SHELL.hideDiffSurfaces) {
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         onToggleDiff();
@@ -3163,7 +3115,7 @@ export default function ChatView(props: ChatViewProps) {
   }, []);
   const onOpenTurnDiff = useCallback(
     (turnId: TurnId, filePath?: string) => {
-      if (!isServerThread) {
+      if (!isServerThread || COWORK_SHELL.hideDiffSurfaces) {
         return;
       }
       onDiffPanelOpen?.();
@@ -3203,7 +3155,7 @@ export default function ChatView(props: ChatViewProps) {
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+    <div className="cowork-shell flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
       {/* Top bar */}
       <header
         className={cn(
@@ -3223,26 +3175,9 @@ export default function ChatView(props: ChatViewProps) {
           {...(routeKind === "draft" && draftId ? { draftId } : {})}
           activeThreadTitle={activeThread.title}
           activeProjectName={activeProject?.name}
-          isGitRepo={isGitRepo}
-          openInCwd={gitCwd}
-          activeProjectScripts={activeProject?.scripts}
-          preferredScriptId={
-            activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-          }
-          keybindings={keybindings}
-          availableEditors={availableEditors}
-          terminalAvailable={activeProject !== undefined}
-          terminalOpen={terminalState.terminalOpen}
-          terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-          diffToggleShortcutLabel={diffPanelShortcutLabel}
-          gitCwd={gitCwd}
-          diffOpen={diffOpen}
-          onRunProjectScript={runProjectScript}
-          onAddProjectScript={saveProjectScript}
-          onUpdateProjectScript={updateProjectScript}
-          onDeleteProjectScript={deleteProjectScript}
-          onToggleTerminal={toggleTerminalVisibility}
-          onToggleDiff={onToggleDiff}
+          showWorkspaceToggle={canShowWorkspacePanel}
+          workspacePanelOpen={planSidebarOpen}
+          onToggleWorkspacePanel={togglePlanSidebar}
         />
       </header>
 
@@ -3282,6 +3217,7 @@ export default function ChatView(props: ChatViewProps) {
               timestampFormat={timestampFormat}
               workspaceRoot={activeWorkspaceRoot}
               onIsAtEndChange={onIsAtEndChange}
+              onOpenWorkspaceFile={openWorkspaceFileInPanel}
             />
 
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
@@ -3330,6 +3266,7 @@ export default function ChatView(props: ChatViewProps) {
               activeProposedPlan={activeProposedPlan}
               activePlan={activePlan as { turnId?: TurnId } | null}
               sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
+              showWorkspacePanelToggle={canShowWorkspacePanel}
               planSidebarLabel={planSidebarLabel}
               planSidebarOpen={planSidebarOpen}
               runtimeMode={runtimeMode}
@@ -3369,7 +3306,7 @@ export default function ChatView(props: ChatViewProps) {
             />
           </div>
 
-          {isGitRepo && (
+          {isGitRepo && !COWORK_SHELL.hideGitSurfaces && (
             <BranchToolbar
               environmentId={activeThread.environmentId}
               threadId={activeThread.id}
@@ -3414,52 +3351,92 @@ export default function ChatView(props: ChatViewProps) {
         </div>
         {/* end chat column */}
 
-        {/* Plan sidebar */}
-        {planSidebarOpen && !shouldUsePlanSidebarSheet ? (
-          <PlanSidebar
-            activePlan={activePlan}
-            activeProposedPlan={sidebarProposedPlan}
-            label={planSidebarLabel}
-            environmentId={environmentId}
-            markdownCwd={gitCwd ?? undefined}
-            workspaceRoot={activeWorkspaceRoot}
-            timestampFormat={timestampFormat}
-            mode="sidebar"
-            onClose={closePlanSidebar}
-          />
+        {/* Workspace panel */}
+        {!shouldUsePlanSidebarSheet ? (
+          <SidebarProvider
+            defaultOpen={false}
+            open={planSidebarOpen}
+            onOpenChange={handleWorkspacePanelOpenChange}
+            className="w-auto min-h-0 flex-none bg-transparent"
+            style={{ "--sidebar-width": WORKSPACE_INLINE_DEFAULT_WIDTH } as CSSProperties}
+          >
+            <Sidebar
+              side="right"
+              collapsible="offcanvas"
+              className="border-l border-border bg-card text-foreground"
+              resizable={{
+                minWidth: WORKSPACE_INLINE_SIDEBAR_MIN_WIDTH,
+                shouldAcceptWidth: shouldAcceptWorkspaceSidebarWidth,
+              }}
+            >
+              {planSidebarOpen ? (
+                <WorkspacePanel
+                  open={planSidebarOpen}
+                  activePlan={activePlan}
+                  activeProposedPlan={sidebarProposedPlan}
+                  environmentId={environmentId}
+                  markdownCwd={gitCwd ?? undefined}
+                  workspaceRoot={activeWorkspaceRoot}
+                  resolvedTheme={resolvedTheme}
+                  timestampFormat={timestampFormat}
+                  artifacts={workspaceArtifacts}
+                  workEntries={workLogEntries}
+                  turnDiffSummaries={turnDiffSummaries}
+                  inferredCheckpointTurnCountByTurnId={inferredCheckpointTurnCountByTurnId}
+                  focusedPath={workspacePanelFocusedPath}
+                  threadId={activeThread.id}
+                  mode="sidebar"
+                  onClose={closePlanSidebar}
+                  onOpenTurnDiff={onOpenTurnDiff}
+                  onAddTextToChat={addWorkspaceTextToComposer}
+                />
+              ) : null}
+              <SidebarRail />
+            </Sidebar>
+          </SidebarProvider>
         ) : null}
       </div>
       {/* end horizontal flex container */}
 
-      {mountedTerminalThreadRefs.map(({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
-        <PersistentThreadTerminalDrawer
-          key={mountedThreadKey}
-          threadRef={mountedThreadRef}
-          threadId={mountedThreadRef.threadId}
-          visible={mountedThreadKey === activeThreadKey && terminalState.terminalOpen}
-          launchContext={
-            mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
-          }
-          focusRequestId={mountedThreadKey === activeThreadKey ? terminalFocusRequestId : 0}
-          splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
-          newShortcutLabel={newTerminalShortcutLabel ?? undefined}
-          closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
-          keybindings={keybindings}
-          onAddTerminalContext={addTerminalContextToDraft}
-        />
-      ))}
+      {!COWORK_SHELL.hideTerminalSurfaces &&
+        mountedTerminalThreadRefs.map(({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
+          <PersistentThreadTerminalDrawer
+            key={mountedThreadKey}
+            threadRef={mountedThreadRef}
+            threadId={mountedThreadRef.threadId}
+            visible={mountedThreadKey === activeThreadKey && terminalState.terminalOpen}
+            launchContext={
+              mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
+            }
+            focusRequestId={mountedThreadKey === activeThreadKey ? terminalFocusRequestId : 0}
+            splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
+            newShortcutLabel={newTerminalShortcutLabel ?? undefined}
+            closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+            keybindings={keybindings}
+            onAddTerminalContext={addTerminalContextToDraft}
+          />
+        ))}
       {shouldUsePlanSidebarSheet ? (
         <RightPanelSheet open={planSidebarOpen} onClose={closePlanSidebar}>
-          <PlanSidebar
+          <WorkspacePanel
+            open={planSidebarOpen}
             activePlan={activePlan}
             activeProposedPlan={sidebarProposedPlan}
-            label={planSidebarLabel}
             environmentId={environmentId}
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeWorkspaceRoot}
+            resolvedTheme={resolvedTheme}
             timestampFormat={timestampFormat}
+            artifacts={workspaceArtifacts}
+            workEntries={workLogEntries}
+            turnDiffSummaries={turnDiffSummaries}
+            inferredCheckpointTurnCountByTurnId={inferredCheckpointTurnCountByTurnId}
+            focusedPath={workspacePanelFocusedPath}
+            threadId={activeThread.id}
             mode="sheet"
             onClose={closePlanSidebar}
+            onOpenTurnDiff={onOpenTurnDiff}
+            onAddTextToChat={addWorkspaceTextToComposer}
           />
         </RightPanelSheet>
       ) : null}

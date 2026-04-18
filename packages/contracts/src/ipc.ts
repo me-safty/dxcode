@@ -20,6 +20,10 @@ import type {
 } from "./git.ts";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type {
+  ProjectListEntriesInput,
+  ProjectListEntriesResult,
+  ProjectReadFileInput,
+  ProjectReadFileResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
   ProjectWriteFileInput,
@@ -242,7 +246,9 @@ export interface EnvironmentApi {
     onEvent: (callback: (event: TerminalEvent) => void) => () => void;
   };
   projects: {
+    listEntries: (input: ProjectListEntriesInput) => Promise<ProjectListEntriesResult>;
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
+    readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
   };
   filesystem: {

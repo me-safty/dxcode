@@ -23,6 +23,7 @@ import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
 import { RightPanelSheet } from "../components/RightPanelSheet";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
+import { COWORK_SHELL } from "../coworkShell";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
 const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
@@ -165,7 +166,7 @@ function ChatThreadRouteView() {
   const routeThreadExists = threadExists || draftThreadExists;
   const serverThreadStarted = threadHasStarted(serverThread);
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
-  const diffOpen = search.diff === "1";
+  const diffOpen = !COWORK_SHELL.hideDiffSurfaces && search.diff === "1";
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
   const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
@@ -235,7 +236,7 @@ function ChatThreadRouteView() {
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
 
-  if (!shouldUseDiffSheet) {
+  if (!shouldUseDiffSheet || COWORK_SHELL.hideDiffSurfaces) {
     return (
       <>
         <SidebarInset className="h-dvh  min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -247,12 +248,14 @@ function ChatThreadRouteView() {
             routeKind="server"
           />
         </SidebarInset>
-        <DiffPanelInlineSidebar
-          diffOpen={diffOpen}
-          onCloseDiff={closeDiff}
-          onOpenDiff={openDiff}
-          renderDiffContent={shouldRenderDiffContent}
-        />
+        {!COWORK_SHELL.hideDiffSurfaces ? (
+          <DiffPanelInlineSidebar
+            diffOpen={diffOpen}
+            onCloseDiff={closeDiff}
+            onOpenDiff={openDiff}
+            renderDiffContent={shouldRenderDiffContent}
+          />
+        ) : null}
       </>
     );
   }

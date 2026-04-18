@@ -49,7 +49,36 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
     yield* workspaceEntries.invalidate(input.cwd);
     return { relativePath: target.relativePath };
   });
-  return { writeFile } satisfies WorkspaceFileSystemShape;
+
+  const readFile: WorkspaceFileSystemShape["readFile"] = Effect.fn("WorkspaceFileSystem.readFile")(
+    function* (input) {
+      const target = yield* workspacePaths.resolveRelativePathWithinRoot({
+        workspaceRoot: input.cwd,
+        relativePath: input.relativePath,
+      });
+      const maxBytes = input.maxBytes ?? 32_000;
+      const contents = yield* fileSystem.readFileString(target.absolutePath).pipe(
+        Effect.mapError(
+          (cause) =>
+            new WorkspaceFileSystemError({
+              cwd: input.cwd,
+              relativePath: input.relativePath,
+              operation: "workspaceFileSystem.readFile",
+              detail: cause.message,
+              cause,
+            }),
+        ),
+      );
+      const truncated = contents.length > maxBytes;
+      return {
+        relativePath: target.relativePath,
+        contents: truncated ? contents.slice(0, maxBytes) : contents,
+        truncated,
+      };
+    },
+  );
+
+  return { readFile, writeFile } satisfies WorkspaceFileSystemShape;
 });
 
 export const WorkspaceFileSystemLive = Layer.effect(WorkspaceFileSystem, makeWorkspaceFileSystem);

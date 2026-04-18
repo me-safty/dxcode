@@ -59,7 +59,7 @@ import {
 } from "@t3tools/contracts/settings";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
-import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
+import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform, newCommandId } from "../lib/utils";
 import {
@@ -180,12 +180,12 @@ import {
 } from "../sidebarProjectGrouping";
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
-  updated_at: "Last user message",
+  updated_at: "Last activity",
   created_at: "Created at",
   manual: "Manual",
 };
 const SIDEBAR_THREAD_SORT_LABELS: Record<SidebarThreadSortOrder, string> = {
-  updated_at: "Last user message",
+  updated_at: "Last activity",
   created_at: "Created at",
 };
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
@@ -813,7 +813,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             data-thread-selection-safe
             className="flex h-6 w-full translate-x-0 items-center px-2 text-left text-[10px] text-muted-foreground/60"
           >
-            <span>No threads yet</span>
+            <span>No tasks yet</span>
           </div>
         </SidebarMenuSubItem>
       ) : null}
@@ -863,7 +863,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
           >
             <span className="flex min-w-0 flex-1 items-center gap-2">
               {hiddenThreadStatus && <ThreadStatusLabel status={hiddenThreadStatus} compact />}
-              <span>Show more</span>
+              <span>Show more tasks</span>
             </span>
           </SidebarMenuSubButton>
         </SidebarMenuSubItem>
@@ -879,7 +879,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               collapseThreadListForProject(projectKey);
             }}
           >
-            <span>Show less</span>
+            <span>Show fewer tasks</span>
           </SidebarMenuSubButton>
         </SidebarMenuSubItem>
       )}
@@ -2016,7 +2016,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               <div className="pointer-events-none absolute top-1 right-1.5 opacity-0 transition-opacity duration-150 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
                 <button
                   type="button"
-                  aria-label={`Create new thread in ${project.displayName}`}
+                  aria-label={`Create new task in ${project.displayName}`}
                   data-testid="new-thread-button"
                   className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                   onClick={handleCreateThreadClick}
@@ -2027,7 +2027,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             }
           />
           <TooltipPopup side="top">
-            {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+            {newThreadShortcutLabel ? `New task (${newThreadShortcutLabel})` : "New task"}
           </TooltipPopup>
         </Tooltip>
       </div>
@@ -2243,12 +2243,12 @@ function ProjectSortMenu({
         >
           <ArrowUpDownIcon className="size-3.5" />
         </TooltipTrigger>
-        <TooltipPopup side="right">Sort projects</TooltipPopup>
+        <TooltipPopup side="right">Sort workspaces and tasks</TooltipPopup>
       </Tooltip>
       <MenuPopup align="end" side="bottom" className="min-w-44">
         <MenuGroup>
           <div className="px-2 py-1 sm:text-xs font-medium text-muted-foreground">
-            Sort projects
+            Sort workspaces
           </div>
           <MenuRadioGroup
             value={projectSortOrder}
@@ -2267,7 +2267,7 @@ function ProjectSortMenu({
         </MenuGroup>
         <MenuGroup>
           <div className="px-2 pt-2 pb-1 sm:text-xs font-medium text-muted-foreground">
-            Sort threads
+            Sort tasks
           </div>
           <MenuRadioGroup
             value={threadSortOrder}
@@ -2362,15 +2362,18 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
         <TooltipTrigger
           render={
             <Link
-              aria-label="Go to threads"
-              className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
+              aria-label="Go to tasks"
+              className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-2xl border border-border/60 bg-card/72 px-2.5 py-2 outline-hidden ring-ring shadow-[0_18px_40px_-34px_rgba(0,0,0,0.75)] transition-colors hover:text-foreground focus-visible:ring-2"
               to="/"
             >
               <T3Wordmark />
-              <span className="truncate text-sm font-medium tracking-tight text-muted-foreground">
-                Code
+              <span className="truncate text-sm font-medium tracking-tight text-foreground/90">
+                {APP_BASE_NAME}
               </span>
-              <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+              <span className="rounded-full border border-border/70 bg-background/40 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/70">
+                Tasks
+              </span>
+              <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/45">
                 {APP_STAGE_LABEL}
               </span>
             </Link>
@@ -2384,11 +2387,13 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
   );
 
   return isElectron ? (
-    <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px] wco:h-[env(titlebar-area-height)] wco:pl-[calc(env(titlebar-area-x)+1em)]">
+    <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 border-b border-border/50 px-4 py-0 pl-[90px] wco:h-[env(titlebar-area-height)] wco:pl-[calc(env(titlebar-area-x)+1em)]">
       {wordmark}
     </SidebarHeader>
   ) : (
-    <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">{wordmark}</SidebarHeader>
+    <SidebarHeader className="gap-3 border-b border-border/50 px-3 py-3 sm:gap-2.5 sm:px-4">
+      {wordmark}
+    </SidebarHeader>
   );
 });
 
@@ -2399,17 +2404,17 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   }, [navigate]);
 
   return (
-    <SidebarFooter className="p-2">
+    <SidebarFooter className="border-t border-border/50 p-2">
       <SidebarUpdatePill />
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton
             size="sm"
-            className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+            className="gap-2 rounded-xl px-2.5 py-2 text-muted-foreground/76 hover:bg-accent/70 hover:text-foreground"
             onClick={handleSettingsClick}
           >
             <SettingsIcon className="size-3.5" />
-            <span className="text-xs">Settings</span>
+            <span className="text-xs">Preferences</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
@@ -2515,20 +2520,20 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
   return (
     <SidebarContent className="gap-0">
-      <SidebarGroup className="px-2 pt-2 pb-1">
+      <SidebarGroup className="px-2 pt-3 pb-1">
         <SidebarMenu>
           <SidebarMenuItem>
             <CommandDialogTrigger
               render={
                 <SidebarMenuButton
                   size="sm"
-                  className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:ring-0"
+                  className="gap-2 rounded-2xl border border-border/60 bg-card/70 px-3 py-2 text-muted-foreground/76 shadow-[0_18px_40px_-34px_rgba(0,0,0,0.75)] hover:bg-accent/70 hover:text-foreground focus-visible:ring-0"
                   data-testid="command-palette-trigger"
                 />
               }
             >
               <SearchIcon className="size-3.5" />
-              <span className="flex-1 truncate text-left text-xs">Search</span>
+              <span className="flex-1 truncate text-left text-xs">Find tasks</span>
               {commandPaletteShortcutLabel ? (
                 <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
                   {commandPaletteShortcutLabel}
@@ -2561,10 +2566,10 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           </Alert>
         </SidebarGroup>
       ) : null}
-      <SidebarGroup className="px-2 py-2">
+      <SidebarGroup className="px-2 py-3">
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-            Projects
+            Workspaces
           </span>
           <div className="flex items-center gap-1">
             <ProjectSortMenu
@@ -2580,7 +2585,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 render={
                   <button
                     type="button"
-                    aria-label="Add project"
+                    aria-label="Add workspace"
                     data-testid="sidebar-add-project-trigger"
                     className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
                     onClick={openAddProject}
@@ -2589,7 +2594,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
               >
                 <PlusIcon className="size-3.5" />
               </TooltipTrigger>
-              <TooltipPopup side="right">Add project</TooltipPopup>
+              <TooltipPopup side="right">Add workspace</TooltipPopup>
             </Tooltip>
           </div>
         </div>
@@ -2669,7 +2674,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
         {projectsLength === 0 && (
           <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
-            No projects yet
+            No workspaces yet
           </div>
         )}
       </SidebarGroup>

@@ -22,3 +22,9 @@ apps/web/src/components/__screenshots__
 __screenshots__/
 .tanstack
 squashfs-root/
+
+# Atelier runtime state (server persistence / worktrees / nested upstream copy)
+apps/server/userdata/
+apps/server/worktrees/
+apps/server/caches/
+t3code-src/

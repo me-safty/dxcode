@@ -59,7 +59,7 @@ import {
   shouldUseCompactComposerFooter,
 } from "../composerFooterLayout";
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
-import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./ProviderModelPicker";
+import { ProviderModelPicker } from "./ProviderModelPicker";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
@@ -87,7 +87,7 @@ import { toastManager } from "../ui/toast";
 import {
   BotIcon,
   CircleAlertIcon,
-  ListTodoIcon,
+  FolderOutputIcon,
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
@@ -103,6 +103,7 @@ import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
+import { formatProviderDisplayLabel } from "../../coworkShell";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -256,7 +257,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                 : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`
             }
           >
-            <ListTodoIcon />
+            <FolderOutputIcon />
             <span className="sr-only sm:not-sr-only">{props.planSidebarLabel}</span>
           </Button>
         </>
@@ -391,6 +392,7 @@ export interface ChatComposerProps {
   activeProposedPlan: Thread["proposedPlans"][number] | null;
   activePlan: { turnId?: TurnId } | null;
   sidebarProposedPlan: { turnId?: TurnId } | null;
+  showWorkspacePanelToggle: boolean;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
 
@@ -486,6 +488,7 @@ export const ChatComposer = memo(
       activeProposedPlan,
       activePlan,
       sidebarProposedPlan,
+      showWorkspacePanelToggle,
       planSidebarLabel,
       planSidebarOpen,
       runtimeMode,
@@ -603,41 +606,43 @@ export const ChatComposer = memo(
       [selectedModel, selectedModelOptionsForDispatch, selectedProvider],
     );
     const selectedModelForPicker = selectedModel;
-    const modelOptionsByProvider = useMemo<
-      Record<ProviderKind, ReadonlyArray<ServerProvider["models"][number]>>
-    >(
-      () => ({
-        codex: providerStatuses.find((provider) => provider.provider === "codex")?.models ?? [],
-        claudeAgent:
-          providerStatuses.find((provider) => provider.provider === "claudeAgent")?.models ?? [],
-        opencode:
-          providerStatuses.find((provider) => provider.provider === "opencode")?.models ?? [],
-        cursor: providerStatuses.find((provider) => provider.provider === "cursor")?.models ?? [],
-      }),
+    const modelOptionsByProvider = useMemo(
+      () =>
+        new Map<ProviderKind, ReadonlyArray<ServerProvider["models"][number]>>(
+          providerStatuses.map((provider) => [provider.provider, provider.models]),
+        ),
       [providerStatuses],
     );
     const selectedModelForPickerWithCustomFallback = useMemo(() => {
-      const currentOptions = modelOptionsByProvider[selectedProvider];
+      const currentOptions = modelOptionsByProvider.get(selectedProvider) ?? [];
       return currentOptions.some((option) => option.slug === selectedModelForPicker)
         ? selectedModelForPicker
         : (normalizeModelSlug(selectedModelForPicker, selectedProvider) ?? selectedModelForPicker);
     }, [modelOptionsByProvider, selectedModelForPicker, selectedProvider]);
+    const pickerProviders = useMemo(() => {
+      if (providerStatuses.length > 0) {
+        return providerStatuses.filter(
+          (provider) => provider.models.length > 0 || provider.provider === selectedProvider,
+        );
+      }
+      return [];
+    }, [providerStatuses, selectedProvider]);
     const searchableModelOptions = useMemo(
       () =>
-        AVAILABLE_PROVIDER_OPTIONS.filter(
-          (option) => lockedProvider === null || option.value === lockedProvider,
-        ).flatMap((option) =>
-          modelOptionsByProvider[option.value].map(({ slug, name }) => ({
-            provider: option.value,
-            providerLabel: option.label,
-            slug,
-            name,
-            searchSlug: slug.toLowerCase(),
-            searchName: name.toLowerCase(),
-            searchProvider: option.label.toLowerCase(),
-          })),
-        ),
-      [lockedProvider, modelOptionsByProvider],
+        pickerProviders
+          .filter((provider) => lockedProvider === null || provider.provider === lockedProvider)
+          .flatMap((provider) =>
+            (modelOptionsByProvider.get(provider.provider) ?? []).map(({ slug, name }) => ({
+              provider: provider.provider,
+              providerLabel: formatProviderDisplayLabel(provider.provider),
+              slug,
+              name,
+              searchSlug: slug.toLowerCase(),
+              searchName: name.toLowerCase(),
+              searchProvider: formatProviderDisplayLabel(provider.provider).toLowerCase(),
+            })),
+          ),
+      [lockedProvider, modelOptionsByProvider, pickerProviders],
     );
 
     // ------------------------------------------------------------------
@@ -844,7 +849,7 @@ export const ChatComposer = memo(
       (showPlanFollowUpPrompt && activeProposedPlan !== null);
 
     const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
-    const showPlanSidebarToggle = Boolean(activePlan || sidebarProposedPlan || planSidebarOpen);
+    const showPlanSidebarToggle = showWorkspacePanelToggle;
     const composerFooterActionLayoutKey = useMemo(() => {
       if (activePendingProgress) {
         return `pending:${activePendingProgress.questionIndex}:${activePendingProgress.isLastQuestion}:${activePendingIsResponding}`;
