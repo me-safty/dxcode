@@ -7,7 +7,7 @@ import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Slider } from "../ui/slider";
-import { ChatFontSizePreview } from "./ChatFontSizePreview";
+import { ChatAppearancePreview } from "./ChatAppearancePreview";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -154,7 +154,7 @@ export function AppearanceSettingsPanel() {
                 }
               }}
             />
-            <ChatFontSizePreview fontSize={settings.chatFontSize} />
+            <ChatAppearancePreview fontSize={settings.chatFontSize} />
           </div>
         </SettingsRow>
       </SettingsSection>

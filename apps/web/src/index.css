@@ -247,9 +247,9 @@ label:has(> select#reasoning-effort) select {
 [data-timeline-root] {
   font-size: var(--chat-font-size, 14px);
   --chat-text-xs: calc(var(--chat-font-size, 14px) * 12 / 14);
-  --chat-text-xxs: calc(var(--chat-font-size, 14px) * 11 / 14);
-  --chat-text-xxxs: calc(var(--chat-font-size, 14px) * 10 / 14);
-  --chat-text-mini: calc(var(--chat-font-size, 14px) * 9 / 14);
+  --chat-text-2xs: calc(var(--chat-font-size, 14px) * 11 / 14);
+  --chat-text-3xs: calc(var(--chat-font-size, 14px) * 10 / 14);
+  --chat-text-4xs: calc(var(--chat-font-size, 14px) * 9 / 14);
   --chat-code-size: calc(var(--chat-font-size, 14px) * 12 / 14);
 }
 
@@ -260,14 +260,14 @@ label:has(> select#reasoning-effort) select {
 .text-chat-xs {
   font-size: var(--chat-text-xs, 12px);
 }
-.text-chat-xxs {
-  font-size: var(--chat-text-xxs, 11px);
+.text-chat-2xs {
+  font-size: var(--chat-text-2xs, 11px);
 }
-.text-chat-xxxs {
-  font-size: var(--chat-text-xxxs, 10px);
+.text-chat-3xs {
+  font-size: var(--chat-text-3xs, 10px);
 }
-.text-chat-mini {
-  font-size: var(--chat-text-mini, 9px);
+.text-chat-4xs {
+  font-size: var(--chat-text-4xs, 9px);
 }
 
 /* Scale markdown prose and inline/code blocks inside the timeline */
