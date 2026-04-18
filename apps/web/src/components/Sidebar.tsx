@@ -2625,6 +2625,7 @@ export default function Sidebar() {
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
+  const toggleProject = useUiStateStore((store) => store.toggleProject);
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
   const isOnSettings = pathname.startsWith("/settings");
@@ -3281,6 +3282,117 @@ export default function Sidebar() {
       return next;
     });
   }, []);
+
+  const nuaSidebarSnapshot = useMemo<NuaT3SidebarSnapshot>(
+    () => ({
+      projects: sortedProjects.map((project) => {
+        const projectThreads = sortThreads(
+          (threadsByProjectKey.get(project.projectKey) ?? []).filter(
+            (thread) => thread.archivedAt === null,
+          ),
+          sidebarThreadSortOrder,
+        );
+
+        return {
+          id: `project:${project.projectKey}`,
+          kind: "project",
+          title: project.displayName,
+          isActive: activeRouteProjectKey === project.projectKey,
+          isExpanded: projectExpandedById[project.projectKey] ?? true,
+          threadCount: projectThreads.length,
+          ...(project.groupedProjectCount > 1
+            ? { subtitle: `${project.groupedProjectCount} linked projects` }
+            : {}),
+          threads: projectThreads.map((thread) => ({
+            id: `thread:${scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))}`,
+            kind: "thread",
+            title: thread.title,
+            isActive:
+              routeThreadKey === scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          })),
+        };
+      }),
+    }),
+    [
+      activeRouteProjectKey,
+      projectExpandedById,
+      routeThreadKey,
+      sidebarThreadSortOrder,
+      sortedProjects,
+      threadsByProjectKey,
+    ],
+  );
+
+  const selectSidebarEntry = useCallback(
+    (entryId: string) => {
+      if (entryId.startsWith("project:")) {
+        const projectKey = entryId.slice("project:".length);
+        if (!projectKey) {
+          return false;
+        }
+        toggleProject(projectKey);
+        return true;
+      }
+
+      if (!entryId.startsWith("thread:")) {
+        return false;
+      }
+
+      const threadKey = entryId.slice("thread:".length);
+      const threadRef = parseScopedThreadKey(threadKey);
+      if (!threadRef) {
+        return false;
+      }
+
+      navigateToThread(threadRef);
+      return true;
+    },
+    [navigateToThread, toggleProject],
+  );
+
+  useEffect(() => {
+    const hooks: NuaT3Hooks = {
+      ...window.__NUA_T3_HOOKS__,
+      getSidebarSnapshot: () => nuaSidebarSnapshot,
+      selectSidebarEntry,
+    };
+
+    window.__NUA_T3_HOOKS__ = hooks;
+    window.__NUA_T3_HOOKS = hooks;
+
+    return () => {
+      const removeSidebarHooks = (key: "__NUA_T3_HOOKS__" | "__NUA_T3_HOOKS") => {
+        const currentHooks = window[key];
+        if (!currentHooks) {
+          return;
+        }
+        if (
+          currentHooks.getSidebarSnapshot !== hooks.getSidebarSnapshot &&
+          currentHooks.selectSidebarEntry !== hooks.selectSidebarEntry
+        ) {
+          return;
+        }
+
+        const nextHooks = { ...currentHooks };
+        if (nextHooks.getSidebarSnapshot === hooks.getSidebarSnapshot) {
+          delete nextHooks.getSidebarSnapshot;
+        }
+        if (nextHooks.selectSidebarEntry === hooks.selectSidebarEntry) {
+          delete nextHooks.selectSidebarEntry;
+        }
+
+        if (Object.keys(nextHooks).length === 0) {
+          delete window[key];
+          return;
+        }
+
+        window[key] = nextHooks;
+      };
+
+      removeSidebarHooks("__NUA_T3_HOOKS__");
+      removeSidebarHooks("__NUA_T3_HOOKS");
+    };
+  }, [nuaSidebarSnapshot, selectSidebarEntry]);
 
   return (
     <>

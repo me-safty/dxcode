@@ -49,6 +49,7 @@ import {
   resolveInitialServerAuthGateState,
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
+import { hasNuaFreshThreadRequest } from "../lib/nuaFreshThread";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -215,6 +216,7 @@ function EventRouter() {
   }));
   const readPathname = useEffectEvent(() => pathname);
   const handledBootstrapThreadIdRef = useRef<string | null>(null);
+  const suppressNextBootstrapThreadRestoreRef = useRef(false);
   const seenServerConfigUpdateIdRef = useRef(getServerConfigUpdatedNotification()?.id ?? 0);
   const disposedRef = useRef(false);
   const serverConfig = useServerConfig();
@@ -252,6 +254,13 @@ function EventRouter() {
       if (readPathname() !== "/") {
         return;
       }
+      if (hasNuaFreshThreadRequest()) {
+        return;
+      }
+      if (suppressNextBootstrapThreadRestoreRef.current) {
+        suppressNextBootstrapThreadRestoreRef.current = false;
+        return;
+      }
       if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
         return;
       }
@@ -266,6 +275,32 @@ function EventRouter() {
       handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
     })().catch(() => undefined);
   });
+
+  useEffect(() => {
+    const onSuppressNextBootstrapThreadRestore = () => {
+      suppressNextBootstrapThreadRestoreRef.current = true;
+    };
+
+    window.__NUA_T3_HOOKS__ = {
+      ...window.__NUA_T3_HOOKS__,
+      suppressNextBootstrapThreadRestore: onSuppressNextBootstrapThreadRestore,
+    };
+
+    return () => {
+      if (
+        window.__NUA_T3_HOOKS__?.suppressNextBootstrapThreadRestore ===
+        onSuppressNextBootstrapThreadRestore
+      ) {
+        const nextHooks = { ...window.__NUA_T3_HOOKS__ };
+        delete nextHooks.suppressNextBootstrapThreadRestore;
+        if (Object.keys(nextHooks).length === 0) {
+          delete window.__NUA_T3_HOOKS__;
+        } else {
+          window.__NUA_T3_HOOKS__ = nextHooks;
+        }
+      }
+    };
+  }, []);
 
   const handleServerConfigUpdated = useEffectEvent(
     (notification: ServerConfigUpdatedNotification | null) => {
