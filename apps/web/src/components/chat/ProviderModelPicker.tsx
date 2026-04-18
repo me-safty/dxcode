@@ -66,7 +66,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   disabled?: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
-  showOpenCodeProviderInModelName?: boolean;
+  showOpenCodeProviderComposer?: boolean;
   onProviderModelChange: (provider: ProviderKind, model: string) => void;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -75,7 +75,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const selectedModelLabel =
     selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
   const displayModelLabel =
-    activeProvider === "opencode" && !props.showOpenCodeProviderInModelName
+    activeProvider === "opencode" && !props.showOpenCodeProviderComposer
       ? stripOpenCodeProviderPrefix(selectedModelLabel)
       : selectedModelLabel;
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[activeProvider];

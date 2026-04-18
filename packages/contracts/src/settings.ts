@@ -104,7 +104,7 @@ export const OpenCodeSettings = Schema.Struct({
   serverUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   serverPassword: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
-  showProviderInModelName: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  showProviderComposer: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type OpenCodeSettings = typeof OpenCodeSettings.Type;
 
@@ -239,7 +239,7 @@ const OpenCodeSettingsPatch = Schema.Struct({
   serverUrl: Schema.optionalKey(Schema.String),
   serverPassword: Schema.optionalKey(Schema.String),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
-  showProviderInModelName: Schema.optionalKey(Schema.Boolean),
+  showProviderComposer: Schema.optionalKey(Schema.Boolean),
 });
 
 export const ServerSettingsPatch = Schema.Struct({
