@@ -168,6 +168,16 @@ async function mountPicker(props: {
   };
 }
 
+function getModelPickerListElement() {
+  const modelPickerList = document.querySelector<HTMLElement>(".model-picker-list");
+  expect(modelPickerList).not.toBeNull();
+  return modelPickerList!;
+}
+
+function getModelPickerListText() {
+  return getModelPickerListElement().textContent ?? "";
+}
+
 describe("ProviderModelPicker", () => {
   afterEach(() => {
     document.body.innerHTML = "";
@@ -219,9 +229,9 @@ describe("ProviderModelPicker", () => {
 
       // Now should only show Codex models
       await vi.waitFor(() => {
-        const text = document.body.textContent ?? "";
-        expect(text).toContain("GPT-5 Codex");
-        expect(text).not.toContain("Claude Opus 4.6");
+        const listText = getModelPickerListText();
+        expect(listText).toContain("GPT-5 Codex");
+        expect(listText).not.toContain("Claude Opus 4.6");
       });
     } finally {
       await mounted.cleanup();
@@ -304,9 +314,9 @@ describe("ProviderModelPicker", () => {
       await searchInput.fill("codex");
 
       await vi.waitFor(() => {
-        const text = document.body.textContent ?? "";
-        expect(text).toContain("GPT-5 Codex");
-        expect(text).not.toContain("Claude Opus 4.6");
+        const listText = getModelPickerListText();
+        expect(listText).toContain("GPT-5 Codex");
+        expect(listText).not.toContain("Claude Opus 4.6");
       });
     } finally {
       await mounted.cleanup();
@@ -383,7 +393,9 @@ describe("ProviderModelPicker", () => {
       await vi.waitFor(async () => {
         const favoritesHeader = await page.getByText("FAVORITES").all();
         const allModelsHeader = await page.getByText("ALL MODELS").all();
-        const favoritedModelRows = await page.getByText("Claude Opus 4.6").all();
+        const favoritedModelRows = Array.from(
+          getModelPickerListElement().querySelectorAll<HTMLDivElement>("div.font-medium"),
+        ).filter((element) => element.textContent?.trim() === "Claude Opus 4.6");
         expect(favoritesHeader.length).toBeGreaterThan(0);
         expect(allModelsHeader.length).toBeGreaterThan(0);
         expect(favoritedModelRows.length).toBe(1);
