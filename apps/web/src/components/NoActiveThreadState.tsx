@@ -20,6 +20,7 @@ import {
   WrenchIcon,
 } from "lucide-react";
 
+import { ClaudeAI, CursorIcon, type Icon, OpenAI, OpenCodeIcon, PiIcon } from "./Icons";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { formatProviderDisplayLabel, describeProviderAvailability } from "../coworkShell";
 import { isElectron } from "../env";
@@ -97,6 +98,23 @@ const PROVIDER_MENU_ORDER: Record<ProviderKind, number> = {
   cursor: 3,
   pi: 4,
 };
+
+/**
+ * Provider-specific glyph for the Assistant chip. Mirrors the same mapping
+ * ProviderModelPicker uses so the landing composer and the in-thread
+ * composer always agree on the visual for a given backend.
+ */
+const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderKind, Icon>> = {
+  codex: OpenAI,
+  claudeAgent: ClaudeAI,
+  opencode: OpenCodeIcon,
+  cursor: CursorIcon,
+  pi: PiIcon,
+};
+
+function providerIconFor(provider: ProviderKind): Icon | typeof BotIcon {
+  return PROVIDER_ICON_BY_PROVIDER[provider] ?? BotIcon;
+}
 
 function projectKey(project: Project): string {
   return scopedProjectKey(scopeProjectRef(project.environmentId, project.id));
@@ -279,13 +297,13 @@ export function NoActiveThreadState() {
         >
           {isElectron ? (
             <span className="text-xs text-muted-foreground/50 wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]">
-              No active task
+              Start a task
             </span>
           ) : (
             <div className="flex items-center gap-2">
               <SidebarTrigger className="size-7 shrink-0 md:hidden" />
               <span className="text-sm font-medium text-foreground md:text-muted-foreground/60">
-                No active task
+                Start a task
               </span>
             </div>
           )}
@@ -365,7 +383,9 @@ export function NoActiveThreadState() {
                             }
                           >
                             <FolderOpenIcon aria-hidden="true" className="size-4 opacity-75" />
-                            <span className="truncate">{projectLabel(selectedProject)}</span>
+                            <span className="truncate">
+                              Folder: {projectLabel(selectedProject)}
+                            </span>
                             <ChevronDownIcon aria-hidden="true" className="size-3.5 opacity-55" />
                           </MenuTrigger>
                           <MenuPopup align="start" className="w-[min(28rem,calc(100vw-2rem))]">
@@ -391,54 +411,6 @@ export function NoActiveThreadState() {
                                 ))}
                               </MenuRadioGroup>
                             )}
-                          </MenuPopup>
-                        </Menu>
-
-                        <Menu>
-                          <MenuTrigger
-                            render={<LandingPillButton type="button" className="justify-start" />}
-                          >
-                            <BotIcon aria-hidden="true" className="size-4 opacity-75" />
-                            <span className="truncate">
-                              Assistant: {formatProviderDisplayLabel(selectedProvider)}
-                            </span>
-                            <ChevronDownIcon aria-hidden="true" className="size-3.5 opacity-55" />
-                          </MenuTrigger>
-                          <MenuPopup align="start" className="w-[min(22rem,calc(100vw-2rem))]">
-                            <MenuGroup>
-                              {assistantOptions.map((provider) => {
-                                const isReady =
-                                  provider.enabled &&
-                                  provider.installed &&
-                                  provider.status === "ready";
-                                return (
-                                  <MenuItem
-                                    key={provider.provider}
-                                    disabled={!isReady}
-                                    onClick={() => {
-                                      if (!isReady) return;
-                                      setRequestedProvider(provider.provider);
-                                    }}
-                                  >
-                                    <div className="min-w-0 flex-1">
-                                      <div className="font-medium">
-                                        {formatProviderDisplayLabel(provider.provider)}
-                                      </div>
-                                      {!isReady ? (
-                                        <div className="truncate text-xs text-muted-foreground/80">
-                                          {describeProviderAvailability(provider)}
-                                        </div>
-                                      ) : null}
-                                    </div>
-                                    {provider.provider === selectedProvider ? (
-                                      <span className="text-xs text-muted-foreground/75">
-                                        Selected
-                                      </span>
-                                    ) : null}
-                                  </MenuItem>
-                                );
-                              })}
-                            </MenuGroup>
                           </MenuPopup>
                         </Menu>
 
@@ -522,6 +494,74 @@ export function NoActiveThreadState() {
                                 );
                               })}
                             </MenuRadioGroup>
+                          </MenuPopup>
+                        </Menu>
+
+                        {/*
+                         * Assistant chip lives at the far right of the
+                         * composer footer, with the provider's own glyph
+                         * inside so the chip matches what the in-thread
+                         * composer ProviderModelPicker shows. `ms-auto`
+                         * pushes it to the right without breaking wrapping
+                         * on narrow widths.
+                         */}
+                        <Menu>
+                          <MenuTrigger
+                            render={
+                              <LandingPillButton type="button" className="ms-auto justify-start" />
+                            }
+                          >
+                            {(() => {
+                              const AssistantIcon = providerIconFor(selectedProvider);
+                              return (
+                                <AssistantIcon aria-hidden="true" className="size-4 opacity-85" />
+                              );
+                            })()}
+                            <span className="truncate">
+                              Assistant: {formatProviderDisplayLabel(selectedProvider)}
+                            </span>
+                            <ChevronDownIcon aria-hidden="true" className="size-3.5 opacity-55" />
+                          </MenuTrigger>
+                          <MenuPopup align="start" className="w-[min(22rem,calc(100vw-2rem))]">
+                            <MenuGroup>
+                              {assistantOptions.map((provider) => {
+                                const isReady =
+                                  provider.enabled &&
+                                  provider.installed &&
+                                  provider.status === "ready";
+                                const OptionIcon = providerIconFor(provider.provider);
+                                return (
+                                  <MenuItem
+                                    key={provider.provider}
+                                    disabled={!isReady}
+                                    onClick={() => {
+                                      if (!isReady) return;
+                                      setRequestedProvider(provider.provider);
+                                    }}
+                                  >
+                                    <OptionIcon
+                                      aria-hidden="true"
+                                      className="size-4 shrink-0 opacity-85"
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="font-medium">
+                                        {formatProviderDisplayLabel(provider.provider)}
+                                      </div>
+                                      {!isReady ? (
+                                        <div className="truncate text-xs text-muted-foreground/80">
+                                          {describeProviderAvailability(provider)}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                    {provider.provider === selectedProvider ? (
+                                      <span className="text-xs text-muted-foreground/75">
+                                        Selected
+                                      </span>
+                                    ) : null}
+                                  </MenuItem>
+                                );
+                              })}
+                            </MenuGroup>
                           </MenuPopup>
                         </Menu>
                       </div>
