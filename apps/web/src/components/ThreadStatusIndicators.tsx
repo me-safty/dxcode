@@ -8,13 +8,14 @@ import {
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
 import { useVcsStatus } from "../lib/vcsStatusState";
+import { cn } from "../lib/utils";
 import { type AppState, selectProjectByRef, useStore } from "../store";
 import { useThreadRunningTerminalIds } from "../terminalSessionState";
 import { useUiStateStore } from "../uiStateStore";
 import { resolveChangeRequestPresentation } from "../sourceControlPresentation";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "./Sidebar.logic";
-import { ClaudeAI, OpenAI } from "./Icons";
-import { CLAUDE_PROVIDER_ICON_CLASS_NAME } from "./providerBrandClassNames";
+import { ClaudeAI, CursorIcon, OpenAI, OpenCodeIcon } from "./Icons";
+import { normalizeProviderBrandKey, providerIconClassName } from "./providerBrandClassNames";
 import type { SidebarThreadSummary } from "../types";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
@@ -102,13 +103,37 @@ export function ThreadStatusLabel({
   status: ThreadStatusPill;
   compact?: boolean;
 }) {
+  const normalizedProvider = normalizeProviderBrandKey(status.workingProvider);
+  const iconClassName = cn(
+    "size-3",
+    providerIconClassName(status.workingProvider, "text-foreground"),
+    status.pulse && "animate-pulse",
+  );
   const statusIcon =
-    status.workingProvider === "claudeAgent" ? (
+    normalizedProvider === "claudeAgent" ? (
       <ClaudeAI
-        className={`size-3 ${CLAUDE_PROVIDER_ICON_CLASS_NAME} ${status.pulse ? "animate-pulse" : ""}`}
+        aria-hidden="true"
+        data-provider-status-icon={normalizedProvider}
+        className={iconClassName}
       />
-    ) : status.workingProvider === "codex" ? (
-      <OpenAI className={`size-3 text-foreground ${status.pulse ? "animate-pulse" : ""}`} />
+    ) : normalizedProvider === "codex" ? (
+      <OpenAI
+        aria-hidden="true"
+        data-provider-status-icon={normalizedProvider}
+        className={iconClassName}
+      />
+    ) : normalizedProvider === "cursor" ? (
+      <CursorIcon
+        aria-hidden="true"
+        data-provider-status-icon={normalizedProvider}
+        className={iconClassName}
+      />
+    ) : normalizedProvider === "opencode" ? (
+      <OpenCodeIcon
+        aria-hidden="true"
+        data-provider-status-icon={normalizedProvider}
+        className={iconClassName}
+      />
     ) : null;
 
   if (compact) {

@@ -546,7 +546,7 @@ describe("resolveThreadStatusPill", () => {
           ...baseThread,
           session: {
             ...baseThread.session,
-            provider: "codex",
+            provider: ProviderDriverKind.make("codex"),
             status: "running",
           },
         },
@@ -561,12 +561,27 @@ describe("resolveThreadStatusPill", () => {
           ...baseThread,
           session: {
             ...baseThread.session,
-            provider: "claudeAgent",
+            provider: ProviderDriverKind.make("claudeAgent"),
             status: "running",
           },
         },
       }),
     ).toMatchObject({ label: "Working", workingProvider: "claudeAgent", pulse: true });
+  });
+
+  it("preserves the raw cursor provider name when a cursor thread is running", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          session: {
+            ...baseThread.session,
+            provider: ProviderDriverKind.make("cursor"),
+            status: "running",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Working", workingProvider: "cursor", pulse: true });
   });
 
   it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {
@@ -630,13 +645,32 @@ describe("resolveThreadStatusPill", () => {
           lastVisitedAt: "2026-03-09T10:04:00.000Z",
           session: {
             ...baseThread.session,
-            provider: "claudeAgent",
+            provider: ProviderDriverKind.make("claudeAgent"),
             status: "ready",
             orchestrationStatus: "ready",
           },
         },
       }),
     ).toMatchObject({ label: "Completed", workingProvider: "claudeAgent", pulse: false });
+  });
+
+  it("preserves the raw opencode provider name for completed threads", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+          session: {
+            ...baseThread.session,
+            provider: ProviderDriverKind.make("opencode"),
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Completed", workingProvider: "opencode", pulse: false });
   });
 });
 
