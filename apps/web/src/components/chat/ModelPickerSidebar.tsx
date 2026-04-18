@@ -27,8 +27,11 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
         onClick={() => handleProviderClick("all")}
         title="All models"
         type="button"
+        aria-label="All models"
       >
-        <div className="text-lg">◆</div>
+        <div className="text-lg" aria-hidden>
+          ◆
+        </div>
       </button>
 
       {/* Provider buttons */}
@@ -54,12 +57,14 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               title={option.label}
               disabled={isDisabled}
               type="button"
+              aria-label={option.label}
             >
               <OptionIcon
                 className={cn(
                   "size-5 shrink-0",
                   providerIconClassName(option.value, "text-muted-foreground/85"),
                 )}
+                aria-hidden
               />
             </button>
           );
@@ -71,8 +76,9 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
           disabled
           title="Gemini (coming soon)"
           type="button"
+          aria-label="Gemini (coming soon)"
         >
-          <Gemini className="size-5 shrink-0 text-muted-foreground/85" />
+          <Gemini className="size-5 shrink-0 text-muted-foreground/85" aria-hidden />
         </button>
       </div>
 
@@ -88,7 +94,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
           type="button"
           aria-label="Favorites"
         >
-          <StarIcon className="size-5 shrink-0" />
+          <StarIcon className="size-5 shrink-0" aria-hidden />
         </button>
       </div>
     </div>
