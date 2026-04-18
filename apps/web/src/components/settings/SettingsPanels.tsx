@@ -9,7 +9,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PROVIDER_DISPLAY_NAMES,
   type DesktopUpdateChannel,
@@ -94,6 +94,201 @@ const THEME_OPTIONS = [
     label: "Dark",
   },
 ] as const;
+
+interface PiBackendStatus {
+  readonly id: string;
+  readonly label: string;
+  readonly loggedIn: boolean;
+}
+
+interface PiBackendsResponse {
+  readonly defaultProvider: string;
+  readonly backends: ReadonlyArray<PiBackendStatus>;
+}
+
+interface PiLoginFeedback {
+  readonly tone: "info" | "error";
+  readonly message: string;
+}
+
+function PiLoginPanel({
+  authenticated,
+  defaultProvider,
+  onDefaultProviderChange,
+  refreshSignal,
+}: {
+  readonly authenticated: boolean;
+  readonly defaultProvider: string;
+  readonly onDefaultProviderChange: (next: string) => void;
+  readonly refreshSignal: number;
+}) {
+  const [backends, setBackends] = useState<ReadonlyArray<PiBackendStatus>>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [loginPending, setLoginPending] = useState<boolean>(false);
+  const [feedback, setFeedback] = useState<PiLoginFeedback | null>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      const response = await fetch("/api/provider/pi/backends", {
+        method: "GET",
+        credentials: "include",
+      });
+      if (!response.ok) {
+        return;
+      }
+      const payload: PiBackendsResponse = await response.json();
+      setBackends(payload.backends);
+    } catch {
+      // Ignore transient fetch errors — the provider snapshot will refresh.
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Reload on mount and whenever refreshSignal changes (parent provider
+  // refresh tick, auth.json watcher, etc.).
+  useEffect(() => {
+    void reload();
+  }, [reload, refreshSignal]);
+
+  const handleLogin = useCallback(async () => {
+    setLoginPending(true);
+    setFeedback(null);
+    try {
+      // backendId is informational — pi's /login menu lets the user pick any
+      // backend at runtime. We pass the current default (or the first
+      // logged-in backend) purely to label the confirmation message.
+      const backendId = defaultProvider || backends.find((b) => b.loggedIn)?.id || "anthropic";
+      const response = await fetch("/api/provider/pi/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ backendId }),
+      });
+      const payload: {
+        readonly launched?: boolean;
+        readonly message?: string;
+        readonly error?: string;
+      } = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setFeedback({
+          tone: "error",
+          message: payload.error ?? `Login request failed (${response.status}).`,
+        });
+        return;
+      }
+      setFeedback({
+        tone: payload.launched ? "info" : "error",
+        message:
+          payload.message ??
+          "Opened pi in Terminal. Type /login — we'll detect the new session automatically.",
+      });
+      // Background polls catch the completed login even if the file watcher
+      // misses an event.
+      window.setTimeout(() => void reload(), 2_000);
+      window.setTimeout(() => void reload(), 6_000);
+      window.setTimeout(() => void reload(), 15_000);
+    } catch (error) {
+      setFeedback({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Failed to contact the server for pi login.",
+      });
+    } finally {
+      setLoginPending(false);
+    }
+  }, [backends, defaultProvider, reload]);
+
+  return (
+    <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-foreground">pi backends</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {authenticated
+              ? "Pick which backend pi routes to, or add another login."
+              : "Open pi to sign into a backend — we'll detect the session automatically."}
+          </div>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={loginPending}
+          onClick={() => void handleLogin()}
+          className="h-8 shrink-0 text-xs"
+        >
+          {loginPending ? "Opening Terminal…" : "Open pi to log in"}
+        </Button>
+      </div>
+
+      <div className="mt-3 space-y-1">
+        {loading && backends.length === 0 ? (
+          <div className="text-xs text-muted-foreground">Checking pi login status…</div>
+        ) : (
+          backends.map((backend) => {
+            const isDefault = defaultProvider === backend.id;
+            const canBeDefault = backend.loggedIn;
+            return (
+              <div
+                key={backend.id}
+                className={cn(
+                  "flex items-center justify-between gap-3 rounded-md border px-3 py-2",
+                  isDefault ? "border-primary/40 bg-primary/5" : "border-border/60 bg-background",
+                )}
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <span
+                    className={cn(
+                      "size-1.5 shrink-0 rounded-full",
+                      backend.loggedIn ? "bg-success" : "bg-muted-foreground/40",
+                    )}
+                    aria-hidden
+                  />
+                  <span className="min-w-0 truncate text-xs text-foreground">{backend.label}</span>
+                  {backend.loggedIn ? (
+                    <span className="shrink-0 text-[10px] uppercase tracking-wide text-success">
+                      Signed in
+                    </span>
+                  ) : (
+                    <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                      Not signed in
+                    </span>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={isDefault ? "secondary" : "ghost"}
+                  disabled={!canBeDefault || isDefault}
+                  onClick={() => onDefaultProviderChange(backend.id)}
+                  className="h-7 shrink-0 text-[11px]"
+                  aria-pressed={isDefault}
+                >
+                  {isDefault ? "Default" : canBeDefault ? "Use as default" : "—"}
+                </Button>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {feedback ? (
+        <div
+          className={cn(
+            "mt-3 rounded-md border px-3 py-2 text-xs",
+            feedback.tone === "error"
+              ? "border-destructive/30 bg-destructive/5 text-destructive"
+              : "border-border/60 bg-muted/30 text-muted-foreground",
+          )}
+          role={feedback.tone === "error" ? "alert" : "status"}
+        >
+          {feedback.message}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
@@ -1458,6 +1653,29 @@ export function GeneralSettingsPanel() {
                           </span>
                         </label>
                       </div>
+                    ) : null}
+
+                    {providerCard.provider === "pi" ? (
+                      <PiLoginPanel
+                        authenticated={providerCard.liveProvider?.auth.status === "authenticated"}
+                        defaultProvider={settings.providers.pi.defaultProvider}
+                        onDefaultProviderChange={(next) =>
+                          updateSettings({
+                            providers: {
+                              ...settings.providers,
+                              pi: {
+                                ...settings.providers.pi,
+                                defaultProvider: next,
+                              },
+                            },
+                          })
+                        }
+                        refreshSignal={
+                          providerCard.liveProvider?.checkedAt
+                            ? new Date(providerCard.liveProvider.checkedAt).getTime()
+                            : 0
+                        }
+                      />
                     ) : null}
 
                     <div className="border-t border-border/60 px-4 py-3 sm:px-5">

@@ -10,9 +10,9 @@
  * @module piRuntime
  */
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join as joinPath } from "node:path";
+import { readFileSync, watch as fsWatch, type FSWatcher } from "node:fs";
+import { homedir, platform as osPlatform } from "node:os";
+import { dirname as pathDirname, join as joinPath } from "node:path";
 import type { ModelCapabilities, ServerProviderModel } from "@t3tools/contracts";
 
 export interface PiCommandResult {
@@ -361,6 +361,168 @@ export function detectPiAuth(input: {
     detectedOAuthKey: undefined,
     checkedBackend: undefined,
     availableBackends,
+  };
+}
+
+export interface PiLoginSpawnResult {
+  readonly launched: boolean;
+  /** Human-readable message to surface in the UI after attempting the spawn. */
+  readonly message: string;
+  /** Shell command the user can run manually if we couldn't launch a terminal. */
+  readonly fallbackCommand: string;
+}
+
+/**
+ * Launch `pi` in a new terminal window so the user can run `/login` and
+ * complete pi's OAuth flow. On macOS we use osascript to open Terminal.app
+ * (the user's default). On other platforms we return a fallback command
+ * the UI can surface verbatim.
+ *
+ * We never send keystrokes to pi or try to automate `/login`; the user
+ * drives the TUI. Our PiProvider's fs.watch on auth.json picks up the
+ * resulting session automatically.
+ */
+export async function spawnPiLoginTerminal(input: {
+  readonly backendLabel: string;
+  readonly binaryPath: string;
+}): Promise<PiLoginSpawnResult> {
+  const binary = input.binaryPath.trim().length > 0 ? input.binaryPath : "pi";
+  const fallbackCommand = `${binary}  # then type /login and pick "${input.backendLabel}"`;
+
+  if (osPlatform() !== "darwin") {
+    return {
+      launched: false,
+      message: `Open a terminal and run \`${binary}\`, then type \`/login\` and pick "${input.backendLabel}". We'll detect the login once it completes.`,
+      fallbackCommand,
+    };
+  }
+
+  // AppleScript string: escape backslashes and double quotes inside the inner command.
+  const innerCommand = binary.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+  const script = `tell application "Terminal" to activate
+tell application "Terminal" to do script "${innerCommand}"`;
+
+  return new Promise((resolve) => {
+    const child = spawn("osascript", ["-e", script], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once("error", () => {
+      resolve({
+        launched: false,
+        message: `Couldn't open Terminal automatically. Run \`${binary}\` yourself and type \`/login\`.`,
+        fallbackCommand,
+      });
+    });
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve({
+          launched: true,
+          message: `Opened Terminal with pi. Type \`/login\` and pick "${input.backendLabel}" — we'll detect it automatically.`,
+          fallbackCommand,
+        });
+        return;
+      }
+      resolve({
+        launched: false,
+        message:
+          stderr.trim().length > 0
+            ? `osascript failed: ${stderr.trim()}. Run \`${binary}\` yourself and type \`/login\`.`
+            : `osascript exited ${code}. Run \`${binary}\` yourself and type \`/login\`.`,
+        fallbackCommand,
+      });
+    });
+  });
+}
+
+/**
+ * Start a best-effort watcher on pi's auth.json. Fires `onChange` whenever
+ * the file appears, is modified, or disappears. The watcher re-attaches
+ * itself every few seconds if the target file doesn't exist yet — handles
+ * first-login gracefully.
+ *
+ * Returns a cleanup function.
+ */
+export function watchPiAuthFile(input: {
+  readonly authFilePath: string;
+  readonly onChange: () => void;
+}): () => void {
+  let watcher: FSWatcher | null = null;
+  let retryTimer: NodeJS.Timeout | null = null;
+  let closed = false;
+
+  const attach = (): void => {
+    if (closed) return;
+    try {
+      watcher = fsWatch(input.authFilePath, { persistent: false }, () => {
+        input.onChange();
+      });
+      watcher.on("error", () => {
+        watcher?.close();
+        watcher = null;
+        scheduleReattach();
+      });
+    } catch {
+      scheduleReattach();
+    }
+  };
+
+  const attachToDirectory = (): void => {
+    if (closed) return;
+    try {
+      const dir = pathDirname(input.authFilePath);
+      const dirWatcher = fsWatch(dir, { persistent: false }, (_event, filename) => {
+        if (!filename || filename === "auth.json") {
+          input.onChange();
+          // Re-attach directly to the file so we get writes too.
+          dirWatcher.close();
+          attach();
+        }
+      });
+      dirWatcher.on("error", () => {
+        dirWatcher.close();
+        scheduleReattach();
+      });
+      watcher = dirWatcher;
+    } catch {
+      scheduleReattach();
+    }
+  };
+
+  const scheduleReattach = (): void => {
+    if (closed) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      // Try the file first; if it doesn't exist, fall back to watching the dir.
+      try {
+        readFileSync(input.authFilePath, "utf8");
+        attach();
+      } catch {
+        attachToDirectory();
+      }
+    }, 5_000);
+  };
+
+  // Initial attach: file first, directory as fallback.
+  try {
+    readFileSync(input.authFilePath, "utf8");
+    attach();
+  } catch {
+    attachToDirectory();
+  }
+
+  return () => {
+    closed = true;
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    watcher?.close();
+    watcher = null;
   };
 }
 

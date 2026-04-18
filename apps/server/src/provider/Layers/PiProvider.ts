@@ -1,5 +1,5 @@
 import type { PiSettings, ServerProvider } from "@t3tools/contracts";
-import { Cause, Effect, Equal, Layer, Stream } from "effect";
+import { Cause, Effect, Equal, Layer, Queue, Stream } from "effect";
 
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
@@ -20,6 +20,7 @@ import {
   readPiOAuthKeys,
   resolvePiAuthFilePath,
   runPiCommand,
+  watchPiAuthFile,
 } from "../piRuntime.ts";
 
 const PROVIDER = "pi" as const;
@@ -279,7 +280,7 @@ export function makePiProviderLive() {
         Effect.map((settings) => settings.providers.pi),
       );
 
-      return yield* makeManagedServerProvider<PiSettings>({
+      const managed = yield* makeManagedServerProvider<PiSettings>({
         getSettings: getProviderSettings.pipe(Effect.orDie),
         streamSettings: serverSettings.streamChanges.pipe(
           Stream.map((settings) => settings.providers.pi),
@@ -290,6 +291,29 @@ export function makePiProviderLive() {
           Effect.flatMap((settings) => checkPiProviderStatus({ settings })),
         ),
       });
+
+      // Watch pi's auth.json so a successful `/login` in the user's terminal
+      // surfaces in the UI within a second, without waiting for the 60s
+      // refresh tick. fs.watch fires in the Node event loop; we bridge it
+      // into Effect via an unbounded queue drained by a forked fiber.
+      const authFilePath = resolvePiAuthFilePath(process.env);
+      const refreshQueue = yield* Effect.acquireRelease(Queue.unbounded<void>(), (queue) =>
+        Queue.shutdown(queue).pipe(Effect.ignore),
+      );
+      yield* Queue.take(refreshQueue).pipe(
+        Effect.flatMap(() => managed.refresh.pipe(Effect.ignoreCause({ log: true }))),
+        Effect.forever,
+        Effect.forkScoped,
+      );
+      const unwatch = watchPiAuthFile({
+        authFilePath,
+        onChange: () => {
+          Effect.runFork(Queue.offer(refreshQueue, undefined).pipe(Effect.ignore));
+        },
+      });
+      yield* Effect.addFinalizer(() => Effect.sync(() => unwatch()));
+
+      return managed;
     }),
   );
 }
