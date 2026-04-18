@@ -1,5 +1,6 @@
 import { type ProviderKind, PROVIDER_DISPLAY_NAMES } from "@t3tools/contracts";
 import { ClaudeAI, CursorIcon, Icon, OpenAI, OpenCodeIcon } from "../Icons";
+import { PROVIDER_OPTIONS } from "../../session-logic";
 
 export const PROVIDER_ICON_BY_PROVIDER: Record<ProviderKind, Icon> = {
   codex: OpenAI,
@@ -11,6 +12,14 @@ export const PROVIDER_ICON_BY_PROVIDER: Record<ProviderKind, Icon> = {
 export function providerIconClassName(provider: ProviderKind, fallbackClassName: string): string {
   return provider === "claudeAgent" ? "text-[#d97757]" : fallbackClassName;
 }
+
+function isAvailableProviderOption(
+  option: (typeof PROVIDER_OPTIONS)[number],
+): option is { value: ProviderKind; label: string; available: true } {
+  return option.available;
+}
+
+export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
 
 /**
  * Get the display label for a provider, handling special cases like OpenCode.

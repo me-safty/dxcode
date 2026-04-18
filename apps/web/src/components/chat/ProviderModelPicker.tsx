@@ -1,23 +1,12 @@
 import { type ProviderKind, type ServerProvider } from "@t3tools/contracts";
 import { memo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { PROVIDER_OPTIONS } from "../../session-logic";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
 import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
 import { cn } from "~/lib/utils";
 import { ModelPickerContent } from "./ModelPickerContent";
-import { PROVIDER_ICON_BY_PROVIDER, providerIconClassName } from "./providerIconUtils";
-
-function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
-  value: ProviderKind;
-  label: string;
-  available: true;
-} {
-  return option.available;
-}
-
-export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
+import { providerIconClassName, PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   provider: ProviderKind;

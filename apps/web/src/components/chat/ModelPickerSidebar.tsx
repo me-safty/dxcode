@@ -2,8 +2,11 @@ import { type ProviderKind, type ServerProvider } from "@t3tools/contracts";
 import { memo } from "react";
 import { StarIcon } from "lucide-react";
 import { Gemini } from "../Icons";
-import { PROVIDER_ICON_BY_PROVIDER, providerIconClassName } from "./providerIconUtils";
-import { AVAILABLE_PROVIDER_OPTIONS } from "./ProviderModelPicker";
+import {
+  AVAILABLE_PROVIDER_OPTIONS,
+  PROVIDER_ICON_BY_PROVIDER,
+  providerIconClassName,
+} from "./providerIconUtils";
 import { cn } from "~/lib/utils";
 import { getProviderSnapshot } from "../../providerModels";
 
