@@ -45,7 +45,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
             ? getProviderSnapshot(props.providers, option.value)
             : undefined;
 
-          const isDisabled = liveProvider && liveProvider.status !== "ready";
+          const isDisabled = !liveProvider || liveProvider.status !== "ready";
           const isSelected = props.selectedProvider === option.value;
 
           return (
