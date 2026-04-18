@@ -1,6 +1,6 @@
 import { type CSSProperties } from "react";
 import ChatMarkdown from "../ChatMarkdown";
-import { WorkEntryRow } from "../chat/WorkEntryRow";
+import { SimpleWorkEntryRow } from "../chat/SimpleWorkEntryRow";
 import { type WorkLogEntry } from "../../session-logic";
 
 const SAMPLE_MARKDOWN = `Sure — here's the refactor:
@@ -38,15 +38,15 @@ interface ChatAppearancePreviewProps {
 
 /**
  * Decorative, read-only chat mock rendered in the Appearance settings
- * panel. Reuses the real timeline's `WorkEntryRow` and `ChatMarkdown` so
+ * panel. Reuses the real timeline's `SimpleWorkEntryRow` and `ChatMarkdown` so
  * whatever styling they carry, the preview carries too — no risk of drift.
  *
  * Every text tier the real timeline uses is exercised here so scaling is
  * visible end-to-end:
  *  - `text-chat-4xs`  — work-log section header
- *  - `text-chat-xs`   — tool-row heading (inside `WorkEntryRow`), user-bubble timestamp
- *  - `text-chat-2xs`  — tooltip command preview (inside `WorkEntryRow`)
- *  - `text-chat-3xs`  — changed-file chip (inside `WorkEntryRow`), assistant meta line
+ *  - `text-chat-xs`   — tool-row heading (inside `SimpleWorkEntryRow`), user-bubble timestamp
+ *  - `text-chat-2xs`  — tooltip command preview (inside `SimpleWorkEntryRow`)
+ *  - `text-chat-3xs`  — changed-file chip (inside `SimpleWorkEntryRow`), assistant meta line
  *  - `text-chat-body` — user / assistant message bodies
  * Plus `ChatMarkdown`, whose `.chat-markdown` rules in `index.css` scale
  * via `[data-timeline-root]` — set here on the wrapper along with
@@ -67,8 +67,8 @@ export function ChatAppearancePreview({ fontSize }: ChatAppearancePreviewProps) 
           Tool calls (2)
         </p>
         <div className="space-y-0.5">
-          <WorkEntryRow workEntry={PREVIEW_BASH_ROW} workspaceRoot={undefined} />
-          <WorkEntryRow workEntry={PREVIEW_EDIT_ROW} workspaceRoot={undefined} />
+          <SimpleWorkEntryRow workEntry={PREVIEW_BASH_ROW} workspaceRoot={undefined} />
+          <SimpleWorkEntryRow workEntry={PREVIEW_EDIT_ROW} workspaceRoot={undefined} />
         </div>
       </div>
       <div className="flex justify-end">

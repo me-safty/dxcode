@@ -24,7 +24,7 @@ import { normalizeCompactToolLabel } from "./MessagesTimeline.logic";
  * subscriptions — so both the live timeline and the Appearance settings
  * preview can render it identically.
  */
-export const WorkEntryRow = memo(function WorkEntryRow(props: {
+export const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: WorkLogEntry;
   workspaceRoot: string | undefined;
 }) {

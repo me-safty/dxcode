@@ -32,7 +32,7 @@ import {
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
-import { WorkEntryRow } from "./WorkEntryRow";
+import { SimpleWorkEntryRow } from "./SimpleWorkEntryRow";
 import {
   deriveDisplayedUserMessageState,
   type ParsedTerminalContextEntry,
@@ -550,7 +550,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
       )}
       <div className="space-y-0.5">
         {visibleEntries.map((workEntry) => (
-          <WorkEntryRow
+          <SimpleWorkEntryRow
             key={`work-row:${workEntry.id}`}
             workEntry={workEntry}
             workspaceRoot={workspaceRoot}
