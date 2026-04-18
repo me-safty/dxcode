@@ -76,19 +76,19 @@ export const PI_MIN_RECOMMENDED_VERSION = "0.60.0";
  */
 export const DEFAULT_PI_BUILTIN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
-    slug: "gpt-5.4",
+    slug: "openai-codex/gpt-5.4",
     name: "openai-codex/gpt-5.4",
     isCustom: false,
     capabilities: DEFAULT_PI_MODEL_CAPABILITIES,
   },
   {
-    slug: "claude-sonnet-4-6",
+    slug: "anthropic/claude-sonnet-4-6",
     name: "anthropic/claude-sonnet-4-6",
     isCustom: false,
     capabilities: DEFAULT_PI_MODEL_CAPABILITIES,
   },
   {
-    slug: "claude-haiku-4-5",
+    slug: "anthropic/claude-haiku-4-5",
     name: "anthropic/claude-haiku-4-5",
     isCustom: false,
     capabilities: DEFAULT_PI_MODEL_CAPABILITIES,
@@ -96,24 +96,28 @@ export const DEFAULT_PI_BUILTIN_MODELS: ReadonlyArray<ServerProviderModel> = [
 ];
 
 /**
- * Default pi model when no other slug has been supplied. Must be a bare pi
- * slug (no `provider/` prefix) that pi's CLI accepts via `--model`. We pick
- * `gpt-5.4` because ChatGPT Plus/Pro Codex subscriptions are the most
- * broadly usable backend through pi today (Claude Pro/Max tokens are
- * blocked by Anthropic for third-party apps).
+ * Default pi model when no other slug has been supplied. Use a
+ * backend-qualified slug (`<backend>/<model>`) so pi routes to a specific
+ * backend — bare slugs like `gpt-5.4` are ambiguous across pi backends
+ * (e.g. `openai-codex/gpt-5.4` vs `azure-openai-responses/gpt-5.4`) and pi
+ * picks whichever backend it finds first, which may be one the user isn't
+ * authed for.
  */
-export const DEFAULT_PI_MODEL_SLUG = "gpt-5.4";
+export const DEFAULT_PI_MODEL_SLUG = "openai-codex/gpt-5.4";
 
 /**
- * Strip any `<provider>/` prefix from a pi model slug. Pi's CLI expects bare
- * model names (e.g. `gpt-5.4`, `claude-3-5-sonnet-20240620`) but older UI
- * state or custom-model settings may have persisted `openai/gpt-5` style
- * slugs. Accept both forms for backwards compatibility.
+ * Normalise a pi model slug for the CLI. Pi's `--model` flag accepts both
+ * bare model names and `<backend>/<model>` patterns. When a slug carries
+ * a backend prefix we keep it verbatim — bare slugs are ambiguous across
+ * backends (e.g. `gpt-5.4` exists under `openai-codex` AND
+ * `azure-openai-responses`) and pi picks whichever backend it finds first,
+ * which may be one the user isn't authed for.
+ *
+ * Returns the slug as-is after trimming; kept as a function so the adapter
+ * has a single hook point if we ever need to reshape slugs further.
  */
 export function normalizePiModelSlug(slug: string): string {
-  const trimmed = slug.trim();
-  const slash = trimmed.indexOf("/");
-  return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
+  return slug.trim();
 }
 
 export interface PiCatalogEntry {
@@ -191,22 +195,26 @@ export async function loadPiModelCatalog(input: {
 
 /**
  * Convert a parsed pi catalog into ServerProviderModel entries for the
- * provider snapshot. The slug is pi's bare model name (what pi --model
- * expects); the display name is `{backend}/{model}` so users can tell which
- * backend a model routes through in the picker.
+ * provider snapshot. Both slug and name are `{backend}/{model}` so pi can
+ * route turns to the right backend — bare model slugs are ambiguous across
+ * backends (pi defaults to the first backend it finds, which may be one
+ * the user isn't authed for).
  */
 export function piCatalogToServerModels(
   entries: ReadonlyArray<PiCatalogEntry>,
 ): ReadonlyArray<ServerProviderModel> {
-  return entries.map((entry) => ({
-    slug: entry.model,
-    name: `${entry.backend}/${entry.model}`,
-    isCustom: false,
-    capabilities: {
-      ...DEFAULT_PI_MODEL_CAPABILITIES,
-      supportsThinkingToggle: entry.supportsThinking,
-    },
-  }));
+  return entries.map((entry) => {
+    const qualified = `${entry.backend}/${entry.model}`;
+    return {
+      slug: qualified,
+      name: qualified,
+      isCustom: false,
+      capabilities: {
+        ...DEFAULT_PI_MODEL_CAPABILITIES,
+        supportsThinkingToggle: entry.supportsThinking,
+      },
+    };
+  });
 }
 
 export interface PiBackendOption {
