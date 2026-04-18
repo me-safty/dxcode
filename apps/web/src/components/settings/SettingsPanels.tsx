@@ -150,6 +150,13 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     serverPasswordDescription:
       "If your OpenCode server requires authentication, enter the password here. NOTE: Stored in plain text on disk",
   },
+  {
+    provider: "pi",
+    title: "pi",
+    binaryPlaceholder: "pi binary path",
+    binaryDescription:
+      "Path to the pi binary. pi reads provider credentials from environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.) — export the one matching your chosen backend before starting the server.",
+  },
 ] as const;
 
 const PROVIDER_STATUS_STYLES = {
