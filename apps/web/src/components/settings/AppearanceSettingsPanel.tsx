@@ -1,4 +1,3 @@
-import { MinusIcon, PlusIcon } from "lucide-react";
 import {
   CHAT_FONT_SIZE_MAX,
   CHAT_FONT_SIZE_MIN,
@@ -6,8 +5,9 @@ import {
 } from "@t3tools/contracts/settings";
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
-import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Slider } from "../ui/slider";
+import { ChatFontSizePreview } from "./ChatFontSizePreview";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -78,60 +78,6 @@ export function AppearanceSettingsPanel() {
         />
 
         <SettingsRow
-          title="Chat font size"
-          description="Controls the text size of messages, tool calls, and code in the chat timeline."
-          resetAction={
-            settings.chatFontSize !== DEFAULT_UNIFIED_SETTINGS.chatFontSize ? (
-              <SettingResetButton
-                label="chat font size"
-                onClick={() =>
-                  updateSettings({
-                    chatFontSize: DEFAULT_UNIFIED_SETTINGS.chatFontSize,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <div
-              className="inline-flex items-center gap-1"
-              role="group"
-              aria-label="Chat font size"
-            >
-              <Button
-                size="icon-xs"
-                variant="outline"
-                disabled={settings.chatFontSize <= CHAT_FONT_SIZE_MIN}
-                onClick={() =>
-                  updateSettings({
-                    chatFontSize: Math.max(CHAT_FONT_SIZE_MIN, settings.chatFontSize - 1),
-                  })
-                }
-                aria-label="Decrease chat font size"
-              >
-                <MinusIcon />
-              </Button>
-              <span className="inline-flex w-14 items-center justify-center rounded-md border border-input bg-popover px-2 py-1 text-center font-mono text-xs tabular-nums text-foreground">
-                {settings.chatFontSize}px
-              </span>
-              <Button
-                size="icon-xs"
-                variant="outline"
-                disabled={settings.chatFontSize >= CHAT_FONT_SIZE_MAX}
-                onClick={() =>
-                  updateSettings({
-                    chatFontSize: Math.min(CHAT_FONT_SIZE_MAX, settings.chatFontSize + 1),
-                  })
-                }
-                aria-label="Increase chat font size"
-              >
-                <PlusIcon />
-              </Button>
-            </div>
-          }
-        />
-
-        <SettingsRow
           title="Time format"
           description="System default follows your browser or OS clock preference."
           resetAction={
@@ -172,6 +118,45 @@ export function AppearanceSettingsPanel() {
             </Select>
           }
         />
+
+        <SettingsRow
+          title="Chat font size"
+          description="Controls the text size of messages, tool calls, and code in the chat timeline."
+          resetAction={
+            settings.chatFontSize !== DEFAULT_UNIFIED_SETTINGS.chatFontSize ? (
+              <SettingResetButton
+                label="chat font size"
+                onClick={() =>
+                  updateSettings({
+                    chatFontSize: DEFAULT_UNIFIED_SETTINGS.chatFontSize,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <span className="font-mono text-xs tabular-nums text-muted-foreground">
+              {settings.chatFontSize}px
+            </span>
+          }
+        >
+          <div className="space-y-3 pb-4 pt-3">
+            <Slider
+              value={[settings.chatFontSize]}
+              min={CHAT_FONT_SIZE_MIN}
+              max={CHAT_FONT_SIZE_MAX}
+              step={1}
+              aria-label="Chat font size"
+              onValueChange={(value) => {
+                const next = Array.isArray(value) ? value[0] : value;
+                if (typeof next === "number" && next !== settings.chatFontSize) {
+                  updateSettings({ chatFontSize: next });
+                }
+              }}
+            />
+            <ChatFontSizePreview fontSize={settings.chatFontSize} />
+          </div>
+        </SettingsRow>
       </SettingsSection>
     </SettingsPageContainer>
   );
