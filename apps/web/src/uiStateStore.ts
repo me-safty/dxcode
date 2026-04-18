@@ -415,7 +415,10 @@ export function markThreadUnread(
     return state;
   }
   const unreadVisitedAt = new Date(latestTurnCompletedAtMs - 1).toISOString();
-  if (state.threadLastVisitedAtById[threadId] === unreadVisitedAt) {
+  if (
+    state.threadLastVisitedAtById[threadId] === unreadVisitedAt &&
+    !(threadId in state.threadDismissedStatusKeyById)
+  ) {
     return state;
   }
   const nextThreadDismissedStatusKeyById = { ...state.threadDismissedStatusKeyById };

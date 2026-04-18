@@ -52,6 +52,24 @@ describe("uiStateStore pure functions", () => {
     expect(next).toBe(initialState);
   });
 
+  it("markThreadUnread clears dismissed status even when the unread timestamp is unchanged", () => {
+    const threadId = ThreadId.make("thread-1");
+    const latestTurnCompletedAt = "2026-02-25T12:30:00.000Z";
+    const initialState = makeUiState({
+      threadLastVisitedAtById: {
+        [threadId]: "2026-02-25T12:29:59.999Z",
+      },
+      threadDismissedStatusKeyById: {
+        [threadId]: "Plan Ready:turn-1",
+      },
+    });
+
+    const next = markThreadUnread(initialState, threadId, latestTurnCompletedAt);
+
+    expect(next.threadLastVisitedAtById[threadId]).toBe("2026-02-25T12:29:59.999Z");
+    expect(next.threadDismissedStatusKeyById).toEqual({});
+  });
+
   it("dismissThreadStatus stores the active dismissal key per thread", () => {
     const threadId = ThreadId.make("thread-1");
     const initialState = makeUiState();
