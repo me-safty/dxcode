@@ -1,11 +1,6 @@
 import { SquarePenIcon, TerminalIcon } from "lucide-react";
-import { type ReactNode } from "react";
+import { type CSSProperties, type ReactNode } from "react";
 import ChatMarkdown from "../ChatMarkdown";
-import {
-  AssistantMessageBubbleShell,
-  ChatFontSizeScope,
-  UserMessageBubbleShell,
-} from "../chat/chatBubbleShells";
 
 const SAMPLE_MARKDOWN = `Sure — here's the refactor:
 
@@ -35,29 +30,32 @@ interface ChatFontSizePreviewProps {
  *  - `text-chat-xxs`   — tool-row preview text
  *  - `text-chat-xxxs`  — changed-file chip, assistant meta line
  *  - `text-chat-body`  — user/assistant message bodies
- * Plus `ChatMarkdown`, whose `.chat-markdown` rules in `index.css` also
- * key off `--chat-font-size` via the `[data-timeline-root]` selector that
- * `ChatFontSizeScope` sets.
+ * Plus `ChatMarkdown`, whose `.chat-markdown` rules in `index.css` scale
+ * via `[data-timeline-root]` — set here on the wrapper along with
+ * `--chat-font-size`, mirroring what MessagesTimeline does on its rows.
  */
 export function ChatFontSizePreview({ fontSize }: ChatFontSizePreviewProps) {
   return (
-    <ChatFontSizeScope
-      fontSize={fontSize}
+    <div
       aria-hidden
+      data-timeline-root="true"
+      style={{ "--chat-font-size": `${fontSize}px` } as CSSProperties}
       className="space-y-3 rounded-md border border-border/60 bg-muted/40 px-3 py-3"
     >
       <PreviewWorkLog />
-      <UserMessageBubbleShell>
-        <div className="whitespace-pre-wrap wrap-break-word text-chat-body leading-relaxed text-foreground">
-          Can you refactor this function to use early returns?
+      <div className="flex justify-end">
+        <div className="relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+          <div className="whitespace-pre-wrap wrap-break-word text-chat-body leading-relaxed text-foreground">
+            Can you refactor this function to use early returns?
+          </div>
+          <p className="mt-1.5 text-right text-chat-xs text-muted-foreground/50">09:45</p>
         </div>
-        <p className="mt-1.5 text-right text-chat-xs text-muted-foreground/50">09:45</p>
-      </UserMessageBubbleShell>
-      <AssistantMessageBubbleShell>
+      </div>
+      <div className="min-w-0 px-1 py-0.5">
         <ChatMarkdown text={SAMPLE_MARKDOWN} cwd={undefined} isStreaming={false} />
         <p className="mt-1.5 text-chat-xxxs text-muted-foreground/30">Just now • 1.2s</p>
-      </AssistantMessageBubbleShell>
-    </ChatFontSizeScope>
+      </div>
+    </div>
   );
 }
 
