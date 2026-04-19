@@ -5,6 +5,7 @@ import type { EnvironmentId, ProjectEntry, ThreadId, TurnId } from "@workbench/c
 import type { TimestampFormat } from "@workbench/contracts/settings";
 import {
   FilesIcon,
+  FolderKanbanIcon,
   HistoryIcon,
   ListChecksIcon,
   Maximize2Icon,
@@ -379,7 +380,9 @@ const ConsoleRail = memo(function ConsoleRail({
     projectReadFileQueryOptions({
       environmentId,
       cwd: workspaceRoot ?? null,
-      relativePath: selectedPath ? resolveWorkspaceSelectionPath(selectedPath, workspaceRoot) : null,
+      relativePath: selectedPath
+        ? resolveWorkspaceSelectionPath(selectedPath, workspaceRoot)
+        : null,
       enabled: viewerOverlayOpen && !!workspaceRoot && selectedDescriptor?.previewKind === "text",
       maxBytes: 24_000,
     }),
@@ -777,6 +780,7 @@ function RailHeader({ summary, panes, visibility, onTogglePane, onClose }: RailH
               />
             }
           >
+            <FolderKanbanIcon className="size-3.5" />
             <Badge
               variant="secondary"
               className="bg-transparent p-0 text-[11px] font-semibold tracking-wide text-blue-600 uppercase shadow-none dark:text-blue-300"
