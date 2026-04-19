@@ -18,10 +18,12 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 import {
+  RuntimeItemId,
   EventId,
   type ProviderRuntimeEvent,
   type ProviderSession,
   type ThreadId,
+  type ToolLifecycleItemType,
   TurnId,
 } from "@workbench/contracts";
 import { Effect, Layer, PubSub, Stream } from "effect";
@@ -52,8 +54,10 @@ interface PiTurnContext {
   readonly child: ChildProcess;
   /** Set true once we have emitted a terminal turn event (completed / aborted / failed). */
   settled: boolean;
-  /** Text accumulated from assistant message_end events, joined and emitted as content deltas. */
-  assistantTextEmitted: boolean;
+  /** True once any assistant text delta has been emitted for the turn. */
+  assistantTextSeen: boolean;
+  /** Tracks in-flight tool calls so updates/completions can reuse canonical item ids. */
+  readonly toolItems: Map<string, PiToolState>;
 }
 
 interface PiSessionContext {
@@ -63,12 +67,52 @@ interface PiSessionContext {
   stopped: boolean;
 }
 
+interface PiToolState {
+  readonly itemId: string;
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly itemType: ToolLifecycleItemType;
+  readonly title: string;
+  readonly summary: string;
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
 
+function killTurn(turn: PiTurnContext, signal: NodeJS.Signals = "SIGKILL") {
+  if (!turn.child.killed) {
+    try {
+      turn.child.kill(signal);
+    } catch {
+      // Best effort — process may have already exited.
+    }
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function asTrimmedString(value: unknown): string | undefined {
+  const text = asString(value)?.trim();
+  return text && text.length > 0 ? text : undefined;
+}
+
+function truncateText(value: string, maxLength = 400): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
+}
+
+function summarizeJson(value: unknown, maxLength = 400): string | undefined {
+  try {
+    return truncateText(JSON.stringify(value), maxLength);
+  } catch {
+    return undefined;
+  }
 }
 
 function extractAssistantText(message: unknown): string {
@@ -84,6 +128,143 @@ function extractAssistantText(message: unknown): string {
   return parts.join("");
 }
 
+function extractTextFromToolResult(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const content = value.content;
+  if (!Array.isArray(content)) return undefined;
+
+  const textParts = content.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const text = asTrimmedString(entry.text);
+    return text ? [text] : [];
+  });
+
+  return textParts.length > 0 ? truncateText(textParts.join("\n\n"), 1_000) : undefined;
+}
+
+function extractToolCallId(raw: Record<string, unknown>): string | undefined {
+  return (
+    asTrimmedString(raw.toolCallId) ??
+    asTrimmedString(raw.callId) ??
+    asTrimmedString(raw.id) ??
+    asTrimmedString(raw.tool_use_id)
+  );
+}
+
+function extractToolName(raw: Record<string, unknown>): string | undefined {
+  return (
+    asTrimmedString(raw.toolName) ??
+    asTrimmedString(raw.name) ??
+    asTrimmedString(raw.tool) ??
+    asTrimmedString(raw.tool_name)
+  );
+}
+
+function classifyPiToolItemType(toolName: string): ToolLifecycleItemType {
+  const normalized = toolName.toLowerCase();
+  if (
+    normalized.includes("bash") ||
+    normalized.includes("command") ||
+    normalized.includes("shell") ||
+    normalized.includes("terminal") ||
+    normalized === "run"
+  ) {
+    return "command_execution";
+  }
+  if (
+    normalized.includes("edit") ||
+    normalized.includes("write") ||
+    normalized.includes("patch") ||
+    normalized.includes("replace") ||
+    normalized.includes("delete") ||
+    normalized.includes("create")
+  ) {
+    return "file_change";
+  }
+  if (normalized.includes("mcp")) {
+    return "mcp_tool_call";
+  }
+  if (
+    normalized.includes("agent") ||
+    normalized.includes("subagent") ||
+    normalized.includes("sub-agent") ||
+    normalized.includes("task")
+  ) {
+    return "collab_agent_tool_call";
+  }
+  if (normalized.includes("web")) {
+    return "web_search";
+  }
+  if (normalized.includes("image")) {
+    return "image_view";
+  }
+  return "dynamic_tool_call";
+}
+
+function titleForPiTool(itemType: ToolLifecycleItemType): string {
+  switch (itemType) {
+    case "command_execution":
+      return "Command run";
+    case "file_change":
+      return "File change";
+    case "mcp_tool_call":
+      return "MCP tool call";
+    case "collab_agent_tool_call":
+      return "Subagent task";
+    case "web_search":
+      return "Web search";
+    case "image_view":
+      return "Image view";
+    case "dynamic_tool_call":
+      return "Tool call";
+  }
+}
+
+function summarizeToolArgs(toolName: string, args: unknown): string {
+  if (isRecord(args)) {
+    const command =
+      asTrimmedString(args.command) ?? asTrimmedString(args.cmd) ?? asTrimmedString(args.input);
+    if (command) {
+      return `${toolName}: ${truncateText(command)}`;
+    }
+
+    const path =
+      asTrimmedString(args.path) ??
+      asTrimmedString(args.filePath) ??
+      asTrimmedString(args.filename) ??
+      asTrimmedString(args.relativePath);
+    if (path) {
+      return `${toolName}: ${truncateText(path)}`;
+    }
+  }
+
+  const serialized = summarizeJson(args);
+  return serialized ? `${toolName}: ${serialized}` : toolName;
+}
+
+function summarizeToolResult(result: unknown, isError: boolean): string | undefined {
+  const text = extractTextFromToolResult(result);
+  if (text) {
+    return text;
+  }
+  if (isRecord(result)) {
+    const errorMessage =
+      asTrimmedString(result.errorMessage) ??
+      asTrimmedString(result.error) ??
+      asTrimmedString(result.message);
+    if (errorMessage) {
+      return errorMessage;
+    }
+    const fullOutputPath = isRecord(result.details)
+      ? asTrimmedString(result.details.fullOutputPath)
+      : undefined;
+    if (fullOutputPath) {
+      return fullOutputPath;
+    }
+  }
+  return isError ? "Tool failed." : undefined;
+}
+
 function extractMessageRole(message: unknown): string | undefined {
   if (!isRecord(message)) return undefined;
   if (typeof message.role === "string") return message.role;
@@ -96,6 +277,12 @@ function extractStopReason(message: unknown): string | undefined {
     return message.stopReason.trim();
   }
   return undefined;
+}
+
+function isToolUseStopReason(stopReason: string | undefined): boolean {
+  if (!stopReason) return false;
+  const normalized = stopReason.trim().toLowerCase();
+  return normalized === "tooluse" || normalized === "tool_use" || normalized === "tool-use";
 }
 
 function extractErrorMessage(raw: Record<string, unknown>): string | undefined {
@@ -120,10 +307,11 @@ function extractErrorMessage(raw: Record<string, unknown>): string | undefined {
 function buildEventBase(input: {
   readonly threadId: ThreadId;
   readonly turnId?: TurnId | undefined;
+  readonly itemId?: string | undefined;
   readonly raw?: unknown;
 }): Pick<
   ProviderRuntimeEvent,
-  "eventId" | "provider" | "threadId" | "createdAt" | "turnId" | "raw"
+  "eventId" | "provider" | "threadId" | "createdAt" | "turnId" | "itemId" | "raw"
 > {
   return {
     eventId: EventId.make(randomUUID()),
@@ -131,6 +319,7 @@ function buildEventBase(input: {
     threadId: input.threadId,
     createdAt: nowIso(),
     ...(input.turnId ? { turnId: input.turnId } : {}),
+    ...(input.itemId ? { itemId: RuntimeItemId.make(input.itemId) } : {}),
     ...(input.raw !== undefined
       ? {
           // pi's NDJSON lines are not in the RuntimeEventRawSource union, so we
@@ -201,16 +390,6 @@ export function makePiAdapterLive(options?: PiAdapterLiveOptions) {
         return Effect.succeed(ctx);
       };
 
-      const killTurn = (turn: PiTurnContext, signal: NodeJS.Signals = "SIGKILL") => {
-        if (!turn.child.killed) {
-          try {
-            turn.child.kill(signal);
-          } catch {
-            // Best effort — process may have already exited.
-          }
-        }
-      };
-
       const handlePiEvent = (ctx: PiSessionContext, turn: PiTurnContext, raw: unknown) => {
         if (!isRecord(raw)) return;
         writeNativeEventBestEffort(ctx.threadId, raw);
@@ -221,14 +400,48 @@ export function makePiAdapterLive(options?: PiAdapterLiveOptions) {
           case "agent_start":
           case "turn_start":
           case "agent_end":
-          case "plan":
           case "plan_mode":
-          case "todos":
           case "attachment":
-          case "tool_call":
-          case "tool_result":
-            // MVP: acknowledge by logging only. Richer event mapping can land later.
             return;
+
+          case "plan":
+          case "todos": {
+            const planSource = Array.isArray(raw.plan)
+              ? raw.plan
+              : Array.isArray(raw.todos)
+                ? raw.todos
+                : undefined;
+            if (!planSource) return;
+
+            const plan = planSource.flatMap((entry) => {
+              if (!isRecord(entry)) return [];
+              const step =
+                asTrimmedString(entry.step) ??
+                asTrimmedString(entry.content) ??
+                asTrimmedString(entry.title);
+              if (!step) return [];
+              const status =
+                entry.status === "completed"
+                  ? "completed"
+                  : entry.status === "inProgress" || entry.status === "in_progress"
+                    ? "inProgress"
+                    : "pending";
+              return [{ step, status }] as const;
+            });
+            if (plan.length === 0) return;
+
+            void emitPromise({
+              ...buildEventBase({ threadId: ctx.threadId, turnId: turn.turnId }),
+              type: "turn.plan.updated",
+              payload: {
+                ...(asTrimmedString(raw.explanation)
+                  ? { explanation: asTrimmedString(raw.explanation) }
+                  : {}),
+                plan,
+              },
+            }).catch(() => undefined);
+            return;
+          }
 
           case "message_start":
           case "message_end": {
@@ -236,8 +449,8 @@ export function makePiAdapterLive(options?: PiAdapterLiveOptions) {
             if (role !== "assistant") return;
 
             const text = extractAssistantText(raw.message);
-            if (kind === "message_end" && text.length > 0 && !turn.assistantTextEmitted) {
-              turn.assistantTextEmitted = true;
+            if (kind === "message_end" && text.length > 0 && !turn.assistantTextSeen) {
+              turn.assistantTextSeen = true;
               void emitPromise({
                 ...buildEventBase({ threadId: ctx.threadId, turnId: turn.turnId }),
                 type: "content.delta",
@@ -250,12 +463,183 @@ export function makePiAdapterLive(options?: PiAdapterLiveOptions) {
             return;
           }
 
+          case "message_update": {
+            const role = extractMessageRole(raw.message);
+            if (role !== "assistant") return;
+
+            const assistantMessageEvent = isRecord(raw.assistantMessageEvent)
+              ? raw.assistantMessageEvent
+              : undefined;
+            const deltaType = asString(assistantMessageEvent?.type);
+            if (deltaType === "text_delta") {
+              const delta = asString(assistantMessageEvent?.delta);
+              if (!delta || delta.length === 0) return;
+              turn.assistantTextSeen = true;
+              void emitPromise({
+                ...buildEventBase({ threadId: ctx.threadId, turnId: turn.turnId }),
+                type: "content.delta",
+                payload: {
+                  streamKind: "assistant_text",
+                  delta,
+                },
+              }).catch(() => undefined);
+              return;
+            }
+            if (deltaType === "thinking_delta") {
+              const delta = asString(assistantMessageEvent?.delta);
+              if (!delta || delta.length === 0) return;
+              void emitPromise({
+                ...buildEventBase({ threadId: ctx.threadId, turnId: turn.turnId }),
+                type: "content.delta",
+                payload: {
+                  streamKind: "reasoning_text",
+                  delta,
+                },
+              }).catch(() => undefined);
+            }
+            return;
+          }
+
+          case "tool_execution_start":
+          case "tool_call": {
+            const toolCallId = extractToolCallId(raw) ?? `pi-tool-${randomUUID()}`;
+            const toolName = extractToolName(raw) ?? "Tool";
+            const itemType = classifyPiToolItemType(toolName);
+            const title = titleForPiTool(itemType);
+            const summary = summarizeToolArgs(toolName, raw.args);
+            const toolState: PiToolState = {
+              itemId: `pi-item-${toolCallId}`,
+              toolCallId,
+              toolName,
+              itemType,
+              title,
+              summary,
+            };
+            turn.toolItems.set(toolCallId, toolState);
+
+            void emitPromise({
+              ...buildEventBase({
+                threadId: ctx.threadId,
+                turnId: turn.turnId,
+                itemId: toolState.itemId,
+              }),
+              type: "item.started",
+              payload: {
+                itemType,
+                status: "inProgress",
+                title,
+                detail: summary,
+                data: {
+                  toolCallId,
+                  toolName,
+                  args: raw.args,
+                },
+              },
+            }).catch(() => undefined);
+            return;
+          }
+
+          case "tool_execution_update": {
+            const toolCallId = extractToolCallId(raw);
+            if (!toolCallId) return;
+            const toolState = turn.toolItems.get(toolCallId);
+            const toolName = toolState?.toolName ?? extractToolName(raw) ?? "Tool";
+            const itemType = toolState?.itemType ?? classifyPiToolItemType(toolName);
+            const title = toolState?.title ?? titleForPiTool(itemType);
+            const detail =
+              summarizeToolResult(raw.partialResult, false) ??
+              toolState?.summary ??
+              summarizeToolArgs(toolName, raw.args);
+
+            void emitPromise({
+              ...buildEventBase({
+                threadId: ctx.threadId,
+                turnId: turn.turnId,
+                itemId: toolState?.itemId ?? `pi-item-${toolCallId}`,
+              }),
+              type: "item.updated",
+              payload: {
+                itemType,
+                status: "inProgress",
+                title,
+                detail,
+                data: {
+                  toolCallId,
+                  toolName,
+                  args: raw.args,
+                  partialResult: raw.partialResult,
+                },
+              },
+            }).catch(() => undefined);
+            return;
+          }
+
+          case "tool_execution_end":
+          case "tool_result": {
+            const toolCallId = extractToolCallId(raw);
+            const toolState = toolCallId ? turn.toolItems.get(toolCallId) : undefined;
+            const toolName = toolState?.toolName ?? extractToolName(raw) ?? "Tool";
+            const itemType = toolState?.itemType ?? classifyPiToolItemType(toolName);
+            const title = toolState?.title ?? titleForPiTool(itemType);
+            const isError = raw.isError === true;
+            const detail =
+              summarizeToolResult(raw.result, isError) ??
+              summarizeToolResult(raw.partialResult, isError) ??
+              toolState?.summary;
+
+            void emitPromise({
+              ...buildEventBase({
+                threadId: ctx.threadId,
+                turnId: turn.turnId,
+                itemId:
+                  toolState?.itemId ??
+                  (toolCallId ? `pi-item-${toolCallId}` : `pi-item-${randomUUID()}`),
+              }),
+              type: "item.completed",
+              payload: {
+                itemType,
+                status: isError ? "failed" : "completed",
+                title,
+                ...(detail ? { detail } : {}),
+                data: {
+                  ...(toolCallId ? { toolCallId } : {}),
+                  toolName,
+                  args: raw.args,
+                  result: raw.result,
+                  isError,
+                },
+              },
+            }).catch(() => undefined);
+
+            if (toolCallId) {
+              turn.toolItems.delete(toolCallId);
+            }
+            return;
+          }
+
           case "turn_end": {
+            const stopReason = extractStopReason(raw.message);
+            if (isToolUseStopReason(stopReason)) {
+              return;
+            }
+
+            const text = extractAssistantText(raw.message);
+            if (text.length > 0 && !turn.assistantTextSeen) {
+              turn.assistantTextSeen = true;
+              void emitPromise({
+                ...buildEventBase({ threadId: ctx.threadId, turnId: turn.turnId }),
+                type: "content.delta",
+                payload: {
+                  streamKind: "assistant_text",
+                  delta: text,
+                },
+              }).catch(() => undefined);
+            }
+
             if (turn.settled) return;
             turn.settled = true;
 
             const errorMessage = extractErrorMessage(raw);
-            const stopReason = extractStopReason(raw.message);
             const isError =
               errorMessage !== undefined ||
               stopReason === "error" ||
@@ -290,7 +674,8 @@ export function makePiAdapterLive(options?: PiAdapterLiveOptions) {
           }
 
           case "error":
-          case "agent_error": {
+          case "agent_error":
+          case "extension_error": {
             if (turn.settled) return;
             turn.settled = true;
             const detail = extractErrorMessage(raw) ?? "pi emitted an error event.";
@@ -534,7 +919,8 @@ export function makePiAdapterLive(options?: PiAdapterLiveOptions) {
             turnId,
             child,
             settled: false,
-            assistantTextEmitted: false,
+            assistantTextSeen: false,
+            toolItems: new Map(),
           };
           ctx.activeTurn = turn;
           ctx.session = {
@@ -616,7 +1002,7 @@ export function makePiAdapterLive(options?: PiAdapterLiveOptions) {
 
       const listSessions: PiAdapterShape["listSessions"] = () =>
         Effect.sync(() =>
-          [...sessions.values()].filter((c) => !c.stopped).map((c) => ({ ...c.session })),
+          [...sessions.values()].filter((c) => !c.stopped).map((c) => Object.assign({}, c.session)),
         );
 
       const hasSession: PiAdapterShape["hasSession"] = (threadId) =>

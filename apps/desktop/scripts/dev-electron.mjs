@@ -21,6 +21,7 @@ const requiredFiles = [
   "dist-electron/preload.cjs",
   "../server/dist/bin.mjs",
 ];
+const serverDir = join(desktopDir, "../server");
 const watchedDirectories = [
   { directory: "dist-electron", files: new Set(["main.cjs", "preload.cjs"]) },
   { directory: "../server/dist", files: new Set(["bin.mjs"]) },
@@ -42,6 +43,7 @@ delete childEnv.ELECTRON_RUN_AS_NODE;
 let shuttingDown = false;
 let restartTimer = null;
 let currentApp = null;
+let currentServerWatcher = null;
 let restartQueue = Promise.resolve();
 const expectedExits = new WeakSet();
 const watchers = [];
@@ -101,6 +103,32 @@ function startApp() {
   });
 }
 
+function startServerBundleWatcher() {
+  if (shuttingDown || currentServerWatcher !== null) {
+    return;
+  }
+
+  const watcher = spawn("bun", ["run", "build:bundle", "--", "--watch"], {
+    cwd: serverDir,
+    env: childEnv,
+    stdio: "inherit",
+  });
+
+  currentServerWatcher = watcher;
+
+  watcher.once("error", () => {
+    if (currentServerWatcher === watcher) {
+      currentServerWatcher = null;
+    }
+  });
+
+  watcher.once("exit", () => {
+    if (currentServerWatcher === watcher) {
+      currentServerWatcher = null;
+    }
+  });
+}
+
 async function stopApp() {
   const app = currentApp;
   if (!app) {
@@ -133,6 +161,41 @@ async function stopApp() {
 
       app.kill("SIGKILL");
       killChildTreeByPid(app.pid, "KILL");
+      finish();
+    }, forcedShutdownTimeoutMs).unref();
+  });
+}
+
+async function stopServerBundleWatcher() {
+  const watcher = currentServerWatcher;
+  if (!watcher) {
+    return;
+  }
+
+  currentServerWatcher = null;
+  expectedExits.add(watcher);
+
+  await new Promise((resolve) => {
+    let settled = false;
+
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      resolve();
+    };
+
+    watcher.once("exit", finish);
+    watcher.kill("SIGTERM");
+
+    setTimeout(() => {
+      if (settled) {
+        return;
+      }
+
+      watcher.kill("SIGKILL");
       finish();
     }, forcedShutdownTimeoutMs).unref();
   });
@@ -201,6 +264,7 @@ async function shutdown(exitCode) {
   }
 
   await stopApp();
+  await stopServerBundleWatcher();
   killChildTree("TERM");
   await new Promise((resolve) => {
     setTimeout(resolve, childTreeGracePeriodMs);
@@ -212,6 +276,7 @@ async function shutdown(exitCode) {
 
 startWatchers();
 cleanupStaleDevApps();
+startServerBundleWatcher();
 startApp();
 
 process.once("SIGINT", () => {
