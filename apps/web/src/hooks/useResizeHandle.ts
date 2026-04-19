@@ -86,7 +86,9 @@ export function useResizeHandle({
 
   /**
    * Callback ref for the wrapper element.
-   * - On mount: restores the persisted width from localStorage.
+   * - On mount: restores the persisted width from localStorage, validated through
+   *   `shouldAcceptWidth` so a stale value can't squeeze the composer below its
+   *   minimum usable width (e.g. if the viewport is narrower than when it was saved).
    * - On unmount (node === null): cancels any active resize and clears body styles,
    *   covering the case where `planSidebarOpen` flips to false programmatically
    *   mid-drag (e.g. auto-close from plan state changes).
@@ -103,9 +105,13 @@ export function useResizeHandle({
       if (!stored) return;
       const parsed = Number(stored);
       if (!Number.isFinite(parsed) || parsed < minWidth) return;
+      // Validate against current viewport/composer constraints before restoring.
+      // shouldAcceptWidth temporarily sets the CSS var to measure then restores it,
+      // so it's safe to call before we've applied the value ourselves.
+      if (!shouldAcceptWidth({ nextWidth: parsed, wrapper: node })) return;
       node.style.setProperty(cssVarName, `${parsed}px`);
     },
-    [cssVarName, storageKey, minWidth, stop],
+    [cssVarName, storageKey, minWidth, stop, shouldAcceptWidth],
   );
 
   const onPointerDown = useCallback(
