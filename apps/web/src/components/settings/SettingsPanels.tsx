@@ -56,6 +56,7 @@ import {
 } from "../../store";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
 import { cn } from "../../lib/utils";
+import { TrashIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
@@ -516,6 +517,199 @@ export function useSettingsRestore(onRestored?: () => void) {
   };
 }
 
+function ClaudeProfilesEditor() {
+  const settings = useSettings();
+  const { updateSettings } = useUpdateSettings();
+  const claudeSettings = settings.providers.claudeAgent;
+  const profiles = claudeSettings.profiles;
+  const defaultProfileId = claudeSettings.defaultProfileId;
+
+  const updateClaudeProfiles = useCallback(
+    (next: { profiles?: typeof claudeSettings.profiles; defaultProfileId?: string }) => {
+      updateSettings({
+        providers: {
+          ...settings.providers,
+          claudeAgent: {
+            ...claudeSettings,
+            ...(next.profiles ? { profiles: next.profiles } : {}),
+            ...(next.defaultProfileId ? { defaultProfileId: next.defaultProfileId } : {}),
+          },
+        },
+      });
+    },
+    [claudeSettings, settings.providers, updateSettings],
+  );
+
+  const updateProfileField = useCallback(
+    (
+      profileId: string,
+      field: "label" | "binaryPath" | "homePath" | "launchArgs",
+      value: string,
+    ) => {
+      const nextProfiles = profiles.map((profile) =>
+        profile.id === profileId ? { ...profile, [field]: value } : profile,
+      );
+      updateClaudeProfiles({ profiles: nextProfiles });
+    },
+    [profiles, updateClaudeProfiles],
+  );
+
+  const addProfile = useCallback(() => {
+    const existingIds = new Set(profiles.map((p) => p.id));
+    let nextId = "work";
+    let counter = 2;
+    while (existingIds.has(nextId)) {
+      nextId = `work-${counter}`;
+      counter += 1;
+    }
+    const nextProfile = {
+      id: nextId,
+      label: nextId === "work" ? "Work" : `Work ${counter - 1}`,
+      binaryPath: "claude",
+      homePath: "",
+      launchArgs: "",
+    };
+    updateClaudeProfiles({ profiles: [...profiles, nextProfile] });
+  }, [profiles, updateClaudeProfiles]);
+
+  const removeProfile = useCallback(
+    (profileId: string) => {
+      if (profiles.length <= 1) return;
+      const nextProfiles = profiles.filter((profile) => profile.id !== profileId);
+      const nextDefaultId =
+        profileId === defaultProfileId ? (nextProfiles[0]?.id ?? "personal") : defaultProfileId;
+      updateClaudeProfiles({
+        profiles: nextProfiles,
+        defaultProfileId: nextDefaultId,
+      });
+    },
+    [profiles, defaultProfileId, updateClaudeProfiles],
+  );
+
+  const setDefault = useCallback(
+    (profileId: string) => {
+      updateClaudeProfiles({ defaultProfileId: profileId });
+    },
+    [updateClaudeProfiles],
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-xs font-medium text-foreground">Profiles</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            Each profile spawns the same <code>claude</code> binary with a different
+            <code> CLAUDE_CONFIG_DIR</code>. Leave the binary as <code>claude</code> and use
+            <code> CLAUDE_CONFIG_DIR</code> to switch accounts (e.g.
+            <code> ~/.claude-work</code>). Shell aliases like <code>wclaude</code> won&apos;t work —
+            Node spawns the binary directly.
+          </div>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 text-xs"
+          onClick={addProfile}
+        >
+          <PlusIcon className="size-3" />
+          Add profile
+        </Button>
+      </div>
+
+      <div className="space-y-2">
+        {profiles.map((profile) => {
+          const isDefault = profile.id === defaultProfileId;
+          return (
+            <div
+              key={profile.id}
+              className="rounded-md border border-border/60 bg-background/40 p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="radio"
+                    name="claude-default-profile"
+                    checked={isDefault}
+                    onChange={() => setDefault(profile.id)}
+                    className="h-3 w-3"
+                  />
+                  <span>{isDefault ? "Default" : "Set as default"}</span>
+                </label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                  disabled={profiles.length <= 1}
+                  onClick={() => removeProfile(profile.id)}
+                  aria-label={`Remove ${profile.label} profile`}
+                >
+                  <TrashIcon className="size-3" />
+                </Button>
+              </div>
+
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="block">
+                  <span className="text-[11px] font-medium text-muted-foreground">Label</span>
+                  <Input
+                    className="mt-1"
+                    value={profile.label}
+                    onChange={(event) =>
+                      updateProfileField(profile.id, "label", event.target.value)
+                    }
+                    placeholder="Personal"
+                    spellCheck={false}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    CLAUDE_CONFIG_DIR
+                  </span>
+                  <Input
+                    className="mt-1"
+                    value={profile.homePath}
+                    onChange={(event) =>
+                      updateProfileField(profile.id, "homePath", event.target.value)
+                    }
+                    placeholder="Leave empty for default (~/.claude)"
+                    spellCheck={false}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-medium text-muted-foreground">Binary path</span>
+                  <Input
+                    className="mt-1"
+                    value={profile.binaryPath}
+                    onChange={(event) =>
+                      updateProfileField(profile.id, "binaryPath", event.target.value)
+                    }
+                    placeholder="claude"
+                    spellCheck={false}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-medium text-muted-foreground">Launch args</span>
+                  <Input
+                    className="mt-1"
+                    value={profile.launchArgs}
+                    onChange={(event) =>
+                      updateProfileField(profile.id, "launchArgs", event.target.value)
+                    }
+                    placeholder="e.g. --verbose"
+                    spellCheck={false}
+                  />
+                </label>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
@@ -534,10 +728,12 @@ export function GeneralSettingsPanel() {
       settings.providers.codex.customModels.length > 0,
     ),
     claudeAgent: Boolean(
-      settings.providers.claudeAgent.binaryPath !==
-        DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath ||
       settings.providers.claudeAgent.customModels.length > 0 ||
-      settings.providers.claudeAgent.launchArgs !== "",
+      settings.providers.claudeAgent.profiles.length > 1 ||
+      settings.providers.claudeAgent.profiles.some(
+        (profile) =>
+          profile.binaryPath !== "claude" || profile.homePath !== "" || profile.launchArgs !== "",
+      ),
     ),
     cursor: Boolean(
       settings.providers.cursor.binaryPath !==
@@ -773,6 +969,8 @@ export function GeneralSettingsPanel() {
         capabilities: null,
       }));
 
+    const binaryPathValue = "binaryPath" in providerConfig ? providerConfig.binaryPath : "";
+
     return {
       provider: providerSettings.provider,
       title: providerSettings.title,
@@ -786,7 +984,7 @@ export function GeneralSettingsPanel() {
       homePathKey: providerSettings.homePathKey,
       homePlaceholder: providerSettings.homePlaceholder,
       homeDescription: providerSettings.homeDescription,
-      binaryPathValue: providerConfig.binaryPath,
+      binaryPathValue,
       serverUrlValue: "serverUrl" in providerConfig ? providerConfig.serverUrl : "",
       serverPasswordValue: "serverPassword" in providerConfig ? providerConfig.serverPassword : "",
       isDirty: !Equal.equals(providerConfig, defaultProviderConfig),
@@ -1269,37 +1467,39 @@ export function GeneralSettingsPanel() {
               >
                 <CollapsibleContent>
                   <div className="space-y-0">
-                    <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-                      <label
-                        htmlFor={`provider-install-${providerCard.provider}-binary-path`}
-                        className="block"
-                      >
-                        <span className="text-xs font-medium text-foreground">
-                          {providerDisplayName} binary path
-                        </span>
-                        <Input
-                          id={`provider-install-${providerCard.provider}-binary-path`}
-                          className="mt-1.5"
-                          value={providerCard.binaryPathValue}
-                          onChange={(event) =>
-                            updateSettings({
-                              providers: {
-                                ...settings.providers,
-                                [providerCard.provider]: {
-                                  ...settings.providers[providerCard.provider],
-                                  binaryPath: event.target.value,
+                    {providerCard.provider === "codex" ? (
+                      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                        <label
+                          htmlFor={`provider-install-${providerCard.provider}-binary-path`}
+                          className="block"
+                        >
+                          <span className="text-xs font-medium text-foreground">
+                            {providerDisplayName} binary path
+                          </span>
+                          <Input
+                            id={`provider-install-${providerCard.provider}-binary-path`}
+                            className="mt-1.5"
+                            value={providerCard.binaryPathValue}
+                            onChange={(event) =>
+                              updateSettings({
+                                providers: {
+                                  ...settings.providers,
+                                  codex: {
+                                    ...settings.providers.codex,
+                                    binaryPath: event.target.value,
+                                  },
                                 },
-                              },
-                            })
-                          }
-                          placeholder={providerCard.binaryPlaceholder}
-                          spellCheck={false}
-                        />
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          {providerCard.binaryDescription}
-                        </span>
-                      </label>
-                    </div>
+                              })
+                            }
+                            placeholder={providerCard.binaryPlaceholder}
+                            spellCheck={false}
+                          />
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            {providerCard.binaryDescription}
+                          </span>
+                        </label>
+                      </div>
+                    ) : null}
 
                     {providerCard.serverUrlPlaceholder ? (
                       <div className="border-t border-border/60 px-4 py-3 sm:px-5">
@@ -1417,32 +1617,7 @@ export function GeneralSettingsPanel() {
 
                     {providerCard.provider === "claudeAgent" ? (
                       <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-                        <label htmlFor="provider-install-claudeAgent-launch-args" className="block">
-                          <span className="text-xs font-medium text-foreground">
-                            Launch arguments
-                          </span>
-                          <Input
-                            id="provider-install-claudeAgent-launch-args"
-                            className="mt-1.5"
-                            value={settings.providers.claudeAgent.launchArgs}
-                            onChange={(event) =>
-                              updateSettings({
-                                providers: {
-                                  ...settings.providers,
-                                  claudeAgent: {
-                                    ...settings.providers.claudeAgent,
-                                    launchArgs: event.target.value,
-                                  },
-                                },
-                              })
-                            }
-                            placeholder="e.g. --chrome"
-                            spellCheck={false}
-                          />
-                          <span className="mt-1 block text-xs text-muted-foreground">
-                            Additional CLI arguments passed to Claude Code on session start.
-                          </span>
-                        </label>
+                        <ClaudeProfilesEditor />
                       </div>
                     ) : null}
 

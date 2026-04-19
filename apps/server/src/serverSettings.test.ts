@@ -55,7 +55,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
             homePath: "/Users/julius/.codex",
           },
           claudeAgent: {
-            binaryPath: "/usr/local/bin/claude",
+            profiles: [
+              {
+                id: "personal",
+                label: "Personal",
+                binaryPath: "/usr/local/bin/claude",
+                homePath: "",
+                launchArgs: "",
+              },
+            ],
+            defaultProfileId: "personal",
             customModels: ["claude-custom"],
           },
         },
@@ -90,9 +99,17 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       });
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,
-        binaryPath: "/usr/local/bin/claude",
         customModels: ["claude-custom"],
-        launchArgs: "",
+        profiles: [
+          {
+            id: "personal",
+            label: "Personal",
+            binaryPath: "/usr/local/bin/claude",
+            homePath: "",
+            launchArgs: "",
+          },
+        ],
+        defaultProfileId: "personal",
       });
       assert.deepEqual(next.textGenerationModelSelection, {
         provider: "codex",
@@ -182,7 +199,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
             homePath: "   ",
           },
           claudeAgent: {
-            binaryPath: "  /opt/homebrew/bin/claude  ",
+            profiles: [
+              {
+                id: "personal",
+                label: "Personal",
+                binaryPath: "  /opt/homebrew/bin/claude  ",
+                homePath: "",
+                launchArgs: "",
+              },
+            ],
+            defaultProfileId: "personal",
           },
           opencode: {
             binaryPath: "  /opt/homebrew/bin/opencode  ",
@@ -200,9 +226,17 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       });
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,
-        binaryPath: "/opt/homebrew/bin/claude",
         customModels: [],
-        launchArgs: "",
+        profiles: [
+          {
+            id: "personal",
+            label: "Personal",
+            binaryPath: "/opt/homebrew/bin/claude",
+            homePath: "",
+            launchArgs: "",
+          },
+        ],
+        defaultProfileId: "personal",
       });
       assert.deepEqual(next.providers.opencode, {
         enabled: true,
@@ -244,13 +278,104 @@ it.layer(NodeServices.layer)("server settings", (it) => {
             binaryPath: "   ",
           },
           claudeAgent: {
-            binaryPath: "",
+            profiles: [
+              {
+                id: "personal",
+                label: "Personal",
+                binaryPath: "",
+                homePath: "",
+                launchArgs: "",
+              },
+            ],
+            defaultProfileId: "personal",
           },
         },
       });
 
       assert.equal(next.providers.codex.binaryPath, "codex");
-      assert.equal(next.providers.claudeAgent.binaryPath, "claude");
+      assert.equal(next.providers.claudeAgent.profiles[0]!.binaryPath, "claude");
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("migrates legacy Claude settings shape to profiles on read", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      // Write a pre-profiles settings.json containing the legacy
+      // binaryPath/launchArgs directly under providers.claudeAgent.
+      const legacySettings = {
+        providers: {
+          claudeAgent: {
+            binaryPath: "/usr/local/bin/claude",
+            launchArgs: "--verbose",
+            customModels: ["claude-custom"],
+          },
+        },
+      };
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        JSON.stringify(legacySettings, null, 2),
+      );
+
+      const serverSettings = yield* ServerSettingsService;
+      const settings = yield* serverSettings.getSettings;
+
+      assert.deepEqual(settings.providers.claudeAgent.profiles, [
+        {
+          id: "personal",
+          label: "Personal",
+          binaryPath: "/usr/local/bin/claude",
+          homePath: "",
+          launchArgs: "--verbose",
+        },
+      ]);
+      assert.equal(settings.providers.claudeAgent.defaultProfileId, "personal");
+      assert.deepEqual(settings.providers.claudeAgent.customModels, ["claude-custom"]);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("leaves new-shape Claude settings untouched on read", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      // A settings.json already in the profiles shape should pass through
+      // unchanged — the migration must be a no-op when profiles is set.
+      const newShapeSettings = {
+        providers: {
+          claudeAgent: {
+            profiles: [
+              {
+                id: "work",
+                label: "Work",
+                binaryPath: "/opt/homebrew/bin/claude",
+                homePath: "~/.claude-work",
+                launchArgs: "",
+              },
+            ],
+            defaultProfileId: "work",
+          },
+        },
+      };
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        JSON.stringify(newShapeSettings, null, 2),
+      );
+
+      const serverSettings = yield* ServerSettingsService;
+      const settings = yield* serverSettings.getSettings;
+
+      assert.deepEqual(settings.providers.claudeAgent.profiles, [
+        {
+          id: "work",
+          label: "Work",
+          binaryPath: "/opt/homebrew/bin/claude",
+          homePath: "~/.claude-work",
+          launchArgs: "",
+        },
+      ]);
+      assert.equal(settings.providers.claudeAgent.defaultProfileId, "work");
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 

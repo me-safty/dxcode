@@ -105,6 +105,54 @@ export class ServerSettingsService extends Context.Service<
 
 const ServerSettingsJson = fromLenientJson(ServerSettings);
 
+/**
+ * Migrate the legacy single-Claude-config shape into the new profiles shape
+ * before schema decoding. Pre-profiles configs looked like:
+ *   providers.claudeAgent = { enabled, binaryPath, launchArgs, customModels }
+ * The new shape stores a list of profiles and a defaultProfileId, so we
+ * synthesize a "personal" profile from the legacy top-level fields.
+ */
+function migrateClaudeProfilesShape(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const record = raw as Record<string, unknown>;
+  const providers = record.providers;
+  if (!providers || typeof providers !== "object" || Array.isArray(providers)) return raw;
+  const providersRecord = providers as Record<string, unknown>;
+  const claude = providersRecord.claudeAgent;
+  if (!claude || typeof claude !== "object" || Array.isArray(claude)) return raw;
+  const claudeRecord = claude as Record<string, unknown>;
+
+  const hasProfiles = Array.isArray(claudeRecord.profiles);
+  const legacyBinary = typeof claudeRecord.binaryPath === "string" ? claudeRecord.binaryPath : "";
+  const legacyLaunchArgs =
+    typeof claudeRecord.launchArgs === "string" ? claudeRecord.launchArgs : "";
+  const hasLegacyFields = legacyBinary.length > 0 || legacyLaunchArgs.length > 0;
+
+  if (hasProfiles || !hasLegacyFields) return raw;
+
+  const migratedClaude: Record<string, unknown> = { ...claudeRecord };
+  delete migratedClaude.binaryPath;
+  delete migratedClaude.launchArgs;
+  migratedClaude.profiles = [
+    {
+      id: "personal",
+      label: "Personal",
+      binaryPath: legacyBinary || "claude",
+      homePath: "",
+      launchArgs: legacyLaunchArgs,
+    },
+  ];
+  migratedClaude.defaultProfileId = "personal";
+
+  return {
+    ...record,
+    providers: {
+      ...providersRecord,
+      claudeAgent: migratedClaude,
+    },
+  };
+}
+
 const PROVIDER_ORDER: readonly ProviderKind[] = ["codex", "claudeAgent", "opencode", "cursor"];
 
 /**
@@ -214,7 +262,13 @@ const makeServerSettings = Effect.gen(function* () {
     }
 
     const raw = yield* readRawConfig;
-    const decoded = Schema.decodeUnknownExit(ServerSettingsJson)(raw);
+    const parsedRaw = yield* Effect.try({
+      try: () => JSON.parse(raw) as unknown,
+      catch: () => undefined,
+    }).pipe(Effect.orElseSucceed(() => undefined));
+    const migratedRaw =
+      parsedRaw === undefined ? raw : JSON.stringify(migrateClaudeProfilesShape(parsedRaw));
+    const decoded = Schema.decodeUnknownExit(ServerSettingsJson)(migratedRaw);
     if (decoded._tag === "Failure") {
       yield* Effect.logWarning("failed to parse settings.json, using defaults", {
         path: settingsPath,

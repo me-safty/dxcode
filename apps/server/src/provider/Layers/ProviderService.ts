@@ -104,6 +104,7 @@ function toRuntimePayloadFromSession(
     readonly modelSelection?: unknown;
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
+    readonly claudeProfileId?: string;
   },
 ): Record<string, unknown> {
   return {
@@ -116,6 +117,7 @@ function toRuntimePayloadFromSession(
     ...(extra?.lastRuntimeEventAt !== undefined
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
       : {}),
+    ...(extra?.claudeProfileId !== undefined ? { claudeProfileId: extra.claudeProfileId } : {}),
   };
 }
 
@@ -138,6 +140,18 @@ function readPersistedCwd(
   const rawCwd = "cwd" in runtimePayload ? runtimePayload.cwd : undefined;
   if (typeof rawCwd !== "string") return undefined;
   const trimmed = rawCwd.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readPersistedClaudeProfileId(
+  runtimePayload: ProviderRuntimeBinding["runtimePayload"],
+): string | undefined {
+  if (!runtimePayload || typeof runtimePayload !== "object" || Array.isArray(runtimePayload)) {
+    return undefined;
+  }
+  const raw = "claudeProfileId" in runtimePayload ? runtimePayload.claudeProfileId : undefined;
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
@@ -238,6 +252,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
+      const persistedClaudeProfileId = readPersistedClaudeProfileId(input.binding.runtimePayload);
 
       const resumed = yield* adapter.startSession({
         threadId: input.binding.threadId,
@@ -245,6 +260,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ...(persistedCwd ? { cwd: persistedCwd } : {}),
         ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
         ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
+        ...(persistedClaudeProfileId ? { claudeProfileId: persistedClaudeProfileId } : {}),
         runtimeMode: input.binding.runtimeMode ?? "full-access",
       });
       if (resumed.provider !== adapter.provider) {
@@ -393,6 +409,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         yield* upsertSessionBinding(session, threadId, {
           modelSelection: input.modelSelection,
+          ...(input.claudeProfileId ? { claudeProfileId: input.claudeProfileId } : {}),
         });
         yield* analytics.record("provider.session.started", {
           provider: session.provider,
