@@ -14,14 +14,32 @@ const EMPTY_SHORTCUT_MODIFIER_STATE: ShortcutModifierState = {
   shiftKey: false,
 };
 
+export function areShortcutModifierStatesEqual(
+  left: ShortcutModifierState,
+  right: ShortcutModifierState,
+): boolean {
+  return (
+    left.metaKey === right.metaKey &&
+    left.ctrlKey === right.ctrlKey &&
+    left.altKey === right.altKey &&
+    left.shiftKey === right.shiftKey
+  );
+}
+
 const useShortcutModifierStateStore = create<{
   state: ShortcutModifierState;
   setState: (state: ShortcutModifierState) => void;
   clear: () => void;
 }>((set) => ({
   state: EMPTY_SHORTCUT_MODIFIER_STATE,
-  setState: (state) => set({ state }),
-  clear: () => set({ state: EMPTY_SHORTCUT_MODIFIER_STATE }),
+  setState: (state) =>
+    set((current) => (areShortcutModifierStatesEqual(current.state, state) ? current : { state })),
+  clear: () =>
+    set((current) =>
+      areShortcutModifierStatesEqual(current.state, EMPTY_SHORTCUT_MODIFIER_STATE)
+        ? current
+        : { state: EMPTY_SHORTCUT_MODIFIER_STATE },
+    ),
 }));
 
 const useModelPickerOpenStore = create<{
@@ -29,14 +47,42 @@ const useModelPickerOpenStore = create<{
   setOpen: (open: boolean) => void;
 }>((set) => ({
   open: false,
-  setOpen: (open) => set({ open }),
+  setOpen: (open) => set((current) => (current.open === open ? current : { open })),
 }));
 
 export function useShortcutModifierState(): ShortcutModifierState {
   return useShortcutModifierStateStore((store) => store.state);
 }
 
+function normalizeModifierKey(key: string): keyof ShortcutModifierState | null {
+  switch (key) {
+    case "Meta":
+    case "OS":
+    case "Command":
+      return "metaKey";
+    case "Control":
+      return "ctrlKey";
+    case "Alt":
+    case "Option":
+      return "altKey";
+    case "Shift":
+      return "shiftKey";
+    default:
+      return null;
+  }
+}
+
 export function syncShortcutModifierStateFromKeyboardEvent(event: KeyboardEvent): void {
+  const normalizedModifierKey = normalizeModifierKey(event.key);
+  if (normalizedModifierKey) {
+    const currentState = useShortcutModifierStateStore.getState().state;
+    useShortcutModifierStateStore.getState().setState({
+      ...currentState,
+      [normalizedModifierKey]: event.type === "keydown",
+    });
+    return;
+  }
+
   useShortcutModifierStateStore.getState().setState({
     metaKey: event.metaKey,
     ctrlKey: event.ctrlKey,
