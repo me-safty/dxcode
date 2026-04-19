@@ -162,4 +162,53 @@ describe("ChatMarkdown", () => {
       await screen.unmount();
     }
   });
+
+  it("promotes inline-code file paths into clickable file links that route to the viewer", async () => {
+    // The agent often writes file paths in backticks (`docs/plan.md`) instead
+    // of as proper [link](path) markdown. We detect those and treat them as
+    // file links so they route to the viewer the same way explicit links do.
+    const onOpenWorkspaceFile = vi.fn(() => true);
+    const screen = await render(
+      <ChatMarkdown
+        text="See `docs/google-workspace-v2-plan.md` for details."
+        cwd="/repo/project"
+        onOpenWorkspaceFile={onOpenWorkspaceFile}
+      />,
+    );
+
+    try {
+      const link = page.getByRole("link", { name: /google-workspace-v2-plan\.md/ });
+      await expect.element(link).toBeInTheDocument();
+      await link.click();
+
+      await vi.waitFor(() => {
+        expect(onOpenWorkspaceFile).toHaveBeenCalledWith(
+          "/repo/project/docs/google-workspace-v2-plan.md",
+        );
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("leaves non-path inline code as plain <code>", async () => {
+    // Sanity guard: not every backtick'd token is a file path. Things like
+    // `npm install` or `useState` should stay as decorative inline code.
+    const onOpenWorkspaceFile = vi.fn(() => true);
+    const screen = await render(
+      <ChatMarkdown
+        text="Run `npm install` then call `useState`."
+        cwd="/repo/project"
+        onOpenWorkspaceFile={onOpenWorkspaceFile}
+      />,
+    );
+
+    try {
+      // No link role for either token.
+      expect(document.querySelectorAll("a, button").length).toBe(0);
+      expect(onOpenWorkspaceFile).not.toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+    }
+  });
 });

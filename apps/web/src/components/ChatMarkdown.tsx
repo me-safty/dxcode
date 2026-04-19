@@ -556,8 +556,49 @@ function ChatMarkdown({ text, cwd, isStreaming = false, onOpenWorkspaceFile }: C
           </MarkdownCodeBlock>
         );
       },
+      // Inline file-mention support. When the agent writes a file path inside
+      // backticks (e.g. `docs/plan.md`) we promote the inline code to a real
+      // file link so clicking it routes through onOpenWorkspaceFile (which
+      // opens the viewer pane) — matching the behavior of explicit `[](...)`
+      // links. Fenced code blocks aren't affected: they have a `language-*`
+      // className OR multi-line content, both of which short-circuit here.
+      code({ node: _node, className, children, ...props }) {
+        const childText = nodeToPlainText(children);
+        const isInline = !className && !childText.includes("\n");
+        if (!isInline) {
+          return (
+            <code className={className} {...props}>
+              {children}
+            </code>
+          );
+        }
+        const trimmed = childText.trim();
+        if (trimmed.length === 0) {
+          return <code {...props}>{children}</code>;
+        }
+        const meta = resolveMarkdownFileLinkMeta(trimmed, cwd);
+        if (!meta) {
+          return <code {...props}>{children}</code>;
+        }
+        const labelParts = [meta.basename];
+        if (meta.line) {
+          labelParts.push(`L${meta.line}${meta.column ? `:C${meta.column}` : ""}`);
+        }
+        return (
+          <MarkdownFileLink
+            href={meta.targetPath}
+            targetPath={meta.targetPath}
+            displayPath={meta.displayPath}
+            filePath={meta.filePath}
+            label={labelParts.join(" · ")}
+            theme={resolvedTheme}
+            onOpenWorkspaceFile={onOpenWorkspaceFile}
+          />
+        );
+      },
     }),
     [
+      cwd,
       diffThemeName,
       fileLinkParentSuffixByPath,
       isStreaming,

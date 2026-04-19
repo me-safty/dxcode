@@ -511,6 +511,78 @@ label:has(> select#reasoning-effort) select {
   text-align: left;
 }
 
+/* Document markdown — typography overrides applied when ChatMarkdown is
+   rendered inside the workspace viewer. Keeps every component-level behavior
+   (file links, code blocks, tables) but bumps text sizes and prose spacing
+   to feel like reading a document instead of a chat reply. */
+.document-markdown .chat-markdown {
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: var(--foreground);
+  max-width: 72ch;
+}
+
+.document-markdown .chat-markdown h1,
+.document-markdown .chat-markdown h2,
+.document-markdown .chat-markdown h3,
+.document-markdown .chat-markdown h4,
+.document-markdown .chat-markdown h5,
+.document-markdown .chat-markdown h6 {
+  font-weight: 600;
+  color: var(--foreground);
+  line-height: 1.25;
+  margin-top: 1.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.document-markdown .chat-markdown > h1:first-child,
+.document-markdown .chat-markdown > h2:first-child,
+.document-markdown .chat-markdown > h3:first-child {
+  margin-top: 0;
+}
+
+.document-markdown .chat-markdown h1 {
+  font-size: 1.75rem;
+  letter-spacing: -0.01em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.45rem;
+}
+
+.document-markdown .chat-markdown h2 {
+  font-size: 1.4rem;
+  letter-spacing: -0.005em;
+}
+
+.document-markdown .chat-markdown h3 {
+  font-size: 1.15rem;
+}
+
+.document-markdown .chat-markdown h4 {
+  font-size: 1rem;
+}
+
+.document-markdown .chat-markdown p,
+.document-markdown .chat-markdown ul,
+.document-markdown .chat-markdown ol,
+.document-markdown .chat-markdown blockquote,
+.document-markdown .chat-markdown pre,
+.document-markdown .chat-markdown table {
+  margin: 0.9rem 0;
+}
+
+.document-markdown .chat-markdown li + li {
+  margin-top: 0.35rem;
+}
+
+.document-markdown .chat-markdown blockquote {
+  font-style: italic;
+  color: color-mix(in srgb, var(--muted-foreground) 90%, var(--foreground));
+}
+
+.document-markdown .chat-markdown :not(pre) > code {
+  font-size: 0.85rem;
+}
+
 /* Diffs theme bridge (match diff surfaces to app palette) */
 .diff-panel-viewport {
   background: color-mix(in srgb, var(--background) 94%, var(--card));

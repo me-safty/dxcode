@@ -1840,9 +1840,11 @@ export default function ChatView(props: ChatViewProps) {
       if (typeof window === "undefined") {
         return true;
       }
-      // Hard cap at 80% of the viewport so the chat column can never be
-      // squeezed off-screen by an aggressive drag.
-      return nextWidth <= window.innerWidth * 0.8;
+      // Cap manual drag at 50% of the viewport. Drag is for "I want a roomier
+      // stack"; the viewer's Expand button is the affordance for going wider
+      // than that (covers the chat column entirely so a file can be read or
+      // edited at full width).
+      return nextWidth <= window.innerWidth * 0.5;
     },
     [],
   );
@@ -3200,8 +3202,16 @@ export default function ChatView(props: ChatViewProps) {
         error={activeThread.error}
         onDismiss={() => setThreadError(activeThread.id, null)}
       />
-      {/* Main content area with optional plan sidebar */}
-      <div className="relative flex min-h-0 min-w-0 flex-1">
+      {/* Main content area with optional plan sidebar.
+          When the workspace rail is expanded we set a `transform` on this row
+          so it becomes the containing block for the rail's `position: fixed`
+          inner container. That caps the expanded rail at the row's left edge
+          (i.e. the right edge of the left sidebar) instead of letting it
+          stretch behind the left sidebar all the way to the viewport edge. */}
+      <div
+        className="relative flex min-h-0 min-w-0 flex-1"
+        style={workspaceRailExpanded ? { transform: "translateZ(0)" } : undefined}
+      >
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper */}
@@ -3375,12 +3385,7 @@ export default function ChatView(props: ChatViewProps) {
             defaultOpen={false}
             open={planSidebarOpen}
             onOpenChange={handleWorkspacePanelOpenChange}
-            className={cn(
-              "min-h-0 bg-transparent",
-              workspaceRailExpanded
-                ? "absolute inset-y-0 right-0 left-0 z-30 w-auto"
-                : "w-auto flex-none",
-            )}
+            className="w-auto min-h-0 flex-none bg-transparent"
             style={
               {
                 "--sidebar-width": workspaceRailExpanded ? "100%" : WORKSPACE_INLINE_DEFAULT_WIDTH,
