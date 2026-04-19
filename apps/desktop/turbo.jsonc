@@ -7,16 +7,16 @@
       "outputs": ["dist-electron/**"],
     },
     "dev": {
-      "dependsOn": ["t3#build"],
+      "dependsOn": ["workbench#build"],
       "persistent": true,
     },
     "start": {
-      "dependsOn": ["build", "@workbench/web#build", "t3#build"],
+      "dependsOn": ["build", "@workbench/web#build", "workbench#build"],
       "cache": false,
       "persistent": true,
     },
     "smoke-test": {
-      "dependsOn": ["build", "@workbench/web#build", "t3#build"],
+      "dependsOn": ["build", "@workbench/web#build", "workbench#build"],
       "cache": false,
       "outputs": [],
     },

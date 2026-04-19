@@ -101,12 +101,22 @@ const SET_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:set-saved-environment-secr
 const REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:remove-saved-environment-secret";
 const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
-const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
+const DEFAULT_WORKBENCH_HOME = Path.join(OS.homedir(), ".workbench");
+const LEGACY_T3_HOME = Path.join(OS.homedir(), ".t3");
+const BASE_DIR =
+  process.env.WORKBENCH_HOME?.trim() ||
+  process.env.T3CODE_HOME?.trim() ||
+  (FS.existsSync(DEFAULT_WORKBENCH_HOME)
+    ? DEFAULT_WORKBENCH_HOME
+    : FS.existsSync(LEGACY_T3_HOME)
+      ? LEGACY_T3_HOME
+      : DEFAULT_WORKBENCH_HOME);
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
 const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
 const SAVED_ENVIRONMENT_REGISTRY_PATH = Path.join(STATE_DIR, "saved-environments.json");
-const DESKTOP_SCHEME = "t3";
+const DESKTOP_SCHEME = "workbench";
+const LEGACY_DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const desktopAppBranding: DesktopAppBranding = resolveDesktopAppBranding({
@@ -114,11 +124,13 @@ const desktopAppBranding: DesktopAppBranding = resolveDesktopAppBranding({
   appVersion: app.getVersion(),
 });
 const APP_DISPLAY_NAME = desktopAppBranding.displayName;
-const APP_USER_MODEL_ID = isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code";
-const LINUX_DESKTOP_ENTRY_NAME = isDevelopment ? "t3code-dev.desktop" : "t3code.desktop";
-const LINUX_WM_CLASS = isDevelopment ? "t3code-dev" : "t3code";
-const USER_DATA_DIR_NAME = isDevelopment ? "t3code-dev" : "t3code";
-const LEGACY_USER_DATA_DIR_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+const APP_USER_MODEL_ID = isDevelopment ? "com.workbench.app.dev" : "com.workbench.app";
+const LINUX_DESKTOP_ENTRY_NAME = isDevelopment ? "workbench-dev.desktop" : "workbench.desktop";
+const LINUX_WM_CLASS = isDevelopment ? "workbench-dev" : "workbench";
+const USER_DATA_DIR_NAME = isDevelopment ? "workbench-dev" : "workbench";
+const LEGACY_USER_DATA_DIR_NAMES = isDevelopment
+  ? ["t3code-dev", "T3 Code (Dev)"]
+  : ["t3code", "T3 Code (Alpha)"];
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
 const LOG_DIR = Path.join(STATE_DIR, "logs");
@@ -289,6 +301,13 @@ function resolveDesktopDevServerUrl(): string {
 
 function backendChildEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
+  delete env.WORKBENCH_PORT;
+  delete env.WORKBENCH_MODE;
+  delete env.WORKBENCH_NO_BROWSER;
+  delete env.WORKBENCH_HOST;
+  delete env.WORKBENCH_DESKTOP_WS_URL;
+  delete env.WORKBENCH_DESKTOP_LAN_ACCESS;
+  delete env.WORKBENCH_DESKTOP_LAN_HOST;
   delete env.T3CODE_PORT;
   delete env.T3CODE_MODE;
   delete env.T3CODE_NO_BROWSER;
@@ -316,7 +335,8 @@ function getDesktopSecretStorage() {
 }
 
 function resolveAdvertisedHostOverride(): string | undefined {
-  const override = process.env.T3CODE_DESKTOP_LAN_HOST?.trim();
+  const override =
+    process.env.WORKBENCH_DESKTOP_LAN_HOST?.trim() || process.env.T3CODE_DESKTOP_LAN_HOST?.trim();
   return override && override.length > 0 ? override : undefined;
 }
 
@@ -645,6 +665,15 @@ protocol.registerSchemesAsPrivileged([
       corsEnabled: true,
     },
   },
+  {
+    scheme: LEGACY_DESKTOP_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
+  },
 ]);
 
 function resolveAppRoot(): string {
@@ -695,8 +724,11 @@ function resolveEmbeddedCommitHash(): string | null {
 
   try {
     const raw = FS.readFileSync(packageJsonPath, "utf8");
-    const parsed = JSON.parse(raw) as { t3codeCommitHash?: unknown };
-    return normalizeCommitHash(parsed.t3codeCommitHash);
+    const parsed = JSON.parse(raw) as {
+      workbenchCommitHash?: unknown;
+      t3codeCommitHash?: unknown;
+    };
+    return normalizeCommitHash(parsed.workbenchCommitHash ?? parsed.t3codeCommitHash);
   } catch {
     return null;
   }
@@ -707,7 +739,9 @@ function resolveAboutCommitHash(): string | null {
     return aboutCommitHashCache;
   }
 
-  const envCommitHash = normalizeCommitHash(process.env.T3CODE_COMMIT_HASH);
+  const envCommitHash = normalizeCommitHash(
+    process.env.WORKBENCH_COMMIT_HASH ?? process.env.T3CODE_COMMIT_HASH,
+  );
   if (envCommitHash) {
     aboutCommitHashCache = envCommitHash;
     return aboutCommitHashCache;
@@ -812,28 +846,32 @@ function registerDesktopProtocol(): void {
   const staticRootPrefix = `${staticRootResolved}${Path.sep}`;
   const fallbackIndex = Path.join(staticRootResolved, "index.html");
 
-  protocol.registerFileProtocol(DESKTOP_SCHEME, (request, callback) => {
-    try {
-      const candidate = resolveDesktopStaticPath(staticRootResolved, request.url);
-      const resolvedCandidate = Path.resolve(candidate);
-      const isInRoot =
-        resolvedCandidate === fallbackIndex || resolvedCandidate.startsWith(staticRootPrefix);
-      const isAssetRequest = isStaticAssetRequest(request.url);
+  const registerScheme = (scheme: string) =>
+    protocol.registerFileProtocol(scheme, (request, callback) => {
+      try {
+        const candidate = resolveDesktopStaticPath(staticRootResolved, request.url);
+        const resolvedCandidate = Path.resolve(candidate);
+        const isInRoot =
+          resolvedCandidate === fallbackIndex || resolvedCandidate.startsWith(staticRootPrefix);
+        const isAssetRequest = isStaticAssetRequest(request.url);
 
-      if (!isInRoot || !FS.existsSync(resolvedCandidate)) {
-        if (isAssetRequest) {
-          callback({ error: -6 });
+        if (!isInRoot || !FS.existsSync(resolvedCandidate)) {
+          if (isAssetRequest) {
+            callback({ error: -6 });
+            return;
+          }
+          callback({ path: fallbackIndex });
           return;
         }
-        callback({ path: fallbackIndex });
-        return;
-      }
 
-      callback({ path: resolvedCandidate });
-    } catch {
-      callback({ path: fallbackIndex });
-    }
-  });
+        callback({ path: resolvedCandidate });
+      } catch {
+        callback({ path: fallbackIndex });
+      }
+    });
+
+  registerScheme(DESKTOP_SCHEME);
+  registerScheme(LEGACY_DESKTOP_SCHEME);
 
   desktopProtocolRegistered = true;
 }
@@ -862,13 +900,16 @@ function dispatchMenuAction(action: string): void {
 
 function handleCheckForUpdatesMenuClick(): void {
   const hasUpdateFeedConfig =
-    readAppUpdateYml() !== null || Boolean(process.env.T3CODE_DESKTOP_MOCK_UPDATES);
+    readAppUpdateYml() !== null ||
+    Boolean(process.env.WORKBENCH_DESKTOP_MOCK_UPDATES || process.env.T3CODE_DESKTOP_MOCK_UPDATES);
   const disabledReason = getAutoUpdateDisabledReason({
     isDevelopment,
     isPackaged: app.isPackaged,
     platform: process.platform,
     appImage: process.env.APPIMAGE,
-    disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+    disabledByEnv:
+      process.env.WORKBENCH_DISABLE_AUTO_UPDATE === "1" ||
+      process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
     hasUpdateFeedConfig,
   });
   if (disabledReason) {
@@ -1029,7 +1070,7 @@ function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
  * parentheses (e.g. `~/.config/T3 Code (Alpha)` on Linux). This is
  * unfriendly for shell usage and violates Linux naming conventions.
  *
- * We override it to a clean lowercase name (`t3code`). If the legacy
+ * We override it to a clean lowercase name (`workbench`). If a legacy
  * directory already exists we keep using it so existing users don't
  * lose their Chromium profile data (localStorage, cookies, sessions).
  */
@@ -1041,9 +1082,11 @@ function resolveUserDataPath(): string {
         ? Path.join(OS.homedir(), "Library", "Application Support")
         : process.env.XDG_CONFIG_HOME || Path.join(OS.homedir(), ".config");
 
-  const legacyPath = Path.join(appDataBase, LEGACY_USER_DATA_DIR_NAME);
-  if (FS.existsSync(legacyPath)) {
-    return legacyPath;
+  for (const legacyName of LEGACY_USER_DATA_DIR_NAMES) {
+    const legacyPath = Path.join(appDataBase, legacyName);
+    if (FS.existsSync(legacyPath)) {
+      return legacyPath;
+    }
   }
 
   return Path.join(appDataBase, USER_DATA_DIR_NAME);
@@ -1139,14 +1182,17 @@ function applyAutoUpdaterChannel(channel: DesktopUpdateChannel): void {
 
 function shouldEnableAutoUpdates(): boolean {
   const hasUpdateFeedConfig =
-    readAppUpdateYml() !== null || Boolean(process.env.T3CODE_DESKTOP_MOCK_UPDATES);
+    readAppUpdateYml() !== null ||
+    Boolean(process.env.WORKBENCH_DESKTOP_MOCK_UPDATES || process.env.T3CODE_DESKTOP_MOCK_UPDATES);
   return (
     getAutoUpdateDisabledReason({
       isDevelopment,
       isPackaged: app.isPackaged,
       platform: process.platform,
       appImage: process.env.APPIMAGE,
-      disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+      disabledByEnv:
+        process.env.WORKBENCH_DISABLE_AUTO_UPDATE === "1" ||
+        process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
       hasUpdateFeedConfig,
     }) === null
   );
@@ -1232,7 +1278,10 @@ async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed
 
 function configureAutoUpdater(): void {
   const githubToken =
-    process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
+    process.env.WORKBENCH_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() ||
+    process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() ||
+    process.env.GH_TOKEN?.trim() ||
+    "";
   if (githubToken) {
     // When a token is provided, re-configure the feed with `private: true` so
     // electron-updater uses the GitHub API (api.github.com) instead of the
@@ -1248,10 +1297,10 @@ function configureAutoUpdater(): void {
     }
   }
 
-  if (process.env.T3CODE_DESKTOP_MOCK_UPDATES) {
+  if (process.env.WORKBENCH_DESKTOP_MOCK_UPDATES || process.env.T3CODE_DESKTOP_MOCK_UPDATES) {
     autoUpdater.setFeedURL({
       provider: "generic",
-      url: `http://localhost:${process.env.T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT ?? 3000}`,
+      url: `http://localhost:${process.env.WORKBENCH_DESKTOP_MOCK_UPDATE_SERVER_PORT ?? process.env.T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT ?? 3000}`,
     });
   }
 

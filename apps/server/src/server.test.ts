@@ -353,7 +353,7 @@ const buildAppUnderTest = (options?: {
       otlpTracesUrl: undefined,
       otlpMetricsUrl: undefined,
       otlpExportIntervalMs: 10_000,
-      otlpServiceName: "t3-server",
+      otlpServiceName: "workbench-server",
       mode: "desktop",
       port: 0,
       host: "127.0.0.1",
@@ -823,7 +823,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const url = yield* getHttpServerUrl("/.well-known/t3/environment");
+      const url = yield* getHttpServerUrl("/.well-known/workbench/environment");
       const response = yield* Effect.promise(() => fetch(url));
       const body = (yield* Effect.promise(() =>
         response.json(),

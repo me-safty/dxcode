@@ -212,7 +212,7 @@ interface StagePackageJson {
   readonly name: string;
   readonly version: string;
   readonly buildVersion: string;
-  readonly t3codeCommitHash: string;
+  readonly workbenchCommitHash: string;
   readonly private: true;
   readonly description: string;
   readonly author: string;
@@ -239,18 +239,63 @@ const AzureTrustedSigningOptionsConfig = Config.all({
   ),
 });
 
+function optionalConfigWithAliases<Value>(
+  names: ReadonlyArray<string>,
+  read: (name: string) => Config.Config<Value>,
+): Config.Config<Option.Option<Value>> {
+  const [firstName, ...restNames] = names;
+  if (!firstName) {
+    throw new Error("Expected at least one config alias name.");
+  }
+
+  let config = read(firstName);
+  for (const name of restNames) {
+    config = Config.orElse(config, () => read(name));
+  }
+
+  return config.pipe(Config.option);
+}
+
 const BuildEnvConfig = Config.all({
-  platform: Config.schema(BuildPlatform, "T3CODE_DESKTOP_PLATFORM").pipe(Config.option),
-  target: Config.string("T3CODE_DESKTOP_TARGET").pipe(Config.option),
-  arch: Config.schema(BuildArch, "T3CODE_DESKTOP_ARCH").pipe(Config.option),
-  version: Config.string("T3CODE_DESKTOP_VERSION").pipe(Config.option),
-  outputDir: Config.string("T3CODE_DESKTOP_OUTPUT_DIR").pipe(Config.option),
-  skipBuild: Config.boolean("T3CODE_DESKTOP_SKIP_BUILD").pipe(Config.withDefault(false)),
-  keepStage: Config.boolean("T3CODE_DESKTOP_KEEP_STAGE").pipe(Config.withDefault(false)),
-  signed: Config.boolean("T3CODE_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
-  verbose: Config.boolean("T3CODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
-  mockUpdates: Config.boolean("T3CODE_DESKTOP_MOCK_UPDATES").pipe(Config.withDefault(false)),
-  mockUpdateServerPort: Config.string("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
+  platform: optionalConfigWithAliases(
+    ["WORKBENCH_DESKTOP_PLATFORM", "T3CODE_DESKTOP_PLATFORM"],
+    (name) => Config.schema(BuildPlatform, name),
+  ),
+  target: optionalConfigWithAliases(
+    ["WORKBENCH_DESKTOP_TARGET", "T3CODE_DESKTOP_TARGET"],
+    Config.string,
+  ),
+  arch: optionalConfigWithAliases(
+    ["WORKBENCH_DESKTOP_ARCH", "T3CODE_DESKTOP_ARCH"],
+    (name) => Config.schema(BuildArch, name),
+  ),
+  version: optionalConfigWithAliases(
+    ["WORKBENCH_DESKTOP_VERSION", "T3CODE_DESKTOP_VERSION"],
+    Config.string,
+  ),
+  outputDir: optionalConfigWithAliases(
+    ["WORKBENCH_DESKTOP_OUTPUT_DIR", "T3CODE_DESKTOP_OUTPUT_DIR"],
+    Config.string,
+  ),
+  skipBuild: Config.orElse(Config.boolean("WORKBENCH_DESKTOP_SKIP_BUILD"), () =>
+    Config.boolean("T3CODE_DESKTOP_SKIP_BUILD"),
+  ).pipe(Config.withDefault(false)),
+  keepStage: Config.orElse(Config.boolean("WORKBENCH_DESKTOP_KEEP_STAGE"), () =>
+    Config.boolean("T3CODE_DESKTOP_KEEP_STAGE"),
+  ).pipe(Config.withDefault(false)),
+  signed: Config.orElse(Config.boolean("WORKBENCH_DESKTOP_SIGNED"), () =>
+    Config.boolean("T3CODE_DESKTOP_SIGNED"),
+  ).pipe(Config.withDefault(false)),
+  verbose: Config.orElse(Config.boolean("WORKBENCH_DESKTOP_VERBOSE"), () =>
+    Config.boolean("T3CODE_DESKTOP_VERBOSE"),
+  ).pipe(Config.withDefault(false)),
+  mockUpdates: Config.orElse(Config.boolean("WORKBENCH_DESKTOP_MOCK_UPDATES"), () =>
+    Config.boolean("T3CODE_DESKTOP_MOCK_UPDATES"),
+  ).pipe(Config.withDefault(false)),
+  mockUpdateServerPort: optionalConfigWithAliases(
+    ["WORKBENCH_DESKTOP_MOCK_UPDATE_SERVER_PORT", "T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT"],
+    Config.string,
+  ),
 });
 
 const MockUpdateServerPortSchema = Schema.NumberFromString.check(
@@ -511,6 +556,7 @@ function resolveGitHubPublishConfig(updateChannel: "latest" | "nightly"):
     }
   | undefined {
   const rawRepo =
+    process.env.WORKBENCH_DESKTOP_UPDATE_REPOSITORY?.trim() ||
     process.env.T3CODE_DESKTOP_UPDATE_REPOSITORY?.trim() ||
     process.env.GITHUB_REPOSITORY?.trim() ||
     "";
@@ -554,8 +600,8 @@ export function resolveMockUpdateServerUrl(mockUpdateServerPort: number | undefi
 
 export function resolveDesktopProductName(version: string): string {
   return resolveDesktopUpdateChannel(version) === "nightly"
-    ? "T3 Code (Nightly)"
-    : (desktopPackageJson.productName ?? "T3 Code");
+    ? "Workbench (Nightly)"
+    : (desktopPackageJson.productName ?? "Workbench");
 }
 
 const createBuildConfig = Effect.fn("createBuildConfig")(function* (
@@ -567,9 +613,9 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   mockUpdateServerPort: number | undefined,
 ) {
   const buildConfig: Record<string, unknown> = {
-    appId: "com.t3tools.t3code",
+    appId: "com.workbench.app",
     productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    artifactName: "Workbench-${version}-${arch}.${ext}",
     directories: {
       buildResources: "apps/desktop/resources",
     },
@@ -598,12 +644,12 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "linux") {
     buildConfig.linux = {
       target: [target],
-      executableName: "t3code",
+      executableName: "workbench",
       icon: "icon.png",
       category: "Development",
       desktop: {
         entry: {
-          StartupWMClass: "t3code",
+          StartupWMClass: "workbench",
         },
       },
     };
@@ -715,7 +761,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const commitHash = yield* resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
-    prefix: `t3code-desktop-${options.platform}-stage-`,
+    prefix: `workbench-desktop-${options.platform}-stage-`,
   });
 
   const stageAppDir = path.join(stageRoot, "app");
@@ -778,13 +824,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(stageResourcesDir, path.join(stageAppDir, "apps/desktop/prod-resources"));
 
   const stagePackageJson: StagePackageJson = {
-    name: "t3code",
+    name: "workbench",
     version: appVersion,
     buildVersion: appVersion,
-    t3codeCommitHash: commitHash,
+    workbenchCommitHash: commitHash,
     private: true,
-    description: "T3 Code desktop build",
-    author: "T3 Tools",
+    description: "Workbench desktop build",
+    author: "Workbench",
     main: "apps/desktop/dist-electron/main.cjs",
     build: yield* createBuildConfig(
       options.platform,
@@ -942,7 +988,7 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.optional,
   ),
 }).pipe(
-  Command.withDescription("Build a desktop artifact for T3 Code."),
+  Command.withDescription("Build a desktop artifact for Workbench."),
   Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),
 );
 

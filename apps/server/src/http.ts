@@ -60,6 +60,17 @@ const requireAuthenticatedRequest = Effect.gen(function* () {
 
 export const serverEnvironmentRouteLayer = HttpRouter.add(
   "GET",
+  "/.well-known/workbench/environment",
+  Effect.gen(function* () {
+    const descriptor = yield* Effect.service(ServerEnvironment).pipe(
+      Effect.flatMap((serverEnvironment) => serverEnvironment.getDescriptor),
+    );
+    return HttpServerResponse.jsonUnsafe(descriptor, { status: 200 });
+  }),
+);
+
+export const legacyServerEnvironmentRouteLayer = HttpRouter.add(
+  "GET",
   "/.well-known/t3/environment",
   Effect.gen(function* () {
     const descriptor = yield* Effect.service(ServerEnvironment).pipe(

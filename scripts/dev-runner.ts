@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -16,8 +17,24 @@ const MAX_PORT = 65535;
 const DESKTOP_DEV_LOOPBACK_HOST = "127.0.0.1";
 const DEV_PORT_PROBE_HOSTS = ["127.0.0.1", "0.0.0.0", "::1", "::"] as const;
 
-export const DEFAULT_T3_HOME = Effect.map(Effect.service(Path.Path), (path) =>
-  path.join(NodeOS.homedir(), ".t3"),
+const DEFAULT_WORKBENCH_HOME_BASENAME = ".workbench";
+const LEGACY_T3_HOME_BASENAME = ".t3";
+
+function resolveDefaultWorkbenchHomePath(): string {
+  const workbenchHome = `${NodeOS.homedir()}/${DEFAULT_WORKBENCH_HOME_BASENAME}`;
+  const legacyHome = `${NodeOS.homedir()}/${LEGACY_T3_HOME_BASENAME}`;
+
+  if (NodeFS.existsSync(workbenchHome)) {
+    return workbenchHome;
+  }
+  if (NodeFS.existsSync(legacyHome)) {
+    return legacyHome;
+  }
+  return workbenchHome;
+}
+
+export const DEFAULT_WORKBENCH_HOME = Effect.map(Effect.service(Path.Path), (path) =>
+  path.resolve(resolveDefaultWorkbenchHomePath()),
 );
 
 const MODE_ARGS = {
@@ -27,10 +44,10 @@ const MODE_ARGS = {
     "--ui=tui",
     "--filter=@workbench/contracts",
     "--filter=@workbench/web",
-    "--filter=t3",
+    "--filter=workbench",
     "--parallel",
   ],
-  "dev:server": ["run", "dev", "--filter=t3"],
+  "dev:server": ["run", "dev", "--filter=workbench"],
   "dev:web": ["run", "dev", "--filter=@workbench/web"],
   "dev:desktop": ["run", "dev", "--filter=@workbench/desktop", "--filter=@workbench/web", "--parallel"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
@@ -45,35 +62,37 @@ class DevRunnerError extends Data.TaggedError("DevRunnerError")<{
   readonly cause?: unknown;
 }> {}
 
-const optionalStringConfig = (name: string): Config.Config<string | undefined> =>
-  Config.string(name).pipe(
-    Config.option,
-    Config.map((value) => Option.getOrUndefined(value)),
-  );
-const optionalBooleanConfig = (name: string): Config.Config<boolean | undefined> =>
-  Config.boolean(name).pipe(
-    Config.option,
-    Config.map((value) => Option.getOrUndefined(value)),
-  );
-const optionalPortConfig = (name: string): Config.Config<number | undefined> =>
-  Config.port(name).pipe(
-    Config.option,
-    Config.map((value) => Option.getOrUndefined(value)),
-  );
-const optionalIntegerConfig = (name: string): Config.Config<number | undefined> =>
-  Config.int(name).pipe(
-    Config.option,
-    Config.map((value) => Option.getOrUndefined(value)),
-  );
-const optionalUrlConfig = (name: string): Config.Config<URL | undefined> =>
-  Config.url(name).pipe(
-    Config.option,
-    Config.map((value) => Option.getOrUndefined(value)),
-  );
+function optionalConfigWithAliases<Value>(
+  names: ReadonlyArray<string>,
+  read: (name: string) => Config.Config<Value>,
+): Config.Config<Value | undefined> {
+  const [firstName, ...restNames] = names;
+  if (!firstName) {
+    throw new Error("Expected at least one config alias name.");
+  }
+
+  let config = read(firstName);
+  for (const name of restNames) {
+    config = Config.orElse(config, () => read(name));
+  }
+
+  return config.pipe(Config.option, Config.map((value) => Option.getOrUndefined(value)));
+}
+
+const optionalStringConfig = (...names: ReadonlyArray<string>): Config.Config<string | undefined> =>
+  optionalConfigWithAliases(names, Config.string);
+const optionalBooleanConfig = (...names: ReadonlyArray<string>): Config.Config<boolean | undefined> =>
+  optionalConfigWithAliases(names, Config.boolean);
+const optionalPortConfig = (...names: ReadonlyArray<string>): Config.Config<number | undefined> =>
+  optionalConfigWithAliases(names, Config.port);
+const optionalIntegerConfig = (...names: ReadonlyArray<string>): Config.Config<number | undefined> =>
+  optionalConfigWithAliases(names, Config.int);
+const optionalUrlConfig = (...names: ReadonlyArray<string>): Config.Config<URL | undefined> =>
+  optionalConfigWithAliases(names, Config.url);
 
 const OffsetConfig = Config.all({
-  portOffset: optionalIntegerConfig("T3CODE_PORT_OFFSET"),
-  devInstance: optionalStringConfig("T3CODE_DEV_INSTANCE"),
+  portOffset: optionalIntegerConfig("WORKBENCH_PORT_OFFSET", "T3CODE_PORT_OFFSET"),
+  devInstance: optionalStringConfig("WORKBENCH_DEV_INSTANCE", "T3CODE_DEV_INSTANCE"),
 });
 
 export function resolveOffset(config: {
@@ -82,11 +101,11 @@ export function resolveOffset(config: {
 }): { readonly offset: number; readonly source: string } {
   if (config.portOffset !== undefined) {
     if (config.portOffset < 0) {
-      throw new Error(`Invalid T3CODE_PORT_OFFSET: ${config.portOffset}`);
+      throw new Error(`Invalid WORKBENCH_PORT_OFFSET: ${config.portOffset}`);
     }
     return {
       offset: config.portOffset,
-      source: `T3CODE_PORT_OFFSET=${config.portOffset}`,
+      source: `WORKBENCH_PORT_OFFSET=${config.portOffset}`,
     };
   }
 
@@ -96,11 +115,11 @@ export function resolveOffset(config: {
   }
 
   if (/^\d+$/.test(seed)) {
-    return { offset: Number(seed), source: `numeric T3CODE_DEV_INSTANCE=${seed}` };
+    return { offset: Number(seed), source: `numeric WORKBENCH_DEV_INSTANCE=${seed}` };
   }
 
   const offset = ((Hash.string(seed) >>> 0) % MAX_HASH_OFFSET) + 1;
-  return { offset, source: `hashed T3CODE_DEV_INSTANCE=${seed}` };
+  return { offset, source: `hashed WORKBENCH_DEV_INSTANCE=${seed}` };
 }
 
 function resolveBaseDir(baseDir: string | undefined): Effect.Effect<string, never, Path.Path> {
@@ -112,7 +131,7 @@ function resolveBaseDir(baseDir: string | undefined): Effect.Effect<string, neve
       return path.resolve(configured);
     }
 
-    return yield* DEFAULT_T3_HOME;
+    return yield* DEFAULT_WORKBENCH_HOME;
   });
 }
 
@@ -155,56 +174,74 @@ export function createDevRunnerEnv({
       VITE_DEV_SERVER_URL:
         devUrl?.toString() ??
         `http://${isDesktopMode ? DESKTOP_DEV_LOOPBACK_HOST : "localhost"}:${webPort}`,
+      WORKBENCH_HOME: resolvedBaseDir,
       T3CODE_HOME: resolvedBaseDir,
     };
 
     if (!isDesktopMode) {
+      output.WORKBENCH_PORT = String(serverPort);
       output.T3CODE_PORT = String(serverPort);
       output.VITE_HTTP_URL = `http://localhost:${serverPort}`;
       output.VITE_WS_URL = `ws://localhost:${serverPort}`;
     } else {
+      output.WORKBENCH_PORT = String(serverPort);
       output.T3CODE_PORT = String(serverPort);
       output.VITE_HTTP_URL = `http://${DESKTOP_DEV_LOOPBACK_HOST}:${serverPort}`;
       output.VITE_WS_URL = `ws://${DESKTOP_DEV_LOOPBACK_HOST}:${serverPort}`;
+      delete output.WORKBENCH_MODE;
+      delete output.WORKBENCH_NO_BROWSER;
+      delete output.WORKBENCH_HOST;
       delete output.T3CODE_MODE;
       delete output.T3CODE_NO_BROWSER;
       delete output.T3CODE_HOST;
     }
 
     if (!isDesktopMode && host !== undefined) {
+      output.WORKBENCH_HOST = host;
       output.T3CODE_HOST = host;
     }
 
     if (!isDesktopMode && noBrowser !== undefined) {
+      output.WORKBENCH_NO_BROWSER = noBrowser ? "1" : "0";
       output.T3CODE_NO_BROWSER = noBrowser ? "1" : "0";
     } else if (!isDesktopMode) {
+      delete output.WORKBENCH_NO_BROWSER;
       delete output.T3CODE_NO_BROWSER;
     }
 
     if (autoBootstrapProjectFromCwd !== undefined) {
+      output.WORKBENCH_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = autoBootstrapProjectFromCwd ? "1" : "0";
       output.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = autoBootstrapProjectFromCwd ? "1" : "0";
     } else {
+      delete output.WORKBENCH_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
       delete output.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
     }
 
     if (logWebSocketEvents !== undefined) {
+      output.WORKBENCH_LOG_WS_EVENTS = logWebSocketEvents ? "1" : "0";
       output.T3CODE_LOG_WS_EVENTS = logWebSocketEvents ? "1" : "0";
     } else {
+      delete output.WORKBENCH_LOG_WS_EVENTS;
       delete output.T3CODE_LOG_WS_EVENTS;
     }
 
     if (mode === "dev") {
+      output.WORKBENCH_MODE = "web";
       output.T3CODE_MODE = "web";
+      delete output.WORKBENCH_DESKTOP_WS_URL;
       delete output.T3CODE_DESKTOP_WS_URL;
     }
 
     if (mode === "dev:server" || mode === "dev:web") {
+      output.WORKBENCH_MODE = "web";
       output.T3CODE_MODE = "web";
+      delete output.WORKBENCH_DESKTOP_WS_URL;
       delete output.T3CODE_DESKTOP_WS_URL;
     }
 
     if (isDesktopMode) {
       output.HOST = DESKTOP_DEV_LOOPBACK_HOST;
+      delete output.WORKBENCH_DESKTOP_WS_URL;
       delete output.T3CODE_DESKTOP_WS_URL;
     }
 
@@ -381,7 +418,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       Effect.mapError(
         (cause) =>
           new DevRunnerError({
-            message: "Failed to read T3CODE_PORT_OFFSET/T3CODE_DEV_INSTANCE configuration.",
+            message: "Failed to read WORKBENCH_PORT_OFFSET/WORKBENCH_DEV_INSTANCE configuration.",
             cause,
           }),
       ),
@@ -423,7 +460,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         : "";
 
     yield* Effect.logInfo(
-      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.T3CODE_PORT)} webPort=${String(env.PORT)} baseDir=${String(env.T3CODE_HOME)}`,
+      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.WORKBENCH_PORT ?? env.T3CODE_PORT)} webPort=${String(env.PORT)} baseDir=${String(env.WORKBENCH_HOME ?? env.T3CODE_HOME)}`,
     );
 
     if (input.dryRun) {
@@ -472,32 +509,37 @@ const devRunnerCli = Command.make("dev-runner", {
     Argument.withDescription("Development mode to run."),
   ),
   t3Home: Flag.string("home-dir").pipe(
-    Flag.withDescription("Base directory for all T3 Code data (equivalent to T3CODE_HOME)."),
-    Flag.withFallbackConfig(optionalStringConfig("T3CODE_HOME")),
+    Flag.withDescription("Base directory for all Workbench data (equivalent to WORKBENCH_HOME)."),
+    Flag.withFallbackConfig(optionalStringConfig("WORKBENCH_HOME", "T3CODE_HOME")),
   ),
   noBrowser: Flag.boolean("no-browser").pipe(
-    Flag.withDescription("Browser auto-open toggle (equivalent to T3CODE_NO_BROWSER)."),
-    Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_NO_BROWSER")),
+    Flag.withDescription("Browser auto-open toggle (equivalent to WORKBENCH_NO_BROWSER)."),
+    Flag.withFallbackConfig(optionalBooleanConfig("WORKBENCH_NO_BROWSER", "T3CODE_NO_BROWSER")),
   ),
   autoBootstrapProjectFromCwd: Flag.boolean("auto-bootstrap-project-from-cwd").pipe(
     Flag.withDescription(
-      "Auto-bootstrap toggle (equivalent to T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD).",
+      "Auto-bootstrap toggle (equivalent to WORKBENCH_AUTO_BOOTSTRAP_PROJECT_FROM_CWD).",
     ),
-    Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD")),
+    Flag.withFallbackConfig(
+      optionalBooleanConfig(
+        "WORKBENCH_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
+        "T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
+      ),
+    ),
   ),
   logWebSocketEvents: Flag.boolean("log-websocket-events").pipe(
-    Flag.withDescription("WebSocket event logging toggle (equivalent to T3CODE_LOG_WS_EVENTS)."),
+    Flag.withDescription("WebSocket event logging toggle (equivalent to WORKBENCH_LOG_WS_EVENTS)."),
     Flag.withAlias("log-ws-events"),
-    Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_LOG_WS_EVENTS")),
+    Flag.withFallbackConfig(optionalBooleanConfig("WORKBENCH_LOG_WS_EVENTS", "T3CODE_LOG_WS_EVENTS")),
   ),
   host: Flag.string("host").pipe(
-    Flag.withDescription("Server host/interface override (forwards to T3CODE_HOST)."),
-    Flag.withFallbackConfig(optionalStringConfig("T3CODE_HOST")),
+    Flag.withDescription("Server host/interface override (forwards to WORKBENCH_HOST)."),
+    Flag.withFallbackConfig(optionalStringConfig("WORKBENCH_HOST", "T3CODE_HOST")),
   ),
   port: Flag.integer("port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
-    Flag.withDescription("Server port override (forwards to T3CODE_PORT)."),
-    Flag.withFallbackConfig(optionalPortConfig("T3CODE_PORT")),
+    Flag.withDescription("Server port override (forwards to WORKBENCH_PORT)."),
+    Flag.withFallbackConfig(optionalPortConfig("WORKBENCH_PORT", "T3CODE_PORT")),
   ),
   devUrl: Flag.string("dev-url").pipe(
     Flag.withSchema(Schema.URLFromString),

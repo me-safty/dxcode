@@ -1,5 +1,5 @@
 {
-  "name": "t3",
+  "name": "workbench",
   "version": "0.0.20",
   "license": "MIT",
   "repository": {
@@ -8,6 +8,7 @@
     "directory": "apps/server"
   },
   "bin": {
+    "workbench": "./dist/bin.mjs",
     "t3": "./dist/bin.mjs"
   },
   "files": [

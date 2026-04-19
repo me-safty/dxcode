@@ -1,3 +1,4 @@
+import * as FS from "node:fs";
 import * as OS from "node:os";
 import { Effect, Path } from "effect";
 import {
@@ -81,6 +82,22 @@ export function fixPath(
   }
 }
 
+const DEFAULT_WORKBENCH_HOME_BASENAME = ".workbench";
+const LEGACY_T3_HOME_BASENAME = ".t3";
+
+function resolveDefaultBaseDirPath(): string {
+  const workbenchHome = `${OS.homedir()}/${DEFAULT_WORKBENCH_HOME_BASENAME}`;
+  const legacyHome = `${OS.homedir()}/${LEGACY_T3_HOME_BASENAME}`;
+
+  if (FS.existsSync(workbenchHome)) {
+    return workbenchHome;
+  }
+  if (FS.existsSync(legacyHome)) {
+    return legacyHome;
+  }
+  return workbenchHome;
+}
+
 export const expandHomePath = Effect.fn(function* (input: string) {
   const { join } = yield* Path.Path;
   if (input === "~") {
@@ -93,9 +110,9 @@ export const expandHomePath = Effect.fn(function* (input: string) {
 });
 
 export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
-  const { join, resolve } = yield* Path.Path;
+  const { resolve } = yield* Path.Path;
   if (!raw || raw.trim().length === 0) {
-    return join(OS.homedir(), ".t3");
+    return resolve(resolveDefaultBaseDirPath());
   }
   return resolve(yield* expandHomePath(raw.trim()));
 });
