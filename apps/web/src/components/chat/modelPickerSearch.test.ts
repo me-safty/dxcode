@@ -7,9 +7,10 @@ describe("buildModelPickerSearchText", () => {
     expect(
       buildModelPickerSearchText({
         provider: "opencode",
-        name: "GitHub Copilot · Claude Opus 4.7",
+        name: "Claude Opus 4.7",
+        subProvider: "GitHub Copilot",
       }),
-    ).toBe("github copilot · claude opus 4.7 opencode opencode");
+    ).toBe("claude opus 4.7 github copilot opencode opencode");
   });
 });
 
@@ -19,7 +20,8 @@ describe("scoreModelPickerSearch", () => {
       scoreModelPickerSearch(
         {
           provider: "opencode",
-          name: "GitHub Copilot · Claude Opus 4.7",
+          name: "Claude Opus 4.7",
+          subProvider: "GitHub Copilot",
         },
         "coplt op",
       ),
@@ -42,14 +44,16 @@ describe("scoreModelPickerSearch", () => {
     const exactScore = scoreModelPickerSearch(
       {
         provider: "opencode",
-        name: "GitHub Copilot · Claude Opus 4.7",
+        name: "Claude Opus 4.7",
+        subProvider: "GitHub Copilot",
       },
       "copilot opus",
     );
     const fuzzyScore = scoreModelPickerSearch(
       {
         provider: "opencode",
-        name: "GitHub Copilot · Claude Opus 4.7",
+        name: "Claude Opus 4.7",
+        subProvider: "GitHub Copilot",
       },
       "coplt op",
     );

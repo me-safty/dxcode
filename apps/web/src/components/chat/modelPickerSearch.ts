@@ -4,6 +4,8 @@ import { normalizeSearchQuery, scoreQueryMatch } from "@t3tools/shared/searchRan
 type ModelPickerSearchableModel = {
   provider: ProviderKind;
   name: string;
+  shortName?: string;
+  subProvider?: string;
   isFavorite?: boolean;
 };
 
@@ -12,6 +14,8 @@ const MODEL_PICKER_FAVORITE_SCORE_BOOST = 24;
 function getModelPickerSearchFields(model: ModelPickerSearchableModel): string[] {
   return [
     normalizeSearchQuery(model.name),
+    ...(model.shortName ? [normalizeSearchQuery(model.shortName)] : []),
+    ...(model.subProvider ? [normalizeSearchQuery(model.subProvider)] : []),
     normalizeSearchQuery(model.provider),
     normalizeSearchQuery(PROVIDER_DISPLAY_NAMES[model.provider]),
     buildModelPickerSearchText(model),
@@ -36,7 +40,15 @@ function scoreModelPickerSearchToken(
 
 export function buildModelPickerSearchText(model: ModelPickerSearchableModel): string {
   return normalizeSearchQuery(
-    [model.name, model.provider, PROVIDER_DISPLAY_NAMES[model.provider]].join(" "),
+    [
+      model.name,
+      model.shortName,
+      model.subProvider,
+      model.provider,
+      PROVIDER_DISPLAY_NAMES[model.provider],
+    ]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .join(" "),
   );
 }
 

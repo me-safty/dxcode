@@ -8,9 +8,15 @@ import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { ModelPickerContent } from "./ModelPickerContent";
-import { PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
+import {
+  ModelEsque,
+  PROVIDER_ICON_BY_PROVIDER,
+  getTriggerDisplayModelLabel,
+  getTriggerDisplayModelName,
+} from "./providerIconUtils";
 import { setModelPickerOpen } from "../../shortcutModifierState";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
@@ -19,7 +25,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   lockedProvider: ProviderKind | null;
   providers?: ReadonlyArray<ServerProvider>;
   keybindings?: ResolvedKeybindingsConfig;
-  modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
+  modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<ModelEsque>>;
   activeProviderIconClassName?: string;
   compact?: boolean;
   disabled?: boolean;
@@ -34,9 +40,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const activeProvider = props.lockedProvider ?? props.provider;
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
   const selectedProviderOptions = props.modelOptionsByProvider[activeProvider];
-  const selectedModelLabel =
-    selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
+  const selectedModel = selectedProviderOptions.find((option) => option.slug === props.model);
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[activeProvider];
+  const triggerTitle = selectedModel ? getTriggerDisplayModelName(selectedModel) : props.model;
+  const triggerSubtitle = selectedModel?.subProvider;
+  const triggerLabel = selectedModel ? getTriggerDisplayModelLabel(selectedModel) : props.model;
 
   const setIsMenuOpen = (open: boolean) => {
     props.onOpenChange?.(open);
@@ -94,7 +102,33 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             aria-hidden="true"
             className={cn("size-4 shrink-0", props.activeProviderIconClassName)}
           />
-          <span className="min-w-0 flex-1 truncate">{selectedModelLabel}</span>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 overflow-hidden",
+                    triggerSubtitle
+                      ? "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1"
+                      : "truncate",
+                  )}
+                />
+              }
+            >
+              {triggerSubtitle ? (
+                <>
+                  <span className="min-w-0 truncate">{triggerSubtitle}</span>
+                  <span aria-hidden="true" className="shrink-0 opacity-60">
+                    ·
+                  </span>
+                  <span className="min-w-0 truncate">{triggerTitle}</span>
+                </>
+              ) : (
+                triggerTitle
+              )}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
+          </Tooltip>
           <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
         </span>
       </PopoverTrigger>

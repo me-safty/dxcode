@@ -416,6 +416,51 @@ describe("ProviderModelPicker", () => {
     }
   });
 
+  it("uses the trigger label for locked opencode rows", async () => {
+    const providers: ReadonlyArray<ServerProvider> = [
+      buildOpenCodeProvider([
+        {
+          slug: "github-copilot/claude-opus-4.5",
+          name: "Claude Opus 4.5",
+          subProvider: "GitHub Copilot",
+          shortName: "Opus 4.5",
+          isCustom: false,
+          capabilities: {
+            reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
+            supportsFastMode: false,
+            supportsThinkingToggle: false,
+            contextWindowOptions: [],
+            promptInjectedEffortLevels: [],
+          },
+        },
+      ]),
+    ];
+    const mounted = await mountPicker({
+      provider: "opencode",
+      model: "github-copilot/claude-opus-4.5",
+      lockedProvider: "opencode",
+      providers,
+    });
+
+    try {
+      await vi.waitFor(() => {
+        const trigger = document.querySelector<HTMLElement>(
+          '[data-chat-provider-model-picker="true"]',
+        );
+        expect(trigger?.textContent).toContain("GitHub Copilot");
+        expect(trigger?.textContent).toContain("Opus 4.5");
+      });
+
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(getVisibleModelNames()).toEqual(["GitHub Copilot · Opus 4.5"]);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("searches models by name in flat list", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
@@ -586,7 +631,8 @@ describe("ProviderModelPicker", () => {
       buildOpenCodeProvider([
         {
           slug: "github-copilot/claude-opus-4.7",
-          name: "GitHub Copilot · Claude Opus 4.7",
+          name: "Claude Opus 4.7",
+          subProvider: "GitHub Copilot",
           isCustom: false,
           capabilities: {
             reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
@@ -613,6 +659,68 @@ describe("ProviderModelPicker", () => {
         const listText = getModelPickerListText();
         expect(listText).toContain("Claude Opus 4.7");
         expect(listText).not.toContain("GPT-5 Codex");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("renders each search result with its own provider branding", async () => {
+    const providers: ReadonlyArray<ServerProvider> = [
+      buildOpenCodeProvider([
+        {
+          slug: "github-copilot/claude-opus-4.7",
+          name: "Claude Opus 4.7",
+          subProvider: "GitHub Copilot",
+          isCustom: false,
+          capabilities: {
+            reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
+            supportsFastMode: false,
+            supportsThinkingToggle: false,
+            contextWindowOptions: [],
+            promptInjectedEffortLevels: [],
+          },
+        },
+      ]),
+      {
+        ...TEST_PROVIDERS[1]!,
+        models: [
+          {
+            slug: "claude-opus-4-6",
+            name: "Claude Opus 4.6",
+            isCustom: false,
+            capabilities: {
+              reasoningEffortLevels: [
+                effort("low"),
+                effort("medium", true),
+                effort("high"),
+                effort("max"),
+              ],
+              supportsFastMode: false,
+              supportsThinkingToggle: true,
+              contextWindowOptions: [],
+              promptInjectedEffortLevels: [],
+            },
+          },
+        ],
+      },
+    ];
+    const mounted = await mountPicker({
+      provider: "opencode",
+      model: "github-copilot/claude-opus-4.7",
+      lockedProvider: null,
+      providers,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await page.getByPlaceholder("Search models...").fill("opus");
+
+      await vi.waitFor(() => {
+        const listText = getModelPickerListText();
+        expect(listText).toContain("OpenCode · GitHub Copilot");
+        expect(listText).toContain("Claude");
+        expect(listText).not.toContain("OpenCodeClaude Opus 4.6");
       });
     } finally {
       await mounted.cleanup();

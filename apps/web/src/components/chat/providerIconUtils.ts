@@ -20,36 +20,33 @@ function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): o
 
 export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
 
-/**
- * Get the display label for a provider, handling special cases like OpenCode.
- * For OpenCode models with format "SubProvider · Model Name", extracts "SubProvider".
- * Otherwise returns the standard provider display name.
- */
-export function getProviderLabel(provider: ProviderKind, modelName: string): string {
-  // For OpenCode, extract the sub-provider from the model name (format: "SubProvider · Model Name")
-  if (provider === "opencode") {
-    const parts = modelName.split(" · ");
-    if (parts.length > 1) {
-      return parts[0]!.trim();
-    }
-  }
+export type ModelEsque = {
+  slug: string;
+  name: string;
+  shortName?: string | undefined;
+  subProvider?: string | undefined;
+};
 
-  return PROVIDER_DISPLAY_NAMES[provider];
+export function getProviderLabel(provider: ProviderKind, model: ModelEsque): string {
+  const providerLabel = PROVIDER_DISPLAY_NAMES[provider];
+  return model.subProvider ? `${providerLabel} · ${model.subProvider}` : providerLabel;
 }
 
-/**
- * Get the display name for a model, removing provider prefix for OpenCode.
- * For OpenCode models with format "SubProvider · Model Name", extracts "Model Name".
- * For other providers, returns the model name as-is.
- */
-export function getDisplayModelName(provider: ProviderKind, modelName: string): string {
-  // For OpenCode, extract just the model name part (format: "SubProvider · Model Name")
-  if (provider === "opencode") {
-    const parts = modelName.split(" · ");
-    if (parts.length > 1) {
-      return parts[1]!.trim();
-    }
+export function getDisplayModelName(
+  model: ModelEsque,
+  options?: { preferShortName?: boolean },
+): string {
+  if (options?.preferShortName && model.shortName) {
+    return model.shortName;
   }
+  return model.name;
+}
 
-  return modelName;
+export function getTriggerDisplayModelName(model: ModelEsque): string {
+  return getDisplayModelName(model, { preferShortName: true });
+}
+
+export function getTriggerDisplayModelLabel(model: ModelEsque): string {
+  const title = getTriggerDisplayModelName(model);
+  return model.subProvider ? `${model.subProvider} · ${title}` : title;
 }

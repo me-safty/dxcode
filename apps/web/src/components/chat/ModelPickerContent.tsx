@@ -12,7 +12,7 @@ import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { isModelPickerNewModel } from "./modelPickerModelHighlights";
 import { buildModelPickerSearchText, scoreModelPickerSearch } from "./modelPickerSearch";
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxList } from "../ui/combobox";
-import { PROVIDER_ICON_BY_PROVIDER, getProviderLabel } from "./providerIconUtils";
+import { ModelEsque, PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
 import {
   modelPickerJumpCommandForIndex,
   modelPickerJumpIndexFromCommand,
@@ -26,6 +26,8 @@ import { TooltipProvider } from "../ui/tooltip";
 type ModelPickerItem = {
   slug: string;
   name: string;
+  shortName?: string;
+  subProvider?: string;
   provider: ProviderKind;
 };
 
@@ -37,7 +39,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   lockedProvider: ProviderKind | null;
   providers?: ReadonlyArray<ServerProvider>;
   keybindings?: ResolvedKeybindingsConfig;
-  modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
+  modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<ModelEsque>>;
   terminalOpen: boolean;
   onRequestClose?: () => void;
   onProviderModelChange: (provider: ProviderKind, model: string) => void;
@@ -118,6 +120,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       return models.map((m) => ({
         slug: m.slug,
         name: m.name,
+        ...(m.shortName ? { shortName: m.shortName } : {}),
+        ...(m.subProvider ? { subProvider: m.subProvider } : {}),
         provider: providerKind as ProviderKind,
       })) satisfies Array<ModelPickerItem>;
     });
@@ -396,9 +400,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           <div className="flex items-center gap-2 px-4 py-3 border-b">
             <LockedProviderIcon className="size-5 shrink-0" />
             <span className="font-medium text-sm">
-              {props.lockedProvider === "opencode"
-                ? PROVIDER_DISPLAY_NAMES.opencode
-                : getProviderLabel(props.lockedProvider, "")}
+              {PROVIDER_DISPLAY_NAMES[props.lockedProvider]}
             </span>
           </div>
         )}
@@ -492,12 +494,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     <ModelListRow
                       key={modelKey}
                       index={index}
-                      value={modelKey}
-                      slug={model.slug}
-                      name={model.name}
+                      model={model}
                       provider={model.provider}
                       isFavorite={favoritesSet.has(modelKey)}
                       showProvider={!isLocked}
+                      preferShortName={!isLocked}
+                      useTriggerLabel={isLocked}
                       showNewBadge={isModelPickerNewModel(model.provider, model.slug)}
                       jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                       onToggleFavorite={() => toggleFavorite(model.provider, model.slug)}
