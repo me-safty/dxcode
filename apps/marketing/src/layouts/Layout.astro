@@ -5,8 +5,8 @@ interface Props {
 }
 
 const {
-  title = "T3 Code",
-  description = "T3 Code — The best way to code with AI.",
+  title = "Workbench",
+  description = "Workbench — The best way to work with AI.",
 } = Astro.props;
 ---
 
@@ -31,7 +31,15 @@ const {
     <div class="page">
       <nav class="nav">
         <a href="/" class="nav-brand">
-          <img src="/icon.png" alt="T3" class="nav-icon" />
+          <svg class="nav-icon" viewBox="0 0 120 120" fill="none" aria-label="Workbench">
+            <rect x="20" y="40" width="80" height="8" fill="currentColor"></rect>
+            <rect x="25" y="48" width="6" height="30" fill="currentColor"></rect>
+            <rect x="89" y="48" width="6" height="30" fill="currentColor"></rect>
+            <rect x="35" y="25" width="12" height="12" fill="currentColor"></rect>
+            <rect x="55" y="20" width="10" height="17" fill="currentColor"></rect>
+            <rect x="70" y="28" width="15" height="9" fill="currentColor"></rect>
+          </svg>
+          <span class="nav-brand-text">Workbench</span>
         </a>
         <a
           href="https://github.com/pingdotgg/t3code"
@@ -150,12 +158,19 @@ const {
   .nav-brand {
     display: flex;
     align-items: center;
+    gap: 0.6rem;
+    color: var(--fg);
   }
 
   .nav-icon {
     width: 28px;
     height: 28px;
-    border-radius: 6px;
+  }
+
+  .nav-brand-text {
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
   }
 
   .nav-github {

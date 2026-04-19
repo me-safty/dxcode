@@ -249,7 +249,7 @@ export function NoActiveThreadState() {
       toastManager.add({
         type: "info",
         title: "Add a project first",
-        description: "Use the command palette (\u2318K) to create your first workspace.",
+        description: "Use the command palette (\u2318K) to create your first console.",
       });
       return;
     }

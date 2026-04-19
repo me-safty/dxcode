@@ -55,8 +55,8 @@ export const ChatHeader = memo(function ChatHeader({
             size="sm"
             variant="ghost"
             onClick={onToggleWorkspacePanel}
-            aria-label={workspacePanelOpen ? "Hide workspace panel" : "Show workspace panel"}
-            title={workspacePanelOpen ? "Hide workspace panel" : "Show workspace panel"}
+            aria-label={workspacePanelOpen ? "Hide console panel" : "Show console panel"}
+            title={workspacePanelOpen ? "Hide console panel" : "Show console panel"}
             className={
               workspacePanelOpen
                 ? "rounded-full border border-blue-200/80 bg-blue-500/10 px-3 text-blue-600 hover:bg-blue-500/14 dark:border-blue-400/30 dark:text-blue-300"
@@ -64,7 +64,7 @@ export const ChatHeader = memo(function ChatHeader({
             }
           >
             <FolderKanbanIcon className="size-3.5" />
-            Workspace
+            Console
           </Button>
         </div>
       ) : null}

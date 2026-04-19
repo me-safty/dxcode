@@ -14,17 +14,17 @@ without hand-copying tokens.
 **PR2 — Pi as a first-class provider** (10 commits, closes out the brief's
 "backends are pluggable" wedge):
 
-| Slice | Commit | What |
-| --- | --- | --- |
-| 1 | [08bccf62](..) | Contract plumbing — `pi` in `ProviderKind`, defaults, display names |
-| 2 | [2ae93554](..) | PiProvider snapshot — install/auth/models detection |
-| 2c | [53ed1163](..) | Detect pi OAuth logins from `~/.pi/agent/auth.json` |
-| 2d+2b | [4b550738](..) | Unified pi settings panel — one login button, status list, default picker |
-| 3 | [f6132b5b](..) | PiAdapter runtime — per-turn `pi -p --mode json` subprocess |
-| 3.1 | [5827dd2f](..) | Real pi model catalog + pi logo in picker |
-| 3.1B | [e74539e9](..) | Composer provider write/read key alignment |
-| 3.1B fix | [f98db3f3](..) | `normalizeProviderKind` + two exhaustive lists missed `pi` |
-| 3.1 slug | [23d58a15](..) | Backend-qualified pi model slugs (`openai-codex/gpt-5.4`) |
+| Slice    | Commit         | What                                                                      |
+| -------- | -------------- | ------------------------------------------------------------------------- |
+| 1        | [08bccf62](..) | Contract plumbing — `pi` in `ProviderKind`, defaults, display names       |
+| 2        | [2ae93554](..) | PiProvider snapshot — install/auth/models detection                       |
+| 2c       | [53ed1163](..) | Detect pi OAuth logins from `~/.pi/agent/auth.json`                       |
+| 2d+2b    | [4b550738](..) | Unified pi settings panel — one login button, status list, default picker |
+| 3        | [f6132b5b](..) | PiAdapter runtime — per-turn `pi -p --mode json` subprocess               |
+| 3.1      | [5827dd2f](..) | Real pi model catalog + pi logo in picker                                 |
+| 3.1B     | [e74539e9](..) | Composer provider write/read key alignment                                |
+| 3.1B fix | [f98db3f3](..) | `normalizeProviderKind` + two exhaustive lists missed `pi`                |
+| 3.1 slug | [23d58a15](..) | Backend-qualified pi model slugs (`openai-codex/gpt-5.4`)                 |
 
 End-to-end working: pi is selectable in the composer picker, routes
 turns through the pi harness, uses the user's existing Claude Pro/Max
@@ -33,11 +33,11 @@ and ChatGPT Plus/Pro (Codex Subscription) OAuth sessions captured by
 
 **PR3 — Landing composer polish** (4 commits):
 
-| Slice | Commit | What |
-| --- | --- | --- |
-| 3.A | [5242f0dd](..) | Provider icons in composer chips, Assistant → far right, `Folder:` prefix, "Start a task" copy |
-| 3.C | [029d43dd](..) | "Open a folder…" action in folder chip dropdown (desktop folder picker + project.create) |
-| 3.D | [472f0f16](..) | 7 Atelier slash-command shortcuts: `/summarize`, `/research`, `/draft`, `/rewrite`, `/organize`, `/compare`, `/nextsteps` |
+| Slice | Commit         | What                                                                                                                      |
+| ----- | -------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 3.A   | [5242f0dd](..) | Provider icons in composer chips, Assistant → far right, `Folder:` prefix, "Start a task" copy                            |
+| 3.C   | [029d43dd](..) | "Open a folder…" action in folder chip dropdown (desktop folder picker + project.create)                                  |
+| 3.D   | [472f0f16](..) | 7 Atelier slash-command shortcuts: `/summarize`, `/research`, `/draft`, `/rewrite`, `/organize`, `/compare`, `/nextsteps` |
 
 ## Uncommitted in working tree — decide first thing on resume
 
@@ -102,6 +102,7 @@ Cost: ~20 lines.
 ### 5. WorkspacePanel bug fixes
 
 Separate from the refactor in §1. The current panel had:
+
 - Header row collapses — filename label draws over Open in app / Open in
   editor buttons
 - File tree hardcoded right-side 320px, non-resizable
@@ -140,7 +141,7 @@ internally calls a `Project`).
 code today:**
 
 1. **User-facing sidebar grouping** ("Workspaces" section label,
-   "T3-Cowork" etc. as entries). *This* is the one becoming "Consoles".
+   "T3-Cowork" etc. as entries). _This_ is the one becoming "Consoles".
 2. **The right-side panel with the file tree + artifact viewer** (the
    `WorkspacePanel.tsx` / `workspace/` refactor). Still called
    "Workspace" in the composer footer chip, header badge, etc.
@@ -148,6 +149,7 @@ code today:**
    infrastructure code for project file operations.
 
 Proposed rule:
+
 - **Rename (1)** — sidebar grouping label in the UI: "Workspaces" →
   "Consoles", "Workspace" (singular) → "Console".
 - **Keep (2) and (3)** — the right-side panel and server services stay
@@ -163,6 +165,7 @@ Flag this explicitly so we don't start the rename then get stuck.
 All of these get changed in the same PR (or a tight series):
 
 **Package / repo identity:**
+
 - `package.json#name`: `@t3tools/monorepo` → `@workbench/monorepo`
 - `packages/*/package.json` and `apps/*/package.json`: `@t3tools/*` →
   `@workbench/*` everywhere, including imports
@@ -172,6 +175,7 @@ All of these get changed in the same PR (or a tight series):
 - `tsconfig.base.json` paths aliased to `@t3tools/*` → `@workbench/*`
 
 **User-facing strings:**
+
 - "T3 Code", "T3 Code (Dev)", "T3 Code (Alpha)" → "Workbench" /
   "Workbench (Dev)" etc. — in `branding.ts`, HTML titles, meta tags,
   splash screens, pairing page, error pages
@@ -183,6 +187,7 @@ All of these get changed in the same PR (or a tight series):
 - Any "Your workspaces" / "Open workspace" copy → console equivalents
 
 **Data dirs and env vars (decide preserve-vs-rename):**
+
 - `~/.t3/` directory — changing this migrates all existing installations'
   state. Safer to **keep** `~/.t3/` and note it as legacy, OR add a
   one-time migration that copies `~/.t3/` → `~/.workbench/` the first
@@ -191,12 +196,14 @@ All of these get changed in the same PR (or a tight series):
 - Database file name `state.sqlite` — fine as-is, no brand in the path.
 
 **Logo / icon assets:**
+
 - `apps/web/public/favicon.ico`, `favicon-16x16.png`, `favicon-32x32.png`,
   `apple-touch-icon.png` — replace with Workbench logo
 - `assets/` directory (macOS dmg background, etc.) if desktop packaging is
   still on the roadmap
 
 **Docs:**
+
 - Rename `docs/atelier/` → `docs/workbench/`
 - `Atelier-design-brief.md` in repo root → `Workbench-design-brief.md`
 - Internal section headings, code references
@@ -234,7 +241,7 @@ so the diff for each is readable.
 
 1. Start dev stack: `cd atelier && bun dev` (watch out for the stale
    `bun dev` background process if it's still running — `pkill -f
-   "node src/bin.ts"` and restart).
+"node src/bin.ts"` and restart).
 2. If the browser can't reach the dev app, use
    `./scripts/claude-pair.sh` to mint a fresh pair URL.
 3. Check `git status` — if the working tree isn't clean, the

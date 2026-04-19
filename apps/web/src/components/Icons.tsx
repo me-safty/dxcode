@@ -2,6 +2,17 @@ import { type SVGProps, useId } from "react";
 
 export type Icon = React.FC<SVGProps<SVGSVGElement>>;
 
+export const WorkbenchLogo: Icon = (props) => (
+  <svg {...props} viewBox="0 0 120 120" fill="none">
+    <rect x="20" y="40" width="80" height="8" fill="currentColor" />
+    <rect x="25" y="48" width="6" height="30" fill="currentColor" />
+    <rect x="89" y="48" width="6" height="30" fill="currentColor" />
+    <rect x="35" y="25" width="12" height="12" fill="currentColor" />
+    <rect x="55" y="20" width="10" height="17" fill="currentColor" />
+    <rect x="70" y="28" width="15" height="9" fill="currentColor" />
+  </svg>
+);
+
 export const GitHubIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 1024 1024" fill="none">
     <path
