@@ -153,7 +153,7 @@ function migrateClaudeProfilesShape(raw: unknown): unknown {
   };
 }
 
-const PROVIDER_ORDER: readonly ProviderKind[] = ["codex", "claudeAgent"];
+const PROVIDER_ORDER: readonly ProviderKind[] = ["codex", "claudeAgent", "opencode", "cursor"];
 
 /**
  * Ensure the `textGenerationModelSelection` points to an enabled provider.
