@@ -1,6 +1,6 @@
 # Next Steps — Workbench Handoff
 
-Snapshot: 2026-04-18 · branch `atelier`
+Snapshot: 2026-04-18
 
 ## Current State
 
@@ -115,7 +115,7 @@ These are technical terms, not product-branding mistakes.
 
 ## Open Questions
 
-1. Should Workbench keep the `atelier` git branch name during the migration, or create a fresh long-lived `workbench` branch once the deeper identity pass starts?
+1. Should Workbench keep the current long-lived git branch name during the migration, or create a fresh long-lived `workbench` branch once the deeper identity pass starts?
 2. Should we introduce dual support for `@t3tools/*` and `@workbench/*` briefly, or perform the package/import rename atomically?
 3. Should the first deep rename PR stop before CLI/data-dir changes, or include the binary rename too?
 4. Is the best persistence strategy "preserve `.t3` indefinitely" or "migrate with compatibility fallbacks"?
