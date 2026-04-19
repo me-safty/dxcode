@@ -13,9 +13,12 @@ export function providerIconClassName(provider: ProviderKind, fallbackClassName:
   return provider === "claudeAgent" ? "text-[#d97757]" : fallbackClassName;
 }
 
-function isAvailableProviderOption(
-  option: (typeof PROVIDER_OPTIONS)[number],
-): option is { value: ProviderKind; label: string; available: true } {
+function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
+  value: ProviderKind;
+  label: string;
+  available: true;
+  pickerSidebarBadge?: "new" | "soon";
+} {
   return option.available;
 }
 

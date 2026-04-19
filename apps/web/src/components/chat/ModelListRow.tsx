@@ -7,6 +7,7 @@ import {
   getProviderLabel,
   getDisplayModelName,
 } from "./providerIconUtils";
+import { Kbd } from "../ui/kbd";
 import { cn } from "~/lib/utils";
 
 export const ModelListRow = memo(function ModelListRow(props: {
@@ -16,6 +17,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
   isSelected: boolean;
   isFavorite: boolean;
   showProvider: boolean;
+  showNewBadge?: boolean;
+  jumpLabel?: string | null;
   onSelect: () => void;
   onToggleFavorite: () => void;
 }) {
@@ -39,8 +42,23 @@ export const ModelListRow = memo(function ModelListRow(props: {
       </button>
 
       <button className="min-w-0 flex-1 text-left" onClick={props.onSelect} type="button">
-        <div className="font-medium text-sm truncate">
-          {getDisplayModelName(props.provider, props.name)}
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="text-xs font-medium leading-snug flex items-center gap-2 min-w-0">
+            <span className="truncate">{getDisplayModelName(props.provider, props.name)}</span>
+            {props.showNewBadge ? (
+              <span
+                className="shrink-0 rounded border border-amber-500/35 bg-amber-500/15 px-0.5 py-px text-[10px] font-bold uppercase leading-none tracking-wide text-amber-800 dark:border-amber-400/30 dark:bg-amber-400/12 dark:text-amber-200"
+                aria-label="New model"
+              >
+                New
+              </span>
+            ) : null}
+          </div>
+          {props.jumpLabel ? (
+            <Kbd className="h-4 min-w-0 shrink-0 rounded-sm px-1.5 text-[10px]">
+              {props.jumpLabel}
+            </Kbd>
+          ) : null}
         </div>
         {props.showProvider && (
           <div className="flex items-center gap-1 mt-0.5">
@@ -50,7 +68,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
                 providerIconClassName(props.provider, "text-muted-foreground/70"),
               )}
             />
-            <span className="text-xs text-muted-foreground/70 truncate">
+            <span className="text-xs font-normal leading-snug text-muted-foreground/70 truncate">
               {getProviderLabel(props.provider, props.name)}
             </span>
           </div>

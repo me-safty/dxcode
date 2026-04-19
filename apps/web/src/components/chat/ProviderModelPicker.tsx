@@ -1,5 +1,9 @@
-import { type ProviderKind, type ServerProvider } from "@t3tools/contracts";
-import { memo, useState } from "react";
+import {
+  type ProviderKind,
+  type ResolvedKeybindingsConfig,
+  type ServerProvider,
+} from "@t3tools/contracts";
+import { memo, useEffect, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -7,26 +11,46 @@ import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
 import { cn } from "~/lib/utils";
 import { ModelPickerContent } from "./ModelPickerContent";
 import { providerIconClassName, PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
+import { setModelPickerOpen } from "../../shortcutModifierState";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   provider: ProviderKind;
   model: string;
   lockedProvider: ProviderKind | null;
   providers?: ReadonlyArray<ServerProvider>;
+  keybindings?: ResolvedKeybindingsConfig;
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
   activeProviderIconClassName?: string;
   compact?: boolean;
   disabled?: boolean;
+  terminalOpen?: boolean;
+  open?: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
+  onOpenChange?: (open: boolean) => void;
   onProviderModelChange: (provider: ProviderKind, model: string) => void;
 }) {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const activeProvider = props.lockedProvider ?? props.provider;
+  const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
   const selectedProviderOptions = props.modelOptionsByProvider[activeProvider];
   const selectedModelLabel =
     selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[activeProvider];
+
+  const setIsMenuOpen = (open: boolean) => {
+    props.onOpenChange?.(open);
+    if (props.open === undefined) {
+      setUncontrolledIsMenuOpen(open);
+    }
+  };
+
+  useEffect(() => {
+    setModelPickerOpen(isMenuOpen);
+    return () => {
+      setModelPickerOpen(false);
+    };
+  }, [isMenuOpen]);
 
   const handleProviderModelChange = (provider: ProviderKind, model: string) => {
     if (props.disabled) return;
@@ -84,7 +108,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           model={props.model}
           lockedProvider={props.lockedProvider}
           {...(props.providers && { providers: props.providers })}
+          {...(props.keybindings ? { keybindings: props.keybindings } : {})}
           modelOptionsByProvider={props.modelOptionsByProvider}
+          terminalOpen={props.terminalOpen ?? false}
+          onRequestClose={() => setIsMenuOpen(false)}
           onProviderModelChange={handleProviderModelChange}
         />
       </MenuPopup>

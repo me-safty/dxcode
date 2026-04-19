@@ -48,6 +48,7 @@ import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { getServerConfig } from "../rpc/serverState";
 import { getRouter } from "../router";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
+import { readShortcutModifierState } from "../shortcutModifierState";
 import { selectBootstrapCompleteForActiveEnvironment, useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
@@ -1378,6 +1379,18 @@ function dispatchChatNewShortcut(): void {
       shiftKey: true,
       metaKey: useMetaForMod,
       ctrlKey: !useMetaForMod,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
+function releaseModShortcut(key?: string): void {
+  window.dispatchEvent(
+    new KeyboardEvent("keyup", {
+      key: key ?? (isMacPlatform(navigator.platform) ? "Meta" : "Control"),
+      metaKey: false,
+      ctrlKey: false,
       bubbles: true,
       cancelable: true,
     }),
@@ -4006,6 +4019,29 @@ describe("ChatView timeline estimator parity (full app)", () => {
                 node: { type: "identifier", name: "terminalFocus" },
               },
             },
+            {
+              command: "thread.jump.1",
+              shortcut: {
+                key: "1",
+                metaKey: true,
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false,
+                modKey: false,
+              },
+            },
+            {
+              command: "modelPicker.jump.1",
+              shortcut: {
+                key: "1",
+                metaKey: true,
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false,
+                modKey: false,
+              },
+              whenAst: { type: "identifier", name: "modelPickerOpen" },
+            },
           ],
         };
       },
@@ -5516,6 +5552,330 @@ describe("ChatView timeline estimator parity (full app)", () => {
         { timeout: 8_000, interval: 16 },
       );
     } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens the model picker when selecting /model", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-model-command-target" as MessageId,
+        targetText: "model command thread",
+      }),
+    });
+
+    try {
+      await waitForComposerEditor();
+      await page.getByTestId("composer-editor").fill("/mod");
+
+      const menuItem = await waitForComposerMenuItem("slash:model");
+      await menuItem.click();
+
+      await vi.waitFor(() => {
+        expect(document.querySelector(".model-picker-list")).not.toBeNull();
+        expect(findComposerProviderModelPicker()?.textContent).not.toContain("/model");
+      });
+
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve());
+        });
+      });
+
+      await vi.waitFor(() => {
+        const searchInput = document.querySelector<HTMLInputElement>(
+          'input[placeholder="Search models..."]',
+        );
+        expect(searchInput).not.toBeNull();
+        expect(document.activeElement).toBe(searchInput);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("toggles the model picker from the desktop menu action bridge", async () => {
+    let menuActionListener: ((action: string) => void) | null = null;
+    window.desktopBridge = {
+      getAppBranding: () => null,
+      getLocalEnvironmentBootstrap: () => ({
+        label: "Local environment",
+        httpBaseUrl: "http://localhost:3000",
+        wsBaseUrl: "ws://localhost:3000",
+      }),
+      getClientSettings: vi.fn().mockResolvedValue(null),
+      setClientSettings: vi.fn().mockResolvedValue(undefined),
+      getSavedEnvironmentRegistry: vi.fn().mockResolvedValue([]),
+      setSavedEnvironmentRegistry: vi.fn().mockResolvedValue(undefined),
+      getSavedEnvironmentSecret: vi.fn().mockResolvedValue(null),
+      setSavedEnvironmentSecret: vi.fn().mockResolvedValue(false),
+      removeSavedEnvironmentSecret: vi.fn().mockResolvedValue(undefined),
+      getServerExposureState: vi.fn().mockResolvedValue({
+        mode: "local-only",
+        endpointUrl: null,
+        advertisedHost: null,
+      }),
+      setServerExposureMode: vi.fn().mockResolvedValue({
+        mode: "local-only",
+        endpointUrl: null,
+        advertisedHost: null,
+      }),
+      pickFolder: vi.fn().mockResolvedValue(null),
+      confirm: vi.fn().mockResolvedValue(true),
+      setTheme: vi.fn().mockResolvedValue(undefined),
+      showContextMenu: vi.fn().mockResolvedValue(null),
+      openExternal: vi.fn().mockResolvedValue(true),
+      onMenuAction: (listener) => {
+        menuActionListener = listener;
+        return () => {
+          menuActionListener = null;
+        };
+      },
+      getUpdateState: vi.fn().mockResolvedValue(null),
+      setUpdateChannel: vi.fn().mockResolvedValue(null),
+      checkForUpdate: vi.fn().mockResolvedValue({ ok: true }),
+      downloadUpdate: vi.fn().mockResolvedValue({ ok: true }),
+      installUpdate: vi.fn().mockResolvedValue({ ok: true }),
+      onUpdateState: vi.fn(() => () => undefined),
+    } as NonNullable<typeof window.desktopBridge>;
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-desktop-model-picker-target" as MessageId,
+        targetText: "desktop menu action thread",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "modelPicker.toggle",
+              shortcut: {
+                key: "m",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false,
+                modKey: true,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      expect(menuActionListener).not.toBeNull();
+      if (!menuActionListener) {
+        throw new Error("Desktop menu action listener was not registered.");
+      }
+
+      (menuActionListener as (action: string) => void)("toggle-model-picker");
+
+      await vi.waitFor(() => {
+        expect(document.querySelector(".model-picker-list")).not.toBeNull();
+      });
+
+      await vi.waitFor(() => {
+        expect(readShortcutModifierState()).toEqual({
+          metaKey: true,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        });
+      });
+
+      (menuActionListener as (action: string) => void)("toggle-model-picker");
+
+      await vi.waitFor(() => {
+        expect(document.querySelector(".model-picker-list")).toBeNull();
+      });
+
+      (menuActionListener as (action: string) => void)("toggle-model-picker");
+
+      await vi.waitFor(() => {
+        expect(document.querySelector(".model-picker-list")).not.toBeNull();
+      });
+
+      (menuActionListener as (action: string) => void)("clear-shortcut-hints");
+
+      await vi.waitFor(() => {
+        expect(readShortcutModifierState()).toEqual({
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        });
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("toggles the model picker and shows jump keys immediately from the shortcut", async () => {
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-model-picker-shortcut-target" as MessageId,
+      targetText: "model picker shortcut thread",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: {
+        ...snapshot,
+        projects: snapshot.projects.map((project) =>
+          project.id === PROJECT_ID
+            ? Object.assign({}, project, {
+                defaultModelSelection: { provider: "codex", model: "gpt-5.4" },
+              })
+            : project,
+        ),
+        threads: snapshot.threads.map((thread) =>
+          thread.id === THREAD_ID
+            ? Object.assign({}, thread, {
+                modelSelection: { provider: "codex", model: "gpt-5.4" },
+              })
+            : thread,
+        ),
+      },
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "modelPicker.toggle",
+              shortcut: {
+                key: "m",
+                metaKey: false,
+                ctrlKey: true,
+                shiftKey: false,
+                altKey: false,
+                modKey: false,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+            {
+              command: "thread.jump.1",
+              shortcut: {
+                key: "1",
+                metaKey: false,
+                ctrlKey: true,
+                shiftKey: false,
+                altKey: false,
+                modKey: false,
+              },
+            },
+            {
+              command: "modelPicker.jump.1",
+              shortcut: {
+                key: "1",
+                metaKey: false,
+                ctrlKey: true,
+                shiftKey: false,
+                altKey: false,
+                modKey: false,
+              },
+              whenAst: { type: "identifier", name: "modelPickerOpen" },
+            },
+          ],
+          providers: [
+            {
+              ...nextFixture.serverConfig.providers[0]!,
+              provider: "codex",
+              models: [
+                {
+                  slug: "gpt-5.1-codex-max",
+                  name: "GPT-5.1 Codex Max",
+                  isCustom: false,
+                  capabilities: {
+                    supportsFastMode: true,
+                    supportsThinkingToggle: false,
+                    reasoningEffortLevels: [],
+                    promptInjectedEffortLevels: [],
+                    contextWindowOptions: [],
+                  },
+                },
+                {
+                  slug: "gpt-5.3-codex",
+                  name: "GPT-5.3 Codex",
+                  isCustom: false,
+                  capabilities: {
+                    supportsFastMode: true,
+                    supportsThinkingToggle: false,
+                    reasoningEffortLevels: [],
+                    promptInjectedEffortLevels: [],
+                    contextWindowOptions: [],
+                  },
+                },
+                {
+                  slug: "gpt-5.4",
+                  name: "GPT-5.4",
+                  isCustom: false,
+                  capabilities: {
+                    supportsFastMode: true,
+                    supportsThinkingToggle: false,
+                    reasoningEffortLevels: [],
+                    promptInjectedEffortLevels: [],
+                    contextWindowOptions: [],
+                  },
+                },
+              ],
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      await waitForComposerEditor();
+
+      const initialPath = mounted.router.state.location.pathname;
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "m",
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(document.querySelector(".model-picker-list")).not.toBeNull();
+      });
+
+      const jumpLabel = isMacPlatform(navigator.platform) ? "⌃1" : "Ctrl+1";
+      await vi.waitFor(() => {
+        expect(
+          Array.from(
+            document.querySelectorAll<HTMLElement>('.model-picker-list [data-slot="kbd"]'),
+          ).some((element) => element.textContent?.trim() === jumpLabel),
+        ).toBe(true);
+      });
+      expect(mounted.router.state.location.pathname).toBe(initialPath);
+
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "m",
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(document.querySelector(".model-picker-list")).toBeNull();
+      });
+    } finally {
+      releaseModShortcut("Control");
       await mounted.cleanup();
     }
   });

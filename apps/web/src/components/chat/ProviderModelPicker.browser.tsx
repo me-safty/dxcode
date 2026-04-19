@@ -6,7 +6,7 @@ import { render } from "vitest-browser-react";
 
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { getCustomModelOptionsByProvider } from "../../modelSelection";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import { DEFAULT_CLIENT_SETTINGS, DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { __resetLocalApiForTests } from "../../localApi";
 
 // Mock the environments/runtime module to provide a mock primary environment connection
@@ -188,6 +188,21 @@ function buildCodexProvider(models: ServerProvider["models"]): ServerProvider {
   };
 }
 
+function buildOpenCodeProvider(models: ServerProvider["models"]): ServerProvider {
+  return {
+    provider: "opencode",
+    enabled: true,
+    installed: true,
+    version: "1.0.0",
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: new Date().toISOString(),
+    models,
+    slashCommands: [],
+    skills: [],
+  };
+}
+
 async function mountPicker(props: {
   provider: ProviderKind;
   model: string;
@@ -237,6 +252,18 @@ function getModelPickerListText() {
   return getModelPickerListElement().textContent ?? "";
 }
 
+function getVisibleModelNames() {
+  return Array.from(getModelPickerListElement().querySelectorAll<HTMLDivElement>("div.font-medium"))
+    .map((element) => element.textContent?.replace(/New$/u, "").trim() ?? "")
+    .filter((text) => text.length > 0);
+}
+
+function getSidebarProviderOrder() {
+  return Array.from(document.querySelectorAll<HTMLElement>("[data-model-picker-provider]")).map(
+    (element) => element.dataset.modelPickerProvider ?? "",
+  );
+}
+
 describe("ProviderModelPicker", () => {
   beforeEach(async () => {
     // Reset test environment before each test
@@ -260,9 +287,31 @@ describe("ProviderModelPicker", () => {
 
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
-        expect(text).toContain("Codex");
+        expect(text).not.toContain("Codex");
         expect(text).toContain("Claude");
         expect(text).toContain("Claude Opus 4.6");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows favorites first in the provider sidebar", async () => {
+    const mounted = await mountPicker({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(getSidebarProviderOrder().slice(0, 3)).toEqual([
+          "favorites",
+          "codex",
+          "claudeAgent",
+        ]);
       });
     } finally {
       await mounted.cleanup();
@@ -279,18 +328,18 @@ describe("ProviderModelPicker", () => {
     try {
       await page.getByRole("button").click();
 
-      // Start with all models visible
+      // Start with Claude models visible
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
-        expect(text).toContain("GPT-5 Codex");
+        expect(text).not.toContain("GPT-5 Codex");
         expect(text).toContain("Claude Opus 4.6");
       });
 
       // Click on Codex provider in sidebar
-      const buttons = await page.getByTitle("Codex").all();
-      // Ensure the sidebar button is present — fail loudly if it's not.
-      expect(buttons.length).toBeGreaterThan(0);
-      await buttons[0]!.click();
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-model-picker-provider="codex"]')).not.toBeNull();
+      });
+      await page.getByRole("button", { name: "Codex", exact: true }).click();
 
       // Now should only show Codex models
       await vi.waitFor(() => {
@@ -303,7 +352,45 @@ describe("ProviderModelPicker", () => {
     }
   });
 
+  it("focuses the search input after selecting a sidebar provider", async () => {
+    const mounted = await mountPicker({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-model-picker-provider="codex"]')).not.toBeNull();
+      });
+      await page.getByRole("button", { name: "Codex", exact: true }).click();
+
+      await vi.waitFor(() => {
+        const searchInput = document.querySelector<HTMLInputElement>(
+          'input[placeholder="Search models..."]',
+        );
+        expect(searchInput).not.toBeNull();
+        expect(document.activeElement).toBe(searchInput);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("shows locked provider header and only its models in locked mode", async () => {
+    localStorage.setItem(
+      "t3code:client-settings:v1",
+      JSON.stringify({
+        ...DEFAULT_CLIENT_SETTINGS,
+        favorites: [
+          { provider: "codex", model: "gpt-5-codex" },
+          { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+        ],
+      }),
+    );
+
     const mounted = await mountPicker({
       provider: "claudeAgent",
       model: "claude-opus-4-6",
@@ -317,13 +404,14 @@ describe("ProviderModelPicker", () => {
         const text = document.body.textContent ?? "";
         // Should show locked provider label
         expect(text).toContain("Claude");
-        // Should show models from locked provider
-        expect(text).toContain("Claude Sonnet 4.6");
-        expect(text).toContain("Claude Haiku 4.5");
-        // Should not show other provider models
-        expect(text).not.toContain("GPT-5 Codex");
+        expect(getVisibleModelNames()).toEqual([
+          "Claude Sonnet 4.6",
+          "Claude Opus 4.6",
+          "Claude Haiku 4.5",
+        ]);
       });
     } finally {
+      localStorage.removeItem("t3code:client-settings:v1");
       await mounted.cleanup();
     }
   });
@@ -341,7 +429,7 @@ describe("ProviderModelPicker", () => {
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
         expect(text).toContain("Claude Opus 4.6");
-        expect(text).toContain("GPT-5 Codex");
+        expect(text).not.toContain("GPT-5 Codex");
       });
 
       // Find and type in search box
@@ -352,6 +440,58 @@ describe("ProviderModelPicker", () => {
         const text = document.body.textContent ?? "";
         expect(text).toContain("Claude Opus 4.6");
         expect(text).not.toContain("GPT-5 Codex");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("hides the provider sidebar while searching", async () => {
+    const mounted = await mountPicker({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(getSidebarProviderOrder().length).toBeGreaterThan(0);
+      });
+
+      await page.getByPlaceholder("Search models...").fill("cla");
+
+      await vi.waitFor(() => {
+        expect(getSidebarProviderOrder()).toEqual([]);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("closes the picker when escape is pressed in search", async () => {
+    const mounted = await mountPicker({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      const searchInput = page.getByPlaceholder("Search models...");
+      await searchInput.click();
+      const searchInputElement = document.querySelector<HTMLInputElement>(
+        'input[placeholder="Search models..."]',
+      );
+      expect(searchInputElement).not.toBeNull();
+      searchInputElement!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+
+      await vi.waitFor(() => {
+        expect(document.querySelector(".model-picker-list")).toBeNull();
       });
     } finally {
       await mounted.cleanup();
@@ -371,7 +511,7 @@ describe("ProviderModelPicker", () => {
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
         expect(text).toContain("Claude Opus 4.6");
-        expect(text).toContain("GPT-5 Codex");
+        expect(text).not.toContain("GPT-5 Codex");
       });
 
       // Search by provider name
@@ -382,6 +522,58 @@ describe("ProviderModelPicker", () => {
         const listText = getModelPickerListText();
         expect(listText).toContain("GPT-5 Codex");
         expect(listText).not.toContain("Claude Opus 4.6");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("matches fuzzy multi-token queries across provider and model text", async () => {
+    const providers: ReadonlyArray<ServerProvider> = [
+      buildCodexProvider([
+        {
+          slug: "gpt-5-codex",
+          name: "GPT-5 Codex",
+          isCustom: false,
+          capabilities: {
+            reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
+            supportsFastMode: true,
+            supportsThinkingToggle: false,
+            contextWindowOptions: [],
+            promptInjectedEffortLevels: [],
+          },
+        },
+      ]),
+      buildOpenCodeProvider([
+        {
+          slug: "github-copilot/claude-opus-4.7",
+          name: "GitHub Copilot · Claude Opus 4.7",
+          isCustom: false,
+          capabilities: {
+            reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
+            supportsFastMode: false,
+            supportsThinkingToggle: false,
+            contextWindowOptions: [],
+            promptInjectedEffortLevels: [],
+          },
+        },
+      ]),
+    ];
+    const mounted = await mountPicker({
+      provider: "opencode",
+      model: "github-copilot/claude-opus-4.7",
+      lockedProvider: null,
+      providers,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await page.getByPlaceholder("Search models...").fill("coplt op");
+
+      await vi.waitFor(() => {
+        const listText = getModelPickerListText();
+        expect(listText).toContain("Claude Opus 4.7");
+        expect(listText).not.toContain("GPT-5 Codex");
       });
     } finally {
       await mounted.cleanup();
@@ -456,14 +648,38 @@ describe("ProviderModelPicker", () => {
       await favoriteButton.first().click();
 
       await vi.waitFor(async () => {
-        const favoritesHeader = await page.getByText("FAVORITES").all();
-        const allModelsHeader = await page.getByText("ALL MODELS").all();
         const favoritedModelRows = Array.from(
           getModelPickerListElement().querySelectorAll<HTMLDivElement>("div.font-medium"),
         ).filter((element) => element.textContent?.trim() === "Claude Opus 4.6");
-        expect(favoritesHeader.length).toBeGreaterThan(0);
-        expect(allModelsHeader.length).toBeGreaterThan(0);
         expect(favoritedModelRows.length).toBe(1);
+      });
+    } finally {
+      await mounted.cleanup();
+      localStorage.removeItem("t3code:client-settings:v1");
+    }
+  });
+
+  it("shows favorited models first within the selected provider list", async () => {
+    localStorage.setItem(
+      "t3code:client-settings:v1",
+      JSON.stringify({
+        ...DEFAULT_CLIENT_SETTINGS,
+        favorites: [{ provider: "codex", model: "gpt-5.3-codex" }],
+      }),
+    );
+
+    const mounted = await mountPicker({
+      provider: "codex",
+      model: "gpt-5-codex",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await page.getByRole("button", { name: "Codex", exact: true }).click();
+
+      await vi.waitFor(() => {
+        expect(getVisibleModelNames().slice(0, 2)).toEqual(["GPT-5.3 Codex", "GPT-5 Codex"]);
       });
     } finally {
       await mounted.cleanup();
@@ -549,8 +765,8 @@ describe("ProviderModelPicker", () => {
     ];
 
     const hidden = await mountPicker({
-      provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      provider: "codex",
+      model: "gpt-5.3-codex",
       lockedProvider: null,
       providers: providersWithoutSpark,
     });
@@ -568,8 +784,8 @@ describe("ProviderModelPicker", () => {
     }
 
     const visible = await mountPicker({
-      provider: "claudeAgent",
-      model: "claude-opus-4-6",
+      provider: "codex",
+      model: "gpt-5.3-codex",
       lockedProvider: null,
       providers: providersWithSpark,
     });

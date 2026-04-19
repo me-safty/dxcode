@@ -175,6 +175,7 @@ import {
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
+import { TOGGLE_MODEL_PICKER_EVENT } from "./AppSidebarLayout";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -2233,6 +2234,7 @@ export default function ChatView(props: ChatViewProps) {
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
+        modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
       };
 
       const command = resolveShortcutCommand(event, keybindings, {
@@ -2282,6 +2284,13 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "modelPicker.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        composerRef.current?.toggleModelPicker();
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -2306,6 +2315,17 @@ export default function ChatView(props: ChatViewProps) {
     onToggleDiff,
     toggleTerminalVisibility,
   ]);
+
+  useEffect(() => {
+    const handleToggleModelPicker = () => {
+      composerRef.current?.toggleModelPicker();
+    };
+
+    window.addEventListener(TOGGLE_MODEL_PICKER_EVENT, handleToggleModelPicker);
+    return () => {
+      window.removeEventListener(TOGGLE_MODEL_PICKER_EVENT, handleToggleModelPicker);
+    };
+  }, []);
 
   const onRevertToTurnCount = useCallback(
     async (turnCount: number) => {
@@ -3341,6 +3361,8 @@ export default function ChatView(props: ChatViewProps) {
               activeThreadActivities={activeThread?.activities}
               resolvedTheme={resolvedTheme}
               settings={settings}
+              keybindings={keybindings}
+              terminalOpen={Boolean(terminalState.terminalOpen)}
               gitCwd={gitCwd}
               promptRef={promptRef}
               composerImagesRef={composerImagesRef}
