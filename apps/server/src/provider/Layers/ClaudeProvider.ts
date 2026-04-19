@@ -481,6 +481,15 @@ function dedupeSlashCommands(
   return [...commandsByName.values()];
 }
 
+export function waitForAbortSignal(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
 /**
  * Probe account information by spawning a lightweight Claude Agent SDK
  * session and reading the initialization result.
@@ -499,9 +508,10 @@ const probeClaudeCapabilities = (binaryPath: string) => {
   return Effect.tryPromise(async () => {
     const q = claudeQuery({
       prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
+        yield* [] as ReadonlyArray<SDKUserMessage>;
         // Never yield — we only need initialization data, not a conversation.
         // This prevents any prompt from reaching the Anthropic API.
-        await new Promise<never>(() => {});
+        await waitForAbortSignal(abort.signal);
       })(),
       options: {
         persistSession: false,
