@@ -100,7 +100,6 @@ import {
   PLAN_INLINE_DEFAULT_WIDTH,
   PLAN_INLINE_SIDEBAR_MIN_WIDTH,
 } from "../rightPanelLayout";
-import { Sidebar, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
@@ -718,6 +717,18 @@ export default function ChatView(props: ChatViewProps) {
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
+  const planSidebarWrapperRef = useRef<HTMLDivElement>(null);
+  const planResizeHandleRef = useRef<HTMLButtonElement>(null);
+  const planResizeSuppressClickRef = useRef(false);
+  const planResizeStateRef = useRef<{
+    moved: boolean;
+    pointerId: number;
+    pendingWidth: number;
+    startWidth: number;
+    startX: number;
+    rafId: number | null;
+    width: number;
+  } | null>(null);
 
   const terminalState = useTerminalStateStore((state) =>
     selectThreadTerminalState(state.terminalStateByThreadKey, routeThreadRef),
@@ -1930,25 +1941,25 @@ export default function ChatView(props: ChatViewProps) {
     planSidebarDismissedForTurnRef.current =
       activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
   }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
-  const onPlanSidebarOpenChange = useCallback(
-    (open: boolean) => {
-      if (open) {
-        setPlanSidebarOpen(true);
-        planSidebarDismissedForTurnRef.current = null;
-        return;
-      }
-      closePlanSidebar();
-    },
-    [closePlanSidebar],
-  );
+  // Callback ref: restores persisted width when the wrapper mounts
+  const setPlanSidebarWrapperRef = useCallback((node: HTMLDivElement | null) => {
+    (planSidebarWrapperRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+    if (!node) return;
+    const stored = localStorage.getItem(PLAN_INLINE_SIDEBAR_WIDTH_STORAGE_KEY);
+    if (!stored) return;
+    const parsed = Number(stored);
+    if (!Number.isFinite(parsed) || parsed < PLAN_INLINE_SIDEBAR_MIN_WIDTH) return;
+    node.style.setProperty("--plan-sidebar-width", `${parsed}px`);
+  }, []);
+  // Validates a candidate width by temporarily applying it and measuring composer overflow
   const shouldAcceptPlanSidebarWidth = useCallback(
     ({ nextWidth, wrapper }: { nextWidth: number; wrapper: HTMLElement }) => {
       const composerForm = document.querySelector<HTMLElement>("[data-chat-composer-form='true']");
       if (!composerForm) return true;
       const composerViewport = composerForm.parentElement;
       if (!composerViewport) return true;
-      const previousSidebarWidth = wrapper.style.getPropertyValue("--sidebar-width");
-      wrapper.style.setProperty("--sidebar-width", `${nextWidth}px`);
+      const previousWidth = wrapper.style.getPropertyValue("--plan-sidebar-width");
+      wrapper.style.setProperty("--plan-sidebar-width", `${nextWidth}px`);
 
       const viewportStyle = window.getComputedStyle(composerViewport);
       const viewportPaddingLeft = Number.parseFloat(viewportStyle.paddingLeft) || 0;
@@ -1976,16 +1987,99 @@ export default function ChatView(props: ChatViewProps) {
       const overflowsViewport = formRect.width > viewportContentWidth + 0.5;
       const violatesMinimumComposerWidth = composerForm.clientWidth + 0.5 < minimumComposerWidth;
 
-      if (previousSidebarWidth.length > 0) {
-        wrapper.style.setProperty("--sidebar-width", previousSidebarWidth);
+      if (previousWidth.length > 0) {
+        wrapper.style.setProperty("--plan-sidebar-width", previousWidth);
       } else {
-        wrapper.style.removeProperty("--sidebar-width");
+        wrapper.style.removeProperty("--plan-sidebar-width");
       }
 
       return !hasComposerOverflow && !overflowsViewport && !violatesMinimumComposerWidth;
     },
     [],
   );
+  const stopPlanResize = useCallback((pointerId: number) => {
+    const state = planResizeStateRef.current;
+    if (!state) return;
+    if (state.rafId !== null) cancelAnimationFrame(state.rafId);
+    if (Number.isFinite(state.width)) {
+      localStorage.setItem(PLAN_INLINE_SIDEBAR_WIDTH_STORAGE_KEY, String(state.width));
+    }
+    planResizeStateRef.current = null;
+    if (planResizeHandleRef.current?.hasPointerCapture(pointerId)) {
+      planResizeHandleRef.current.releasePointerCapture(pointerId);
+    }
+    document.body.style.removeProperty("cursor");
+    document.body.style.removeProperty("user-select");
+  }, []);
+  const handlePlanResizePointerDown = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return;
+    const wrapper = planSidebarWrapperRef.current;
+    if (!wrapper) return;
+    const startWidth = wrapper.getBoundingClientRect().width;
+    const clamped = Math.max(PLAN_INLINE_SIDEBAR_MIN_WIDTH, startWidth);
+    wrapper.style.setProperty("--plan-sidebar-width", `${clamped}px`);
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    planResizeStateRef.current = {
+      moved: false,
+      pointerId: e.pointerId,
+      pendingWidth: clamped,
+      startWidth: clamped,
+      startX: e.clientX,
+      rafId: null,
+      width: clamped,
+    };
+  }, []);
+  const handlePlanResizePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      const state = planResizeStateRef.current;
+      if (!state || state.pointerId !== e.pointerId) return;
+      e.preventDefault();
+      // right-side panel: dragging left (decreasing clientX) makes it wider
+      const delta = state.startX - e.clientX;
+      if (Math.abs(delta) > 2) state.moved = true;
+      state.pendingWidth = Math.max(PLAN_INLINE_SIDEBAR_MIN_WIDTH, state.startWidth + delta);
+      if (state.rafId !== null) return;
+      state.rafId = requestAnimationFrame(() => {
+        const s = planResizeStateRef.current;
+        const wrapper = planSidebarWrapperRef.current;
+        if (!s || !wrapper) return;
+        s.rafId = null;
+        const nextWidth = s.pendingWidth;
+        if (!shouldAcceptPlanSidebarWidth({ nextWidth, wrapper })) return;
+        wrapper.style.setProperty("--plan-sidebar-width", `${nextWidth}px`);
+        s.width = nextWidth;
+      });
+    },
+    [shouldAcceptPlanSidebarWidth],
+  );
+  const handlePlanResizeEndInteraction = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      const state = planResizeStateRef.current;
+      if (!state || state.pointerId !== e.pointerId) return;
+      e.preventDefault();
+      planResizeSuppressClickRef.current = state.moved;
+      stopPlanResize(e.pointerId);
+    },
+    [stopPlanResize],
+  );
+  const handlePlanResizeClick = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    if (planResizeSuppressClickRef.current) {
+      planResizeSuppressClickRef.current = false;
+      e.preventDefault();
+    }
+  }, []);
+  useEffect(() => {
+    return () => {
+      const state = planResizeStateRef.current;
+      if (state?.rafId != null) cancelAnimationFrame(state.rafId);
+      document.body.style.removeProperty("cursor");
+      document.body.style.removeProperty("user-select");
+    };
+  }, []);
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -3498,40 +3592,43 @@ export default function ChatView(props: ChatViewProps) {
         {/* end chat column */}
 
         {/* Plan sidebar (inline, resizable) */}
-        {!shouldUsePlanSidebarSheet ? (
-          <SidebarProvider
-            defaultOpen={false}
-            open={planSidebarOpen}
-            onOpenChange={onPlanSidebarOpenChange}
-            className="w-auto min-h-0 flex-none bg-transparent"
-            style={{ "--sidebar-width": PLAN_INLINE_DEFAULT_WIDTH } as React.CSSProperties}
+        {planSidebarOpen && !shouldUsePlanSidebarSheet ? (
+          <div
+            ref={setPlanSidebarWrapperRef}
+            className="relative flex h-full min-h-0 flex-none flex-col border-l border-border/70"
+            style={
+              {
+                width: `var(--plan-sidebar-width, ${PLAN_INLINE_DEFAULT_WIDTH})`,
+                transition: "width 0ms",
+              } as React.CSSProperties
+            }
           >
-            <Sidebar
-              side="right"
-              collapsible="offcanvas"
-              className="border-l border-border bg-card text-foreground"
-              resizable={{
-                minWidth: PLAN_INLINE_SIDEBAR_MIN_WIDTH,
-                shouldAcceptWidth: shouldAcceptPlanSidebarWidth,
-                storageKey: PLAN_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
-              }}
-            >
-              {planSidebarOpen ? (
-                <PlanSidebar
-                  activePlan={activePlan}
-                  activeProposedPlan={sidebarProposedPlan}
-                  label={planSidebarLabel}
-                  environmentId={environmentId}
-                  markdownCwd={gitCwd ?? undefined}
-                  workspaceRoot={activeWorkspaceRoot}
-                  timestampFormat={timestampFormat}
-                  mode="sidebar"
-                  onClose={closePlanSidebar}
-                />
-              ) : null}
-              <SidebarRail />
-            </Sidebar>
-          </SidebarProvider>
+            {/* Left-edge drag handle — mirrors SidebarRail behaviour */}
+            <button
+              ref={planResizeHandleRef}
+              type="button"
+              aria-label="Resize plan sidebar"
+              title="Drag to resize"
+              className="absolute inset-y-0 left-0 z-20 hidden w-4 -translate-x-1/2 cursor-e-resize after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-border sm:flex"
+              tabIndex={-1}
+              onPointerDown={handlePlanResizePointerDown}
+              onPointerMove={handlePlanResizePointerMove}
+              onPointerUp={handlePlanResizeEndInteraction}
+              onPointerCancel={handlePlanResizeEndInteraction}
+              onClick={handlePlanResizeClick}
+            />
+            <PlanSidebar
+              activePlan={activePlan}
+              activeProposedPlan={sidebarProposedPlan}
+              label={planSidebarLabel}
+              environmentId={environmentId}
+              markdownCwd={gitCwd ?? undefined}
+              workspaceRoot={activeWorkspaceRoot}
+              timestampFormat={timestampFormat}
+              mode="sidebar"
+              onClose={closePlanSidebar}
+            />
+          </div>
         ) : null}
       </div>
       {/* end horizontal flex container */}
