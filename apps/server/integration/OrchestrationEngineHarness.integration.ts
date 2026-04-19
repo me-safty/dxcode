@@ -47,7 +47,6 @@ import { ProviderService } from "../src/provider/Services/ProviderService.ts";
 import { AnalyticsService } from "../src/telemetry/Services/AnalyticsService.ts";
 import { CheckpointReactorLive } from "../src/orchestration/Layers/CheckpointReactor.ts";
 import { RepositoryIdentityResolverLive } from "../src/project/Layers/RepositoryIdentityResolver.ts";
-import { ProjectProviderOverrideStore } from "../src/project/Services/ProjectProviderOverrideStore.ts";
 import { OrchestrationEngineLive } from "../src/orchestration/Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "../src/orchestration/Layers/ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "../src/orchestration/Layers/ProjectionSnapshotQuery.ts";
@@ -359,7 +358,6 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provide(persistenceLayer),
       Layer.provideMerge(RepositoryIdentityResolverLive),
       Layer.provideMerge(ServerSettingsService.layerTest()),
-      Layer.provideMerge(ProjectProviderOverrideStore.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),
       Layer.provideMerge(NodeServices.layer),
     );

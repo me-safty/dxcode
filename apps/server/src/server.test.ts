@@ -92,7 +92,6 @@ import {
   ProjectSetupScriptRunner,
   type ProjectSetupScriptRunnerShape,
 } from "./project/Services/ProjectSetupScriptRunner.ts";
-import { ProjectProviderOverrideStore } from "./project/Services/ProjectProviderOverrideStore.ts";
 import {
   RepositoryIdentityResolver,
   type RepositoryIdentityResolverShape,
@@ -447,12 +446,6 @@ const buildAppUnderTest = (options?: {
         Layer.mock(ProjectSetupScriptRunner)({
           runForThread: () => Effect.succeed({ status: "no-script" as const }),
           ...options?.layers?.projectSetupScriptRunner,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(ProjectProviderOverrideStore)({
-          get: () => Effect.succeed(undefined),
-          set: (_cwd, override) => Effect.succeed(override),
         }),
       ),
       Layer.provide(

@@ -51,7 +51,6 @@ import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
 import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptRunner.ts";
-import { ProjectProviderOverrideStore } from "./project/Services/ProjectProviderOverrideStore.ts";
 import { RepositoryIdentityResolver } from "./project/Services/RepositoryIdentityResolver.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
@@ -149,7 +148,6 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const workspaceEntries = yield* WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem;
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
-      const projectProviderOverrideStore = yield* ProjectProviderOverrideStore;
       const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
       const serverEnvironment = yield* ServerEnvironment;
       const serverAuth = yield* ServerAuth;
@@ -802,22 +800,6 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 });
               }),
             ),
-            { "rpc.aggregate": "workspace" },
-          ),
-        [WS_METHODS.projectsGetProviderOverride]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.projectsGetProviderOverride,
-            projectProviderOverrideStore
-              .get(input.cwd)
-              .pipe(Effect.map((override) => (override ? { override } : {}))),
-            { "rpc.aggregate": "workspace" },
-          ),
-        [WS_METHODS.projectsSetProviderOverride]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.projectsSetProviderOverride,
-            projectProviderOverrideStore
-              .set(input.cwd, input.override)
-              .pipe(Effect.map((override) => ({ override }))),
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.shellOpenInEditor]: (input) =>

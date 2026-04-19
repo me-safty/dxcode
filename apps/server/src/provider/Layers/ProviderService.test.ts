@@ -43,10 +43,8 @@ import {
 } from "../../persistence/Layers/Sqlite.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
-import { ProjectProviderOverrideStore } from "../../project/Services/ProjectProviderOverrideStore.ts";
 
 const defaultServerSettingsLayer = ServerSettingsService.layerTest();
-const defaultProjectProviderOverrideStoreLayer = ProjectProviderOverrideStore.layerTest();
 
 const asRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
@@ -269,7 +267,6 @@ function makeProviderServiceLayer() {
         Layer.provide(providerAdapterLayer),
         Layer.provide(directoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(defaultProjectProviderOverrideStoreLayer),
         Layer.provideMerge(AnalyticsService.layerTest),
       ),
       directoryLayer,
@@ -285,107 +282,6 @@ function makeProviderServiceLayer() {
     layer,
   };
 }
-
-it.effect(
-  "ProviderServiceLive applies the persisted Claude profile override when starting a session",
-  () =>
-    Effect.gen(function* () {
-      const codex = makeFakeCodexAdapter();
-      const claude = makeFakeCodexAdapter("claudeAgent");
-      const registry: typeof ProviderAdapterRegistry.Service = {
-        getByProvider: (provider) =>
-          provider === "codex"
-            ? Effect.succeed(codex.adapter)
-            : provider === "claudeAgent"
-              ? Effect.succeed(claude.adapter)
-              : Effect.fail(new ProviderUnsupportedError({ provider })),
-        listProviders: () => Effect.succeed(["codex", "claudeAgent"]),
-      };
-      const providerAdapterLayer = Layer.succeed(ProviderAdapterRegistry, registry);
-      const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
-        Layer.provide(SqlitePersistenceMemory),
-      );
-      const directoryLayer = ProviderSessionDirectoryLive.pipe(
-        Layer.provide(runtimeRepositoryLayer),
-      );
-      const overrideStoreLayer = ProjectProviderOverrideStore.layerTest(
-        new Map([["/workspace/pinned", { claudeProfileId: "work" }]]),
-      );
-      const providerLayer = makeProviderServiceLive().pipe(
-        Layer.provide(providerAdapterLayer),
-        Layer.provide(directoryLayer),
-        Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(overrideStoreLayer),
-        Layer.provide(AnalyticsService.layerTest),
-      );
-
-      yield* Effect.gen(function* () {
-        const provider = yield* ProviderService;
-        yield* provider.startSession(asThreadId("thread-override"), {
-          provider: "claudeAgent",
-          threadId: asThreadId("thread-override"),
-          cwd: "/workspace/pinned",
-          runtimeMode: "full-access",
-        });
-      }).pipe(Effect.provide(providerLayer));
-
-      assert.equal(claude.startSession.mock.calls.length, 1);
-      const firstCall = claude.startSession.mock.calls[0]!;
-      const input = firstCall[0] as ProviderSessionStartInput;
-      assert.equal(input.claudeProfileId, "work");
-      assert.equal(codex.startSession.mock.calls.length, 0);
-    }).pipe(Effect.provide(NodeServices.layer)),
-);
-
-it.effect(
-  "ProviderServiceLive prefers the session-input profile over the persisted override",
-  () =>
-    Effect.gen(function* () {
-      const codex = makeFakeCodexAdapter();
-      const claude = makeFakeCodexAdapter("claudeAgent");
-      const registry: typeof ProviderAdapterRegistry.Service = {
-        getByProvider: (provider) =>
-          provider === "codex"
-            ? Effect.succeed(codex.adapter)
-            : provider === "claudeAgent"
-              ? Effect.succeed(claude.adapter)
-              : Effect.fail(new ProviderUnsupportedError({ provider })),
-        listProviders: () => Effect.succeed(["codex", "claudeAgent"]),
-      };
-      const providerAdapterLayer = Layer.succeed(ProviderAdapterRegistry, registry);
-      const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
-        Layer.provide(SqlitePersistenceMemory),
-      );
-      const directoryLayer = ProviderSessionDirectoryLive.pipe(
-        Layer.provide(runtimeRepositoryLayer),
-      );
-      const overrideStoreLayer = ProjectProviderOverrideStore.layerTest(
-        new Map([["/workspace/pinned", { claudeProfileId: "work" }]]),
-      );
-      const providerLayer = makeProviderServiceLive().pipe(
-        Layer.provide(providerAdapterLayer),
-        Layer.provide(directoryLayer),
-        Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(overrideStoreLayer),
-        Layer.provide(AnalyticsService.layerTest),
-      );
-
-      yield* Effect.gen(function* () {
-        const provider = yield* ProviderService;
-        yield* provider.startSession(asThreadId("thread-explicit"), {
-          provider: "claudeAgent",
-          threadId: asThreadId("thread-explicit"),
-          cwd: "/workspace/pinned",
-          runtimeMode: "full-access",
-          claudeProfileId: "personal",
-        });
-      }).pipe(Effect.provide(providerLayer));
-
-      assert.equal(claude.startSession.mock.calls.length, 1);
-      const input = claude.startSession.mock.calls[0]![0] as ProviderSessionStartInput;
-      assert.equal(input.claudeProfileId, "personal");
-    }).pipe(Effect.provide(NodeServices.layer)),
-);
 
 it.effect("ProviderServiceLive rejects new sessions for disabled providers", () =>
   Effect.gen(function* () {
@@ -416,7 +312,6 @@ it.effect("ProviderServiceLive rejects new sessions for disabled providers", () 
       Layer.provide(providerAdapterLayer),
       Layer.provide(directoryLayer),
       Layer.provide(serverSettingsLayer),
-      Layer.provide(defaultProjectProviderOverrideStoreLayer),
       Layer.provide(AnalyticsService.layerTest),
     );
 
@@ -470,7 +365,6 @@ it.effect("ProviderServiceLive keeps persisted resumable sessions on startup", (
       Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
       Layer.provide(directoryLayer),
       Layer.provide(defaultServerSettingsLayer),
-      Layer.provide(defaultProjectProviderOverrideStoreLayer),
       Layer.provide(AnalyticsService.layerTest),
     );
 
@@ -531,7 +425,6 @@ it.effect(
         Layer.provide(Layer.succeed(ProviderAdapterRegistry, firstRegistry)),
         Layer.provide(firstDirectoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(defaultProjectProviderOverrideStoreLayer),
         Layer.provide(AnalyticsService.layerTest),
       );
       const updatedResumeCursor = {
@@ -584,7 +477,6 @@ it.effect(
         Layer.provide(Layer.succeed(ProviderAdapterRegistry, secondRegistry)),
         Layer.provide(secondDirectoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(defaultProjectProviderOverrideStoreLayer),
         Layer.provide(AnalyticsService.layerTest),
       );
 
@@ -1045,7 +937,6 @@ routing.layer("ProviderServiceLive routing", (it) => {
         Layer.provide(Layer.succeed(ProviderAdapterRegistry, firstRegistry)),
         Layer.provide(firstDirectoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(defaultProjectProviderOverrideStoreLayer),
         Layer.provide(AnalyticsService.layerTest),
       );
 
@@ -1079,7 +970,6 @@ routing.layer("ProviderServiceLive routing", (it) => {
         Layer.provide(Layer.succeed(ProviderAdapterRegistry, secondRegistry)),
         Layer.provide(secondDirectoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(defaultProjectProviderOverrideStoreLayer),
         Layer.provide(AnalyticsService.layerTest),
       );
 

@@ -44,7 +44,6 @@ import {
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { ProjectProviderOverrideStore } from "../../project/Services/ProjectProviderOverrideStore.ts";
 
 export interface ProviderServiceLiveOptions {
   readonly canonicalEventLogPath?: string;
@@ -161,7 +160,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 ) {
   const analytics = yield* Effect.service(AnalyticsService);
   const serverSettings = yield* ServerSettingsService;
-  const projectProviderOverrideStore = yield* ProjectProviderOverrideStore;
   const canonicalEventLogger =
     options?.canonicalEventLogger ??
     (options?.canonicalEventLogPath !== undefined
@@ -357,16 +355,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         payload: rawInput,
       });
 
-      const projectOverride = parsed.cwd
-        ? yield* projectProviderOverrideStore.get(parsed.cwd)
-        : undefined;
       const input = {
         ...parsed,
         threadId,
         provider: parsed.provider ?? "codex",
-        ...(parsed.claudeProfileId === undefined && projectOverride?.claudeProfileId
-          ? { claudeProfileId: projectOverride.claudeProfileId }
-          : {}),
       };
       yield* Effect.annotateCurrentSpan({
         "provider.operation": "start-session",

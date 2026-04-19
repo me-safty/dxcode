@@ -49,8 +49,6 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
 import {
-  ProjectProviderOverride,
-  ProjectProviderOverrideInput,
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
@@ -58,7 +56,6 @@ import {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project.ts";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   TerminalClearInput,
   TerminalCloseInput,
@@ -87,8 +84,6 @@ export const WS_METHODS = {
   projectsRemove: "projects.remove",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
-  projectsGetProviderOverride: "projects.getProviderOverride",
-  projectsSetProviderOverride: "projects.setProviderOverride",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -171,16 +166,6 @@ export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
   success: ProjectWriteFileResult,
   error: ProjectWriteFileError,
-});
-
-export const WsProjectsGetProviderOverrideRpc = Rpc.make(WS_METHODS.projectsGetProviderOverride, {
-  payload: Schema.Struct({ cwd: TrimmedNonEmptyString }),
-  success: Schema.Struct({ override: Schema.optional(ProjectProviderOverride) }),
-});
-
-export const WsProjectsSetProviderOverrideRpc = Rpc.make(WS_METHODS.projectsSetProviderOverride, {
-  payload: ProjectProviderOverrideInput,
-  success: Schema.Struct({ override: ProjectProviderOverride }),
 });
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -378,8 +363,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerUpdateSettingsRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
-  WsProjectsGetProviderOverrideRpc,
-  WsProjectsSetProviderOverrideRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsSubscribeGitStatusRpc,

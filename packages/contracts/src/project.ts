@@ -53,20 +53,3 @@ export class ProjectWriteFileError extends Schema.TaggedErrorClass<ProjectWriteF
     cause: Schema.optional(Schema.Defect),
   },
 ) {}
-
-/**
- * User-level per-project override: pins a repo path to a preferred Claude
- * profile. Stored on the server under the user data directory, keyed by
- * absolute cwd. Read on session start to resolve the Claude profile when
- * the composer did not specify one.
- */
-export const ProjectProviderOverride = Schema.Struct({
-  claudeProfileId: Schema.optional(TrimmedNonEmptyString),
-});
-export type ProjectProviderOverride = typeof ProjectProviderOverride.Type;
-
-export const ProjectProviderOverrideInput = Schema.Struct({
-  cwd: TrimmedNonEmptyString,
-  override: ProjectProviderOverride,
-});
-export type ProjectProviderOverrideInput = typeof ProjectProviderOverrideInput.Type;

@@ -20,8 +20,6 @@ import type {
 } from "./git.ts";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type {
-  ProjectProviderOverride,
-  ProjectProviderOverrideInput,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
   ProjectWriteFileInput,
@@ -246,12 +244,6 @@ export interface EnvironmentApi {
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
-    getProviderOverride: (input: {
-      readonly cwd: string;
-    }) => Promise<{ readonly override?: ProjectProviderOverride | undefined }>;
-    setProviderOverride: (
-      input: ProjectProviderOverrideInput,
-    ) => Promise<{ readonly override: ProjectProviderOverride }>;
   };
   filesystem: {
     browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
