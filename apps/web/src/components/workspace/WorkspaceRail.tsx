@@ -1,8 +1,8 @@
 import { parsePatchFiles } from "@pierre/diffs";
 import { type FileDiffMetadata } from "@pierre/diffs/react";
 import { useQuery } from "@tanstack/react-query";
-import type { EnvironmentId, ProjectEntry, ThreadId, TurnId } from "@t3tools/contracts";
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+import type { EnvironmentId, ProjectEntry, ThreadId, TurnId } from "@workbench/contracts";
+import type { TimestampFormat } from "@workbench/contracts/settings";
 import {
   CheckIcon,
   FilesIcon,

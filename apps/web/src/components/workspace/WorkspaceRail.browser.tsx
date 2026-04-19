@@ -1,7 +1,7 @@
 import "../../index.css";
 
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { OrchestrationProposedPlanId, TurnId as MakeTurnId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@workbench/contracts";
+import { OrchestrationProposedPlanId, TurnId as MakeTurnId } from "@workbench/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";

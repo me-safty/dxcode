@@ -1,12 +1,12 @@
-import { createModelSelection } from "@t3tools/shared/model";
+import { createModelSelection } from "@workbench/shared/model";
 import type {
   ProviderInteractionMode,
   ProviderKind,
   ProviderModelOptions,
   RuntimeMode,
   ServerProvider,
-} from "@t3tools/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
+} from "@workbench/contracts";
+import { scopedProjectKey, scopeProjectRef } from "@workbench/client-runtime";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -22,7 +22,7 @@ import {
 
 import { FolderPlusIcon } from "lucide-react";
 import { ClaudeAI, CursorIcon, type Icon, OpenAI, OpenCodeIcon, PiIcon } from "./Icons";
-import { DEFAULT_MODEL_BY_PROVIDER } from "@t3tools/contracts";
+import { DEFAULT_MODEL_BY_PROVIDER } from "@workbench/contracts";
 import { toastManager } from "./ui/toast";
 import { newCommandId, newProjectId } from "../lib/utils";
 import { inferProjectTitleFromPath } from "../lib/projectPaths";

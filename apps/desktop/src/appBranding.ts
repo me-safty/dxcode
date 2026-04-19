@@ -1,4 +1,4 @@
-import type { DesktopAppBranding, DesktopAppStageLabel } from "@t3tools/contracts";
+import type { DesktopAppBranding, DesktopAppStageLabel } from "@workbench/contracts";
 
 import { isNightlyDesktopVersion } from "./updateChannels.ts";
 

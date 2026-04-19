@@ -1,12 +1,12 @@
-import { NetService } from "@t3tools/shared/Net";
-import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
+import { NetService } from "@workbench/shared/Net";
+import { parsePersistedServerObservabilitySettings } from "@workbench/shared/serverSettings";
 import {
   AuthSessionId,
   CommandId,
   OrchestrationReadModel,
   ProjectId,
   type ClientOrchestrationCommand,
-} from "@t3tools/contracts";
+} from "@workbench/contracts";
 import {
   Config,
   Console,

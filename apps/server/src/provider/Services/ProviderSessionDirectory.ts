@@ -3,7 +3,7 @@ import type {
   ProviderSessionRuntimeStatus,
   RuntimeMode,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@workbench/contracts";
 import { Option, Context } from "effect";
 import type { Effect } from "effect";
 

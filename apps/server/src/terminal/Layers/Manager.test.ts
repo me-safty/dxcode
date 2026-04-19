@@ -7,7 +7,7 @@ import {
   type TerminalEvent,
   type TerminalOpenInput,
   type TerminalRestartInput,
-} from "@t3tools/contracts";
+} from "@workbench/contracts";
 import {
   Duration,
   Effect,

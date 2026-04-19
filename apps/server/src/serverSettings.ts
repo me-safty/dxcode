@@ -18,7 +18,7 @@ import {
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
-} from "@t3tools/contracts";
+} from "@workbench/contracts";
 import {
   Cache,
   Deferred,
@@ -40,9 +40,9 @@ import {
 } from "effect";
 import * as Semaphore from "effect/Semaphore";
 import { ServerConfig } from "./config.ts";
-import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
-import { fromLenientJson } from "@t3tools/shared/schemaJson";
-import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
+import { type DeepPartial, deepMerge } from "@workbench/shared/Struct";
+import { fromLenientJson } from "@workbench/shared/schemaJson";
+import { applyServerSettingsPatch } from "@workbench/shared/serverSettings";
 
 export interface ServerSettingsShape {
   /** Start the settings runtime and attach file watching. */

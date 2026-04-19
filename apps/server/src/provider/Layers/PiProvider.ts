@@ -1,4 +1,4 @@
-import type { PiSettings, ServerProvider } from "@t3tools/contracts";
+import type { PiSettings, ServerProvider } from "@workbench/contracts";
 import { Cause, Effect, Equal, Layer, Queue, Stream } from "effect";
 
 import { ServerSettingsService } from "../../serverSettings.ts";

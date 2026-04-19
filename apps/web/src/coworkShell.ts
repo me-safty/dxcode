@@ -1,4 +1,4 @@
-import { PROVIDER_DISPLAY_NAMES, type ProviderKind, type ServerProvider } from "@t3tools/contracts";
+import { PROVIDER_DISPLAY_NAMES, type ProviderKind, type ServerProvider } from "@workbench/contracts";
 
 export const COWORK_SHELL = {
   hideGitSurfaces: true,

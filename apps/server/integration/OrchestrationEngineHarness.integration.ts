@@ -6,7 +6,7 @@ import {
   ProviderKind,
   type OrchestrationEvent,
   type OrchestrationThread,
-} from "@t3tools/contracts";
+} from "@workbench/contracts";
 import {
   Effect,
   Exit,

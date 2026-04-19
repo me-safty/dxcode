@@ -23,7 +23,7 @@ import {
   type ProviderSession,
   type ThreadId,
   TurnId,
-} from "@t3tools/contracts";
+} from "@workbench/contracts";
 import { Effect, Layer, PubSub, Stream } from "effect";
 
 import { ServerSettingsService } from "../../serverSettings.ts";

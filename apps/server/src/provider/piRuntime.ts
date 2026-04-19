@@ -13,7 +13,7 @@ import { spawn } from "node:child_process";
 import { readFileSync, watch as fsWatch, type FSWatcher } from "node:fs";
 import { homedir, platform as osPlatform } from "node:os";
 import { dirname as pathDirname, join as joinPath } from "node:path";
-import type { ModelCapabilities, ServerProviderModel } from "@t3tools/contracts";
+import type { ModelCapabilities, ServerProviderModel } from "@workbench/contracts";
 
 export interface PiCommandResult {
   readonly stdout: string;

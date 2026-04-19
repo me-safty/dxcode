@@ -1,5 +1,5 @@
-import type { TimestampFormat } from "@t3tools/contracts/settings";
-import type { TurnId } from "@t3tools/contracts";
+import type { TimestampFormat } from "@workbench/contracts/settings";
+import type { TurnId } from "@workbench/contracts";
 import {
   ChevronDownIcon,
   ChevronRightIcon,

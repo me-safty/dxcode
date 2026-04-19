@@ -3,7 +3,7 @@ import type {
   ProjectListEntriesResult,
   ProjectReadFileResult,
   ProjectSearchEntriesResult,
-} from "@t3tools/contracts";
+} from "@workbench/contracts";
 import { queryOptions } from "@tanstack/react-query";
 import { ensureEnvironmentApi } from "~/environmentApi";
 

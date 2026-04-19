@@ -11,7 +11,7 @@ import {
   type PiModelOptions,
   type ProviderKind,
   type ProviderModelOptions,
-} from "@t3tools/contracts";
+} from "@workbench/contracts";
 
 export interface SelectableModelOption {
   slug: string;

@@ -1,4 +1,4 @@
-import type { TurnId } from "@t3tools/contracts";
+import type { TurnId } from "@workbench/contracts";
 import { FileSearchIcon, FolderOpenIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";

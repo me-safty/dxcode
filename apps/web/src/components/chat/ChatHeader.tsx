@@ -1,4 +1,4 @@
-import { type EnvironmentId, type ThreadId } from "@t3tools/contracts";
+import { type EnvironmentId, type ThreadId } from "@workbench/contracts";
 import { memo } from "react";
 import { type DraftId } from "~/composerDraftStore";
 import { BriefcaseBusinessIcon, FolderKanbanIcon } from "lucide-react";

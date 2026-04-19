@@ -2,8 +2,8 @@ import {
   attachEnvironmentDescriptor,
   createKnownEnvironment,
   type KnownEnvironment,
-} from "@t3tools/client-runtime";
-import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
+} from "@workbench/client-runtime";
+import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@workbench/contracts";
 import { create } from "zustand";
 
 import { BootstrapHttpError, retryTransientBootstrap } from "./auth";

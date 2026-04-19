@@ -9,7 +9,7 @@ import {
   listLoginShellCandidates,
   mergePathEntries,
   readPathFromLaunchctl,
-} from "@t3tools/shared/shell";
+} from "@workbench/shared/shell";
 
 type WindowsCommandAvailabilityChecker = (
   command: string,

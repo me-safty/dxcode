@@ -1,4 +1,4 @@
-import type { ProjectEntry } from "@t3tools/contracts";
+import type { ProjectEntry } from "@workbench/contracts";
 
 export interface WorkspaceTreeFileNode {
   kind: "file";

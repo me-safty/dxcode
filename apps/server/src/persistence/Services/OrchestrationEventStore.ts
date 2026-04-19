@@ -9,7 +9,7 @@
  *
  * @module OrchestrationEventStore
  */
-import { OrchestrationEvent } from "@t3tools/contracts";
+import { OrchestrationEvent } from "@workbench/contracts";
 import { Context } from "effect";
 import type { Effect, Stream } from "effect";
 

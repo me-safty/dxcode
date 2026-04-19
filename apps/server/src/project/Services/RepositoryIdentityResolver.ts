@@ -1,4 +1,4 @@
-import type { RepositoryIdentity } from "@t3tools/contracts";
+import type { RepositoryIdentity } from "@workbench/contracts";
 import { Context } from "effect";
 import type { Effect } from "effect";
 

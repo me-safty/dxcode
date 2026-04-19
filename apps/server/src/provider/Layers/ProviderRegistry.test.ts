@@ -18,10 +18,10 @@ import {
   ServerSettings,
   type ServerProvider,
   type ServerSettings as ContractServerSettings,
-} from "@t3tools/contracts";
+} from "@workbench/contracts";
 import * as PlatformError from "effect/PlatformError";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { deepMerge } from "@t3tools/shared/Struct";
+import { deepMerge } from "@workbench/shared/Struct";
 
 import {
   checkCodexProviderStatus,
