@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Mint a fresh pairing token for the Atelier dev server and print the /pair URL.
+# Mint a fresh pairing token for the Workbench dev server and print the /pair URL.
 # Used to give agents (or a second browser) access to the dev app without
 # hand-copying a token from the authenticated session.
 #
-# Usage (from the atelier workspace root):
+# Usage (from the repo root):
 #   ./scripts/claude-pair.sh            # 24h default
 #   ./scripts/claude-pair.sh 7d         # custom TTL
 #
