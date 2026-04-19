@@ -14,6 +14,7 @@ import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 import {
   query as claudeQuery,
   type SlashCommand as ClaudeSlashCommand,
+  type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
 import {
@@ -484,9 +485,11 @@ function dedupeSlashCommands(
  * Probe account information by spawning a lightweight Claude Agent SDK
  * session and reading the initialization result.
  *
- * The prompt is never sent to the Anthropic API — we abort immediately
- * after the local initialization phase completes. This gives us the
- * user's subscription type without incurring any token cost.
+ * We pass a never-yielding AsyncIterable as the prompt so that no user
+ * message is ever written to the subprocess stdin. This means the Claude
+ * Code subprocess completes its local initialization IPC (returning
+ * account info and slash commands) but never starts an API request to
+ * Anthropic. We read the init data and then abort the subprocess.
  *
  * This is used as a fallback when `claude auth status` does not include
  * subscription type information.
@@ -495,12 +498,15 @@ const probeClaudeCapabilities = (binaryPath: string) => {
   const abort = new AbortController();
   return Effect.tryPromise(async () => {
     const q = claudeQuery({
-      prompt: ".",
+      prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
+        // Never yield — we only need initialization data, not a conversation.
+        // This prevents any prompt from reaching the Anthropic API.
+        await new Promise<never>(() => {});
+      })(),
       options: {
         persistSession: false,
         pathToClaudeCodeExecutable: binaryPath,
         abortController: abort,
-        maxTurns: 0,
         settingSources: ["user", "project", "local"],
         allowedTools: [],
         stderr: () => {},
