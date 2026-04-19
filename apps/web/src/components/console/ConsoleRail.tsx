@@ -10,7 +10,6 @@ import {
   ListChecksIcon,
   Maximize2Icon,
   Minimize2Icon,
-  PanelRightCloseIcon,
   PlusIcon,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -641,7 +640,6 @@ const ConsoleRail = memo(function ConsoleRail({
         panes={panes}
         visibility={paneVisibility}
         onTogglePane={togglePane}
-        onClose={onClose}
       />
 
       {/* Stack body — vertical scroll of cards. Always rendered so its state
@@ -759,10 +757,9 @@ interface RailHeaderProps {
   panes: ReadonlyArray<ConsolePaneDescriptor>;
   visibility: ConsolePaneVisibilityMap;
   onTogglePane: (id: ConsolePaneId) => void;
-  onClose: () => void;
 }
 
-function RailHeader({ summary, panes, visibility, onTogglePane, onClose }: RailHeaderProps) {
+function RailHeader({ summary, panes, visibility, onTogglePane }: RailHeaderProps) {
   return (
     <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border/60 px-3 [-webkit-app-region:no-drag]">
       <div className="flex min-w-0 items-center gap-2">
@@ -811,19 +808,6 @@ function RailHeader({ summary, panes, visibility, onTogglePane, onClose }: RailH
           </MenuPopup>
         </Menu>
         <span className="truncate text-[11px] text-muted-foreground/68">{summary}</span>
-      </div>
-
-      <div className="flex items-center gap-1">
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          onClick={onClose}
-          aria-label="Collapse console panel"
-          title="Collapse console panel"
-          className="text-muted-foreground/55 hover:text-foreground/80"
-        >
-          <PanelRightCloseIcon className="size-3.5" />
-        </Button>
       </div>
     </div>
   );
