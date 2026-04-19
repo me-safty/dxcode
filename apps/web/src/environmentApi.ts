@@ -19,6 +19,8 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     projects: {
       searchEntries: rpcClient.projects.searchEntries,
       writeFile: rpcClient.projects.writeFile,
+      getProviderOverride: rpcClient.projects.getProviderOverride,
+      setProviderOverride: rpcClient.projects.setProviderOverride,
     },
     filesystem: {
       browse: rpcClient.filesystem.browse,

@@ -67,6 +67,8 @@ export interface WsRpcClient {
   readonly projects: {
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
     readonly writeFile: RpcUnaryMethod<typeof WS_METHODS.projectsWriteFile>;
+    readonly getProviderOverride: RpcUnaryMethod<typeof WS_METHODS.projectsGetProviderOverride>;
+    readonly setProviderOverride: RpcUnaryMethod<typeof WS_METHODS.projectsSetProviderOverride>;
   };
   readonly filesystem: {
     readonly browse: RpcUnaryMethod<typeof WS_METHODS.filesystemBrowse>;
@@ -147,6 +149,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.projectsSearchEntries](input)),
       writeFile: (input) =>
         transport.request((client) => client[WS_METHODS.projectsWriteFile](input)),
+      getProviderOverride: (input) =>
+        transport.request((client) => client[WS_METHODS.projectsGetProviderOverride](input)),
+      setProviderOverride: (input) =>
+        transport.request((client) => client[WS_METHODS.projectsSetProviderOverride](input)),
     },
     filesystem: {
       browse: (input) => transport.request((client) => client[WS_METHODS.filesystemBrowse](input)),

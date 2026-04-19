@@ -60,6 +60,7 @@ import {
 } from "../composerFooterLayout";
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./ProviderModelPicker";
+import { ClaudeProfileBadge } from "./ClaudeProfileBadge";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
@@ -1925,6 +1926,14 @@ export const ChatComposer = memo(
                       : {})}
                     onProviderModelChange={onProviderModelSelect}
                   />
+
+                  {selectedProvider === "claudeAgent" ? (
+                    <ClaudeProfileBadge
+                      environmentId={environmentId}
+                      cwd={gitCwd}
+                      compact={isComposerFooterCompact}
+                    />
+                  ) : null}
 
                   {isComposerFooterCompact ? (
                     <CompactComposerControlsMenu
