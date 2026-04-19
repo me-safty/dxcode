@@ -12,11 +12,7 @@ import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { isModelPickerNewModel } from "./modelPickerModelHighlights";
 import { buildModelPickerSearchText, scoreModelPickerSearch } from "./modelPickerSearch";
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxList } from "../ui/combobox";
-import {
-  PROVIDER_ICON_BY_PROVIDER,
-  providerIconClassName,
-  getProviderLabel,
-} from "./providerIconUtils";
+import { PROVIDER_ICON_BY_PROVIDER, getProviderLabel } from "./providerIconUtils";
 import {
   modelPickerJumpCommandForIndex,
   modelPickerJumpIndexFromCommand,
@@ -398,12 +394,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         {/* Locked provider header (only shown in locked mode) */}
         {isLocked && LockedProviderIcon && props.lockedProvider && (
           <div className="flex items-center gap-2 px-4 py-3 border-b">
-            <LockedProviderIcon
-              className={cn(
-                "size-5 shrink-0",
-                providerIconClassName(props.lockedProvider, "text-muted-foreground/85"),
-              )}
-            />
+            <LockedProviderIcon className="size-5 shrink-0" />
             <span className="font-medium text-sm">
               {props.lockedProvider === "opencode"
                 ? PROVIDER_DISPLAY_NAMES.opencode

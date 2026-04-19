@@ -3,7 +3,6 @@ import { memo } from "react";
 import { StarIcon } from "lucide-react";
 import {
   PROVIDER_ICON_BY_PROVIDER,
-  providerIconClassName,
   getProviderLabel,
   getDisplayModelName,
 } from "./providerIconUtils";
@@ -84,12 +83,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
         </div>
         {props.showProvider && (
           <div className="flex items-center gap-1 mt-0.5">
-            <ProviderIcon
-              className={cn(
-                "size-3 shrink-0",
-                providerIconClassName(props.provider, "text-muted-foreground/70"),
-              )}
-            />
+            <ProviderIcon className="size-3 shrink-0" />
             <span className="text-xs font-normal leading-snug text-muted-foreground/70 truncate">
               {getProviderLabel(props.provider, props.name)}
             </span>

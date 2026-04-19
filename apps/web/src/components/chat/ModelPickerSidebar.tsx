@@ -2,11 +2,7 @@ import { type ProviderKind, type ServerProvider } from "@t3tools/contracts";
 import { memo } from "react";
 import { Clock3Icon, SparklesIcon, StarIcon } from "lucide-react";
 import { Gemini, GithubCopilotIcon } from "../Icons";
-import {
-  AVAILABLE_PROVIDER_OPTIONS,
-  PROVIDER_ICON_BY_PROVIDER,
-  providerIconClassName,
-} from "./providerIconUtils";
+import { AVAILABLE_PROVIDER_OPTIONS, PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { getProviderSnapshot } from "../../providerModels";
@@ -121,13 +117,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   : option.label
             }
           >
-            <OptionIcon
-              className={cn(
-                "size-5 shrink-0",
-                providerIconClassName(option.value, "text-muted-foreground/85"),
-              )}
-              aria-hidden
-            />
+            <OptionIcon className="size-5 shrink-0" aria-hidden />
             {badge === "new" ? (
               <span className={NEW_BADGE_CLASS} aria-hidden>
                 <SparklesIcon className="size-2" />

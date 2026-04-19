@@ -9,10 +9,6 @@ export const PROVIDER_ICON_BY_PROVIDER: Record<ProviderKind, Icon> = {
   cursor: CursorIcon,
 };
 
-export function providerIconClassName(provider: ProviderKind, fallbackClassName: string): string {
-  return provider === "claudeAgent" ? "text-[#d97757]" : fallbackClassName;
-}
-
 function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
   value: ProviderKind;
   label: string;

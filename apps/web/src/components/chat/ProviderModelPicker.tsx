@@ -10,7 +10,7 @@ import { Button, buttonVariants } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { cn } from "~/lib/utils";
 import { ModelPickerContent } from "./ModelPickerContent";
-import { providerIconClassName, PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
+import { PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
 import { setModelPickerOpen } from "../../shortcutModifierState";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
@@ -92,11 +92,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         >
           <ProviderIcon
             aria-hidden="true"
-            className={cn(
-              "size-4 shrink-0",
-              providerIconClassName(activeProvider, "text-muted-foreground/70"),
-              props.activeProviderIconClassName,
-            )}
+            className={cn("size-4 shrink-0", props.activeProviderIconClassName)}
           />
           <span className="min-w-0 flex-1 truncate">{selectedModelLabel}</span>
           <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
@@ -104,7 +100,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       </PopoverTrigger>
       <PopoverPopup
         align="start"
-        className="border-0 bg-transparent p-0 shadow-none before:hidden [--viewport-inline-padding:0] [&>[data-slot=popover-viewport]]:p-0"
+        className="border-0 bg-transparent p-0 shadow-none before:hidden [--viewport-inline-padding:0] *:data-[slot=popover-viewport]:p-0"
       >
         <ModelPickerContent
           provider={props.provider}
