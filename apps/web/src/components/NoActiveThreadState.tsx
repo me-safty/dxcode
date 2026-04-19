@@ -1,4 +1,8 @@
 import { createModelSelection } from "@workbench/shared/model";
+import {
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+} from "@workbench/contracts";
 import type {
   ProviderInteractionMode,
   ProviderKind,
@@ -20,7 +24,7 @@ import {
   WrenchIcon,
 } from "lucide-react";
 
-import { FolderPlusIcon } from "lucide-react";
+import { FolderPlusIcon, PaperclipIcon, XIcon } from "lucide-react";
 import { ClaudeAI, CursorIcon, type Icon, OpenAI, OpenCodeIcon, PiIcon } from "./Icons";
 import { DEFAULT_MODEL_BY_PROVIDER } from "@workbench/contracts";
 import { toastManager } from "./ui/toast";
@@ -28,8 +32,9 @@ import { newCommandId, newProjectId } from "../lib/utils";
 import { inferProjectTitleFromPath } from "../lib/projectPaths";
 import { readLocalApi } from "../localApi";
 import { readEnvironmentApi } from "../environmentApi";
-import { useComposerDraftStore } from "../composerDraftStore";
+import { type ComposerImageAttachment, useComposerDraftStore } from "../composerDraftStore";
 import { usePendingAutoSubmitStore } from "../pendingAutoSubmitStore";
+import { randomUUID } from "../lib/utils";
 import { formatProviderDisplayLabel, describeProviderAvailability } from "../coworkShell";
 import { isElectron } from "../env";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -199,6 +204,136 @@ export function NoActiveThreadState() {
   >({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [attachedImages, setAttachedImages] = useState<ComposerImageAttachment[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragDepthRef = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Revoke object URLs on unmount so we don't leak memory.
+  useEffect(() => {
+    return () => {
+      for (const image of attachedImages) {
+        if (image.previewUrl) {
+          URL.revokeObjectURL(image.previewUrl);
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only fire on unmount
+  }, []);
+
+  const addImageFiles = useCallback(
+    (files: File[]) => {
+      if (files.length === 0) return;
+      const next: ComposerImageAttachment[] = [];
+      let count = attachedImages.length;
+      let nextError: string | null = null;
+      for (const file of files) {
+        if (!file.type.startsWith("image/")) {
+          nextError = `Unsupported file type for '${file.name}'. Please attach image files only.`;
+          continue;
+        }
+        if (file.size > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
+          const limitMb = Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024));
+          nextError = `'${file.name}' exceeds the ${limitMb}MB attachment limit.`;
+          continue;
+        }
+        if (count >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
+          nextError = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`;
+          break;
+        }
+        next.push({
+          type: "image",
+          id: randomUUID(),
+          name: file.name || "image",
+          mimeType: file.type,
+          sizeBytes: file.size,
+          previewUrl: URL.createObjectURL(file),
+          file,
+        });
+        count += 1;
+      }
+      if (next.length > 0) {
+        setAttachedImages((prev) => [...prev, ...next]);
+      }
+      if (nextError) {
+        setErrorMessage(nextError);
+      }
+    },
+    [attachedImages.length],
+  );
+
+  const removeImage = useCallback((imageId: string) => {
+    setAttachedImages((prev) => {
+      const target = prev.find((img) => img.id === imageId);
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return prev.filter((img) => img.id !== imageId);
+    });
+  }, []);
+
+  const handleTextareaPaste = useCallback(
+    (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const files = Array.from(event.clipboardData.files);
+      if (files.length === 0) return;
+      const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+      if (imageFiles.length === 0) return;
+      event.preventDefault();
+      addImageFiles(imageFiles);
+    },
+    [addImageFiles],
+  );
+
+  const handleFormDragEnter = useCallback((event: React.DragEvent<HTMLFormElement>) => {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDragOver(true);
+  }, []);
+
+  const handleFormDragOver = useCallback((event: React.DragEvent<HTMLFormElement>) => {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDragOver(true);
+  }, []);
+
+  const handleFormDragLeave = useCallback((event: React.DragEvent<HTMLFormElement>) => {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDragOver(false);
+    }
+  }, []);
+
+  const handleFormDrop = useCallback(
+    (event: React.DragEvent<HTMLFormElement>) => {
+      if (!event.dataTransfer.types.includes("Files")) return;
+      event.preventDefault();
+      dragDepthRef.current = 0;
+      setIsDragOver(false);
+      const files = Array.from(event.dataTransfer.files);
+      addImageFiles(files);
+    },
+    [addImageFiles],
+  );
+
+  const handleAttachClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileInputChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const files = event.target.files ? Array.from(event.target.files) : [];
+      addImageFiles(files);
+      // Reset so picking the same file twice in a row still triggers onChange.
+      event.target.value = "";
+    },
+    [addImageFiles],
+  );
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -352,6 +487,9 @@ export function NoActiveThreadState() {
       draftStore.setModelSelection(draftSession.draftId, modelSelection);
       draftStore.setStickyModelSelection(modelSelection);
       draftStore.setPrompt(draftSession.draftId, trimmedPrompt);
+      if (attachedImages.length > 0) {
+        draftStore.addImages(draftSession.draftId, attachedImages);
+      }
       // Mark the draft for auto-submit so the new ChatView fires onSend on
       // mount instead of leaving the user staring at their pre-populated
       // prompt waiting for a second Enter.
@@ -364,6 +502,7 @@ export function NoActiveThreadState() {
       setIsSubmitting(false);
     }
   }, [
+    attachedImages,
     handleNewThread,
     interactionMode,
     projectGroupingSettings,
@@ -430,9 +569,60 @@ export function NoActiveThreadState() {
                 }
                 void handleSubmit();
               }}
+              onDragEnter={handleFormDragEnter}
+              onDragOver={handleFormDragOver}
+              onDragLeave={handleFormDragLeave}
+              onDrop={handleFormDrop}
             >
-              <div className="rounded-[28px] border border-border/55 bg-card/80 p-2 shadow-[0_28px_80px_-46px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handleFileInputChange}
+              />
+              <div
+                className={cn(
+                  "rounded-[28px] border bg-card/80 p-2 shadow-[0_28px_80px_-46px_rgba(0,0,0,0.55)] backdrop-blur-xl transition-colors",
+                  isDragOver
+                    ? "border-blue-400/70 bg-blue-500/5"
+                    : "border-border/55",
+                )}
+              >
                 <div className="rounded-[22px] bg-background/88">
+                  {attachedImages.length > 0 ? (
+                    <div className="flex flex-wrap gap-2 px-5 pt-5 sm:px-7 sm:pt-6">
+                      {attachedImages.map((image) => (
+                        <div
+                          key={image.id}
+                          className="relative h-16 w-16 overflow-hidden rounded-lg border border-border/80 bg-background"
+                        >
+                          {image.previewUrl ? (
+                            <img
+                              src={image.previewUrl}
+                              alt={image.name}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center px-1 text-center text-[10px] text-muted-foreground/70">
+                              {image.name}
+                            </div>
+                          )}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            onClick={() => removeImage(image.id)}
+                            aria-label={`Remove ${image.name}`}
+                            className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
+                          >
+                            <XIcon />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="relative">
                     <Textarea
                       ref={textareaRef}
@@ -454,20 +644,39 @@ export function NoActiveThreadState() {
                         event.preventDefault();
                         formRef.current?.requestSubmit();
                       }}
+                      onPaste={handleTextareaPaste}
                       placeholder="Describe a task, or type / for shortcuts"
                       unstyled
                       style={{ minHeight: "140px", maxHeight: "40vh" }}
-                      className="w-full rounded-[22px] border-0 bg-transparent shadow-none before:shadow-none focus-visible:border-0 focus-visible:ring-0 [&_textarea]:overflow-y-auto [&_textarea]:px-5 [&_textarea]:py-5 [&_textarea]:pr-16 [&_textarea]:text-foreground [&_textarea]:leading-7 [&_textarea]:text-[clamp(0.95rem,1.6vw,1.125rem)] sm:[&_textarea]:px-7 sm:[&_textarea]:py-6 sm:[&_textarea]:pr-20"
+                      className="w-full rounded-[22px] border-0 bg-transparent shadow-none before:shadow-none focus-visible:border-0 focus-visible:ring-0 [&_textarea]:overflow-y-auto [&_textarea]:px-5 [&_textarea]:py-5 [&_textarea]:pr-28 [&_textarea]:text-foreground [&_textarea]:leading-7 [&_textarea]:text-[clamp(0.95rem,1.6vw,1.125rem)] sm:[&_textarea]:px-7 sm:[&_textarea]:py-6 sm:[&_textarea]:pr-32"
                     />
 
-                    <Button
-                      type="submit"
-                      size="icon"
-                      className="absolute bottom-3 right-3 size-10 rounded-full shadow-[0_20px_40px_-20px_rgba(37,99,235,0.95)] sm:bottom-5 sm:right-5 sm:size-11"
-                      disabled={isSubmitting || prompt.trim().length === 0 || !selectedProject}
-                    >
-                      <ArrowUpIcon className="size-4.5" />
-                    </Button>
+                    <div className="absolute bottom-3 right-3 flex items-center gap-2 sm:bottom-5 sm:right-5">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        onClick={handleAttachClick}
+                        aria-label="Attach images"
+                        title="Attach images"
+                        disabled={attachedImages.length >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS}
+                        className="size-10 rounded-full text-muted-foreground/70 hover:bg-accent/60 hover:text-foreground sm:size-11"
+                      >
+                        <PaperclipIcon className="size-4.5" />
+                      </Button>
+                      <Button
+                        type="submit"
+                        size="icon"
+                        className="size-10 rounded-full shadow-[0_20px_40px_-20px_rgba(37,99,235,0.95)] sm:size-11"
+                        disabled={
+                          isSubmitting ||
+                          (prompt.trim().length === 0 && attachedImages.length === 0) ||
+                          !selectedProject
+                        }
+                      >
+                        <ArrowUpIcon className="size-4.5" />
+                      </Button>
+                    </div>
                   </div>
 
                     <div className="border-t border-border/55 px-4 py-3 sm:px-5">
