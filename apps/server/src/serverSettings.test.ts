@@ -285,6 +285,88 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("migrates legacy Claude settings shape to profiles on read", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      // Write a pre-profiles settings.json containing the legacy
+      // binaryPath/launchArgs directly under providers.claudeAgent.
+      const legacySettings = {
+        providers: {
+          claudeAgent: {
+            binaryPath: "/usr/local/bin/claude",
+            launchArgs: "--verbose",
+            customModels: ["claude-custom"],
+          },
+        },
+      };
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        JSON.stringify(legacySettings, null, 2),
+      );
+
+      const serverSettings = yield* ServerSettingsService;
+      const settings = yield* serverSettings.getSettings;
+
+      assert.deepEqual(settings.providers.claudeAgent.profiles, [
+        {
+          id: "personal",
+          label: "Personal",
+          binaryPath: "/usr/local/bin/claude",
+          homePath: "",
+          launchArgs: "--verbose",
+        },
+      ]);
+      assert.equal(settings.providers.claudeAgent.defaultProfileId, "personal");
+      assert.deepEqual(settings.providers.claudeAgent.customModels, ["claude-custom"]);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("leaves new-shape Claude settings untouched on read", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      // A settings.json already in the profiles shape should pass through
+      // unchanged — the migration must be a no-op when profiles is set.
+      const newShapeSettings = {
+        providers: {
+          claudeAgent: {
+            profiles: [
+              {
+                id: "work",
+                label: "Work",
+                binaryPath: "/opt/homebrew/bin/claude",
+                homePath: "~/.claude-work",
+                launchArgs: "",
+              },
+            ],
+            defaultProfileId: "work",
+          },
+        },
+      };
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        JSON.stringify(newShapeSettings, null, 2),
+      );
+
+      const serverSettings = yield* ServerSettingsService;
+      const settings = yield* serverSettings.getSettings;
+
+      assert.deepEqual(settings.providers.claudeAgent.profiles, [
+        {
+          id: "work",
+          label: "Work",
+          binaryPath: "/opt/homebrew/bin/claude",
+          homePath: "~/.claude-work",
+          launchArgs: "",
+        },
+      ]);
+      assert.equal(settings.providers.claudeAgent.defaultProfileId, "work");
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("writes only non-default server settings to disk", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;

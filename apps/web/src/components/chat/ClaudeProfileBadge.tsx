@@ -55,7 +55,6 @@ export function ClaudeProfileBadge({ environmentId, cwd, compact }: ClaudeProfil
     (profileId: string) => {
       if (!cwd) return;
       setOverrideMutation.mutate({
-        provider: "claudeAgent",
         claudeProfileId: profileId,
       });
     },

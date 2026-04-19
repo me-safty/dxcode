@@ -9,6 +9,14 @@ export interface ProjectProviderOverrideStoreShape {
   ) => Effect.Effect<ProjectProviderOverride>;
 }
 
+/**
+ * An override is "empty" when it carries no pinned values — in that case
+ * the store deletes the entry rather than persisting an empty record.
+ */
+export function isEmptyProjectProviderOverride(override: ProjectProviderOverride): boolean {
+  return override.claudeProfileId === undefined;
+}
+
 export class ProjectProviderOverrideStore extends Context.Service<
   ProjectProviderOverrideStore,
   ProjectProviderOverrideStoreShape
@@ -23,7 +31,7 @@ export class ProjectProviderOverrideStore extends Context.Service<
           set: (cwd, override) =>
             Ref.update(ref, (map) => {
               const next = new Map(map);
-              if (override.provider === undefined && override.claudeProfileId === undefined) {
+              if (isEmptyProjectProviderOverride(override)) {
                 next.delete(cwd);
               } else {
                 next.set(cwd, override);

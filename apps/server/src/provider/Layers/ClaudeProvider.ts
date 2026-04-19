@@ -526,9 +526,13 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (args: Readonly
 });
 
 export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(function* (
-  resolveSubscriptionType?: (binaryPath: string) => Effect.Effect<string | undefined>,
+  resolveSubscriptionType?: (
+    binaryPath: string,
+    homePath: string,
+  ) => Effect.Effect<string | undefined>,
   resolveSlashCommands?: (
     binaryPath: string,
+    homePath: string,
   ) => Effect.Effect<ReadonlyArray<ServerProviderSlashCommand> | undefined>,
 ): Effect.fn.Return<
   ServerProvider,
@@ -638,7 +642,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   const defaultProfile = resolveClaudeProfile(claudeSettings);
   const slashCommands =
     (resolveSlashCommands
-      ? yield* resolveSlashCommands(defaultProfile.binaryPath).pipe(
+      ? yield* resolveSlashCommands(defaultProfile.binaryPath, defaultProfile.homePath).pipe(
           Effect.orElseSucceed(() => undefined),
         )
       : undefined) ?? [];
@@ -666,7 +670,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   }
 
   if (!subscriptionType && resolveSubscriptionType) {
-    subscriptionType = yield* resolveSubscriptionType(defaultProfile.binaryPath);
+    subscriptionType = yield* resolveSubscriptionType(defaultProfile.binaryPath, defaultProfile.homePath);
   }
 
   // ── Handle auth results (same logic as before, adjusted models) ──
@@ -780,33 +784,28 @@ export const ClaudeProviderLive = Layer.effect(
     const serverSettings = yield* ServerSettingsService;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
+    // Capacity sized to cover a handful of profile (binaryPath, homePath)
+    // combinations without thrashing when the user switches between them.
+    // The cache keys on a JSON-stringified tuple so two calls with the same
+    // binary+home hit the same entry.
+    const probeCacheKey = (binaryPath: string, homePath: string) =>
+      JSON.stringify([binaryPath, homePath]);
     const subscriptionProbeCache = yield* Cache.make({
-      capacity: 4,
+      capacity: 8,
       timeToLive: Duration.minutes(5),
-      lookup: (cacheKey: string) => {
-        const [binaryPath, homePath] = cacheKey.split("\u0000", 2) as [string, string];
-        return probeClaudeCapabilities({ binaryPath, homePath: homePath ?? "" });
+      lookup: (key: string) => {
+        const [binaryPath, homePath] = JSON.parse(key) as [string, string];
+        return probeClaudeCapabilities({ binaryPath, homePath });
       },
     });
 
-    const probeCacheKey = (binaryPath: string): Effect.Effect<string> =>
-      serverSettings.getSettings.pipe(
-        Effect.orDie,
-        Effect.map((settings) => {
-          const profile = resolveClaudeProfile(settings.providers.claudeAgent);
-          return `${binaryPath}\u0000${profile.homePath}`;
-        }),
-      );
-
     const checkProvider = checkClaudeProviderStatus(
-      (binaryPath) =>
-        probeCacheKey(binaryPath).pipe(
-          Effect.flatMap((key) => Cache.get(subscriptionProbeCache, key)),
+      (binaryPath, homePath) =>
+        Cache.get(subscriptionProbeCache, probeCacheKey(binaryPath, homePath)).pipe(
           Effect.map((probe) => probe?.subscriptionType),
         ),
-      (binaryPath) =>
-        probeCacheKey(binaryPath).pipe(
-          Effect.flatMap((key) => Cache.get(subscriptionProbeCache, key)),
+      (binaryPath, homePath) =>
+        Cache.get(subscriptionProbeCache, probeCacheKey(binaryPath, homePath)).pipe(
           Effect.map((probe) => probe?.slashCommands),
         ),
     ).pipe(

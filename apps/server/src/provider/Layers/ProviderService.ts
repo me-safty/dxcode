@@ -363,7 +363,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const input = {
         ...parsed,
         threadId,
-        provider: parsed.provider ?? projectOverride?.provider ?? "codex",
+        provider: parsed.provider ?? "codex",
         ...(parsed.claudeProfileId === undefined && projectOverride?.claudeProfileId
           ? { claudeProfileId: projectOverride.claudeProfileId }
           : {}),

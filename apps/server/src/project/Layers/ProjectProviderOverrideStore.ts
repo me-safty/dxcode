@@ -1,6 +1,6 @@
 /**
  * ProjectProviderOverrideStore - User-level store pinning absolute repo cwd
- * paths to a preferred provider kind and/or Claude profile id.
+ * paths to a preferred Claude profile id.
  *
  * Persisted as a single JSON file under the server state directory (user
  * scope, not shared with the repo). Reads are cached in-process; writes are
@@ -8,15 +8,15 @@
  *
  * @module ProjectProviderOverrideStore
  */
-import {
-  type ProjectProviderOverride,
-  ProjectProviderOverride as ProjectProviderOverrideSchema,
-} from "@t3tools/contracts";
+import { ProjectProviderOverride as ProjectProviderOverrideSchema } from "@t3tools/contracts";
 import { Effect, FileSystem, Layer, Path, Ref, Schema } from "effect";
 import * as Semaphore from "effect/Semaphore";
 
 import { ServerConfig } from "../../config.ts";
-import { ProjectProviderOverrideStore } from "../Services/ProjectProviderOverrideStore.ts";
+import {
+  isEmptyProjectProviderOverride,
+  ProjectProviderOverrideStore,
+} from "../Services/ProjectProviderOverrideStore.ts";
 
 const PersistedFile = Schema.Struct({
   version: Schema.Literal(1),
@@ -27,10 +27,6 @@ type PersistedFile = typeof PersistedFile.Type;
 const decodePersistedFile = Schema.decodeUnknownEffect(Schema.fromJsonString(PersistedFile));
 
 const EMPTY: PersistedFile = { version: 1, overrides: {} };
-
-function isEmptyOverride(override: ProjectProviderOverride): boolean {
-  return override.provider === undefined && override.claudeProfileId === undefined;
-}
 
 export const ProjectProviderOverrideStoreLive = Layer.effect(
   ProjectProviderOverrideStore,
@@ -80,7 +76,7 @@ export const ProjectProviderOverrideStoreLive = Layer.effect(
           Effect.gen(function* () {
             const current = yield* Ref.get(stateRef);
             const overrides = { ...current.overrides };
-            if (isEmptyOverride(override)) {
+            if (isEmptyProjectProviderOverride(override)) {
               delete overrides[cwd];
             } else {
               overrides[cwd] = override;

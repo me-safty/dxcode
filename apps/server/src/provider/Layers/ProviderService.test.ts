@@ -286,6 +286,107 @@ function makeProviderServiceLayer() {
   };
 }
 
+it.effect(
+  "ProviderServiceLive applies the persisted Claude profile override when starting a session",
+  () =>
+    Effect.gen(function* () {
+      const codex = makeFakeCodexAdapter();
+      const claude = makeFakeCodexAdapter("claudeAgent");
+      const registry: typeof ProviderAdapterRegistry.Service = {
+        getByProvider: (provider) =>
+          provider === "codex"
+            ? Effect.succeed(codex.adapter)
+            : provider === "claudeAgent"
+              ? Effect.succeed(claude.adapter)
+              : Effect.fail(new ProviderUnsupportedError({ provider })),
+        listProviders: () => Effect.succeed(["codex", "claudeAgent"]),
+      };
+      const providerAdapterLayer = Layer.succeed(ProviderAdapterRegistry, registry);
+      const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+        Layer.provide(SqlitePersistenceMemory),
+      );
+      const directoryLayer = ProviderSessionDirectoryLive.pipe(
+        Layer.provide(runtimeRepositoryLayer),
+      );
+      const overrideStoreLayer = ProjectProviderOverrideStore.layerTest(
+        new Map([["/workspace/pinned", { claudeProfileId: "work" }]]),
+      );
+      const providerLayer = makeProviderServiceLive().pipe(
+        Layer.provide(providerAdapterLayer),
+        Layer.provide(directoryLayer),
+        Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(overrideStoreLayer),
+        Layer.provide(AnalyticsService.layerTest),
+      );
+
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService;
+        yield* provider.startSession(asThreadId("thread-override"), {
+          provider: "claudeAgent",
+          threadId: asThreadId("thread-override"),
+          cwd: "/workspace/pinned",
+          runtimeMode: "full-access",
+        });
+      }).pipe(Effect.provide(providerLayer));
+
+      assert.equal(claude.startSession.mock.calls.length, 1);
+      const firstCall = claude.startSession.mock.calls[0]!;
+      const input = firstCall[0] as ProviderSessionStartInput;
+      assert.equal(input.claudeProfileId, "work");
+      assert.equal(codex.startSession.mock.calls.length, 0);
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "ProviderServiceLive prefers the session-input profile over the persisted override",
+  () =>
+    Effect.gen(function* () {
+      const codex = makeFakeCodexAdapter();
+      const claude = makeFakeCodexAdapter("claudeAgent");
+      const registry: typeof ProviderAdapterRegistry.Service = {
+        getByProvider: (provider) =>
+          provider === "codex"
+            ? Effect.succeed(codex.adapter)
+            : provider === "claudeAgent"
+              ? Effect.succeed(claude.adapter)
+              : Effect.fail(new ProviderUnsupportedError({ provider })),
+        listProviders: () => Effect.succeed(["codex", "claudeAgent"]),
+      };
+      const providerAdapterLayer = Layer.succeed(ProviderAdapterRegistry, registry);
+      const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+        Layer.provide(SqlitePersistenceMemory),
+      );
+      const directoryLayer = ProviderSessionDirectoryLive.pipe(
+        Layer.provide(runtimeRepositoryLayer),
+      );
+      const overrideStoreLayer = ProjectProviderOverrideStore.layerTest(
+        new Map([["/workspace/pinned", { claudeProfileId: "work" }]]),
+      );
+      const providerLayer = makeProviderServiceLive().pipe(
+        Layer.provide(providerAdapterLayer),
+        Layer.provide(directoryLayer),
+        Layer.provide(defaultServerSettingsLayer),
+        Layer.provide(overrideStoreLayer),
+        Layer.provide(AnalyticsService.layerTest),
+      );
+
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService;
+        yield* provider.startSession(asThreadId("thread-explicit"), {
+          provider: "claudeAgent",
+          threadId: asThreadId("thread-explicit"),
+          cwd: "/workspace/pinned",
+          runtimeMode: "full-access",
+          claudeProfileId: "personal",
+        });
+      }).pipe(Effect.provide(providerLayer));
+
+      assert.equal(claude.startSession.mock.calls.length, 1);
+      const input = claude.startSession.mock.calls[0]![0] as ProviderSessionStartInput;
+      assert.equal(input.claudeProfileId, "personal");
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.effect("ProviderServiceLive rejects new sessions for disabled providers", () =>
   Effect.gen(function* () {
     const codex = makeFakeCodexAdapter();
