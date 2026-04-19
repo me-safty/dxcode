@@ -67,8 +67,8 @@ const DiffPanelInlineSidebar = (props: {
     },
     [onCloseDiff, onOpenDiff],
   );
-  const shouldAcceptInlineSidebarWidth = useCallback(
-    createComposerWidthValidator("--sidebar-width"),
+  const shouldAcceptInlineSidebarWidth = useMemo(
+    () => createComposerWidthValidator("--sidebar-width"),
     [],
   );
 

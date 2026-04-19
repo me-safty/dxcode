@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createComposerWidthValidator } from "../rightPanelLayout";
 
 interface ResizeState {
@@ -44,8 +44,7 @@ export function useResizeHandle({
   const resizeStateRef = useRef<ResizeState | null>(null);
 
   // Stable width validator — uses the same DOM-measurement logic as shouldAcceptInlineSidebarWidth
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const shouldAcceptWidth = useCallback(createComposerWidthValidator(cssVarName), [cssVarName]);
+  const shouldAcceptWidth = useMemo(() => createComposerWidthValidator(cssVarName), [cssVarName]);
 
   const stop = useCallback(
     (pointerId: number) => {
