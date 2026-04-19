@@ -12,6 +12,10 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function asBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
 export interface RateLimitWindow {
   /** Label for this window, e.g. "Session (5 hrs)" or "Weekly" */
   readonly label: string;
@@ -34,6 +38,22 @@ export interface ProviderUsageSnapshot {
 
 // ---------------------------------------------------------------------------
 // Claude rate_limit_event normalization
+//
+// Real payload shape (from native event logs):
+// {
+//   type: "rate_limit_event",
+//   rate_limit_info: {
+//     status: "allowed" | "allowed_warning" | "rejected",
+//     resetsAt: 1776582000,           // camelCase, unix seconds
+//     rateLimitType: "five_hour",     // camelCase
+//     overageStatus: "rejected",
+//     overageDisabledReason: "...",
+//     isUsingOverage: false,
+//     utilization?: number,           // 0-1, may be absent
+//   },
+//   uuid: "...",
+//   session_id: "...",
+// }
 // ---------------------------------------------------------------------------
 
 const CLAUDE_WINDOW_LABELS: Record<string, string> = {
@@ -47,30 +67,58 @@ const CLAUDE_WINDOW_LABELS: Record<string, string> = {
 function normalizeClaudeRateLimitEvent(
   payload: Record<string, unknown>,
 ): Omit<ProviderUsageSnapshot, "updatedAt"> | null {
-  // Claude SDK sends: { type: "rate_limit_event", rate_limit_info: { ... }, ... }
   const info = asRecord(payload.rate_limit_info) ?? asRecord(payload);
   if (!info) {
     return null;
   }
 
-  const utilization = asFiniteNumber(info.utilization);
-  if (utilization === null) {
-    return null;
-  }
-
-  const rateLimitType = asString(info.rate_limit_type);
+  // The SDK may use camelCase or snake_case depending on version.
+  const rateLimitType =
+    asString(info.rateLimitType) ?? asString(info.rate_limit_type);
   const statusRaw = asString(info.status);
+  const resetsAt =
+    asFiniteNumber(info.resetsAt) ?? asFiniteNumber(info.resets_at);
+
+  // utilization (0-1) may or may not be present.
+  const utilization = asFiniteNumber(info.utilization);
+
+  const label = (rateLimitType && CLAUDE_WINDOW_LABELS[rateLimitType]) ?? "Session";
 
   const windows: RateLimitWindow[] = [];
 
-  windows.push({
-    label: (rateLimitType && CLAUDE_WINDOW_LABELS[rateLimitType]) ?? "Session",
-    usedPercent: Math.min(100, Math.max(0, utilization * 100)),
-    resetsAt: asFiniteNumber(info.resets_at),
-  });
+  if (utilization !== null) {
+    // We have a utilization value — use it directly.
+    windows.push({
+      label,
+      usedPercent: Math.min(100, Math.max(0, utilization * 100)),
+      resetsAt,
+    });
+  } else if (rateLimitType || resetsAt !== null) {
+    // No utilization, but we still know which window and its reset time.
+    // Show a placeholder — the status field tells us whether we're OK or not.
+    const estimatedPercent =
+      statusRaw === "rejected"
+        ? 100
+        : statusRaw === "allowed_warning"
+          ? 80
+          : 0;
+    windows.push({
+      label,
+      usedPercent: estimatedPercent,
+      resetsAt,
+    });
+  }
+
+  if (windows.length === 0) {
+    return null;
+  }
 
   const status: ProviderUsageSnapshot["status"] =
-    statusRaw === "rejected" ? "rejected" : statusRaw === "allowed_warning" ? "warning" : "ok";
+    statusRaw === "rejected"
+      ? "rejected"
+      : statusRaw === "allowed_warning"
+        ? "warning"
+        : "ok";
 
   return {
     providerLabel: "Claude",
@@ -81,14 +129,33 @@ function normalizeClaudeRateLimitEvent(
 
 // ---------------------------------------------------------------------------
 // Codex rate limit normalization
+//
+// Real payload shape (from native event logs):
+// The activity payload is the full rateLimits object. Due to adapter nesting,
+// it may arrive as:
+//   { rateLimits: { limitId, primary: {...}, secondary: {...}, ... } }
+// or directly as:
+//   { limitId, primary: {...}, secondary: {...}, ... }
+// We handle both.
+//
+// primary/secondary shape:
+//   { usedPercent: 1, windowDurationMins: 300, resetsAt: 1776587601 }
 // ---------------------------------------------------------------------------
 
 function normalizeCodexRateLimits(
   payload: Record<string, unknown>,
 ): Omit<ProviderUsageSnapshot, "updatedAt"> | null {
-  // Codex sends: { primary: { usedPercent, windowDurationMins, resetsAt }, secondary: ..., ... }
-  const primary = asRecord(payload.primary);
-  const secondary = asRecord(payload.secondary);
+  // Handle double-nesting: payload might be { rateLimits: { primary, ... } }
+  let data = payload;
+  if (!data.primary && !data.secondary) {
+    const nested = asRecord(data.rateLimits);
+    if (nested) {
+      data = nested;
+    }
+  }
+
+  const primary = asRecord(data.primary);
+  const secondary = asRecord(data.secondary);
 
   if (!primary && !secondary) {
     return null;
@@ -164,13 +231,23 @@ function normalizeRateLimitPayload(
     return normalizeClaudeRateLimitEvent(record);
   }
 
-  // Codex: has primary/secondary windows
+  // Codex: has primary/secondary windows (possibly nested under rateLimits)
   if (record.primary || record.secondary) {
     return normalizeCodexRateLimits(record);
   }
 
-  // Unknown format — try Claude-style (flat utilization field)
-  if (asFiniteNumber(record.utilization) !== null) {
+  // Codex double-nested: { rateLimits: { primary, secondary, ... } }
+  const nested = asRecord(record.rateLimits);
+  if (nested && (nested.primary || nested.secondary || nested.limitId !== undefined)) {
+    return normalizeCodexRateLimits(record);
+  }
+
+  // Unknown format — try Claude-style (flat fields with rateLimitType or utilization)
+  if (
+    asFiniteNumber(record.utilization) !== null ||
+    asString(record.rateLimitType) !== null ||
+    asString(record.rate_limit_type) !== null
+  ) {
     return normalizeClaudeRateLimitEvent(record);
   }
 
