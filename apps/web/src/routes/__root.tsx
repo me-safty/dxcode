@@ -8,6 +8,7 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { APP_DISPLAY_NAME } from "../branding";
@@ -22,6 +23,8 @@ import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { readLocalApi } from "../localApi";
+import { useDesktopOpenProjectPathSubscription } from "../hooks/useDesktopOpenProjectPathSubscription";
+import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useSettings } from "../hooks/useSettings";
 import {
   deriveLogicalProjectKeyFromSettings,
@@ -35,7 +38,11 @@ import {
   useServerConfigUpdatedSubscription,
   useServerWelcomeSubscription,
 } from "../rpc/serverState";
-import { useStore } from "../store";
+import {
+  selectProjectsAcrossEnvironments,
+  selectSidebarThreadsAcrossEnvironments,
+  useStore,
+} from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { syncBrowserChromeTheme } from "../hooks/useTheme";
 import {
@@ -213,6 +220,11 @@ function EventRouter() {
     sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
     sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
   }));
+  const sidebarThreadSortOrder = useSettings((s) => s.sidebarThreadSortOrder);
+  const defaultThreadEnvMode = useSettings((s) => s.defaultThreadEnvMode);
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const { handleNewThread } = useNewThreadHandler();
   const readPathname = useEffectEvent(() => pathname);
   const handledBootstrapThreadIdRef = useRef<string | null>(null);
   const seenServerConfigUpdateIdRef = useRef(getServerConfigUpdatedNotification()?.id ?? 0);
@@ -339,6 +351,16 @@ function EventRouter() {
       disposedRef.current = true;
     };
   }, []);
+
+  useDesktopOpenProjectPathSubscription({
+    isDisposed: () => disposedRef.current,
+    projects,
+    threads,
+    sidebarThreadSortOrder,
+    defaultThreadEnvMode,
+    navigate,
+    handleNewThread,
+  });
 
   useServerWelcomeSubscription(handleWelcome);
   useServerConfigUpdatedSubscription(handleServerConfigUpdated);
