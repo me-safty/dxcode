@@ -7,6 +7,7 @@ import type {
   ServerProviderSlashCommand,
   ServerProviderState,
 } from "@t3tools/contracts";
+import { resolveClaudeProfile } from "@t3tools/contracts";
 import { Cache, Duration, Effect, Equal, Layer, Option, Result, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
@@ -29,6 +30,7 @@ import {
 import { compareCliVersions } from "../cliVersion.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import { ClaudeProvider } from "../Services/ClaudeProvider.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ServerSettingsError } from "@t3tools/contracts";
 
@@ -465,19 +467,26 @@ function dedupeSlashCommands(
  * This is used as a fallback when `claude auth status` does not include
  * subscription type information.
  */
-const probeClaudeCapabilities = (binaryPath: string) => {
+const probeClaudeCapabilities = (input: {
+  readonly binaryPath: string;
+  readonly homePath: string;
+}) => {
   const abort = new AbortController();
   return Effect.tryPromise(async () => {
+    const env: NodeJS.ProcessEnv = input.homePath
+      ? { ...process.env, CLAUDE_CONFIG_DIR: expandHomePath(input.homePath) }
+      : process.env;
     const q = claudeQuery({
       prompt: ".",
       options: {
         persistSession: false,
-        pathToClaudeCodeExecutable: binaryPath,
+        pathToClaudeCodeExecutable: input.binaryPath,
         abortController: abort,
         maxTurns: 0,
         settingSources: ["user", "project", "local"],
         allowedTools: [],
         stderr: () => {},
+        env,
       },
     });
     const init = await q.initializationResult();
@@ -505,10 +514,15 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (args: Readonly
     Effect.flatMap((service) => service.getSettings),
     Effect.map((settings) => settings.providers.claudeAgent),
   );
-  const command = ChildProcess.make(claudeSettings.binaryPath, [...args], {
+  const profile = resolveClaudeProfile(claudeSettings);
+  const env = profile.homePath
+    ? { ...process.env, CLAUDE_CONFIG_DIR: expandHomePath(profile.homePath) }
+    : process.env;
+  const command = ChildProcess.make(profile.binaryPath, [...args], {
     shell: process.platform === "win32",
+    env,
   });
-  return yield* spawnAndCollect(claudeSettings.binaryPath, command);
+  return yield* spawnAndCollect(profile.binaryPath, command);
 });
 
 export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(function* (
@@ -621,9 +635,10 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     ? undefined
     : formatClaudeOpus47UpgradeMessage(parsedVersion);
 
+  const defaultProfile = resolveClaudeProfile(claudeSettings);
   const slashCommands =
     (resolveSlashCommands
-      ? yield* resolveSlashCommands(claudeSettings.binaryPath).pipe(
+      ? yield* resolveSlashCommands(defaultProfile.binaryPath).pipe(
           Effect.orElseSucceed(() => undefined),
         )
       : undefined) ?? [];
@@ -651,7 +666,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   }
 
   if (!subscriptionType && resolveSubscriptionType) {
-    subscriptionType = yield* resolveSubscriptionType(claudeSettings.binaryPath);
+    subscriptionType = yield* resolveSubscriptionType(defaultProfile.binaryPath);
   }
 
   // ── Handle auth results (same logic as before, adjusted models) ──
@@ -766,18 +781,32 @@ export const ClaudeProviderLive = Layer.effect(
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
     const subscriptionProbeCache = yield* Cache.make({
-      capacity: 1,
+      capacity: 4,
       timeToLive: Duration.minutes(5),
-      lookup: (binaryPath: string) => probeClaudeCapabilities(binaryPath),
+      lookup: (cacheKey: string) => {
+        const [binaryPath, homePath] = cacheKey.split("\u0000", 2) as [string, string];
+        return probeClaudeCapabilities({ binaryPath, homePath: homePath ?? "" });
+      },
     });
+
+    const probeCacheKey = (binaryPath: string): Effect.Effect<string> =>
+      serverSettings.getSettings.pipe(
+        Effect.orDie,
+        Effect.map((settings) => {
+          const profile = resolveClaudeProfile(settings.providers.claudeAgent);
+          return `${binaryPath}\u0000${profile.homePath}`;
+        }),
+      );
 
     const checkProvider = checkClaudeProviderStatus(
       (binaryPath) =>
-        Cache.get(subscriptionProbeCache, binaryPath).pipe(
+        probeCacheKey(binaryPath).pipe(
+          Effect.flatMap((key) => Cache.get(subscriptionProbeCache, key)),
           Effect.map((probe) => probe?.subscriptionType),
         ),
       (binaryPath) =>
-        Cache.get(subscriptionProbeCache, binaryPath).pipe(
+        probeCacheKey(binaryPath).pipe(
+          Effect.flatMap((key) => Cache.get(subscriptionProbeCache, key)),
           Effect.map((probe) => probe?.slashCommands),
         ),
     ).pipe(

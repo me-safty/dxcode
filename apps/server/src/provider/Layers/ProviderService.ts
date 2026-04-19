@@ -44,6 +44,7 @@ import {
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { ProjectProviderOverrideStore } from "../../project/Services/ProjectProviderOverrideStore.ts";
 
 export interface ProviderServiceLiveOptions {
   readonly canonicalEventLogPath?: string;
@@ -104,6 +105,7 @@ function toRuntimePayloadFromSession(
     readonly modelSelection?: unknown;
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
+    readonly claudeProfileId?: string;
   },
 ): Record<string, unknown> {
   return {
@@ -116,6 +118,7 @@ function toRuntimePayloadFromSession(
     ...(extra?.lastRuntimeEventAt !== undefined
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
       : {}),
+    ...(extra?.claudeProfileId !== undefined ? { claudeProfileId: extra.claudeProfileId } : {}),
   };
 }
 
@@ -141,11 +144,24 @@ function readPersistedCwd(
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function readPersistedClaudeProfileId(
+  runtimePayload: ProviderRuntimeBinding["runtimePayload"],
+): string | undefined {
+  if (!runtimePayload || typeof runtimePayload !== "object" || Array.isArray(runtimePayload)) {
+    return undefined;
+  }
+  const raw = "claudeProfileId" in runtimePayload ? runtimePayload.claudeProfileId : undefined;
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 const makeProviderService = Effect.fn("makeProviderService")(function* (
   options?: ProviderServiceLiveOptions,
 ) {
   const analytics = yield* Effect.service(AnalyticsService);
   const serverSettings = yield* ServerSettingsService;
+  const projectProviderOverrideStore = yield* ProjectProviderOverrideStore;
   const canonicalEventLogger =
     options?.canonicalEventLogger ??
     (options?.canonicalEventLogPath !== undefined
@@ -236,6 +252,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
+      const persistedClaudeProfileId = readPersistedClaudeProfileId(input.binding.runtimePayload);
 
       const resumed = yield* adapter.startSession({
         threadId: input.binding.threadId,
@@ -243,6 +260,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ...(persistedCwd ? { cwd: persistedCwd } : {}),
         ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
         ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
+        ...(persistedClaudeProfileId ? { claudeProfileId: persistedClaudeProfileId } : {}),
         runtimeMode: input.binding.runtimeMode ?? "full-access",
       });
       if (resumed.provider !== adapter.provider) {
@@ -339,10 +357,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         payload: rawInput,
       });
 
+      const projectOverride = parsed.cwd
+        ? yield* projectProviderOverrideStore.get(parsed.cwd)
+        : undefined;
       const input = {
         ...parsed,
         threadId,
-        provider: parsed.provider ?? "codex",
+        provider: parsed.provider ?? projectOverride?.provider ?? "codex",
+        ...(parsed.claudeProfileId === undefined && projectOverride?.claudeProfileId
+          ? { claudeProfileId: projectOverride.claudeProfileId }
+          : {}),
       };
       yield* Effect.annotateCurrentSpan({
         "provider.operation": "start-session",
@@ -391,6 +415,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         yield* upsertSessionBinding(session, threadId, {
           modelSelection: input.modelSelection,
+          ...(input.claudeProfileId ? { claudeProfileId: input.claudeProfileId } : {}),
         });
         yield* analytics.record("provider.session.started", {
           provider: session.provider,

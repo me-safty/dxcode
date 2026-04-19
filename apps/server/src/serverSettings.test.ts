@@ -55,7 +55,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
             homePath: "/Users/julius/.codex",
           },
           claudeAgent: {
-            binaryPath: "/usr/local/bin/claude",
+            profiles: [
+              {
+                id: "personal",
+                label: "Personal",
+                binaryPath: "/usr/local/bin/claude",
+                homePath: "",
+                launchArgs: "",
+              },
+            ],
+            defaultProfileId: "personal",
             customModels: ["claude-custom"],
           },
         },
@@ -90,9 +99,17 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       });
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,
-        binaryPath: "/usr/local/bin/claude",
         customModels: ["claude-custom"],
-        launchArgs: "",
+        profiles: [
+          {
+            id: "personal",
+            label: "Personal",
+            binaryPath: "/usr/local/bin/claude",
+            homePath: "",
+            launchArgs: "",
+          },
+        ],
+        defaultProfileId: "personal",
       });
       assert.deepEqual(next.textGenerationModelSelection, {
         provider: "codex",
@@ -182,7 +199,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
             homePath: "   ",
           },
           claudeAgent: {
-            binaryPath: "  /opt/homebrew/bin/claude  ",
+            profiles: [
+              {
+                id: "personal",
+                label: "Personal",
+                binaryPath: "  /opt/homebrew/bin/claude  ",
+                homePath: "",
+                launchArgs: "",
+              },
+            ],
+            defaultProfileId: "personal",
           },
         },
       });
@@ -195,9 +221,17 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       });
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,
-        binaryPath: "/opt/homebrew/bin/claude",
         customModels: [],
-        launchArgs: "",
+        profiles: [
+          {
+            id: "personal",
+            label: "Personal",
+            binaryPath: "/opt/homebrew/bin/claude",
+            homePath: "",
+            launchArgs: "",
+          },
+        ],
+        defaultProfileId: "personal",
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
@@ -232,13 +266,22 @@ it.layer(NodeServices.layer)("server settings", (it) => {
             binaryPath: "   ",
           },
           claudeAgent: {
-            binaryPath: "",
+            profiles: [
+              {
+                id: "personal",
+                label: "Personal",
+                binaryPath: "",
+                homePath: "",
+                launchArgs: "",
+              },
+            ],
+            defaultProfileId: "personal",
           },
         },
       });
 
       assert.equal(next.providers.codex.binaryPath, "codex");
-      assert.equal(next.providers.claudeAgent.binaryPath, "claude");
+      assert.equal(next.providers.claudeAgent.profiles[0]!.binaryPath, "claude");
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 

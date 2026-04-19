@@ -10,7 +10,7 @@
 import { Effect, Layer, Option, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { ClaudeModelSelection } from "@t3tools/contracts";
+import { ClaudeModelSelection, resolveClaudeProfile } from "@t3tools/contracts";
 import { resolveApiModelId } from "@t3tools/shared/model";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 
@@ -31,6 +31,7 @@ import {
 } from "../Utils.ts";
 import { normalizeClaudeModelOptionsWithCapabilities } from "@t3tools/shared/model";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 import { getClaudeModelCapabilities } from "../../provider/Layers/ClaudeProvider.ts";
 
 const CLAUDE_TIMEOUT_MS = 180_000;
@@ -100,9 +101,15 @@ const makeClaudeTextGeneration = Effect.gen(function* () {
       (settings) => settings.providers.claudeAgent,
     ).pipe(Effect.catch(() => Effect.undefined));
 
+    const claudeProfile = claudeSettings ? resolveClaudeProfile(claudeSettings) : undefined;
+    const claudeBinaryPath = claudeProfile?.binaryPath || "claude";
+    const claudeEnv = claudeProfile?.homePath
+      ? { ...process.env, CLAUDE_CONFIG_DIR: expandHomePath(claudeProfile.homePath) }
+      : undefined;
+
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* () {
       const command = ChildProcess.make(
-        claudeSettings?.binaryPath || "claude",
+        claudeBinaryPath,
         [
           "-p",
           "--output-format",
@@ -118,6 +125,7 @@ const makeClaudeTextGeneration = Effect.gen(function* () {
         {
           cwd,
           shell: process.platform === "win32",
+          ...(claudeEnv ? { env: claudeEnv } : {}),
           stdin: {
             stream: Stream.encodeText(Stream.make(prompt)),
           },

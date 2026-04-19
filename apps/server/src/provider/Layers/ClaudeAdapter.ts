@@ -41,6 +41,7 @@ import {
   TurnId,
   type UserInputQuestion,
   ClaudeAgentEffort,
+  resolveClaudeProfile,
 } from "@t3tools/contracts";
 import {
   applyClaudePromptEffortPrefix,
@@ -65,6 +66,7 @@ import {
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { getClaudeModelCapabilities } from "./ClaudeProvider.ts";
 import {
@@ -2824,8 +2826,12 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             }),
         ),
       );
-      const claudeBinaryPath = claudeSettings.binaryPath;
-      const extraArgs = parseCliArgs(claudeSettings.launchArgs).flags;
+      const claudeProfile = resolveClaudeProfile(claudeSettings, input.claudeProfileId);
+      const claudeBinaryPath = claudeProfile.binaryPath;
+      const extraArgs = parseCliArgs(claudeProfile.launchArgs).flags;
+      const profileEnv: NodeJS.ProcessEnv = claudeProfile.homePath
+        ? { ...process.env, CLAUDE_CONFIG_DIR: expandHomePath(claudeProfile.homePath) }
+        : process.env;
       const modelSelection =
         input.modelSelection?.provider === "claudeAgent" ? input.modelSelection : undefined;
       const caps = getClaudeModelCapabilities(modelSelection?.model);
@@ -2863,7 +2869,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
-        env: process.env,
+        env: profileEnv,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
       };
