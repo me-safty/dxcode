@@ -8,10 +8,7 @@ import {
   syncShortcutModifierStateFromKeyboardEvent,
 } from "./shortcutModifierState";
 
-function keyboardEventLike(
-  type: "keydown" | "keyup",
-  init: Partial<KeyboardEvent>,
-): KeyboardEvent {
+function keyboardEventLike(type: "keydown" | "keyup", init: Partial<KeyboardEvent>): KeyboardEvent {
   return {
     type,
     key: "",
