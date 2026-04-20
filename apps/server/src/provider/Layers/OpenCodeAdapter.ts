@@ -11,7 +11,7 @@ import {
   TurnId,
   type UserInputQuestion,
 } from "@t3tools/contracts";
-import { Cause, Effect, Exit, Fiber, Layer, Queue, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Layer, Queue, Ref, Schema, Scope, Stream } from "effect";
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -68,11 +68,21 @@ interface OpenCodeSessionContext {
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
   activeVariant: string | undefined;
-  stopped: boolean;
+  /**
+   * One-shot guard flipped by `stopOpenCodeContext` / `emitUnexpectedExit`.
+   * The session lifecycle is owned by `sessionScope`; this Ref exists only
+   * so concurrent callers can race the transition safely via `getAndSet`.
+   */
+  readonly stopped: Ref.Ref<boolean>;
+  /**
+   * Sole lifecycle handle for the session. Closing this scope:
+   *   - aborts the `AbortController` registered as a finalizer
+   *     (cancels the in-flight `event.subscribe` fetch),
+   *   - interrupts the event-pump and server-exit fibers forked
+   *     via `Effect.forkIn(sessionScope)`,
+   *   - tears down the OpenCode server process for scope-owned servers.
+   */
   readonly sessionScope: Scope.Closeable;
-  eventsFiber: Fiber.Fiber<void, never> | undefined;
-  exitFiber: Fiber.Fiber<void, never> | undefined;
-  readonly eventsAbortController: AbortController;
 }
 
 export interface OpenCodeAdapterLiveOptions {
@@ -84,23 +94,8 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function isProviderAdapterRequestError(cause: unknown): cause is ProviderAdapterRequestError {
-  return (
-    typeof cause === "object" &&
-    cause !== null &&
-    "_tag" in cause &&
-    cause._tag === "ProviderAdapterRequestError"
-  );
-}
-
-function isProviderAdapterProcessError(cause: unknown): cause is ProviderAdapterProcessError {
-  return (
-    typeof cause === "object" &&
-    cause !== null &&
-    "_tag" in cause &&
-    cause._tag === "ProviderAdapterProcessError"
-  );
-}
+const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
+const isProviderAdapterProcessError = Schema.is(ProviderAdapterProcessError);
 
 function buildEventBase(input: {
   readonly threadId: ThreadId;
@@ -224,7 +219,10 @@ function ensureSessionContext(
   if (!session) {
     throw new ProviderAdapterSessionNotFoundError({ provider: PROVIDER, threadId });
   }
-  if (session.stopped) {
+  // `ensureSessionContext` is a sync gate used from both sync helpers and
+  // Effect bodies. `Ref.getUnsafe` is an atomic read of the backing cell —
+  // no fiber suspension required, which keeps this callable everywhere.
+  if (Ref.getUnsafe(session.stopped)) {
     throw new ProviderAdapterSessionClosedError({ provider: PROVIDER, threadId });
   }
   return session;
@@ -391,29 +389,22 @@ function updateProviderSession(
 const stopOpenCodeContext = Effect.fn("stopOpenCodeContext")(function* (
   context: OpenCodeSessionContext,
 ) {
-  if (context.stopped) {
+  // Race-safe one-shot: first caller flips the flag, everyone else no-ops.
+  if (yield* Ref.getAndSet(context.stopped, true)) {
     return;
   }
-  context.stopped = true;
-  context.eventsAbortController.abort();
 
-  const eventsFiber = context.eventsFiber;
-  context.eventsFiber = undefined;
-  if (eventsFiber && eventsFiber.pollUnsafe() === undefined) {
-    yield* Fiber.interrupt(eventsFiber).pipe(Effect.ignore);
-  }
-
-  const exitFiber = context.exitFiber;
-  context.exitFiber = undefined;
-  if (exitFiber && exitFiber.pollUnsafe() === undefined) {
-    yield* Fiber.interrupt(exitFiber).pipe(Effect.ignore);
-  }
-
+  // Best-effort remote abort. The scope close below tears down the local
+  // handles (event-pump fiber, server-exit fiber, event-subscribe fetch),
+  // but we still want to tell OpenCode that this session is done.
   yield* Effect.tryPromise({
     try: () => context.client.session.abort({ sessionID: context.openCodeSessionId }),
     catch: () => undefined,
   }).pipe(Effect.ignore);
 
+  // Closing the session scope interrupts every fiber forked into it and
+  // runs each finalizer we registered — the `AbortController.abort()` call,
+  // the child-process termination, etc.
   yield* Scope.close(context.sessionScope, Exit.void);
 });
 
@@ -424,8 +415,6 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
       const serverConfig = yield* ServerConfig;
       const serverSettings = yield* ServerSettingsService;
       const openCodeRuntime = yield* OpenCodeRuntime;
-      const runtimeContext = yield* Effect.context<never>();
-      const runFork = Effect.runForkWith(runtimeContext);
       const nativeEventLogger =
         options?.nativeEventLogger ??
         (options?.nativeEventLogPath !== undefined
@@ -475,7 +464,11 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         context: OpenCodeSessionContext,
         message: string,
       ) {
-        if (context.stopped) {
+        // Two fibers can race here (the event-pump on stream failure and the
+        // server-exit watcher). Whoever loses the race observes `true` and
+        // returns — this also makes the `stopOpenCodeContext` call below a
+        // no-op for the loser.
+        if (yield* Ref.get(context.stopped)) {
           return;
         }
         const turnId = context.activeTurnId;
@@ -874,60 +867,76 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         }
       });
 
-      const startEventPump = (context: OpenCodeSessionContext) => {
-        let eventsFiber: Fiber.Fiber<void, never>;
-        eventsFiber = runFork(
-          Effect.tryPromise({
-            try: () =>
-              context.client.event.subscribe(undefined, {
-                signal: context.eventsAbortController.signal,
-              }),
-            catch: (cause) =>
-              new ProviderAdapterProcessError({
-                provider: PROVIDER,
-                threadId: context.session.threadId,
-                detail: openCodeRuntimeErrorDetail(cause),
-                cause,
-              }),
-          }).pipe(
-            Effect.flatMap((subscription) =>
-              Stream.fromAsyncIterable(subscription.stream, (cause) =>
-                cause instanceof Error ? cause : new Error("OpenCode event stream failed."),
-              ).pipe(Stream.runForEach((event) => handleSubscribedEvent(context, event))),
-            ),
-            Effect.exit,
-            Effect.flatMap((exit) => {
-              if (context.eventsFiber === eventsFiber) {
-                context.eventsFiber = undefined;
-              }
-              if (context.eventsAbortController.signal.aborted || context.stopped) {
-                return Effect.void;
+      const startEventPump = Effect.fn("startEventPump")(function* (
+        context: OpenCodeSessionContext,
+      ) {
+        // One AbortController per session scope. The finalizer fires when
+        // the scope closes (explicit stop, unexpected exit, or layer
+        // shutdown) and cancels the in-flight `event.subscribe` fetch so
+        // the async iterable unwinds cleanly.
+        const eventsAbortController = new AbortController();
+        yield* Scope.addFinalizer(
+          context.sessionScope,
+          Effect.sync(() => eventsAbortController.abort()),
+        );
+
+        // Fibers forked into `context.sessionScope` are interrupted
+        // automatically when the scope closes — no bookkeeping required.
+        yield* Effect.tryPromise({
+          try: () =>
+            context.client.event.subscribe(undefined, {
+              signal: eventsAbortController.signal,
+            }),
+          catch: (cause) =>
+            new ProviderAdapterProcessError({
+              provider: PROVIDER,
+              threadId: context.session.threadId,
+              detail: openCodeRuntimeErrorDetail(cause),
+              cause,
+            }),
+        }).pipe(
+          Effect.flatMap((subscription) =>
+            Stream.fromAsyncIterable(subscription.stream, (cause) =>
+              cause instanceof Error ? cause : new Error("OpenCode event stream failed."),
+            ).pipe(Stream.runForEach((event) => handleSubscribedEvent(context, event))),
+          ),
+          Effect.exit,
+          Effect.flatMap((exit) =>
+            Effect.gen(function* () {
+              // Expected paths: caller aborted the fetch or the session
+              // has already been marked stopped. Treat as a clean exit.
+              if (eventsAbortController.signal.aborted || (yield* Ref.get(context.stopped))) {
+                return;
               }
               if (Exit.isFailure(exit)) {
                 const failure = Cause.squash(exit.cause);
-                return emitUnexpectedExit(
+                yield* emitUnexpectedExit(
                   context,
                   failure instanceof Error ? failure.message : "OpenCode event stream failed.",
                 );
               }
-              return Effect.void;
             }),
           ),
+          Effect.forkIn(context.sessionScope),
         );
-        context.eventsFiber = eventsFiber;
 
         if (!context.server.external && context.server.exitCode !== null) {
-          context.exitFiber = runFork(
-            context.server.exitCode.pipe(
-              Effect.flatMap((code) =>
-                context.stopped
-                  ? Effect.void
-                  : emitUnexpectedExit(context, `OpenCode server exited unexpectedly (${code}).`),
-              ),
+          yield* context.server.exitCode.pipe(
+            Effect.flatMap((code) =>
+              Effect.gen(function* () {
+                if (yield* Ref.get(context.stopped)) {
+                  return;
+                }
+                yield* emitUnexpectedExit(
+                  context,
+                  `OpenCode server exited unexpectedly (${code}).`,
+                );
+              }),
             ),
+            Effect.forkIn(context.sessionScope),
           );
         }
-      };
+      });
 
       const startSession: OpenCodeAdapterShape["startSession"] = Effect.fn("startSession")(
         function* (input) {
@@ -1068,14 +1077,11 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
             activeTurnId: undefined,
             activeAgent: undefined,
             activeVariant: undefined,
-            stopped: false,
+            stopped: yield* Ref.make(false),
             sessionScope: started.sessionScope,
-            eventsFiber: undefined,
-            exitFiber: undefined,
-            eventsAbortController: new AbortController(),
           };
           sessions.set(input.threadId, context);
-          startEventPump(context);
+          yield* startEventPump(context);
 
           yield* emit({
             ...buildEventBase({ threadId: input.threadId }),
