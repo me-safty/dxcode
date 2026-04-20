@@ -209,6 +209,24 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("round-trips addProjectBaseDirectory through patch + decode", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      const next = yield* serverSettings.updateSettings({
+        addProjectBaseDirectory: "/Users/tester/Projects",
+      });
+
+      assert.equal(next.addProjectBaseDirectory, "/Users/tester/Projects");
+
+      const followup = yield* serverSettings.updateSettings({
+        addProjectBaseDirectory: "A",
+      });
+
+      assert.equal(followup.addProjectBaseDirectory, "A");
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("writes only non-default server settings to disk", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;

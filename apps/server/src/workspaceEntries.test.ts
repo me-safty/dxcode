@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 
 import { afterEach, assert, describe, it, vi } from "vitest";
 
-import { searchWorkspaceEntries } from "./workspaceEntries";
+import { browseDirectories, searchWorkspaceEntries } from "./workspaceEntries";
 
 const tempDirs: string[] = [];
 
@@ -198,5 +198,82 @@ describe("searchWorkspaceEntries", () => {
     await searchWorkspaceEntries({ cwd, query: "", limit: 200 });
 
     assert.isAtMost(peakReads, 32);
+  });
+});
+
+describe("browseDirectories", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const dir of tempDirs.splice(0, tempDirs.length)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns directory entries relative to cwd with resolvedParent", async () => {
+    const cwd = makeTempDir("marcode-browse-basic-");
+    fs.mkdirSync(path.join(cwd, "alpha"));
+    fs.mkdirSync(path.join(cwd, "beta"));
+    writeFile(cwd, "readme.md", "");
+
+    const result = await browseDirectories({ cwd, pathQuery: "", limit: 100 });
+    const names = result.entries.map((entry) => entry.path);
+
+    assert.sameMembers(names, ["alpha", "beta"]);
+    assert.equal(result.resolvedParent, path.resolve(cwd));
+    assert.isFalse(result.truncated);
+  });
+
+  it("resolves absolute paths in pathQuery regardless of cwd", async () => {
+    const cwd = makeTempDir("marcode-browse-cwd-");
+    const other = makeTempDir("marcode-browse-abs-");
+    fs.mkdirSync(path.join(other, "nested"));
+
+    const result = await browseDirectories({ cwd, pathQuery: `${other}/`, limit: 100 });
+    const names = result.entries.map((entry) => entry.path);
+
+    assert.equal(result.resolvedParent, path.resolve(other));
+    assert.include(
+      names.map((name) => path.basename(name)),
+      "nested",
+    );
+  });
+
+  it("expands ~/ in cwd to the user's home directory", async () => {
+    const homeDir = os.homedir();
+    const sentinel = `marcode-browse-home-sentinel-${process.pid}-${Date.now()}`;
+    const sentinelPath = path.join(homeDir, sentinel);
+    fs.mkdirSync(sentinelPath);
+    try {
+      const result = await browseDirectories({ cwd: "~/", pathQuery: "", limit: 100 });
+
+      assert.equal(result.resolvedParent, path.resolve(homeDir));
+      assert.isTrue(result.entries.some((entry) => path.basename(entry.path) === sentinel));
+    } finally {
+      fs.rmSync(sentinelPath, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves ../ relative to cwd", async () => {
+    const parent = makeTempDir("marcode-browse-parent-");
+    const child = path.join(parent, "child");
+    fs.mkdirSync(child);
+    fs.mkdirSync(path.join(parent, "sibling"));
+
+    const result = await browseDirectories({ cwd: child, pathQuery: "../", limit: 100 });
+
+    assert.equal(result.resolvedParent, path.resolve(parent));
+    const names = result.entries.map((entry) => path.basename(entry.path));
+    assert.includeMembers(names, ["child", "sibling"]);
+  });
+
+  it("returns empty entries and resolvedParent when directory does not exist", async () => {
+    const cwd = makeTempDir("marcode-browse-missing-");
+    const missing = path.join(cwd, "does-not-exist");
+
+    const result = await browseDirectories({ cwd: missing, pathQuery: "", limit: 100 });
+
+    assert.deepEqual([...result.entries], []);
+    assert.equal(result.resolvedParent, path.resolve(missing));
+    assert.isFalse(result.truncated);
   });
 });

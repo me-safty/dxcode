@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import type { Dirent } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { runProcess } from "./processRunner";
 
@@ -580,11 +581,21 @@ function parsePathQueryComponents(pathQuery: string): { parentDir: string; nameP
   };
 }
 
+function expandHomePath(value: string): string {
+  if (value === "~") return os.homedir();
+  if (value.startsWith("~/") || value.startsWith("~\\")) {
+    return path.join(os.homedir(), value.slice(2));
+  }
+  return value;
+}
+
 export async function browseDirectories(
   input: ProjectBrowseDirectoriesInput,
 ): Promise<ProjectBrowseDirectoriesResult> {
-  const { parentDir, namePrefix } = parsePathQueryComponents(input.pathQuery);
-  const resolvedParent = path.resolve(input.cwd, parentDir);
+  const expandedCwd = expandHomePath(input.cwd);
+  const expandedPathQuery = expandHomePath(input.pathQuery);
+  const { parentDir, namePrefix } = parsePathQueryComponents(expandedPathQuery);
+  const resolvedParent = path.resolve(expandedCwd, parentDir);
   const limit = Math.max(0, Math.floor(input.limit));
   const lowerPrefix = namePrefix.toLowerCase();
 
@@ -592,7 +603,7 @@ export async function browseDirectories(
   try {
     dirents = await fs.readdir(resolvedParent, { withFileTypes: true });
   } catch {
-    return { entries: [], truncated: false };
+    return { entries: [], truncated: false, resolvedParent };
   }
 
   dirents.sort((a, b) => a.name.localeCompare(b.name));
@@ -627,5 +638,5 @@ export async function browseDirectories(
     });
   }
 
-  return { entries, truncated };
+  return { entries, truncated, resolvedParent };
 }

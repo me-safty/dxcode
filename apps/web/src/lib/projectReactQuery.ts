@@ -61,6 +61,7 @@ const DEFAULT_BROWSE_DIRECTORIES_LIMIT = 100;
 const EMPTY_BROWSE_DIRECTORIES_RESULT: ProjectBrowseDirectoriesResult = {
   entries: [],
   truncated: false,
+  resolvedParent: "",
 };
 
 export function projectBrowseDirectoriesQueryOptions(input: {
