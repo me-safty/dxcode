@@ -448,6 +448,10 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
               stream: "native",
             })
           : undefined);
+      // Only close loggers we created. If the caller passed one in via
+      // `options.nativeEventLogger`, they own its lifecycle.
+      const managedNativeEventLogger =
+        options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
       const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
       const sessions = new Map<ThreadId, OpenCodeSessionContext>();
 
@@ -469,6 +473,13 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
             (context) => Effect.ignoreCause(stopOpenCodeContext(context)),
             { concurrency: "unbounded", discard: true },
           );
+          // Close the logger AFTER session teardown so any final lifecycle
+          // events emitted during shutdown still get written. `close` flushes
+          // the `Logger.batched` window and closes each per-thread
+          // `RotatingFileSink` handle owned by the logger's internal scope.
+          if (managedNativeEventLogger !== undefined) {
+            yield* managedNativeEventLogger.close();
+          }
         }),
       );
 

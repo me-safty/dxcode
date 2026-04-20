@@ -1,4 +1,4 @@
-import { Duration, Effect, Exit, Fiber, Layer, Schema, Scope } from "effect";
+import { Effect, Exit, Fiber, Layer, Schema, Scope } from "effect";
 import * as Semaphore from "effect/Semaphore";
 
 import {
@@ -33,7 +33,7 @@ import {
   toOpenCodeFileParts,
 } from "../../provider/opencodeRuntime.ts";
 
-const OPENCODE_TEXT_GENERATION_IDLE_TTL_MS = 30_000;
+const OPENCODE_TEXT_GENERATION_IDLE_TTL = "30 seconds";
 
 function getOpenCodePromptErrorMessage(error: unknown): string | null {
   if (!error || typeof error !== "object") {
@@ -130,7 +130,7 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
     server: OpenCodeServerProcess,
   ) {
     yield* cancelIdleCloseFiber();
-    const fiber = yield* Effect.sleep(Duration.millis(OPENCODE_TEXT_GENERATION_IDLE_TTL_MS)).pipe(
+    const fiber = yield* Effect.sleep(OPENCODE_TEXT_GENERATION_IDLE_TTL).pipe(
       Effect.andThen(
         sharedServerMutex.withPermit(
           Effect.gen(function* () {
