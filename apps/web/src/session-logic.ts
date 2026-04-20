@@ -22,16 +22,19 @@ import type {
   TurnDiffSummary,
 } from "./types";
 
-export type ProviderPickerKind = ProviderKind | "cursor";
+export type ProviderPickerKind = ProviderKind | "cursor" | "opencode";
 
 export const PROVIDER_OPTIONS: Array<{
   value: ProviderPickerKind;
   label: string;
   available: boolean;
+  /** Shown on the model picker sidebar when relevant */
+  pickerSidebarBadge?: "new" | "soon";
 }> = [
   { value: "claudeAgent", label: "Claude", available: true },
   { value: "codex", label: "Codex", available: true },
-  { value: "cursor", label: "Cursor", available: false },
+  { value: "opencode", label: "OpenCode", available: false, pickerSidebarBadge: "soon" },
+  { value: "cursor", label: "Cursor", available: false, pickerSidebarBadge: "soon" },
 ];
 
 export interface SubagentToolProgress {

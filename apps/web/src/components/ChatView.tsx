@@ -226,7 +226,8 @@ import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
-import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
+import { ProviderModelPicker } from "./chat/ProviderModelPicker";
+import { getModelPickerOpen } from "../modelPickerOpenState";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
 import { searchSlashCommandItems } from "./chat/composerSlashCommandSearch";
 import { formatProviderSkillDisplayName } from "../providerSkillPresentation";
@@ -1703,23 +1704,6 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
       ? selectedModelForPicker
       : (normalizeModelSlug(selectedModelForPicker, selectedProvider) ?? selectedModelForPicker);
   }, [modelOptionsByProvider, selectedModelForPicker, selectedProvider]);
-  const searchableModelOptions = useMemo(
-    () =>
-      AVAILABLE_PROVIDER_OPTIONS.filter(
-        (option) => lockedProvider === null || option.value === lockedProvider,
-      ).flatMap((option) =>
-        modelOptionsByProvider[option.value].map(({ slug, name }) => ({
-          provider: option.value,
-          providerLabel: option.label,
-          slug,
-          name,
-          searchSlug: slug.toLowerCase(),
-          searchName: name.toLowerCase(),
-          searchProvider: option.label.toLowerCase(),
-        })),
-      ),
-    [lockedProvider, modelOptionsByProvider],
-  );
   const workspaceEntriesQuery = useQuery(
     projectSearchEntriesQueryOptions({
       environmentId: activeThreadEnvironmentId ?? null,
@@ -1838,30 +1822,8 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
       }));
     }
 
-    return searchableModelOptions
-      .filter(({ searchSlug, searchName, searchProvider }) => {
-        const query = composerTrigger.query.trim().toLowerCase();
-        if (!query) return true;
-        return (
-          searchSlug.includes(query) || searchName.includes(query) || searchProvider.includes(query)
-        );
-      })
-      .map(({ provider, providerLabel, slug, name }) => ({
-        id: `model:${provider}:${slug}`,
-        type: "model",
-        provider,
-        model: slug,
-        label: name,
-        description: `${providerLabel} · ${slug}`,
-      }));
-  }, [
-    composerTrigger,
-    jiraIssues,
-    providerStatuses,
-    searchableModelOptions,
-    selectedProvider,
-    workspaceEntries,
-  ]);
+    return [];
+  }, [composerTrigger, jiraIssues, providerStatuses, selectedProvider, workspaceEntries]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -3060,6 +3022,7 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
+        modelPickerOpen: getModelPickerOpen(),
       };
 
       const command = resolveShortcutCommand(event, keybindings, {
@@ -3106,6 +3069,16 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
         event.preventDefault();
         event.stopPropagation();
         onToggleDiff();
+        return;
+      }
+
+      if (command === "modelPicker.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        const trigger = document.querySelector<HTMLButtonElement>(
+          '[data-chat-provider-model-picker="true"]',
+        );
+        trigger?.click();
         return;
       }
 
@@ -4368,21 +4341,16 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
       }
       if (item.type === "slash-command") {
         if (item.command === "model") {
-          const replacement = `/${item.command} `;
-          const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
-            snapshot.value,
-            trigger.rangeEnd,
-            replacement,
-          );
-          const applied = applyPromptReplacement(
-            trigger.rangeStart,
-            replacementRangeEnd,
-            replacement,
-            { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
-          );
+          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          });
           if (applied) {
             setComposerHighlightedItemId(null);
           }
+          const pickerTrigger = document.querySelector<HTMLButtonElement>(
+            '[data-chat-provider-model-picker="true"]',
+          );
+          pickerTrigger?.click();
           return;
         }
         void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
@@ -4430,19 +4398,11 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
         }
         return;
       }
-      onProviderModelSelect(item.provider, item.model);
-      const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
-        expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
-      });
-      if (applied) {
-        setComposerHighlightedItemId(null);
-      }
     },
     [
       addComposerDraftJiraTaskContext,
       applyPromptReplacement,
       handleInteractionModeChange,
-      onProviderModelSelect,
       resolveActiveComposerTrigger,
       threadId,
     ],
@@ -5192,6 +5152,8 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
                           model={selectedModelForPickerWithCustomFallback}
                           lockedProvider={lockedProvider}
                           providers={providerStatuses}
+                          keybindings={keybindings}
+                          terminalOpen={Boolean(terminalState.terminalOpen)}
                           modelOptionsByProvider={modelOptionsByProvider}
                           {...(composerProviderState.modelPickerIconClassName
                             ? {

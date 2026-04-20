@@ -47,14 +47,6 @@ export type ComposerCommandItem =
     }
   | {
       id: string;
-      type: "model";
-      provider: ProviderKind;
-      model: string;
-      label: string;
-      description: string;
-    }
-  | {
-      id: string;
       type: "skill";
       provider: ProviderKind;
       skill: ServerProviderSkill;
@@ -277,11 +269,6 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground/80">
           <SkillGlyph className="size-3.5" />
         </span>
-      ) : null}
-      {props.item.type === "model" ? (
-        <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
-          model
-        </Badge>
       ) : null}
       {props.item.type === "jira-task" ? (
         <>

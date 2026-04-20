@@ -12,11 +12,12 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import {
   ServerSettings,
-  ServerSettingsPatch,
+  type ServerSettingsPatch,
   ModelSelection,
   ThreadEnvMode,
 } from "@marcode/contracts";
 import {
+  type ClientSettingsPatch,
   type ClientSettings,
   ClientSettingsSchema,
   DEFAULT_CLIENT_SETTINGS,
@@ -111,7 +112,7 @@ const SERVER_SETTINGS_KEYS = new Set<string>(Struct.keys(ServerSettings.fields))
 
 function splitPatch(patch: Partial<UnifiedSettings>): {
   serverPatch: ServerSettingsPatch;
-  clientPatch: Partial<ClientSettings>;
+  clientPatch: ClientSettingsPatch;
 } {
   const serverPatch: Record<string, unknown> = {};
   const clientPatch: Record<string, unknown> = {};
@@ -124,7 +125,7 @@ function splitPatch(patch: Partial<UnifiedSettings>): {
   }
   return {
     serverPatch: serverPatch as ServerSettingsPatch,
-    clientPatch: clientPatch as Partial<ClientSettings>,
+    clientPatch: clientPatch as ClientSettingsPatch,
   };
 }
 
