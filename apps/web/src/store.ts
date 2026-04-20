@@ -808,24 +808,30 @@ function writeThreadShellState(
     };
   }
 
+  // The shell stream's `nextThread.summary` always carries `agentCommandStatus:
+  // null` because the server doesn't compute it. We rebuild it from activities
+  // BEFORE the equality check; otherwise the check sees the stored
+  // (non-null computed) status vs. null and never returns true for threads
+  // with active URL detections — that previously caused an unbounded loop of
+  // no-op writes on every shell tick.
+  const activityIds = nextState.activityIdsByThreadId[nextThread.shell.id] ?? EMPTY_ACTIVITY_IDS;
+  const activitiesById = nextState.activityByThreadId[nextThread.shell.id] ?? {};
+  const activities = activityIds.flatMap((id) => {
+    const activity = activitiesById[id];
+    return activity ? [activity] : [];
+  });
+  const desiredSummary = withSidebarAgentCommandStatus(nextThread.summary, activities);
   if (
     !sidebarThreadSummariesEqual(
       state.sidebarThreadSummaryById[nextThread.shell.id],
-      nextThread.summary,
+      desiredSummary,
     )
   ) {
-    const activityIds = nextState.activityIdsByThreadId[nextThread.shell.id] ?? EMPTY_ACTIVITY_IDS;
-    const activitiesById = nextState.activityByThreadId[nextThread.shell.id] ?? {};
-    const activities = activityIds.flatMap((id) => {
-      const activity = activitiesById[id];
-      return activity ? [activity] : [];
-    });
-    const summary = withSidebarAgentCommandStatus(nextThread.summary, activities);
     nextState = {
       ...nextState,
       sidebarThreadSummaryById: {
         ...nextState.sidebarThreadSummaryById,
-        [nextThread.shell.id]: summary,
+        [nextThread.shell.id]: desiredSummary,
       },
     };
   }
