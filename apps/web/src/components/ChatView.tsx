@@ -1396,21 +1396,28 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
   });
   const hasInFlightTurn = Boolean(activeLatestTurn && !activeLatestTurn.completedAt);
   const isSessionStarting = activeThread?.session?.orchestrationStatus === "starting";
+  const lastActiveMessage = activeThread?.messages[activeThread.messages.length - 1];
+  const hasPendingAssistantResponse = Boolean(
+    lastActiveMessage?.role === "user" &&
+    (!activeLatestTurn || Boolean(activeLatestTurn.completedAt)),
+  );
   const isWorking =
     phase === "running" ||
     isSendBusy ||
     isConnecting ||
     isRevertingCheckpoint ||
     hasInFlightTurn ||
-    isSessionStarting;
+    isSessionStarting ||
+    hasPendingAssistantResponse;
   const isCompacting = activeThread?.session?.compacting === true;
   const isThreadHydrating = activeThread !== undefined && !isThreadHydrated(activeThread);
   const nowIso = new Date(nowTick).toISOString();
-  const activeWorkStartedAt = deriveActiveWorkStartedAt(
-    activeLatestTurn,
-    activeThread?.session ?? null,
-    localDispatchStartedAt,
-  );
+  const activeWorkStartedAt =
+    deriveActiveWorkStartedAt(
+      activeLatestTurn,
+      activeThread?.session ?? null,
+      localDispatchStartedAt,
+    ) ?? (hasPendingAssistantResponse ? (lastActiveMessage?.createdAt ?? null) : null);
   const isComposerApprovalState = activePendingApproval !== null;
   const hasComposerHeader =
     isComposerApprovalState ||
@@ -4870,6 +4877,7 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
                 workspaceRoot={activeWorkspaceRoot}
                 isSendBusy={isSendBusy}
                 isSessionStarting={isSessionStarting}
+                hasPendingAssistantResponse={hasPendingAssistantResponse}
                 isPreparingWorktree={isPreparingWorktree}
                 isCompacting={isCompacting}
                 onSubagentSelect={onSubagentSelect}

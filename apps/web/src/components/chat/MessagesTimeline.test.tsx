@@ -102,6 +102,7 @@ describe("MessagesTimeline", () => {
         workspaceRoot={undefined}
         isSendBusy={false}
         isSessionStarting={false}
+        hasPendingAssistantResponse={false}
         isPreparingWorktree={false}
         isCompacting={false}
         onSubagentSelect={() => {}}
@@ -167,6 +168,7 @@ describe("MessagesTimeline", () => {
         workspaceRoot={undefined}
         isSendBusy={false}
         isSessionStarting={false}
+        hasPendingAssistantResponse={false}
         isPreparingWorktree={false}
         isCompacting={false}
         onSubagentSelect={() => {}}

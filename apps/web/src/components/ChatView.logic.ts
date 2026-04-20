@@ -350,12 +350,13 @@ export function hasServerAcknowledgedLocalDispatch(input: {
   }
 
   const latestTurn = input.latestTurn ?? null;
-
+  const latestTurnCompletedAt = latestTurn?.completedAt ?? null;
+  if (latestTurnCompletedAt === null) {
+    return false;
+  }
   return (
     input.localDispatch.latestTurnTurnId !== (latestTurn?.turnId ?? null) ||
-    input.localDispatch.latestTurnRequestedAt !== (latestTurn?.requestedAt ?? null) ||
-    input.localDispatch.latestTurnStartedAt !== (latestTurn?.startedAt ?? null) ||
-    input.localDispatch.latestTurnCompletedAt !== (latestTurn?.completedAt ?? null)
+    input.localDispatch.latestTurnCompletedAt !== latestTurnCompletedAt
   );
 }
 
