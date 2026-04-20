@@ -183,40 +183,43 @@ describe("uiStateStore pure functions", () => {
     });
 
     const next = syncProjects(initialState, [
-      { key: project1, cwd: "/tmp/project-1" },
-      { key: project2, cwd: "/tmp/project-2" },
-      { key: project3, cwd: "/tmp/project-3" },
+      { key: project1, logicalKey: project1, cwd: "/tmp/project-1" },
+      { key: project2, logicalKey: project2, cwd: "/tmp/project-2" },
+      { key: project3, logicalKey: project3, cwd: "/tmp/project-3" },
     ]);
 
     expect(next.projectOrder).toEqual([project2, project1, project3]);
     expect(next.projectExpandedById[project2]).toBe(false);
   });
 
-  it("syncProjects preserves manual order when a project is recreated with the same cwd", () => {
-    const oldProject1 = ProjectId.make("project-1");
-    const oldProject2 = ProjectId.make("project-2");
-    const recreatedProject2 = ProjectId.make("project-2b");
+  it("syncProjects preserves manual order across project id churn at the same cwd", () => {
+    // Under the current design, physical key and logical key are both
+    // cwd-derived, so an internal project-id change doesn't alter the store
+    // keys. This test locks in that stability: re-syncing the same cwds keeps
+    // manual order and collapse state.
+    const keyProject1 = "env-local:/tmp/project-1";
+    const keyProject2 = "env-local:/tmp/project-2";
     const initialState = syncProjects(
       makeUiState({
         projectExpandedById: {
-          [oldProject1]: true,
-          [oldProject2]: false,
+          [keyProject1]: true,
+          [keyProject2]: false,
         },
-        projectOrder: [oldProject2, oldProject1],
+        projectOrder: [keyProject2, keyProject1],
       }),
       [
-        { key: oldProject1, cwd: "/tmp/project-1" },
-        { key: oldProject2, cwd: "/tmp/project-2" },
+        { key: keyProject1, logicalKey: keyProject1, cwd: "/tmp/project-1" },
+        { key: keyProject2, logicalKey: keyProject2, cwd: "/tmp/project-2" },
       ],
     );
 
     const next = syncProjects(initialState, [
-      { key: oldProject1, cwd: "/tmp/project-1" },
-      { key: recreatedProject2, cwd: "/tmp/project-2" },
+      { key: keyProject1, logicalKey: keyProject1, cwd: "/tmp/project-1" },
+      { key: keyProject2, logicalKey: keyProject2, cwd: "/tmp/project-2" },
     ]);
 
-    expect(next.projectOrder).toEqual([recreatedProject2, oldProject1]);
-    expect(next.projectExpandedById[recreatedProject2]).toBe(false);
+    expect(next.projectOrder).toEqual([keyProject2, keyProject1]);
+    expect(next.projectExpandedById[keyProject2]).toBe(false);
   });
 
   it("syncProjects returns a new state when only project cwd changes", () => {
@@ -228,14 +231,43 @@ describe("uiStateStore pure functions", () => {
         },
         projectOrder: [project1],
       }),
-      [{ key: project1, cwd: "/tmp/project-1" }],
+      [{ key: project1, logicalKey: project1, cwd: "/tmp/project-1" }],
     );
 
-    const next = syncProjects(initialState, [{ key: project1, cwd: "/tmp/project-1-renamed" }]);
+    const next = syncProjects(initialState, [
+      { key: project1, logicalKey: project1, cwd: "/tmp/project-1-renamed" },
+    ]);
 
     expect(next).not.toBe(initialState);
     expect(next.projectOrder).toEqual([project1]);
     expect(next.projectExpandedById[project1]).toBe(false);
+  });
+
+  it("syncProjects keys projectExpandedById by the logical key, not the physical key", () => {
+    // In repository grouping mode, multiple physical projects (different
+    // environments or different repo-relative paths) collapse into one
+    // logical group. The group's expand state must be keyed by the logical
+    // key so clicks on the grouped row toggle the shared state, and so the
+    // state survives subsequent syncProjects calls (which rebuild the map
+    // from incoming inputs).
+    const physicalLocal = "env-local:/repo/project";
+    const physicalRemote = "env-remote:/repo/project";
+    const logicalKey = "repo-canonical-key";
+
+    const initial = syncProjects(makeUiState(), [
+      { key: physicalLocal, logicalKey, cwd: "/repo/project" },
+      { key: physicalRemote, logicalKey, cwd: "/repo/project" },
+    ]);
+
+    expect(initial.projectExpandedById).toEqual({ [logicalKey]: true });
+
+    const afterCollapse = { ...initial, projectExpandedById: { [logicalKey]: false } };
+    const next = syncProjects(afterCollapse, [
+      { key: physicalLocal, logicalKey, cwd: "/repo/project" },
+      { key: physicalRemote, logicalKey, cwd: "/repo/project" },
+    ]);
+
+    expect(next.projectExpandedById[logicalKey]).toBe(false);
   });
 
   it("syncThreads prunes missing thread UI state", () => {
