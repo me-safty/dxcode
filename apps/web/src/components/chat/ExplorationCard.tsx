@@ -16,7 +16,8 @@ interface ExplorationCardProps {
 }
 
 const READ_TOOL_NAMES = new Set(["read", "cat", "head", "tail", "view"]);
-const SEARCH_TOOL_NAMES = new Set(["grep", "glob", "search", "find", "list", "ls"]);
+const SEARCH_TOOL_NAMES = new Set(["grep", "glob", "search", "toolsearch", "find", "list", "ls"]);
+const SEARCH_QUERY_KEYS = ["pattern", "query", "q", "searchQuery", "term"] as const;
 
 function isReadEntry(entry: WorkLogEntry): boolean {
   if (entry.requestKind === "file-read") return true;
@@ -50,6 +51,14 @@ function inputNum(input: Record<string, unknown> | undefined, key: string): numb
 
 function inputFilePath(input: Record<string, unknown> | undefined): string | null {
   return inputStr(input, "file_path") ?? inputStr(input, "filePath") ?? inputStr(input, "path");
+}
+
+function extractSearchQuery(input: Record<string, unknown> | undefined): string | null {
+  for (const key of SEARCH_QUERY_KEYS) {
+    const value = inputStr(input, key);
+    if (value) return value;
+  }
+  return null;
 }
 
 function formatLineRange(input: Record<string, unknown> | undefined): string | null {
@@ -111,12 +120,41 @@ function explorationEntryHeading(entry: WorkLogEntry): string {
     return `Found ${extractPathSummaryFromDetail(entry.detail)}`;
   }
 
+  if (lower === "toolsearch") {
+    const query = extractSearchQuery(input);
+    if (query) return `Searched tools for ${query}`;
+    const summary = extractSearchSummaryFromDetail(entry.detail);
+    return summary ? `Searched tools ${summary}` : "Searched tools";
+  }
+
+  if (lower && lower.includes("search")) {
+    const query = extractSearchQuery(input);
+    const path = inputFilePath(input);
+    if (query && path) return `Searched for ${query} in ${fileNameFromPath(path)}`;
+    if (query) return `Searched for ${query}`;
+    const summary = extractSearchSummaryFromDetail(entry.detail);
+    return summary ? `Searched ${summary}` : "Searched";
+  }
+
   const raw = (entry.toolTitle ?? entry.label).trim();
   if (isGenericLabel(raw) && entry.detail) {
     return cleanDetailAsHeading(entry.detail);
   }
-  if (raw.length === 0) return "Explored";
-  return `${raw.charAt(0).toUpperCase()}${raw.slice(1)}`;
+  const titled = raw.length === 0 ? "Explored" : `${raw.charAt(0).toUpperCase()}${raw.slice(1)}`;
+
+  const fallbackPath = inputFilePath(input);
+  const fallbackQuery = extractSearchQuery(input);
+  if (fallbackQuery && fallbackPath) {
+    return `${titled}: ${fallbackQuery} in ${fileNameFromPath(fallbackPath)}`;
+  }
+  if (fallbackQuery) return `${titled}: ${fallbackQuery}`;
+  if (fallbackPath) return `${titled} ${fileNameFromPath(fallbackPath)}`;
+
+  if (entry.detail) {
+    const summary = extractSearchSummaryFromDetail(entry.detail);
+    if (summary && summary !== titled) return `${titled}: ${summary}`;
+  }
+  return titled;
 }
 
 function isGenericLabel(label: string): boolean {
@@ -175,10 +213,12 @@ function extractSearchSummaryFromDetail(detail: string | undefined): string {
   const cleaned = stripToolPrefix(detail);
   const parsed = tryParseJson(cleaned);
   if (parsed) {
-    const pattern = typeof parsed.pattern === "string" ? parsed.pattern : null;
+    const query = SEARCH_QUERY_KEYS.map((key) => parsed[key]).find(
+      (value): value is string => typeof value === "string" && value.trim().length > 0,
+    );
     const path = typeof parsed.path === "string" ? parsed.path : null;
-    if (pattern && path) return `${pattern} in ${fileNameFromPath(path)}`;
-    if (pattern) return pattern;
+    if (query && path) return `${query} in ${fileNameFromPath(path)}`;
+    if (query) return query;
   }
   return cleaned.slice(0, 120);
 }

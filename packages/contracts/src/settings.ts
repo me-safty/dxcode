@@ -75,7 +75,6 @@ export const ClientSettingsSchema = Schema.Struct({
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
   ),
-  showTodosInComposer: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   turnNotificationMode: TurnNotificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TURN_NOTIFICATION_MODE)),
   ),

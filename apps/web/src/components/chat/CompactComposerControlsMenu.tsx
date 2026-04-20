@@ -16,10 +16,12 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   activePlan: boolean;
   interactionMode: ProviderInteractionMode;
   planSidebarOpen: boolean;
+  planSidebarLabel: string;
   traitsMenuContent?: ReactNode;
   onToggleInteractionMode: () => void;
   onTogglePlanSidebar: () => void;
 }) {
+  const sidebarLabel = props.planSidebarLabel.toLowerCase();
   return (
     <Menu>
       <MenuTrigger
@@ -57,7 +59,9 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             <MenuDivider />
             <MenuItem onClick={props.onTogglePlanSidebar}>
               <ListTodoIcon className="size-4 shrink-0" />
-              {props.planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
+              {props.planSidebarOpen
+                ? `Hide ${sidebarLabel} sidebar`
+                : `Show ${sidebarLabel} sidebar`}
             </MenuItem>
           </>
         ) : null}

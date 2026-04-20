@@ -23,6 +23,7 @@ import {
   ApprovalRequestId,
   type CanonicalItemType,
   type CanonicalRequestType,
+  CLAUDE_COMPACTING_REASON,
   EventId,
   type ProviderApprovalDecision,
   ProviderItemId,
@@ -518,6 +519,34 @@ function classifyRequestType(toolName: string): CanonicalRequestType {
     : itemType === "file_change"
       ? "file_change_approval"
       : "dynamic_tool_call";
+}
+
+function isTodoTool(toolName: string): boolean {
+  return toolName.toLowerCase().includes("todowrite");
+}
+
+type PlanStep = { step: string; status: "pending" | "inProgress" | "completed" };
+
+function extractPlanStepsFromTodoInput(input: Record<string, unknown>): PlanStep[] | null {
+  // TodoWrite format: { todos: [{ content, status, activeForm? }] }
+  const todos = input.todos;
+  if (!Array.isArray(todos) || todos.length === 0) {
+    return null;
+  }
+  return todos
+    .filter((t): t is Record<string, unknown> => t !== null && typeof t === "object")
+    .map((todo) => ({
+      step:
+        typeof todo.content === "string" && todo.content.trim().length > 0
+          ? todo.content.trim()
+          : "Task",
+      status:
+        todo.status === "completed"
+          ? "completed"
+          : todo.status === "in_progress"
+            ? "inProgress"
+            : "pending",
+    }));
 }
 
 function summarizeToolRequest(toolName: string, input: Record<string, unknown>): string {
@@ -1804,6 +1833,25 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             payload: message,
           },
         });
+
+        if (parsedInput && isTodoTool(nextTool.toolName)) {
+          const planSteps = extractPlanStepsFromTodoInput(parsedInput);
+          if (planSteps && planSteps.length > 0) {
+            const planStamp = yield* makeEventStamp();
+            yield* offerRuntimeEvent({
+              type: "turn.plan.updated",
+              eventId: planStamp.eventId,
+              provider: PROVIDER,
+              createdAt: planStamp.createdAt,
+              threadId: context.session.threadId,
+              ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+              payload: {
+                plan: planSteps,
+              },
+              providerRefs: nativeProviderRefs(context),
+            });
+          }
+        }
       }
       return;
     }
@@ -1883,6 +1931,23 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           payload: message,
         },
       });
+
+      if (isTodoTool(tool.toolName) && Object.keys(toolInput).length > 0) {
+        const planSteps = extractPlanStepsFromTodoInput(toolInput);
+        if (planSteps && planSteps.length > 0) {
+          const planStamp = yield* makeEventStamp();
+          yield* offerRuntimeEvent({
+            type: "turn.plan.updated",
+            eventId: planStamp.eventId,
+            provider: PROVIDER,
+            createdAt: planStamp.createdAt,
+            threadId: context.session.threadId,
+            ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+            payload: { plan: planSteps },
+            providerRefs: nativeProviderRefs(context),
+          });
+        }
+      }
       return;
     }
 
@@ -2170,7 +2235,10 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           type: "session.state.changed",
           payload: {
             state: message.status === "compacting" ? "waiting" : "running",
-            reason: `status:${message.status ?? "active"}`,
+            reason:
+              message.status === "compacting"
+                ? CLAUDE_COMPACTING_REASON
+                : `status:${message.status ?? "active"}`,
             detail: message,
           },
         });

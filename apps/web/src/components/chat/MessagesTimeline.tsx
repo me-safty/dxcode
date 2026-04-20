@@ -153,7 +153,9 @@ interface MessagesTimelineProps {
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
   isSendBusy: boolean;
+  isSessionStarting: boolean;
   isPreparingWorktree: boolean;
+  isCompacting: boolean;
   onSubagentSelect: (taskId: string) => void;
   pendingApprovals?: ReadonlyArray<PendingApproval>;
   editingUserMessageId: MessageId | null;
@@ -208,7 +210,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   timestampFormat,
   workspaceRoot,
   isSendBusy,
+  isSessionStarting,
   isPreparingWorktree,
+  isCompacting,
   onSubagentSelect,
   pendingApprovals,
   editingUserMessageId,
@@ -615,11 +619,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           <span className="shiny-text pt-1 text-xs font-semibold text-primary/60">
             {isPreparingWorktree
               ? "Preparing worktree\u2026"
-              : isSendBusy
+              : isSendBusy || isSessionStarting
                 ? "Starting\u2026"
-                : row.createdAt
-                  ? `Working for ${formatWorkingTimer(row.createdAt, nowIso) ?? "0s"}`
-                  : "Working\u2026"}
+                : isCompacting
+                  ? "Compacting\u2026"
+                  : row.createdAt
+                    ? `Working for ${formatWorkingTimer(row.createdAt, nowIso) ?? "0s"}`
+                    : "Working\u2026"}
           </span>
         </div>
       )}
