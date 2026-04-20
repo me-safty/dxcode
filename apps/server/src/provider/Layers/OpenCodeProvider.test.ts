@@ -13,7 +13,8 @@ import {
   OpenCodeRuntimeError,
   type OpenCodeRuntimeShape,
 } from "../opencodeRuntime.ts";
-import { OpenCodeProviderLive, type OpenCodeInventory } from "./OpenCodeProvider.ts";
+import { OpenCodeProviderLive } from "./OpenCodeProvider.ts";
+import type { OpenCodeInventory } from "../opencodeRuntime.ts";
 
 const runtimeMock = {
   state: {
