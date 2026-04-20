@@ -1,9 +1,13 @@
 import { ProjectId, ThreadId } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   clearThreadUi,
+  hydratePersistedProjectState,
   markThreadUnread,
+  PERSISTED_STATE_KEY,
+  type PersistedUiState,
+  persistState,
   reorderProjects,
   setProjectExpanded,
   setThreadChangedFilesExpanded,
@@ -401,5 +405,106 @@ describe("uiStateStore pure functions", () => {
     const next = setThreadChangedFilesExpanded(initialState, thread1, "turn-1", true);
 
     expect(next.threadChangedFilesExpandedById).toEqual({});
+  });
+});
+
+describe("uiStateStore persistence round-trip", () => {
+  function createLocalStorageStub(): Storage {
+    const store = new Map<string, string>();
+    return {
+      clear: () => {
+        store.clear();
+      },
+      getItem: (key) => store.get(key) ?? null,
+      key: (index) => [...store.keys()][index] ?? null,
+      get length() {
+        return store.size;
+      },
+      removeItem: (key) => {
+        store.delete(key);
+      },
+      setItem: (key, value) => {
+        store.set(key, value);
+      },
+    };
+  }
+
+  let localStorageStub: Storage;
+
+  beforeEach(() => {
+    localStorageStub = createLocalStorageStub();
+    vi.stubGlobal("window", { localStorage: localStorageStub });
+    vi.stubGlobal("localStorage", localStorageStub);
+    // Reset module-level persistence state so tests don't bleed into each other.
+    hydratePersistedProjectState({ collapsedProjectCwds: [], expandedProjectCwds: [] });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("preserves all-collapsed project state across restart", () => {
+    // Regression: pre-fix, persistState only wrote `expandedProjectCwds`, so
+    // an empty array on rehydrate was indistinguishable from a fresh install
+    // and the syncProjects fallback re-expanded every row.
+    const projectA = { key: "kA", logicalKey: "kA", cwd: "/projA" };
+    const projectB = { key: "kB", logicalKey: "kB", cwd: "/projB" };
+
+    let state = syncProjects(makeUiState(), [projectA, projectB]);
+    state = setProjectExpanded(state, projectA.key, false);
+    state = setProjectExpanded(state, projectB.key, false);
+    persistState(state);
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+    hydratePersistedProjectState(persisted);
+    const rehydrated = syncProjects(makeUiState(), [projectA, projectB]);
+
+    expect(rehydrated.projectExpandedById).toEqual({
+      [projectA.key]: false,
+      [projectB.key]: false,
+    });
+  });
+
+  it("respects mixed expand state on rehydrate and defaults new projects to expanded", () => {
+    const projectA = { key: "kA", logicalKey: "kA", cwd: "/projA" };
+    const projectB = { key: "kB", logicalKey: "kB", cwd: "/projB" };
+    const projectC = { key: "kC", logicalKey: "kC", cwd: "/projC" };
+
+    let state = syncProjects(makeUiState(), [projectA, projectB]);
+    state = setProjectExpanded(state, projectB.key, false);
+    persistState(state);
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+    hydratePersistedProjectState(persisted);
+    const rehydrated = syncProjects(makeUiState(), [projectA, projectB, projectC]);
+
+    expect(rehydrated.projectExpandedById).toEqual({
+      [projectA.key]: true,
+      [projectB.key]: false,
+      [projectC.key]: true,
+    });
+  });
+
+  it("preserves legacy not-in-expanded-list = collapsed for one upgrade session", () => {
+    // Pre-fix shape only stored expandedProjectCwds. Absence of
+    // collapsedProjectCwds opts the session into the legacy fallback so
+    // upgrade users do not see previously collapsed rows pop open.
+    hydratePersistedProjectState({
+      expandedProjectCwds: ["/projA"],
+    });
+
+    const rehydrated = syncProjects(makeUiState(), [
+      { key: "kA", logicalKey: "kA", cwd: "/projA" },
+      { key: "kB", logicalKey: "kB", cwd: "/projB" },
+    ]);
+
+    expect(rehydrated.projectExpandedById).toEqual({
+      kA: true,
+      kB: false,
+    });
   });
 });

@@ -1,7 +1,7 @@
 import { Debouncer } from "@tanstack/react-pacer";
 import { create } from "zustand";
 
-const PERSISTED_STATE_KEY = "t3code:ui-state:v1";
+export const PERSISTED_STATE_KEY = "t3code:ui-state:v1";
 const LEGACY_PERSISTED_STATE_KEYS = [
   "t3code:renderer-state:v8",
   "t3code:renderer-state:v7",
@@ -15,7 +15,7 @@ const LEGACY_PERSISTED_STATE_KEYS = [
   "codething:renderer-state:v1",
 ] as const;
 
-interface PersistedUiState {
+export interface PersistedUiState {
   collapsedProjectCwds?: string[];
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
@@ -125,7 +125,7 @@ function sanitizePersistedThreadChangedFilesExpanded(
   return nextState;
 }
 
-function hydratePersistedProjectState(parsed: PersistedUiState): void {
+export function hydratePersistedProjectState(parsed: PersistedUiState): void {
   persistedCollapsedProjectCwds.clear();
   persistedExpandedProjectCwds.clear();
   persistedProjectOrderCwds.length = 0;
@@ -147,7 +147,7 @@ function hydratePersistedProjectState(parsed: PersistedUiState): void {
   }
 }
 
-function persistState(state: UiState): void {
+export function persistState(state: UiState): void {
   if (typeof window === "undefined") {
     return;
   }
