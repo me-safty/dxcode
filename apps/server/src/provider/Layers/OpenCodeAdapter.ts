@@ -493,16 +493,19 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         context: OpenCodeSessionContext,
         message: string,
       ) {
-        // Two fibers can race here (the event-pump on stream failure and the
-        // server-exit watcher). Whoever loses the race observes `true` and
-        // returns — this also makes the `stopOpenCodeContext` call below a
-        // no-op for the loser.
-        if (yield* Ref.get(context.stopped)) {
+        // Atomic one-shot: two fibers can race here (the event-pump on stream
+        // failure and the server-exit watcher). `getAndSet` flips the flag in
+        // a single step so the loser observes `true` and returns; a plain
+        // `Ref.get` would let both racers slip past and emit duplicates.
+        if (yield* Ref.getAndSet(context.stopped, true)) {
           return;
         }
         const turnId = context.activeTurnId;
         sessions.delete(context.session.threadId);
-        yield* stopOpenCodeContext(context);
+        // Emit lifecycle events BEFORE tearing down the scope. Both call sites
+        // run this inside a fiber forked via `Effect.forkIn(context.sessionScope)`;
+        // closing that scope triggers the fiber-interrupt finalizer, so any
+        // subsequent yield point would unwind and silently drop these emits.
         yield* emit({
           ...buildEventBase({ threadId: context.session.threadId, turnId }),
           type: "runtime.error",
@@ -520,6 +523,13 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
             exitKind: "error",
           },
         }).pipe(Effect.ignore);
+        // Inline the teardown that `stopOpenCodeContext` would do; we can't
+        // delegate to it because our `getAndSet` above already flipped the
+        // one-shot guard, so the call would no-op.
+        yield* runOpenCodeSdk("session.abort", () =>
+          context.client.session.abort({ sessionID: context.openCodeSessionId }),
+        ).pipe(Effect.ignore({ log: true }));
+        yield* Scope.close(context.sessionScope, Exit.void);
       });
 
       /** Emit content.delta and item.completed events for an assistant text part. */

@@ -184,35 +184,50 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
         // Create a fresh scope that owns this shared server. The runtime
         // will attach its child-process and fiber finalizers to this scope;
         // closing it kills the server and interrupts those fibers.
-        const serverScope = yield* Scope.make();
-        const startedExit = yield* Effect.exit(
-          openCodeRuntime
-            .startOpenCodeServerProcess({
-              binaryPath: input.binaryPath,
-            })
-            .pipe(
-              Effect.provideService(Scope.Scope, serverScope),
-              Effect.mapError(
-                (cause) =>
-                  new TextGenerationError({
-                    operation: input.operation,
-                    detail: openCodeRuntimeErrorDetail(cause),
-                    cause,
-                  }),
+        //
+        // The `Scope.make` / spawn / record-or-close transitions run inside
+        // `uninterruptibleMask` so an interrupt arriving between any two
+        // steps can't orphan the scope (and the child process attached to
+        // it) before we either close it on failure or hand ownership to
+        // `sharedServerState`. `restore` keeps the actual spawn
+        // interruptible; an interrupt during the spawn is captured by
+        // `Effect.exit` and drives us through the failure branch that
+        // closes the fresh scope.
+        return yield* Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const serverScope = yield* Scope.make();
+            const startedExit = yield* Effect.exit(
+              restore(
+                openCodeRuntime
+                  .startOpenCodeServerProcess({
+                    binaryPath: input.binaryPath,
+                  })
+                  .pipe(
+                    Effect.provideService(Scope.Scope, serverScope),
+                    Effect.mapError(
+                      (cause) =>
+                        new TextGenerationError({
+                          operation: input.operation,
+                          detail: openCodeRuntimeErrorDetail(cause),
+                          cause,
+                        }),
+                    ),
+                  ),
               ),
-            ),
-        );
-        if (startedExit._tag === "Failure") {
-          yield* Scope.close(serverScope, Exit.void).pipe(Effect.ignore);
-          return yield* Effect.failCause(startedExit.cause);
-        }
+            );
+            if (startedExit._tag === "Failure") {
+              yield* Scope.close(serverScope, Exit.void).pipe(Effect.ignore);
+              return yield* Effect.failCause(startedExit.cause);
+            }
 
-        const server = startedExit.value;
-        sharedServerState.server = server;
-        sharedServerState.serverScope = serverScope;
-        sharedServerState.binaryPath = input.binaryPath;
-        sharedServerState.activeRequests = 1;
-        return server;
+            const server = startedExit.value;
+            sharedServerState.server = server;
+            sharedServerState.serverScope = serverScope;
+            sharedServerState.binaryPath = input.binaryPath;
+            sharedServerState.activeRequests = 1;
+            return server;
+          }),
+        );
       }),
     );
 
