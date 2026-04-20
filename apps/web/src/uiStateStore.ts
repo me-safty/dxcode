@@ -16,6 +16,7 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 ] as const;
 
 interface PersistedUiState {
+  collapsedProjectCwds?: string[];
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
@@ -53,8 +54,14 @@ const initialState: UiState = {
   threadChangedFilesExpandedById: {},
 };
 
+const persistedCollapsedProjectCwds = new Set<string>();
 const persistedExpandedProjectCwds = new Set<string>();
 const persistedProjectOrderCwds: string[] = [];
+// Pre-fix persisted shape only listed expanded cwds, so anything not listed
+// was treated as collapsed. Track whether the loaded blob carried the new
+// `collapsedProjectCwds` field so we can preserve that legacy semantic for
+// one session after upgrade, until persistState rewrites in the new shape.
+let persistedProjectStateUsesLegacyShape = false;
 const currentProjectCwdById = new Map<string, string>();
 const currentProjectCwdsByLogicalKey = new Map<string, string[]>();
 const currentLogicalKeyByPhysicalKey = new Map<string, string>();
@@ -119,8 +126,15 @@ function sanitizePersistedThreadChangedFilesExpanded(
 }
 
 function hydratePersistedProjectState(parsed: PersistedUiState): void {
+  persistedCollapsedProjectCwds.clear();
   persistedExpandedProjectCwds.clear();
   persistedProjectOrderCwds.length = 0;
+  persistedProjectStateUsesLegacyShape = !Array.isArray(parsed.collapsedProjectCwds);
+  for (const cwd of parsed.collapsedProjectCwds ?? []) {
+    if (typeof cwd === "string" && cwd.length > 0) {
+      persistedCollapsedProjectCwds.add(cwd);
+    }
+  }
   for (const cwd of parsed.expandedProjectCwds ?? []) {
     if (typeof cwd === "string" && cwd.length > 0) {
       persistedExpandedProjectCwds.add(cwd);
@@ -138,6 +152,12 @@ function persistState(state: UiState): void {
     return;
   }
   try {
+    // Persist collapsed cwds explicitly so an empty/missing field unambiguously
+    // means "first install" rather than "user collapsed everything"; without
+    // this, the syncProjects fallback would re-expand all rows on next launch.
+    const collapsedProjectCwds = Object.entries(state.projectExpandedById)
+      .filter(([, expanded]) => !expanded)
+      .flatMap(([logicalKey]) => currentProjectCwdsByLogicalKey.get(logicalKey) ?? []);
     const expandedProjectCwds = Object.entries(state.projectExpandedById)
       .filter(([, expanded]) => expanded)
       .flatMap(([logicalKey]) => currentProjectCwdsByLogicalKey.get(logicalKey) ?? []);
@@ -156,6 +176,7 @@ function persistState(state: UiState): void {
     window.localStorage.setItem(
       PERSISTED_STATE_KEY,
       JSON.stringify({
+        collapsedProjectCwds,
         expandedProjectCwds,
         projectOrderCwds,
         threadChangedFilesExpandedById,
@@ -272,12 +293,22 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
         }
         return undefined;
       })();
+      const fallbackFromPersistedShape = (() => {
+        if (groupCwds.some((cwd) => persistedExpandedProjectCwds.has(cwd))) {
+          return true;
+        }
+        if (groupCwds.some((cwd) => persistedCollapsedProjectCwds.has(cwd))) {
+          return false;
+        }
+        if (persistedProjectStateUsesLegacyShape && persistedExpandedProjectCwds.size > 0) {
+          return false;
+        }
+        return true;
+      })();
       const expanded =
         previousExpandedById[project.logicalKey] ??
         fallbackFromPreviousLogicalKey ??
-        (persistedExpandedProjectCwds.size > 0
-          ? groupCwds.some((cwd) => persistedExpandedProjectCwds.has(cwd))
-          : true);
+        fallbackFromPersistedShape;
       nextExpandedById[project.logicalKey] = expanded;
     }
     return {
