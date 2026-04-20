@@ -15,6 +15,7 @@ import {
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { normalizeCommandActivityPayload } from "@t3tools/shared/toolActivity";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
@@ -45,7 +46,16 @@ const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL = Duration.minutes(120);
 const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
+const MAX_BUFFERED_COMMAND_OUTPUT_CHARS = 32_768;
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
+
+function commandOutputKey(
+  threadId: ThreadId,
+  turnId: TurnId | string | undefined,
+  itemId: string,
+): string {
+  return `${threadId}\u0000${turnId ?? ""}\u0000${itemId}`;
+}
 
 type TurnStartRequestedDomainEvent = Extract<
   OrchestrationEvent,
@@ -179,6 +189,7 @@ function requestKindFromCanonicalRequestType(
 
 function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
+  options: { readonly commandOutputText?: string | undefined } = {},
 ): ReadonlyArray<OrchestrationThreadActivity> {
   const maybeSequence = (() => {
     const eventWithSequence = event as ProviderRuntimeEvent & { sessionSequence?: number };
@@ -451,6 +462,12 @@ function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
+      const basePayload = {
+        itemType: event.payload.itemType,
+        ...(event.payload.status ? { status: event.payload.status } : {}),
+        ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+        ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+      };
       return [
         {
           id: event.eventId,
@@ -458,12 +475,19 @@ function runtimeEventToActivities(
           tone: "tool",
           kind: "tool.updated",
           summary: event.payload.title ?? "Tool updated",
-          payload: {
-            itemType: event.payload.itemType,
-            ...(event.payload.status ? { status: event.payload.status } : {}),
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
-          },
+          payload:
+            event.payload.itemType === "command_execution"
+              ? {
+                  ...basePayload,
+                  commandActivity: normalizeCommandActivityPayload({
+                    itemType: event.payload.itemType,
+                    title: event.payload.title,
+                    detail: event.payload.detail,
+                    data: event.payload.data,
+                    outputText: options.commandOutputText,
+                  }),
+                }
+              : basePayload,
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
         },
@@ -474,6 +498,11 @@ function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
+      const basePayload = {
+        itemType: event.payload.itemType,
+        ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+        ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+      };
       return [
         {
           id: event.eventId,
@@ -481,11 +510,19 @@ function runtimeEventToActivities(
           tone: "tool",
           kind: "tool.completed",
           summary: event.payload.title ?? "Tool",
-          payload: {
-            itemType: event.payload.itemType,
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
-          },
+          payload:
+            event.payload.itemType === "command_execution"
+              ? {
+                  ...basePayload,
+                  commandActivity: normalizeCommandActivityPayload({
+                    itemType: event.payload.itemType,
+                    title: event.payload.title,
+                    detail: event.payload.detail,
+                    data: event.payload.data,
+                    outputText: options.commandOutputText,
+                  }),
+                }
+              : basePayload,
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
         },
@@ -552,6 +589,80 @@ const make = Effect.gen(function* () {
     timeToLive: BUFFERED_PROPOSED_PLAN_BY_ID_TTL,
     lookup: () => Effect.succeed({ text: "", createdAt: "" }),
   });
+  const bufferedCommandOutputByKey = new Map<string, string>();
+  const completedCommandOutputKeys = new Set<string>();
+
+  const appendBufferedCommandOutput = (event: ProviderRuntimeEvent, threadId: ThreadId) =>
+    Effect.sync(() => {
+      if (
+        event.type !== "content.delta" ||
+        event.payload.streamKind !== "command_output" ||
+        !event.itemId ||
+        event.payload.delta.length === 0
+      ) {
+        return;
+      }
+      const key = commandOutputKey(threadId, event.turnId, event.itemId);
+      if (completedCommandOutputKeys.has(key)) {
+        return;
+      }
+      const previous = bufferedCommandOutputByKey.get(key) ?? "";
+      const next = `${previous}${event.payload.delta}`;
+      bufferedCommandOutputByKey.set(
+        key,
+        next.length > MAX_BUFFERED_COMMAND_OUTPUT_CHARS
+          ? next.slice(next.length - MAX_BUFFERED_COMMAND_OUTPUT_CHARS)
+          : next,
+      );
+    });
+
+  const peekBufferedCommandOutput = (event: ProviderRuntimeEvent, threadId: ThreadId) => {
+    if (!event.itemId) {
+      return undefined;
+    }
+    return bufferedCommandOutputByKey.get(commandOutputKey(threadId, event.turnId, event.itemId));
+  };
+
+  const takeBufferedCommandOutput = (event: ProviderRuntimeEvent, threadId: ThreadId) => {
+    if (!event.itemId) {
+      return undefined;
+    }
+    const key = commandOutputKey(threadId, event.turnId, event.itemId);
+    const value = bufferedCommandOutputByKey.get(key);
+    bufferedCommandOutputByKey.delete(key);
+    completedCommandOutputKeys.add(key);
+    return value;
+  };
+
+  const clearCommandOutputForTurn = (threadId: ThreadId, turnId: TurnId | string | undefined) =>
+    Effect.sync(() => {
+      const prefix = `${threadId}\u0000${turnId ?? ""}\u0000`;
+      for (const key of bufferedCommandOutputByKey.keys()) {
+        if (key.startsWith(prefix)) {
+          bufferedCommandOutputByKey.delete(key);
+        }
+      }
+      for (const key of completedCommandOutputKeys) {
+        if (key.startsWith(prefix)) {
+          completedCommandOutputKeys.delete(key);
+        }
+      }
+    });
+
+  const clearCommandOutputForThread = (threadId: ThreadId) =>
+    Effect.sync(() => {
+      const prefix = `${threadId}\u0000`;
+      for (const key of bufferedCommandOutputByKey.keys()) {
+        if (key.startsWith(prefix)) {
+          bufferedCommandOutputByKey.delete(key);
+        }
+      }
+      for (const key of completedCommandOutputKeys) {
+        if (key.startsWith(prefix)) {
+          completedCommandOutputKeys.delete(key);
+        }
+      }
+    });
 
   const isGitRepoForThread = Effect.fn("isGitRepoForThread")(function* (threadId: ThreadId) {
     const readModel = yield* orchestrationEngine.getReadModel();
@@ -1103,6 +1214,7 @@ const make = Effect.gen(function* () {
       const now = event.createdAt;
       const eventTurnId = toTurnId(event.turnId);
       const activeTurnId = thread.session?.activeTurnId ?? null;
+      yield* appendBufferedCommandOutput(event, thread.id);
 
       const conflictsWithActiveTurn =
         activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
@@ -1399,6 +1511,13 @@ const make = Effect.gen(function* () {
           fallbackMarkdown: proposedPlanCompletion.planMarkdown,
           updatedAt: now,
         });
+        if (proposedPlanCompletion.turnId) {
+          yield* clearCommandOutputForTurn(thread.id, proposedPlanCompletion.turnId);
+        }
+      }
+
+      if (event.type === "turn.aborted") {
+        yield* clearCommandOutputForTurn(thread.id, event.turnId);
       }
 
       if (event.type === "turn.completed") {
@@ -1424,6 +1543,7 @@ const make = Effect.gen(function* () {
           ).pipe(Effect.asVoid);
           yield* clearAssistantMessageIdsForTurn(thread.id, turnId);
           yield* clearAssistantSegmentStateForTurn(thread.id, turnId);
+          yield* clearCommandOutputForTurn(thread.id, turnId);
 
           yield* finalizeBufferedProposedPlan({
             event,
@@ -1438,6 +1558,7 @@ const make = Effect.gen(function* () {
 
       if (event.type === "session.exited") {
         yield* clearTurnStateForSession(thread.id);
+        yield* clearCommandOutputForThread(thread.id);
       }
 
       if (event.type === "runtime.error") {
@@ -1478,10 +1599,6 @@ const make = Effect.gen(function* () {
       if (event.type === "turn.diff.updated") {
         const turnId = toTurnId(event.turnId);
         if (turnId && (yield* isGitRepoForThread(thread.id))) {
-          // Skip if a checkpoint already exists for this turn. A real
-          // (non-placeholder) capture from CheckpointReactor should not
-          // be clobbered, and dispatching a duplicate placeholder for the
-          // same turnId would produce an unstable checkpointTurnCount.
           if (thread.checkpoints.some((c) => c.turnId === turnId)) {
             // Already tracked; no-op.
           } else {
@@ -1509,7 +1626,13 @@ const make = Effect.gen(function* () {
         }
       }
 
-      const activities = runtimeEventToActivities(event);
+      const commandOutputText =
+        event.type === "item.completed" && event.payload.itemType === "command_execution"
+          ? takeBufferedCommandOutput(event, thread.id)
+          : event.type === "item.updated" && event.payload.itemType === "command_execution"
+            ? peekBufferedCommandOutput(event, thread.id)
+            : undefined;
+      const activities = runtimeEventToActivities(event, { commandOutputText });
       yield* Effect.forEach(activities, (activity) =>
         orchestrationEngine.dispatch({
           type: "thread.activity.append",

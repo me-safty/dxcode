@@ -20,6 +20,7 @@ export interface PersistedUiState {
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
+  dismissedAgentCommandStatusByThreadKey?: Record<string, string>;
 }
 
 export interface UiProjectState {
@@ -30,6 +31,7 @@ export interface UiProjectState {
 export interface UiThreadState {
   threadLastVisitedAtById: Record<string, string>;
   threadChangedFilesExpandedById: Record<string, Record<string, boolean>>;
+  dismissedAgentCommandStatusByThreadKey: Record<string, string>;
 }
 
 export interface UiState extends UiProjectState, UiThreadState {}
@@ -52,6 +54,7 @@ const initialState: UiState = {
   projectOrder: [],
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
+  dismissedAgentCommandStatusByThreadKey: {},
 };
 
 const persistedCollapsedProjectCwds = new Set<string>();
@@ -91,10 +94,27 @@ function readPersistedState(): UiState {
       threadChangedFilesExpandedById: sanitizePersistedThreadChangedFilesExpanded(
         parsed.threadChangedFilesExpandedById,
       ),
+      dismissedAgentCommandStatusByThreadKey: sanitizePersistedStringRecord(
+        parsed.dismissedAgentCommandStatusByThreadKey,
+      ),
     };
   } catch {
     return initialState;
   }
+}
+
+function sanitizePersistedStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  const nextState: Record<string, string> = {};
+  for (const [key, recordValue] of Object.entries(value)) {
+    if (key.length > 0 && typeof recordValue === "string" && recordValue.length > 0) {
+      nextState[key] = recordValue;
+    }
+  }
+  return nextState;
 }
 
 function sanitizePersistedThreadChangedFilesExpanded(
@@ -173,6 +193,11 @@ export function persistState(state: UiState): void {
         return Object.keys(nextTurns).length > 0 ? [[threadId, nextTurns]] : [];
       }),
     );
+    const dismissedAgentCommandStatusByThreadKey = Object.fromEntries(
+      Object.entries(state.dismissedAgentCommandStatusByThreadKey).filter(
+        ([threadId, statusKey]) => threadId.length > 0 && statusKey.length > 0,
+      ),
+    );
     window.localStorage.setItem(
       PERSISTED_STATE_KEY,
       JSON.stringify({
@@ -180,6 +205,7 @@ export function persistState(state: UiState): void {
         expandedProjectCwds,
         projectOrderCwds,
         threadChangedFilesExpandedById,
+        dismissedAgentCommandStatusByThreadKey,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -404,11 +430,20 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
       retainedThreadIds.has(threadId),
     ),
   );
+  const nextDismissedAgentCommandStatusByThreadKey = Object.fromEntries(
+    Object.entries(state.dismissedAgentCommandStatusByThreadKey).filter(([threadId]) =>
+      retainedThreadIds.has(threadId),
+    ),
+  );
   if (
     recordsEqual(state.threadLastVisitedAtById, nextThreadLastVisitedAtById) &&
     nestedBooleanRecordsEqual(
       state.threadChangedFilesExpandedById,
       nextThreadChangedFilesExpandedById,
+    ) &&
+    recordsEqual(
+      state.dismissedAgentCommandStatusByThreadKey,
+      nextDismissedAgentCommandStatusByThreadKey,
     )
   ) {
     return state;
@@ -417,6 +452,7 @@ export function syncThreads(state: UiState, threads: readonly SyncThreadInput[])
     ...state,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
     threadChangedFilesExpandedById: nextThreadChangedFilesExpandedById,
+    dismissedAgentCommandStatusByThreadKey: nextDismissedAgentCommandStatusByThreadKey,
   };
 }
 
@@ -469,17 +505,44 @@ export function markThreadUnread(
 export function clearThreadUi(state: UiState, threadId: string): UiState {
   const hasVisitedState = threadId in state.threadLastVisitedAtById;
   const hasChangedFilesState = threadId in state.threadChangedFilesExpandedById;
-  if (!hasVisitedState && !hasChangedFilesState) {
+  const hasDismissedAgentCommandState = threadId in state.dismissedAgentCommandStatusByThreadKey;
+  if (!hasVisitedState && !hasChangedFilesState && !hasDismissedAgentCommandState) {
     return state;
   }
   const nextThreadLastVisitedAtById = { ...state.threadLastVisitedAtById };
   const nextThreadChangedFilesExpandedById = { ...state.threadChangedFilesExpandedById };
+  const nextDismissedAgentCommandStatusByThreadKey = {
+    ...state.dismissedAgentCommandStatusByThreadKey,
+  };
   delete nextThreadLastVisitedAtById[threadId];
   delete nextThreadChangedFilesExpandedById[threadId];
+  delete nextDismissedAgentCommandStatusByThreadKey[threadId];
   return {
     ...state,
     threadLastVisitedAtById: nextThreadLastVisitedAtById,
     threadChangedFilesExpandedById: nextThreadChangedFilesExpandedById,
+    dismissedAgentCommandStatusByThreadKey: nextDismissedAgentCommandStatusByThreadKey,
+  };
+}
+
+export function dismissAgentCommandStatus(
+  state: UiState,
+  threadId: string,
+  statusKey: string,
+): UiState {
+  if (
+    !threadId ||
+    !statusKey ||
+    state.dismissedAgentCommandStatusByThreadKey[threadId] === statusKey
+  ) {
+    return state;
+  }
+  return {
+    ...state,
+    dismissedAgentCommandStatusByThreadKey: {
+      ...state.dismissedAgentCommandStatusByThreadKey,
+      [threadId]: statusKey,
+    },
   };
 }
 
@@ -605,6 +668,7 @@ interface UiStateStore extends UiState {
   markThreadVisited: (threadId: string, visitedAt?: string) => void;
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   clearThreadUi: (threadId: string) => void;
+  dismissAgentCommandStatus: (threadId: string, statusKey: string) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   toggleProject: (projectId: string) => void;
   setProjectExpanded: (projectId: string, expanded: boolean) => void;
@@ -623,6 +687,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   markThreadUnread: (threadId, latestTurnCompletedAt) =>
     set((state) => markThreadUnread(state, threadId, latestTurnCompletedAt)),
   clearThreadUi: (threadId) => set((state) => clearThreadUi(state, threadId)),
+  dismissAgentCommandStatus: (threadId, statusKey) =>
+    set((state) => dismissAgentCommandStatus(state, threadId, statusKey)),
   setThreadChangedFilesExpanded: (threadId, turnId, expanded) =>
     set((state) => setThreadChangedFilesExpanded(state, threadId, turnId, expanded)),
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),

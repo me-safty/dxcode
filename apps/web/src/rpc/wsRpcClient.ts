@@ -64,6 +64,10 @@ export interface WsRpcClient {
     readonly close: RpcUnaryMethod<typeof WS_METHODS.terminalClose>;
     readonly onEvent: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
   };
+  readonly localProcesses: {
+    readonly stopPorts: RpcUnaryMethod<typeof WS_METHODS.localProcessStopPorts>;
+    readonly probePorts: RpcUnaryMethod<typeof WS_METHODS.localProcessProbePorts>;
+  };
   readonly projects: {
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
     readonly writeFile: RpcUnaryMethod<typeof WS_METHODS.projectsWriteFile>;
@@ -141,6 +145,12 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
           listener,
           options,
         ),
+    },
+    localProcesses: {
+      stopPorts: (input) =>
+        transport.request((client) => client[WS_METHODS.localProcessStopPorts](input)),
+      probePorts: (input) =>
+        transport.request((client) => client[WS_METHODS.localProcessProbePorts](input)),
     },
     projects: {
       searchEntries: (input) =>

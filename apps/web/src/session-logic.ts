@@ -12,10 +12,16 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
+import {
+  normalizeCommandActivityPayload,
+  type LocalhostUrlCandidate,
+  type NormalizedCommandActivity,
+} from "@t3tools/shared/toolActivity";
 
 import type {
   ChatMessage,
   ProposedPlan,
+  SidebarAgentCommandStatus,
   SessionPhase,
   Thread,
   ThreadSession,
@@ -44,6 +50,9 @@ export interface WorkLogEntry {
   detail?: string;
   command?: string;
   rawCommand?: string;
+  urls?: ReadonlyArray<LocalhostUrlCandidate>;
+  hasLocalUrl?: boolean;
+  outputPreview?: string;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
@@ -488,6 +497,71 @@ export function deriveWorkLogEntries(
   );
 }
 
+export function deriveSidebarAgentCommandStatus(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  latestTurnId: TurnId | null | undefined,
+): SidebarAgentCommandStatus | null {
+  if (!latestTurnId) {
+    return null;
+  }
+
+  // Scan all `tool.completed` activities (any item type) for localhost URLs.
+  // This intentionally widens beyond `command_execution` so URLs that surface
+  // through Monitor/tail/log tools — common when agents background a dev
+  // server — are captured too. We only emit a status when at least one URL is
+  // detected; the icon's visibility is otherwise driven by live process state
+  // (terminal subprocesses + port liveness probes), not stale activity.
+  const completedCommands = activities
+    .filter((activity) => activity.kind === "tool.completed" && activity.turnId === latestTurnId)
+    .flatMap((activity) => {
+      const payload =
+        activity.payload && typeof activity.payload === "object"
+          ? (activity.payload as Record<string, unknown>)
+          : null;
+      const itemType = extractWorkLogItemType(payload) ?? "command_execution";
+      const title = extractToolTitle(payload);
+      const commandActivity = extractToolCommandActivity({
+        payload,
+        title,
+        itemType,
+      });
+      if (!commandActivity.hasLocalUrl || commandActivity.urls.length === 0) {
+        return [];
+      }
+      return [{ activity, commandActivity }];
+    })
+    .toSorted((left, right) => compareActivitiesByOrder(left.activity, right.activity));
+
+  if (completedCommands.length === 0) {
+    return null;
+  }
+
+  const newestLocalUrlCommand = completedCommands.at(-1);
+  const urls = completedCommands
+    .toReversed()
+    .flatMap((entry) => entry.commandActivity.urls)
+    .filter((url, index, candidates) => {
+      if (!url.href) return false;
+      return candidates.findIndex((candidate) => candidate.href === url.href) === index;
+    });
+  const primaryUrl = urls[0];
+  if (!newestLocalUrlCommand || !primaryUrl) {
+    return null;
+  }
+  return {
+    label: "Agent local URL detected",
+    createdAt: newestLocalUrlCommand.activity.createdAt,
+    hasLocalUrl: true,
+    urls,
+    primaryUrl,
+  };
+}
+
+export function sidebarAgentCommandStatusKey(status: SidebarAgentCommandStatus): string {
+  const urls = status.urls.length > 0 ? status.urls.map((url) => url.href).join(",") : "";
+  return [status.createdAt, status.label, status.hasLocalUrl ? "url" : "command", urls].join("|");
+}
+
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {
   if (activity.kind !== "tool.updated" && activity.kind !== "tool.completed") {
     return false;
@@ -505,9 +579,14 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     activity.payload && typeof activity.payload === "object"
       ? (activity.payload as Record<string, unknown>)
       : null;
-  const commandPreview = extractToolCommand(payload);
-  const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
+  const itemType = extractWorkLogItemType(payload);
+  const commandActivity =
+    itemType === "command_execution"
+      ? extractToolCommandActivity({ payload, title, itemType })
+      : null;
+  const commandPreview = commandActivity ?? extractToolCommand(payload);
+  const changedFiles = extractChangedFiles(payload);
   const isTaskActivity = activity.kind === "task.progress" || activity.kind === "task.completed";
   const taskSummary =
     isTaskActivity && typeof payload?.summary === "string" && payload.summary.length > 0
@@ -542,7 +621,6 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
           : activity.tone,
     activityKind: activity.kind,
   };
-  const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
   if (detail) {
     entry.detail = detail;
@@ -552,6 +630,15 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (commandPreview.rawCommand) {
     entry.rawCommand = commandPreview.rawCommand;
+  }
+  if (commandActivity?.urls.length) {
+    entry.urls = commandActivity.urls;
+  }
+  if (commandActivity?.hasLocalUrl) {
+    entry.hasLocalUrl = true;
+  }
+  if (commandActivity?.outputPreview) {
+    entry.outputPreview = commandActivity.outputPreview;
   }
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
@@ -620,9 +707,11 @@ function mergeDerivedWorkLogEntries(
   next: DerivedWorkLogEntry,
 ): DerivedWorkLogEntry {
   const changedFiles = mergeChangedFiles(previous.changedFiles, next.changedFiles);
+  const urls = mergeLocalhostUrls(previous.urls, next.urls);
   const detail = next.detail ?? previous.detail;
   const command = next.command ?? previous.command;
   const rawCommand = next.rawCommand ?? previous.rawCommand;
+  const outputPreview = next.outputPreview ?? previous.outputPreview;
   const toolTitle = next.toolTitle ?? previous.toolTitle;
   const itemType = next.itemType ?? previous.itemType;
   const requestKind = next.requestKind ?? previous.requestKind;
@@ -634,6 +723,8 @@ function mergeDerivedWorkLogEntries(
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
+    ...(urls.length > 0 ? { urls, hasLocalUrl: true } : {}),
+    ...(outputPreview ? { outputPreview } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
     ...(toolTitle ? { toolTitle } : {}),
     ...(itemType ? { itemType } : {}),
@@ -641,6 +732,22 @@ function mergeDerivedWorkLogEntries(
     ...(collapseKey ? { collapseKey } : {}),
     ...(toolCallId ? { toolCallId } : {}),
   };
+}
+
+function mergeLocalhostUrls(
+  previous: ReadonlyArray<LocalhostUrlCandidate> | undefined,
+  next: ReadonlyArray<LocalhostUrlCandidate> | undefined,
+): LocalhostUrlCandidate[] {
+  const merged: LocalhostUrlCandidate[] = [];
+  const seen = new Set<string>();
+  for (const url of [...(previous ?? []), ...(next ?? [])]) {
+    if (seen.has(url.href)) {
+      continue;
+    }
+    seen.add(url.href);
+    merged.push(url);
+  }
+  return merged;
 }
 
 function mergeChangedFiles(
@@ -700,6 +807,74 @@ function asTrimmedString(value: unknown): string | null {
 
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function isLocalhostUrlSource(value: unknown): value is LocalhostUrlCandidate["source"] {
+  return (
+    value === "detail" ||
+    value === "output" ||
+    value === "raw-output" ||
+    value === "structured-data"
+  );
+}
+
+function asLocalhostUrlCandidate(value: unknown): LocalhostUrlCandidate | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const url = asTrimmedString(record.url);
+  const href = asTrimmedString(record.href);
+  const host = asTrimmedString(record.host);
+  const port = record.port === null ? null : asNumber(record.port);
+  if (!url || !href || !host || !isLocalhostUrlSource(record.source)) {
+    return null;
+  }
+  return {
+    url,
+    href,
+    host,
+    port,
+    source: record.source,
+  };
+}
+
+function commandActivityFromPayload(
+  payload: Record<string, unknown> | null,
+): NormalizedCommandActivity | null {
+  const commandActivity = asRecord(payload?.commandActivity);
+  if (!commandActivity) {
+    return null;
+  }
+  const urls = Array.isArray(commandActivity.urls)
+    ? commandActivity.urls.flatMap((url) => {
+        const parsed = asLocalhostUrlCandidate(url);
+        return parsed ? [parsed] : [];
+      })
+    : [];
+  return {
+    command: asTrimmedString(commandActivity.command) ?? null,
+    rawCommand: asTrimmedString(commandActivity.rawCommand) ?? null,
+    outputPreview: asTrimmedString(commandActivity.outputPreview) ?? null,
+    urls,
+    hasLocalUrl: commandActivity.hasLocalUrl === true || urls.length > 0,
+  };
+}
+
+function extractToolCommandActivity(input: {
+  readonly payload: Record<string, unknown> | null;
+  readonly title: string | null;
+  readonly itemType: ToolLifecycleItemType;
+}): NormalizedCommandActivity {
+  return (
+    commandActivityFromPayload(input.payload) ??
+    normalizeCommandActivityPayload({
+      itemType: input.itemType,
+      title: input.title,
+      detail: typeof input.payload?.detail === "string" ? input.payload.detail : null,
+      data: input.payload?.data,
+    })
+  );
 }
 
 function trimMatchingOuterQuotes(value: string): string {

@@ -16,6 +16,7 @@ import type {
   ProviderInteractionMode,
   RuntimeMode,
 } from "@t3tools/contracts";
+import type { LocalhostUrlCandidate } from "@t3tools/shared/toolActivity";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
@@ -138,6 +139,14 @@ export interface ThreadTurnState {
   pendingSourceProposedPlan?: OrchestrationLatestTurn["sourceProposedPlan"];
 }
 
+export interface SidebarAgentCommandStatus {
+  readonly label: "Agent local URL detected" | "Agent ran command";
+  readonly createdAt: string;
+  readonly hasLocalUrl: boolean;
+  readonly urls: ReadonlyArray<LocalhostUrlCandidate>;
+  readonly primaryUrl?: LocalhostUrlCandidate;
+}
+
 export interface SidebarThreadSummary {
   id: ThreadId;
   environmentId: EnvironmentId;
@@ -155,6 +164,7 @@ export interface SidebarThreadSummary {
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
+  agentCommandStatus: SidebarAgentCommandStatus | null;
 }
 
 export interface ThreadSession {

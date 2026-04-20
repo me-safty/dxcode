@@ -453,6 +453,7 @@ function toShellThread(thread: OrchestrationReadModel["threads"][number]) {
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
+    agentCommandStatus: null,
   };
 }
 

@@ -57,6 +57,14 @@ import {
   ProjectWriteFileResult,
 } from "./project.ts";
 import {
+  LocalProcessProbePortsError,
+  LocalProcessProbePortsInput,
+  LocalProcessProbePortsResult,
+  LocalProcessStopPortsError,
+  LocalProcessStopPortsInput,
+  LocalProcessStopPortsResult,
+} from "./localProcess.ts";
+import {
   TerminalClearInput,
   TerminalCloseInput,
   TerminalError,
@@ -111,6 +119,10 @@ export const WS_METHODS = {
   terminalClear: "terminal.clear",
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
+
+  // Local process methods
+  localProcessStopPorts: "localProcess.stopPorts",
+  localProcessProbePorts: "localProcess.probePorts",
 
   // Server meta
   serverGetConfig: "server.getConfig",
@@ -283,6 +295,18 @@ export const WsTerminalCloseRpc = Rpc.make(WS_METHODS.terminalClose, {
   error: TerminalError,
 });
 
+export const WsLocalProcessStopPortsRpc = Rpc.make(WS_METHODS.localProcessStopPorts, {
+  payload: LocalProcessStopPortsInput,
+  success: LocalProcessStopPortsResult,
+  error: LocalProcessStopPortsError,
+});
+
+export const WsLocalProcessProbePortsRpc = Rpc.make(WS_METHODS.localProcessProbePorts, {
+  payload: LocalProcessProbePortsInput,
+  success: LocalProcessProbePortsResult,
+  error: LocalProcessProbePortsError,
+});
+
 export const WsOrchestrationDispatchCommandRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.dispatchCommand,
   {
@@ -383,6 +407,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalClearRpc,
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
+  WsLocalProcessStopPortsRpc,
+  WsLocalProcessProbePortsRpc,
   WsSubscribeTerminalEventsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
