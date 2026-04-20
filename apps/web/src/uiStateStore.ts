@@ -34,7 +34,10 @@ export interface UiThreadState {
 export interface UiState extends UiProjectState, UiThreadState {}
 
 export interface SyncProjectInput {
+  /** Physical project key (env + cwd). Used for manual sort order. */
   key: string;
+  /** Logical group key. Used for expand/collapse state. */
+  logicalKey: string;
   cwd: string;
 }
 
@@ -53,6 +56,7 @@ const initialState: UiState = {
 const persistedExpandedProjectCwds = new Set<string>();
 const persistedProjectOrderCwds: string[] = [];
 const currentProjectCwdById = new Map<string, string>();
+const currentProjectCwdsByLogicalKey = new Map<string, string[]>();
 let legacyKeysCleanedUp = false;
 
 function readPersistedState(): UiState {
@@ -135,10 +139,7 @@ function persistState(state: UiState): void {
   try {
     const expandedProjectCwds = Object.entries(state.projectExpandedById)
       .filter(([, expanded]) => expanded)
-      .flatMap(([projectId]) => {
-        const cwd = currentProjectCwdById.get(projectId);
-        return cwd ? [cwd] : [];
-      });
+      .flatMap(([logicalKey]) => currentProjectCwdsByLogicalKey.get(logicalKey) ?? []);
     const projectOrderCwds = state.projectOrder.flatMap((projectId) => {
       const cwd = currentProjectCwdById.get(projectId);
       return cwd ? [cwd] : [];
@@ -211,12 +212,20 @@ function nestedBooleanRecordsEqual(
 
 export function syncProjects(state: UiState, projects: readonly SyncProjectInput[]): UiState {
   const previousProjectCwdById = new Map(currentProjectCwdById);
-  const previousProjectIdByCwd = new Map(
-    [...previousProjectCwdById.entries()].map(([projectId, cwd]) => [cwd, projectId] as const),
-  );
   currentProjectCwdById.clear();
   for (const project of projects) {
     currentProjectCwdById.set(project.key, project.cwd);
+  }
+  currentProjectCwdsByLogicalKey.clear();
+  for (const project of projects) {
+    const cwds = currentProjectCwdsByLogicalKey.get(project.logicalKey);
+    if (cwds) {
+      if (!cwds.includes(project.cwd)) {
+        cwds.push(project.cwd);
+      }
+    } else {
+      currentProjectCwdsByLogicalKey.set(project.logicalKey, [project.cwd]);
+    }
   }
   const cwdMappingChanged =
     previousProjectCwdById.size !== currentProjectCwdById.size ||
@@ -228,14 +237,15 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
     persistedProjectOrderCwds.map((cwd, index) => [cwd, index] as const),
   );
   const mappedProjects = projects.map((project, index) => {
-    const previousProjectIdForCwd = previousProjectIdByCwd.get(project.cwd);
-    const expanded =
-      previousExpandedById[project.key] ??
-      (previousProjectIdForCwd ? previousExpandedById[previousProjectIdForCwd] : undefined) ??
-      (persistedExpandedProjectCwds.size > 0
-        ? persistedExpandedProjectCwds.has(project.cwd)
-        : true);
-    nextExpandedById[project.key] = expanded;
+    if (!(project.logicalKey in nextExpandedById)) {
+      const groupCwds = currentProjectCwdsByLogicalKey.get(project.logicalKey) ?? [project.cwd];
+      const expanded =
+        previousExpandedById[project.logicalKey] ??
+        (persistedExpandedProjectCwds.size > 0
+          ? groupCwds.some((cwd) => persistedExpandedProjectCwds.has(cwd))
+          : true);
+      nextExpandedById[project.logicalKey] = expanded;
+    }
     return {
       id: project.key,
       cwd: project.cwd,
@@ -246,6 +256,7 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
   const nextProjectOrder =
     state.projectOrder.length > 0
       ? (() => {
+          const currentProjectIds = new Set(mappedProjects.map((project) => project.id));
           const nextProjectIdByCwd = new Map(
             mappedProjects.map((project) => [project.cwd, project.id] as const),
           );
@@ -254,7 +265,7 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
 
           for (const projectId of state.projectOrder) {
             const matchedProjectId =
-              (projectId in nextExpandedById ? projectId : undefined) ??
+              (currentProjectIds.has(projectId) ? projectId : undefined) ??
               (() => {
                 const previousCwd = previousProjectCwdById.get(projectId);
                 return previousCwd ? nextProjectIdByCwd.get(previousCwd) : undefined;
