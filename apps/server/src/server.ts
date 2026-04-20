@@ -84,6 +84,7 @@ import {
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
 } from "./orchestration/http.ts";
+import { NetService } from "@marcode/shared/Net";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -259,6 +260,7 @@ const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   // Misc.
   Layer.provideMerge(OpenLive),
   Layer.provideMerge(ServerLifecycleEventsLive),
+  Layer.provide(NetService.layer),
 );
 
 const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
