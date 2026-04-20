@@ -1,27 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
-import {
-  ArrowUpIcon,
-  ChevronRightIcon,
-  FolderOpenIcon,
-  HomeIcon,
-  MonitorIcon,
-  SearchIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, CornerLeftUpIcon, FolderIcon, SearchIcon } from "lucide-react";
 
 import type { EnvironmentId, ProjectEntry } from "@marcode/contracts";
-import { Button } from "../ui/button";
-import { Dialog, DialogFooter, DialogHeader, DialogPopup, DialogTitle } from "../ui/dialog";
+import { Dialog, DialogPopup } from "../ui/dialog";
 import { Kbd, KbdGroup } from "../ui/kbd";
 import { projectBrowseDirectoriesQueryOptions } from "~/lib/projectReactQuery";
 import { readLocalApi } from "~/localApi";
-import { useTheme } from "~/hooks/useTheme";
 import { basenameOfPath } from "~/vscode-icons";
 import { cn, isMacPlatform } from "~/lib/utils";
-import { VscodeEntryIcon } from "./VscodeEntryIcon";
 
 const FILTER_DEBOUNCE_MS = 120;
+const HOME_PREFIX_REGEX = /^\/Users\/[^/]+|^\/home\/[^/]+/;
 
 interface DirectoryBrowserDialogProps {
   open: boolean;
@@ -54,19 +45,10 @@ function parentOfPath(absolutePath: string): string | null {
   return normalized.slice(0, lastSlash);
 }
 
-function buildBreadcrumbSegments(absolutePath: string): Array<{ label: string; path: string }> {
-  const normalized = normalizeTrailingSlash(absolutePath);
-  if (!normalized || normalized === "/") {
-    return [{ label: "/", path: "/" }];
-  }
-  const parts = normalized.split("/").filter(Boolean);
-  const segments: Array<{ label: string; path: string }> = [{ label: "/", path: "/" }];
-  let accumulator = "";
-  for (const part of parts) {
-    accumulator = `${accumulator}/${part}`;
-    segments.push({ label: part, path: accumulator });
-  }
-  return segments;
+function formatDisplayPath(absolutePath: string): string {
+  if (!absolutePath) return "/";
+  const withHome = absolutePath.replace(HOME_PREFIX_REGEX, "~");
+  return withHome.endsWith("/") ? withHome : `${withHome}/`;
 }
 
 export function DirectoryBrowserDialog({
@@ -79,7 +61,6 @@ export function DirectoryBrowserDialog({
   onConfirm,
   allowNativePicker = true,
 }: DirectoryBrowserDialogProps) {
-  const { resolvedTheme } = useTheme();
   const [currentPath, setCurrentPath] = useState(initialPath);
   const [filterInput, setFilterInput] = useState("");
   const [debouncedFilter] = useDebouncedValue(filterInput, { wait: FILTER_DEBOUNCE_MS });
@@ -108,6 +89,7 @@ export function DirectoryBrowserDialog({
 
   const entries = browseQuery.data?.entries;
   const resolvedParent = browseQuery.data?.resolvedParent ?? "";
+  const activePath = resolvedParent || currentPath;
 
   const filteredEntries = useMemo<ProjectEntry[]>(() => {
     if (!entries) return [];
@@ -121,9 +103,12 @@ export function DirectoryBrowserDialog({
     });
   }, [entries, debouncedFilter]);
 
+  const canGoUp = useMemo(() => parentOfPath(activePath) !== null, [activePath]);
+  const parentEntryOffset = canGoUp ? 1 : 0;
+
   useEffect(() => {
-    setHighlightedIndex(filteredEntries.length > 0 ? 0 : -1);
-  }, [filteredEntries]);
+    setHighlightedIndex(filteredEntries.length > 0 ? parentEntryOffset : -1);
+  }, [filteredEntries, parentEntryOffset]);
 
   useEffect(() => {
     if (highlightedIndex < 0 || !listRef.current) return;
@@ -131,40 +116,23 @@ export function DirectoryBrowserDialog({
     el?.scrollIntoView({ block: "nearest" });
   }, [highlightedIndex]);
 
-  const breadcrumbSegments = useMemo(
-    () => buildBreadcrumbSegments(resolvedParent || currentPath),
-    [resolvedParent, currentPath],
-  );
-
   const navigateInto = useCallback(
     (entry: ProjectEntry) => {
-      const base = resolvedParent || currentPath;
       const name = basenameOfPath(entry.path);
-      setCurrentPath(joinPath(base, name));
+      setCurrentPath(joinPath(activePath, name));
       setFilterInput("");
       filterInputRef.current?.focus();
     },
-    [resolvedParent, currentPath],
+    [activePath],
   );
 
-  const canGoUp = useMemo(() => {
-    const base = resolvedParent || currentPath;
-    return parentOfPath(base) !== null;
-  }, [resolvedParent, currentPath]);
-
   const goUp = useCallback(() => {
-    const base = resolvedParent || currentPath;
-    const parent = parentOfPath(base);
+    const parent = parentOfPath(activePath);
     if (parent !== null) {
       setCurrentPath(parent);
       setFilterInput("");
     }
-  }, [resolvedParent, currentPath]);
-
-  const goHome = useCallback(() => {
-    setCurrentPath("~/");
-    setFilterInput("");
-  }, []);
+  }, [activePath]);
 
   const handleConfirm = useCallback(
     async (absolutePath: string) => {
@@ -194,25 +162,33 @@ export function DirectoryBrowserDialog({
     }
   }, [handleConfirm]);
 
+  const totalListItems = parentEntryOffset + filteredEntries.length;
+
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
       if (event.key === "ArrowDown") {
-        if (filteredEntries.length === 0) return;
+        if (totalListItems === 0) return;
         event.preventDefault();
-        setHighlightedIndex((prev) => (prev + 1) % filteredEntries.length);
+        setHighlightedIndex((prev) => (prev + 1) % totalListItems);
       } else if (event.key === "ArrowUp") {
-        if (filteredEntries.length === 0) return;
+        if (totalListItems === 0) return;
         event.preventDefault();
-        setHighlightedIndex((prev) => (prev <= 0 ? filteredEntries.length - 1 : prev - 1));
+        setHighlightedIndex((prev) => (prev <= 0 ? totalListItems - 1 : prev - 1));
       } else if (event.key === "Enter") {
         if (event.metaKey || event.ctrlKey) {
           event.preventDefault();
-          void handleConfirm(resolvedParent || currentPath);
+          void handleConfirm(activePath);
           return;
         }
-        if (highlightedIndex >= 0 && filteredEntries[highlightedIndex]) {
+        if (canGoUp && highlightedIndex === 0) {
           event.preventDefault();
-          navigateInto(filteredEntries[highlightedIndex]);
+          goUp();
+          return;
+        }
+        const entryIndex = highlightedIndex - parentEntryOffset;
+        if (entryIndex >= 0 && filteredEntries[entryIndex]) {
+          event.preventDefault();
+          navigateInto(filteredEntries[entryIndex]);
         }
       } else if (event.key === "Backspace" && filterInput === "" && canGoUp) {
         event.preventDefault();
@@ -220,88 +196,98 @@ export function DirectoryBrowserDialog({
       }
     },
     [
+      totalListItems,
       filteredEntries,
       highlightedIndex,
+      parentEntryOffset,
       navigateInto,
       handleConfirm,
-      resolvedParent,
-      currentPath,
+      activePath,
       filterInput,
       canGoUp,
       goUp,
     ],
   );
 
-  const canConfirm = (resolvedParent || currentPath).length > 0 && !isConfirming;
+  const canConfirm = activePath.length > 0 && !isConfirming;
   const isDesktop = typeof window !== "undefined" && Boolean(window.desktopBridge);
   const isMac = typeof navigator !== "undefined" ? isMacPlatform(navigator.platform) : false;
   const modKeyLabel = isMac ? "⌘" : "Ctrl";
+  const finderLabel = isMac ? "Open in Finder" : "Open in Explorer";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <div className="mt-1 flex items-center gap-1 overflow-x-auto text-muted-foreground text-xs">
-            {breadcrumbSegments.map((segment, index) => (
-              <div key={segment.path} className="flex shrink-0 items-center gap-1">
-                {index > 0 && <ChevronRightIcon className="size-3 text-muted-foreground/60" />}
-                <button
-                  type="button"
-                  onClick={() => setCurrentPath(segment.path)}
-                  className="rounded px-1 py-0.5 hover:bg-accent hover:text-foreground"
-                >
-                  {segment.label}
-                </button>
-              </div>
-            ))}
-          </div>
-        </DialogHeader>
-
-        <div className="flex flex-col gap-3 px-6 pb-3" onKeyDown={handleKeyDown}>
-          <div className="flex items-center gap-1.5">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={goUp}
-              disabled={!canGoUp}
-              aria-label="Go up one directory"
-              title="Go up one directory"
-            >
-              <ArrowUpIcon />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={goHome}
-              aria-label="Go to home directory"
-              title="Go to home directory"
-            >
-              <HomeIcon />
-            </Button>
-            <div className="relative min-w-0 flex-1">
-              <SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/50" />
-              <input
-                ref={filterInputRef}
-                type="text"
-                className="w-full rounded-md border border-border bg-secondary py-1.5 pl-8 pr-2 text-sm outline-none placeholder:text-muted-foreground/50 focus:border-ring focus:ring-1 focus:ring-ring"
-                placeholder="Filter folders in this directory…"
-                value={filterInput}
-                onChange={(e) => setFilterInput(e.target.value)}
-                autoFocus
-              />
-            </div>
-          </div>
-
-          <div
-            ref={listRef}
-            className="flex max-h-72 min-h-48 flex-col gap-0.5 overflow-y-auto rounded-md border border-border bg-background p-1"
+      <DialogPopup
+        className="max-w-xl gap-0 p-0 overflow-hidden"
+        showCloseButton={false}
+        aria-label={title}
+      >
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-border/60">
+          <button
+            type="button"
+            onClick={goUp}
+            disabled={!canGoUp}
+            aria-label="Go up one directory"
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
           >
+            <ArrowLeftIcon className="size-4" />
+          </button>
+          <div className="min-w-0 flex-1 truncate font-mono text-sm text-foreground">
+            {formatDisplayPath(activePath)}
+          </div>
+          <button
+            type="button"
+            disabled={!canConfirm}
+            onClick={() => void handleConfirm(activePath)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-sm text-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            <span>{isConfirming ? "Adding…" : confirmLabel}</span>
+            <KbdGroup className="text-muted-foreground">
+              <Kbd>{modKeyLabel}</Kbd>
+              <Kbd>↵</Kbd>
+            </KbdGroup>
+          </button>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col" onKeyDown={handleKeyDown}>
+          <div className="relative px-4 pt-3 pb-2">
+            <SearchIcon className="absolute left-6 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/50" />
+            <input
+              ref={filterInputRef}
+              type="text"
+              className="w-full rounded-md border border-transparent bg-transparent py-1 pl-7 pr-2 text-sm outline-none placeholder:text-muted-foreground/50 focus:border-border/60 focus:bg-secondary/40"
+              placeholder="Filter folders…"
+              value={filterInput}
+              onChange={(e) => setFilterInput(e.target.value)}
+              autoFocus
+            />
+          </div>
+
+          <div className="px-4 pb-1 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+            Directories
+          </div>
+
+          <div ref={listRef} className="flex max-h-80 min-h-48 flex-col overflow-y-auto px-2 pb-2">
+            {canGoUp && (
+              <button
+                type="button"
+                className={cn(
+                  "flex items-center gap-3 rounded-md px-2 py-2 text-left text-sm",
+                  highlightedIndex === 0
+                    ? "bg-accent text-accent-foreground"
+                    : "hover:bg-accent/50",
+                )}
+                onMouseEnter={() => setHighlightedIndex(0)}
+                onClick={goUp}
+                onDoubleClick={goUp}
+              >
+                <CornerLeftUpIcon className="size-4 text-muted-foreground" />
+                <span className="text-muted-foreground">..</span>
+              </button>
+            )}
             {browseQuery.isFetching && (entries?.length ?? 0) === 0 ? (
               <span className="px-3 py-6 text-center text-muted-foreground text-xs">Loading…</span>
-            ) : filteredEntries.length === 0 ? (
+            ) : filteredEntries.length === 0 && !canGoUp ? (
               <span className="px-3 py-6 text-center text-muted-foreground text-xs">
                 {browseQuery.isError
                   ? "Unable to read this directory."
@@ -309,36 +295,26 @@ export function DirectoryBrowserDialog({
                     ? "This directory is empty or inaccessible."
                     : "No folders match the filter."}
               </span>
-            ) : (
+            ) : filteredEntries.length === 0 ? null : (
               filteredEntries.map((entry, index) => {
-                const isHighlighted = index === highlightedIndex;
+                const listIndex = index + parentEntryOffset;
+                const isHighlighted = listIndex === highlightedIndex;
                 return (
                   <button
                     key={entry.path}
                     type="button"
                     className={cn(
-                      "group flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",
+                      "flex items-center gap-3 rounded-md px-2 py-2 text-left text-sm",
                       isHighlighted ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
                     )}
-                    onMouseEnter={() => setHighlightedIndex(index)}
+                    onMouseEnter={() => setHighlightedIndex(listIndex)}
                     onClick={() => navigateInto(entry)}
                     onDoubleClick={() => navigateInto(entry)}
                   >
-                    <VscodeEntryIcon
-                      pathValue={entry.path}
-                      kind={entry.kind}
-                      theme={resolvedTheme}
-                      className="size-4"
-                    />
+                    <FolderIcon className="size-4 text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate">
                       {basenameOfPath(entry.path) || entry.path}
                     </span>
-                    {isHighlighted ? (
-                      <KbdGroup className="ml-auto shrink-0 text-muted-foreground">
-                        <Kbd>↵</Kbd>
-                        <span className="text-[10px]">Open</span>
-                      </KbdGroup>
-                    ) : null}
                   </button>
                 );
               })
@@ -346,40 +322,32 @@ export function DirectoryBrowserDialog({
           </div>
         </div>
 
-        <DialogFooter>
+        <div className="flex items-center justify-between gap-3 border-t border-border/60 bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-4 overflow-x-auto">
+            <KbdGroup>
+              <Kbd>↑</Kbd>
+              <Kbd>↓</Kbd>
+              <span className="ml-1">Navigate</span>
+            </KbdGroup>
+            <KbdGroup>
+              <Kbd>⌫</Kbd>
+              <span className="ml-1">Back</span>
+            </KbdGroup>
+            <KbdGroup>
+              <Kbd>Esc</Kbd>
+              <span className="ml-1">Close</span>
+            </KbdGroup>
+          </div>
           {allowNativePicker && isDesktop ? (
-            <Button
+            <button
               type="button"
-              variant="ghost"
-              size="sm"
               onClick={() => void handleNativePicker()}
-              className="mr-auto"
+              className="shrink-0 rounded px-1 text-foreground/80 hover:text-foreground hover:underline"
             >
-              <MonitorIcon />
-              Browse with system…
-            </Button>
+              {finderLabel}
+            </button>
           ) : null}
-          <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            disabled={!canConfirm}
-            onClick={() => void handleConfirm(resolvedParent || currentPath)}
-          >
-            <FolderOpenIcon />
-            {isConfirming ? "Adding…" : confirmLabel}
-            {!isConfirming ? (
-              <KbdGroup className="ml-1 opacity-80">
-                <Kbd className="bg-primary-foreground/15 text-primary-foreground">
-                  {modKeyLabel}
-                </Kbd>
-                <Kbd className="bg-primary-foreground/15 text-primary-foreground">↵</Kbd>
-              </KbdGroup>
-            ) : null}
-          </Button>
-        </DialogFooter>
+        </div>
       </DialogPopup>
     </Dialog>
   );

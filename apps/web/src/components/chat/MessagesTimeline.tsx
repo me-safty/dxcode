@@ -14,7 +14,7 @@ import {
 import { deriveTimelineEntries, formatElapsed, type PendingApproval } from "../../session-logic";
 // AUTO_SCROLL_BOTTOM_THRESHOLD_PX no longer needed without virtualizer
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
-import { type ComposerImageAttachment } from "../../composerDraftStore";
+import { type ComposerImageAttachment, useComposerDraftStore } from "../../composerDraftStore";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import {
   BotIcon,
@@ -231,6 +231,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
+  // Skip the fade-in animation when mounting into a thread that was just
+  // promoted from a draft — this prevents a visible flicker during the
+  // draft→thread route transition, which remounts the timeline.
+  const [skipInitialFadeIn] = useState(() => {
+    const draftStore = useComposerDraftStore.getState();
+    for (const draft of Object.values(draftStore.draftThreadsByThreadKey)) {
+      if (draft.promotedTo?.threadId === threadId) {
+        return true;
+      }
+    }
+    return false;
+  });
 
   useLayoutEffect(() => {
     const timelineRoot = timelineRootRef.current;
@@ -655,7 +667,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     <div
       ref={timelineRootRef}
       data-timeline-root="true"
-      className="timeline-fade-in mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden"
+      className={cn(
+        "mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden",
+        !skipInitialFadeIn && "timeline-fade-in",
+      )}
     >
       {rows.map((row, index) => {
         const nearBottom = index >= rows.length - 3;

@@ -39,11 +39,25 @@ function DraftChatThreadRouteView() {
     if (!canonicalThreadRef) {
       return;
     }
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(canonicalThreadRef),
-      replace: true,
-    });
+    const runNavigate = () =>
+      navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(canonicalThreadRef),
+        replace: true,
+      });
+    // View Transitions cross-fade the DOM between draft and thread route so the
+    // remount of ChatView doesn't flash an empty frame over the just-sent
+    // message. Falls back to plain navigation when unsupported (non-Chromium).
+    const startViewTransition = (
+      globalThis.document as Document & {
+        startViewTransition?: (cb: () => unknown) => unknown;
+      }
+    ).startViewTransition;
+    if (typeof startViewTransition === "function") {
+      startViewTransition.call(globalThis.document, () => runNavigate());
+      return;
+    }
+    void runNavigate();
   }, [canonicalThreadRef, navigate]);
 
   useEffect(() => {

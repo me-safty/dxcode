@@ -534,6 +534,16 @@ label:has(> select#reasoning-effort) select {
   animation: timeline-fade-in 300ms ease-out both;
 }
 
+/* Smooth the draft -> canonical thread route remount: the default
+ * view transition cross-fades the root, but that's heavy and long.
+ * Speed up to ~120ms and pin to the root to avoid per-element
+ * animations that cause layout jitter. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 120ms;
+  animation-timing-function: ease-out;
+}
+
 /* Word-by-word fade-in for new assistant messages */
 .tr-word {
   opacity: 0;
