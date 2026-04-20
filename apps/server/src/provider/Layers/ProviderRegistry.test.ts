@@ -403,6 +403,107 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         ]);
       });
 
+      it("preserves provider usage when a refresh does not include a new usage snapshot", () => {
+        const previousProvider = {
+          provider: "codex",
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: {
+            status: "authenticated",
+            type: "chatgpt",
+            label: "ChatGPT Pro Subscription",
+          },
+          checkedAt: "2026-04-20T00:00:00.000Z",
+          version: "1.0.0",
+          usage: {
+            state: "available",
+            checkedAt: "2026-04-20T00:00:00.000Z",
+            windows: [
+              {
+                id: "5h",
+                label: "5h",
+                percentUsed: 72,
+                resetsAt: "2026-04-20T05:00:00.000Z",
+                level: "warning",
+                exhausted: false,
+              },
+            ],
+          },
+          models: [],
+          slashCommands: [],
+          skills: [],
+        } as const satisfies ServerProvider;
+        const refreshedProvider = {
+          ...previousProvider,
+          checkedAt: "2026-04-20T00:01:00.000Z",
+          usage: undefined,
+        } satisfies ServerProvider;
+
+        assert.deepStrictEqual(mergeProviderSnapshot(previousProvider, refreshedProvider).usage, {
+          state: "available",
+          checkedAt: "2026-04-20T00:00:00.000Z",
+          windows: [
+            {
+              id: "5h",
+              label: "5h",
+              percentUsed: 72,
+              resetsAt: "2026-04-20T05:00:00.000Z",
+              level: "warning",
+              exhausted: false,
+            },
+          ],
+        });
+      });
+
+      it("clears codex usage when a refreshed provider snapshot is using an api key", () => {
+        const previousProvider = {
+          provider: "codex",
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: {
+            status: "authenticated",
+            type: "chatgpt",
+            label: "ChatGPT Pro Subscription",
+          },
+          checkedAt: "2026-04-20T00:00:00.000Z",
+          version: "1.0.0",
+          usage: {
+            state: "available",
+            checkedAt: "2026-04-20T00:00:00.000Z",
+            windows: [
+              {
+                id: "5h",
+                label: "5h",
+                percentUsed: 72,
+                resetsAt: "2026-04-20T05:00:00.000Z",
+                level: "warning",
+                exhausted: false,
+              },
+            ],
+          },
+          models: [],
+          slashCommands: [],
+          skills: [],
+        } as const satisfies ServerProvider;
+        const refreshedProvider = {
+          ...previousProvider,
+          checkedAt: "2026-04-20T00:01:00.000Z",
+          auth: {
+            status: "authenticated",
+            type: "apiKey",
+            label: "OpenAI API Key",
+          },
+          usage: undefined,
+        } satisfies ServerProvider;
+
+        assert.strictEqual(
+          mergeProviderSnapshot(previousProvider, refreshedProvider).usage,
+          undefined,
+        );
+      });
+
       it.effect("probes enabled providers in the background during registry startup", () =>
         Effect.gen(function* () {
           let spawnCount = 0;

@@ -4,7 +4,7 @@
  * @module ProviderRegistryLive
  */
 import type { ProviderKind, ServerProvider } from "@t3tools/contracts";
-import { Effect, Equal, FileSystem, Layer, Path, PubSub, Ref, Stream } from "effect";
+import { Effect, Equal, FileSystem, Layer, Option, Path, PubSub, Ref, Stream } from "effect";
 
 import { ServerConfig } from "../../config.ts";
 import { ClaudeProviderLive } from "./ClaudeProvider.ts";
@@ -25,6 +25,8 @@ import {
   resolveProviderStatusCachePath,
   writeProviderStatusCache,
 } from "../providerStatusCache.ts";
+import { ProviderService } from "../Services/ProviderService.ts";
+import { mergeProviderRuntimeEventIntoSnapshot } from "../providerUsage.ts";
 
 type ProviderSnapshotSource = {
   readonly provider: ProviderKind;
@@ -70,16 +72,30 @@ const mergeProviderModels = (
   return [...mergedModels, ...previousModels.filter((model) => !nextSlugs.has(model.slug))];
 };
 
+const shouldClearProviderUsage = (provider: ServerProvider): boolean =>
+  !provider.enabled || (provider.provider === "codex" && provider.auth.type === "apiKey");
+
 export const mergeProviderSnapshot = (
   previousProvider: ServerProvider | undefined,
   nextProvider: ServerProvider,
 ): ServerProvider =>
   !previousProvider
     ? nextProvider
-    : {
-        ...nextProvider,
-        models: mergeProviderModels(previousProvider.models, nextProvider.models),
-      };
+    : (() => {
+        const mergedProvider: ServerProvider = {
+          ...nextProvider,
+          models: mergeProviderModels(previousProvider.models, nextProvider.models),
+        };
+        if (shouldClearProviderUsage(mergedProvider)) {
+          return mergedProvider;
+        }
+        return nextProvider.usage === undefined && previousProvider.usage !== undefined
+          ? {
+              ...mergedProvider,
+              usage: previousProvider.usage,
+            }
+          : mergedProvider;
+      })();
 
 export const haveProvidersChanged = (
   previousProviders: ReadonlyArray<ServerProvider>,
@@ -97,6 +113,7 @@ const ProviderRegistryLiveBase = Layer.effect(
     const path = yield* Path.Path;
 
     const cursorProvider = yield* CursorProvider;
+    const providerServiceOption = yield* Effect.serviceOption(ProviderService);
 
     const providerSources = [
       {
@@ -263,6 +280,24 @@ const ProviderRegistryLiveBase = Layer.effect(
         discard: true,
       },
     );
+    if (Option.isSome(providerServiceOption)) {
+      yield* Stream.runForEach(providerServiceOption.value.streamEvents, (event) => {
+        if (event.type !== "account.updated" && event.type !== "account.rate-limits.updated") {
+          return Effect.void;
+        }
+
+        return Ref.get(providersRef).pipe(
+          Effect.map((providers) =>
+            providers.find((provider) => provider.provider === event.provider),
+          ),
+          Effect.flatMap((provider) =>
+            provider
+              ? syncProvider(mergeProviderRuntimeEventIntoSnapshot(provider, event))
+              : Effect.void,
+          ),
+        );
+      }).pipe(Effect.forkScoped);
+    }
     yield* loadProviders(providerSources).pipe(
       Effect.flatMap((providers) => upsertProviders(providers, { publish: false })),
     );

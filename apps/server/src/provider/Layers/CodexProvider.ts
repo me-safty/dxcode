@@ -29,6 +29,7 @@ import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import { buildServerProvider } from "../providerSnapshot.ts";
 import { CodexProvider } from "../Services/CodexProvider.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { codexAccountAuthMetadata } from "../codexAccount.ts";
 import packageJson from "../../../package.json" with { type: "json" };
 
 const PROVIDER = "codex" as const;
@@ -49,37 +50,6 @@ const REASONING_EFFORT_LABELS: Record<CodexSchema.V2ModelListResponse__Reasoning
   high: "High",
   xhigh: "Extra High",
 };
-
-function codexAccountAuthLabel(account: CodexSchema.V2GetAccountResponse["account"]) {
-  if (!account) return undefined;
-  if (account.type === "apiKey") return "OpenAI API Key";
-
-  switch (account.planType) {
-    case "free":
-      return "ChatGPT Free Subscription";
-    case "go":
-      return "ChatGPT Go Subscription";
-    case "plus":
-      return "ChatGPT Plus Subscription";
-    case "pro":
-      return "ChatGPT Pro Subscription";
-    case "team":
-      return "ChatGPT Team Subscription";
-    case "self_serve_business_usage_based":
-    case "business":
-      return "ChatGPT Business Subscription";
-    case "enterprise_cbp_usage_based":
-    case "enterprise":
-      return "ChatGPT Enterprise Subscription";
-    case "edu":
-      return "ChatGPT Edu Subscription";
-    case "unknown":
-      return "ChatGPT Subscription";
-    default:
-      account.planType satisfies never;
-      return undefined;
-  }
-}
 
 function mapCodexModelCapabilities(
   model: CodexSchema.V2ModelListResponse__Model,
@@ -324,11 +294,15 @@ function accountProbeStatus(account: CodexAppServerProviderSnapshot["account"]):
   readonly auth: ServerProvider["auth"];
   readonly message?: string;
 } {
-  const authLabel = codexAccountAuthLabel(account.account);
+  const planType = account.account?.type === "chatgpt" ? account.account.planType : undefined;
+  const authMetadata = codexAccountAuthMetadata({
+    accountType: account.account?.type,
+    planType,
+  });
   const auth = {
     status: account.account ? ("authenticated" as const) : ("unknown" as const),
-    ...(account.account?.type ? { type: account.account?.type } : {}),
-    ...(authLabel ? { label: authLabel } : {}),
+    ...(authMetadata?.type ? { type: authMetadata.type } : {}),
+    ...(authMetadata?.label ? { label: authMetadata.label } : {}),
   } satisfies ServerProvider["auth"];
 
   if (account.account) {

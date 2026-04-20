@@ -163,6 +163,7 @@ import {
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
+import { SidebarProviderUsageCard } from "./sidebar/SidebarProviderUsageCard";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { CommandDialogTrigger } from "./ui/command";
 import { readEnvironmentApi } from "../environmentApi";
@@ -2389,6 +2390,7 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
     <SidebarFooter className="p-2">
       <SidebarUpdatePill />
+      <SidebarProviderUsageCard />
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton

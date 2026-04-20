@@ -50,6 +50,37 @@ export const ServerProviderAuth = Schema.Struct({
 });
 export type ServerProviderAuth = typeof ServerProviderAuth.Type;
 
+export const ServerProviderUsageState = Schema.Literals(["available", "syncing", "unavailable"]);
+export type ServerProviderUsageState = typeof ServerProviderUsageState.Type;
+
+export const ServerProviderUsageLevel = Schema.Literals([
+  "normal",
+  "warning",
+  "critical",
+  "exhausted",
+]);
+export type ServerProviderUsageLevel = typeof ServerProviderUsageLevel.Type;
+
+export const ServerProviderUsageWindow = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  percentUsed: Schema.NullOr(Schema.Number),
+  resetsAt: Schema.NullOr(IsoDateTime),
+  level: ServerProviderUsageLevel,
+  exhausted: Schema.Boolean,
+});
+export type ServerProviderUsageWindow = typeof ServerProviderUsageWindow.Type;
+
+export const ServerProviderUsage = Schema.Struct({
+  state: ServerProviderUsageState,
+  checkedAt: IsoDateTime,
+  windows: Schema.Array(ServerProviderUsageWindow).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  message: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerProviderUsage = typeof ServerProviderUsage.Type;
+
 export const ServerProviderModel = Schema.Struct({
   slug: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
@@ -92,6 +123,7 @@ export const ServerProvider = Schema.Struct({
   auth: ServerProviderAuth,
   checkedAt: IsoDateTime,
   message: Schema.optional(TrimmedNonEmptyString),
+  usage: Schema.optional(ServerProviderUsage),
   models: Schema.Array(ServerProviderModel),
   slashCommands: Schema.Array(ServerProviderSlashCommand).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
