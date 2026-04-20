@@ -58,8 +58,7 @@ function toBranchActionErrorMessage(error: unknown): string {
 // Matches the server-side message produced by `GitCheckoutDirtyWorktreeError`.
 // Files are emitted one per line prefixed with "  - ", so we can parse them
 // unambiguously even when a path contains a comma.
-const DIRTY_WORKTREE_ERROR_PATTERN =
-  /Uncommitted changes block checkout to ([^:\n]+):\n([\s\S]+)/;
+const DIRTY_WORKTREE_ERROR_PATTERN = /Uncommitted changes block checkout to ([^:\n]+):\n([\s\S]+)/;
 
 function readDirtyWorktreeDetails(
   error: unknown,
