@@ -1022,18 +1022,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
               });
             }
             return startedExit.value;
-          }).pipe(
-            Effect.mapError((cause) =>
-              isProviderAdapterProcessError(cause)
-                ? cause
-                : new ProviderAdapterProcessError({
-                    provider: PROVIDER,
-                    threadId: input.threadId,
-                    detail: openCodeRuntimeErrorDetail(cause),
-                    cause,
-                  }),
-            ),
-          );
+          });
 
           // Guard against a concurrent startSession call that may have raced
           // and already inserted a session while we were awaiting async work.
