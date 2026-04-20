@@ -452,6 +452,7 @@ const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  additionalDirectories: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   createdAt: IsoDateTime,
 });
 

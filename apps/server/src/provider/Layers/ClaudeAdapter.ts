@@ -2939,6 +2939,13 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(fastMode ? { fastMode: true } : {}),
       };
 
+      const computedAdditionalDirs = (() => {
+        const dirs: string[] = [];
+        if (input.cwd) dirs.push(input.cwd);
+        if (input.additionalDirectories) dirs.push(...input.additionalDirectories);
+        return [...new Set(dirs)];
+      })();
+
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
@@ -2955,13 +2962,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         includePartialMessages: true,
         canUseTool,
         env: process.env,
-        ...(() => {
-          const dirs: string[] = [];
-          if (input.cwd) dirs.push(input.cwd);
-          if (input.additionalDirectories) dirs.push(...input.additionalDirectories);
-          const uniqueDirs = [...new Set(dirs)];
-          return uniqueDirs.length > 0 ? { additionalDirectories: uniqueDirs } : {};
-        })(),
+        ...(computedAdditionalDirs.length > 0
+          ? { additionalDirectories: computedAdditionalDirs }
+          : {}),
       };
 
       const queryRuntime = yield* Effect.try({

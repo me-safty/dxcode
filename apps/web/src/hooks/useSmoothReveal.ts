@@ -201,25 +201,30 @@ export function useSmoothReveal(
     let last = burstCount - 1;
 
     const tick = (now: number) => {
-      const idx = searchTimeline(tl, now - start);
-
-      if (!spans[last + 1]?.isConnected) {
+      if (!el.isConnected) {
         rafRef.current = 0;
         spansRef.current = [];
         setIsRevealing(false);
         return;
       }
 
+      const idx = searchTimeline(tl, now - start);
+
       while (last < idx - 1 && last < spans.length - 1) {
         last++;
-        spans[last]!.classList.add("tr-visible");
-        revealDecorationForSpan(spans[last]!);
+        const span = spans[last]!;
+        if (!span.isConnected) continue;
+        span.classList.add("tr-visible");
+        revealDecorationForSpan(span);
       }
 
       if (idx < spans.length) {
         rafRef.current = requestAnimationFrame(tick);
       } else {
-        for (let i = last + 1; i < spans.length; i++) spans[i]!.classList.add("tr-visible");
+        for (let i = last + 1; i < spans.length; i++) {
+          const span = spans[i]!;
+          if (span.isConnected) span.classList.add("tr-visible");
+        }
         setTimeout(() => {
           if (el.isConnected) {
             unwrapSpans(el);
