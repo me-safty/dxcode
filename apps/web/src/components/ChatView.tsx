@@ -1394,8 +1394,14 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
     threadError: activeThread?.error,
   });
   const hasInFlightTurn = Boolean(activeLatestTurn && !activeLatestTurn.completedAt);
+  const isSessionStarting = activeThread?.session?.orchestrationStatus === "starting";
   const isWorking =
-    phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint || hasInFlightTurn;
+    phase === "running" ||
+    isSendBusy ||
+    isConnecting ||
+    isRevertingCheckpoint ||
+    hasInFlightTurn ||
+    isSessionStarting;
   const isCompacting = activeThread?.session?.compacting === true;
   const isThreadHydrating = activeThread !== undefined && !isThreadHydrated(activeThread);
   const nowIso = new Date(nowTick).toISOString();
@@ -4903,6 +4909,7 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeWorkspaceRoot}
                 isSendBusy={isSendBusy}
+                isSessionStarting={isSessionStarting}
                 isPreparingWorktree={isPreparingWorktree}
                 isCompacting={isCompacting}
                 onSubagentSelect={onSubagentSelect}
