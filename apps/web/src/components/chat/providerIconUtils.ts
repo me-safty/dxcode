@@ -1,0 +1,55 @@
+import { type ProviderKind, PROVIDER_DISPLAY_NAMES } from "@marcode/contracts";
+import { ClaudeAI, Icon, OpenAI } from "../Icons";
+import { PROVIDER_OPTIONS } from "../../session-logic";
+
+export const PROVIDER_ICON_BY_PROVIDER: Record<ProviderKind, Icon> = {
+  codex: OpenAI,
+  claudeAgent: ClaudeAI,
+};
+
+export type AvailableProviderOption = {
+  value: ProviderKind;
+  label: string;
+  available: true;
+  pickerSidebarBadge?: "new" | "soon";
+};
+
+function isAvailableProviderOption(
+  option: (typeof PROVIDER_OPTIONS)[number],
+): option is AvailableProviderOption {
+  return option.available;
+}
+
+export const AVAILABLE_PROVIDER_OPTIONS: ReadonlyArray<AvailableProviderOption> =
+  PROVIDER_OPTIONS.filter(isAvailableProviderOption);
+
+export type ModelEsque = {
+  slug: string;
+  name: string;
+  shortName?: string | undefined;
+  subProvider?: string | undefined;
+};
+
+export function getProviderLabel(provider: ProviderKind, model: ModelEsque): string {
+  const providerLabel = PROVIDER_DISPLAY_NAMES[provider];
+  return model.subProvider ? `${providerLabel} · ${model.subProvider}` : providerLabel;
+}
+
+export function getDisplayModelName(
+  model: ModelEsque,
+  options?: { preferShortName?: boolean },
+): string {
+  if (options?.preferShortName && model.shortName) {
+    return model.shortName;
+  }
+  return model.name;
+}
+
+export function getTriggerDisplayModelName(model: ModelEsque): string {
+  return getDisplayModelName(model, { preferShortName: true });
+}
+
+export function getTriggerDisplayModelLabel(model: ModelEsque): string {
+  const title = getTriggerDisplayModelName(model);
+  return model.subProvider ? `${model.subProvider} · ${title}` : title;
+}

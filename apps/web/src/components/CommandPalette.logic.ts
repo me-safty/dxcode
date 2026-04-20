@@ -14,6 +14,8 @@ export interface CommandPaletteItem {
   readonly value: string;
   readonly searchTerms: ReadonlyArray<string>;
   readonly title: ReactNode;
+  readonly titleLeadingContent?: ReactNode;
+  readonly titleTrailingContent?: ReactNode;
   readonly description?: string;
   readonly timestamp?: string;
   readonly icon: ReactNode;
@@ -86,6 +88,8 @@ export function buildThreadActionItems(input: {
   icon: ReactNode;
   runThread: (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) => Promise<void>;
   limit?: number;
+  renderLeadingContent?: (thread: Pick<SidebarThreadSummary, "id">) => ReactNode;
+  renderTrailingContent?: (thread: Pick<SidebarThreadSummary, "id">) => ReactNode;
 }): CommandPaletteActionItem[] {
   const sortedThreads = sortThreads(
     input.threads.filter((thread) => thread.archivedAt === null),
@@ -108,18 +112,29 @@ export function buildThreadActionItems(input: {
       descriptionParts.push("Current thread");
     }
 
-    return {
-      kind: "action",
-      value: `thread:${thread.id}`,
-      searchTerms: [thread.title, projectTitle ?? "", thread.branch ?? ""],
-      title: thread.title,
-      description: descriptionParts.join(" · "),
-      timestamp: formatRelativeTimeLabel(thread.updatedAt ?? thread.createdAt),
-      icon: input.icon,
-      run: async () => {
-        await input.runThread(thread);
+    const leadingContent = input.renderLeadingContent?.(thread);
+    const trailingContent = input.renderTrailingContent?.(thread);
+
+    return Object.assign(
+      {
+        kind: "action" as const,
+        value: `thread:${thread.id}`,
+        searchTerms: [thread.title, projectTitle ?? "", thread.branch ?? ""],
+        title: thread.title,
+        description: descriptionParts.join(" · "),
+        timestamp: formatRelativeTimeLabel(
+          thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
+        ),
+        icon: input.icon,
       },
-    };
+      leadingContent ? { titleLeadingContent: leadingContent } : {},
+      trailingContent ? { titleTrailingContent: trailingContent } : {},
+      {
+        run: async () => {
+          await input.runThread(thread);
+        },
+      },
+    );
   });
 }
 

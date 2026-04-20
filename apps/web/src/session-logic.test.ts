@@ -2090,7 +2090,8 @@ describe("PROVIDER_OPTIONS", () => {
     expect(PROVIDER_OPTIONS).toEqual([
       { value: "claudeAgent", label: "Claude", available: true },
       { value: "codex", label: "Codex", available: true },
-      { value: "cursor", label: "Cursor", available: false },
+      { value: "opencode", label: "OpenCode", available: false, pickerSidebarBadge: "soon" },
+      { value: "cursor", label: "Cursor", available: false, pickerSidebarBadge: "soon" },
     ]);
     expect(claude).toEqual({
       value: "claudeAgent",
@@ -2101,6 +2102,7 @@ describe("PROVIDER_OPTIONS", () => {
       value: "cursor",
       label: "Cursor",
       available: false,
+      pickerSidebarBadge: "soon",
     });
   });
 });
