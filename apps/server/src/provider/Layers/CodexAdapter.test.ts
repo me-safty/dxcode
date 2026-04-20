@@ -30,7 +30,7 @@ import {
   type CodexSessionRuntimeSendTurnInput,
   type CodexSessionRuntimeShape,
   type CodexThreadSnapshot,
-} from "../codex/CodexSessionRuntime.ts";
+} from "./CodexSessionRuntime.ts";
 import { makeCodexAdapterLive } from "./CodexAdapter.ts";
 
 const asThreadId = (value: string): ThreadId => ThreadId.make(value);

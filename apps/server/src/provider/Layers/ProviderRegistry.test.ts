@@ -12,7 +12,7 @@ import * as PlatformError from "effect/PlatformError";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { deepMerge } from "@t3tools/shared/Struct";
 
-import { checkCodexProviderStatus } from "./CodexProvider.ts";
+import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
 import { checkClaudeProviderStatus, parseClaudeAuthStatusFromOutput } from "./ClaudeProvider.ts";
 import {
   haveProvidersChanged,
@@ -22,7 +22,6 @@ import {
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
-import type { CodexAppServerProviderSnapshot } from "../codexAppServer.ts";
 
 process.env.T3CODE_CURSOR_ENABLED = "1";
 

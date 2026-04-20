@@ -9,7 +9,7 @@ import * as CodexRpc from "effect-codex-app-server/rpc";
 import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
-} from "./CodexDeveloperInstructions.ts";
+} from "../CodexDeveloperInstructions.ts";
 import {
   buildTurnStartParams,
   isRecoverableThreadResumeError,
