@@ -14,7 +14,9 @@ export interface CommandPaletteItem {
   readonly value: string;
   readonly searchTerms: ReadonlyArray<string>;
   readonly title: ReactNode;
+  /** Optional content rendered inline before the title text. */
   readonly titleLeadingContent?: ReactNode;
+  /** Optional content rendered inline after the title text (before the timestamp). */
   readonly titleTrailingContent?: ReactNode;
   readonly description?: string;
   readonly timestamp?: string;
@@ -72,24 +74,26 @@ export function buildProjectActionItems(input: {
   }));
 }
 
-export function buildThreadActionItems(input: {
-  threads: ReadonlyArray<
-    Pick<
-      SidebarThreadSummary,
-      "archivedAt" | "branch" | "createdAt" | "environmentId" | "id" | "projectId" | "title"
-    > & {
-      updatedAt?: string | undefined;
-      latestUserMessageAt?: string | null;
-    }
-  >;
+export type BuildThreadActionItemsThread = Pick<
+  SidebarThreadSummary,
+  "archivedAt" | "branch" | "createdAt" | "environmentId" | "id" | "projectId" | "title"
+> & {
+  updatedAt?: string | undefined;
+  latestUserMessageAt?: string | null;
+};
+
+export function buildThreadActionItems<TThread extends BuildThreadActionItemsThread>(input: {
+  threads: ReadonlyArray<TThread>;
   activeThreadId?: Thread["id"];
   projectTitleById: ReadonlyMap<Project["id"], string>;
   sortOrder: SidebarThreadSortOrder;
   icon: ReactNode;
+  /** Optional content rendered inline before the title text per-thread. */
+  renderLeadingContent?: (thread: TThread) => ReactNode;
+  /** Optional content rendered inline after the title text per-thread. */
+  renderTrailingContent?: (thread: TThread) => ReactNode;
   runThread: (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) => Promise<void>;
   limit?: number;
-  renderLeadingContent?: (thread: Pick<SidebarThreadSummary, "id">) => ReactNode;
-  renderTrailingContent?: (thread: Pick<SidebarThreadSummary, "id">) => ReactNode;
 }): CommandPaletteActionItem[] {
   const sortedThreads = sortThreads(
     input.threads.filter((thread) => thread.archivedAt === null),
@@ -115,26 +119,22 @@ export function buildThreadActionItems(input: {
     const leadingContent = input.renderLeadingContent?.(thread);
     const trailingContent = input.renderTrailingContent?.(thread);
 
-    return Object.assign(
-      {
-        kind: "action" as const,
-        value: `thread:${thread.id}`,
-        searchTerms: [thread.title, projectTitle ?? "", thread.branch ?? ""],
-        title: thread.title,
-        description: descriptionParts.join(" · "),
-        timestamp: formatRelativeTimeLabel(
-          thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
-        ),
-        icon: input.icon,
+    return {
+      kind: "action",
+      value: `thread:${thread.id}`,
+      searchTerms: [thread.title, projectTitle ?? "", thread.branch ?? ""],
+      title: thread.title,
+      description: descriptionParts.join(" · "),
+      timestamp: formatRelativeTimeLabel(
+        thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
+      ),
+      icon: input.icon,
+      ...(leadingContent ? { titleLeadingContent: leadingContent } : {}),
+      ...(trailingContent ? { titleTrailingContent: trailingContent } : {}),
+      run: async () => {
+        await input.runThread(thread);
       },
-      leadingContent ? { titleLeadingContent: leadingContent } : {},
-      trailingContent ? { titleTrailingContent: trailingContent } : {},
-      {
-        run: async () => {
-          await input.runThread(thread);
-        },
-      },
-    );
+    };
   });
 }
 
