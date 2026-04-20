@@ -1410,32 +1410,6 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          title="Todo checklist in composer"
-          description="Show agent task checklists in the composer area."
-          resetAction={
-            settings.showTodosInComposer !== DEFAULT_UNIFIED_SETTINGS.showTodosInComposer ? (
-              <SettingResetButton
-                label="todo checklist"
-                onClick={() =>
-                  updateSettings({
-                    showTodosInComposer: DEFAULT_UNIFIED_SETTINGS.showTodosInComposer,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.showTodosInComposer}
-              onCheckedChange={(checked) =>
-                updateSettings({ showTodosInComposer: Boolean(checked) })
-              }
-              aria-label="Show todo checklist in composer"
-            />
-          }
-        />
-
-        <SettingsRow
           title="Text generation model"
           description="Configure the model used for generated commit messages, PR titles, and similar Git text."
           resetAction={

@@ -386,16 +386,15 @@ export function deriveActivePlanState(
   latestTurnId: TurnId | undefined,
 ): ActivePlanState | null {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  const candidates = ordered.filter((activity) => {
-    if (activity.kind !== "turn.plan.updated") {
-      return false;
-    }
-    if (!latestTurnId) {
-      return true;
-    }
-    return activity.turnId === latestTurnId;
-  });
-  const latest = candidates.at(-1);
+  const allPlanActivities = ordered.filter((activity) => activity.kind === "turn.plan.updated");
+  // Prefer plan from the current turn; fall back to the most recent plan from any turn
+  // so that TodoWrite tasks persist across follow-up messages.
+  const latest =
+    (latestTurnId
+      ? allPlanActivities.filter((activity) => activity.turnId === latestTurnId).at(-1)
+      : undefined) ??
+    allPlanActivities.at(-1) ??
+    null;
   if (!latest) {
     return null;
   }
@@ -502,54 +501,11 @@ export function hasActionableProposedPlan(
   return proposedPlan !== null && proposedPlan.implementedAt === null;
 }
 
-export interface TodoItem {
-  content: string;
-  activeForm: string;
-  status: "in_progress" | "completed" | "pending";
-}
-
-export function deriveTodoItems(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
-  latestTurnId: TurnId | undefined,
-): TodoItem[] {
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  const candidates = ordered.filter(
-    (activity) =>
-      (latestTurnId ? activity.turnId === latestTurnId : true) && isTodoWriteActivity(activity),
-  );
-  const latest = candidates.at(-1);
-  if (!latest) return [];
-
-  const payload = asRecord(latest.payload);
-  const data = asRecord(payload?.data);
-  const input = asRecord(data?.input);
-  const rawTodos = input?.todos;
-  if (!Array.isArray(rawTodos)) return [];
-
-  return rawTodos
-    .map((entry): TodoItem | null => {
-      const record = asRecord(entry);
-      if (!record) return null;
-      const content = asTrimmedString(record.content);
-      if (!content) return null;
-      const activeForm = asTrimmedString(record.activeForm) ?? content;
-      const status =
-        record.status === "in_progress" ||
-        record.status === "completed" ||
-        record.status === "pending"
-          ? record.status
-          : "pending";
-      return { content, activeForm, status };
-    })
-    .filter((item): item is TodoItem => item !== null);
-}
-
 export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
-  options?: { excludeTodoToolCalls?: boolean; isSessionRunning?: boolean },
+  options?: { isSessionRunning?: boolean },
 ): WorkLogEntry[] {
-  const excludeTodos = options?.excludeTodoToolCalls === true;
   const isSessionRunning = options?.isSessionRunning ?? false;
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
 
@@ -607,11 +563,11 @@ export function deriveWorkLogEntries(
     .filter((activity) => activity.summary !== "Checkpoint captured")
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .filter((activity) => !isSubagentToolActivity(activity))
+    .filter((activity) => !isTodoWriteToolActivity(activity))
     .filter((activity) => {
       const taskId = extractTaskId(activity);
       return !taskId || !nestedTaskIds.has(taskId);
     })
-    .filter((activity) => !excludeTodos || !isTodoWriteActivity(activity))
     .filter((activity) => !activity.kind.startsWith("setup-script."))
     .filter((activity) => !activity.kind.startsWith("approval."));
 
@@ -731,19 +687,18 @@ function isSubagentToolActivity(activity: OrchestrationThreadActivity): boolean 
   return payload?.itemType === "collab_agent_tool_call";
 }
 
-const TODO_WRITE_TOOL_PATTERN = /^todo\s*write$/i;
-
-function isTodoWriteActivity(activity: OrchestrationThreadActivity): boolean {
-  if (activity.kind !== "tool.completed" && activity.kind !== "tool.updated") {
+function isTodoWriteToolActivity(activity: OrchestrationThreadActivity): boolean {
+  if (
+    activity.kind !== "tool.started" &&
+    activity.kind !== "tool.updated" &&
+    activity.kind !== "tool.completed"
+  ) {
     return false;
   }
   const payload = asRecord(activity.payload);
   const data = asRecord(payload?.data);
-  const toolName = asTrimmedString(data?.toolName);
-  if (toolName && TODO_WRITE_TOOL_PATTERN.test(toolName)) return true;
-  const title = asTrimmedString(payload?.title);
-  if (title && TODO_WRITE_TOOL_PATTERN.test(title)) return true;
-  return false;
+  const toolName = typeof data?.toolName === "string" ? data.toolName : undefined;
+  return typeof toolName === "string" && toolName.toLowerCase().includes("todowrite");
 }
 
 interface TaskActivityGroup {
