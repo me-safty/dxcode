@@ -48,20 +48,18 @@ export interface OpenCodeServerConnection {
   readonly external: boolean;
 }
 
-export class OpenCodeRuntimeError extends Data.TaggedError("OpenCodeRuntimeError")<{
-  readonly operation:
-    | "runOpenCodeCommand"
-    | "startOpenCodeServerProcess"
-    | "connectToOpenCodeServer"
-    | "loadOpenCodeInventory";
+const OPENCODE_RUNTIME_ERROR_TAG = "OpenCodeRuntimeError";
+export class OpenCodeRuntimeError extends Data.TaggedError(OPENCODE_RUNTIME_ERROR_TAG)<{
+  readonly operation: string;
   readonly cause?: unknown;
   readonly detail: string;
-}> {}
-const isOpenCodeRuntimeError = (error: unknown): error is OpenCodeRuntimeError =>
-  P.isTagged(error, "OpenCodeRuntimeError");
+}> {
+  static readonly is = (u: unknown): u is OpenCodeRuntimeError =>
+    P.isTagged(u, OPENCODE_RUNTIME_ERROR_TAG);
+}
 
 export function openCodeRuntimeErrorDetail(cause: unknown): string {
-  if (isOpenCodeRuntimeError(cause)) return cause.detail;
+  if (OpenCodeRuntimeError.is(cause)) return cause.detail;
   if (cause instanceof Error && cause.message.trim().length > 0) return cause.message.trim();
   if (cause && typeof cause === "object") {
     // SDK v2 throws { response, request, error? } shapes — extract what's useful
@@ -76,6 +74,17 @@ export function openCodeRuntimeErrorDetail(cause: unknown): string {
   }
   return String(cause);
 }
+
+export const runOpenCodeSdk = <A>(
+  operation: string,
+  fn: () => Promise<A>,
+): Effect.Effect<A, OpenCodeRuntimeError> =>
+  Effect.tryPromise({
+    try: fn,
+    catch: (cause) =>
+      new OpenCodeRuntimeError({ operation, detail: openCodeRuntimeErrorDetail(cause), cause }),
+  }).pipe(Effect.withSpan(`opencode.${operation}`));
+
 export interface OpenCodeCommandResult {
   readonly stdout: string;
   readonly stderr: string;
@@ -252,7 +261,7 @@ function ensureRuntimeError(
   detail: string,
   cause: unknown,
 ): OpenCodeRuntimeError {
-  return isOpenCodeRuntimeError(cause)
+  return OpenCodeRuntimeError.is(cause)
     ? cause
     : new OpenCodeRuntimeError({ operation, detail, cause });
 }
@@ -419,7 +428,6 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
         return yield* new OpenCodeRuntimeError({
           operation: "startOpenCodeServerProcess",
           detail: `Timed out waiting for OpenCode server start after ${timeoutMs}ms.`,
-          cause: { timeoutMs },
         });
       }
 
@@ -472,55 +480,29 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
     });
 
   const loadProviders = (client: OpencodeClient) =>
-    Effect.tryPromise({
-      try: async () => client.provider.list(),
-      catch: (cause) =>
-        new OpenCodeRuntimeError({
-          operation: "loadOpenCodeInventory",
-          detail: `Failed to load OpenCode providers: ${openCodeRuntimeErrorDetail(cause)}`,
-          cause: cause,
-        }),
-    }).pipe(
-      Effect.filterMapOrFail((list) =>
-        list.data
-          ? Result.succeed(list.data)
-          : Result.fail(
-              new OpenCodeRuntimeError({
-                operation: "loadOpenCodeInventory",
-                detail: "OpenCode provider list was empty.",
-              }),
-            ),
+    runOpenCodeSdk("provider.list", () => client.provider.list()).pipe(
+      Effect.filterMapOrFail(
+        (list) =>
+          list.data
+            ? Result.succeed(list.data)
+            : Result.fail(
+                new OpenCodeRuntimeError({
+                  operation: "provider.list",
+                  detail: "OpenCode provider list was empty.",
+                }),
+              ),
+        (result) => result,
       ),
     );
 
   const loadAgents = (client: OpencodeClient) =>
-    Effect.tryPromise({
-      try: async () => client.app.agents(),
-      catch: (cause) =>
-        new OpenCodeRuntimeError({
-          operation: "loadOpenCodeInventory",
-          detail: `Failed to load OpenCode agents: ${openCodeRuntimeErrorDetail(cause)}`,
-          cause: cause,
-        }),
-    }).pipe(Effect.map((result) => result.data ?? []));
+    runOpenCodeSdk("app.agents", () => client.app.agents()).pipe(
+      Effect.map((result) => result.data ?? []),
+    );
 
   const loadOpenCodeInventory: OpenCodeRuntimeShape["loadOpenCodeInventory"] = (client) =>
     Effect.all([loadProviders(client), loadAgents(client)], { concurrency: "unbounded" }).pipe(
-      Effect.map(
-        ([providerList, agents]) =>
-          ({
-            providerList,
-            agents,
-          }) satisfies OpenCodeInventory,
-      ),
-      Effect.mapError(
-        (cause) =>
-          new OpenCodeRuntimeError({
-            operation: "loadOpenCodeInventory",
-            detail: `Failed to load OpenCode inventory: ${openCodeRuntimeErrorDetail(cause)}`,
-            cause: cause,
-          }),
-      ),
+      Effect.map(([providerList, agents]) => ({ providerList, agents })),
     );
 
   return {

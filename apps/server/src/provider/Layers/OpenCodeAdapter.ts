@@ -11,7 +11,7 @@ import {
   TurnId,
   type UserInputQuestion,
 } from "@t3tools/contracts";
-import { Cause, Effect, Exit, Layer, Queue, Ref, Schema, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Layer, Queue, Ref, Scope, Stream } from "effect";
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -29,9 +29,11 @@ import { OpenCodeAdapter, type OpenCodeAdapterShape } from "../Services/OpenCode
 import {
   buildOpenCodePermissionRules,
   OpenCodeRuntime,
+  OpenCodeRuntimeError,
   openCodeQuestionId,
   openCodeRuntimeErrorDetail,
   parseOpenCodeModelSlug,
+  runOpenCodeSdk,
   toOpenCodeFileParts,
   toOpenCodePermissionReply,
   toOpenCodeQuestionAnswers,
@@ -94,8 +96,33 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
-const isProviderAdapterProcessError = Schema.is(ProviderAdapterProcessError);
+/**
+ * Map a tagged OpenCodeRuntimeError produced by {@link runOpenCodeSdk} into
+ * the adapter-boundary `ProviderAdapterRequestError`. SDK-method-level call
+ * sites pipe through this in `Effect.mapError` so they never build the error
+ * shape by hand.
+ */
+const toRequestError = (cause: OpenCodeRuntimeError): ProviderAdapterRequestError =>
+  new ProviderAdapterRequestError({
+    provider: PROVIDER,
+    method: cause.operation,
+    detail: cause.detail,
+    cause: cause.cause,
+  });
+
+/**
+ * Map a `Cause.squash`-ed failure into a `ProviderAdapterProcessError`. The
+ * typed cause is usually an `OpenCodeRuntimeError` (from {@link runOpenCodeSdk}),
+ * in which case we preserve its `detail`; otherwise we fall back to
+ * {@link openCodeRuntimeErrorDetail} for unknown causes (defects, etc.).
+ */
+const toProcessError = (threadId: ThreadId, cause: unknown): ProviderAdapterProcessError =>
+  new ProviderAdapterProcessError({
+    provider: PROVIDER,
+    threadId,
+    detail: OpenCodeRuntimeError.is(cause) ? cause.detail : openCodeRuntimeErrorDetail(cause),
+    cause,
+  });
 
 function buildEventBase(input: {
   readonly threadId: ThreadId;
@@ -397,10 +424,9 @@ const stopOpenCodeContext = Effect.fn("stopOpenCodeContext")(function* (
   // Best-effort remote abort. The scope close below tears down the local
   // handles (event-pump fiber, server-exit fiber, event-subscribe fetch),
   // but we still want to tell OpenCode that this session is done.
-  yield* Effect.tryPromise({
-    try: () => context.client.session.abort({ sessionID: context.openCodeSessionId }),
-    catch: () => undefined,
-  }).pipe(Effect.ignore);
+  yield* runOpenCodeSdk("session.abort", () =>
+    context.client.session.abort({ sessionID: context.openCodeSessionId }),
+  ).pipe(Effect.ignore({ log: true }));
 
   // Closing the session scope interrupts every fiber forked into it and
   // runs each finalizer we registered — the `AbortController.abort()` call,
@@ -435,9 +461,12 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         Effect.gen(function* () {
           const contexts = [...sessions.values()];
           sessions.clear();
+          // `ignoreCause` swallows both typed failures (none here) and defects
+          // from throwing scope finalizers so a sibling's death can't interrupt
+          // the remaining cleanups.
           yield* Effect.forEach(
             contexts,
-            (context) => Effect.ignore(stopOpenCodeContext(context)),
+            (context) => Effect.ignoreCause(stopOpenCodeContext(context)),
             { concurrency: "unbounded", discard: true },
           );
         }),
@@ -882,24 +911,23 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
 
         // Fibers forked into `context.sessionScope` are interrupted
         // automatically when the scope closes — no bookkeeping required.
-        yield* Effect.tryPromise({
-          try: () =>
+        yield* Effect.flatMap(
+          runOpenCodeSdk("event.subscribe", () =>
             context.client.event.subscribe(undefined, {
               signal: eventsAbortController.signal,
             }),
-          catch: (cause) =>
-            new ProviderAdapterProcessError({
-              provider: PROVIDER,
-              threadId: context.session.threadId,
-              detail: openCodeRuntimeErrorDetail(cause),
-              cause,
-            }),
-        }).pipe(
-          Effect.flatMap((subscription) =>
-            Stream.fromAsyncIterable(subscription.stream, (cause) =>
-              cause instanceof Error ? cause : new Error("OpenCode event stream failed."),
-            ).pipe(Stream.runForEach((event) => handleSubscribedEvent(context, event))),
           ),
+          (subscription) =>
+            Stream.fromAsyncIterable(
+              subscription.stream,
+              (cause) =>
+                new OpenCodeRuntimeError({
+                  operation: "event.subscribe",
+                  detail: openCodeRuntimeErrorDetail(cause),
+                  cause,
+                }),
+            ).pipe(Stream.runForEach((event) => handleSubscribedEvent(context, event))),
+        ).pipe(
           Effect.exit,
           Effect.flatMap((exit) =>
             Effect.gen(function* () {
@@ -909,10 +937,9 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                 return;
               }
               if (Exit.isFailure(exit)) {
-                const failure = Cause.squash(exit.cause);
                 yield* emitUnexpectedExit(
                   context,
-                  failure instanceof Error ? failure.message : "OpenCode event stream failed.",
+                  openCodeRuntimeErrorDetail(Cause.squash(exit.cause)),
                 );
               }
             }),
@@ -957,17 +984,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           const directory = input.cwd ?? serverConfig.cwd;
           const existing = sessions.get(input.threadId);
           if (existing) {
-            yield* stopOpenCodeContext(existing).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ProviderAdapterProcessError({
-                    provider: PROVIDER,
-                    threadId: input.threadId,
-                    detail: "Failed to stop existing OpenCode session.",
-                    cause,
-                  }),
-              ),
-            );
+            yield* stopOpenCodeContext(existing);
             sessions.delete(input.threadId);
           }
 
@@ -987,39 +1004,24 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                   directory,
                   ...(server.external && serverPassword ? { serverPassword } : {}),
                 });
-                const openCodeSession = yield* Effect.tryPromise({
-                  try: () =>
-                    client.session.create({
-                      title: `T3 Code ${input.threadId}`,
-                      permission: buildOpenCodePermissionRules(input.runtimeMode),
-                    }),
-                  catch: (cause) =>
-                    new ProviderAdapterProcessError({
-                      provider: PROVIDER,
-                      threadId: input.threadId,
-                      detail: openCodeRuntimeErrorDetail(cause),
-                      cause,
-                    }),
-                });
+                const openCodeSession = yield* runOpenCodeSdk("session.create", () =>
+                  client.session.create({
+                    title: `T3 Code ${input.threadId}`,
+                    permission: buildOpenCodePermissionRules(input.runtimeMode),
+                  }),
+                );
                 if (!openCodeSession.data) {
-                  return yield* new ProviderAdapterProcessError({
-                    provider: PROVIDER,
-                    threadId: input.threadId,
+                  return yield* new OpenCodeRuntimeError({
+                    operation: "session.create",
                     detail: "OpenCode session.create returned no session payload.",
                   });
                 }
                 return { sessionScope, server, client, openCodeSession: openCodeSession.data };
               }).pipe(Effect.provideService(Scope.Scope, sessionScope)),
             );
-            if (startedExit._tag === "Failure") {
+            if (Exit.isFailure(startedExit)) {
               yield* Scope.close(sessionScope, Exit.void).pipe(Effect.ignore);
-              const failure = Cause.squash(startedExit.cause);
-              return yield* new ProviderAdapterProcessError({
-                provider: PROVIDER,
-                threadId: input.threadId,
-                detail: openCodeRuntimeErrorDetail(failure),
-                cause: startedExit.cause,
-              });
+              return yield* toProcessError(input.threadId, Cause.squash(startedExit.cause));
             }
             return startedExit.value;
           });
@@ -1030,10 +1032,9 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           if (raceWinner) {
             // Another call won the race – clean up the session we just created
             // (including the remote SDK session) and return the existing one.
-            yield* Effect.tryPromise({
-              try: () => started.client.session.abort({ sessionID: started.openCodeSession.id }),
-              catch: () => undefined,
-            }).pipe(Effect.ignore);
+            yield* runOpenCodeSdk("session.abort", () =>
+              started.client.session.abort({ sessionID: started.openCodeSession.id }),
+            ).pipe(Effect.ignore);
             yield* Scope.close(started.sessionScope, Exit.void).pipe(Effect.ignore);
             return raceWinner.session;
           }
@@ -1153,59 +1154,44 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           },
         });
 
-        const promptExit = yield* Effect.exit(
-          Effect.tryPromise({
-            try: async () => {
-              await context.client.session.promptAsync({
-                sessionID: context.openCodeSessionId,
-                model: parsedModel,
-                ...(context.activeAgent ? { agent: context.activeAgent } : {}),
-                ...(context.activeVariant ? { variant: context.activeVariant } : {}),
-                parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
-              });
-            },
-            catch: (cause) =>
-              new ProviderAdapterRequestError({
-                provider: PROVIDER,
-                method: "session.promptAsync",
-                detail: cause instanceof Error ? cause.message : "Failed to send OpenCode turn.",
-                cause,
-              }),
+        yield* runOpenCodeSdk("session.promptAsync", () =>
+          context.client.session.promptAsync({
+            sessionID: context.openCodeSessionId,
+            model: parsedModel,
+            ...(context.activeAgent ? { agent: context.activeAgent } : {}),
+            ...(context.activeVariant ? { variant: context.activeVariant } : {}),
+            parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
           }),
-        );
-        if (promptExit._tag === "Failure") {
-          const failure = Cause.squash(promptExit.cause);
-          const requestError = isProviderAdapterRequestError(failure)
-            ? failure
-            : new ProviderAdapterRequestError({
-                provider: PROVIDER,
-                method: "session.promptAsync",
-                detail:
-                  failure instanceof Error ? failure.message : "Failed to send OpenCode turn.",
-                cause: failure,
+        ).pipe(
+          Effect.mapError(toRequestError),
+          // On failure: clear active-turn state, flip the session back to ready
+          // with lastError set, emit turn.aborted, then let the typed error
+          // propagate. We don't need to rebuild the error here — `toRequestError`
+          // already produced the right shape.
+          Effect.tapError((requestError) =>
+            Effect.gen(function* () {
+              context.activeTurnId = undefined;
+              context.activeAgent = undefined;
+              context.activeVariant = undefined;
+              updateProviderSession(
+                context,
+                {
+                  status: "ready",
+                  model: modelSelection?.model ?? context.session.model,
+                  lastError: requestError.detail,
+                },
+                { clearActiveTurnId: true },
+              );
+              yield* emit({
+                ...buildEventBase({ threadId: input.threadId, turnId }),
+                type: "turn.aborted",
+                payload: {
+                  reason: requestError.detail,
+                },
               });
-          const failureMessage = requestError.detail;
-          context.activeTurnId = undefined;
-          context.activeAgent = undefined;
-          context.activeVariant = undefined;
-          updateProviderSession(
-            context,
-            {
-              status: "ready",
-              model: modelSelection?.model ?? context.session.model,
-              lastError: failureMessage,
-            },
-            { clearActiveTurnId: true },
-          );
-          yield* emit({
-            ...buildEventBase({ threadId: input.threadId, turnId }),
-            type: "turn.aborted",
-            payload: {
-              reason: failureMessage,
-            },
-          });
-          return yield* requestError;
-        }
+            }),
+          ),
+        );
 
         return {
           threadId: input.threadId,
@@ -1216,16 +1202,9 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
       const interruptTurn: OpenCodeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
         function* (threadId, turnId) {
           const context = ensureSessionContext(sessions, threadId);
-          yield* Effect.tryPromise({
-            try: () => context.client.session.abort({ sessionID: context.openCodeSessionId }),
-            catch: (cause) =>
-              new ProviderAdapterRequestError({
-                provider: PROVIDER,
-                method: "session.abort",
-                detail: cause instanceof Error ? cause.message : "Failed to abort OpenCode turn.",
-                cause,
-              }),
-          });
+          yield* runOpenCodeSdk("session.abort", () =>
+            context.client.session.abort({ sessionID: context.openCodeSessionId }),
+          ).pipe(Effect.mapError(toRequestError));
           if (turnId ?? context.activeTurnId) {
             yield* emit({
               ...buildEventBase({ threadId, turnId: turnId ?? context.activeTurnId }),
@@ -1250,23 +1229,12 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           });
         }
 
-        yield* Effect.tryPromise({
-          try: () =>
-            context.client.permission.reply({
-              requestID: requestId,
-              reply: toOpenCodePermissionReply(decision),
-            }),
-          catch: (cause) =>
-            new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method: "permission.reply",
-              detail:
-                cause instanceof Error
-                  ? cause.message
-                  : "Failed to submit OpenCode permission reply.",
-              cause,
-            }),
-        });
+        yield* runOpenCodeSdk("permission.reply", () =>
+          context.client.permission.reply({
+            requestID: requestId,
+            reply: toOpenCodePermissionReply(decision),
+          }),
+        ).pipe(Effect.mapError(toRequestError));
       });
 
       const respondToUserInput: OpenCodeAdapterShape["respondToUserInput"] = Effect.fn(
@@ -1282,20 +1250,12 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           });
         }
 
-        yield* Effect.tryPromise({
-          try: () =>
-            context.client.question.reply({
-              requestID: requestId,
-              answers: toOpenCodeQuestionAnswers(request, answers),
-            }),
-          catch: (cause) =>
-            new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method: "question.reply",
-              detail: cause instanceof Error ? cause.message : "Failed to submit OpenCode answers.",
-              cause,
-            }),
-        });
+        yield* runOpenCodeSdk("question.reply", () =>
+          context.client.question.reply({
+            requestID: requestId,
+            answers: toOpenCodeQuestionAnswers(request, answers),
+          }),
+        ).pipe(Effect.mapError(toRequestError));
       });
 
       const stopSession: OpenCodeAdapterShape["stopSession"] = Effect.fn("stopSession")(
@@ -1324,16 +1284,9 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
       const readThread: OpenCodeAdapterShape["readThread"] = Effect.fn("readThread")(
         function* (threadId) {
           const context = ensureSessionContext(sessions, threadId);
-          const messages = yield* Effect.tryPromise({
-            try: () => context.client.session.messages({ sessionID: context.openCodeSessionId }),
-            catch: (cause) =>
-              new ProviderAdapterRequestError({
-                provider: PROVIDER,
-                method: "session.messages",
-                detail: cause instanceof Error ? cause.message : "Failed to read OpenCode thread.",
-                cause,
-              }),
-          });
+          const messages = yield* runOpenCodeSdk("session.messages", () =>
+            context.client.session.messages({ sessionID: context.openCodeSessionId }),
+          ).pipe(Effect.mapError(toRequestError));
 
           const turns = (messages.data ?? [])
             .filter((entry) => entry.info.role === "assistant")
@@ -1352,37 +1305,21 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
       const rollbackThread: OpenCodeAdapterShape["rollbackThread"] = Effect.fn("rollbackThread")(
         function* (threadId, numTurns) {
           const context = ensureSessionContext(sessions, threadId);
-          const messages = yield* Effect.tryPromise({
-            try: () => context.client.session.messages({ sessionID: context.openCodeSessionId }),
-            catch: (cause) =>
-              new ProviderAdapterRequestError({
-                provider: PROVIDER,
-                method: "session.messages",
-                detail:
-                  cause instanceof Error ? cause.message : "Failed to inspect OpenCode thread.",
-                cause,
-              }),
-          });
+          const messages = yield* runOpenCodeSdk("session.messages", () =>
+            context.client.session.messages({ sessionID: context.openCodeSessionId }),
+          ).pipe(Effect.mapError(toRequestError));
 
           const assistantMessages = (messages.data ?? []).filter(
             (entry) => entry.info.role === "assistant",
           );
           const targetIndex = assistantMessages.length - numTurns - 1;
           const target = targetIndex >= 0 ? assistantMessages[targetIndex] : null;
-          yield* Effect.tryPromise({
-            try: () =>
-              context.client.session.revert({
-                sessionID: context.openCodeSessionId,
-                ...(target ? { messageID: target.info.id } : {}),
-              }),
-            catch: (cause) =>
-              new ProviderAdapterRequestError({
-                provider: PROVIDER,
-                method: "session.revert",
-                detail: cause instanceof Error ? cause.message : "Failed to revert OpenCode turn.",
-                cause,
-              }),
-          });
+          yield* runOpenCodeSdk("session.revert", () =>
+            context.client.session.revert({
+              sessionID: context.openCodeSessionId,
+              ...(target ? { messageID: target.info.id } : {}),
+            }),
+          ).pipe(Effect.mapError(toRequestError));
 
           return yield* readThread(threadId);
         },
@@ -1392,42 +1329,16 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         Effect.gen(function* () {
           const contexts = [...sessions.values()];
           sessions.clear();
-          const exits = yield* Effect.forEach(
+          // `stopOpenCodeContext` is typed as never-failing — SDK aborts are
+          // already `Effect.ignore`'d inside it. `ignoreCause` here also
+          // swallows defects from throwing finalizers so one bad close can't
+          // interrupt the sibling fibers. Same pattern as the layer finalizer.
+          yield* Effect.forEach(
             contexts,
-            (context) => Effect.exit(stopOpenCodeContext(context)),
-            { concurrency: "unbounded" },
+            (context) => Effect.ignoreCause(stopOpenCodeContext(context)),
+            { concurrency: "unbounded", discard: true },
           );
-          const failures: Array<Error> = [];
-          for (const exit of exits) {
-            if (Exit.isFailure(exit)) {
-              const failure = Cause.squash(exit.cause);
-              failures.push(
-                failure instanceof Error
-                  ? failure
-                  : new Error("Failed to stop an OpenCode session."),
-              );
-            }
-          }
-          if (failures.length === 1) {
-            return yield* Effect.fail(failures[0]!);
-          }
-          if (failures.length > 1) {
-            return yield* Effect.fail(
-              new AggregateError(failures, `Failed to stop ${failures.length} OpenCode sessions.`),
-            );
-          }
-        }).pipe(
-          Effect.mapError(
-            (cause) =>
-              new ProviderAdapterProcessError({
-                provider: PROVIDER,
-                threadId: "*",
-                detail:
-                  cause instanceof Error ? cause.message : "Failed to stop OpenCode sessions.",
-                cause,
-              }),
-          ),
-        );
+        });
 
       return {
         provider: PROVIDER,
