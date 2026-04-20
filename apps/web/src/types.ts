@@ -140,7 +140,10 @@ export interface ThreadTurnState {
 }
 
 export interface SidebarAgentCommandStatus {
-  readonly label: "Agent local URL detected" | "Agent ran command";
+  // `deriveSidebarAgentCommandStatus` only emits a status when at least one
+  // localhost URL was detected, so the label is always this constant. Kept as
+  // a literal type (not a free string) so callers can branch on it safely.
+  readonly label: "Agent local URL detected";
   readonly createdAt: string;
   readonly hasLocalUrl: boolean;
   readonly urls: ReadonlyArray<LocalhostUrlCandidate>;

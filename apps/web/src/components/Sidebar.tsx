@@ -468,7 +468,7 @@ function AgentCommandStatusDialog({
           </div>
           <div className="min-w-0 flex-1">
             <DialogTitle className="font-semibold text-[15px] text-foreground leading-tight tracking-tight">
-              {isRunning ? "Server running" : (status?.label ?? "Agent ran command")}
+              {isRunning ? "Server running" : "Agent local URL detected"}
             </DialogTitle>
             <DialogDescription className="mt-0.5 text-[11.5px] text-muted-foreground leading-snug">
               {isRunning

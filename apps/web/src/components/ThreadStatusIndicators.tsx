@@ -102,13 +102,14 @@ export function AgentCommandStatusIcon({
   }
 
   const hasLocalUrl = status?.hasLocalUrl === true && Boolean(status.primaryUrl);
+  // `status` is only set when `deriveSidebarAgentCommandStatus` detected a
+  // URL, so when `!isRunning` we always have `hasLocalUrl`. The `"Server
+  // running"` branch covers the live-process case without a detected URL.
   const label = isRunning
     ? hasLocalUrl
       ? "Server running — local URL detected"
       : "Server running"
-    : hasLocalUrl
-      ? "Agent local URL detected"
-      : "Agent ran command";
+    : "Agent local URL detected";
 
   const isEmerald = isRunning || hasLocalUrl;
 
