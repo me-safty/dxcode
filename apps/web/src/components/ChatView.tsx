@@ -1404,6 +1404,7 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
     threadError: activeThread?.error,
   });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const isCompacting = activeThread?.session?.compacting === true;
   const isThreadHydrating = activeThread !== undefined && !isThreadHydrated(activeThread);
   const nowIso = new Date(nowTick).toISOString();
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
@@ -4901,6 +4902,7 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
                 workspaceRoot={activeWorkspaceRoot}
                 isSendBusy={isSendBusy}
                 isPreparingWorktree={isPreparingWorktree}
+                isCompacting={isCompacting}
                 onSubagentSelect={onSubagentSelect}
                 pendingApprovals={pendingApprovals}
                 editingUserMessageId={editingUserMessageId}
