@@ -5171,6 +5171,8 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
                       >
                         <ComposerAttachmentsPopover
                           threadId={activeThread.id}
+                          environmentId={activeThreadEnvironmentId ?? null}
+                          projectCwd={activeProjectCwd}
                           additionalDirectories={activeThread.additionalDirectories}
                           onLocalDirectoriesChange={
                             isLocalDraftThread ? setDraftAdditionalDirectories : undefined

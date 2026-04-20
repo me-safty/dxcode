@@ -40,6 +40,7 @@ export type ProjectBrowseDirectoriesInput = typeof ProjectBrowseDirectoriesInput
 export const ProjectBrowseDirectoriesResult = Schema.Struct({
   entries: Schema.Array(ProjectEntry),
   truncated: Schema.Boolean,
+  resolvedParent: TrimmedNonEmptyString,
 });
 export type ProjectBrowseDirectoriesResult = typeof ProjectBrowseDirectoriesResult.Type;
 
