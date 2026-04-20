@@ -993,9 +993,11 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                     }),
                 });
                 if (!openCodeSession.data) {
-                  return yield* Effect.fail(
-                    new Error("OpenCode session.create returned no session payload."),
-                  );
+                  return yield* new ProviderAdapterProcessError({
+                    provider: PROVIDER,
+                    threadId: input.threadId,
+                    detail: "OpenCode session.create returned no session payload.",
+                  });
                 }
                 return { sessionScope, server, client, openCodeSession: openCodeSession.data };
               }).pipe(Effect.provideService(Scope.Scope, sessionScope)),
@@ -1003,9 +1005,12 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
             if (startedExit._tag === "Failure") {
               yield* Scope.close(sessionScope, Exit.void).pipe(Effect.ignore);
               const failure = Cause.squash(startedExit.cause);
-              return yield* Effect.fail(
-                failure instanceof Error ? failure : new Error("Failed to start OpenCode session."),
-              );
+              return yield* new ProviderAdapterProcessError({
+                provider: PROVIDER,
+                threadId: input.threadId,
+                detail: openCodeRuntimeErrorDetail(failure),
+                cause: startedExit.cause,
+              });
             }
             return startedExit.value;
           }).pipe(
@@ -1015,8 +1020,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                 : new ProviderAdapterProcessError({
                     provider: PROVIDER,
                     threadId: input.threadId,
-                    detail:
-                      cause instanceof Error ? cause.message : "Failed to start OpenCode session.",
+                    detail: openCodeRuntimeErrorDetail(cause),
                     cause,
                   }),
             ),

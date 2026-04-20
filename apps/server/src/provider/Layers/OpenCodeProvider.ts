@@ -15,7 +15,11 @@ import {
   providerModelsFromSettings,
 } from "../providerSnapshot.ts";
 import { OpenCodeProvider } from "../Services/OpenCodeProvider.ts";
-import { OpenCodeRuntime, openCodeRuntimeErrorDetail } from "../opencodeRuntime.ts";
+import {
+  OpenCodeRuntime,
+  openCodeRuntimeErrorDetail,
+  type OpenCodeInventory,
+} from "../opencodeRuntime.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 
 const PROVIDER = "opencode" as const;
@@ -122,11 +126,6 @@ function formatOpenCodeProbeError(input: {
       ? `Failed to execute OpenCode CLI health check: ${detail}`
       : "Failed to execute OpenCode CLI health check.",
   };
-}
-
-export interface OpenCodeInventory {
-  readonly providerList: ProviderListResponse;
-  readonly agents: ReadonlyArray<Agent>;
 }
 
 function titleCaseSlug(value: string): string {

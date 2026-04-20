@@ -54,7 +54,7 @@ export class OpenCodeRuntimeError extends Data.TaggedError("OpenCodeRuntimeError
     | "startOpenCodeServerProcess"
     | "connectToOpenCodeServer"
     | "loadOpenCodeInventory";
-  readonly cause: unknown;
+  readonly cause?: unknown;
   readonly detail: string;
 }> {}
 const isOpenCodeRuntimeError = (error: unknown): error is OpenCodeRuntimeError =>
@@ -278,7 +278,6 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
         return yield* new OpenCodeRuntimeError({
           operation: "runOpenCodeCommand",
           detail: `spawn ${input.binaryPath} ENOENT`,
-          cause: new Error(`spawn ${input.binaryPath} ENOENT`),
         });
       }
       return {
@@ -489,7 +488,6 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
               new OpenCodeRuntimeError({
                 operation: "loadOpenCodeInventory",
                 detail: "OpenCode provider list was empty.",
-                cause: new Error("OpenCode provider list was empty."),
               }),
             ),
       ),
