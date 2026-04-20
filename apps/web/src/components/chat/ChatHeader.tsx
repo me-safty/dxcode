@@ -37,6 +37,7 @@ interface ChatHeaderProps {
   diffOpen: boolean;
   hasPlan: boolean;
   planSidebarOpen: boolean;
+  planSidebarLabel: string;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
@@ -66,6 +67,7 @@ export const ChatHeader = memo(function ChatHeader({
   diffOpen,
   hasPlan,
   planSidebarOpen,
+  planSidebarLabel,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
@@ -185,7 +187,7 @@ export const ChatHeader = memo(function ChatHeader({
                 className="shrink-0"
                 pressed={planSidebarOpen}
                 onPressedChange={onTogglePlanSidebar}
-                aria-label="Toggle plan sidebar"
+                aria-label={`Toggle ${planSidebarLabel.toLowerCase()} sidebar`}
                 variant="outline"
                 size="xs"
                 disabled={!hasPlan}
@@ -196,10 +198,10 @@ export const ChatHeader = memo(function ChatHeader({
           />
           <TooltipPopup side="bottom">
             {!hasPlan
-              ? "No plan available"
+              ? `No ${planSidebarLabel.toLowerCase()} available`
               : planSidebarOpen
-                ? "Hide plan sidebar"
-                : "Show plan sidebar"}
+                ? `Hide ${planSidebarLabel.toLowerCase()} sidebar`
+                : `Show ${planSidebarLabel.toLowerCase()} sidebar`}
           </TooltipPopup>
         </Tooltip>
       </div>

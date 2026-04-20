@@ -75,7 +75,6 @@ import {
   findSidebarProposedPlan,
   findLatestProposedPlan,
   deriveWorkLogEntries,
-  deriveTodoItems,
   hasActionableProposedPlan,
   hasToolActivityForTurn,
   isLatestTurnSettled,
@@ -237,7 +236,6 @@ import { ComposerPrimaryActions } from "./chat/ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./chat/ComposerPlanFollowUpBanner";
-import { ComposerTodoListPanel } from "./chat/ComposerActiveTasksPanel";
 import { SubagentDetailDrawer } from "./chat/SubagentDetailDrawer";
 import {
   getComposerProviderState,
@@ -748,7 +746,6 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
     (store) => store.setStickyModelSelection,
   );
   const timestampFormat = settings.timestampFormat;
-  const showTodosInComposer = settings.showTodosInComposer;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const rawSearch = useSearch({
@@ -1296,20 +1293,12 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const timelineThreadActivities = timelineThread?.activities ?? EMPTY_ACTIVITIES;
-  const activeTodoItems = useMemo(
-    () =>
-      showTodosInComposer
-        ? deriveTodoItems(threadActivities, activeLatestTurn?.turnId ?? undefined)
-        : [],
-    [showTodosInComposer, threadActivities, activeLatestTurn?.turnId],
-  );
   const workLogEntries = useMemo(
     () =>
       deriveWorkLogEntries(timelineThreadActivities, timelineLatestTurn?.turnId ?? undefined, {
-        excludeTodoToolCalls: showTodosInComposer,
         isSessionRunning: phase === "running",
       }),
-    [timelineLatestTurn?.turnId, timelineThreadActivities, showTodosInComposer, phase],
+    [timelineLatestTurn?.turnId, timelineThreadActivities, phase],
   );
   const timelineLatestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(timelineThreadActivities, timelineLatestTurn?.turnId),
@@ -1383,6 +1372,7 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
+  const planSidebarLabel = sidebarProposedPlan || interactionMode === "plan" ? "Plan" : "Tasks";
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
@@ -1403,7 +1393,9 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError: activeThread?.error,
   });
-  const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const hasInFlightTurn = Boolean(activeLatestTurn && !activeLatestTurn.completedAt);
+  const isWorking =
+    phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint || hasInFlightTurn;
   const isThreadHydrating = activeThread !== undefined && !isThreadHydrated(activeThread);
   const nowIso = new Date(nowTick).toISOString();
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
@@ -1415,8 +1407,7 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
   const hasComposerHeader =
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
-    (showPlanFollowUpPrompt && activeProposedPlan !== null) ||
-    activeTodoItems.length > 0;
+    (showPlanFollowUpPrompt && activeProposedPlan !== null);
   const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
   const composerFooterActionLayoutKey = useMemo(() => {
     if (activePendingProgress) {
@@ -2352,10 +2343,8 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
   const togglePlanSidebar = useCallback(() => {
     setPlanSidebarOpen((open) => {
       if (open) {
-        const turnKey = activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? null;
-        if (turnKey) {
-          planSidebarDismissedForTurnRef.current = turnKey;
-        }
+        planSidebarDismissedForTurnRef.current =
+          activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
       } else {
         planSidebarDismissedForTurnRef.current = null;
       }
@@ -2737,6 +2726,18 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
     }
     planSidebarDismissedForTurnRef.current = null;
   }, [activeThread?.id]);
+
+  // Auto-open the plan sidebar when plan/todo steps arrive for the current turn.
+  // Don't auto-open for plans carried over from a previous turn (the user can open manually).
+  useEffect(() => {
+    if (!activePlan) return;
+    if (planSidebarOpen) return;
+    const latestTurnId = activeLatestTurn?.turnId ?? null;
+    if (latestTurnId && activePlan.turnId !== latestTurnId) return;
+    const turnKey = activePlan.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
+    if (planSidebarDismissedForTurnRef.current === turnKey) return;
+    setPlanSidebarOpen(true);
+  }, [activePlan, activeLatestTurn?.turnId, planSidebarOpen, sidebarProposedPlan?.turnId]);
 
   useEffect(() => {
     if (!composerMenuOpen) {
@@ -4837,6 +4838,7 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
           diffOpen={diffOpen}
           hasPlan={Boolean(activePlan || sidebarProposedPlan)}
           planSidebarOpen={planSidebarOpen}
+          planSidebarLabel={planSidebarLabel}
           onRunProjectScript={runProjectScript}
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
@@ -4983,10 +4985,6 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
                         key={activeProposedPlan.id}
                         planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
                       />
-                    </div>
-                  ) : activeTodoItems.length > 0 ? (
-                    <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                      <ComposerTodoListPanel items={activeTodoItems} />
                     </div>
                   ) : null}
                   <div
@@ -5156,7 +5154,7 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
                       data-chat-composer-footer="true"
                       data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
                       className={cn(
-                        "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-hidden px-2.5 pb-2.5 sm:px-3 sm:pb-3",
+                        "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-2.5 pb-2.5 sm:px-3 sm:pb-3",
                         isComposerFooterCompact ? "gap-1.5" : "gap-2 sm:gap-0",
                       )}
                     >
@@ -5207,6 +5205,7 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
                             activePlan={activePlan !== null}
                             interactionMode={interactionMode}
                             planSidebarOpen={planSidebarOpen}
+                            planSidebarLabel={planSidebarLabel}
                             traitsMenuContent={providerTraitsMenuContent}
                             onToggleInteractionMode={toggleInteractionMode}
                             onTogglePlanSidebar={togglePlanSidebar}
@@ -5337,16 +5336,15 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
             environmentId={activeThreadEnvironmentId!}
             activePlan={activePlan}
             activeProposedPlan={sidebarProposedPlan}
+            label={planSidebarLabel}
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeWorkspaceRoot}
             timestampFormat={timestampFormat}
             onClose={() => {
               setPlanSidebarOpen(false);
               // Track that the user explicitly dismissed for this turn so auto-open won't fight them.
-              const turnKey = activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? null;
-              if (turnKey) {
-                planSidebarDismissedForTurnRef.current = turnKey;
-              }
+              planSidebarDismissedForTurnRef.current =
+                activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
             }}
           />
         ) : null}

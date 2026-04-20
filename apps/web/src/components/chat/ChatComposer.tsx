@@ -163,10 +163,12 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   runtimeMode: RuntimeMode;
   showPlanToggle: boolean;
   planSidebarOpen: boolean;
+  planSidebarLabel: string;
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   onTogglePlanSidebar: () => void;
 }) {
+  const sidebarLabelLower = props.planSidebarLabel.toLowerCase();
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
   const RuntimeModeIcon = runtimeModeOption.icon;
 
@@ -243,10 +245,14 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             size="sm"
             type="button"
             onClick={props.onTogglePlanSidebar}
-            title={props.planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
+            title={
+              props.planSidebarOpen
+                ? `Hide ${sidebarLabelLower} sidebar`
+                : `Show ${sidebarLabelLower} sidebar`
+            }
           >
             <ListTodoIcon />
-            <span className="sr-only sm:not-sr-only">Plan</span>
+            <span className="sr-only sm:not-sr-only">{props.planSidebarLabel}</span>
           </Button>
         </>
       ) : null}
@@ -381,6 +387,7 @@ export interface ChatComposerProps {
   activePlan: { turnId?: TurnId } | null;
   sidebarProposedPlan: { turnId?: TurnId } | null;
   planSidebarOpen: boolean;
+  planSidebarLabel: string;
 
   // Mode
   runtimeMode: RuntimeMode;
@@ -475,6 +482,7 @@ export const ChatComposer = memo(
       activePlan,
       sidebarProposedPlan,
       planSidebarOpen,
+      planSidebarLabel,
       runtimeMode,
       interactionMode,
       lockedProvider,
@@ -1927,6 +1935,7 @@ export const ChatComposer = memo(
                       activePlan={showPlanSidebarToggle}
                       interactionMode={interactionMode}
                       planSidebarOpen={planSidebarOpen}
+                      planSidebarLabel={planSidebarLabel}
                       traitsMenuContent={providerTraitsMenuContent}
                       onToggleInteractionMode={toggleInteractionMode}
                       onTogglePlanSidebar={togglePlanSidebar}
@@ -1947,6 +1956,7 @@ export const ChatComposer = memo(
                         runtimeMode={runtimeMode}
                         showPlanToggle={showPlanSidebarToggle}
                         planSidebarOpen={planSidebarOpen}
+                        planSidebarLabel={planSidebarLabel}
                         onToggleInteractionMode={toggleInteractionMode}
                         onRuntimeModeChange={handleRuntimeModeChange}
                         onTogglePlanSidebar={togglePlanSidebar}

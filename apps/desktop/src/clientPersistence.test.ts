@@ -55,7 +55,6 @@ const clientSettings: ClientSettings = {
   sidebarProjectSortOrder: "manual",
   sidebarThreadSortOrder: "created_at",
   timestampFormat: "24-hour",
-  showTodosInComposer: true,
   turnNotificationMode: "off",
   turnNotificationSoundId: "default",
   turnNotificationCustomSounds: [],
