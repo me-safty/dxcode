@@ -45,10 +45,7 @@ describe("parseFolderFromArgv", () => {
 
   it("ignores --t3-project-path= with an empty value and falls back to positional", () => {
     expect(
-      parseFolderFromArgv(
-        [electronBinary, "--t3-project-path=", "/tmp/project-sample"],
-        options,
-      ),
+      parseFolderFromArgv([electronBinary, "--t3-project-path=", "/tmp/project-sample"], options),
     ).toBe("/tmp/project-sample");
   });
 
@@ -92,5 +89,43 @@ describe("parseFolderFromArgv", () => {
         options,
       ),
     ).toBeNull();
+  });
+
+  it("resolves a relative positional `.` against the provided cwd", () => {
+    expect(
+      parseFolderFromArgv([electronBinary, "."], {
+        ...options,
+        cwd: "/tmp/project-sample",
+      }),
+    ).toBe("/tmp/project-sample");
+  });
+
+  it("resolves a relative positional `./child` against the provided cwd", () => {
+    expect(
+      parseFolderFromArgv([electronBinary, "./child"], {
+        ...options,
+        cwd: "/tmp/project-parent",
+      }),
+    ).toBe("/tmp/project-parent/child");
+  });
+
+  it("resolves --t3-project-path= with a relative value against the provided cwd", () => {
+    const knownWithTmpSample = new Set([...knownDirectories, "/tmp/sample"]);
+    expect(
+      parseFolderFromArgv([electronBinary, "--t3-project-path=./sample"], {
+        realpath: (input: string) => input,
+        isDirectory: (candidate: string) => knownWithTmpSample.has(candidate),
+        cwd: "/tmp",
+      }),
+    ).toBe("/tmp/sample");
+  });
+
+  it("leaves absolute positional paths unchanged when cwd is set", () => {
+    expect(
+      parseFolderFromArgv([electronBinary, "/tmp/project-sample"], {
+        ...options,
+        cwd: "/some/other/cwd",
+      }),
+    ).toBe("/tmp/project-sample");
   });
 });

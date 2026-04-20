@@ -2097,8 +2097,8 @@ configureAppIdentity();
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", (_event, argv, _cwd) => {
-    const forwarded = parseFolderFromArgv(argv);
+  app.on("second-instance", (_event, argv, cwd) => {
+    const forwarded = parseFolderFromArgv(argv, { cwd });
     if (forwarded) {
       if (app.isReady()) {
         forwardProjectPathToRenderer(forwarded);

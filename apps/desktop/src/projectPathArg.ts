@@ -1,10 +1,12 @@
 import * as FS from "node:fs";
+import * as Path from "node:path";
 
 const PROJECT_PATH_FLAG_PREFIX = "--t3-project-path=";
 
 interface ParseOptions {
   readonly isDirectory?: (candidate: string) => boolean;
   readonly realpath?: (input: string) => string;
+  readonly cwd?: string;
 }
 
 /**
@@ -27,18 +29,23 @@ export function parseFolderFromArgv(
 ): string | null {
   const isDirectory = options.isDirectory ?? defaultIsDirectory;
   const realpath = options.realpath ?? defaultRealpath;
+  // Resolve relative tokens (e.g. `.` from `T3Code .`) against the invoking
+  // shell's CWD. For the Electron second-instance path, the caller must pass
+  // the second instance's cwd — otherwise realpath would resolve against the
+  // first instance's process.cwd() and silently open the wrong folder.
+  const cwd = options.cwd ?? process.cwd();
 
   for (const token of argv) {
     if (!token.startsWith(PROJECT_PATH_FLAG_PREFIX)) continue;
     const value = token.slice(PROJECT_PATH_FLAG_PREFIX.length);
     if (value.length === 0) continue;
-    const resolved = resolveDirectory(value, realpath, isDirectory);
+    const resolved = resolveDirectory(Path.resolve(cwd, value), realpath, isDirectory);
     if (resolved) return resolved;
   }
 
   for (const token of argv) {
     if (token.length === 0 || token.startsWith("-")) continue;
-    const resolved = resolveDirectory(token, realpath, isDirectory);
+    const resolved = resolveDirectory(Path.resolve(cwd, token), realpath, isDirectory);
     if (resolved) return resolved;
   }
 
