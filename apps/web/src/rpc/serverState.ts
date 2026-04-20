@@ -79,6 +79,15 @@ export function getServerConfigUpdatedNotification(): ServerConfigUpdatedNotific
 }
 
 export function setServerConfigSnapshot(config: ServerConfig): void {
+  console.log("[marcode/debug] setServerConfigSnapshot providers:", {
+    providers: config.providers.map((p) => ({
+      provider: p.provider,
+      enabled: p.enabled,
+      slashCommandCount: p.slashCommands?.length ?? 0,
+      skillCount: p.skills?.length ?? 0,
+      firstFewCommands: (p.slashCommands ?? []).slice(0, 5).map((c) => c.name),
+    })),
+  });
   resolveServerConfig(config);
   emitProvidersUpdated({ providers: config.providers });
   emitServerConfigUpdated(toServerConfigUpdatedPayload(config), "snapshot");
@@ -87,6 +96,7 @@ export function setServerConfigSnapshot(config: ServerConfig): void {
 export function applyServerConfigEvent(event: ServerConfigStreamEvent): void {
   switch (event.type) {
     case "snapshot": {
+      console.log("[marcode/debug] applyServerConfigEvent snapshot received");
       setServerConfigSnapshot(event.config);
       return;
     }
@@ -115,6 +125,15 @@ export function applyServerConfigEvent(event: ServerConfigStreamEvent): void {
 }
 
 export function applyProvidersUpdated(payload: ServerProviderUpdatedPayload): void {
+  console.log("[marcode/debug] applyProvidersUpdated:", {
+    providers: payload.providers.map((p) => ({
+      provider: p.provider,
+      enabled: p.enabled,
+      slashCommandCount: p.slashCommands?.length ?? 0,
+      skillCount: p.skills?.length ?? 0,
+      firstFewCommands: (p.slashCommands ?? []).slice(0, 5).map((c) => c.name),
+    })),
+  });
   const latestServerConfig = getServerConfig();
   emitProvidersUpdated(payload);
 

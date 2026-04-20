@@ -228,6 +228,9 @@ import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
+import { searchSlashCommandItems } from "./chat/composerSlashCommandSearch";
+import { formatProviderSkillDisplayName } from "../providerSkillPresentation";
+import { searchProviderSkills } from "../providerSkillSearch";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./chat/ComposerPrimaryActions";
@@ -507,7 +510,6 @@ function useLocalDispatchState(input: {
         localDispatch,
         phase: input.phase,
         latestTurn: input.activeLatestTurn,
-        session: input.activeThread?.session ?? null,
         hasPendingApproval: input.activePendingApproval !== null,
         hasPendingUserInput: input.activePendingUserInput !== null,
         threadError: input.threadError,
@@ -1779,38 +1781,61 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
       return [...jiraItems, ...fileItems];
     }
     if (composerTrigger.kind === "slash-command") {
-      const allItems: ComposerCommandItem[] = [
+      const builtInSlashCommandItems = [
         {
           id: "slash:model",
-          type: "slash-command",
-          command: "model",
+          type: "slash-command" as const,
+          command: "model" as const,
           label: "/model",
           description: "Switch response model for this thread",
         },
         {
           id: "slash:plan",
-          type: "slash-command",
-          command: "plan",
+          type: "slash-command" as const,
+          command: "plan" as const,
           label: "/plan",
           description: "Switch this thread into plan mode",
         },
         {
           id: "slash:default",
-          type: "slash-command",
-          command: "default",
+          type: "slash-command" as const,
+          command: "default" as const,
           label: "/default",
           description: "Switch this thread back to normal build mode",
         },
       ];
-      const query = composerTrigger.query.trim().toLowerCase();
+      const selectedProviderSlashCommands =
+        providerStatuses.find((provider) => provider.provider === selectedProvider)
+          ?.slashCommands ?? [];
+      const providerSlashCommandItems = selectedProviderSlashCommands.map((command) => ({
+        id: `provider-slash-command:${selectedProvider}:${command.name}`,
+        type: "provider-slash-command" as const,
+        provider: selectedProvider,
+        command,
+        label: `/${command.name}`,
+        description: command.description ?? command.input?.hint ?? "Run provider command",
+      }));
+      const slashCommandItems = [...builtInSlashCommandItems, ...providerSlashCommandItems];
+      const query = composerTrigger.query.trim();
       if (!query) {
-        return allItems;
+        return slashCommandItems;
       }
-      return allItems.filter(
-        (item) =>
-          item.label.toLowerCase().includes(query) ||
-          item.description.toLowerCase().includes(query),
-      );
+      return searchSlashCommandItems(slashCommandItems, query);
+    }
+    if (composerTrigger.kind === "skill") {
+      const selectedProviderSkills =
+        providerStatuses.find((provider) => provider.provider === selectedProvider)?.skills ?? [];
+      return searchProviderSkills(selectedProviderSkills, composerTrigger.query).map((skill) => ({
+        id: `skill:${selectedProvider}:${skill.name}`,
+        type: "skill" as const,
+        provider: selectedProvider,
+        skill,
+        label: formatProviderSkillDisplayName(skill),
+        description:
+          skill.shortDescription ??
+          skill.description ??
+          (skill.scope ? `${skill.scope} skill` : "Run provider skill"),
+      }));
     }
 
     return searchableModelOptions
@@ -1829,7 +1854,14 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
         label: name,
         description: `${providerLabel} · ${slug}`,
       }));
-  }, [composerTrigger, jiraIssues, searchableModelOptions, workspaceEntries]);
+  }, [
+    composerTrigger,
+    jiraIssues,
+    providerStatuses,
+    searchableModelOptions,
+    selectedProvider,
+    workspaceEntries,
+  ]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -3479,16 +3511,6 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
           ...(selectedModelSelection.options ? { options: selectedModelSelection.options } : {}),
         };
 
-        if (isLocalDraftThread && draftAdditionalDirectories.length > 0) {
-          await api.orchestration.dispatchCommand({
-            type: "thread.meta.update",
-            commandId: newCommandId(),
-            threadId: threadIdForSend,
-            additionalDirectories: draftAdditionalDirectories,
-          });
-          setDraftAdditionalDirectories([]);
-        }
-
         if (isFirstMessage && isServerThread) {
           await api.orchestration.dispatchCommand({
             type: "thread.meta.update",
@@ -3522,6 +3544,9 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
                         interactionMode,
                         branch: activeThread.branch,
                         worktreePath: activeThread.worktreePath,
+                        ...(draftAdditionalDirectories.length > 0
+                          ? { additionalDirectories: draftAdditionalDirectories }
+                          : {}),
                         createdAt: activeThread.createdAt,
                       },
                     }
@@ -3557,6 +3582,9 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
           createdAt: messageCreatedAt,
         });
         turnStartSucceeded = true;
+        if (isLocalDraftThread && draftAdditionalDirectories.length > 0) {
+          setDraftAdditionalDirectories([]);
+        }
       })().catch(async (err: unknown) => {
         if (
           input.clearComposerDraft &&
@@ -4366,7 +4394,42 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
         }
         return;
       }
-      if (item.type === "provider-slash-command" || item.type === "skill") return;
+      if (item.type === "provider-slash-command") {
+        const replacement = `/${item.command.name} `;
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
+        return;
+      }
+      if (item.type === "skill") {
+        const replacement = `$${item.skill.name} `;
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
+        return;
+      }
       onProviderModelSelect(item.provider, item.model);
       const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
         expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),

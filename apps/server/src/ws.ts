@@ -389,6 +389,18 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 createdAt: bootstrap.createThread.createdAt,
               });
               createdThread = true;
+
+              if (
+                bootstrap.createThread.additionalDirectories &&
+                bootstrap.createThread.additionalDirectories.length > 0
+              ) {
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.meta.update",
+                  commandId: serverCommandId("bootstrap-thread-additional-directories"),
+                  threadId: command.threadId,
+                  additionalDirectories: bootstrap.createThread.additionalDirectories,
+                });
+              }
             }
 
             if (bootstrap?.prepareWorktree) {
@@ -927,11 +939,12 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 })),
               );
 
+              const initialConfig = yield* loadServerConfig;
               return Stream.concat(
                 Stream.make({
                   version: 1 as const,
                   type: "snapshot" as const,
-                  config: yield* loadServerConfig,
+                  config: initialConfig,
                 }),
                 Stream.merge(keybindingsUpdates, Stream.merge(providerStatuses, settingsUpdates)),
               );
