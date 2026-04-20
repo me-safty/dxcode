@@ -351,20 +351,20 @@ export const OpenCodeProviderLive = Layer.effect(
       }
 
       const inventoryExit = yield* Effect.exit(
-        Effect.acquireUseRelease(
-          openCodeRuntime
-            .connectToOpenCodeServer({
-              binaryPath: input.settings.binaryPath,
-              serverUrl: input.settings.serverUrl,
-            })
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
-              ),
-            ),
-          (server) =>
-            openCodeRuntime
+        Effect.scoped(
+          Effect.gen(function* () {
+            const server = yield* openCodeRuntime
+              .connectToOpenCodeServer({
+                binaryPath: input.settings.binaryPath,
+                serverUrl: input.settings.serverUrl,
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
+                ),
+              );
+            return yield* openCodeRuntime
               .loadOpenCodeInventory(
                 openCodeRuntime.createOpenCodeSdkClient({
                   baseUrl: server.url,
@@ -379,8 +379,8 @@ export const OpenCodeProviderLive = Layer.effect(
                   (cause) =>
                     new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
                 ),
-              ),
-          (server) => Effect.sync(() => server.close()),
+              );
+          }),
         ),
       );
       if (inventoryExit._tag === "Failure") {

@@ -1,11 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-import type {
-  ChatAttachment,
-  ModelCapabilities,
-  ProviderApprovalDecision,
-  RuntimeMode,
-} from "@t3tools/contracts";
+import type { ChatAttachment, ProviderApprovalDecision, RuntimeMode } from "@t3tools/contracts";
 import {
   createOpencodeClient,
   type Agent,
@@ -45,14 +40,12 @@ const DEFAULT_HOSTNAME = "127.0.0.1";
 export interface OpenCodeServerProcess {
   readonly url: string;
   readonly exitCode: Effect.Effect<number, never>;
-  close(): void;
 }
 
 export interface OpenCodeServerConnection {
   readonly url: string;
   readonly exitCode: Effect.Effect<number, never> | null;
   readonly external: boolean;
-  close(): void;
 }
 
 export class OpenCodeRuntimeError extends Data.TaggedError("OpenCodeRuntimeError")<{
@@ -100,19 +93,30 @@ export interface ParsedOpenCodeModelSlug {
 }
 
 export interface OpenCodeRuntimeShape {
+  /**
+   * Spawns a local OpenCode server process. Its lifetime is bound to the caller's
+   * `Scope.Scope` — the child is killed automatically when that scope closes.
+   * Consumers that want a long-lived server must create and hold a scope explicitly
+   * (see {@link Scope.make}) and close it when done.
+   */
   readonly startOpenCodeServerProcess: (input: {
     readonly binaryPath: string;
     readonly port?: number;
     readonly hostname?: string;
     readonly timeoutMs?: number;
-  }) => Effect.Effect<OpenCodeServerProcess, OpenCodeRuntimeError>;
+  }) => Effect.Effect<OpenCodeServerProcess, OpenCodeRuntimeError, Scope.Scope>;
+  /**
+   * Returns a handle to either an externally-managed OpenCode server (when
+   * `serverUrl` is provided — no lifetime is attached to the caller's scope) or a
+   * freshly spawned local server whose lifetime is bound to the caller's scope.
+   */
   readonly connectToOpenCodeServer: (input: {
     readonly binaryPath: string;
     readonly serverUrl?: string | null;
     readonly port?: number;
     readonly hostname?: string;
     readonly timeoutMs?: number;
-  }) => Effect.Effect<OpenCodeServerConnection, OpenCodeRuntimeError>;
+  }) => Effect.Effect<OpenCodeServerConnection, OpenCodeRuntimeError, Scope.Scope>;
   readonly runOpenCodeCommand: (input: {
     readonly binaryPath: string;
     readonly args: ReadonlyArray<string>;
@@ -256,8 +260,6 @@ function ensureRuntimeError(
 const makeOpenCodeRuntime = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const netService = yield* NetService;
-  const runtimeContext = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
-  const runFork = Effect.runForkWith(runtimeContext);
 
   const runOpenCodeCommand: OpenCodeRuntimeShape["runOpenCodeCommand"] = (input) =>
     Effect.gen(function* () {
@@ -297,6 +299,11 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
 
   const startOpenCodeServerProcess: OpenCodeRuntimeShape["startOpenCodeServerProcess"] = (input) =>
     Effect.gen(function* () {
+      // Bind this server's lifetime to the caller's scope. When the caller's
+      // scope closes, the spawned child is killed and all associated fibers
+      // are interrupted automatically — no `close()` method needed.
+      const runtimeScope = yield* Scope.Scope;
+
       const hostname = input.hostname ?? DEFAULT_HOSTNAME;
       const port =
         input.port ??
@@ -313,21 +320,6 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
       const timeoutMs = input.timeoutMs ?? DEFAULT_OPENCODE_SERVER_TIMEOUT_MS;
       const args = ["serve", `--hostname=${hostname}`, `--port=${port}`];
 
-      const scope = yield* Scope.make();
-
-      let closed = false;
-      const closeScope = Effect.sync(() => {
-        if (closed) {
-          return false;
-        }
-        closed = true;
-        return true;
-      }).pipe(
-        Effect.flatMap((shouldClose) =>
-          shouldClose ? Scope.close(scope, Exit.void).pipe(Effect.ignore) : Effect.void,
-        ),
-      );
-
       const child = yield* spawner
         .spawn(
           ChildProcess.make(input.binaryPath, args, {
@@ -338,7 +330,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
           }),
         )
         .pipe(
-          Effect.provideService(Scope.Scope, scope),
+          Effect.provideService(Scope.Scope, runtimeScope),
           Effect.mapError(
             (cause) =>
               new OpenCodeRuntimeError({
@@ -367,13 +359,13 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
         Stream.decodeText(),
         Stream.runForEach(setReadyFromStdoutChunk),
         Effect.ignore,
-        Effect.forkIn(scope),
+        Effect.forkIn(runtimeScope),
       );
       const stderrFiber = yield* child.stderr.pipe(
         Stream.decodeText(),
         Stream.runForEach((chunk) => Ref.update(stderrRef, (stderr) => `${stderr}${chunk}`)),
         Effect.ignore,
-        Effect.forkIn(scope),
+        Effect.forkIn(runtimeScope),
       );
 
       const exitFiber = yield* child.exitCode.pipe(
@@ -399,16 +391,21 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
           }),
         ),
         Effect.ignore,
-        Effect.forkIn(scope),
+        Effect.forkIn(runtimeScope),
       );
 
       const readyExit = yield* Effect.exit(
         Deferred.await(readyDeferred).pipe(Effect.timeoutOption(timeoutMs)),
       );
 
+      // Startup-time fibers are no longer needed once ready has resolved (either
+      // way). The exit fiber is only interrupted on failure; on success it keeps
+      // the caller's `exitCode` effect observable until the scope closes.
+      yield* Fiber.interrupt(stdoutFiber).pipe(Effect.ignore);
+      yield* Fiber.interrupt(stderrFiber).pipe(Effect.ignore);
+
       if (Exit.isFailure(readyExit)) {
         yield* Fiber.interrupt(exitFiber).pipe(Effect.ignore);
-        yield* closeScope;
         const squashed = Cause.squash(readyExit.cause);
         return yield* ensureRuntimeError(
           "startOpenCodeServerProcess",
@@ -417,13 +414,9 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
         );
       }
 
-      yield* Fiber.interrupt(stdoutFiber).pipe(Effect.ignore);
-      yield* Fiber.interrupt(stderrFiber).pipe(Effect.ignore);
-
       const readyOption = readyExit.value;
       if (Option.isNone(readyOption)) {
         yield* Fiber.interrupt(exitFiber).pipe(Effect.ignore);
-        yield* closeScope;
         return yield* new OpenCodeRuntimeError({
           operation: "startOpenCodeServerProcess",
           detail: `Timed out waiting for OpenCode server start after ${timeoutMs}ms.`,
@@ -437,20 +430,17 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
           Effect.map(Number),
           Effect.orElseSucceed(() => 0),
         ),
-        close: () => {
-          runFork(closeScope);
-        },
       } satisfies OpenCodeServerProcess;
     });
 
   const connectToOpenCodeServer: OpenCodeRuntimeShape["connectToOpenCodeServer"] = (input) => {
     const serverUrl = input.serverUrl?.trim();
     if (serverUrl) {
+      // We don't own externally-configured servers — no scope interaction.
       return Effect.succeed({
         url: serverUrl,
         exitCode: null,
         external: true,
-        close() {},
       });
     }
 
@@ -464,7 +454,6 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
         url: server.url,
         exitCode: server.exitCode,
         external: false,
-        close: () => server.close(),
       })),
     );
   };
@@ -535,29 +524,6 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
           }),
       ),
     );
-  // Effect.tryPromise({
-  //   try: async () => {
-  //     const [providerListResult, agentsResult] = await Promise.all([
-  //       client.provider.list(),
-  //       client.app.agents(),
-  //     ]);
-  //     console.log(JSON.stringify(providerListResult, null, 4));
-  //     console.log(JSON.stringify(agentsResult, null, 4));
-  //     if (!providerListResult.data) {
-  //       throw new Error("OpenCode provider inventory was empty.");
-  //     }
-  //     return {
-  //       providerList: providerListResult.data,
-  //       agents: agentsResult.data ?? [],
-  //     } satisfies OpenCodeInventory;
-  //   },
-  //   catch: (cause) =>
-  //     new OpenCodeRuntimeError({
-  //       operation: "loadOpenCodeInventory",
-  //       detail: `Failed to load OpenCode inventory: ${openCodeRuntimeErrorDetail(cause)}`,
-  //       cause: cause,
-  //     }),
-  // });
 
   return {
     startOpenCodeServerProcess,

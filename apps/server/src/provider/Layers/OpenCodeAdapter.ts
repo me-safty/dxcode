@@ -436,6 +436,24 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
       const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
       const sessions = new Map<ThreadId, OpenCodeSessionContext>();
 
+      // Layer-level finalizer: when the adapter layer shuts down, stop every
+      // session. Each session's `Scope.close` tears down its spawned OpenCode
+      // server (via the `ChildProcessSpawner` finalizer installed in
+      // `startOpenCodeServerProcess`) and interrupts the forked event/exit
+      // fibers. Consumers that can't reason about Effect scopes therefore
+      // cannot leak OpenCode child processes by forgetting to call `stopAll`.
+      yield* Effect.addFinalizer(() =>
+        Effect.gen(function* () {
+          const contexts = [...sessions.values()];
+          sessions.clear();
+          yield* Effect.forEach(
+            contexts,
+            (context) => Effect.ignore(stopOpenCodeContext(context)),
+            { concurrency: "unbounded", discard: true },
+          );
+        }),
+      );
+
       const emit = (event: ProviderRuntimeEvent) =>
         Queue.offer(runtimeEvents, event).pipe(Effect.asVoid);
       const writeNativeEvent = (
@@ -898,7 +916,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         );
         context.eventsFiber = eventsFiber;
 
-        if (context.server.exitCode !== null) {
+        if (!context.server.external && context.server.exitCode !== null) {
           context.exitFiber = runFork(
             context.server.exitCode.pipe(
               Effect.flatMap((code) =>
@@ -948,14 +966,13 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
             const sessionScope = yield* Scope.make();
             const startedExit = yield* Effect.exit(
               Effect.gen(function* () {
+                // The runtime binds the server's lifetime to the Scope.Scope
+                // we provide below — closing `sessionScope` kills the child
+                // process automatically. No manual `server.close()` needed.
                 const server = yield* openCodeRuntime.connectToOpenCodeServer({
                   binaryPath,
                   serverUrl,
                 });
-                yield* Scope.addFinalizer(
-                  sessionScope,
-                  Effect.sync(() => server.close()),
-                );
                 const client = openCodeRuntime.createOpenCodeSdkClient({
                   baseUrl: server.url,
                   directory,

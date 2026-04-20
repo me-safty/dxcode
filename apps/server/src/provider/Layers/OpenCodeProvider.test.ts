@@ -39,14 +39,12 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
     Effect.succeed({
       url: "http://127.0.0.1:4301",
       exitCode: Effect.never,
-      close() {},
     }),
   connectToOpenCodeServer: ({ serverUrl }) =>
     Effect.succeed({
       url: serverUrl ?? "http://127.0.0.1:4301",
       exitCode: null,
       external: Boolean(serverUrl),
-      close() {},
     }),
   runOpenCodeCommand: () =>
     runtimeMock.state.runVersionError

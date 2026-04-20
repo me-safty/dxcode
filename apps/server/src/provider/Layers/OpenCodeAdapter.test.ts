@@ -60,26 +60,43 @@ const runtimeMock = {
 
 const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
   startOpenCodeServerProcess: ({ binaryPath }) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       runtimeMock.state.startCalls.push(binaryPath);
+      const url = "http://127.0.0.1:4301";
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          runtimeMock.state.closeCalls.push(url);
+          if (runtimeMock.state.closeError) {
+            throw runtimeMock.state.closeError;
+          }
+        }),
+      );
       return {
-        url: "http://127.0.0.1:4301",
+        url,
         exitCode: Effect.never,
-        close() {},
       };
     }),
   connectToOpenCodeServer: ({ serverUrl }) =>
-    Effect.sync(() => ({
-      url: serverUrl ?? "http://127.0.0.1:4301",
-      exitCode: null,
-      external: Boolean(serverUrl),
-      close() {
-        runtimeMock.state.closeCalls.push(serverUrl ?? "http://127.0.0.1:4301");
-        if (runtimeMock.state.closeError) {
-          throw runtimeMock.state.closeError;
-        }
-      },
-    })),
+    Effect.gen(function* () {
+      const url = serverUrl ?? "http://127.0.0.1:4301";
+      // Unconditionally register a scope finalizer for test observability —
+      // preserves the `closeCalls` / `closeError` probes that the existing
+      // suites rely on. Production code never attaches a finalizer to an
+      // external server (it simply returns `Effect.succeed(...)`).
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          runtimeMock.state.closeCalls.push(url);
+          if (runtimeMock.state.closeError) {
+            throw runtimeMock.state.closeError;
+          }
+        }),
+      );
+      return {
+        url,
+        exitCode: null,
+        external: Boolean(serverUrl),
+      };
+    }),
   runOpenCodeCommand: () => Effect.succeed({ stdout: "", stderr: "", code: 0 }),
   createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
     ({
@@ -475,7 +492,13 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         Layer.provideMerge(NodeServices.layer),
       );
 
-      const sessions = yield* Effect.gen(function* () {
+      // Capture closeCalls *inside* the provided layer scope: the adapter's
+      // layer finalizer now tears down any live sessions when the layer
+      // closes (which is exactly what we want for leak prevention), so
+      // inspecting closeCalls after `Effect.provide` completes would observe
+      // the teardown — not the behavior under test. We care that the event
+      // pump kept the session alive while logging was failing.
+      const { sessions, closeCallsDuringRun } = yield* Effect.gen(function* () {
         const adapter = yield* OpenCodeAdapter;
         yield* adapter.startSession({
           provider: "opencode",
@@ -483,12 +506,15 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           runtimeMode: "full-access",
         });
         yield* sleep(10);
-        return yield* adapter.listSessions();
+        return {
+          sessions: yield* adapter.listSessions(),
+          closeCallsDuringRun: [...runtimeMock.state.closeCalls],
+        };
       }).pipe(Effect.provide(adapterLayer));
 
       assert.equal(sessions.length, 1);
       assert.equal(sessions[0]?.threadId, "thread-native-log-failure");
-      assert.deepEqual(runtimeMock.state.closeCalls, []);
+      assert.deepEqual(closeCallsDuringRun, []);
     }),
   );
 });

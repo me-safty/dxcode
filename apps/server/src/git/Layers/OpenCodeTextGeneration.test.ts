@@ -36,16 +36,20 @@ const runtimeMock = {
 
 const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
   startOpenCodeServerProcess: ({ binaryPath }) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       const index = runtimeMock.state.startCalls.length + 1;
       const url = `http://127.0.0.1:${4_300 + index}`;
       runtimeMock.state.startCalls.push(binaryPath);
+      // The production runtime binds server lifetime to the caller's scope.
+      // Mirror that here so the closeCalls probe observes scope close.
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          runtimeMock.state.closeCalls.push(url);
+        }),
+      );
       return {
         url,
         exitCode: Effect.never,
-        close: () => {
-          runtimeMock.state.closeCalls.push(url);
-        },
       };
     }),
   connectToOpenCodeServer: ({ serverUrl }) =>
@@ -53,7 +57,6 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
       url: serverUrl ?? "http://127.0.0.1:4301",
       exitCode: null,
       external: Boolean(serverUrl),
-      close() {},
     }),
   runOpenCodeCommand: () => Effect.succeed({ stdout: "", stderr: "", code: 0 }),
   createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
