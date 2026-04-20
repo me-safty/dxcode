@@ -188,6 +188,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         DEFAULT_KEYBINDINGS.map((binding) => [binding.command, binding.key] as const),
       );
 
+      assert.equal(defaultsByCommand.get("server.refreshProviders"), "mod+shift+r");
       assert.equal(defaultsByCommand.get("thread.previous"), "mod+shift+[");
       assert.equal(defaultsByCommand.get("thread.next"), "mod+shift+]");
       assert.equal(defaultsByCommand.get("thread.jump.1"), "mod+1");
@@ -286,6 +287,10 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         );
 
         for (const defaultRule of DEFAULT_KEYBINDINGS) {
+          if (defaultRule.command === "server.refreshProviders") {
+            assert.isFalse(byCommand.has(defaultRule.command));
+            continue;
+          }
           assert.isTrue(byCommand.has(defaultRule.command), `expected ${defaultRule.command}`);
         }
         assert.isTrue(byCommand.has("script.run-tests.run"));

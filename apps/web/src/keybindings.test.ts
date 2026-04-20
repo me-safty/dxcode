@@ -84,6 +84,7 @@ function compile(bindings: TestBinding[]): ResolvedKeybindingsConfig {
 }
 
 const DEFAULT_BINDINGS = compile([
+  { shortcut: modShortcut("r", { shiftKey: true }), command: "server.refreshProviders" },
   { shortcut: modShortcut("j"), command: "terminal.toggle" },
   {
     shortcut: modShortcut("d"),
@@ -161,6 +162,24 @@ describe("isTerminalToggleShortcut", () => {
         platform: "Win32",
         context: { terminalFocus: true },
       }),
+    );
+  });
+});
+
+describe("refresh providers shortcut", () => {
+  it("resolves the default refresh command on macOS", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "r", metaKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+      }),
+      "server.refreshProviders",
+    );
+  });
+
+  it("formats the default refresh shortcut label", () => {
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "server.refreshProviders", "MacIntel"),
+      "⇧⌘R",
     );
   });
 });

@@ -20,7 +20,9 @@ import {
 } from "../components/WebSocketConnectionSurface";
 import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
+import { useCommandPaletteStore } from "../commandPaletteStore";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
+import { resolveShortcutCommand } from "../keybindings";
 import { readLocalApi } from "../localApi";
 import { useSettings } from "../hooks/useSettings";
 import {
@@ -33,6 +35,7 @@ import {
   startServerStateSync,
   useServerConfig,
   useServerConfigUpdatedSubscription,
+  useServerKeybindings,
   useServerWelcomeSubscription,
 } from "../rpc/serverState";
 import { useStore } from "../store";
@@ -94,6 +97,7 @@ function RootRouteView() {
       <AnchoredToastProvider>
         <AuthenticatedTracingBootstrap />
         <ServerStateBootstrap />
+        <AuthenticatedShellShortcuts />
         <EnvironmentConnectionManagerBootstrap />
         <EventRouter />
         <WebSocketConnectionCoordinator />
@@ -108,6 +112,40 @@ function RootRouteView() {
       </AnchoredToastProvider>
     </ToastProvider>
   );
+}
+
+function AuthenticatedShellShortcuts() {
+  const keybindings = useServerKeybindings();
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || useCommandPaletteStore.getState().open) {
+        return;
+      }
+
+      if (resolveShortcutCommand(event, keybindings) !== "server.refreshProviders") {
+        return;
+      }
+
+      const api = readLocalApi();
+      if (!api) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      void api.server.refreshProviders().catch((error: unknown) => {
+        console.warn("Failed to refresh providers", error);
+      });
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [keybindings]);
+
+  return null;
 }
 
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
