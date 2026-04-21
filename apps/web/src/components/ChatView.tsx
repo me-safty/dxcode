@@ -92,7 +92,6 @@ import {
 import { markThreadUserStopped } from "../turnNotification";
 import {
   type AppState,
-  isThreadHydrated,
   selectProjectsAcrossEnvironments,
   selectThreadsAcrossEnvironments,
   useStore,
@@ -1410,7 +1409,7 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
     isSessionStarting ||
     hasPendingAssistantResponse;
   const isCompacting = activeThread?.session?.compacting === true;
-  const isThreadHydrating = activeThread !== undefined && !isThreadHydrated(activeThread);
+  const isThreadHydrating = false;
   const nowIso = new Date(nowTick).toISOString();
   const activeWorkStartedAt =
     deriveActiveWorkStartedAt(

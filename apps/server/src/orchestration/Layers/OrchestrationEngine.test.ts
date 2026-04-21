@@ -146,10 +146,14 @@ describe("OrchestrationEngine", () => {
       Layer.provide(
         Layer.succeed(ProjectionSnapshotQuery, {
           getSnapshot: () => Effect.succeed(projectionSnapshot),
-          getListingSnapshot: () =>
-            Effect.die("OrchestrationEngine test should not request the listing snapshot"),
-          getThread: () =>
-            Effect.die("OrchestrationEngine test should not request a single thread"),
+          getShellSnapshot: () =>
+            Effect.die("OrchestrationEngine test should not request the shell snapshot"),
+          getProjectShellById: () =>
+            Effect.die("OrchestrationEngine test should not request a project shell"),
+          getThreadShellById: () =>
+            Effect.die("OrchestrationEngine test should not request a thread shell"),
+          getThreadDetailById: () =>
+            Effect.die("OrchestrationEngine test should not request a thread detail"),
           getCounts: () => Effect.succeed({ projectCount: 1, threadCount: 1 }),
           getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),

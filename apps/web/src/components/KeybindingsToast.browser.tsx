@@ -192,7 +192,7 @@ function buildFixture(): TestFixture {
   };
 }
 
-function toThreadSummary(thread: OrchestrationReadModel["threads"][number]) {
+function toShellThread(thread: OrchestrationReadModel["threads"][number]) {
   return {
     id: thread.id,
     projectId: thread.projectId,
@@ -208,31 +208,35 @@ function toThreadSummary(thread: OrchestrationReadModel["threads"][number]) {
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     archivedAt: thread.archivedAt,
-    deletedAt: thread.deletedAt,
-    latestUserMessageAt: null,
+    latestUserMessageAt:
+      thread.messages.findLast((message) => message.role === "user")?.createdAt ?? null,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
   };
 }
 
+function toShellSnapshot(snapshot: OrchestrationReadModel) {
+  return {
+    snapshotSequence: snapshot.snapshotSequence,
+    projects: snapshot.projects.map((project) => ({
+      id: project.id,
+      title: project.title,
+      workspaceRoot: project.workspaceRoot,
+      repositoryIdentity: project.repositoryIdentity ?? null,
+      defaultModelSelection: project.defaultModelSelection,
+      scripts: project.scripts,
+      jiraBoard: project.jiraBoard ?? null,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+    })),
+    threads: snapshot.threads.map(toShellThread),
+    updatedAt: snapshot.updatedAt,
+  };
+}
+
 function resolveWsRpc(request: { _tag: string; [key: string]: unknown }): unknown {
   const tag = request._tag;
-  if (tag === ORCHESTRATION_WS_METHODS.getListingSnapshot) {
-    return {
-      snapshotSequence: fixture.snapshot.snapshotSequence,
-      projects: fixture.snapshot.projects,
-      threads: fixture.snapshot.threads.map(toThreadSummary),
-      updatedAt: fixture.snapshot.updatedAt,
-    };
-  }
-  if (tag === ORCHESTRATION_WS_METHODS.getThread) {
-    const threadId = request.threadId as string;
-    return fixture.snapshot.threads.find((t) => t.id === threadId) ?? null;
-  }
-  if (tag === ORCHESTRATION_WS_METHODS.getSnapshot) {
-    return fixture.snapshot;
-  }
   if (tag === WS_METHODS.serverGetConfig) {
     return fixture.serverConfig;
   }
@@ -468,6 +472,28 @@ describe("Keybindings update toast", () => {
               config: fixture.serverConfig,
             },
           ];
+        }
+        if (request._tag === ORCHESTRATION_WS_METHODS.subscribeShell) {
+          return [
+            {
+              kind: "snapshot",
+              snapshot: toShellSnapshot(fixture.snapshot),
+            },
+          ];
+        }
+        if (request._tag === ORCHESTRATION_WS_METHODS.subscribeThread) {
+          const thread = fixture.snapshot.threads.find((entry) => entry.id === request.threadId);
+          return thread
+            ? [
+                {
+                  kind: "snapshot",
+                  snapshot: {
+                    snapshotSequence: fixture.snapshot.snapshotSequence,
+                    thread,
+                  },
+                },
+              ]
+            : [];
         }
         return [];
       },

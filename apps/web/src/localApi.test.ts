@@ -3,10 +3,9 @@ import {
   DEFAULT_SERVER_SETTINGS,
   type DesktopBridge,
   EnvironmentId,
-  EventId,
   type GitStatusResult,
   ProjectId,
-  type OrchestrationEvent,
+  type OrchestrationShellStreamItem,
   type ServerConfig,
   type ServerProvider,
   type TerminalEvent,
@@ -32,7 +31,8 @@ function registerListener<T>(listeners: Set<(event: T) => void>, listener: (even
 }
 
 const terminalEventListeners = new Set<(event: TerminalEvent) => void>();
-const orchestrationEventListeners = new Set<(event: OrchestrationEvent) => void>();
+const shellStreamListeners = new Set<(event: unknown) => void>();
+const threadStreamListeners = new Set<(event: unknown) => void>();
 const gitStatusListeners = new Set<(event: GitStatusResult) => void>();
 
 const rpcClientMock = {
@@ -95,13 +95,15 @@ const rpcClientMock = {
     onConnectionStatusChanged: vi.fn(),
   },
   orchestration: {
-    getSnapshot: vi.fn(),
     dispatchCommand: vi.fn(),
     getTurnDiff: vi.fn(),
     getFullThreadDiff: vi.fn(),
     replayEvents: vi.fn(),
-    onDomainEvent: vi.fn((listener: (event: OrchestrationEvent) => void) =>
-      registerListener(orchestrationEventListeners, listener),
+    subscribeShell: vi.fn((listener: (item: unknown) => void) =>
+      registerListener(shellStreamListeners as never, listener as never),
+    ),
+    subscribeThread: vi.fn((_input: unknown, listener: (item: unknown) => void) =>
+      registerListener(threadStreamListeners as never, listener as never),
     ),
   },
 };
@@ -283,7 +285,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   showContextMenuFallbackMock.mockReset();
   terminalEventListeners.clear();
-  orchestrationEventListeners.clear();
+  shellStreamListeners.clear();
+  threadStreamListeners.clear();
   gitStatusListeners.clear();
   const testWindow = getWindowForTest();
   Reflect.deleteProperty(testWindow, "desktopBridge");
@@ -310,15 +313,15 @@ describe("wsApi", () => {
     expect(rpcClientMock.server.subscribeLifecycle).not.toHaveBeenCalled();
   });
 
-  it("forwards terminal and orchestration stream events", async () => {
+  it("forwards terminal and shell stream events", async () => {
     const { createEnvironmentApi } = await import("./environmentApi");
 
     const api = createEnvironmentApi(rpcClientMock as never);
     const onTerminalEvent = vi.fn();
-    const onDomainEvent = vi.fn();
+    const onShellEvent = vi.fn();
 
     api.terminal.onEvent(onTerminalEvent);
-    api.orchestration.onDomainEvent(onDomainEvent);
+    api.orchestration.subscribeShell(onShellEvent);
 
     const terminalEvent = {
       threadId: "thread-1",
@@ -329,19 +332,11 @@ describe("wsApi", () => {
     } as const;
     emitEvent(terminalEventListeners, terminalEvent);
 
-    const orchestrationEvent = {
+    const shellEvent = {
+      kind: "project-upserted" as const,
       sequence: 1,
-      eventId: EventId.make("event-1"),
-      aggregateKind: "project",
-      aggregateId: ProjectId.make("project-1"),
-      occurredAt: "2026-02-24T00:00:00.000Z",
-      commandId: null,
-      causationEventId: null,
-      correlationId: null,
-      metadata: {},
-      type: "project.created",
-      payload: {
-        projectId: ProjectId.make("project-1"),
+      project: {
+        id: ProjectId.make("project-1"),
         title: "Project",
         workspaceRoot: "/tmp/workspace",
         defaultModelSelection: {
@@ -353,11 +348,11 @@ describe("wsApi", () => {
         createdAt: "2026-02-24T00:00:00.000Z",
         updatedAt: "2026-02-24T00:00:00.000Z",
       },
-    } satisfies Extract<OrchestrationEvent, { type: "project.created" }>;
-    emitEvent(orchestrationEventListeners, orchestrationEvent);
+    } satisfies OrchestrationShellStreamItem;
+    emitEvent(shellStreamListeners, shellEvent);
 
     expect(onTerminalEvent).toHaveBeenCalledWith(terminalEvent);
-    expect(onDomainEvent).toHaveBeenCalledWith(orchestrationEvent);
+    expect(onShellEvent).toHaveBeenCalledWith(shellEvent);
   });
 
   it("forwards git status stream events", async () => {
@@ -386,16 +381,16 @@ describe("wsApi", () => {
     expect(rpcClientMock.git.refreshStatus).toHaveBeenCalledWith({ cwd: "/repo" });
   });
 
-  it("forwards orchestration stream subscription options to the RPC client", async () => {
+  it("forwards shell stream subscription options to the RPC client", async () => {
     const { createEnvironmentApi } = await import("./environmentApi");
 
     const api = createEnvironmentApi(rpcClientMock as never);
-    const onDomainEvent = vi.fn();
+    const onShellEvent = vi.fn();
     const onResubscribe = vi.fn();
 
-    api.orchestration.onDomainEvent(onDomainEvent, { onResubscribe });
+    api.orchestration.subscribeShell(onShellEvent, { onResubscribe });
 
-    expect(rpcClientMock.orchestration.onDomainEvent).toHaveBeenCalledWith(onDomainEvent, {
+    expect(rpcClientMock.orchestration.subscribeShell).toHaveBeenCalledWith(onShellEvent, {
       onResubscribe,
     });
   });

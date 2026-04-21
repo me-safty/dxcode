@@ -165,14 +165,12 @@ vi.mock("../../environments/runtime", () => {
         runStackedAction: vi.fn().mockResolvedValue({}),
       },
       orchestration: {
-        getSnapshot: vi.fn().mockResolvedValue({}),
-        getListingSnapshot: vi.fn().mockResolvedValue({}),
-        getThread: vi.fn().mockResolvedValue(null),
         dispatchCommand: vi.fn().mockResolvedValue({}),
         getTurnDiff: vi.fn().mockResolvedValue({}),
         getFullThreadDiff: vi.fn().mockResolvedValue({}),
         replayEvents: vi.fn().mockResolvedValue({}),
-        onDomainEvent: () => () => {},
+        subscribeShell: () => () => {},
+        subscribeThread: () => () => {},
       },
       jira: {
         getConnectionStatus: vi.fn().mockResolvedValue({ connected: false }),

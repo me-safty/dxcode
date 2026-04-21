@@ -34,18 +34,13 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       workingTreeDiff: rpcClient.git.workingTreeDiff,
     },
     orchestration: {
-      getSnapshot: rpcClient.orchestration.getSnapshot,
-      getListingSnapshot: rpcClient.orchestration.getListingSnapshot,
-      getThread: rpcClient.orchestration.getThread,
       dispatchCommand: rpcClient.orchestration.dispatchCommand,
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
-      replayEvents: (fromSequenceExclusive) =>
-        rpcClient.orchestration
-          .replayEvents({ fromSequenceExclusive })
-          .then((events) => [...events]),
-      onDomainEvent: (callback, options) =>
-        rpcClient.orchestration.onDomainEvent(callback, options),
+      subscribeShell: (callback, options) =>
+        rpcClient.orchestration.subscribeShell(callback, options),
+      subscribeThread: (input, callback, options) =>
+        rpcClient.orchestration.subscribeThread(input, callback, options),
     },
     jira: {
       getConnectionStatus: rpcClient.jira.getConnectionStatus,

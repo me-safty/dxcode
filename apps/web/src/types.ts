@@ -117,7 +117,6 @@ export interface Thread {
   additionalDirectories: string[];
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
-  hydrated: boolean;
 }
 
 export interface ThreadShell {
@@ -136,7 +135,6 @@ export interface ThreadShell {
   branch: string | null;
   worktreePath: string | null;
   additionalDirectories: string[];
-  hydrated: boolean;
 }
 
 export interface ThreadTurnState {

@@ -3,14 +3,17 @@ import type {
   MessageId,
   OrchestrationCheckpointSummary,
   OrchestrationEvent,
-  OrchestrationListingSnapshot,
   OrchestrationMessage,
+  OrchestrationProjectShell,
   OrchestrationProposedPlan,
   OrchestrationReadModel,
   OrchestrationSession,
   OrchestrationSessionStatus,
+  OrchestrationShellSnapshot,
+  OrchestrationShellStreamEvent,
   OrchestrationThread,
   OrchestrationThreadActivity,
+  OrchestrationThreadShell,
   ProjectId,
   ProviderKind,
   ScopedProjectRef,
@@ -220,8 +223,79 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     additionalDirectories: [...(thread.additionalDirectories ?? [])],
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
-    hydrated: true,
   };
+}
+
+function mapProjectShell(
+  project: OrchestrationProjectShell,
+  environmentId: EnvironmentId,
+): Project {
+  return {
+    id: project.id,
+    environmentId,
+    name: project.title,
+    cwd: project.workspaceRoot,
+    repositoryIdentity: project.repositoryIdentity ?? null,
+    defaultModelSelection: project.defaultModelSelection
+      ? normalizeModelSelection(project.defaultModelSelection)
+      : null,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+    scripts: mapProjectScripts(project.scripts),
+    jiraBoard: project.jiraBoard ?? null,
+  };
+}
+
+function mapThreadShell(
+  thread: OrchestrationThreadShell,
+  environmentId: EnvironmentId,
+): {
+  shell: ThreadShell;
+  session: ThreadSession | null;
+  turnState: ThreadTurnState;
+  summary: SidebarThreadSummary;
+} {
+  const shell: ThreadShell = {
+    id: thread.id,
+    environmentId,
+    codexThreadId: null,
+    projectId: thread.projectId,
+    title: thread.title,
+    modelSelection: normalizeModelSelection(thread.modelSelection),
+    runtimeMode: thread.runtimeMode,
+    interactionMode: thread.interactionMode,
+    error: sanitizeThreadErrorMessage(thread.session?.lastError),
+    createdAt: thread.createdAt,
+    archivedAt: thread.archivedAt,
+    updatedAt: thread.updatedAt,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    additionalDirectories: [...(thread.additionalDirectories ?? [])],
+  };
+  const session = thread.session ? mapSession(thread.session) : null;
+  const turnState: ThreadTurnState = {
+    latestTurn: thread.latestTurn,
+    pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
+  };
+  const summary: SidebarThreadSummary = {
+    id: thread.id,
+    environmentId,
+    projectId: thread.projectId,
+    title: thread.title,
+    interactionMode: thread.interactionMode,
+    session,
+    createdAt: thread.createdAt,
+    archivedAt: thread.archivedAt,
+    updatedAt: thread.updatedAt,
+    latestTurn: thread.latestTurn,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    latestUserMessageAt: thread.latestUserMessageAt,
+    hasPendingApprovals: thread.hasPendingApprovals,
+    hasPendingUserInput: thread.hasPendingUserInput,
+    hasActionableProposedPlan: thread.hasActionableProposedPlan,
+  };
+  return { shell, session, turnState, summary };
 }
 
 function toThreadShell(thread: Thread): ThreadShell {
@@ -241,7 +315,6 @@ function toThreadShell(thread: Thread): ThreadShell {
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     additionalDirectories: thread.additionalDirectories,
-    hydrated: thread.hydrated,
   };
 }
 
@@ -331,8 +404,25 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.updatedAt === right.updatedAt &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
-    left.additionalDirectories === right.additionalDirectories &&
-    left.hydrated === right.hydrated
+    left.additionalDirectories === right.additionalDirectories
+  );
+}
+
+function threadSessionsEqual(
+  left: ThreadSession | null | undefined,
+  right: ThreadSession | null | undefined,
+): boolean {
+  if (left === right) return true;
+  if (left == null || right == null) return false;
+  return (
+    left.provider === right.provider &&
+    left.status === right.status &&
+    left.orchestrationStatus === right.orchestrationStatus &&
+    left.activeTurnId === right.activeTurnId &&
+    left.createdAt === right.createdAt &&
+    left.updatedAt === right.updatedAt &&
+    left.lastError === right.lastError &&
+    left.compacting === right.compacting
   );
 }
 
@@ -624,6 +714,136 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
     turnDiffSummaryByThreadId,
     sidebarThreadSummaryById,
   };
+}
+
+function ensureThreadRegistered(
+  state: EnvironmentState,
+  threadId: ThreadId,
+  nextProjectId: ProjectId,
+  previousProjectId: ProjectId | undefined,
+): EnvironmentState {
+  let nextState = state;
+
+  if (!state.threadIds.includes(threadId)) {
+    nextState = {
+      ...nextState,
+      threadIds: [...nextState.threadIds, threadId],
+    };
+  }
+
+  if (previousProjectId !== nextProjectId) {
+    let threadIdsByProjectId = nextState.threadIdsByProjectId;
+    if (previousProjectId) {
+      const previousIds = threadIdsByProjectId[previousProjectId] ?? EMPTY_THREAD_IDS;
+      const nextIds = removeId(previousIds, threadId);
+      if (nextIds.length === 0) {
+        const { [previousProjectId]: _removed, ...rest } = threadIdsByProjectId;
+        threadIdsByProjectId = rest as Record<ProjectId, ThreadId[]>;
+      } else if (!arraysEqual(previousIds, nextIds)) {
+        threadIdsByProjectId = {
+          ...threadIdsByProjectId,
+          [previousProjectId]: nextIds,
+        };
+      }
+    }
+    const projectThreadIds = threadIdsByProjectId[nextProjectId] ?? EMPTY_THREAD_IDS;
+    const nextProjectThreadIds = appendId(projectThreadIds, threadId);
+    if (!arraysEqual(projectThreadIds, nextProjectThreadIds)) {
+      threadIdsByProjectId = {
+        ...threadIdsByProjectId,
+        [nextProjectId]: nextProjectThreadIds,
+      };
+    }
+    if (threadIdsByProjectId !== nextState.threadIdsByProjectId) {
+      nextState = {
+        ...nextState,
+        threadIdsByProjectId,
+      };
+    }
+  }
+
+  return nextState;
+}
+
+function writeThreadShellState(
+  state: EnvironmentState,
+  nextThread: {
+    shell: ThreadShell;
+    session: ThreadSession | null;
+    turnState: ThreadTurnState;
+    summary: SidebarThreadSummary;
+  },
+): EnvironmentState {
+  const previousShell = state.threadShellById[nextThread.shell.id];
+
+  let nextState = ensureThreadRegistered(
+    state,
+    nextThread.shell.id,
+    nextThread.shell.projectId,
+    previousShell?.projectId,
+  );
+
+  if (!threadShellsEqual(previousShell, nextThread.shell)) {
+    nextState = {
+      ...nextState,
+      threadShellById: {
+        ...nextState.threadShellById,
+        [nextThread.shell.id]: nextThread.shell,
+      },
+    };
+  }
+
+  if (
+    !threadSessionsEqual(state.threadSessionById[nextThread.shell.id] ?? null, nextThread.session)
+  ) {
+    nextState = {
+      ...nextState,
+      threadSessionById: {
+        ...nextState.threadSessionById,
+        [nextThread.shell.id]: nextThread.session,
+      },
+    };
+  }
+
+  if (
+    !threadTurnStatesEqual(state.threadTurnStateById[nextThread.shell.id], nextThread.turnState)
+  ) {
+    nextState = {
+      ...nextState,
+      threadTurnStateById: {
+        ...nextState.threadTurnStateById,
+        [nextThread.shell.id]: nextThread.turnState,
+      },
+    };
+  }
+
+  if (
+    !sidebarThreadSummariesEqual(
+      state.sidebarThreadSummaryById[nextThread.shell.id],
+      nextThread.summary,
+    )
+  ) {
+    nextState = {
+      ...nextState,
+      sidebarThreadSummaryById: {
+        ...nextState.sidebarThreadSummaryById,
+        [nextThread.shell.id]: nextThread.summary,
+      },
+    };
+  }
+
+  return nextState;
+}
+
+function retainThreadScopedRecord<T>(
+  record: Record<ThreadId, T>,
+  nextThreadIds: ReadonlySet<ThreadId>,
+): Record<ThreadId, T> {
+  return Object.fromEntries(
+    Object.entries(record).flatMap(([threadId, value]) =>
+      nextThreadIds.has(threadId as ThreadId) ? [[threadId, value] as const] : [],
+    ),
+  ) as Record<ThreadId, T>;
 }
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
@@ -985,95 +1205,74 @@ export function syncServerReadModel(
   );
 }
 
-export function syncListingSnapshot(
-  state: AppState,
-  listing: OrchestrationListingSnapshot,
+function syncEnvironmentShellSnapshot(
+  state: EnvironmentState,
+  snapshot: OrchestrationShellSnapshot,
   environmentId: EnvironmentId,
-): AppState {
-  const envState = getStoredEnvironmentState(state, environmentId);
-  const projects = listing.projects
-    .filter((project) => project.deletedAt === null)
-    .map((project) => mapProject(project, environmentId));
-
-  const threads = listing.threads
-    .filter((t) => t.deletedAt === null)
-    .map(
-      (summary): Thread => ({
-        id: summary.id,
-        environmentId,
-        codexThreadId: null,
-        projectId: summary.projectId,
-        title: summary.title,
-        modelSelection: normalizeModelSelection(summary.modelSelection),
-        runtimeMode: summary.runtimeMode,
-        interactionMode: summary.interactionMode,
-        session: summary.session ? mapSession(summary.session) : null,
-        messages: [],
-        proposedPlans: [],
-        error: sanitizeThreadErrorMessage(summary.session?.lastError),
-        createdAt: summary.createdAt,
-        archivedAt: summary.archivedAt,
-        updatedAt: summary.updatedAt,
-        latestTurn: summary.latestTurn,
-        pendingSourceProposedPlan: summary.latestTurn?.sourceProposedPlan,
-        branch: summary.branch,
-        worktreePath: summary.worktreePath,
-        additionalDirectories: [...(summary.additionalDirectories ?? [])],
-        turnDiffSummaries: [],
-        activities: [],
-        hydrated: summary.latestTurn === null,
-      }),
-    );
-
-  const sidebarThreadSummaryById: Record<ThreadId, SidebarThreadSummary> = {};
-  for (const summary of listing.threads) {
-    if (summary.deletedAt !== null) continue;
-    const thread = threads.find((t) => t.id === summary.id);
-    if (!thread) continue;
-    sidebarThreadSummaryById[summary.id] = {
-      id: summary.id,
-      environmentId,
-      projectId: summary.projectId,
-      title: summary.title,
-      interactionMode: summary.interactionMode,
-      session: thread.session,
-      createdAt: summary.createdAt,
-      archivedAt: summary.archivedAt,
-      updatedAt: summary.updatedAt,
-      latestTurn: summary.latestTurn,
-      branch: summary.branch,
-      worktreePath: summary.worktreePath,
-      latestUserMessageAt: summary.latestUserMessageAt,
-      hasPendingApprovals: summary.hasPendingApprovals,
-      hasPendingUserInput: summary.hasPendingUserInput,
-      hasActionableProposedPlan: summary.hasActionableProposedPlan,
-    };
-  }
-
-  const nextEnvState: EnvironmentState = {
-    ...envState,
-    ...buildProjectState(projects),
-    ...buildThreadState(threads),
-    sidebarThreadSummaryById,
+): EnvironmentState {
+  const nextProjects = snapshot.projects.map((project) => mapProjectShell(project, environmentId));
+  const nextThreadIds = new Set(snapshot.threads.map((thread) => thread.id));
+  let nextState: EnvironmentState = {
+    ...state,
+    ...buildProjectState(nextProjects),
+    threadIds: [],
+    threadIdsByProjectId: {},
+    threadShellById: {},
+    threadSessionById: {},
+    threadTurnStateById: {},
+    sidebarThreadSummaryById: {},
+    messageIdsByThreadId: retainThreadScopedRecord(state.messageIdsByThreadId, nextThreadIds),
+    messageByThreadId: retainThreadScopedRecord(state.messageByThreadId, nextThreadIds),
+    activityIdsByThreadId: retainThreadScopedRecord(state.activityIdsByThreadId, nextThreadIds),
+    activityByThreadId: retainThreadScopedRecord(state.activityByThreadId, nextThreadIds),
+    proposedPlanIdsByThreadId: retainThreadScopedRecord(
+      state.proposedPlanIdsByThreadId,
+      nextThreadIds,
+    ),
+    proposedPlanByThreadId: retainThreadScopedRecord(state.proposedPlanByThreadId, nextThreadIds),
+    turnDiffIdsByThreadId: retainThreadScopedRecord(state.turnDiffIdsByThreadId, nextThreadIds),
+    turnDiffSummaryByThreadId: retainThreadScopedRecord(
+      state.turnDiffSummaryByThreadId,
+      nextThreadIds,
+    ),
     bootstrapComplete: true,
   };
 
-  return commitEnvironmentState(state, environmentId, nextEnvState);
+  for (const thread of snapshot.threads) {
+    nextState = writeThreadShellState(nextState, mapThreadShell(thread, environmentId));
+  }
+
+  return nextState;
 }
 
-export function hydrateThread(
+export function syncServerShellSnapshot(
   state: AppState,
-  fullThread: OrchestrationThread,
+  snapshot: OrchestrationShellSnapshot,
   environmentId: EnvironmentId,
 ): AppState {
-  const envState = getStoredEnvironmentState(state, environmentId);
-  const mapped = mapThread(fullThread, environmentId);
-  const nextEnvState = writeThreadState(envState, mapped);
-  return commitEnvironmentState(state, environmentId, nextEnvState);
+  return commitEnvironmentState(
+    state,
+    environmentId,
+    syncEnvironmentShellSnapshot(
+      getStoredEnvironmentState(state, environmentId),
+      snapshot,
+      environmentId,
+    ),
+  );
 }
 
-export function isThreadHydrated(thread: Thread): boolean {
-  return thread.hydrated;
+export function syncServerThreadDetail(
+  state: AppState,
+  thread: OrchestrationThread,
+  environmentId: EnvironmentId,
+): AppState {
+  const environmentState = getStoredEnvironmentState(state, environmentId);
+  const previousThread = getThreadFromEnvironmentState(environmentState, thread.id);
+  return commitEnvironmentState(
+    state,
+    environmentId,
+    writeThreadState(environmentState, mapThread(thread, environmentId), previousThread),
+  );
 }
 
 function applyEnvironmentOrchestrationEvent(
@@ -1591,6 +1790,83 @@ export function applyOrchestrationEvents(
   return commitEnvironmentState(state, environmentId, nextEnvironmentState);
 }
 
+function applyEnvironmentShellEvent(
+  state: EnvironmentState,
+  event: OrchestrationShellStreamEvent,
+  environmentId: EnvironmentId,
+): EnvironmentState {
+  switch (event.kind) {
+    case "project-upserted": {
+      const nextProject = mapProjectShell(event.project, environmentId);
+      const existingProjectId =
+        state.projectIds.find(
+          (projectId) =>
+            projectId === event.project.id ||
+            state.projectById[projectId]?.cwd === event.project.workspaceRoot,
+        ) ?? null;
+      let projectById = state.projectById;
+      let projectIds = state.projectIds;
+
+      if (existingProjectId !== null && existingProjectId !== nextProject.id) {
+        const { [existingProjectId]: _removedProject, ...restProjectById } = state.projectById;
+        projectById = {
+          ...restProjectById,
+          [nextProject.id]: nextProject,
+        };
+        projectIds = state.projectIds.map((projectId) =>
+          projectId === existingProjectId ? nextProject.id : projectId,
+        );
+      } else {
+        projectById = {
+          ...state.projectById,
+          [nextProject.id]: nextProject,
+        };
+        projectIds =
+          existingProjectId === null && !state.projectIds.includes(nextProject.id)
+            ? [...state.projectIds, nextProject.id]
+            : state.projectIds;
+      }
+
+      return {
+        ...state,
+        projectById,
+        projectIds,
+      };
+    }
+    case "project-removed": {
+      if (!state.projectById[event.projectId]) {
+        return state;
+      }
+      const { [event.projectId]: _removedProject, ...projectById } = state.projectById;
+      return {
+        ...state,
+        projectById,
+        projectIds: removeId(state.projectIds, event.projectId),
+      };
+    }
+    case "thread-upserted":
+      return writeThreadShellState(state, mapThreadShell(event.thread, environmentId));
+    case "thread-removed":
+      return removeThreadState(state, event.threadId);
+  }
+}
+
+export function applyShellEvent(
+  state: AppState,
+  event: OrchestrationShellStreamEvent,
+  environmentId: EnvironmentId,
+): AppState {
+  return commitEnvironmentState(
+    state,
+    environmentId,
+    applyEnvironmentShellEvent(
+      getStoredEnvironmentState(state, environmentId),
+      event,
+      environmentId,
+    ),
+  );
+}
+
 function getEnvironmentEntries(
   state: AppState,
 ): ReadonlyArray<readonly [EnvironmentId, EnvironmentState]> {
@@ -1795,16 +2071,17 @@ export function setThreadBranch(
 interface AppStore extends AppState {
   setActiveEnvironmentId: (environmentId: EnvironmentId) => void;
   syncServerReadModel: (readModel: OrchestrationReadModel, environmentId: EnvironmentId) => void;
-  syncListingSnapshot: (
-    listing: OrchestrationListingSnapshot,
+  syncServerShellSnapshot: (
+    snapshot: OrchestrationShellSnapshot,
     environmentId: EnvironmentId,
   ) => void;
-  hydrateThread: (fullThread: OrchestrationThread, environmentId: EnvironmentId) => void;
+  syncServerThreadDetail: (thread: OrchestrationThread, environmentId: EnvironmentId) => void;
   applyOrchestrationEvent: (event: OrchestrationEvent, environmentId: EnvironmentId) => void;
   applyOrchestrationEvents: (
     events: ReadonlyArray<OrchestrationEvent>,
     environmentId: EnvironmentId,
   ) => void;
+  applyShellEvent: (event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) => void;
   setError: (threadId: ThreadId, error: string | null) => void;
   setThreadBranch: (
     threadRef: ScopedThreadRef,
@@ -1819,14 +2096,16 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => setActiveEnvironmentId(state, environmentId)),
   syncServerReadModel: (readModel, environmentId) =>
     set((state) => syncServerReadModel(state, readModel, environmentId)),
-  syncListingSnapshot: (listing, environmentId) =>
-    set((state) => syncListingSnapshot(state, listing, environmentId)),
-  hydrateThread: (fullThread, environmentId) =>
-    set((state) => hydrateThread(state, fullThread, environmentId)),
+  syncServerShellSnapshot: (snapshot, environmentId) =>
+    set((state) => syncServerShellSnapshot(state, snapshot, environmentId)),
+  syncServerThreadDetail: (thread, environmentId) =>
+    set((state) => syncServerThreadDetail(state, thread, environmentId)),
   applyOrchestrationEvent: (event, environmentId) =>
     set((state) => applyOrchestrationEvent(state, event, environmentId)),
   applyOrchestrationEvents: (events, environmentId) =>
     set((state) => applyOrchestrationEvents(state, events, environmentId)),
+  applyShellEvent: (event, environmentId) =>
+    set((state) => applyShellEvent(state, event, environmentId)),
   setError: (threadId, error) => set((state) => setError(state, threadId, error)),
   setThreadBranch: (threadRef, branch, worktreePath) =>
     set((state) => setThreadBranch(state, threadRef, branch, worktreePath)),

@@ -31,7 +31,6 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     branch: null,
     worktreePath: null,
     additionalDirectories: [],
-    hydrated: true,
     ...overrides,
   };
 }

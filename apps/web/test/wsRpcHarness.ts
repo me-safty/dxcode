@@ -1,5 +1,5 @@
 import { Effect, Exit, PubSub, Scope, Stream } from "effect";
-import { WS_METHODS, WsRpcGroup } from "@marcode/contracts";
+import { ORCHESTRATION_WS_METHODS, WS_METHODS, WsRpcGroup } from "@marcode/contracts";
 import { RpcMessage, RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 type RpcServerInstance = RpcServer.RpcServer<any>;
@@ -25,7 +25,8 @@ interface BrowserWsRpcHarnessOptions {
 const STREAM_METHODS = new Set<string>([
   WS_METHODS.gitRunStackedAction,
   WS_METHODS.subscribeGitStatus,
-  WS_METHODS.subscribeOrchestrationDomainEvents,
+  ORCHESTRATION_WS_METHODS.subscribeShell,
+  ORCHESTRATION_WS_METHODS.subscribeThread,
   WS_METHODS.subscribeTerminalEvents,
   WS_METHODS.subscribeServerConfig,
   WS_METHODS.subscribeServerLifecycle,

@@ -84,7 +84,6 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     branch: null,
     worktreePath: null,
     additionalDirectories: [],
-    hydrated: true,
     ...overrides,
   };
 }
@@ -132,7 +131,6 @@ function makeState(thread: Thread): AppState {
         branch: thread.branch,
         worktreePath: thread.worktreePath,
         additionalDirectories: thread.additionalDirectories,
-        hydrated: thread.hydrated,
       },
     },
     threadSessionById: {
@@ -846,7 +844,6 @@ describe("incremental orchestration updates", () => {
           branch: thread2.branch,
           worktreePath: thread2.worktreePath,
           additionalDirectories: thread2.additionalDirectories,
-          hydrated: thread2.hydrated,
         },
       },
       threadSessionById: {

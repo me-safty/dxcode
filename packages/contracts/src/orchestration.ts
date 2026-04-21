@@ -18,17 +18,12 @@ import {
 } from "./baseSchemas";
 
 export const ORCHESTRATION_WS_METHODS = {
-  getSnapshot: "orchestration.getSnapshot",
-  getListingSnapshot: "orchestration.getListingSnapshot",
-  getThread: "orchestration.getThread",
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   replayEvents: "orchestration.replayEvents",
-} as const;
-
-export const ORCHESTRATION_WS_CHANNELS = {
-  domainEvent: "orchestration.domainEvent",
+  subscribeShell: "orchestration.subscribeShell",
+  subscribeThread: "orchestration.subscribeThread",
 } as const;
 
 export const ProviderKind = Schema.Literals(["claudeAgent", "codex"]);
@@ -323,7 +318,22 @@ export const OrchestrationReadModel = Schema.Struct({
 });
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type;
 
-export const OrchestrationThreadSummary = Schema.Struct({
+export const OrchestrationProjectShell = Schema.Struct({
+  id: ProjectId,
+  title: TrimmedNonEmptyString,
+  workspaceRoot: TrimmedNonEmptyString,
+  repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
+  defaultModelSelection: Schema.NullOr(ModelSelection),
+  scripts: Schema.Array(ProjectScript),
+  jiraBoard: Schema.NullOr(JiraBoardReference).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
+
+export const OrchestrationThreadShell = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -338,25 +348,68 @@ export const OrchestrationThreadSummary = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
-  session: Schema.NullOr(OrchestrationSession),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
-  deletedAt: Schema.NullOr(IsoDateTime),
+  session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
 });
-export type OrchestrationThreadSummary = typeof OrchestrationThreadSummary.Type;
+export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
-export const OrchestrationListingSnapshot = Schema.Struct({
+export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
-  projects: Schema.Array(OrchestrationProject),
-  threads: Schema.Array(OrchestrationThreadSummary),
+  projects: Schema.Array(OrchestrationProjectShell),
+  threads: Schema.Array(OrchestrationThreadShell),
   updatedAt: IsoDateTime,
 });
-export type OrchestrationListingSnapshot = typeof OrchestrationListingSnapshot.Type;
+export type OrchestrationShellSnapshot = typeof OrchestrationShellSnapshot.Type;
+
+export const OrchestrationShellStreamEvent = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("project-upserted"),
+    sequence: NonNegativeInt,
+    project: OrchestrationProjectShell,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("project-removed"),
+    sequence: NonNegativeInt,
+    projectId: ProjectId,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("thread-upserted"),
+    sequence: NonNegativeInt,
+    thread: OrchestrationThreadShell,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("thread-removed"),
+    sequence: NonNegativeInt,
+    threadId: ThreadId,
+  }),
+]);
+export type OrchestrationShellStreamEvent = typeof OrchestrationShellStreamEvent.Type;
+
+export const OrchestrationShellStreamItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("snapshot"),
+    snapshot: OrchestrationShellSnapshot,
+  }),
+  OrchestrationShellStreamEvent,
+]);
+export type OrchestrationShellStreamItem = typeof OrchestrationShellStreamItem.Type;
+
+export const OrchestrationSubscribeThreadInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationSubscribeThreadInput = typeof OrchestrationSubscribeThreadInput.Type;
+
+export const OrchestrationThreadDetailSnapshot = Schema.Struct({
+  snapshotSequence: NonNegativeInt,
+  thread: OrchestrationThread,
+});
+export type OrchestrationThreadDetailSnapshot = typeof OrchestrationThreadDetailSnapshot.Type;
 
 export const ProjectCreateCommand = Schema.Struct({
   type: Schema.Literal("project.create"),
@@ -1014,6 +1067,18 @@ export const OrchestrationEvent = Schema.Union([
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;
 
+export const OrchestrationThreadStreamItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("snapshot"),
+    snapshot: OrchestrationThreadDetailSnapshot,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("event"),
+    event: OrchestrationEvent,
+  }),
+]);
+export type OrchestrationThreadStreamItem = typeof OrchestrationThreadStreamItem.Type;
+
 export const OrchestrationCommandReceiptStatus = Schema.Literals(["accepted", "rejected"]);
 export type OrchestrationCommandReceiptStatus = typeof OrchestrationCommandReceiptStatus.Type;
 
@@ -1078,21 +1143,6 @@ export const DispatchResult = Schema.Struct({
 });
 export type DispatchResult = typeof DispatchResult.Type;
 
-export const OrchestrationGetSnapshotInput = Schema.Struct({});
-export type OrchestrationGetSnapshotInput = typeof OrchestrationGetSnapshotInput.Type;
-const OrchestrationGetSnapshotResult = OrchestrationReadModel;
-export type OrchestrationGetSnapshotResult = typeof OrchestrationGetSnapshotResult.Type;
-
-export const OrchestrationGetListingSnapshotInput = Schema.Struct({});
-export type OrchestrationGetListingSnapshotInput = typeof OrchestrationGetListingSnapshotInput.Type;
-
-export const OrchestrationGetThreadInput = Schema.Struct({
-  threadId: ThreadId,
-});
-export type OrchestrationGetThreadInput = typeof OrchestrationGetThreadInput.Type;
-const OrchestrationGetThreadResult = Schema.NullOr(OrchestrationThread);
-export type OrchestrationGetThreadResult = typeof OrchestrationGetThreadResult.Type;
-
 export const OrchestrationGetTurnDiffInput = TurnCountRange.mapFields(
   Struct.assign({ threadId: ThreadId }),
   { unsafePreserveChecks: true },
@@ -1120,18 +1170,6 @@ const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
 export const OrchestrationRpcSchemas = {
-  getSnapshot: {
-    input: OrchestrationGetSnapshotInput,
-    output: OrchestrationGetSnapshotResult,
-  },
-  getListingSnapshot: {
-    input: OrchestrationGetListingSnapshotInput,
-    output: OrchestrationListingSnapshot,
-  },
-  getThread: {
-    input: OrchestrationGetThreadInput,
-    output: OrchestrationGetThreadResult,
-  },
   dispatchCommand: {
     input: ClientOrchestrationCommand,
     output: DispatchResult,
@@ -1148,26 +1186,18 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationReplayEventsInput,
     output: OrchestrationReplayEventsResult,
   },
+  subscribeThread: {
+    input: OrchestrationSubscribeThreadInput,
+    output: OrchestrationThreadStreamItem,
+  },
+  subscribeShell: {
+    input: Schema.Struct({}),
+    output: OrchestrationShellStreamItem,
+  },
 } as const;
 
 export class OrchestrationGetSnapshotError extends Schema.TaggedErrorClass<OrchestrationGetSnapshotError>()(
   "OrchestrationGetSnapshotError",
-  {
-    message: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect),
-  },
-) {}
-
-export class OrchestrationGetListingSnapshotError extends Schema.TaggedErrorClass<OrchestrationGetListingSnapshotError>()(
-  "OrchestrationGetListingSnapshotError",
-  {
-    message: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect),
-  },
-) {}
-
-export class OrchestrationGetThreadError extends Schema.TaggedErrorClass<OrchestrationGetThreadError>()(
-  "OrchestrationGetThreadError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),

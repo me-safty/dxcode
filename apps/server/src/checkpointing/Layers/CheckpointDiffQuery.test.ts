@@ -82,9 +82,14 @@ describe("CheckpointDiffQueryLive", () => {
         Layer.succeed(ProjectionSnapshotQuery, {
           getSnapshot: () =>
             Effect.die("CheckpointDiffQuery should not request the full orchestration snapshot"),
-          getListingSnapshot: () =>
-            Effect.die("CheckpointDiffQuery should not request the listing snapshot"),
-          getThread: () => Effect.die("CheckpointDiffQuery should not request a single thread"),
+          getShellSnapshot: () =>
+            Effect.die("CheckpointDiffQuery should not request the shell snapshot"),
+          getProjectShellById: () =>
+            Effect.die("CheckpointDiffQuery should not request a project shell"),
+          getThreadShellById: () =>
+            Effect.die("CheckpointDiffQuery should not request a thread shell"),
+          getThreadDetailById: () =>
+            Effect.die("CheckpointDiffQuery should not request a thread detail"),
           getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
           getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
@@ -139,9 +144,14 @@ describe("CheckpointDiffQueryLive", () => {
         Layer.succeed(ProjectionSnapshotQuery, {
           getSnapshot: () =>
             Effect.die("CheckpointDiffQuery should not request the full orchestration snapshot"),
-          getListingSnapshot: () =>
-            Effect.die("CheckpointDiffQuery should not request the listing snapshot"),
-          getThread: () => Effect.die("CheckpointDiffQuery should not request a single thread"),
+          getShellSnapshot: () =>
+            Effect.die("CheckpointDiffQuery should not request the shell snapshot"),
+          getProjectShellById: () =>
+            Effect.die("CheckpointDiffQuery should not request a project shell"),
+          getThreadShellById: () =>
+            Effect.die("CheckpointDiffQuery should not request a thread shell"),
+          getThreadDetailById: () =>
+            Effect.die("CheckpointDiffQuery should not request a thread detail"),
           getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
           getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
