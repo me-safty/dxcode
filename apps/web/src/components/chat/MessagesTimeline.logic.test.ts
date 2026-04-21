@@ -5,6 +5,8 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  selectUserMessageMinimapEntries,
+  type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
 
 describe("computeMessageDurationStart", () => {
@@ -431,5 +433,182 @@ describe("computeStableMessagesTimelineRows", () => {
 
     expect(reordered).not.toBe(initial);
     expect(reordered.result).toEqual([initial.result[1], initial.result[0]]);
+  });
+});
+
+describe("selectUserMessageMinimapEntries", () => {
+  it("returns an empty array when no rows are present", () => {
+    expect(selectUserMessageMinimapEntries([])).toEqual([]);
+  });
+
+  it("returns an empty array when no rows are user messages", () => {
+    const rows: MessagesTimelineRow[] = [
+      {
+        kind: "message",
+        id: "entry-a1",
+        createdAt: "2026-01-01T00:00:10Z",
+        message: {
+          id: "assistant-1" as never,
+          role: "assistant",
+          text: "Hello",
+          turnId: "turn-1" as never,
+          createdAt: "2026-01-01T00:00:10Z",
+          completedAt: "2026-01-01T00:00:11Z",
+          streaming: false,
+        },
+        durationStart: "2026-01-01T00:00:10Z",
+        showCompletionDivider: false,
+        showAssistantCopyButton: false,
+      },
+      {
+        kind: "work",
+        id: "entry-work-1",
+        createdAt: "2026-01-01T00:00:05Z",
+        groupedEntries: [
+          {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:05Z",
+            label: "thinking",
+            tone: "thinking",
+          },
+        ],
+      },
+    ];
+
+    expect(selectUserMessageMinimapEntries(rows)).toEqual([]);
+  });
+
+  it("captures the original rowIndex for user message rows in a mixed list", () => {
+    const rows: MessagesTimelineRow[] = [
+      {
+        kind: "work",
+        id: "entry-work-1",
+        createdAt: "2026-01-01T00:00:00Z",
+        groupedEntries: [
+          {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:00Z",
+            label: "thinking",
+            tone: "thinking",
+          },
+        ],
+      },
+      {
+        kind: "message",
+        id: "entry-user-1",
+        createdAt: "2026-01-01T00:00:05Z",
+        message: {
+          id: "user-1" as never,
+          role: "user",
+          text: "First message",
+          turnId: null,
+          createdAt: "2026-01-01T00:00:05Z",
+          streaming: false,
+        },
+        durationStart: "2026-01-01T00:00:05Z",
+        showCompletionDivider: false,
+        showAssistantCopyButton: false,
+      },
+      {
+        kind: "message",
+        id: "entry-a1",
+        createdAt: "2026-01-01T00:00:10Z",
+        message: {
+          id: "assistant-1" as never,
+          role: "assistant",
+          text: "Reply",
+          turnId: "turn-1" as never,
+          createdAt: "2026-01-01T00:00:10Z",
+          completedAt: "2026-01-01T00:00:11Z",
+          streaming: false,
+        },
+        durationStart: "2026-01-01T00:00:05Z",
+        showCompletionDivider: false,
+        showAssistantCopyButton: true,
+      },
+      {
+        kind: "message",
+        id: "entry-user-2",
+        createdAt: "2026-01-01T00:00:20Z",
+        message: {
+          id: "user-2" as never,
+          role: "user",
+          text: "Second message",
+          turnId: null,
+          createdAt: "2026-01-01T00:00:20Z",
+          streaming: false,
+        },
+        durationStart: "2026-01-01T00:00:20Z",
+        showCompletionDivider: false,
+        showAssistantCopyButton: false,
+      },
+    ];
+
+    const entries = selectUserMessageMinimapEntries(rows);
+    expect(entries).toEqual([
+      {
+        rowIndex: 1,
+        rowKey: "entry-user-1",
+        messageId: "user-1",
+        previewText: "First message",
+      },
+      {
+        rowIndex: 3,
+        rowKey: "entry-user-2",
+        messageId: "user-2",
+        previewText: "Second message",
+      },
+    ]);
+  });
+
+  it("strips trailing terminal context blocks from the preview text", () => {
+    const rows: MessagesTimelineRow[] = [
+      {
+        kind: "message",
+        id: "entry-user-1",
+        createdAt: "2026-01-01T00:00:00Z",
+        message: {
+          id: "user-1" as never,
+          role: "user",
+          text:
+            "Look at the log\n\n<terminal_context>\n- session 1:\nhello\nworld\n</terminal_context>",
+          turnId: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          streaming: false,
+        },
+        durationStart: "2026-01-01T00:00:00Z",
+        showCompletionDivider: false,
+        showAssistantCopyButton: false,
+      },
+    ];
+
+    const entries = selectUserMessageMinimapEntries(rows);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.previewText).toBe("Look at the log");
+  });
+
+  it("falls back to a placeholder when the visible text is empty but a terminal context exists", () => {
+    const rows: MessagesTimelineRow[] = [
+      {
+        kind: "message",
+        id: "entry-user-1",
+        createdAt: "2026-01-01T00:00:00Z",
+        message: {
+          id: "user-1" as never,
+          role: "user",
+          text: "<terminal_context>\n- session 1:\nhello\n</terminal_context>",
+          turnId: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          streaming: false,
+        },
+        durationStart: "2026-01-01T00:00:00Z",
+        showCompletionDivider: false,
+        showAssistantCopyButton: false,
+      },
+    ];
+
+    const entries = selectUserMessageMinimapEntries(rows);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.previewText).toBe("(terminal context)");
   });
 });
