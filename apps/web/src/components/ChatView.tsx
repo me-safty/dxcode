@@ -43,6 +43,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
@@ -89,7 +90,12 @@ import {
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
-import { markThreadUserStopped } from "../turnNotification";
+import {
+  getLocallyInterruptedTurnsSnapshot,
+  markThreadUserStopped,
+  markTurnLocallyInterrupted,
+  subscribeToLocallyInterruptedTurns,
+} from "../turnNotification";
 import {
   type AppState,
   isThreadHydrated,
@@ -1456,13 +1462,24 @@ export default function ChatView({
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError: activeThread?.error,
   });
-  const hasInFlightTurn = Boolean(activeLatestTurn && !activeLatestTurn.completedAt);
+  const locallyInterruptedTurns = useSyncExternalStore(
+    subscribeToLocallyInterruptedTurns,
+    getLocallyInterruptedTurnsSnapshot,
+    getLocallyInterruptedTurnsSnapshot,
+  );
+  const isLatestTurnLocallyInterrupted = Boolean(
+    activeLatestTurn && locallyInterruptedTurns.has(activeLatestTurn.turnId),
+  );
+  const hasInFlightTurn =
+    !isLatestTurnLocallyInterrupted && Boolean(activeLatestTurn && !activeLatestTurn.completedAt);
   const isSessionStarting = activeThread?.session?.orchestrationStatus === "starting";
   const lastActiveMessage = activeThread?.messages[activeThread.messages.length - 1];
-  const hasPendingAssistantResponse = Boolean(
-    lastActiveMessage?.role === "user" &&
-    (!activeLatestTurn || Boolean(activeLatestTurn.completedAt)),
-  );
+  const hasPendingAssistantResponse =
+    !isLatestTurnLocallyInterrupted &&
+    Boolean(
+      lastActiveMessage?.role === "user" &&
+      (!activeLatestTurn || Boolean(activeLatestTurn.completedAt)),
+    );
   const isWorking =
     phase === "running" ||
     isSendBusy ||
@@ -3806,6 +3823,9 @@ export default function ChatView({
     const api = readNativeApi();
     if (!api || !activeThread) return;
     markThreadUserStopped(activeThread.id);
+    if (activeLatestTurn?.turnId) {
+      markTurnLocallyInterrupted(activeLatestTurn.turnId);
+    }
     await api.orchestration.dispatchCommand({
       type: "thread.turn.interrupt",
       commandId: newCommandId(),
