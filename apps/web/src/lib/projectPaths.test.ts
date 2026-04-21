@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendBrowsePathSegment,
   canNavigateUp,
+  collapseRelativeSegments,
   getBrowseDirectoryPath,
   findProjectByPath,
   getBrowseLeafPathSegment,
@@ -113,5 +114,20 @@ describe("projectPaths", () => {
     expect(canNavigateUp("~/repo/")).toBe(true);
     expect(canNavigateUp("\\\\server\\share\\")).toBe(false);
     expect(canNavigateUp("\\\\server\\share\\repo\\")).toBe(true);
+  });
+
+  it("collapses .. and . segments in browse paths", () => {
+    expect(collapseRelativeSegments("/Users/foo/marcode/../")).toBe("/Users/foo/");
+    expect(collapseRelativeSegments("/Users/foo/marcode/..")).toBe("/Users/foo");
+    expect(collapseRelativeSegments("/a/./b/")).toBe("/a/b/");
+    expect(collapseRelativeSegments("/a/../b/")).toBe("/b/");
+    expect(collapseRelativeSegments("/../")).toBe("/");
+    expect(collapseRelativeSegments("/")).toBe("/");
+    expect(collapseRelativeSegments("~/projects/foo/../")).toBe("~/projects/");
+    expect(collapseRelativeSegments("~/../")).toBe("~/");
+    expect(collapseRelativeSegments("C:\\Work\\project\\..\\")).toBe("C:\\Work\\");
+    expect(collapseRelativeSegments("\\\\server\\share\\repo\\..\\")).toBe("\\\\server\\share\\");
+    expect(collapseRelativeSegments("notes")).toBe("notes");
+    expect(collapseRelativeSegments("../")).toBe("../");
   });
 });

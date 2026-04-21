@@ -257,3 +257,46 @@ export function getBrowseParentPath(currentPath: string): string | null {
 export function canNavigateUp(currentPath: string): boolean {
   return hasTrailingPathSeparator(currentPath) && getBrowseParentPath(currentPath) !== null;
 }
+
+function collapseSegmentList(segments: readonly string[]): string[] {
+  const collapsed: string[] = [];
+  for (const segment of segments) {
+    if (segment.length === 0 || segment === ".") continue;
+    if (segment === "..") {
+      collapsed.pop();
+      continue;
+    }
+    collapsed.push(segment);
+  }
+  return collapsed;
+}
+
+export function collapseRelativeSegments(currentPath: string): string {
+  const preserveTrailing = hasTrailingPathSeparator(currentPath);
+
+  if (currentPath.startsWith("~/") || currentPath.startsWith("~\\")) {
+    const separator = currentPath[1] === "\\" ? "\\" : "/";
+    const rawSegments = currentPath.slice(2).split(/[\\/]+/);
+    const collapsed = collapseSegmentList(rawSegments);
+    if (collapsed.length === 0) {
+      return `~${separator}`;
+    }
+    const joined = collapsed.join(separator);
+    const trailing = preserveTrailing ? separator : "";
+    return `~${separator}${joined}${trailing}`;
+  }
+
+  const absolutePath = splitAbsolutePath(currentPath);
+  if (!absolutePath) {
+    return currentPath;
+  }
+
+  const collapsed = collapseSegmentList(absolutePath.segments);
+  if (collapsed.length === 0) {
+    return absolutePath.root;
+  }
+
+  const joined = collapsed.join(absolutePath.separator);
+  const trailing = preserveTrailing ? absolutePath.separator : "";
+  return `${absolutePath.root}${joined}${trailing}`;
+}

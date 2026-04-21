@@ -48,6 +48,7 @@ import {
 import {
   appendBrowsePathSegment,
   canNavigateUp,
+  collapseRelativeSegments,
   ensureBrowseDirectoryPath,
   findProjectByPath,
   getBrowseDirectoryPath,
@@ -522,16 +523,19 @@ function OpenCommandPaletteDialog() {
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
 
   function pushPaletteView(view: CommandPaletteView): void {
+    const normalizedInitialQuery = view.initialQuery
+      ? collapseRelativeSegments(view.initialQuery)
+      : view.initialQuery;
     setViewStack((previousViews) => [
       ...previousViews,
       {
         addonIcon: view.addonIcon,
         groups: view.groups,
-        ...(view.initialQuery ? { initialQuery: view.initialQuery } : {}),
+        ...(normalizedInitialQuery ? { initialQuery: normalizedInitialQuery } : {}),
       },
     ]);
     setHighlightedItemValue(null);
-    setQuery(view.initialQuery ?? "");
+    setQuery(normalizedInitialQuery ?? "");
   }
 
   function pushView(item: CommandPaletteSubmenuItem): void {
@@ -553,9 +557,12 @@ function OpenCommandPaletteDialog() {
   }
 
   function handleQueryChange(nextQuery: string): void {
+    const normalizedQuery = hasTrailingPathSeparator(nextQuery)
+      ? collapseRelativeSegments(nextQuery)
+      : nextQuery;
     setHighlightedItemValue(null);
-    setQuery(nextQuery);
-    if (nextQuery === "" && currentView?.initialQuery) {
+    setQuery(normalizedQuery);
+    if (normalizedQuery === "" && currentView?.initialQuery) {
       popView();
     }
   }
@@ -1090,11 +1097,9 @@ function OpenCommandPaletteDialog() {
           <CommandInput
             className={isBrowsing ? (willCreateProjectPath ? "pe-36" : "pe-16") : undefined}
             placeholder={inputPlaceholder}
-            wrapperClassName={
-              isSubmenu ? "[&_[data-slot=autocomplete-start-addon]]:pointer-events-auto" : undefined
-            }
             {...(isSubmenu
               ? {
+                  startAddonInteractive: true,
                   startAddon: (
                     <button
                       type="button"
