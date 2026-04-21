@@ -1130,10 +1130,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             userMessageAtByThread.set(row.threadId, row.latestUserMessageAt);
           }
 
+          const repositoryIdentities = new Map(
+            yield* Effect.forEach(
+              projectRows,
+              (row) =>
+                repositoryIdentityResolver
+                  .resolve(row.workspaceRoot)
+                  .pipe(Effect.map((identity) => [row.projectId, identity] as const)),
+              { concurrency: repositoryIdentityResolutionConcurrency },
+            ),
+          );
+
           const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) => ({
             id: row.projectId,
             title: row.title,
             workspaceRoot: row.workspaceRoot,
+            repositoryIdentity: repositoryIdentities.get(row.projectId) ?? null,
             defaultModelSelection: row.defaultModelSelection,
             scripts: row.scripts,
             jiraBoard: row.jiraBoard,

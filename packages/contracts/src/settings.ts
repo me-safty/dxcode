@@ -56,6 +56,14 @@ export const NotificationSoundMap = Schema.Struct({
 });
 export type NotificationSoundMap = typeof NotificationSoundMap.Type;
 
+export const SidebarProjectGroupingMode = Schema.Literals([
+  "repository",
+  "repository_path",
+  "separate",
+]);
+export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
+export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
+
 export const ClientSettingsSchema = Schema.Struct({
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
@@ -66,6 +74,13 @@ export const ClientSettingsSchema = Schema.Struct({
       model: TrimmedNonEmptyString,
     }),
   ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
+  ),
+  sidebarProjectGroupingOverrides: Schema.Record(
+    TrimmedNonEmptyString,
+    SidebarProjectGroupingMode,
+  ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_SORT_ORDER)),
   ),
