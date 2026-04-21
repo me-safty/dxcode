@@ -11,7 +11,7 @@ import {
   ChevronRightIcon,
   EllipsisIcon,
   LoaderIcon,
-  PanelRightCloseIcon,
+  XIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
 import type { ActivePlanState } from "../session-logic";
@@ -186,7 +186,7 @@ const PlanSidebar = memo(function PlanSidebar({
             aria-label={`Close ${label.toLowerCase()} sidebar`}
             className="text-muted-foreground/50 hover:text-foreground/70"
           >
-            <PanelRightCloseIcon className="size-3.5" />
+            <XIcon className="size-3.5" />
           </Button>
         </div>
       </div>

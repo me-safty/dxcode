@@ -162,17 +162,28 @@ function buildMacLauncher(electronBinaryPath) {
   return targetBinaryPath;
 }
 
+export function resolveElectronLaunchStrategy({ platform, isDevelopment, useMacWrapper }) {
+  if (platform !== "darwin") {
+    return "original";
+  }
+
+  if (isDevelopment) {
+    return "original";
+  }
+
+  return useMacWrapper ? "wrapped" : "original";
+}
+
 export function resolveElectronPath() {
   const require = createRequire(import.meta.url);
   const electronBinaryPath = require("electron");
+  const launchStrategy = resolveElectronLaunchStrategy({
+    platform: process.platform,
+    isDevelopment,
+    useMacWrapper: process.env.T3CODE_DESKTOP_USE_MAC_WRAPPER === "1",
+  });
 
-  if (process.platform !== "darwin") {
-    return electronBinaryPath;
-  }
-
-  // Dev launches do not need a renamed app bundle badly enough to risk breaking
-  // Electron helper resource lookup on macOS.
-  if (isDevelopment) {
+  if (launchStrategy === "original") {
     return electronBinaryPath;
   }
 
