@@ -158,6 +158,14 @@ interface ClaudeSessionContext {
   turnState: ClaudeTurnState | undefined;
   lastKnownContextWindow: number | undefined;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
+  /**
+   * Cumulative per-class token counts emitted in the prior turn's
+   * `result.usage`. Claude's SDK reports `result.usage` as a running total
+   * across every API call in the session, so per-turn cost requires
+   * subtracting this snapshot from the current cumulative totals. Cleared
+   * on session start; reset after each emission.
+   */
+  lastTurnCumulativeUsage: ClaudeUsageBreakdown | undefined;
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
   stopped: boolean;
@@ -290,61 +298,197 @@ function maxClaudeContextWindowFromModelUsage(
   return maxContextWindow;
 }
 
+/**
+ * Breakdown of a Claude SDK usage record across the four token classes we
+ * price separately. Pure — no derived totals, no capping. Callers combine
+ * with prior session state to compute context/ring values or per-turn deltas.
+ */
+interface ClaudeUsageBreakdown {
+  readonly inputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly cacheCreationInputTokens: number;
+  readonly outputTokens: number;
+  /**
+   * `usage.total_tokens` when the SDK reports it explicitly, otherwise the
+   * sum of the four classes. Used to drive `usedTokens` when no task
+   * snapshot is available.
+   */
+  readonly totalTokens: number;
+  readonly toolUses?: number;
+  readonly durationMs?: number;
+}
+
+function nonNegativeNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+export function parseClaudeUsageBreakdown(value: unknown): ClaudeUsageBreakdown | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const usage = value as Record<string, unknown>;
+  const inputTokens = nonNegativeNumber(usage.input_tokens);
+  const cachedInputTokens = nonNegativeNumber(usage.cache_read_input_tokens);
+  const cacheCreationInputTokens = nonNegativeNumber(usage.cache_creation_input_tokens);
+  const outputTokens = nonNegativeNumber(usage.output_tokens);
+  const derivedTotal =
+    inputTokens + cachedInputTokens + cacheCreationInputTokens + outputTokens;
+  const totalTokens =
+    typeof usage.total_tokens === "number" && Number.isFinite(usage.total_tokens) && usage.total_tokens > 0
+      ? usage.total_tokens
+      : derivedTotal;
+  if (totalTokens <= 0) {
+    return undefined;
+  }
+  const toolUses =
+    typeof usage.tool_uses === "number" && Number.isFinite(usage.tool_uses)
+      ? usage.tool_uses
+      : undefined;
+  const durationMs =
+    typeof usage.duration_ms === "number" && Number.isFinite(usage.duration_ms)
+      ? usage.duration_ms
+      : undefined;
+  return {
+    inputTokens,
+    cachedInputTokens,
+    cacheCreationInputTokens,
+    outputTokens,
+    totalTokens,
+    ...(toolUses !== undefined ? { toolUses } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+  };
+}
+
+/**
+ * Normalize a single Claude usage record into a `ThreadTokenUsageSnapshot`.
+ *
+ * Used for mid-turn snapshots (task_progress / task_notification) — each such
+ * event represents one API call's usage, which (for the latest call) matches
+ * the current context window size. The four token classes are reported
+ * separately so downstream cost math can apply the correct tier.
+ *
+ * No capping: `usedTokens` reflects `total_tokens` (or the derived sum) as
+ * reported. Callers that want to clamp for ring display should do so in the
+ * UI layer.
+ */
 function normalizeClaudeTokenUsage(
   value: unknown,
   contextWindow?: number,
 ): ThreadTokenUsageSnapshot | undefined {
-  if (!value || typeof value !== "object") {
+  const breakdown = parseClaudeUsageBreakdown(value);
+  if (!breakdown) {
     return undefined;
   }
-
-  const usage = value as Record<string, unknown>;
-  const inputTokens =
-    (typeof usage.input_tokens === "number" && Number.isFinite(usage.input_tokens)
-      ? usage.input_tokens
-      : 0) +
-    (typeof usage.cache_creation_input_tokens === "number" &&
-    Number.isFinite(usage.cache_creation_input_tokens)
-      ? usage.cache_creation_input_tokens
-      : 0) +
-    (typeof usage.cache_read_input_tokens === "number" &&
-    Number.isFinite(usage.cache_read_input_tokens)
-      ? usage.cache_read_input_tokens
-      : 0);
-  const outputTokens =
-    typeof usage.output_tokens === "number" && Number.isFinite(usage.output_tokens)
-      ? usage.output_tokens
-      : 0;
-  const derivedTotalProcessedTokens = inputTokens + outputTokens;
-  const totalProcessedTokens =
-    (typeof usage.total_tokens === "number" && Number.isFinite(usage.total_tokens)
-      ? usage.total_tokens
-      : undefined) ?? (derivedTotalProcessedTokens > 0 ? derivedTotalProcessedTokens : undefined);
-  if (totalProcessedTokens === undefined || totalProcessedTokens <= 0) {
-    return undefined;
-  }
-
   const maxTokens =
     typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
       ? contextWindow
       : undefined;
-  const usedTokens =
-    maxTokens !== undefined ? Math.min(totalProcessedTokens, maxTokens) : totalProcessedTokens;
-
   return {
-    usedTokens,
-    lastUsedTokens: usedTokens,
-    ...(totalProcessedTokens > usedTokens ? { totalProcessedTokens } : {}),
-    ...(inputTokens > 0 ? { inputTokens } : {}),
-    ...(outputTokens > 0 ? { outputTokens } : {}),
+    usedTokens: breakdown.totalTokens,
+    lastUsedTokens: breakdown.totalTokens,
+    ...(breakdown.inputTokens > 0 ? { inputTokens: breakdown.inputTokens } : {}),
+    ...(breakdown.cachedInputTokens > 0 ? { cachedInputTokens: breakdown.cachedInputTokens } : {}),
+    ...(breakdown.cacheCreationInputTokens > 0
+      ? { cacheCreationInputTokens: breakdown.cacheCreationInputTokens }
+      : {}),
+    ...(breakdown.outputTokens > 0 ? { outputTokens: breakdown.outputTokens } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
-    ...(typeof usage.tool_uses === "number" && Number.isFinite(usage.tool_uses)
-      ? { toolUses: usage.tool_uses }
-      : {}),
-    ...(typeof usage.duration_ms === "number" && Number.isFinite(usage.duration_ms)
-      ? { durationMs: usage.duration_ms }
-      : {}),
+    ...(breakdown.toolUses !== undefined ? { toolUses: breakdown.toolUses } : {}),
+    ...(breakdown.durationMs !== undefined ? { durationMs: breakdown.durationMs } : {}),
   };
+}
+
+/**
+ * Build the turn-complete usage snapshot. Combines:
+ *   - Mid-turn task snapshot (current context size) for `usedTokens`.
+ *   - Cumulative session totals from `result.usage` for `totalProcessedTokens`
+ *     and the cumulative per-class counts.
+ *   - Per-turn deltas via subtraction against the prior turn's cumulative —
+ *     this populates `lastInputTokens / lastCachedInputTokens /
+ *     lastCacheCreationInputTokens / lastOutputTokens` for the downstream
+ *     cost meter.
+ *
+ * `priorCumulative` is mutated by the caller after emission so the next turn
+ * sees fresh baseline state.
+ */
+export interface ClaudeTurnCompleteUsageInput {
+  readonly resultUsage: unknown;
+  readonly taskSnapshot: ThreadTokenUsageSnapshot | undefined;
+  readonly contextWindow?: number | undefined;
+  readonly priorCumulative?: ClaudeUsageBreakdown | undefined;
+}
+
+export interface ClaudeTurnCompleteUsageResult {
+  readonly snapshot: ThreadTokenUsageSnapshot | undefined;
+  readonly nextCumulative: ClaudeUsageBreakdown | undefined;
+}
+
+export function buildClaudeTurnCompleteUsage(
+  input: ClaudeTurnCompleteUsageInput,
+): ClaudeTurnCompleteUsageResult {
+  const cumulative = parseClaudeUsageBreakdown(input.resultUsage);
+  const maxTokens =
+    typeof input.contextWindow === "number" &&
+    Number.isFinite(input.contextWindow) &&
+    input.contextWindow > 0
+      ? input.contextWindow
+      : undefined;
+
+  if (!cumulative) {
+    // No result.usage — fall back to whatever task snapshot we have, stamped
+    // with the freshest maxTokens.
+    if (!input.taskSnapshot) {
+      return { snapshot: undefined, nextCumulative: input.priorCumulative };
+    }
+    return {
+      snapshot: {
+        ...input.taskSnapshot,
+        ...(maxTokens !== undefined ? { maxTokens } : {}),
+      },
+      nextCumulative: input.priorCumulative,
+    };
+  }
+
+  const prior = input.priorCumulative ?? {
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+  };
+  const deltaInput = Math.max(0, cumulative.inputTokens - prior.inputTokens);
+  const deltaCached = Math.max(0, cumulative.cachedInputTokens - prior.cachedInputTokens);
+  const deltaCacheCreation = Math.max(
+    0,
+    cumulative.cacheCreationInputTokens - prior.cacheCreationInputTokens,
+  );
+  const deltaOutput = Math.max(0, cumulative.outputTokens - prior.outputTokens);
+  const lastTotal = deltaInput + deltaCached + deltaCacheCreation + deltaOutput;
+
+  // usedTokens: prefer the task snapshot (current context size); fall back to
+  // the cumulative total when no task snapshot was recorded for this turn.
+  const usedTokens = input.taskSnapshot?.usedTokens ?? cumulative.totalTokens;
+
+  const snapshot: ThreadTokenUsageSnapshot = {
+    usedTokens,
+    lastUsedTokens: lastTotal > 0 ? lastTotal : cumulative.totalTokens,
+    totalProcessedTokens: cumulative.totalTokens,
+    ...(cumulative.inputTokens > 0 ? { inputTokens: cumulative.inputTokens } : {}),
+    ...(cumulative.cachedInputTokens > 0 ? { cachedInputTokens: cumulative.cachedInputTokens } : {}),
+    ...(cumulative.cacheCreationInputTokens > 0
+      ? { cacheCreationInputTokens: cumulative.cacheCreationInputTokens }
+      : {}),
+    ...(cumulative.outputTokens > 0 ? { outputTokens: cumulative.outputTokens } : {}),
+    ...(deltaInput > 0 ? { lastInputTokens: deltaInput } : {}),
+    ...(deltaCached > 0 ? { lastCachedInputTokens: deltaCached } : {}),
+    ...(deltaCacheCreation > 0 ? { lastCacheCreationInputTokens: deltaCacheCreation } : {}),
+    ...(deltaOutput > 0 ? { lastOutputTokens: deltaOutput } : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(cumulative.toolUses !== undefined ? { toolUses: cumulative.toolUses } : {}),
+    ...(cumulative.durationMs !== undefined ? { durationMs: cumulative.durationMs } : {}),
+  };
+
+  return { snapshot, nextCumulative: cumulative };
 }
 
 function asCanonicalTurnId(value: TurnId): TurnId {
@@ -1385,34 +1529,20 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       context.lastKnownContextWindow = resultContextWindow;
     }
 
-    // The SDK result.usage contains *accumulated* totals across all API calls
-    // (input_tokens, cache_read_input_tokens, etc. summed over every request).
-    // This does NOT represent the current context window size.
-    // Instead, use the last known context-window-accurate usage from task_progress
-    // events and treat the accumulated total as totalProcessedTokens.
-    const accumulatedSnapshot = normalizeClaudeTokenUsage(
-      result?.usage,
-      resultContextWindow ?? context.lastKnownContextWindow,
-    );
-    const accumulatedTotalProcessedTokens =
-      accumulatedSnapshot?.totalProcessedTokens ?? accumulatedSnapshot?.usedTokens;
-    const lastGoodUsage = context.lastKnownTokenUsage;
-    const maxTokens = resultContextWindow ?? context.lastKnownContextWindow;
-    const usageSnapshot: ThreadTokenUsageSnapshot | undefined = lastGoodUsage
-      ? {
-          ...lastGoodUsage,
-          ...(typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0
-            ? { maxTokens }
-            : {}),
-          ...(typeof accumulatedTotalProcessedTokens === "number" &&
-          Number.isFinite(accumulatedTotalProcessedTokens) &&
-          accumulatedTotalProcessedTokens > lastGoodUsage.usedTokens
-            ? {
-                totalProcessedTokens: accumulatedTotalProcessedTokens,
-              }
-            : {}),
-        }
-      : accumulatedSnapshot;
+    // `result.usage` reports running totals across every API call in the
+    // session. We combine it with the freshest per-call task snapshot (for
+    // `usedTokens` — the real current-context value) and with the prior
+    // turn's cumulative snapshot (to derive this turn's per-class deltas).
+    const turnUsage = buildClaudeTurnCompleteUsage({
+      resultUsage: result?.usage,
+      taskSnapshot: context.lastKnownTokenUsage,
+      contextWindow: resultContextWindow ?? context.lastKnownContextWindow,
+      priorCumulative: context.lastTurnCumulativeUsage,
+    });
+    const usageSnapshot = turnUsage.snapshot;
+    if (turnUsage.nextCumulative !== undefined) {
+      context.lastTurnCumulativeUsage = turnUsage.nextCumulative;
+    }
 
     const turnState = context.turnState;
     if (!turnState) {
@@ -2918,6 +3048,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         turnState: undefined,
         lastKnownContextWindow: undefined,
         lastKnownTokenUsage: undefined,
+        lastTurnCumulativeUsage: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
         stopped: false,

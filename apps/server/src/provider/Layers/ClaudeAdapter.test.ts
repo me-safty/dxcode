@@ -1595,12 +1595,22 @@ describe("ClaudeAdapterLive", () => {
       const usageEvent = runtimeEvents.find((event) => event.type === "thread.token-usage.updated");
       assert.equal(usageEvent?.type, "thread.token-usage.updated");
       if (usageEvent?.type === "thread.token-usage.updated") {
+        // First turn: no prior cumulative, so last* deltas equal cumulative
+        // totals. Cache read/write split correctly; usedTokens = cumulative
+        // total (no task snapshot in this test).
         assert.deepEqual(usageEvent.payload, {
           usage: {
             usedTokens: 24542,
             lastUsedTokens: 24542,
-            inputTokens: 23863,
+            totalProcessedTokens: 24542,
+            inputTokens: 4,
+            cachedInputTokens: 21144,
+            cacheCreationInputTokens: 2715,
             outputTokens: 679,
+            lastInputTokens: 4,
+            lastCachedInputTokens: 21144,
+            lastCacheCreationInputTokens: 2715,
+            lastOutputTokens: 679,
             maxTokens: 200000,
           },
         });
@@ -1611,7 +1621,7 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("clamps oversized Claude usage to the reported context window", () => {
+  it.effect("reports Claude usage uncapped when cumulative exceeds context window", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -1659,10 +1669,12 @@ describe("ClaudeAdapterLive", () => {
       const usageEvent = runtimeEvents.find((event) => event.type === "thread.token-usage.updated");
       assert.equal(usageEvent?.type, "thread.token-usage.updated");
       if (usageEvent?.type === "thread.token-usage.updated") {
+        // usedTokens is no longer clamped: the cumulative result total is
+        // reported as-is. UI clamps for ring display; callers get truth.
         assert.deepEqual(usageEvent.payload, {
           usage: {
-            usedTokens: 200000,
-            lastUsedTokens: 200000,
+            usedTokens: 535000,
+            lastUsedTokens: 535000,
             totalProcessedTokens: 535000,
             maxTokens: 200000,
           },
@@ -1739,10 +1751,13 @@ describe("ClaudeAdapterLive", () => {
         const finalUsageEvent = usageEvents.at(-1);
         assert.equal(finalUsageEvent?.type, "thread.token-usage.updated");
         if (finalUsageEvent?.type === "thread.token-usage.updated") {
+          // Task snapshot drives usedTokens (real current-context); result
+          // cumulative drives totalProcessedTokens. lastUsedTokens reports
+          // the turn's total (cumulative since there's no prior turn).
           assert.deepEqual(finalUsageEvent.payload, {
             usage: {
               usedTokens: 190000,
-              lastUsedTokens: 190000,
+              lastUsedTokens: 535000,
               totalProcessedTokens: 535000,
               maxTokens: 200000,
             },
