@@ -6,6 +6,7 @@ import { readEnvironmentApi } from "../environmentApi";
 import { readPrimaryEnvironmentDescriptor } from "../environments/primary";
 import { ensureEnvironmentConnectionBootstrapped } from "../environments/runtime";
 import { openProjectByPath, type OpenProjectByPathInput } from "../lib/openProjectByPath";
+import { selectEnvironmentState, selectProjectsForEnvironment, useStore } from "../store";
 
 type Toaster = (params: {
   readonly type: "error";
@@ -13,11 +14,14 @@ type Toaster = (params: {
   readonly description: string;
 }) => unknown;
 
+interface ProjectSnapshot {
+  readonly projects: OpenProjectByPathInput["projects"];
+  readonly threads: OpenProjectByPathInput["threads"];
+}
+
 export interface DesktopOpenProjectPathHandlerDeps {
   readonly path: string;
   readonly isDisposed: () => boolean;
-  readonly projects: OpenProjectByPathInput["projects"];
-  readonly threads: OpenProjectByPathInput["threads"];
   readonly sidebarThreadSortOrder: OpenProjectByPathInput["sidebarThreadSortOrder"];
   readonly defaultThreadEnvMode: OpenProjectByPathInput["defaultThreadEnvMode"];
   readonly navigate: OpenProjectByPathInput["navigate"];
@@ -28,6 +32,7 @@ export interface DesktopOpenProjectPathHandlerDeps {
   readonly readApi?: (
     environmentId: EnvironmentId,
   ) => Pick<EnvironmentApi, "orchestration"> | undefined;
+  readonly readProjectSnapshot?: (environmentId: EnvironmentId) => ProjectSnapshot;
   readonly dispatch?: (input: OpenProjectByPathInput) => Promise<void>;
   readonly toast?: Toaster;
 }
@@ -40,9 +45,21 @@ function defaultToast(params: Parameters<Toaster>[0]): void {
   toastManager.add(params);
 }
 
+function defaultReadProjectSnapshot(environmentId: EnvironmentId): ProjectSnapshot {
+  const state = useStore.getState();
+  const environmentState = selectEnvironmentState(state, environmentId);
+  return {
+    projects: selectProjectsForEnvironment(state, environmentId),
+    threads: environmentState.threadIds.flatMap((threadId) => {
+      const thread = environmentState.sidebarThreadSummaryById[threadId];
+      return thread ? [thread] : [];
+    }),
+  };
+}
+
 /**
  * The body of the `onOpenProjectPath` listener, extracted so the async
- * sequencing (await bootstrap → check disposed → resolve api → dispatch)
+ * sequencing (await bootstrap → check disposed → resolve fresh state → dispatch)
  * can be covered by a plain unit test without mounting React.
  */
 export async function runDesktopOpenProjectPathHandler(
@@ -51,6 +68,7 @@ export async function runDesktopOpenProjectPathHandler(
   const readEnvId = deps.readPrimaryEnvironmentId ?? defaultReadPrimaryEnvironmentId;
   const ensureBootstrapped = deps.ensureBootstrapped ?? ensureEnvironmentConnectionBootstrapped;
   const readApi = deps.readApi ?? readEnvironmentApi;
+  const readProjectSnapshot = deps.readProjectSnapshot ?? defaultReadProjectSnapshot;
   const dispatch = deps.dispatch ?? openProjectByPath;
   const toast = deps.toast ?? defaultToast;
 
@@ -67,14 +85,15 @@ export async function runDesktopOpenProjectPathHandler(
     if (!environmentId) return;
     await ensureBootstrapped(environmentId);
     if (deps.isDisposed()) return;
+    const snapshot = readProjectSnapshot(environmentId);
     const api = readApi(environmentId);
     if (!api) return;
     await dispatch({
       environmentId,
       path: deps.path,
       api,
-      projects: deps.projects,
-      threads: deps.threads,
+      projects: snapshot.projects,
+      threads: snapshot.threads,
       sidebarThreadSortOrder: deps.sidebarThreadSortOrder,
       defaultThreadEnvMode: deps.defaultThreadEnvMode,
       navigate: deps.navigate,
@@ -88,7 +107,13 @@ export async function runDesktopOpenProjectPathHandler(
 
 type UseDesktopOpenProjectPathSubscriptionInput = Omit<
   DesktopOpenProjectPathHandlerDeps,
-  "path" | "readPrimaryEnvironmentId" | "ensureBootstrapped" | "readApi" | "dispatch" | "toast"
+  | "path"
+  | "readPrimaryEnvironmentId"
+  | "ensureBootstrapped"
+  | "readApi"
+  | "readProjectSnapshot"
+  | "dispatch"
+  | "toast"
 >;
 
 /**

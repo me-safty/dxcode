@@ -7,6 +7,7 @@ interface ParseOptions {
   readonly isDirectory?: (candidate: string) => boolean;
   readonly realpath?: (input: string) => string;
   readonly cwd?: string;
+  readonly skipLeadingPositionalArgs?: number;
 }
 
 /**
@@ -19,6 +20,10 @@ interface ParseOptions {
  *
  * Returns the resolved real path (symlinks collapsed, `..` normalized) or null.
  *
+ * When Electron prefixes argv with runtime/app entry positionals, callers can
+ * set `skipLeadingPositionalArgs` so those entries are not mistaken for a
+ * project folder. Switches do not count toward that skip budget.
+ *
  * Skips `-`-prefixed tokens so Chromium / Electron switches that land in argv —
  * especially the ones macOS injects into `second-instance.argv`, like
  * `--allow-file-access-from-files` — cannot be mistaken for a folder.
@@ -29,6 +34,7 @@ export function parseFolderFromArgv(
 ): string | null {
   const isDirectory = options.isDirectory ?? defaultIsDirectory;
   const realpath = options.realpath ?? defaultRealpath;
+  const skipLeadingPositionalArgs = options.skipLeadingPositionalArgs ?? 0;
   // Resolve relative tokens (e.g. `.` from `T3Code .`) against the invoking
   // shell's CWD. For the Electron second-instance path, the caller must pass
   // the second instance's cwd — otherwise realpath would resolve against the
@@ -43,8 +49,13 @@ export function parseFolderFromArgv(
     if (resolved) return resolved;
   }
 
+  let skippedPositionals = 0;
   for (const token of argv) {
     if (token.length === 0 || token.startsWith("-")) continue;
+    if (skippedPositionals < skipLeadingPositionalArgs) {
+      skippedPositionals += 1;
+      continue;
+    }
     const resolved = resolveDirectory(Path.resolve(cwd, token), realpath, isDirectory);
     if (resolved) return resolved;
   }

@@ -202,8 +202,18 @@ type LinuxDesktopNamedApp = Electron.App & {
   setDesktopName?: (desktopName: string) => void;
 };
 
+function parseProjectPathFromElectronArgv(argv: readonly string[], cwd?: string): string | null {
+  // Electron populates app.isPackaged synchronously before main module
+  // initialization continues, so cold-start argv parsing can safely choose the
+  // packaged vs unpackaged leading-positionals skip count here.
+  return parseFolderFromArgv(argv, {
+    ...(cwd !== undefined ? { cwd } : {}),
+    skipLeadingPositionalArgs: app.isPackaged ? 1 : 2,
+  });
+}
+
 let mainWindow: BrowserWindow | null = null;
-let pendingProjectPath: string | null = parseFolderFromArgv(process.argv);
+let pendingProjectPath: string | null = parseProjectPathFromElectronArgv(process.argv);
 let backendProcess: ChildProcess.ChildProcess | null = null;
 let backendPort = 0;
 let backendBindHost = DESKTOP_LOOPBACK_HOST;
@@ -2098,14 +2108,14 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", (_event, argv, cwd) => {
-    const forwarded = parseFolderFromArgv(argv, { cwd });
+    const forwarded = parseProjectPathFromElectronArgv(argv, cwd);
     if (forwarded) {
       if (app.isReady()) {
         forwardProjectPathToRenderer(forwarded);
       } else {
-        // Startup is still in flight; let cold-start bootstrap consume it via
-        // the envelope. forwardProjectPathToRenderer would call createWindow()
-        // which is only valid post-ready.
+        // Startup is still in flight. Keep the latest launch target as the
+        // cold-start bootstrap target; opening every queued path would need a
+        // separate multi-open queue and UX.
         pendingProjectPath = forwarded;
       }
       return;

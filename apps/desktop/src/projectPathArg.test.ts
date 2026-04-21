@@ -2,8 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import { parseFolderFromArgv } from "./projectPathArg.ts";
 
+function resolvingProjectParentRealpath(input: string): string {
+  return input === "/tmp/project-parent/child/.." ? "/tmp/project-parent" : input;
+}
+
+function failingMissingPathRealpath(input: string): string {
+  if (input === "/does/not/exist") throw new Error("ENOENT");
+  return input;
+}
+
 describe("parseFolderFromArgv", () => {
   const electronBinary = "/Applications/T3 Code.app";
+  const electronRuntimeBinary = "/Applications/Electron.app/Contents/MacOS/Electron";
+  const appEntry = "/repo/apps/desktop/dist-electron/main.cjs";
   const knownDirectories = new Set([
     "/tmp/project-sample",
     "/tmp/project-other",
@@ -20,16 +31,54 @@ describe("parseFolderFromArgv", () => {
   });
 
   it("picks up a bare positional directory after the electron binary", () => {
-    expect(parseFolderFromArgv([electronBinary, "/tmp/project-sample"], options)).toBe(
-      "/tmp/project-sample",
-    );
+    const knownWithElectronBinary = new Set([...knownDirectories, electronBinary]);
+    expect(
+      parseFolderFromArgv([electronBinary, "/tmp/project-sample"], {
+        realpath: (input: string) => input,
+        isDirectory: (candidate: string) => knownWithElectronBinary.has(candidate),
+        skipLeadingPositionalArgs: 1,
+      }),
+    ).toBe("/tmp/project-sample");
+  });
+
+  it("skips the Electron binary and app entry for unpackaged launches", () => {
+    const knownWithElectronEntries = new Set([
+      ...knownDirectories,
+      electronRuntimeBinary,
+      appEntry,
+    ]);
+    expect(
+      parseFolderFromArgv([electronRuntimeBinary, appEntry, "/tmp/project-sample"], {
+        realpath: (input: string) => input,
+        isDirectory: (candidate: string) => knownWithElectronEntries.has(candidate),
+        skipLeadingPositionalArgs: 2,
+      }),
+    ).toBe("/tmp/project-sample");
+  });
+
+  it("does not count switches as leading positional args to skip", () => {
+    const knownWithElectronEntries = new Set([
+      ...knownDirectories,
+      electronRuntimeBinary,
+      appEntry,
+    ]);
+    expect(
+      parseFolderFromArgv(
+        [electronRuntimeBinary, "--allow-file-access-from-files", appEntry, "/tmp/project-sample"],
+        {
+          realpath: (input: string) => input,
+          isDirectory: (candidate: string) => knownWithElectronEntries.has(candidate),
+          skipLeadingPositionalArgs: 2,
+        },
+      ),
+    ).toBe("/tmp/project-sample");
   });
 
   it("skips Chromium switches that would otherwise land before the path", () => {
     expect(
       parseFolderFromArgv(
         [electronBinary, "--allow-file-access-from-files", "/tmp/project-sample"],
-        options,
+        { ...options, skipLeadingPositionalArgs: 1 },
       ),
     ).toBe("/tmp/project-sample");
   });
@@ -50,25 +99,19 @@ describe("parseFolderFromArgv", () => {
   });
 
   it("resolves `..` via realpath before checking isDirectory", () => {
-    const resolvingRealpath = (input: string) =>
-      input === "/tmp/project-parent/child/.." ? "/tmp/project-parent" : input;
     expect(
       parseFolderFromArgv([electronBinary, "/tmp/project-parent/child/.."], {
         ...options,
-        realpath: resolvingRealpath,
+        realpath: resolvingProjectParentRealpath,
       }),
     ).toBe("/tmp/project-parent");
   });
 
   it("skips tokens whose realpath throws (non-existent paths)", () => {
-    const failingRealpath = (input: string) => {
-      if (input === "/does/not/exist") throw new Error("ENOENT");
-      return input;
-    };
     expect(
       parseFolderFromArgv([electronBinary, "/does/not/exist", "/tmp/project-sample"], {
         ...options,
-        realpath: failingRealpath,
+        realpath: failingMissingPathRealpath,
       }),
     ).toBe("/tmp/project-sample");
   });

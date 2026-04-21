@@ -30,8 +30,6 @@ function makeDeps(overrides: Partial<DesktopOpenProjectPathHandlerDeps> = {}): {
   const baseDeps: DesktopOpenProjectPathHandlerDeps = {
     path: "/tmp/project-sample",
     isDisposed: () => false,
-    projects: [],
-    threads: [],
     sidebarThreadSortOrder: "updated_at",
     defaultThreadEnvMode: "local",
     navigate: navigate as unknown as OpenProjectByPathInput["navigate"],
@@ -81,9 +79,42 @@ describe("runDesktopOpenProjectPathHandler", () => {
     const [input] = dispatch.mock.calls[0] as [OpenProjectByPathInput];
     expect(input.environmentId).toBe(ENV);
     expect(input.path).toBe("/tmp/project-sample");
+    expect(input.projects).toEqual([]);
+    expect(input.threads).toEqual([]);
     expect(input.sidebarThreadSortOrder).toBe("updated_at");
     expect(input.defaultThreadEnvMode).toBe("local");
     expect(typeof input.onError).toBe("function");
+  });
+
+  it("reads a fresh project snapshot after bootstrap before dispatching", async () => {
+    const order: string[] = [];
+    const staleProject = { cwd: "/tmp/stale" };
+    const freshProject = { cwd: "/tmp/project-sample" };
+    const ensureBootstrapped = vi.fn(async () => {
+      order.push("bootstrap");
+    });
+    const readProjectSnapshot = vi.fn(() => {
+      order.push("snapshot");
+      return {
+        projects: [freshProject],
+        threads: [],
+      } as unknown as Pick<OpenProjectByPathInput, "projects" | "threads">;
+    });
+    const dispatch = vi.fn(async (input: OpenProjectByPathInput) => {
+      order.push("dispatch");
+      expect(input.projects).toEqual([freshProject]);
+      expect(input.projects).not.toEqual([staleProject]);
+    });
+    const { deps } = makeDeps({
+      ensureBootstrapped,
+      readProjectSnapshot,
+      dispatch,
+    });
+
+    await runDesktopOpenProjectPathHandler(deps);
+
+    expect(order).toEqual(["bootstrap", "snapshot", "dispatch"]);
+    expect(readProjectSnapshot).toHaveBeenCalledWith(ENV);
   });
 
   it("bails without calling dispatch if the primary environment is unknown", async () => {
@@ -163,10 +194,12 @@ describe("runDesktopOpenProjectPathHandler", () => {
     const ensureBootstrapped = vi.fn(async () => {
       throw new Error("bootstrap failed");
     });
-    const { deps, toast, dispatch } = makeDeps({ ensureBootstrapped });
+    const readProjectSnapshot = vi.fn(() => ({ projects: [], threads: [] }));
+    const { deps, toast, dispatch } = makeDeps({ ensureBootstrapped, readProjectSnapshot });
 
     await expect(runDesktopOpenProjectPathHandler(deps)).resolves.toBeUndefined();
 
+    expect(readProjectSnapshot).not.toHaveBeenCalled();
     expect(dispatch).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledTimes(1);
   });
