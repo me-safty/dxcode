@@ -1596,12 +1596,15 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(usageEvent?.type, "thread.token-usage.updated");
       if (usageEvent?.type === "thread.token-usage.updated") {
         // First turn: no prior cumulative, so last* deltas equal cumulative
-        // totals. Cache read/write split correctly; usedTokens = cumulative
-        // total (no task snapshot in this test).
+        // totals. Cache read/write split correctly. `usedTokens` +
+        // `lastUsedTokens` report input-side only (4 input + 21_144 cached
+        // + 2_715 cache-write = 23_863); output (679) is billed separately
+        // and tracked via `outputTokens` / `lastOutputTokens`.
+        // `totalProcessedTokens` keeps the full billed cumulative (24_542).
         assert.deepEqual(usageEvent.payload, {
           usage: {
-            usedTokens: 24542,
-            lastUsedTokens: 24542,
+            usedTokens: 23863,
+            lastUsedTokens: 23863,
             totalProcessedTokens: 24542,
             inputTokens: 4,
             cachedInputTokens: 21144,

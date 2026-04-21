@@ -51,6 +51,20 @@ function monthFilename(monthKey: string): string {
 
 const ALLTIME_FILENAME = "alltime.json";
 
+/**
+ * Ledger schema version. Bump when the on-disk format changes in a way that
+ * makes older files incompatible with the new reducer — a sentinel file
+ * `.schema-v<N>` is written to `usageDir` and, if missing on startup, the
+ * ledger is wiped (only the JSON ledger files; untracked files in the
+ * directory are left alone). Rationale for v2: prior versions fed mid-turn
+ * `thread.token-usage.updated` snapshots into the cost reducer, which
+ * double-counted token totals and inflated `turnCount` by N per real turn.
+ * Those buckets can't be retroactively repaired, so we reset on upgrade.
+ */
+const LEDGER_SCHEMA_VERSION = 2 as const;
+const LEDGER_SCHEMA_SENTINEL = `.schema-v${LEDGER_SCHEMA_VERSION}`;
+const LEDGER_FILE_PATTERN = /^(session_.+|\d{4}-\d{2}|alltime)\.json$/;
+
 const make = Effect.gen(function* () {
   const { usageDir } = yield* ServerConfig;
   const fs = yield* FileSystem.FileSystem;
@@ -61,6 +75,48 @@ const make = Effect.gen(function* () {
 
   // Ensure the directory exists even if config bootstrap skipped it.
   yield* fs.makeDirectory(usageDir, { recursive: true }).pipe(Effect.ignore({ log: true }));
+
+  // Migration: wipe ledger files polluted by the pre-v2 reducer.  Idempotent
+  // via the `.schema-vN` sentinel — once present, subsequent boots skip.
+  yield* Effect.gen(function* () {
+    const sentinelPath = path.join(usageDir, LEDGER_SCHEMA_SENTINEL);
+    const sentinelExists = yield* fs
+      .exists(sentinelPath)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (sentinelExists) return;
+
+    const entries = yield* fs
+      .readDirectory(usageDir)
+      .pipe(Effect.orElseSucceed(() => [] as Array<string>));
+    const ledgerFiles = entries.filter((entry) => LEDGER_FILE_PATTERN.test(entry));
+    if (ledgerFiles.length > 0) {
+      yield* Effect.logInfo(
+        `CostTracker: migrating usage ledger to schema v${LEDGER_SCHEMA_VERSION}; wiping ${ledgerFiles.length} pre-migration file(s)`,
+      );
+      yield* Effect.forEach(
+        ledgerFiles,
+        (entry) =>
+          fs
+            .remove(path.join(usageDir, entry), { force: true })
+            .pipe(Effect.ignoreCause({ log: true })),
+        { concurrency: "unbounded", discard: true },
+      );
+    }
+    yield* fs
+      .writeFileString(
+        sentinelPath,
+        `${JSON.stringify(
+          {
+            version: LEDGER_SCHEMA_VERSION,
+            migratedAt: new Date().toISOString(),
+            wipedFileCount: ledgerFiles.length,
+          },
+          null,
+          2,
+        )}\n`,
+      )
+      .pipe(Effect.ignoreCause({ log: true }));
+  }).pipe(Effect.ignoreCause({ log: true }));
 
   const filePathFor = (kind: PersistedCostFileKind, key: string): string => {
     switch (kind) {

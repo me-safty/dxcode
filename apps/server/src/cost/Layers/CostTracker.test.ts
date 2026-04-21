@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { Effect, Fiber, FileSystem, Layer, Path, Stream } from "effect";
@@ -11,6 +15,15 @@ const SONNET = "claude-sonnet-4-6";
 
 const makeLayer = () => {
   const configLayer = ServerConfig.layerTest(process.cwd(), { prefix: "t3-cost-" });
+  return Layer.mergeAll(CostTrackerLive.pipe(Layer.provide(configLayer)), configLayer);
+};
+
+/**
+ * Build a layer pointing at a pre-existing temp dir so the migration has
+ * ledger files to wipe on boot. Caller is responsible for `rmSync` cleanup.
+ */
+const makeLayerAt = (baseDir: string) => {
+  const configLayer = ServerConfig.layerTest(process.cwd(), baseDir);
   return Layer.mergeAll(CostTrackerLive.pipe(Layer.provide(configLayer)), configLayer);
 };
 
@@ -143,4 +156,83 @@ it.layer(NodeServices.layer)("CostTrackerLive", (it) => {
       assert.equal(summary.monthKey, "2019-12");
     }).pipe(Effect.provide(makeLayer())),
   );
+
+  it.effect("wipes pre-v2 ledger files on first boot and writes a schema sentinel", () => {
+    // Seed a usage dir that looks like a pre-migration install: a pair of
+    // session files, one month bucket, one all-time file, and an
+    // unrelated stray file we must leave alone.
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-cost-wipe-"));
+    const usageDir = path.join(baseDir, "userdata", "usage");
+    fs.mkdirSync(usageDir, { recursive: true });
+    const seededLedgerFiles = [
+      "session_thread-a.json",
+      "session_thread-b.json",
+      "2026-04.json",
+      "alltime.json",
+    ];
+    for (const name of seededLedgerFiles) {
+      fs.writeFileSync(
+        path.join(usageDir, name),
+        JSON.stringify({ version: 1, bucket: { totalUsd: 42, turnCount: 99 } }),
+      );
+    }
+    // Stray non-ledger file that must survive the wipe.
+    const strayPath = path.join(usageDir, "notes.txt");
+    fs.writeFileSync(strayPath, "unrelated");
+
+    return Effect.gen(function* () {
+      // Tracker service is resolved here so the layer effect — and thus
+      // the migration — runs before we assert.
+      yield* CostTrackerService;
+
+      for (const name of seededLedgerFiles) {
+        assert.equal(
+          fs.existsSync(path.join(usageDir, name)),
+          false,
+          `expected ${name} to be wiped`,
+        );
+      }
+      assert.equal(fs.existsSync(strayPath), true, "expected stray file to survive");
+
+      const sentinelPath = path.join(usageDir, ".schema-v2");
+      assert.equal(fs.existsSync(sentinelPath), true);
+      const sentinelContents = JSON.parse(fs.readFileSync(sentinelPath, "utf8")) as {
+        readonly version: number;
+        readonly wipedFileCount: number;
+      };
+      assert.equal(sentinelContents.version, 2);
+      assert.equal(sentinelContents.wipedFileCount, seededLedgerFiles.length);
+    }).pipe(
+      Effect.provide(makeLayerAt(baseDir)),
+      Effect.ensuring(
+        Effect.sync(() => fs.rmSync(baseDir, { recursive: true, force: true })),
+      ),
+    );
+  });
+
+  it.effect("skips the wipe on subsequent boots when the sentinel is present", () => {
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-cost-wipe-idempotent-"));
+    const usageDir = path.join(baseDir, "userdata", "usage");
+    fs.mkdirSync(usageDir, { recursive: true });
+    // Pre-existing sentinel → migration is a no-op; ledger files survive.
+    fs.writeFileSync(
+      path.join(usageDir, ".schema-v2"),
+      JSON.stringify({ version: 2, migratedAt: "2026-04-01T00:00:00.000Z" }),
+    );
+    const preservedPath = path.join(usageDir, "session_thread-keep.json");
+    fs.writeFileSync(
+      preservedPath,
+      JSON.stringify({ version: 1, bucket: { totalUsd: 1, turnCount: 1 } }),
+    );
+
+    return Effect.gen(function* () {
+      yield* CostTrackerService;
+      assert.equal(fs.existsSync(preservedPath), true);
+    }).pipe(
+      Effect.provide(makeLayerAt(baseDir)),
+      Effect.ensuring(
+        Effect.sync(() => fs.rmSync(baseDir, { recursive: true, force: true })),
+      ),
+    );
+  });
 });

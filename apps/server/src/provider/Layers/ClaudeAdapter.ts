@@ -367,9 +367,15 @@ export function parseClaudeUsageBreakdown(value: unknown): ClaudeUsageBreakdown 
  * the current context window size. The four token classes are reported
  * separately so downstream cost math can apply the correct tier.
  *
- * No capping: `usedTokens` reflects `total_tokens` (or the derived sum) as
- * reported. Callers that want to clamp for ring display should do so in the
- * UI layer.
+ * `usedTokens` reports the **input-side** tokens only (context the model
+ * consumed: input + cache-read + cache-creation). Output + reasoning are
+ * billed separately and do not live in the prompt window; including them
+ * inflates the context ring for long-output turns. When the SDK reports
+ * only an opaque `total_tokens` (no class breakdown), we fall back to that
+ * number so the ring still shows *something* rather than zero.
+ *
+ * No capping: callers that want to clamp for ring display should do so in
+ * the UI layer.
  */
 function normalizeClaudeTokenUsage(
   value: unknown,
@@ -383,9 +389,12 @@ function normalizeClaudeTokenUsage(
     typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
       ? contextWindow
       : undefined;
+  const inputSideTokens =
+    breakdown.inputTokens + breakdown.cachedInputTokens + breakdown.cacheCreationInputTokens;
+  const usedTokens = inputSideTokens > 0 ? inputSideTokens : breakdown.totalTokens;
   return {
-    usedTokens: breakdown.totalTokens,
-    lastUsedTokens: breakdown.totalTokens,
+    usedTokens,
+    lastUsedTokens: usedTokens,
     ...(breakdown.inputTokens > 0 ? { inputTokens: breakdown.inputTokens } : {}),
     ...(breakdown.cachedInputTokens > 0 ? { cachedInputTokens: breakdown.cachedInputTokens } : {}),
     ...(breakdown.cacheCreationInputTokens > 0
@@ -463,15 +472,28 @@ export function buildClaudeTurnCompleteUsage(
     cumulative.cacheCreationInputTokens - prior.cacheCreationInputTokens,
   );
   const deltaOutput = Math.max(0, cumulative.outputTokens - prior.outputTokens);
-  const lastTotal = deltaInput + deltaCached + deltaCacheCreation + deltaOutput;
 
-  // usedTokens: prefer the task snapshot (current context size); fall back to
-  // the cumulative total when no task snapshot was recorded for this turn.
-  const usedTokens = input.taskSnapshot?.usedTokens ?? cumulative.totalTokens;
+  // Context-window semantics: `usedTokens` reports input-side only (tokens
+  // the model actually has in its prompt window). Output + reasoning are
+  // billed but not persisted into the context, so including them over-
+  // reports the ring for long-output turns.
+  const lastInputSideTokens = deltaInput + deltaCached + deltaCacheCreation;
+  const cumulativeInputSideTokens =
+    cumulative.inputTokens + cumulative.cachedInputTokens + cumulative.cacheCreationInputTokens;
+  const cumulativeUsedFallback =
+    cumulativeInputSideTokens > 0 ? cumulativeInputSideTokens : cumulative.totalTokens;
+  // Prefer the freshest task snapshot (captured per-API-call → matches the
+  // real current context size).  Fall back to the cumulative input-side.
+  const usedTokens = input.taskSnapshot?.usedTokens ?? cumulativeUsedFallback;
+  // `lastUsedTokens` mirrors `usedTokens` at turn scope.  When this turn
+  // actually consumed prompt tokens, use its input-side delta; otherwise
+  // fall back to the cumulative read so we never report 0 for a turn that
+  // still had billable activity.
+  const lastUsedTokens = lastInputSideTokens > 0 ? lastInputSideTokens : cumulativeUsedFallback;
 
   const snapshot: ThreadTokenUsageSnapshot = {
     usedTokens,
-    lastUsedTokens: lastTotal > 0 ? lastTotal : cumulative.totalTokens,
+    lastUsedTokens,
     totalProcessedTokens: cumulative.totalTokens,
     ...(cumulative.inputTokens > 0 ? { inputTokens: cumulative.inputTokens } : {}),
     ...(cumulative.cachedInputTokens > 0 ? { cachedInputTokens: cumulative.cachedInputTokens } : {}),

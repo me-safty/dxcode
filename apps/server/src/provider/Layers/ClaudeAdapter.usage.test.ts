@@ -67,8 +67,13 @@ describe("buildClaudeTurnCompleteUsage", () => {
     expect(snap.lastCachedInputTokens).toBe(5_000);
     expect(snap.lastCacheCreationInputTokens).toBe(2_000);
     expect(snap.lastOutputTokens).toBe(500);
-    expect(snap.lastUsedTokens).toBe(8_500);
-    expect(snap.usedTokens).toBe(8_500);
+    // usedTokens + lastUsedTokens are input-side only (1_000+5_000+2_000 =
+    // 8_000). Output is billed (`outputTokens`) but excluded from the
+    // context-window ring since it doesn't live in the prompt.
+    expect(snap.usedTokens).toBe(8_000);
+    expect(snap.lastUsedTokens).toBe(8_000);
+    // totalProcessedTokens keeps the full cumulative billed total for
+    // informational display ("tokens processed so far").
     expect(snap.totalProcessedTokens).toBe(8_500);
     expect(snap.maxTokens).toBe(200_000);
     expect(res.nextCumulative).toBeDefined();
@@ -107,7 +112,10 @@ describe("buildClaudeTurnCompleteUsage", () => {
     expect(s.lastCachedInputTokens).toBe(1_000);
     expect(s.lastCacheCreationInputTokens).toBe(300);
     expect(s.lastOutputTokens).toBe(200);
-    expect(s.lastUsedTokens).toBe(500 + 1_000 + 300 + 200);
+    // lastUsedTokens is input-side only (context consumed this turn):
+    // 500 + 1_000 + 300 = 1_800.  Output (200) is tracked separately in
+    // lastOutputTokens for billing but not in the context window total.
+    expect(s.lastUsedTokens).toBe(1_800);
   });
 
   it("does not cap usedTokens to maxTokens", () => {
