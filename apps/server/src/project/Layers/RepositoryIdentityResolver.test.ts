@@ -97,24 +97,24 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
   );
 
-  it.effect("prefers upstream over origin when both remotes are configured", () =>
+  it.effect("prefers origin over upstream so forks surface their own name", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const cwd = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "marcode-repository-identity-upstream-test-",
+        prefix: "marcode-repository-identity-origin-priority-test-",
       });
 
       yield* git(cwd, ["init"]);
-      yield* git(cwd, ["remote", "add", "origin", "git@github.com:julius/marcode.git"]);
+      yield* git(cwd, ["remote", "add", "origin", "git@github.com:tyulyukov/marcode.git"]);
       yield* git(cwd, ["remote", "add", "upstream", "git@github.com:MarCodeHQ/marcode.git"]);
 
       const resolver = yield* RepositoryIdentityResolver;
       const identity = yield* resolver.resolve(cwd);
 
       expect(identity).not.toBeNull();
-      expect(identity?.locator.remoteName).toBe("upstream");
-      expect(identity?.canonicalKey).toBe("github.com/marcodehq/marcode");
-      expect(identity?.displayName).toBe("marcodehq/marcode");
+      expect(identity?.locator.remoteName).toBe("origin");
+      expect(identity?.canonicalKey).toBe("github.com/tyulyukov/marcode");
+      expect(identity?.displayName).toBe("tyulyukov/marcode");
     }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
   );
 
