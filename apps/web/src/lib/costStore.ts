@@ -293,6 +293,16 @@ export interface CostSummary {
   readonly averagePerTurnUsd: number | null;
 }
 
+export function useCostSummary(
+  threadId: string | null | undefined,
+  now?: Date,
+): CostSummary {
+  const sessions = useCostStore((state) => state.sessions);
+  const months = useCostStore((state) => state.months);
+  // Intentionally rebuild on any change to sessions/months — selector is cheap.
+  return selectCostSummary({ version: 1, sessions, months }, threadId, now);
+}
+
 export function selectCostSummary(
   state: PersistedCostState,
   threadId: string | null | undefined,

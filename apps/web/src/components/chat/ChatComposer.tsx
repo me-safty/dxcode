@@ -77,6 +77,7 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderRegistry";
 import { ContextWindowMeter } from "./ContextWindowMeter";
+import { CostMeter } from "./CostMeter";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { basenameOfPath } from "../../vscode-icons";
 import { cn, randomUUID } from "~/lib/utils";
@@ -102,6 +103,8 @@ import type { SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
+import { useCostSummary, type CostSummary } from "../../lib/costStore";
+import { useCostTracking } from "../../lib/useCostTracking";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 
@@ -269,6 +272,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(props: {
   compact: boolean;
   activeContextWindow: ReturnType<typeof deriveLatestContextWindowSnapshot>;
+  costSummary: CostSummary;
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -290,6 +294,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   return (
     <>
       {props.activeContextWindow ? <ContextWindowMeter usage={props.activeContextWindow} /> : null}
+      <CostMeter summary={props.costSummary} />
       {props.isPreparingWorktree ? (
         <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
       ) : null}
@@ -638,6 +643,12 @@ export const ChatComposer = memo(
       () => deriveLatestContextWindowSnapshot(activeThreadActivities ?? []),
       [activeThreadActivities],
     );
+
+    // ------------------------------------------------------------------
+    // Cost tracking (session + month-to-date spend)
+    // ------------------------------------------------------------------
+    useCostTracking(activeThreadId, activeThreadActivities, activeThreadModelSelection);
+    const costSummary = useCostSummary(activeThreadId);
 
     // ------------------------------------------------------------------
     // Composer-local state
@@ -1953,6 +1964,7 @@ export const ChatComposer = memo(
                   <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}
                     activeContextWindow={activeContextWindow}
+                    costSummary={costSummary}
                     pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}
                     showPlanFollowUpPrompt={
