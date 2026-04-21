@@ -84,13 +84,17 @@ function codexAccountAuthLabel(account: CodexSchema.V2GetAccountResponse["accoun
 function mapCodexModelCapabilities(
   model: CodexSchema.V2ModelListResponse__Model,
 ): ModelCapabilities {
+  const supportsFastMode = globalThis.Array.isArray(model.additionalSpeedTiers)
+    ? model.additionalSpeedTiers.includes("fast")
+    : /^gpt-5(?:[.-]|$)/.test(model.model);
+
   return {
     reasoningEffortLevels: model.supportedReasoningEfforts.map(({ reasoningEffort }) => ({
       value: reasoningEffort,
       label: REASONING_EFFORT_LABELS[reasoningEffort],
       ...(reasoningEffort === model.defaultReasoningEffort ? { isDefault: true } : {}),
     })),
-    supportsFastMode: (model.additionalSpeedTiers ?? []).includes("fast"),
+    supportsFastMode,
     supportsThinkingToggle: false,
     contextWindowOptions: [],
     promptInjectedEffortLevels: [],
@@ -104,7 +108,7 @@ const toDisplayName = (model: CodexSchema.V2ModelListResponse__Model): string =>
     .replace(/-([a-z])/g, (_, c) => "-" + c.toUpperCase());
 };
 
-function parseCodexModelListResponse(
+export function parseCodexModelListResponse(
   response: CodexSchema.V2ModelListResponse,
 ): ReadonlyArray<ServerProviderModel> {
   return response.data.map((model) => ({
