@@ -632,4 +632,166 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       }
     }),
   );
+
+  it.effect("hydrates shell projections and individual project/thread shells + details", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+      yield* sql`DELETE FROM projection_thread_sessions`;
+      yield* sql`DELETE FROM projection_turns`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          jira_board_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-shell',
+          'Shell Project',
+          '/tmp/shell-workspace',
+          '{"provider":"claudeAgent","model":"claude-sonnet-5"}',
+          '[]',
+          '{"cloudId":"cloud-shell","boardId":42}',
+          '2026-04-01T00:00:00.000Z',
+          '2026-04-01T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          additional_directories_json,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-shell',
+          'project-shell',
+          'Shell Thread',
+          '{"provider":"claudeAgent","model":"claude-sonnet-5"}',
+          'full-access',
+          'default',
+          'feature/shell',
+          '/tmp/shell-worktree',
+          '["/tmp/docs","/tmp/shared"]',
+          NULL,
+          '2026-04-01T00:00:02.000Z',
+          '2026-04-01T00:00:03.000Z',
+          NULL,
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id,
+          thread_id,
+          turn_id,
+          role,
+          text,
+          is_streaming,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'message-user-shell',
+          'thread-shell',
+          NULL,
+          'user',
+          'let me think',
+          0,
+          '2026-04-01T00:00:04.000Z',
+          '2026-04-01T00:00:04.000Z'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_sessions (
+          thread_id,
+          status,
+          provider_name,
+          provider_session_id,
+          provider_thread_id,
+          runtime_mode,
+          active_turn_id,
+          last_error,
+          updated_at
+        )
+        VALUES (
+          'thread-shell',
+          'running',
+          'claudeAgent',
+          'session-shell',
+          'provider-thread-shell',
+          'full-access',
+          NULL,
+          NULL,
+          '2026-04-01T00:00:05.000Z'
+        )
+      `;
+
+      const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
+      assert.equal(shellSnapshot.projects.length, 1);
+      assert.deepEqual(shellSnapshot.projects[0]?.jiraBoard, {
+        cloudId: "cloud-shell",
+        boardId: 42,
+      });
+      assert.equal(shellSnapshot.threads.length, 1);
+      assert.deepEqual(Array.from(shellSnapshot.threads[0]!.additionalDirectories), [
+        "/tmp/docs",
+        "/tmp/shared",
+      ]);
+      assert.equal(shellSnapshot.threads[0]?.session?.compacting, false);
+      assert.equal(shellSnapshot.threads[0]?.latestUserMessageAt, "2026-04-01T00:00:04.000Z");
+
+      const projectShell = yield* snapshotQuery.getProjectShellById(asProjectId("project-shell"));
+      assert.equal(projectShell._tag, "Some");
+      if (projectShell._tag === "Some") {
+        assert.deepEqual(projectShell.value.jiraBoard, {
+          cloudId: "cloud-shell",
+          boardId: 42,
+        });
+      }
+
+      const threadShell = yield* snapshotQuery.getThreadShellById(ThreadId.make("thread-shell"));
+      assert.equal(threadShell._tag, "Some");
+      if (threadShell._tag === "Some") {
+        assert.deepEqual(Array.from(threadShell.value.additionalDirectories), [
+          "/tmp/docs",
+          "/tmp/shared",
+        ]);
+      }
+
+      const threadDetail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-shell"));
+      assert.equal(threadDetail._tag, "Some");
+      if (threadDetail._tag === "Some") {
+        assert.deepEqual(Array.from(threadDetail.value.additionalDirectories), [
+          "/tmp/docs",
+          "/tmp/shared",
+        ]);
+      }
+    }),
+  );
 });

@@ -7,7 +7,6 @@ import {
   EnvironmentId,
   type EnvironmentApi,
   type MessageId,
-  type OrchestrationEvent,
   type OrchestrationReadModel,
   type ProjectId,
   type ServerConfig,
@@ -232,19 +231,16 @@ function createMockEnvironmentApi(input: {
     git: {} as EnvironmentApi["git"],
     orchestration: {
       dispatchCommand: input.dispatchCommand,
-      getSnapshot: notImplemented("getSnapshot") as EnvironmentApi["orchestration"]["getSnapshot"],
-      getListingSnapshot: notImplemented(
-        "getListingSnapshot",
-      ) as EnvironmentApi["orchestration"]["getListingSnapshot"],
-      getThread: notImplemented("getThread") as EnvironmentApi["orchestration"]["getThread"],
       getTurnDiff: notImplemented("getTurnDiff") as EnvironmentApi["orchestration"]["getTurnDiff"],
       getFullThreadDiff: notImplemented(
         "getFullThreadDiff",
       ) as EnvironmentApi["orchestration"]["getFullThreadDiff"],
-      replayEvents: notImplemented(
-        "replayEvents",
-      ) as EnvironmentApi["orchestration"]["replayEvents"],
-      onDomainEvent: (() => () => undefined) as EnvironmentApi["orchestration"]["onDomainEvent"],
+      subscribeShell: notImplemented(
+        "subscribeShell",
+      ) as EnvironmentApi["orchestration"]["subscribeShell"],
+      subscribeThread: notImplemented(
+        "subscribeThread",
+      ) as EnvironmentApi["orchestration"]["subscribeThread"],
     },
     jira: {} as EnvironmentApi["jira"],
   };
@@ -476,75 +472,62 @@ function addThreadToSnapshot(
   };
 }
 
-function createThreadCreatedEvent(threadId: ThreadId, sequence: number): OrchestrationEvent {
+function toShellThread(thread: OrchestrationReadModel["threads"][number]) {
   return {
-    sequence,
-    eventId: EventId.make(`event-thread-created-${sequence}`),
-    aggregateKind: "thread",
-    aggregateId: threadId,
-    occurredAt: NOW_ISO,
-    commandId: null,
-    causationEventId: null,
-    correlationId: null,
-    metadata: {},
-    type: "thread.created",
-    payload: {
-      threadId,
-      projectId: PROJECT_ID,
-      title: "New thread",
-      modelSelection: {
-        provider: "codex",
-        model: "gpt-5",
-      },
-      runtimeMode: "full-access",
-      interactionMode: "default",
-      branch: "main",
-      worktreePath: null,
-      createdAt: NOW_ISO,
-      updatedAt: NOW_ISO,
-    },
+    id: thread.id,
+    projectId: thread.projectId,
+    title: thread.title,
+    modelSelection: thread.modelSelection,
+    runtimeMode: thread.runtimeMode,
+    interactionMode: thread.interactionMode,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    additionalDirectories: thread.additionalDirectories,
+    latestTurn: thread.latestTurn,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    archivedAt: thread.archivedAt,
+    session: thread.session,
+    latestUserMessageAt:
+      thread.messages.findLast((message) => message.role === "user")?.createdAt ?? null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
   };
 }
 
-function createThreadSessionSetEvent(threadId: ThreadId, sequence: number): OrchestrationEvent {
+function toShellSnapshot(snapshot: OrchestrationReadModel) {
   return {
-    sequence,
-    eventId: EventId.make(`event-thread-session-set-${sequence}`),
-    aggregateKind: "thread",
-    aggregateId: threadId,
-    occurredAt: NOW_ISO,
-    commandId: null,
-    causationEventId: null,
-    correlationId: null,
-    metadata: {},
-    type: "thread.session-set",
-    payload: {
-      threadId,
-      session: {
-        threadId,
-        status: "running",
-        providerName: "codex",
-        runtimeMode: "full-access",
-        activeTurnId: `turn-${threadId}` as TurnId,
-        lastError: null,
-        compacting: false,
-        updatedAt: NOW_ISO,
-      },
-    },
+    snapshotSequence: snapshot.snapshotSequence,
+    projects: snapshot.projects.map((project) => ({
+      id: project.id,
+      title: project.title,
+      workspaceRoot: project.workspaceRoot,
+      repositoryIdentity: project.repositoryIdentity ?? null,
+      defaultModelSelection: project.defaultModelSelection,
+      scripts: project.scripts,
+      jiraBoard: project.jiraBoard ?? null,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+    })),
+    threads: snapshot.threads.map(toShellThread),
+    updatedAt: snapshot.updatedAt,
   };
 }
 
-function sendOrchestrationDomainEvent(event: OrchestrationEvent): void {
-  rpcHarness.emitStreamValue(WS_METHODS.subscribeOrchestrationDomainEvents, event);
+function sendShellThreadUpsert(thread: OrchestrationReadModel["threads"][number]): void {
+  rpcHarness.emitStreamValue(ORCHESTRATION_WS_METHODS.subscribeShell, {
+    kind: "thread-upserted",
+    sequence: fixture.snapshot.snapshotSequence,
+    thread: toShellThread(thread),
+  });
 }
 
 async function waitForWsClient(): Promise<void> {
   await vi.waitFor(
     () => {
       expect(
-        wsRequests.some(
-          (request) => request._tag === WS_METHODS.subscribeOrchestrationDomainEvents,
-        ),
+        wsRequests.some((request) => request._tag === ORCHESTRATION_WS_METHODS.subscribeShell),
       ).toBe(true);
       expect(
         wsRequests.some((request) => request._tag === WS_METHODS.subscribeServerLifecycle),
@@ -604,15 +587,41 @@ async function waitForAppBootstrap(): Promise<void> {
 async function materializePromotedDraftThreadViaDomainEvent(threadId: ThreadId): Promise<void> {
   await waitForWsClient();
   fixture.snapshot = addThreadToSnapshot(fixture.snapshot, threadId);
-  sendOrchestrationDomainEvent(
-    createThreadCreatedEvent(threadId, fixture.snapshot.snapshotSequence),
-  );
+  const thread = fixture.snapshot.threads.find((entry) => entry.id === threadId);
+  if (!thread) {
+    throw new Error(`Expected thread ${threadId} in snapshot.`);
+  }
+  sendShellThreadUpsert(thread);
 }
 
 async function startPromotedServerThreadViaDomainEvent(threadId: ThreadId): Promise<void> {
-  sendOrchestrationDomainEvent(
-    createThreadSessionSetEvent(threadId, fixture.snapshot.snapshotSequence + 1),
-  );
+  fixture.snapshot = {
+    ...fixture.snapshot,
+    snapshotSequence: fixture.snapshot.snapshotSequence + 1,
+    threads: fixture.snapshot.threads.map((thread) =>
+      thread.id === threadId
+        ? {
+            ...thread,
+            session: {
+              threadId,
+              status: "running",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: `turn-${threadId}` as TurnId,
+              lastError: null,
+              compacting: false,
+              updatedAt: NOW_ISO,
+            },
+            updatedAt: NOW_ISO,
+          }
+        : thread,
+    ),
+  };
+  const thread = fixture.snapshot.threads.find((entry) => entry.id === threadId);
+  if (!thread) {
+    throw new Error(`Expected thread ${threadId} in snapshot.`);
+  }
+  sendShellThreadUpsert(thread);
 }
 
 async function promoteDraftThreadViaDomainEvent(threadId: ThreadId): Promise<void> {
@@ -962,51 +971,12 @@ function createSnapshotWithPlanFollowUpPrompt(options?: {
   };
 }
 
-function toThreadSummary(thread: OrchestrationReadModel["threads"][number]) {
-  return {
-    id: thread.id,
-    projectId: thread.projectId,
-    title: thread.title,
-    modelSelection: thread.modelSelection,
-    runtimeMode: thread.runtimeMode,
-    interactionMode: thread.interactionMode,
-    branch: thread.branch,
-    worktreePath: thread.worktreePath,
-    additionalDirectories: thread.additionalDirectories,
-    latestTurn: thread.latestTurn,
-    session: thread.session,
-    createdAt: thread.createdAt,
-    updatedAt: thread.updatedAt,
-    archivedAt: thread.archivedAt,
-    deletedAt: thread.deletedAt,
-    latestUserMessageAt: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
-  };
-}
-
 function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
   const customResult = customWsRpcResolver?.(body);
   if (customResult !== undefined) {
     return customResult;
   }
   const tag = body._tag;
-  if (tag === ORCHESTRATION_WS_METHODS.getListingSnapshot) {
-    return {
-      snapshotSequence: fixture.snapshot.snapshotSequence,
-      projects: fixture.snapshot.projects,
-      threads: fixture.snapshot.threads.map(toThreadSummary),
-      updatedAt: fixture.snapshot.updatedAt,
-    };
-  }
-  if (tag === ORCHESTRATION_WS_METHODS.getThread) {
-    const threadId = body.threadId as string;
-    return fixture.snapshot.threads.find((t) => t.id === threadId) ?? null;
-  }
-  if (tag === ORCHESTRATION_WS_METHODS.getSnapshot) {
-    return fixture.snapshot;
-  }
   if (tag === WS_METHODS.serverGetConfig) {
     return fixture.serverConfig;
   }
@@ -1764,6 +1734,28 @@ describe("ChatView timeline estimator parity (full app)", () => {
               config: fixture.serverConfig,
             },
           ];
+        }
+        if (request._tag === ORCHESTRATION_WS_METHODS.subscribeShell) {
+          return [
+            {
+              kind: "snapshot",
+              snapshot: toShellSnapshot(fixture.snapshot),
+            },
+          ];
+        }
+        if (request._tag === ORCHESTRATION_WS_METHODS.subscribeThread) {
+          const thread = fixture.snapshot.threads.find((entry) => entry.id === request.threadId);
+          return thread
+            ? [
+                {
+                  kind: "snapshot",
+                  snapshot: {
+                    snapshotSequence: fixture.snapshot.snapshotSequence,
+                    thread,
+                  },
+                },
+              ]
+            : [];
         }
         return [];
       },

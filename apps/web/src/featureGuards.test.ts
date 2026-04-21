@@ -98,36 +98,35 @@ describe("MarCode feature guards", () => {
     expect(storeSource).toContain("@marcode/contracts");
   });
 
-  it("lazy thread hydration exists", () => {
+  it("streaming shell + thread subscription pattern", () => {
     const storeSource = readSrc("store.ts");
     expect(storeSource).toContain("threadShellById");
-    expect(storeSource).toContain("syncListingSnapshot");
-    expect(storeSource).toContain("hydrateThread");
+    expect(storeSource).toContain("syncServerShellSnapshot");
+    expect(storeSource).toContain("applyShellEvent");
+    expect(storeSource).toContain("syncServerThreadDetail");
   });
 
-  it("bootstrap uses listing snapshot, not full snapshot", () => {
+  it("bootstrap uses subscribeShell stream, not RPC calls", () => {
     const connectionSource = readSrc("environments/runtime/connection.ts");
-    const recoveryBody = connectionSource.slice(connectionSource.indexOf("runSnapshotRecovery"));
-    expect(recoveryBody).toContain("getListingSnapshot");
-    expect(recoveryBody).not.toContain("getSnapshot()");
+    expect(connectionSource).toContain("subscribeShell");
+    expect(connectionSource).not.toContain("getListingSnapshot");
+    expect(connectionSource).not.toContain("getSnapshot(");
   });
 
-  it("service handler maps to syncListingSnapshot", () => {
+  it("service handler maps to syncShellSnapshot + applyShellEvent", () => {
     const serviceSource = readSrc("environments/runtime/service.ts");
     const handlerBody = serviceSource.slice(
       serviceSource.indexOf("createEnvironmentConnectionHandlers"),
     );
-    expect(handlerBody).toContain("syncListingSnapshot");
+    expect(handlerBody).toContain("syncShellSnapshot");
+    expect(handlerBody).toContain("applyShellEvent");
   });
 
-  it("route triggers per-thread lazy hydration", () => {
+  it("route retains thread detail subscription on mount", () => {
     const routeSource = readSrc("routes/_chat.$environmentId.$threadId.tsx");
-    expect(routeSource).toContain("needsHydration");
-    expect(routeSource).toContain("hydrateThread");
-    expect(routeSource).toContain("readEnvironmentApi");
-    expect(routeSource).toContain("getThread");
-    expect(routeSource).toContain("MAX_HYDRATION_RETRIES");
-    expect(routeSource).toContain("retryTimerRef");
-    expect(routeSource).toContain("clearTimeout");
+    expect(routeSource).toContain("retainThreadDetailSubscription");
+    expect(routeSource).not.toContain("needsHydration");
+    expect(routeSource).not.toContain("hydrateThread");
+    expect(routeSource).not.toContain("MAX_HYDRATION_RETRIES");
   });
 });

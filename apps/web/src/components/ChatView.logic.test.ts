@@ -229,7 +229,6 @@ const makeThread = (input?: {
   additionalDirectories: [],
   turnDiffSummaries: [],
   activities: [],
-  hydrated: true,
 });
 
 function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) {
@@ -275,7 +274,6 @@ function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) 
           branch: thread.branch,
           worktreePath: thread.worktreePath,
           additionalDirectories: thread.additionalDirectories,
-          hydrated: thread.hydrated,
         },
       ]),
     ),
@@ -476,7 +474,6 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       additionalDirectories: [],
       turnDiffSummaries: [],
       activities: [],
-      hydrated: true,
     });
 
     expect(
@@ -514,7 +511,6 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       additionalDirectories: [],
       turnDiffSummaries: [],
       activities: [],
-      hydrated: true,
     });
 
     expect(
@@ -558,7 +554,6 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       additionalDirectories: [],
       turnDiffSummaries: [],
       activities: [],
-      hydrated: true,
     });
 
     expect(

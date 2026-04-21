@@ -49,13 +49,11 @@ import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
-  OrchestrationGetThreadInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
-  OrchestrationEvent,
-  OrchestrationListingSnapshot,
-  OrchestrationReadModel,
-  OrchestrationThread,
+  OrchestrationShellStreamItem,
+  OrchestrationSubscribeThreadInput,
+  OrchestrationThreadStreamItem,
 } from "./orchestration";
 import type {
   JiraConnectionStatus,
@@ -284,17 +282,20 @@ export interface EnvironmentApi {
     workingTreeDiff: (input: GitWorkingTreeDiffInput) => Promise<GitWorkingTreeDiffResult>;
   };
   orchestration: {
-    getSnapshot: () => Promise<OrchestrationReadModel>;
-    getListingSnapshot: () => Promise<OrchestrationListingSnapshot>;
-    getThread: (input: OrchestrationGetThreadInput) => Promise<OrchestrationThread | null>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;
-    replayEvents: (fromSequenceExclusive: number) => Promise<OrchestrationEvent[]>;
-    onDomainEvent: (
-      callback: (event: OrchestrationEvent) => void,
+    subscribeShell: (
+      callback: (event: OrchestrationShellStreamItem) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
+    subscribeThread: (
+      input: OrchestrationSubscribeThreadInput,
+      callback: (event: OrchestrationThreadStreamItem) => void,
       options?: {
         onResubscribe?: () => void;
       },

@@ -37,7 +37,6 @@ import { truncate } from "@marcode/shared/String";
 import {
   memo,
   useCallback,
-  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -98,7 +97,6 @@ import {
 } from "../turnNotification";
 import {
   type AppState,
-  isThreadHydrated,
   selectProjectsAcrossEnvironments,
   selectThreadsAcrossEnvironments,
   useStore,
@@ -1091,11 +1089,7 @@ export default function ChatView({
     ],
   );
   const activeThread = serverThread ?? localDraftThread;
-  // Keep stream-heavy timeline rendering at deferred priority so the composer
-  // stays responsive while provider events are arriving in bursts.
-  const deferredTimelineThread = useDeferredValue(activeThread);
-  const timelineThread =
-    deferredTimelineThread?.id === activeThread?.id ? deferredTimelineThread : activeThread;
+  const timelineThread = activeThread;
   const runtimeMode =
     composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
@@ -1489,7 +1483,7 @@ export default function ChatView({
     isSessionStarting ||
     hasPendingAssistantResponse;
   const isCompacting = activeThread?.session?.compacting === true;
-  const isThreadHydrating = activeThread !== undefined && !isThreadHydrated(activeThread);
+  const isThreadHydrating = false;
   const nowIso = new Date(nowTick).toISOString();
   const activeWorkStartedAt =
     deriveActiveWorkStartedAt(

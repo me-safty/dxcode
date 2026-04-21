@@ -50,6 +50,7 @@ import {
   type GitStatusResult,
 } from "@marcode/contracts";
 import {
+  parseScopedThreadKey,
   scopedProjectKey,
   scopedThreadKey,
   scopeProjectRef,
@@ -151,6 +152,7 @@ import {
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import {
+  getSidebarThreadIdsToPrewarm,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
@@ -164,6 +166,7 @@ import {
   useThreadJumpHintVisibility,
   ThreadStatusPill,
 } from "./Sidebar.logic";
+import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -3050,6 +3053,29 @@ export default function Sidebar() {
     ? threadJumpLabelByKey
     : EMPTY_THREAD_JUMP_LABELS;
   const orderedSidebarThreadKeys = visibleSidebarThreadKeys;
+  const prewarmedSidebarThreadKeys = useMemo(
+    () => getSidebarThreadIdsToPrewarm(visibleSidebarThreadKeys),
+    [visibleSidebarThreadKeys],
+  );
+  const prewarmedSidebarThreadRefs = useMemo(
+    () =>
+      prewarmedSidebarThreadKeys.flatMap((threadKey) => {
+        const ref = parseScopedThreadKey(threadKey);
+        return ref ? [ref] : [];
+      }),
+    [prewarmedSidebarThreadKeys],
+  );
+
+  useEffect(() => {
+    const releases = prewarmedSidebarThreadRefs.map((ref) =>
+      retainThreadDetailSubscription(ref.environmentId, ref.threadId),
+    );
+    return () => {
+      for (const release of releases) {
+        release();
+      }
+    };
+  }, [prewarmedSidebarThreadRefs]);
 
   useEffect(() => {
     updateThreadJumpHintsVisibility(shouldShowThreadJumpHintsNow);

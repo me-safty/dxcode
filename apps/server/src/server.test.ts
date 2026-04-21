@@ -11,7 +11,7 @@ import {
   KeybindingRule,
   MessageId,
   OpenError,
-  type OrchestrationThread,
+  type OrchestrationThreadShell,
   TerminalNotRunningError,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -169,9 +169,9 @@ const makeDefaultOrchestrationReadModel = () => {
   };
 };
 
-const makeDefaultOrchestrationThread = (
-  overrides: Partial<OrchestrationThread> = {},
-): OrchestrationThread => {
+const makeDefaultOrchestrationThreadShell = (
+  overrides: Partial<OrchestrationThreadShell> = {},
+): OrchestrationThreadShell => {
   const now = new Date().toISOString();
   return {
     id: defaultThreadId,
@@ -187,12 +187,11 @@ const makeDefaultOrchestrationThread = (
     createdAt: now,
     updatedAt: now,
     archivedAt: null,
-    deletedAt: null,
-    messages: [],
-    proposedPlans: [],
-    activities: [],
-    checkpoints: [],
     session: null,
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
     ...overrides,
   };
 };
@@ -449,14 +448,16 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.mock(ProjectionSnapshotQuery)({
           getSnapshot: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
-          getListingSnapshot: () =>
+          getShellSnapshot: () =>
             Effect.succeed({
               snapshotSequence: 0,
               updatedAt: new Date().toISOString(),
               projects: [],
               threads: [],
             }),
-          getThread: () => Effect.succeed(Option.none()),
+          getProjectShellById: () => Effect.succeed(Option.none()),
+          getThreadShellById: () => Effect.succeed(Option.none()),
+          getThreadDetailById: () => Effect.succeed(Option.none()),
           getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
           getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
           getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
@@ -2851,10 +2852,46 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ],
       };
 
+      const shellSnapshot = {
+        snapshotSequence: snapshot.snapshotSequence,
+        updatedAt: snapshot.updatedAt,
+        projects: snapshot.projects.map((project) => ({
+          id: project.id,
+          title: project.title,
+          workspaceRoot: project.workspaceRoot,
+          defaultModelSelection: project.defaultModelSelection,
+          scripts: project.scripts,
+          jiraBoard: project.jiraBoard,
+          createdAt: project.createdAt,
+          updatedAt: project.updatedAt,
+        })),
+        threads: snapshot.threads.map((thread) => ({
+          id: thread.id,
+          projectId: thread.projectId,
+          title: thread.title,
+          modelSelection: thread.modelSelection,
+          runtimeMode: thread.runtimeMode,
+          interactionMode: thread.interactionMode,
+          branch: thread.branch,
+          worktreePath: thread.worktreePath,
+          additionalDirectories: thread.additionalDirectories,
+          latestTurn: thread.latestTurn,
+          createdAt: thread.createdAt,
+          updatedAt: thread.updatedAt,
+          archivedAt: thread.archivedAt,
+          session: thread.session,
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+        })),
+      };
+
       yield* buildAppUnderTest({
         layers: {
           projectionSnapshotQuery: {
             getSnapshot: () => Effect.succeed(snapshot),
+            getShellSnapshot: () => Effect.succeed(shellSnapshot),
           },
           orchestrationEngine: {
             dispatch: () => Effect.succeed({ sequence: 7 }),
@@ -2880,10 +2917,19 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
 
       const wsUrl = yield* getWsServerUrl("/ws");
-      const snapshotResult = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) => client[ORCHESTRATION_WS_METHODS.getSnapshot]({})),
+      const shellItems = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeShell]({}).pipe(
+            Stream.take(1),
+            Stream.runCollect,
+          ),
+        ),
       );
-      assert.equal(snapshotResult.snapshotSequence, 1);
+      const firstShellItem = Array.from(shellItems)[0] as
+        | { kind: "snapshot"; snapshot: { snapshotSequence: number } }
+        | undefined;
+      assert.equal(firstShellItem?.kind, "snapshot");
+      assert.equal(firstShellItem?.snapshot.snapshotSequence, 1);
 
       const dispatchResult = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
@@ -3021,10 +3067,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }),
           },
           projectionSnapshotQuery: {
-            getThread: () =>
+            getThreadShellById: () =>
               Effect.succeed(
                 Option.some(
-                  makeDefaultOrchestrationThread({
+                  makeDefaultOrchestrationThreadShell({
                     id: threadId,
                     updatedAt: now,
                     session: {
@@ -3097,13 +3143,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }),
           },
           projectionSnapshotQuery: {
-            getThread: () =>
+            getThreadShellById: () =>
               Effect.sync(() => {
                 effects.push(`query:thread-shell:${archived ? "archived" : "active"}`);
                 return archived
                   ? Option.none()
                   : Option.some(
-                      makeDefaultOrchestrationThread({
+                      makeDefaultOrchestrationThreadShell({
                         id: threadId,
                         updatedAt: now,
                         session: {
@@ -3171,9 +3217,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }),
           },
           projectionSnapshotQuery: {
-            getThread: () =>
+            getThreadShellById: () =>
               Effect.succeed(
-                Option.some(makeDefaultOrchestrationThread({ id: threadId, session: null })),
+                Option.some(makeDefaultOrchestrationThreadShell({ id: threadId, session: null })),
               ),
           },
         },
@@ -3225,10 +3271,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 }),
             },
             projectionSnapshotQuery: {
-              getThread: () =>
+              getThreadShellById: () =>
                 Effect.succeed(
                   Option.some(
-                    makeDefaultOrchestrationThread({
+                    makeDefaultOrchestrationThreadShell({
                       id: threadId,
                       updatedAt: now,
                       session: {
@@ -3299,10 +3345,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             },
           },
           projectionSnapshotQuery: {
-            getThread: () =>
+            getThreadShellById: () =>
               Effect.succeed(
                 Option.some(
-                  makeDefaultOrchestrationThread({
+                  makeDefaultOrchestrationThreadShell({
                     id: threadId,
                     updatedAt: now,
                     session: {
@@ -3372,10 +3418,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             },
           },
           projectionSnapshotQuery: {
-            getThread: () =>
+            getThreadShellById: () =>
               Effect.succeed(
                 Option.some(
-                  makeDefaultOrchestrationThread({
+                  makeDefaultOrchestrationThreadShell({
                     id: threadId,
                     updatedAt: now,
                     session: {
@@ -3826,67 +3872,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect(
-    "routes websocket rpc subscribeOrchestrationDomainEvents with replay/live overlap resilience",
-    () =>
-      Effect.gen(function* () {
-        const now = new Date().toISOString();
-        const threadId = ThreadId.make("thread-1");
-        let replayCursor: number | null = null;
-        const makeEvent = (sequence: number): OrchestrationEvent =>
-          ({
-            sequence,
-            eventId: `event-${sequence}`,
-            aggregateKind: "thread",
-            aggregateId: threadId,
-            occurredAt: now,
-            commandId: null,
-            causationEventId: null,
-            correlationId: null,
-            metadata: {},
-            type: "thread.reverted",
-            payload: {
-              threadId,
-              turnCount: sequence,
-            },
-          }) as OrchestrationEvent;
-
-        yield* buildAppUnderTest({
-          layers: {
-            orchestrationEngine: {
-              getReadModel: () =>
-                Effect.succeed({
-                  ...makeDefaultOrchestrationReadModel(),
-                  snapshotSequence: 1,
-                }),
-              readEvents: (fromSequenceExclusive) => {
-                replayCursor = fromSequenceExclusive;
-                return Stream.make(makeEvent(2), makeEvent(3));
-              },
-              streamDomainEvents: Stream.make(makeEvent(3), makeEvent(4)),
-            },
-          },
-        });
-
-        const wsUrl = yield* getWsServerUrl("/ws");
-        const events = yield* Effect.scoped(
-          withWsRpcClient(wsUrl, (client) =>
-            client[WS_METHODS.subscribeOrchestrationDomainEvents]({}).pipe(
-              Stream.take(3),
-              Stream.runCollect,
-            ),
-          ),
-        );
-
-        assert.equal(replayCursor, 1);
-        assert.deepEqual(
-          Array.from(events).map((event) => event.sequence),
-          [2, 3, 4],
-        );
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("enriches replayed project events only once before streaming them to subscribers", () =>
+  it.effect("enriches replayed project events before returning them to callers", () =>
     Effect.gen(function* () {
       let resolveCalls = 0;
       const repositoryIdentity = {
@@ -3942,14 +3928,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const wsUrl = yield* getWsServerUrl("/ws");
       const events = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
-          client[WS_METHODS.subscribeOrchestrationDomainEvents]({}).pipe(
-            Stream.take(1),
-            Stream.runCollect,
-          ),
+          client[ORCHESTRATION_WS_METHODS.replayEvents]({ fromSequenceExclusive: 0 }),
         ),
       );
 
-      const event = Array.from(events)[0];
+      const event = events[0];
       assert.equal(resolveCalls, 1);
       assert.equal(event?.type, "project.meta-updated");
       assert.deepEqual(
@@ -3959,81 +3942,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("enriches subscribed project meta updates with repository identity metadata", () =>
-    Effect.gen(function* () {
-      const repositoryIdentity = {
-        canonicalKey: "github.com/marcode/marcode",
-        locator: {
-          source: "git-remote" as const,
-          remoteName: "upstream",
-          remoteUrl: "git@github.com:marcode/marcode.git",
-        },
-        displayName: "marcode/marcode",
-        provider: "github",
-        owner: "marcode",
-        name: "marcode",
-      };
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            getReadModel: () =>
-              Effect.succeed({
-                ...makeDefaultOrchestrationReadModel(),
-                snapshotSequence: 0,
-              }),
-            streamDomainEvents: Stream.make({
-              sequence: 1,
-              eventId: EventId.make("event-1"),
-              aggregateKind: "project",
-              aggregateId: defaultProjectId,
-              occurredAt: "2026-04-05T00:00:00.000Z",
-              commandId: null,
-              causationEventId: null,
-              correlationId: null,
-              metadata: {},
-              type: "project.meta-updated",
-              payload: {
-                projectId: defaultProjectId,
-                title: "Renamed Project",
-                updatedAt: "2026-04-05T00:00:00.000Z",
-              },
-            } satisfies Extract<OrchestrationEvent, { type: "project.meta-updated" }>),
-          },
-          repositoryIdentityResolver: {
-            resolve: () => Effect.succeed(repositoryIdentity),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const events = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[WS_METHODS.subscribeOrchestrationDomainEvents]({}).pipe(
-            Stream.take(1),
-            Stream.runCollect,
-          ),
-        ),
-      );
-
-      const event = Array.from(events)[0];
-      assert.equal(event?.type, "project.meta-updated");
-      assert.deepEqual(
-        event && event.type === "project.meta-updated" ? event.payload.repositoryIdentity : null,
-        repositoryIdentity,
-      );
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("routes websocket rpc orchestration.getSnapshot errors", () =>
+  it.effect("routes websocket rpc orchestration.subscribeShell errors", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest({
         layers: {
           projectionSnapshotQuery: {
-            getSnapshot: () =>
+            getShellSnapshot: () =>
               Effect.fail(
                 new PersistenceSqlError({
-                  operation: "ProjectionSnapshotQuery.getSnapshot",
+                  operation: "ProjectionSnapshotQuery.getShellSnapshot",
                   detail: "projection unavailable",
                 }),
               ),
@@ -4043,14 +3960,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const wsUrl = yield* getWsServerUrl("/ws");
       const result = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) => client[ORCHESTRATION_WS_METHODS.getSnapshot]({})).pipe(
-          Effect.result,
-        ),
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeShell]({}).pipe(
+            Stream.take(1),
+            Stream.runCollect,
+          ),
+        ).pipe(Effect.result),
       );
 
       assertTrue(result._tag === "Failure");
       assertTrue(result.failure._tag === "OrchestrationGetSnapshotError");
-      assertInclude(result.failure.message, "Failed to load orchestration snapshot");
+      assertInclude(result.failure.message, "Failed to load orchestration shell snapshot");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
