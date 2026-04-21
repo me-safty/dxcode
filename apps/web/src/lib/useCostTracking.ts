@@ -22,12 +22,14 @@ function extractDeltas(payload: unknown): TurnTokenDeltas | null {
   const p = payload as Record<string, unknown>;
   const input = toNonNegative(p.lastInputTokens);
   const cached = toNonNegative(p.lastCachedInputTokens);
+  const cacheCreation = toNonNegative(p.lastCacheCreationInputTokens);
   const output = toNonNegative(p.lastOutputTokens);
   const reasoning = toNonNegative(p.lastReasoningOutputTokens);
-  if (input + cached + output + reasoning <= 0) return null;
+  if (input + cached + cacheCreation + output + reasoning <= 0) return null;
   return {
     inputTokens: input,
     cachedInputTokens: cached,
+    cacheCreationInputTokens: cacheCreation,
     outputTokens: output,
     reasoningOutputTokens: reasoning,
   };

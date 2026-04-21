@@ -18,6 +18,7 @@ function freshState(): PersistedCostState {
 const cost = (total: number) => ({
   inputUsd: 0,
   cachedUsd: 0,
+  cacheCreationUsd: 0,
   outputUsd: 0,
   reasoningUsd: 0,
   totalUsd: total,
@@ -27,12 +28,14 @@ const deltas = (
   d: Partial<{
     inputTokens: number;
     cachedInputTokens: number;
+    cacheCreationInputTokens: number;
     outputTokens: number;
     reasoningOutputTokens: number;
   }> = {},
 ) => ({
   inputTokens: d.inputTokens ?? 0,
   cachedInputTokens: d.cachedInputTokens ?? 0,
+  cacheCreationInputTokens: d.cacheCreationInputTokens ?? 0,
   outputTokens: d.outputTokens ?? 0,
   reasoningOutputTokens: d.reasoningOutputTokens ?? 0,
 });

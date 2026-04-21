@@ -15,6 +15,13 @@ describe("pricing/getPricing", () => {
     expect(p.inputPerMTok).toBe(3);
     expect(p.cachedInputPerMTok).toBe(0.3);
     expect(p.outputPerMTok).toBe(15);
+    // Anthropic cache-write = 1.25× input.
+    expect(p.cacheCreationInputPerMTok).toBeCloseTo(3 * 1.25, 6);
+  });
+
+  it("defaults OpenAI cacheCreation rate to input rate", () => {
+    const p = getPricing("gpt-5.4");
+    expect(p.cacheCreationInputPerMTok).toBe(p.inputPerMTok);
   });
 
   it("resolves Claude short alias via provider", () => {
@@ -58,6 +65,7 @@ describe("pricing/computeTurnCost", () => {
     const cost = computeTurnCost("claude-sonnet-4-6", {
       inputTokens: 10_000,
       cachedInputTokens: 100_000,
+      cacheCreationInputTokens: 20_000,
       outputTokens: 2_000,
       reasoningOutputTokens: 500,
     });
@@ -65,28 +73,41 @@ describe("pricing/computeTurnCost", () => {
     expect(cost.inputUsd).toBeCloseTo(0.03, 6);
     // 100k * $0.30/Mtok = $0.03
     expect(cost.cachedUsd).toBeCloseTo(0.03, 6);
+    // 20k * ($3 * 1.25 = $3.75)/Mtok = $0.075
+    expect(cost.cacheCreationUsd).toBeCloseTo(0.075, 6);
     // 2k * $15/Mtok = $0.03
     expect(cost.outputUsd).toBeCloseTo(0.03, 6);
     // 500 * $15/Mtok = $0.0075
     expect(cost.reasoningUsd).toBeCloseTo(0.0075, 6);
-    expect(cost.totalUsd).toBeCloseTo(0.0975, 6);
+    expect(cost.totalUsd).toBeCloseTo(0.1725, 6);
   });
 
   it("computes Codex GPT-5.4 turn cost correctly", () => {
     const cost = computeTurnCost("gpt-5.4", {
       inputTokens: 1_000_000,
       cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
       outputTokens: 100_000,
       reasoningOutputTokens: 50_000,
     });
     // 1M * $1.25 = $1.25
     expect(cost.inputUsd).toBeCloseTo(1.25, 6);
     expect(cost.cachedUsd).toBe(0);
+    expect(cost.cacheCreationUsd).toBe(0);
     // 100k * $10/Mtok = $1
     expect(cost.outputUsd).toBeCloseTo(1, 6);
     // 50k * $10/Mtok = $0.5
     expect(cost.reasoningUsd).toBeCloseTo(0.5, 6);
     expect(cost.totalUsd).toBeCloseTo(2.75, 6);
+  });
+
+  it("applies Anthropic cache-write premium correctly", () => {
+    // Pure cache-creation: 1M tokens at 1.25× base rate
+    const cost = computeTurnCost("claude-sonnet-4-6", {
+      cacheCreationInputTokens: 1_000_000,
+    });
+    expect(cost.cacheCreationUsd).toBeCloseTo(3 * 1.25, 6);
+    expect(cost.totalUsd).toBeCloseTo(3.75, 6);
   });
 
   it("returns zero cost for unknown model", () => {
