@@ -1,6 +1,8 @@
 import { normalizeModelSlug } from "./model.ts";
 import type { ProviderKind } from "@t3tools/contracts";
 
+export type { ProviderKind };
+
 /**
  * USD price per 1,000,000 tokens for each token class.
  *
