@@ -277,6 +277,8 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
   const persistedOrderByCwd = new Map(
     persistedProjectOrderCwds.map((cwd, index) => [cwd, index] as const),
   );
+  const defaultToCollapsedOnLegacyUpgrade =
+    persistedProjectStateUsesLegacyShape && persistedExpandedProjectCwds.size > 0;
   const mappedProjects = projects.map((project, index) => {
     if (!(project.logicalKey in nextExpandedById)) {
       const groupCwds = currentProjectCwdsByLogicalKey.get(project.logicalKey) ?? [project.cwd];
@@ -299,10 +301,7 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
         if (groupCwds.some((cwd) => persistedCollapsedProjectCwds.has(cwd))) {
           return false;
         }
-        if (persistedProjectStateUsesLegacyShape && persistedExpandedProjectCwds.size > 0) {
-          return false;
-        }
-        return true;
+        return !defaultToCollapsedOnLegacyUpgrade;
       })();
       const expanded =
         previousExpandedById[project.logicalKey] ??
