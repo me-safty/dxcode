@@ -14,6 +14,7 @@ import {
   syncProjects,
   syncThreads,
   type UiState,
+  useUiStateStore,
 } from "./uiStateStore";
 
 function makeUiState(overrides: Partial<UiState> = {}): UiState {
@@ -558,5 +559,22 @@ describe("uiStateStore persistence round-trip", () => {
     ]);
 
     expect(rehydrated.projectExpandedById[nextLogicalKey]).toBe(false);
+  });
+  it("persists project collapse immediately when using the store actions", () => {
+    const projectA = { key: "kA", logicalKey: "kA", cwd: "/projA" };
+    const projectB = { key: "kB", logicalKey: "kB", cwd: "/projB" };
+
+    useUiStateStore.setState(makeUiState());
+    useUiStateStore.getState().syncProjects([projectA, projectB]);
+
+    localStorageStub.clear();
+    useUiStateStore.getState().setProjectExpanded(projectB.logicalKey, false);
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+
+    expect(persisted.collapsedProjectCwds).toEqual([projectB.cwd]);
+    expect(persisted.expandedProjectCwds).toEqual([projectA.cwd]);
   });
 });
