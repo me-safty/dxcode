@@ -322,14 +322,16 @@ export function sanitizePersistedFile(
     };
   }
   const r = raw as Record<string, unknown>;
-  const version = r.version === 1 ? 1 : 1;
-  const kind = r.kind === expectedKind ? expectedKind : expectedKind;
+  // version and kind are forced to the expected values — any drift from
+  // what the caller asked for is treated as malformed and silently
+  // sanitized (the surrounding contract only supports version 1 and the
+  // requested kind).
   const key = typeof r.key === "string" && r.key.length > 0 ? r.key : expectedKey;
   const bucket = sanitizeBucket(r.bucket, now);
   const lastCumulative = sanitizeLastCumulative(r.lastCumulative);
   return {
-    version,
-    kind,
+    version: 1,
+    kind: expectedKind,
     key,
     bucket,
     ...(lastCumulative && expectedKind === "session" ? { lastCumulative } : {}),

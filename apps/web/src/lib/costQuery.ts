@@ -10,13 +10,15 @@
  * `context-window.updated` activity so the ring updates in near-realtime.
  */
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import {
-  queryOptions,
-  type QueryClient,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { queryOptions, type QueryClient } from "@tanstack/react-query";
 
 import { resolveEnvironmentHttpUrl } from "../environments/runtime";
+
+// Re-export the shared USD formatter so `~/lib/costQuery` stays the single
+// import surface for cost UI consumers (see CostMeter.tsx) while the
+// actual implementation lives in @t3tools/shared/pricing alongside
+// computeTurnCost.
+export { formatUsd } from "@t3tools/shared/pricing";
 
 const COST_SUMMARY_STALE_TIME_MS = 5_000;
 
@@ -181,22 +183,3 @@ export function invalidateCostSummary(
   return queryClient.invalidateQueries({ queryKey: costQueryKeys.all });
 }
 
-/** Convenience hook returning the invalidator for consumers outside React Query's mutation flow. */
-export function useInvalidateCostSummary() {
-  const queryClient = useQueryClient();
-  return (input?: {
-    readonly environmentId?: EnvironmentId | null;
-    readonly threadId?: ThreadId | null;
-  }) => invalidateCostSummary(queryClient, input);
-}
-
-/** Format USD for UI; kept here so the component imports one utility module. */
-export function formatUsd(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return "$0.00";
-  }
-  if (value < 0.01) return "<$0.01";
-  if (value < 1) return `$${value.toFixed(3).replace(/0$/, "")}`;
-  if (value < 100) return `$${value.toFixed(2)}`;
-  return `$${Math.round(value).toLocaleString("en-US")}`;
-}
