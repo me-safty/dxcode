@@ -13,13 +13,14 @@ import {
   KeybindingShortcut,
   KeybindingWhenNode,
   MAX_KEYBINDINGS_COUNT,
+  MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
   MAX_WHEN_EXPRESSION_DEPTH,
   ResolvedKeybindingRule,
   ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
   type ServerConfigIssue,
 } from "@t3tools/contracts";
-import { Mutable } from "effect/Types";
+import type { Mutable } from "effect/Types";
 import {
   Array,
   Cache,
@@ -39,12 +40,12 @@ import {
   SchemaIssue,
   SchemaTransformation,
   Ref,
-  ServiceMap,
+  Context,
   Scope,
   Stream,
 } from "effect";
 import * as Semaphore from "effect/Semaphore";
-import { ServerConfig } from "./config";
+import { ServerConfig } from "./config.ts";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 
 type WhenToken =
@@ -61,15 +62,22 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
   { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+  { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
+  { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,
     command,
+  })),
+  ...MODEL_PICKER_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
+    key: `mod+${index + 1}`,
+    command,
+    when: "modelPickerOpen",
   })),
 ];
 
@@ -322,7 +330,7 @@ export const ResolvedKeybindingFromConfig = KeybindingRule.pipe(
             Predicate.isNotNull,
             () =>
               new SchemaIssue.InvalidValue(Option.some(rule), {
-                title: "Invalid keybinding rule",
+                message: "Invalid keybinding rule",
               }),
           ),
           Effect.map((resolved) => resolved),
@@ -334,7 +342,7 @@ export const ResolvedKeybindingFromConfig = KeybindingRule.pipe(
           if (!key) {
             return yield* Effect.fail(
               new SchemaIssue.InvalidValue(Option.some(resolved), {
-                title: "Resolved shortcut cannot be encoded to key string",
+                message: "Resolved shortcut cannot be encoded to key string",
               }),
             );
           }
@@ -521,7 +529,7 @@ export interface KeybindingsShape {
 /**
  * Keybindings - Service tag for keybinding configuration operations.
  */
-export class Keybindings extends ServiceMap.Service<Keybindings, KeybindingsShape>()(
+export class Keybindings extends Context.Service<Keybindings, KeybindingsShape>()(
   "t3/keybindings",
 ) {}
 
