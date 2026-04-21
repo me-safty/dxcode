@@ -16,6 +16,7 @@ import {
 import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
+import { CostTrackerService } from "../../cost/Services/CostTracker.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
@@ -525,6 +526,7 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const costTracker = yield* CostTrackerService;
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -1519,6 +1521,23 @@ const make = Effect.gen(function* () {
           createdAt: activity.createdAt,
         }),
       ).pipe(Effect.asVoid);
+
+      // Side-channel: feed token usage into the CostTracker so the JSON
+      // ledger stays in sync with the activity stream. Failures never block
+      // ingestion — we log and drop.
+      if (event.type === "thread.token-usage.updated") {
+        const model = event.payload.model ?? thread.modelSelection.model;
+        const provider = thread.modelSelection.provider;
+        yield* costTracker
+          .recordUsage({
+            threadId: thread.id,
+            model,
+            provider,
+            usage: event.payload.usage,
+            at: new Date(event.createdAt),
+          })
+          .pipe(Effect.asVoid, Effect.ignoreCause({ log: true }));
+      }
     });
 
   const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;
@@ -1570,3 +1589,7 @@ export const ProviderRuntimeIngestionLive = Layer.effect(
   ProviderRuntimeIngestionService,
   make,
 ).pipe(Layer.provide(ProjectionTurnRepositoryLive));
+
+// Note: CostTrackerLive must be provided in the composition root (bin.ts or
+// server runtime layer). Keeping it out of ProviderRuntimeIngestionLive keeps
+// the dep graph explicit and lets tests substitute a stub CostTracker.

@@ -1,5 +1,7 @@
+import type { ProviderKind } from "@t3tools/contracts";
+
 import { cn } from "~/lib/utils";
-import { formatUsd, type CostSummary } from "~/lib/costStore";
+import { formatUsd, type CostSummary } from "~/lib/costQuery";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 
 function readBudget(): number | null {
@@ -25,28 +27,52 @@ function formatPercentage(value: number): string {
   return `${Math.round(value)}%`;
 }
 
-export function CostMeter(props: { summary: CostSummary }) {
-  const { summary } = props;
+/**
+ * Providers whose server adapters don't yet emit token-usage events. We
+ * surface "—" to avoid a misleading $0. (See c15: full provider-variance
+ * UI in a follow-up commit.)
+ */
+const PROVIDERS_WITHOUT_USAGE_TELEMETRY = new Set<ProviderKind>(["cursor", "opencode"]);
+
+export function CostMeter(props: {
+  summary: CostSummary;
+  activeProvider?: ProviderKind | null | undefined;
+}) {
+  const { summary, activeProvider } = props;
   const budget = readBudget();
 
-  // Ring: if budget set, fill by MTD/budget ratio; else fill by bucket of
-  // session-vs-month (bounded 0–100) so it still animates.
-  const ratio = budget
-    ? Math.min(100, (summary.monthUsd / budget) * 100)
-    : summary.monthUsd <= 0
-      ? 0
-      : Math.min(100, Math.log10(summary.monthUsd + 1) * 25);
+  const sessionUsd = summary.thread?.totalUsd ?? 0;
+  const sessionTurnCount = summary.thread?.turnCount ?? 0;
+  const monthUsd = summary.month.totalUsd;
+  const averagePerTurnUsd = sessionTurnCount > 0 ? sessionUsd / sessionTurnCount : null;
+  const providerUnsupported = activeProvider
+    ? PROVIDERS_WITHOUT_USAGE_TELEMETRY.has(activeProvider)
+    : false;
+
+  const ratio = providerUnsupported
+    ? 0
+    : budget
+      ? Math.min(100, (monthUsd / budget) * 100)
+      : monthUsd <= 0
+        ? 0
+        : Math.min(100, Math.log10(monthUsd + 1) * 25);
 
   const radius = 9.75;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference - (ratio / 100) * circumference;
 
-  const overBudget = budget ? summary.monthUsd >= budget : false;
+  const overBudget = budget ? monthUsd >= budget : false;
+  const centerLabel = providerUnsupported
+    ? "—"
+    : monthUsd > 0
+      ? formatCompactUsd(monthUsd)
+      : "$0";
 
-  const centerLabel = summary.monthUsd > 0 ? formatCompactUsd(summary.monthUsd) : "$0";
-  const ariaLabel = budget
-    ? `Cost ${formatUsd(summary.monthUsd)} of ${formatUsd(budget)} this month (${formatPercentage(ratio)})`
-    : `Cost ${formatUsd(summary.monthUsd)} this month, ${formatUsd(summary.sessionUsd)} this session`;
+  const ariaLabel = providerUnsupported
+    ? `Cost tracking unavailable for ${activeProvider}`
+    : budget
+      ? `Cost ${formatUsd(monthUsd)} of ${formatUsd(budget)} this month (${formatPercentage(ratio)})`
+      : `Cost ${formatUsd(monthUsd)} this month, ${formatUsd(sessionUsd)} this session`;
 
   return (
     <Popover>
@@ -104,28 +130,42 @@ export function CostMeter(props: { summary: CostSummary }) {
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             Cost
           </div>
-          <div className="whitespace-nowrap text-xs font-medium text-foreground">
-            <span>{formatUsd(summary.sessionUsd)}</span>
-            <span className="mx-1 text-muted-foreground">session</span>
-            <span className="mx-1">⋅</span>
-            <span>{formatUsd(summary.monthUsd)}</span>
-            <span className="mx-1 text-muted-foreground">MTD</span>
-          </div>
-          {budget ? (
-            <div className={cn("text-xs", overBudget ? "text-destructive" : "text-muted-foreground")}>
-              Budget: {formatUsd(budget)} ({formatPercentage(ratio)} used)
-            </div>
-          ) : null}
-          {summary.sessionTurnCount > 0 && summary.averagePerTurnUsd !== null ? (
+          {providerUnsupported ? (
             <div className="text-xs text-muted-foreground">
-              {summary.sessionTurnCount}
-              {summary.sessionTurnCount === 1 ? " turn" : " turns"} this session ·{" "}
-              {formatUsd(summary.averagePerTurnUsd)}/turn avg
+              Usage telemetry not available for this provider.
             </div>
-          ) : null}
-          {summary.month.turnCount > 0 ? (
-            <ModelBreakdown summary={summary} />
-          ) : null}
+          ) : (
+            <>
+              <div className="whitespace-nowrap text-xs font-medium text-foreground">
+                <span>{formatUsd(sessionUsd)}</span>
+                <span className="mx-1 text-muted-foreground">session</span>
+                <span className="mx-1">⋅</span>
+                <span>{formatUsd(monthUsd)}</span>
+                <span className="mx-1 text-muted-foreground">MTD</span>
+                <span className="mx-1">⋅</span>
+                <span>{formatUsd(summary.allTime.totalUsd)}</span>
+                <span className="mx-1 text-muted-foreground">all-time</span>
+              </div>
+              {budget ? (
+                <div
+                  className={cn(
+                    "text-xs",
+                    overBudget ? "text-destructive" : "text-muted-foreground",
+                  )}
+                >
+                  Budget: {formatUsd(budget)} ({formatPercentage(ratio)} used)
+                </div>
+              ) : null}
+              {sessionTurnCount > 0 && averagePerTurnUsd !== null ? (
+                <div className="text-xs text-muted-foreground">
+                  {sessionTurnCount}
+                  {sessionTurnCount === 1 ? " turn" : " turns"} this session ·{" "}
+                  {formatUsd(averagePerTurnUsd)}/turn avg
+                </div>
+              ) : null}
+              {summary.month.turnCount > 0 ? <ModelBreakdown summary={summary} /> : null}
+            </>
+          )}
         </div>
       </PopoverPopup>
     </Popover>
@@ -134,7 +174,7 @@ export function CostMeter(props: { summary: CostSummary }) {
 
 function ModelBreakdown(props: { summary: CostSummary }) {
   const entries = Object.entries(props.summary.month.byModel)
-    .filter(([, entry]) => entry.totalUsd > 0)
+    .filter(([, entry]) => entry.totalUsd > 0 || entry.turnCount > 0)
     .sort((left, right) => right[1].totalUsd - left[1].totalUsd);
   if (entries.length === 0) return null;
   return (
