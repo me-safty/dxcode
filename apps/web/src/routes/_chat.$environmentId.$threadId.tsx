@@ -10,7 +10,6 @@ import {
   DiffPanelShell,
   type DiffPanelMode,
 } from "../components/DiffPanelShell";
-import { ChatViewSkeleton } from "../components/Skeletons";
 import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../composerDraftStore";
 import {
   type DiffRouteSearch,
@@ -268,7 +267,7 @@ function ChatThreadRouteView() {
   }, [threadEnvironmentId, threadThreadId]);
 
   if (!threadRef || !bootstrapComplete || !routeThreadExists) {
-    return <ChatViewSkeleton />;
+    return null;
   }
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;

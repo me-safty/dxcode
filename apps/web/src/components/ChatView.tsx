@@ -34,16 +34,7 @@ import {
 import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@marcode/shared/model";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@marcode/shared/projectScripts";
 import { truncate } from "@marcode/shared/String";
-import {
-  memo,
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -1079,11 +1070,7 @@ export default function ChatView({ threadId, environmentId: environmentIdProp }:
     ],
   );
   const activeThread = serverThread ?? localDraftThread;
-  // Keep stream-heavy timeline rendering at deferred priority so the composer
-  // stays responsive while provider events are arriving in bursts.
-  const deferredTimelineThread = useDeferredValue(activeThread);
-  const timelineThread =
-    deferredTimelineThread?.id === activeThread?.id ? deferredTimelineThread : activeThread;
+  const timelineThread = activeThread;
   const runtimeMode =
     composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =

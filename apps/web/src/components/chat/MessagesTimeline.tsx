@@ -1,6 +1,7 @@
 import { type EnvironmentId, type MessageId, type TurnId } from "@marcode/contracts";
 import {
   memo,
+  startTransition,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -182,6 +183,10 @@ interface MessagesTimelineProps {
   }) => void;
 }
 
+let timelineHasMountedInSession = false;
+
+const INITIAL_RENDER_ROW_CAP = 15;
+
 export const MessagesTimeline = memo(function MessagesTimeline({
   threadId,
   hasMessages,
@@ -231,9 +236,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
-  // Skip the fade-in animation when mounting into a thread that was just
-  // promoted from a draft — this prevents a visible flicker during the
-  // draft→thread route transition, which remounts the timeline.
   const [skipInitialFadeIn] = useState(() => {
     const draftStore = useComposerDraftStore.getState();
     for (const draft of Object.values(draftStore.draftThreadsByThreadKey)) {
@@ -241,6 +243,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         return true;
       }
     }
+    if (timelineHasMountedInSession) {
+      return true;
+    }
+    timelineHasMountedInSession = true;
     return false;
   });
 
@@ -335,8 +341,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         knownMessageIdsRef.current.add(id);
         if (row.message.streaming) {
           pendingRevealRef.current.add(id);
-        } else {
-          fresh.add(id);
         }
       }
     }
@@ -344,6 +348,23 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }, [rows, threadId, isHydrating]);
 
   const showInlineDiffs = expandedWorkGroups;
+
+  const [hydratedFully, setHydratedFully] = useState(() => rows.length <= INITIAL_RENDER_ROW_CAP);
+  useEffect(() => {
+    if (hydratedFully) return;
+    startTransition(() => {
+      setHydratedFully(true);
+    });
+  }, [hydratedFully]);
+  const visibleRows = hydratedFully ? rows : rows.slice(-INITIAL_RENDER_ROW_CAP);
+  const hiddenRowsCount = rows.length - visibleRows.length;
+  const hiddenRowsHeight = useMemo(() => {
+    if (hiddenRowsCount === 0) return 0;
+    return rows
+      .slice(0, hiddenRowsCount)
+      .reduce((acc, row) => acc + estimateRowHeight(row, showInlineDiffs, timelineWidthPx), 0);
+  }, [hiddenRowsCount, rows, showInlineDiffs, timelineWidthPx]);
+
   const onTimelineImageLoad = useCallback(() => {}, []);
   const [allDirectoriesExpandedByTurnId, setAllDirectoriesExpandedByTurnId] = useState<
     Record<string, boolean>
@@ -672,8 +693,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         !skipInitialFadeIn && "timeline-fade-in",
       )}
     >
-      {rows.map((row, index) => {
-        const nearBottom = index >= rows.length - 3;
+      {hiddenRowsCount > 0 && <div aria-hidden="true" style={{ blockSize: hiddenRowsHeight }} />}
+      {visibleRows.map((row, index) => {
+        const nearBottom = index >= visibleRows.length - 3;
         return (
           <div
             key={row.id}
