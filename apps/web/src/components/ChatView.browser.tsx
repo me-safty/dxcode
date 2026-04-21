@@ -11,6 +11,7 @@ import {
   type ProjectId,
   type ServerConfig,
   type ServerLifecycleWelcomePayload,
+  type TerminalOpenInput,
   type ThreadId,
   type TurnId,
   WS_METHODS,
@@ -1479,24 +1480,18 @@ async function dispatchInputKey(
   await waitForLayout();
 }
 
-interface TerminalOpenRequestLike {
-  _tag: string;
-  threadId?: string;
-  cwd?: string;
-  worktreePath?: string | null;
-  env?: Record<string, string>;
-}
-
 async function waitForTerminalOpenRequest(
-  expected: Partial<TerminalOpenRequestLike>,
-): Promise<TerminalOpenRequestLike> {
-  let openRequest: TerminalOpenRequestLike | undefined;
+  expected: Partial<TerminalOpenInput>,
+): Promise<TerminalOpenInput> {
+  let openRequest: TerminalOpenInput | undefined;
   await vi.waitFor(
     () => {
-      openRequest = wsRequests.find((request) => request._tag === WS_METHODS.terminalOpen) as
-        | TerminalOpenRequestLike
-        | undefined;
-      expect(openRequest).toMatchObject({
+      const request = wsRequests.find(
+        (entry): entry is NormalizedWsRpcRequestBody & TerminalOpenInput =>
+          entry._tag === WS_METHODS.terminalOpen,
+      );
+      openRequest = request;
+      expect(request).toMatchObject({
         _tag: WS_METHODS.terminalOpen,
         ...expected,
       });
