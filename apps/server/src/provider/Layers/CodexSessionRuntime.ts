@@ -476,7 +476,8 @@ function readNotificationThreadId(notification: CodexServerNotification): string
     case "thread/compacted":
     case "thread/realtime/started":
     case "thread/realtime/itemAdded":
-    case "thread/realtime/transcriptUpdated":
+    case "thread/realtime/transcript/delta":
+    case "thread/realtime/transcript/done":
     case "thread/realtime/outputAudio/delta":
     case "thread/realtime/sdp":
     case "thread/realtime/error":
