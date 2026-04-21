@@ -78,8 +78,8 @@ function resolveEventKeys(event: ShortcutEventLike): Set<string> {
     }
   }
 
-  // Option-modified letter shortcuts can surface a symbol or dead key in `event.key`
-  // even though the physical letter key is still the user's intended shortcut.
+  // On macOS, Option+letter can change `event.key` to a symbol or dead key.
+  // Fall back to the physical letter key from `event.code`.
   const letterCodeMatch =
     event.altKey && event.code ? LETTER_EVENT_CODE_PATTERN.exec(event.code) : null;
   if (letterCodeMatch?.[1]) {

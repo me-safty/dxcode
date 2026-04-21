@@ -1479,6 +1479,38 @@ async function dispatchInputKey(
   await waitForLayout();
 }
 
+interface TerminalOpenRequestLike {
+  _tag: string;
+  threadId?: string;
+  cwd?: string;
+  worktreePath?: string | null;
+  env?: Record<string, string>;
+}
+
+async function waitForTerminalOpenRequest(
+  expected: Partial<TerminalOpenRequestLike>,
+): Promise<TerminalOpenRequestLike> {
+  let openRequest: TerminalOpenRequestLike | undefined;
+  await vi.waitFor(
+    () => {
+      openRequest = wsRequests.find((request) => request._tag === WS_METHODS.terminalOpen) as
+        | TerminalOpenRequestLike
+        | undefined;
+      expect(openRequest).toMatchObject({
+        _tag: WS_METHODS.terminalOpen,
+        ...expected,
+      });
+    },
+    { timeout: 8_000, interval: 16 },
+  );
+
+  if (!openRequest) {
+    throw new Error("Expected a terminalOpen request.");
+  }
+
+  return openRequest;
+}
+
 async function mountChatView(options: {
   viewport: ViewportSpec;
   snapshot: OrchestrationReadModel;
@@ -1784,30 +1816,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      await vi.waitFor(
-        () => {
-          const openRequest = wsRequests.find(
-            (request) => request._tag === WS_METHODS.terminalOpen,
-          ) as
-            | {
-                _tag: string;
-                cwd?: string;
-                worktreePath?: string | null;
-                env?: Record<string, string>;
-              }
-            | undefined;
-          expect(openRequest).toMatchObject({
-            _tag: WS_METHODS.terminalOpen,
-            cwd: "/repo/project",
-            worktreePath: null,
-            env: {
-              T3CODE_PROJECT_ROOT: "/repo/project",
-            },
-          });
-          expect(openRequest?.env?.T3CODE_WORKTREE_PATH).toBeUndefined();
+      const openRequest = await waitForTerminalOpenRequest({
+        cwd: "/repo/project",
+        worktreePath: null,
+        env: {
+          T3CODE_PROJECT_ROOT: "/repo/project",
         },
-        { timeout: 8_000, interval: 16 },
-      );
+      });
+      expect(openRequest.env?.T3CODE_WORKTREE_PATH).toBeUndefined();
     } finally {
       await mounted.cleanup();
     }
@@ -2108,22 +2124,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
       runButton.click();
 
-      await vi.waitFor(
-        () => {
-          const openRequest = wsRequests.find(
-            (request) => request._tag === WS_METHODS.terminalOpen,
-          );
-          expect(openRequest).toMatchObject({
-            _tag: WS_METHODS.terminalOpen,
-            threadId: THREAD_ID,
-            cwd: "/repo/project",
-            env: {
-              T3CODE_PROJECT_ROOT: "/repo/project",
-            },
-          });
+      await waitForTerminalOpenRequest({
+        threadId: THREAD_ID,
+        cwd: "/repo/project",
+        env: {
+          T3CODE_PROJECT_ROOT: "/repo/project",
         },
-        { timeout: 8_000, interval: 16 },
-      );
+      });
 
       await vi.waitFor(
         () => {
@@ -2187,23 +2194,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
       runButton.click();
 
-      await vi.waitFor(
-        () => {
-          const openRequest = wsRequests.find(
-            (request) => request._tag === WS_METHODS.terminalOpen,
-          );
-          expect(openRequest).toMatchObject({
-            _tag: WS_METHODS.terminalOpen,
-            threadId: THREAD_ID,
-            cwd: "/repo/worktrees/feature-draft",
-            env: {
-              T3CODE_PROJECT_ROOT: "/repo/project",
-              T3CODE_WORKTREE_PATH: "/repo/worktrees/feature-draft",
-            },
-          });
+      await waitForTerminalOpenRequest({
+        threadId: THREAD_ID,
+        cwd: "/repo/worktrees/feature-draft",
+        env: {
+          T3CODE_PROJECT_ROOT: "/repo/project",
+          T3CODE_WORKTREE_PATH: "/repo/worktrees/feature-draft",
         },
-        { timeout: 8_000, interval: 16 },
-      );
+      });
     } finally {
       await mounted.cleanup();
     }
@@ -4105,22 +4103,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
         }),
       );
 
-      await vi.waitFor(
-        () => {
-          const openRequest = wsRequests.find(
-            (request) => request._tag === WS_METHODS.terminalOpen,
-          );
-          expect(openRequest).toMatchObject({
-            _tag: WS_METHODS.terminalOpen,
-            threadId: THREAD_ID,
-            cwd: "/repo/project",
-            env: {
-              T3CODE_PROJECT_ROOT: "/repo/project",
-            },
-          });
+      await waitForTerminalOpenRequest({
+        threadId: THREAD_ID,
+        cwd: "/repo/project",
+        env: {
+          T3CODE_PROJECT_ROOT: "/repo/project",
         },
-        { timeout: 8_000, interval: 16 },
-      );
+      });
     } finally {
       await mounted.cleanup();
     }
