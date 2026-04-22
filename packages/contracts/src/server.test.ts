@@ -23,6 +23,7 @@ describe("ServerProvider", () => {
 
     expect(parsed.slashCommands).toEqual([]);
     expect(parsed.skills).toEqual([]);
+    expect(parsed.versionAdvisory).toBeUndefined();
   });
 
   it("decodes continuation group metadata", () => {

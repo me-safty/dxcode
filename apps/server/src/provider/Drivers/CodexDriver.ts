@@ -36,6 +36,10 @@ import type { ProviderDriver, ProviderInstance } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
+  enrichProviderSnapshotWithVersionAdvisory,
+  getProviderVersionLifecycle,
+} from "../providerVersionLifecycle.ts";
+import {
   codexContinuationIdentity,
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
@@ -138,11 +142,16 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
       const snapshot = yield* makeManagedServerProvider<CodexSettings>({
+        versionLifecycle: getProviderVersionLifecycle(DRIVER_KIND),
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
         initialSnapshot: (settings) => stampIdentity(makePendingCodexProvider(settings)),
         checkProvider,
+        enrichSnapshot: ({ snapshot, publishSnapshot }) =>
+          Effect.promise(() => enrichProviderSnapshotWithVersionAdvisory(snapshot)).pipe(
+            Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
+          ),
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(
         Effect.mapError(

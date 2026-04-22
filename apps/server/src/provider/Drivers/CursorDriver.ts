@@ -34,6 +34,7 @@ import {
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { getProviderVersionLifecycle } from "../providerVersionLifecycle.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("cursor");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
@@ -103,6 +104,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       );
 
       const snapshot = yield* makeManagedServerProvider<CursorSettings>({
+        versionLifecycle: getProviderVersionLifecycle(DRIVER_KIND),
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,

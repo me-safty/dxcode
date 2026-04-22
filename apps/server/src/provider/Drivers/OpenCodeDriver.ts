@@ -34,6 +34,10 @@ import {
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import {
+  enrichProviderSnapshotWithVersionAdvisory,
+  getProviderVersionLifecycle,
+} from "../providerVersionLifecycle.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("opencode");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
@@ -102,11 +106,16 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       ).pipe(Effect.map(stampIdentity), Effect.provideService(OpenCodeRuntime, openCodeRuntime));
 
       const snapshot = yield* makeManagedServerProvider<OpenCodeSettings>({
+        versionLifecycle: getProviderVersionLifecycle(DRIVER_KIND),
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
         initialSnapshot: (settings) => stampIdentity(makePendingOpenCodeProvider(settings)),
         checkProvider,
+        enrichSnapshot: ({ snapshot, publishSnapshot }) =>
+          Effect.promise(() => enrichProviderSnapshotWithVersionAdvisory(snapshot)).pipe(
+            Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
+          ),
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(
         Effect.mapError(

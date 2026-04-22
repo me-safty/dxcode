@@ -34,6 +34,10 @@ import {
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import {
+  enrichProviderSnapshotWithVersionAdvisory,
+  getProviderVersionLifecycle,
+} from "../providerVersionLifecycle.ts";
 import { makeClaudeCapabilitiesCacheKey, makeClaudeContinuationGroupKey } from "./ClaudeHome.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
@@ -121,11 +125,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       );
 
       const snapshot = yield* makeManagedServerProvider<ClaudeSettings>({
+        versionLifecycle: getProviderVersionLifecycle(DRIVER_KIND),
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
         initialSnapshot: (settings) => stampIdentity(makePendingClaudeProvider(settings)),
         checkProvider,
+        enrichSnapshot: ({ snapshot, publishSnapshot }) =>
+          Effect.promise(() => enrichProviderSnapshotWithVersionAdvisory(snapshot)).pipe(
+            Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
+          ),
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(
         Effect.mapError(

@@ -1,0 +1,45 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  createProviderVersionAdvisory,
+  getProviderVersionLifecycle,
+} from "./providerVersionLifecycle.ts";
+
+describe("providerVersionLifecycle", () => {
+  it("marks providers with unknown current versions as unknown", () => {
+    expect(
+      createProviderVersionAdvisory({
+        driver: "codex",
+        currentVersion: null,
+        latestVersion: "9.9.9",
+      }),
+    ).toMatchObject({
+      status: "unknown",
+      currentVersion: null,
+      latestVersion: "9.9.9",
+    });
+  });
+
+  it("marks installed providers behind latest when no stronger tested-version advisory applies", () => {
+    expect(
+      createProviderVersionAdvisory({
+        driver: "claudeAgent",
+        currentVersion: "2.1.110",
+        latestVersion: "2.1.117",
+      }),
+    ).toMatchObject({
+      status: "behind_latest",
+      currentVersion: "2.1.110",
+      latestVersion: "2.1.117",
+      updateCommand: "npm install -g @anthropic-ai/claude-code@latest",
+    });
+  });
+
+  it("keeps update commands owned by provider lifecycle metadata", () => {
+    expect(getProviderVersionLifecycle("cursor")).toEqual({
+      provider: "cursor",
+      packageName: null,
+      updateCommand: "agent update",
+    });
+  });
+});

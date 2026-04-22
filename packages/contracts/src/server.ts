@@ -109,6 +109,25 @@ export const ServerProviderContinuation = Schema.Struct({
 });
 export type ServerProviderContinuation = typeof ServerProviderContinuation.Type;
 
+export const ServerProviderVersionAdvisoryStatus = Schema.Literals([
+  "unknown",
+  "current",
+  "behind_tested",
+  "behind_latest",
+]);
+export type ServerProviderVersionAdvisoryStatus = typeof ServerProviderVersionAdvisoryStatus.Type;
+
+export const ServerProviderVersionAdvisory = Schema.Struct({
+  status: ServerProviderVersionAdvisoryStatus,
+  currentVersion: Schema.NullOr(TrimmedNonEmptyString),
+  testedVersion: Schema.NullOr(TrimmedNonEmptyString),
+  latestVersion: Schema.NullOr(TrimmedNonEmptyString),
+  updateCommand: Schema.NullOr(TrimmedNonEmptyString),
+  checkedAt: Schema.NullOr(IsoDateTime),
+  message: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ServerProviderVersionAdvisory = typeof ServerProviderVersionAdvisory.Type;
+
 export const ServerProvider = Schema.Struct({
   // Routing key for the configured instance this snapshot represents. This
   // is the only stable identity consumers may use for provider routing.
@@ -142,6 +161,7 @@ export const ServerProvider = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
 });
 export type ServerProvider = typeof ServerProvider.Type;
 

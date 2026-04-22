@@ -1,4 +1,4 @@
-import type { ServerProvider } from "@t3tools/contracts";
+import type { ServerProvider, ServerProviderVersionAdvisory } from "@t3tools/contracts";
 
 /**
  * Visual treatment for each server-reported provider status. Centralized so
@@ -88,4 +88,29 @@ export function getProviderSummary(provider: ServerProvider | undefined) {
 export function getProviderVersionLabel(version: string | null | undefined) {
   if (!version) return null;
   return version.startsWith("v") ? version : `v${version}`;
+}
+
+export function getProviderVersionAdvisoryPresentation(
+  advisory: ServerProviderVersionAdvisory | undefined,
+) {
+  if (!advisory || advisory.status === "current" || advisory.status === "unknown") {
+    return null;
+  }
+
+  const label = advisory.status === "behind_tested" ? "Recommended update" : "Update available";
+  const version =
+    advisory.status === "behind_tested"
+      ? advisory.testedVersion
+      : (advisory.latestVersion ?? advisory.testedVersion);
+  const versionLabel = getProviderVersionLabel(version);
+
+  return {
+    detail:
+      advisory.message ??
+      (versionLabel
+        ? `${label}: install ${versionLabel}.`
+        : `${label}: install the latest provider version.`),
+    updateCommand: advisory.updateCommand,
+    emphasis: advisory.status === "behind_tested" ? ("strong" as const) : ("normal" as const),
+  };
 }

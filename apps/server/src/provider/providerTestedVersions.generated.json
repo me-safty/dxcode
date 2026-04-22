@@ -1,0 +1,17 @@
+{
+  "generatedAt": "2026-04-22T15:07:09.413Z",
+  "providers": {
+    "codex": {
+      "testedVersion": "0.121.0"
+    },
+    "claudeAgent": {
+      "testedVersion": "2.0.14"
+    },
+    "cursor": {
+      "testedVersion": null
+    },
+    "opencode": {
+      "testedVersion": null
+    }
+  }
+}

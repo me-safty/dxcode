@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDownIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import { ChevronDownIcon, CopyIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   isProviderDriverKind,
@@ -13,12 +13,14 @@ import {
 } from "@t3tools/contracts";
 
 import { cn } from "../../lib/utils";
+import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import { DraftInput } from "../ui/draft-input";
 import { Switch } from "../ui/switch";
+import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { DriverOption } from "./providerDriverMeta";
 import { ProviderSettingsForm } from "./ProviderSettingsForm";
@@ -26,6 +28,7 @@ import { ProviderModelsSection } from "./ProviderModelsSection";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import {
+  getProviderVersionAdvisoryPresentation,
   PROVIDER_STATUS_STYLES,
   getProviderSummary,
   getProviderVersionLabel,
@@ -464,10 +467,29 @@ export function ProviderInstanceCard({
     : null;
   const summary = rawSummary;
   const versionLabel = getProviderVersionLabel(liveProvider?.version);
+  const versionAdvisory = getProviderVersionAdvisoryPresentation(liveProvider?.versionAdvisory);
   const FallbackIconComponent = driverOption?.icon;
   const displayName =
     instance.displayName?.trim() || driverOption?.label || String(instance.driver);
   const accentColor = normalizeProviderAccentColor(instance.accentColor);
+  const { copyToClipboard } = useCopyToClipboard<{ providerName: string }>({
+    onCopy: ({ providerName }) => {
+      toastManager.add({
+        type: "success",
+        title: `${providerName} update command copied`,
+        description: "Run it in a terminal when you are ready to update.",
+      });
+    },
+    onError: (error, { providerName }) => {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: `Could not copy ${providerName} update command`,
+          description: error.message,
+        }),
+      );
+    },
+  });
 
   // Narrow `instance.driver` for callers that key on the closed
   // `ProviderDriverKind` union (e.g. `normalizeModelSlug`'s alias table). Custom
@@ -626,6 +648,42 @@ export function ProviderInstanceCard({
               )}
               {summary.detail ? <span>- {summary.detail}</span> : null}
             </p>
+            {versionAdvisory ? (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                <span
+                  className={cn(
+                    versionAdvisory.emphasis === "strong"
+                      ? "text-warning"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {versionAdvisory.detail}
+                </span>
+                {versionAdvisory.updateCommand ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          size="xs"
+                          variant="ghost"
+                          className="h-5 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                          onClick={() =>
+                            copyToClipboard(versionAdvisory.updateCommand, {
+                              providerName: displayName,
+                            })
+                          }
+                        >
+                          <CopyIcon className="size-3" />
+                          Copy command
+                        </Button>
+                      }
+                    />
+                    <TooltipPopup side="top">{versionAdvisory.updateCommand}</TooltipPopup>
+                  </Tooltip>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
             <Button
