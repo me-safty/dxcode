@@ -41,9 +41,18 @@ describe("UserMessageQuotedContextLabel", () => {
 
   it("renders one card per entry and shows preview body without clicking", async () => {
     const mounted = await mountLabel([
-      { header: "Quoted text", body: "first quoted body" },
-      { header: "Quoted code (python)", body: "def greet():\n  print('hi')" },
-      { header: "Quoted diff (server.ts)", body: "--- a/server.ts\n+++ b/server.ts" },
+      {
+        header: "Quoted text",
+        body: "first quoted body\nsecond line\nthird line\nfourth line",
+      },
+      {
+        header: "Quoted code (python)",
+        body: "def greet():\n  print('hi')\n  print('second')\n  print('third')\n  print('fourth')",
+      },
+      {
+        header: "Quoted diff (server.ts)",
+        body: "--- a/server.ts\n+++ b/server.ts\n@@ -1,2 +1,2 @@\n-old line\n+new line",
+      },
     ]);
 
     try {
@@ -59,7 +68,12 @@ describe("UserMessageQuotedContextLabel", () => {
   });
 
   it("toggles aria-expanded when the header is clicked", async () => {
-    const mounted = await mountLabel([{ header: "Quoted text", body: "hello world" }]);
+    const mounted = await mountLabel([
+      {
+        header: "Quoted text",
+        body: "hello world\nsecond line\nthird line\nfourth line\nfifth line",
+      },
+    ]);
 
     try {
       const button = page.getByRole("button", { name: /Quoted text/ });

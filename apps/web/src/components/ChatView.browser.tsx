@@ -1541,7 +1541,7 @@ async function measureUserRow(options: {
   const rowSelector = `[data-message-id="${targetMessageId}"][data-message-role="user"]`;
 
   const scrollContainer = await waitForElement(
-    () => host.querySelector<HTMLDivElement>("div.overflow-y-auto.overscroll-y-contain"),
+    () => host.querySelector<HTMLDivElement>("div.overscroll-y-contain"),
     "Unable to find ChatView message scroll container.",
   );
 
