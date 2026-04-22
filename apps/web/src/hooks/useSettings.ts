@@ -33,6 +33,7 @@ import { normalizeCustomModelSlugs } from "~/modelSelection";
 import { Predicate, Schema, Struct } from "effect";
 import { DeepMutable } from "effect/Types";
 import { deepMerge } from "@marcode/shared/Struct";
+import { applyServerSettingsPatch } from "@marcode/shared/serverSettings";
 import { applySettingsUpdated, getServerConfig, useServerSettings } from "~/rpc/serverState";
 
 const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
@@ -179,7 +180,7 @@ export function useUpdateSettings() {
     if (Object.keys(serverPatch).length > 0) {
       const currentServerConfig = getServerConfig();
       if (currentServerConfig) {
-        applySettingsUpdated(deepMerge(currentServerConfig.settings, serverPatch));
+        applySettingsUpdated(applyServerSettingsPatch(currentServerConfig.settings, serverPatch));
       }
       void ensureLocalApi().server.updateSettings(serverPatch);
     }
