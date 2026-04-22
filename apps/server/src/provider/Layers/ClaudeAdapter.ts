@@ -2359,7 +2359,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       case "task_progress":
         if (message.usage) {
           const normalizedUsage = normalizeClaudeTokenUsage(
-            message.usage,
+            message.usage as unknown as NonNullableUsage,
             context.lastKnownContextWindow,
           );
           if (normalizedUsage) {
@@ -2391,7 +2391,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       case "task_notification":
         if (message.usage) {
           const normalizedUsage = normalizeClaudeTokenUsage(
-            message.usage,
+            message.usage as unknown as NonNullableUsage,
             context.lastKnownContextWindow,
           );
           if (normalizedUsage) {

@@ -1294,6 +1294,7 @@ describe("ProviderCommandReactor", () => {
           runtimeMode: "approval-required",
           activeTurnId: null,
           lastError: null,
+          compacting: false,
           updatedAt: now,
         },
         createdAt: now,
