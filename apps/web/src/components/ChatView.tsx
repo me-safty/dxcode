@@ -2612,7 +2612,13 @@ export default function ChatView({
   }, [cancelPendingInteractionAnchorAdjustment, cancelPendingStickToBottom]);
   useLayoutEffect(() => {
     if (!activeThread?.id) return;
+    // Reset scroll/pill state synchronously on thread switch so the first
+    // paint of the new thread doesn't flash the previous thread's pill or
+    // treat an old lastKnownScrollTop as a user scroll-up.
     shouldAutoScrollRef.current = true;
+    pendingUserScrollUpIntentRef.current = false;
+    lastKnownScrollTopRef.current = messagesScrollRef.current?.scrollTop ?? 0;
+    setShowScrollToBottom(false);
     scheduleStickToBottom();
     const timeout = window.setTimeout(() => {
       const scrollContainer = messagesScrollRef.current;
