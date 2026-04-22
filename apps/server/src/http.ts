@@ -5,6 +5,7 @@ import {
   HttpBody,
   HttpClient,
   HttpClientResponse,
+  HttpMiddleware,
   HttpRouter,
   HttpServerResponse,
   HttpServerRequest,
@@ -84,7 +85,11 @@ export function isAllowedBrowserApiCorsOrigin(origin: string | undefined): boole
     return false;
   }
 
-  const [a, b] = octets;
+  const a = octets[0];
+  const b = octets[1];
+  if (a === undefined || b === undefined) {
+    return false;
+  }
   if (a === 10) {
     return true;
   }
@@ -102,13 +107,16 @@ export function isAllowedBrowserApiCorsOrigin(origin: string | undefined): boole
   return false;
 }
 
-export const browserApiCorsLayer = HttpRouter.cors({
-  allowedMethods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["authorization", "b3", "traceparent", "content-type"],
-  maxAge: 600,
-  credentials: true,
-  allowedOrigins: isAllowedBrowserApiCorsOrigin as (origin: string) => boolean,
-});
+export const browserApiCorsLayer = HttpRouter.middleware(
+  HttpMiddleware.cors({
+    allowedMethods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["authorization", "b3", "traceparent", "content-type"],
+    maxAge: 600,
+    credentials: true,
+    allowedOrigins: isAllowedBrowserApiCorsOrigin,
+  }),
+  { global: true },
+);
 
 export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
   const redirectUrl = new URL(devUrl.toString());
