@@ -43,6 +43,7 @@ describe("providerVersionLifecycle", () => {
       updateCommand: "agent update",
       updateExecutable: "agent",
       updateArgs: ["update"],
+      updateLockKey: "cursor-agent",
     });
   });
 });

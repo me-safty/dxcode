@@ -16,13 +16,19 @@ const baseProvider: ServerProvider = {
   driver: "codex",
   enabled: true,
   installed: true,
-  version: "1.0.0",
+  version: null,
   status: "ready",
   auth: { status: "authenticated" },
   checkedAt: "2026-04-10T00:00:00.000Z",
   models: [],
   slashCommands: [],
   skills: [],
+};
+
+const baseCursorProvider: ServerProvider = {
+  ...baseProvider,
+  instanceId: "cursor",
+  driver: "cursor",
 };
 
 const okResult = (stdout = ""): ProcessRunResult => ({
@@ -45,9 +51,13 @@ const failedResult = (stderr: string): ProcessRunResult => ({
   stderrTruncated: false,
 });
 
-function makeRegistry(initialProvider: ServerProvider = baseProvider) {
+function makeRegistry(
+  initialProviders: ServerProvider | ReadonlyArray<ServerProvider> = baseProvider,
+) {
   return Effect.gen(function* () {
-    const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>([initialProvider]);
+    const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(
+      Array.isArray(initialProviders) ? initialProviders : [initialProviders],
+    );
     const updateStatesRef = yield* Ref.make<ReadonlyArray<ServerProviderUpdateState>>([]);
 
     const setProviderUpdateState = (
@@ -93,7 +103,7 @@ function makeRegistry(initialProvider: ServerProvider = baseProvider) {
 describe("providerUpdater", () => {
   it.effect("runs the allowlisted provider update command and records success", () =>
     Effect.gen(function* () {
-      const { registry } = yield* makeRegistry();
+      const { registry, updateStatesRef } = yield* makeRegistry(baseCursorProvider);
       const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
       const updater = yield* makeProviderUpdater({
         providerRegistry: registry,
@@ -103,14 +113,18 @@ describe("providerUpdater", () => {
         },
       });
 
-      const result = yield* updater.updateProvider("codex");
+      const result = yield* updater.updateProvider("cursor");
       assert.deepStrictEqual(calls, [
         {
-          command: "npm",
-          args: ["install", "-g", "@openai/codex@latest"],
+          command: "agent",
+          args: ["update"],
         },
       ]);
       assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
+      assert.deepStrictEqual(
+        (yield* Ref.get(updateStatesRef)).map((state) => state.status),
+        ["queued", "running", "succeeded"],
+      );
     }),
   );
 
@@ -129,6 +143,27 @@ describe("providerUpdater", () => {
       assert.strictEqual(updateState?.message, "Update command exited with code 1.");
       assert.include(updateState?.output ?? "", "permission denied");
     }),
+  );
+
+  it.effect(
+    "marks successful commands as unchanged when the refreshed provider is still outdated",
+    () =>
+      Effect.gen(function* () {
+        const { registry } = yield* makeRegistry({
+          ...baseProvider,
+          installed: false,
+          version: "0.1.0",
+        });
+        const updater = yield* makeProviderUpdater({
+          providerRegistry: registry,
+          runUpdate: async () => okResult(),
+        });
+
+        const result = yield* updater.updateProvider("codex");
+
+        assert.strictEqual(result.providers[0]?.updateState?.status, "unchanged");
+        assert.include(result.providers[0]?.updateState?.message ?? "", "still detects");
+      }),
   );
 
   it.effect("prevents concurrent updates for the same provider", () =>

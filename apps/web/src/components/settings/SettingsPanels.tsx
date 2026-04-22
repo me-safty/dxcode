@@ -1,6 +1,7 @@
 import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useLocation } from "@tanstack/react-router";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   defaultInstanceIdForDriver,
   type DesktopUpdateChannel,
@@ -448,6 +449,7 @@ export function useSettingsRestore(onRestored?: () => void) {
 }
 
 export function GeneralSettingsPanel() {
+  const location = useLocation();
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
@@ -469,6 +471,18 @@ export function GeneralSettingsPanel() {
   // the legacy/unified render swap.
   const [openInstanceDetails, setOpenInstanceDetails] = useState<Record<string, boolean>>({});
   const refreshingRef = useRef(false);
+  useEffect(() => {
+    if (location.hash !== "providers") {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("providers")?.scrollIntoView({
+        block: "start",
+        behavior: "smooth",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.hash]);
   const refreshProviders = useCallback(() => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
@@ -1169,6 +1183,8 @@ export function GeneralSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection
+        id="providers"
+        className="scroll-mt-4"
         title="Providers"
         headerAction={
           <div className="flex items-center gap-1.5">

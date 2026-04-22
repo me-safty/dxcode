@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { exec, execFile } from "node:child_process";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -138,13 +138,18 @@ async function main(): Promise<void> {
     ]),
   );
   const manifest = {
-    generatedAt: new Date().toISOString(),
+    schemaVersion: 1,
     providers: Object.fromEntries(entries),
   };
+  const encoded = `${JSON.stringify(manifest, null, 2)}\n`;
+  const existing = await readFile(OUTPUT_PATH, "utf8").catch(() => null);
+  if (existing === encoded) {
+    return;
+  }
 
   await mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
   const tmpPath = `${OUTPUT_PATH}.tmp`;
-  await writeFile(tmpPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  await writeFile(tmpPath, encoded, "utf8");
   await rename(tmpPath, OUTPUT_PATH);
 }
 

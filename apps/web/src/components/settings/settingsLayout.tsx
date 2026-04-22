@@ -1,5 +1,5 @@
 import { Undo2Icon } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ComponentPropsWithoutRef, type ReactNode, useEffect, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -20,15 +20,17 @@ export function SettingsSection({
   icon,
   headerAction,
   children,
-}: {
+  className,
+  ...sectionProps
+}: ComponentPropsWithoutRef<"section"> & {
   title: string;
   icon?: ReactNode;
   headerAction?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-2.5">
-      <div className="flex h-5 items-center justify-between px-1">
+    <section {...sectionProps} className={cn("space-y-2.5", className)}>
+      <div className="flex items-center justify-between px-1">
         <h2 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
           <span className="inline-block h-px w-3 bg-border" aria-hidden />
           {icon}

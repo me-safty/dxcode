@@ -26,6 +26,7 @@ const versionLifecycle = {
   updateCommand: "npm install -g @openai/codex@latest",
   updateExecutable: "npm",
   updateArgs: ["install", "-g", "@openai/codex@latest"],
+  updateLockKey: "npm-global",
 } as const;
 
 const initialSnapshot: ServerProvider = {

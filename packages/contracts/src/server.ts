@@ -131,9 +131,11 @@ export type ServerProviderVersionAdvisory = typeof ServerProviderVersionAdvisory
 
 export const ServerProviderUpdateStatus = Schema.Literals([
   "idle",
+  "queued",
   "running",
   "succeeded",
   "failed",
+  "unchanged",
 ]);
 export type ServerProviderUpdateStatus = typeof ServerProviderUpdateStatus.Type;
 

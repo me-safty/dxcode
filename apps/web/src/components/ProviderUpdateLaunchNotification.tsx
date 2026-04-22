@@ -1,18 +1,25 @@
 import { useNavigate } from "@tanstack/react-router";
+import { DownloadIcon } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import {
+  defaultInstanceIdForDriver,
   PROVIDER_DISPLAY_NAMES,
-  type ProviderKind,
+  type ProviderDriverKind,
   type ServerProvider,
   type ServerProviderUpdatedPayload,
 } from "@t3tools/contracts";
 
 import { ensureLocalApi } from "../localApi";
 import { useServerProviders } from "../rpc/serverState";
+import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
 const seenProviderUpdateNotificationKeys = new Set<string>();
 type ProviderUpdateToastId = ReturnType<typeof toastManager.add>;
+
+function formatVersion(value: string): string {
+  return value.startsWith("v") ? value : `v${value}`;
+}
 
 function isProviderUpdateCandidate(provider: ServerProvider): boolean {
   return (
@@ -22,11 +29,44 @@ function isProviderUpdateCandidate(provider: ServerProvider): boolean {
   );
 }
 
+function chooseRepresentativeProvider(
+  current: ServerProvider | undefined,
+  candidate: ServerProvider,
+): ServerProvider {
+  if (!current) {
+    return candidate;
+  }
+  const defaultInstanceId = defaultInstanceIdForDriver(candidate.driver);
+  if (candidate.instanceId === defaultInstanceId) {
+    return candidate;
+  }
+  if (current.instanceId === defaultInstanceId) {
+    return current;
+  }
+  return candidate.checkedAt.localeCompare(current.checkedAt) >= 0 ? candidate : current;
+}
+
+function dedupeUpdateProvidersByDriver(
+  providers: ReadonlyArray<ServerProvider>,
+): ReadonlyArray<ServerProvider> {
+  const representatives = new Map<ProviderDriverKind, ServerProvider>();
+  for (const provider of providers) {
+    if (!isProviderUpdateCandidate(provider)) {
+      continue;
+    }
+    representatives.set(
+      provider.driver,
+      chooseRepresentativeProvider(representatives.get(provider.driver), provider),
+    );
+  }
+  return [...representatives.values()];
+}
+
 function providerUpdateNotificationKey(providers: ReadonlyArray<ServerProvider>): string | null {
-  const parts = providers.filter(isProviderUpdateCandidate).map((provider) => {
+  const parts = dedupeUpdateProvidersByDriver(providers).map((provider) => {
     const advisory = provider.versionAdvisory;
     return [
-      provider.provider,
+      provider.driver,
       advisory?.status,
       advisory?.currentVersion,
       advisory?.testedVersion,
@@ -38,35 +78,67 @@ function providerUpdateNotificationKey(providers: ReadonlyArray<ServerProvider>)
 }
 
 function formatProviderList(providers: ReadonlyArray<ServerProvider>): string {
-  const names = providers.map(
-    (provider) => PROVIDER_DISPLAY_NAMES[provider.provider] ?? provider.provider,
-  );
+  const names = providers.map((provider) => PROVIDER_DISPLAY_NAMES[provider.driver] ?? provider.driver);
   if (names.length <= 2) {
     return names.join(" and ");
   }
   return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
 }
 
-function collectFailedUpdateProviders(
+function getProviderUpdateTargetVersion(provider: ServerProvider): string | null {
+  return provider.versionAdvisory?.latestVersion ?? provider.versionAdvisory?.testedVersion ?? null;
+}
+
+function getProviderUpdateToastTitle(providers: ReadonlyArray<ServerProvider>): string {
+  if (providers.length === 1) {
+    const provider = providers[0]!;
+    const providerName = PROVIDER_DISPLAY_NAMES[provider.driver] ?? provider.driver;
+    const targetVersion = getProviderUpdateTargetVersion(provider);
+    return targetVersion
+      ? `Update Available: ${providerName} ${formatVersion(targetVersion)}`
+      : `Update Available: ${providerName}`;
+  }
+
+  return `Updates Available: ${providers.length} providers`;
+}
+
+function ProviderUpdateToastIcon({ provider }: { provider: ProviderDriverKind }) {
+  const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[provider];
+
+  return (
+    <span className="relative inline-flex size-4 shrink-0 items-center justify-center">
+      <ProviderIcon aria-hidden="true" className="size-4" />
+      <span className="absolute -right-1 -bottom-1 inline-flex size-3 items-center justify-center rounded-full bg-popover">
+        <DownloadIcon aria-hidden="true" className="size-2.5 text-success" strokeWidth={2.5} />
+      </span>
+    </span>
+  );
+}
+
+function collectUpdateOutcomeProviders(
   results: ReadonlyArray<PromiseSettledResult<ServerProviderUpdatedPayload>>,
-  attemptedProviders: ReadonlySet<ProviderKind>,
-): ServerProvider[] {
-  const latestProviderByKind = new Map<ProviderKind, ServerProvider>();
+  attemptedProviders: ReadonlySet<ProviderDriverKind>,
+): { failedProviders: ServerProvider[]; unchangedProviders: ServerProvider[] } {
+  const matchedProviders: ServerProvider[] = [];
 
   for (const result of results) {
     if (result.status !== "fulfilled") {
       continue;
     }
     for (const provider of result.value.providers) {
-      if (attemptedProviders.has(provider.provider)) {
-        latestProviderByKind.set(provider.provider, provider);
+      if (attemptedProviders.has(provider.driver)) {
+        matchedProviders.push(provider);
       }
     }
   }
 
-  return [...latestProviderByKind.values()].filter(
-    (provider) => provider.updateState?.status === "failed",
-  );
+  const providers = dedupeUpdateProvidersByDriver(matchedProviders);
+  return {
+    failedProviders: providers.filter((provider) => provider.updateState?.status === "failed"),
+    unchangedProviders: providers.filter(
+      (provider) => provider.updateState?.status === "unchanged",
+    ),
+  };
 }
 
 function firstRejectedMessage(
@@ -86,13 +158,14 @@ export function ProviderUpdateLaunchNotification() {
     null,
   );
 
-  const updateProviders = useMemo(() => providers.filter(isProviderUpdateCandidate), [providers]);
+  const updateProviders = useMemo(() => dedupeUpdateProvidersByDriver(providers), [providers]);
   const notificationKey = useMemo(() => providerUpdateNotificationKey(providers), [providers]);
   const oneClickProviders = useMemo(
     () =>
       updateProviders.filter(
         (provider) =>
           provider.versionAdvisory?.canUpdate === true &&
+          provider.updateState?.status !== "queued" &&
           provider.updateState?.status !== "running",
       ),
     [updateProviders],
@@ -114,12 +187,8 @@ export function ProviderUpdateLaunchNotification() {
 
     seenProviderUpdateNotificationKeys.add(notificationKey);
 
-    const updateCount = updateProviders.length;
     const providerNames = formatProviderList(updateProviders);
-    const title =
-      updateCount === 1
-        ? `${providerNames} has an update`
-        : `${updateCount} providers have updates`;
+    const title = getProviderUpdateToastTitle(updateProviders);
     const description =
       oneClickProviders.length > 0
         ? "Install the update now or review provider settings."
@@ -132,7 +201,7 @@ export function ProviderUpdateLaunchNotification() {
         toastManager.close(toastId);
       }
       activeUpdatePromptRef.current = null;
-      void navigate({ to: "/settings/general" });
+      void navigate({ to: "/settings/general", hash: "providers" });
     };
 
     const runUpdates = () => {
@@ -141,9 +210,7 @@ export function ProviderUpdateLaunchNotification() {
       }
       updateStarted = true;
       activeUpdatePromptRef.current = null;
-      const attemptedProviderKinds = new Set(
-        oneClickProviders.map((provider) => provider.provider),
-      );
+      const attemptedProviderKinds = new Set(oneClickProviders.map((provider) => provider.driver));
 
       toastManager.update(toastId, {
         type: "loading",
@@ -157,7 +224,7 @@ export function ProviderUpdateLaunchNotification() {
 
       void Promise.allSettled(
         oneClickProviders.map(async (provider) =>
-          ensureLocalApi().server.updateProvider({ provider: provider.provider }),
+          ensureLocalApi().server.updateProvider({ provider: provider.driver }),
         ),
       ).then((results) => {
         if (!toastId) {
@@ -165,7 +232,10 @@ export function ProviderUpdateLaunchNotification() {
         }
 
         const rejectedMessage = firstRejectedMessage(results);
-        const failedProviders = collectFailedUpdateProviders(results, attemptedProviderKinds);
+        const { failedProviders, unchangedProviders } = collectUpdateOutcomeProviders(
+          results,
+          attemptedProviderKinds,
+        );
         if (rejectedMessage || failedProviders.length > 0) {
           toastManager.update(
             toastId,
@@ -176,6 +246,29 @@ export function ProviderUpdateLaunchNotification() {
               description:
                 rejectedMessage ??
                 `${formatProviderList(failedProviders)} failed to update. Check provider settings for details.`,
+              timeout: 0,
+              actionProps: {
+                children: "Settings",
+                onClick: openSettings,
+              },
+              actionVariant: "outline",
+              data: {
+                hideCopyButton: true,
+              },
+            }),
+          );
+          return;
+        }
+        if (unchangedProviders.length > 0) {
+          toastManager.update(
+            toastId,
+            stackedThreadToast({
+              type: "warning",
+              title:
+                unchangedProviders.length === 1
+                  ? "Provider still needs an update"
+                  : "Providers still need updates",
+              description: `${formatProviderList(unchangedProviders)} still appears outdated. Check provider settings for details.`,
               timeout: 0,
               actionProps: {
                 children: "Settings",
@@ -221,6 +314,10 @@ export function ProviderUpdateLaunchNotification() {
               },
         actionVariant: oneClickProviders.length > 0 ? "default" : "outline",
         data: {
+          leadingIcon:
+            updateProviders.length === 1 ? (
+              <ProviderUpdateToastIcon provider={updateProviders[0]!.driver} />
+            ) : undefined,
           hideCopyButton: true,
           ...(oneClickProviders.length > 0
             ? {
