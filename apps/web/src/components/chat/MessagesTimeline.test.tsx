@@ -1,6 +1,35 @@
 import { MessageId } from "@marcode/contracts";
+import { createRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import type { LegendListRef } from "@legendapp/list/react";
+
+vi.mock("@legendapp/list/react", async () => {
+  const React = await import("react");
+
+  const LegendList = React.forwardRef(function MockLegendList(
+    props: {
+      data: Array<{ id: string }>;
+      keyExtractor: (item: { id: string }) => string;
+      renderItem: (args: { item: { id: string } }) => React.ReactNode;
+      ListHeaderComponent?: React.ReactNode;
+      ListFooterComponent?: React.ReactNode;
+    },
+    _ref: React.ForwardedRef<LegendListRef>,
+  ) {
+    return (
+      <div data-testid="legend-list">
+        {props.ListHeaderComponent}
+        {props.data.map((item) => (
+          <div key={props.keyExtractor(item)}>{props.renderItem({ item })}</div>
+        ))}
+        {props.ListFooterComponent}
+      </div>
+    );
+  });
+
+  return { LegendList };
+});
 
 function matchMedia() {
   return {
@@ -51,6 +80,7 @@ const ACTIVE_THREAD_ENVIRONMENT_ID = "environment-local" as never;
 describe("MessagesTimeline", () => {
   it("renders inline terminal labels with the composer chip UI", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
+    const listRef = createRef<LegendListRef | null>();
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         threadId="test-thread"
@@ -59,7 +89,8 @@ describe("MessagesTimeline", () => {
         isWorking={false}
         activeTurnInProgress={false}
         activeTurnStartedAt={null}
-        scrollContainer={null}
+        listRef={listRef}
+        onIsAtEndChange={() => {}}
         timelineEntries={[
           {
             id: "entry-1",
@@ -85,9 +116,6 @@ describe("MessagesTimeline", () => {
         completionDividerBeforeEntryId={null}
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
-        nowIso={new Date().toISOString()}
-        expandedWorkGroups={{}}
-        onToggleWorkGroup={() => {}}
         changedFilesExpandedByTurnId={{}}
         onSetChangedFilesExpanded={() => {}}
         onOpenTurnDiff={() => {}}
@@ -126,6 +154,7 @@ describe("MessagesTimeline", () => {
 
   it("renders context compaction entries in the normal work log", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
+    const listRef = createRef<LegendListRef | null>();
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         threadId="test-thread"
@@ -134,7 +163,8 @@ describe("MessagesTimeline", () => {
         isWorking={false}
         activeTurnInProgress={false}
         activeTurnStartedAt={null}
-        scrollContainer={null}
+        listRef={listRef}
+        onIsAtEndChange={() => {}}
         timelineEntries={[
           {
             id: "entry-1",
@@ -151,9 +181,6 @@ describe("MessagesTimeline", () => {
         completionDividerBeforeEntryId={null}
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
-        nowIso={new Date().toISOString()}
-        expandedWorkGroups={{}}
-        onToggleWorkGroup={() => {}}
         changedFilesExpandedByTurnId={{}}
         onSetChangedFilesExpanded={() => {}}
         onOpenTurnDiff={() => {}}
@@ -191,6 +218,7 @@ describe("MessagesTimeline", () => {
 
   it("formats changed file paths from the workspace root", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
+    const listRef = createRef<LegendListRef | null>();
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         threadId="test-thread"
@@ -199,7 +227,8 @@ describe("MessagesTimeline", () => {
         isWorking={false}
         activeTurnInProgress={false}
         activeTurnStartedAt={null}
-        scrollContainer={null}
+        listRef={listRef}
+        onIsAtEndChange={() => {}}
         timelineEntries={[
           {
             id: "entry-1",
@@ -217,9 +246,6 @@ describe("MessagesTimeline", () => {
         completionDividerBeforeEntryId={null}
         completionSummary={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
-        nowIso={new Date().toISOString()}
-        expandedWorkGroups={{}}
-        onToggleWorkGroup={() => {}}
         changedFilesExpandedByTurnId={{}}
         onSetChangedFilesExpanded={() => {}}
         onOpenTurnDiff={() => {}}
