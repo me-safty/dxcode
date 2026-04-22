@@ -16,26 +16,7 @@ import {
   type UiState,
   useUiStateStore,
 } from "./uiStateStore";
-
-function createLocalStorageStub(): Storage {
-  const store = new Map<string, string>();
-  return {
-    clear: () => {
-      store.clear();
-    },
-    getItem: (key) => store.get(key) ?? null,
-    key: (index) => [...store.keys()][index] ?? null,
-    get length() {
-      return store.size;
-    },
-    removeItem: (key) => {
-      store.delete(key);
-    },
-    setItem: (key, value) => {
-      store.set(key, value);
-    },
-  };
-}
+import { createLocalStorageStub } from "./test/createLocalStorageStub";
 
 function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {

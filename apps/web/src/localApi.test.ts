@@ -15,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
 
+import { createLocalStorageStub } from "./test/createLocalStorageStub";
+
 const showContextMenuFallbackMock =
   vi.fn<
     <T extends string>(
@@ -136,26 +138,6 @@ function getWindowForTest(): Window & typeof globalThis & { desktopBridge?: unkn
     testGlobal.window = {} as Window & typeof globalThis & { desktopBridge?: unknown };
   }
   return testGlobal.window;
-}
-
-function createLocalStorageStub(): Storage {
-  const store = new Map<string, string>();
-  return {
-    getItem: (key) => store.get(key) ?? null,
-    setItem: (key, value) => {
-      store.set(key, value);
-    },
-    removeItem: (key) => {
-      store.delete(key);
-    },
-    clear: () => {
-      store.clear();
-    },
-    key: (index) => [...store.keys()][index] ?? null,
-    get length() {
-      return store.size;
-    },
-  };
 }
 
 function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridge {
