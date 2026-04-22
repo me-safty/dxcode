@@ -116,10 +116,20 @@ export function deriveTurnNotificationTriggers(
     }
   }
 
+  // Track threads observed transitioning to "running" earlier in this batch so
+  // that a subsequent completion event still fires a notification even if the
+  // stored session hasn't been updated yet (e.g. on reconnect/replay when
+  // turn.started and turn.completed arrive in the same batch).
+  const threadTransitionedToRunning = new Set<ThreadId>();
+
   for (const event of events) {
     if (event.type === "thread.session-set") {
       const { threadId, session } = event.payload;
       const newStatus = session.status;
+
+      if (newStatus === "running") {
+        threadTransitionedToRunning.add(threadId);
+      }
 
       const reason = COMPLETION_STATUS_TO_REASON[newStatus];
       if (!reason) continue;
@@ -130,7 +140,19 @@ export function deriveTurnNotificationTriggers(
 
       const thread = getThread(threadId);
       if (!thread) continue;
-      if (thread.session?.orchestrationStatus !== "running") continue;
+      // The thread is considered to have been actively turning if the stored
+      // session is still "running", the current batch already transitioned it
+      // into "running", or the latest turn is still marked as running. The
+      // activeTurnId check catches the common case where completion notifications
+      // would otherwise be dropped because the session orchestrationStatus has
+      // already been written ahead of this derivation (e.g. when the server
+      // replays both start + completion events as a single batch).
+      const wasRunning =
+        thread.session?.orchestrationStatus === "running" ||
+        thread.session?.activeTurnId !== undefined ||
+        thread.latestTurn?.state === "running" ||
+        threadTransitionedToRunning.has(threadId);
+      if (!wasRunning) continue;
 
       const project = getProject(thread.projectId);
       triggers.push({

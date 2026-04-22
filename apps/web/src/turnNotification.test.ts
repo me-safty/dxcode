@@ -31,12 +31,16 @@ function makeProject(overrides: Partial<Project> = {}): Project {
   } as Project;
 }
 
-function makeSessionSetEvent(threadId: string, status: string): OrchestrationEvent {
+function makeSessionSetEvent(
+  threadId: string,
+  status: string,
+  extraSession: Record<string, unknown> = {},
+): OrchestrationEvent {
   return {
     type: "thread.session-set",
     payload: {
       threadId: threadId as ThreadId,
-      session: { status },
+      session: { status, ...extraSession },
     },
   } as unknown as OrchestrationEvent;
 }
@@ -168,6 +172,88 @@ describe("deriveTurnNotificationTriggers", () => {
     );
     expect(triggersAfter).toHaveLength(1);
     expect(triggersAfter[0]!.reason).toBe("turn-completed");
+  });
+
+  it("fires turn-completed when a session.set for running arrives earlier in the same batch", () => {
+    // Reconnect / replay: both the turn.started -> "running" and the
+    // turn.completed -> "ready" session-set events land together. getThread
+    // reports the pre-batch state (stopped/ready/idle), so the completion
+    // must still fire because we observed the running transition in-batch.
+    const thread = makeThread({
+      session: { orchestrationStatus: "stopped" },
+    } as Partial<Thread>);
+    const project = makeProject();
+    const events = [
+      makeSessionSetEvent("thread-1", "running", { activeTurnId: "turn-batch-1" }),
+      makeSessionSetEvent("thread-1", "ready"),
+    ];
+
+    const triggers = deriveTurnNotificationTriggers(
+      events,
+      () => thread,
+      () => project,
+    );
+
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0]!.reason).toBe("turn-completed");
+  });
+
+  it("fires turn-completed when the thread has an active latest turn even if orchestrationStatus is not running", () => {
+    // The stored session status may have been updated out of band (e.g. by a
+    // snapshot sync) before the completion event is derived. As long as the
+    // thread is tracking an active turn, completion must still notify.
+    const thread = makeThread({
+      session: { orchestrationStatus: "ready" },
+      latestTurn: { state: "running", turnId: "turn-1" },
+    } as Partial<Thread>);
+    const project = makeProject();
+    const events = [makeSessionSetEvent("thread-1", "idle")];
+
+    const triggers = deriveTurnNotificationTriggers(
+      events,
+      () => thread,
+      () => project,
+    );
+
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0]!.reason).toBe("turn-completed");
+  });
+
+  it("fires turn-completed when the session tracks an activeTurnId even without running status", () => {
+    // Same shape as the latestTurn case but driven off the session binding.
+    const thread = makeThread({
+      session: { orchestrationStatus: "ready", activeTurnId: "turn-1" },
+    } as Partial<Thread>);
+    const project = makeProject();
+    const events = [makeSessionSetEvent("thread-1", "ready")];
+
+    const triggers = deriveTurnNotificationTriggers(
+      events,
+      () => thread,
+      () => project,
+    );
+
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0]!.reason).toBe("turn-completed");
+  });
+
+  it("skips turn-completed when the thread never saw a running turn", () => {
+    // No running status, no active turn, no running transition in-batch.
+    // The completion event is for a session that never actually ran — typical
+    // for provider bootstrap or idle state seeding — so no notification fires.
+    const thread = makeThread({
+      session: { orchestrationStatus: "ready" },
+    } as Partial<Thread>);
+    const project = makeProject();
+    const events = [makeSessionSetEvent("thread-1", "ready")];
+
+    const triggers = deriveTurnNotificationTriggers(
+      events,
+      () => thread,
+      () => project,
+    );
+
+    expect(triggers).toHaveLength(0);
   });
 });
 
