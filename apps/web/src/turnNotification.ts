@@ -116,10 +116,13 @@ export function deriveTurnNotificationTriggers(
     }
   }
 
-  // Track threads observed transitioning to "running" earlier in this batch so
-  // that a subsequent completion event still fires a notification even if the
-  // stored session hasn't been updated yet (e.g. on reconnect/replay when
-  // turn.started and turn.completed arrive in the same batch).
+  // Threads that already produced a completion trigger in this batch. Used to
+  // dedupe between the primary session-set signal and the turn-diff-completed
+  // fallback so we never fire two notifications for the same turn end.
+  const completionFiredThreadIds = new Set<ThreadId>();
+  // Threads observed transitioning to "running" earlier in this batch, used
+  // when reconnect/replay delivers turn.started + turn.completed together and
+  // the stored session still reflects the pre-batch state.
   const threadTransitionedToRunning = new Set<ThreadId>();
 
   for (const event of events) {
@@ -140,19 +143,18 @@ export function deriveTurnNotificationTriggers(
 
       const thread = getThread(threadId);
       if (!thread) continue;
-      // The thread is considered to have been actively turning if the stored
-      // session is still "running", the current batch already transitioned it
-      // into "running", or the latest turn is still marked as running. The
-      // activeTurnId check catches the common case where completion notifications
-      // would otherwise be dropped because the session orchestrationStatus has
-      // already been written ahead of this derivation (e.g. when the server
-      // replays both start + completion events as a single batch).
-      const wasRunning =
+
+      // Skip session-bootstrap completions (e.g. provider "session.started"
+      // maps to status:ready when no turn is active). A real turn completion
+      // always has one of: a session previously in running state, an
+      // activeTurnId on the prior session, a latestTurn still flagged
+      // running, or an in-batch running transition.
+      const turnWasActive =
         thread.session?.orchestrationStatus === "running" ||
         thread.session?.activeTurnId !== undefined ||
         thread.latestTurn?.state === "running" ||
         threadTransitionedToRunning.has(threadId);
-      if (!wasRunning) continue;
+      if (!turnWasActive) continue;
 
       const project = getProject(thread.projectId);
       triggers.push({
@@ -161,6 +163,30 @@ export function deriveTurnNotificationTriggers(
         threadTitle: thread.title || "Untitled",
         projectName: project?.name || "Unknown project",
       });
+      completionFiredThreadIds.add(threadId);
+      continue;
+    }
+
+    // Fallback signal: a turn-diff capture completing is a strong guarantee
+    // that a turn ended — CheckpointReactor only fires this after an actual
+    // turn.completed runtime event. If the session-set path was dropped
+    // (subscription race, snapshot overwrite, missed batch), this still
+    // notifies the user and is deduped against the primary path above.
+    if (event.type === "thread.turn-diff-completed") {
+      const { threadId } = event.payload;
+      if (completionFiredThreadIds.has(threadId)) continue;
+      if (isThreadSuppressed(threadId)) continue;
+      if (userInitiatedThreadIds.has(threadId)) continue;
+      const thread = getThread(threadId);
+      if (!thread) continue;
+      const project = getProject(thread.projectId);
+      triggers.push({
+        threadId,
+        reason: "turn-completed",
+        threadTitle: thread.title || "Untitled",
+        projectName: project?.name || "Unknown project",
+      });
+      completionFiredThreadIds.add(threadId);
       continue;
     }
 

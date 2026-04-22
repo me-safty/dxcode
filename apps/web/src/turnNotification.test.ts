@@ -55,6 +55,16 @@ function makeActivityAppendedEvent(threadId: string, kind: string): Orchestratio
   } as unknown as OrchestrationEvent;
 }
 
+function makeTurnDiffCompletedEvent(threadId: string): OrchestrationEvent {
+  return {
+    type: "thread.turn-diff-completed",
+    payload: {
+      threadId: threadId as ThreadId,
+      turnId: `turn-${threadId}`,
+    },
+  } as unknown as OrchestrationEvent;
+}
+
 describe("BUILT_IN_SOUNDS", () => {
   it("has 4 entries with valid id, label, and src", () => {
     expect(BUILT_IN_SOUNDS).toHaveLength(4);
@@ -246,6 +256,72 @@ describe("deriveTurnNotificationTriggers", () => {
     } as Partial<Thread>);
     const project = makeProject();
     const events = [makeSessionSetEvent("thread-1", "ready")];
+
+    const triggers = deriveTurnNotificationTriggers(
+      events,
+      () => thread,
+      () => project,
+    );
+
+    expect(triggers).toHaveLength(0);
+  });
+
+  it("falls back to turn-diff-completed when session-set signal is missing", () => {
+    // The session-set path can be lost (subscription race, snapshot overwrite)
+    // but the CheckpointReactor reliably dispatches thread.turn-diff-completed
+    // after an actual turn.completed runtime event, so the user still gets
+    // notified.
+    const thread = makeThread({
+      session: { orchestrationStatus: "ready" },
+    } as Partial<Thread>);
+    const project = makeProject();
+    const events = [makeTurnDiffCompletedEvent("thread-1")];
+
+    const triggers = deriveTurnNotificationTriggers(
+      events,
+      () => thread,
+      () => project,
+    );
+
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0]!.reason).toBe("turn-completed");
+  });
+
+  it("dedupes session-set + turn-diff-completed for the same thread", () => {
+    // Both the primary session-set signal and the turn-diff-completed fallback
+    // arrive together in the happy path. Only one notification should fire.
+    const thread = makeThread({
+      session: { orchestrationStatus: "running" },
+    } as Partial<Thread>);
+    const project = makeProject();
+    const events = [
+      makeSessionSetEvent("thread-1", "ready"),
+      makeTurnDiffCompletedEvent("thread-1"),
+    ];
+
+    const triggers = deriveTurnNotificationTriggers(
+      events,
+      () => thread,
+      () => project,
+    );
+
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0]!.reason).toBe("turn-completed");
+  });
+
+  it("honors user-initiated stops on the turn-diff-completed fallback", () => {
+    // If the user stopped the turn themselves, the fallback must respect the
+    // 5-second suppression window so we don't notify for a stop they just did.
+    const thread = makeThread({
+      session: { orchestrationStatus: "running" },
+    } as Partial<Thread>);
+    const project = makeProject();
+
+    vi.spyOn(Date, "now").mockReturnValue(1000);
+    markThreadUserStopped("thread-1" as ThreadId);
+
+    vi.spyOn(Date, "now").mockReturnValue(2000);
+    const events = [makeTurnDiffCompletedEvent("thread-1")];
 
     const triggers = deriveTurnNotificationTriggers(
       events,
