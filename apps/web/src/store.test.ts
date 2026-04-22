@@ -10,14 +10,19 @@ import {
   TurnId,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type OrchestrationShellStreamEvent,
+  type OrchestrationThreadShell,
 } from "@marcode/contracts";
 import { describe, expect, it } from "vitest";
 
+import { resolveThreadStatusPill } from "./components/Sidebar.logic";
 import {
   applyOrchestrationEvent,
   applyOrchestrationEvents,
+  applyShellEvent,
   selectEnvironmentState,
   selectProjectsAcrossEnvironments,
+  selectSidebarThreadSummaryByRef,
   selectThreadByRef,
   selectThreadExistsByRef,
   setThreadBranch,
@@ -1253,5 +1258,138 @@ describe("incremental orchestration updates", () => {
       state: "running",
     });
     expect(threadsOf(next)[0]?.latestTurn?.sourceProposedPlan).toBeUndefined();
+  });
+});
+
+describe("shell events preserve detail-authoritative sidebar summary flags", () => {
+  function makeThreadUpsertedShellEvent(
+    thread: Thread,
+    overrides: Partial<OrchestrationThreadShell> = {},
+  ): OrchestrationShellStreamEvent {
+    return {
+      kind: "thread-upserted",
+      sequence: 2,
+      thread: {
+        id: thread.id,
+        projectId: thread.projectId,
+        title: thread.title,
+        modelSelection: thread.modelSelection,
+        runtimeMode: thread.runtimeMode,
+        interactionMode: thread.interactionMode,
+        branch: thread.branch,
+        worktreePath: thread.worktreePath,
+        additionalDirectories: thread.additionalDirectories,
+        latestTurn: thread.latestTurn,
+        createdAt: thread.createdAt,
+        updatedAt: "2026-02-27T00:00:02.000Z",
+        archivedAt: thread.archivedAt,
+        session: null,
+        latestUserMessageAt: null,
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+        hasActionableProposedPlan: false,
+        ...overrides,
+      } satisfies OrchestrationThreadShell,
+    };
+  }
+
+  it("keeps hasPendingUserInput after a thread-upserted shell event follows a detail activity", () => {
+    const thread = makeThread();
+    const state = makeState(thread);
+
+    const afterActivity = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.activity-appended", {
+        threadId: thread.id,
+        activity: {
+          id: EventId.make("user-input-1"),
+          tone: "info",
+          kind: "user-input.requested",
+          summary: "User input requested",
+          payload: {
+            requestId: "req-user-input-1",
+            questions: [
+              {
+                id: "sandbox_mode",
+                header: "Sandbox",
+                question: "Which mode should be used?",
+                options: [
+                  {
+                    label: "workspace-write",
+                    description: "Allow workspace writes only",
+                  },
+                ],
+                multiSelect: false,
+              },
+            ],
+          },
+          turnId: TurnId.make("turn-1"),
+          createdAt: "2026-02-27T00:00:01.000Z",
+        },
+      }),
+      localEnvironmentId,
+    );
+
+    const ref = scopeThreadRef(thread.environmentId, thread.id);
+    const afterActivitySummary = selectSidebarThreadSummaryByRef(afterActivity, ref);
+    expect(afterActivitySummary?.hasPendingUserInput).toBe(true);
+    expect(resolveThreadStatusPill({ thread: afterActivitySummary! })?.label).toBe(
+      "Awaiting Input",
+    );
+
+    const afterShell = applyShellEvent(
+      afterActivity,
+      makeThreadUpsertedShellEvent(thread),
+      localEnvironmentId,
+    );
+    const afterShellSummary = selectSidebarThreadSummaryByRef(afterShell, ref);
+    expect(afterShellSummary?.hasPendingUserInput).toBe(true);
+    expect(resolveThreadStatusPill({ thread: afterShellSummary! })?.label).toBe("Awaiting Input");
+  });
+
+  it("keeps hasActionableProposedPlan after a thread-upserted shell event follows a detail plan", () => {
+    const thread = makeThread({
+      interactionMode: "plan",
+      latestTurn: {
+        turnId: TurnId.make("turn-1"),
+        state: "completed",
+        requestedAt: "2026-02-27T00:00:00.000Z",
+        startedAt: "2026-02-27T00:00:00.000Z",
+        completedAt: "2026-02-27T00:00:01.000Z",
+        assistantMessageId: null,
+      },
+    });
+    const state = makeState(thread);
+
+    const afterPlan = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.proposed-plan-upserted", {
+        threadId: thread.id,
+        proposedPlan: {
+          id: "plan-1" as never,
+          turnId: TurnId.make("turn-1"),
+          planMarkdown: "plan body",
+          implementedAt: null,
+          implementationThreadId: null,
+          createdAt: "2026-02-27T00:00:01.000Z",
+          updatedAt: "2026-02-27T00:00:01.000Z",
+        },
+      }),
+      localEnvironmentId,
+    );
+
+    const ref = scopeThreadRef(thread.environmentId, thread.id);
+    const afterPlanSummary = selectSidebarThreadSummaryByRef(afterPlan, ref);
+    expect(afterPlanSummary?.hasActionableProposedPlan).toBe(true);
+    expect(resolveThreadStatusPill({ thread: afterPlanSummary! })?.label).toBe("Plan Ready");
+
+    const afterShell = applyShellEvent(
+      afterPlan,
+      makeThreadUpsertedShellEvent(thread),
+      localEnvironmentId,
+    );
+    const afterShellSummary = selectSidebarThreadSummaryByRef(afterShell, ref);
+    expect(afterShellSummary?.hasActionableProposedPlan).toBe(true);
+    expect(resolveThreadStatusPill({ thread: afterShellSummary! })?.label).toBe("Plan Ready");
   });
 });

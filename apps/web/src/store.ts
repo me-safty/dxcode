@@ -817,17 +817,22 @@ function writeThreadShellState(
     };
   }
 
-  if (
-    !sidebarThreadSummariesEqual(
-      state.sidebarThreadSummaryById[nextThread.shell.id],
-      nextThread.summary,
-    )
-  ) {
+  const previousSummary = state.sidebarThreadSummaryById[nextThread.shell.id];
+  const mergedSummary: SidebarThreadSummary = previousSummary
+    ? {
+        ...nextThread.summary,
+        hasPendingApprovals: previousSummary.hasPendingApprovals,
+        hasPendingUserInput: previousSummary.hasPendingUserInput,
+        hasActionableProposedPlan: previousSummary.hasActionableProposedPlan,
+      }
+    : nextThread.summary;
+
+  if (!sidebarThreadSummariesEqual(previousSummary, mergedSummary)) {
     nextState = {
       ...nextState,
       sidebarThreadSummaryById: {
         ...nextState.sidebarThreadSummaryById,
-        [nextThread.shell.id]: nextThread.summary,
+        [nextThread.shell.id]: mergedSummary,
       },
     };
   }
