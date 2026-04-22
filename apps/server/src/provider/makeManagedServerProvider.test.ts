@@ -24,6 +24,8 @@ const versionLifecycle = {
   provider: "codex",
   packageName: "@openai/codex",
   updateCommand: "npm install -g @openai/codex@latest",
+  updateExecutable: "npm",
+  updateArgs: ["install", "-g", "@openai/codex@latest"],
 } as const;
 
 const initialSnapshot: ServerProvider = {

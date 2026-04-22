@@ -6,7 +6,12 @@
  *
  * @module ProviderRegistry
  */
-import type { ProviderInstanceId, ProviderDriverKind, ServerProvider } from "@t3tools/contracts";
+import type {
+  ProviderInstanceId,
+  ProviderDriverKind,
+  ServerProvider,
+  ServerProviderUpdateState,
+} from "@t3tools/contracts";
 import { Context } from "effect";
 import type { Effect, Stream } from "effect";
 
@@ -37,6 +42,16 @@ export interface ProviderRegistryShape {
    */
   readonly refreshInstance: (
     instanceId: ProviderInstanceId,
+  ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+
+  /**
+   * Apply volatile provider-update state to every live snapshot for the
+   * specified driver. Used for one-click update progress and results; this
+   * state is never persisted to disk.
+   */
+  readonly setProviderUpdateState: (
+    provider: ProviderDriverKind,
+    state: ServerProviderUpdateState | null,
   ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**

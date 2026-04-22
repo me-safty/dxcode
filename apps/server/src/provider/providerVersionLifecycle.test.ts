@@ -32,6 +32,7 @@ describe("providerVersionLifecycle", () => {
       currentVersion: "2.1.110",
       latestVersion: "2.1.117",
       updateCommand: "npm install -g @anthropic-ai/claude-code@latest",
+      canUpdate: true,
     });
   });
 
@@ -40,6 +41,8 @@ describe("providerVersionLifecycle", () => {
       provider: "cursor",
       packageName: null,
       updateCommand: "agent update",
+      updateExecutable: "agent",
+      updateArgs: ["update"],
     });
   });
 });

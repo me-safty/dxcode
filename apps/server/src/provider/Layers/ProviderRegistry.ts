@@ -27,6 +27,7 @@ import {
   ProviderDriverKind,
   type ProviderInstanceId,
   type ServerProvider,
+  type ServerProviderUpdateState,
 } from "@t3tools/contracts";
 import { Cause, Effect, Equal, FileSystem, Layer, Path, PubSub, Ref, Stream } from "effect";
 import * as Semaphore from "effect/Semaphore";
@@ -227,6 +228,9 @@ export const ProviderRegistryLive = Layer.effect(
       ),
     );
     const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(cachedProviders);
+    const updateStatesRef = yield* Ref.make<
+      ReadonlyMap<ProviderDriverKind, ServerProviderUpdateState>
+    >(new Map());
 
     // Live-source registry — the dynamic counterpart to the boot-time
     // `bootSources`. Keyed by `instanceId`; the stored `ProviderInstance`
@@ -264,6 +268,21 @@ export const ProviderRegistryLive = Layer.effect(
         );
       });
 
+    const applyProviderUpdateState = Effect.fn("applyProviderUpdateState")(function* (
+      provider: ServerProvider,
+    ) {
+      const updateStates = yield* Ref.get(updateStatesRef);
+      const updateState = updateStates.get(provider.driver);
+      if (!updateState) {
+        const { updateState: _updateState, ...providerWithoutUpdateState } = provider;
+        return providerWithoutUpdateState;
+      }
+      return {
+        ...provider,
+        updateState,
+      };
+    });
+
     const upsertProviders = Effect.fn("upsertProviders")(function* (
       nextProviders: ReadonlyArray<ServerProvider>,
       options?: {
@@ -272,6 +291,13 @@ export const ProviderRegistryLive = Layer.effect(
         readonly replace?: boolean;
       },
     ) {
+      const nextProvidersWithUpdateState = yield* Effect.forEach(
+        nextProviders,
+        applyProviderUpdateState,
+        {
+          concurrency: "unbounded",
+        },
+      );
       const [previousProviders, providers] = yield* Ref.modify(
         providersRef,
         (previousProviders) => {
@@ -279,7 +305,7 @@ export const ProviderRegistryLive = Layer.effect(
             previousProviders.map((provider) => [snapshotInstanceKey(provider), provider] as const),
           );
 
-          for (const provider of nextProviders) {
+          for (const provider of nextProvidersWithUpdateState) {
             const key = snapshotInstanceKey(provider);
             mergedProviders.set(
               key,
@@ -296,7 +322,7 @@ export const ProviderRegistryLive = Layer.effect(
 
       if (haveProvidersChanged(previousProviders, providers)) {
         if (options?.persist !== false) {
-          yield* Effect.forEach(nextProviders, persistProvider, {
+          yield* Effect.forEach(nextProvidersWithUpdateState, persistProvider, {
             concurrency: "unbounded",
             discard: true,
           });
@@ -316,6 +342,34 @@ export const ProviderRegistryLive = Layer.effect(
       },
     ) {
       return yield* upsertProviders([provider], options);
+    });
+
+    const setProviderUpdateState = Effect.fn("setProviderUpdateState")(function* (
+      provider: ProviderDriverKind,
+      state: ServerProviderUpdateState | null,
+    ) {
+      yield* Ref.update(updateStatesRef, (previous) => {
+        const next = new Map(previous);
+        if (state === null || state.status === "idle") {
+          next.delete(provider);
+        } else {
+          next.set(provider, state);
+        }
+        return next;
+      });
+
+      const existingProviders = yield* Ref.get(providersRef);
+      const matchingProviders = existingProviders.filter((candidate) => candidate.driver === provider);
+      if (matchingProviders.length === 0) {
+        return existingProviders;
+      }
+
+      const nextProviders = yield* Effect.forEach(matchingProviders, applyProviderUpdateState, {
+        concurrency: "unbounded",
+      });
+      return yield* upsertProviders(nextProviders, {
+        persist: false,
+      });
     });
 
     const refreshOneSource = Effect.fn("refreshOneSource")(function* (
@@ -555,6 +609,7 @@ export const ProviderRegistryLive = Layer.effect(
         refresh(provider).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshInstance: (instanceId: ProviderInstanceId) =>
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
+      setProviderUpdateState,
       get streamChanges() {
         return Stream.fromPubSub(changesPubSub);
       },

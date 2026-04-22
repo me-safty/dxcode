@@ -23,6 +23,8 @@ export interface ProviderVersionLifecycle {
   readonly provider: ProviderDriverKind;
   readonly packageName: string | null;
   readonly updateCommand: string | null;
+  readonly updateExecutable: string | null;
+  readonly updateArgs: ReadonlyArray<string>;
 }
 
 const PROVIDER_VERSION_LIFECYCLES = {
@@ -30,21 +32,29 @@ const PROVIDER_VERSION_LIFECYCLES = {
     provider: "codex",
     packageName: "@openai/codex",
     updateCommand: "npm install -g @openai/codex@latest",
+    updateExecutable: "npm",
+    updateArgs: ["install", "-g", "@openai/codex@latest"],
   },
   claudeAgent: {
     provider: "claudeAgent",
     packageName: "@anthropic-ai/claude-code",
     updateCommand: "npm install -g @anthropic-ai/claude-code@latest",
+    updateExecutable: "npm",
+    updateArgs: ["install", "-g", "@anthropic-ai/claude-code@latest"],
   },
   cursor: {
     provider: "cursor",
     packageName: null,
     updateCommand: "agent update",
+    updateExecutable: "agent",
+    updateArgs: ["update"],
   },
   opencode: {
     provider: "opencode",
     packageName: "opencode-ai",
     updateCommand: "npm install -g opencode-ai@latest",
+    updateExecutable: "npm",
+    updateArgs: ["install", "-g", "opencode-ai@latest"],
   },
 } as const satisfies Record<VersionLifecycleProvider, ProviderVersionLifecycle>;
 
@@ -73,6 +83,8 @@ export function getProviderVersionLifecycle(provider: ProviderDriverKind): Provi
     provider,
     packageName: null,
     updateCommand: null,
+    updateExecutable: null,
+    updateArgs: [],
   };
 }
 
@@ -147,6 +159,7 @@ export function createProviderVersionAdvisory(input: {
     testedVersion,
     latestVersion,
     updateCommand: lifecycle.updateCommand,
+    canUpdate: lifecycle.updateExecutable !== null,
     checkedAt: input.checkedAt ?? null,
     message: advisoryMessage({ status, testedVersion, latestVersion }),
   };
