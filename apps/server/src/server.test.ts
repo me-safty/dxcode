@@ -59,6 +59,10 @@ import {
 import { GitCore, type GitCoreShape } from "./git/Services/GitCore.ts";
 import { GitManager, type GitManagerShape } from "./git/Services/GitManager.ts";
 import { GitStatusBroadcasterLive } from "./git/Layers/GitStatusBroadcaster.ts";
+import {
+  GitStatusBroadcaster,
+  type GitStatusBroadcasterShape,
+} from "./git/Services/GitStatusBroadcaster.ts";
 import { Keybindings, type KeybindingsShape } from "./keybindings.ts";
 import { Open, type OpenShape } from "./open.ts";
 import {
@@ -327,6 +331,7 @@ const buildAppUnderTest = (options?: {
     open?: Partial<OpenShape>;
     gitCore?: Partial<GitCoreShape>;
     gitManager?: Partial<GitManagerShape>;
+    gitStatusBroadcaster?: Partial<GitStatusBroadcasterShape>;
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunnerShape>;
     terminalManager?: Partial<TerminalManagerShape>;
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
@@ -376,10 +381,37 @@ const buildAppUnderTest = (options?: {
       ...options?.config,
     };
     const layerConfig = Layer.succeed(ServerConfig, config);
+    const gitCoreLayer = Layer.mock(GitCore)({
+      isInsideWorkTree: () => Effect.succeed(false),
+      listWorkspaceFiles: () =>
+        Effect.succeed({
+          paths: [],
+          truncated: false,
+        }),
+      filterIgnoredPaths: (_cwd, relativePaths) => Effect.succeed(relativePaths),
+      ...options?.layers?.gitCore,
+    });
     const gitManagerLayer = Layer.mock(GitManager)({
       ...options?.layers?.gitManager,
     });
-    const gitStatusBroadcasterLayer = GitStatusBroadcasterLive.pipe(Layer.provide(gitManagerLayer));
+    const workspaceEntriesLayer = WorkspaceEntriesLive.pipe(
+      Layer.provide(WorkspacePathsLive),
+      Layer.provideMerge(gitCoreLayer),
+    );
+    const workspaceAndProjectServicesLayer = Layer.mergeAll(
+      WorkspacePathsLive,
+      workspaceEntriesLayer,
+      WorkspaceFileSystemLive.pipe(
+        Layer.provide(WorkspacePathsLive),
+        Layer.provide(workspaceEntriesLayer),
+      ),
+      ProjectFaviconResolverLive,
+    );
+    const gitStatusBroadcasterLayer = options?.layers?.gitStatusBroadcaster
+      ? Layer.mock(GitStatusBroadcaster)({
+          ...options.layers.gitStatusBroadcaster,
+        })
+      : GitStatusBroadcasterLive.pipe(Layer.provide(gitManagerLayer));
 
     const servedRoutesLayer = HttpRouter.serve(makeRoutesLayer, {
       disableListenLog: true,
@@ -418,11 +450,7 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.open,
         }),
       ),
-      Layer.provide(
-        Layer.mock(GitCore)({
-          ...options?.layers?.gitCore,
-        }),
-      ),
+      Layer.provide(gitCoreLayer),
       Layer.provide(gitManagerLayer),
       Layer.provideMerge(gitStatusBroadcasterLayer),
       Layer.provide(
@@ -2031,6 +2059,58 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes websocket rpc projects.searchEntries excludes gitignored files", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-ws-project-search-gitignored-",
+      });
+      yield* fs.writeFileString(path.join(workspaceDir, ".gitignore"), ".venv/\n");
+      yield* fs.makeDirectory(path.join(workspaceDir, ".venv", "lib"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(workspaceDir, ".venv", "lib", "ignored-search-target.ts"),
+        "export const ignored = true;",
+      );
+      yield* fs.makeDirectory(path.join(workspaceDir, "src"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(workspaceDir, "src", "tracked.ts"),
+        "export const ok = 1;",
+      );
+
+      yield* buildAppUnderTest({
+        layers: {
+          gitCore: {
+            isInsideWorkTree: () => Effect.succeed(true),
+            listWorkspaceFiles: () =>
+              Effect.succeed({
+                paths: ["src/tracked.ts"],
+                truncated: false,
+              }),
+            filterIgnoredPaths: (_cwd, relativePaths) =>
+              Effect.succeed(
+                relativePaths.filter((relativePath) => !relativePath.startsWith(".venv/")),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsSearchEntries]({
+            cwd: workspaceDir,
+            query: "ignored-search-target",
+            limit: 10,
+          }),
+        ),
+      );
+
+      assert.equal(response.entries.length, 0);
+      assert.equal(response.truncated, false);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc projects.searchEntries errors", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
@@ -3470,6 +3550,24 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     () =>
       Effect.gen(function* () {
         const dispatchedCommands: Array<OrchestrationCommand> = [];
+        const refreshStatus = vi.fn((_: string) =>
+          Effect.succeed({
+            isRepo: true,
+            hasOriginRemote: true,
+            isDefaultBranch: false,
+            branch: "t3code/bootstrap-branch",
+            hasWorkingTreeChanges: false,
+            workingTree: {
+              files: [],
+              insertions: 0,
+              deletions: 0,
+            },
+            hasUpstream: true,
+            aheadCount: 0,
+            behindCount: 0,
+            pr: null,
+          }),
+        );
         const createWorktree = vi.fn((_: Parameters<GitCoreShape["createWorktree"]>[0]) =>
           Effect.succeed({
             worktree: {
@@ -3493,6 +3591,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           layers: {
             gitCore: {
               createWorktree,
+            },
+            gitStatusBroadcaster: {
+              refreshStatus,
             },
             orchestrationEngine: {
               dispatch: (command) =>
@@ -3571,6 +3672,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           projectCwd: "/tmp/project",
           worktreePath: "/tmp/bootstrap-worktree",
         });
+        assert.deepEqual(refreshStatus.mock.calls[0]?.[0], "/tmp/bootstrap-worktree");
 
         const setupActivities = dispatchedCommands.filter(
           (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
