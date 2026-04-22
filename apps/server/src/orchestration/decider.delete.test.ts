@@ -40,6 +40,7 @@ async function seedReadModel(): Promise<OrchestrationReadModel> {
         workspaceRoot: "/tmp/project-delete",
         defaultModelSelection: null,
         scripts: [],
+        jiraBoard: null,
         createdAt: now,
         updatedAt: now,
       },
