@@ -75,6 +75,7 @@ import {
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
 import { readWindowState, resolveWindowBounds, writeWindowState } from "./windowState";
 import type { WindowState } from "./windowState";
+import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal";
 
 syncShellEnvironment();
 
@@ -1969,16 +1970,17 @@ function createWindow(options?: { deferLoad?: boolean }): BrowserWindow {
     window.webContents.send(FULLSCREEN_STATE_CHANNEL, false);
   });
 
-  let initialRevealScheduled = false;
-  const revealInitialWindow = () => {
-    if (initialRevealScheduled) {
-      return;
-    }
-    initialRevealScheduled = true;
-    revealWindow(window);
-  };
-
-  window.once("ready-to-show", revealInitialWindow);
+  // On Linux/Wayland with `show: false`, Electron's `ready-to-show` only
+  // fires after `show()` is called, deadlocking the standard "wait for
+  // ready, then show" pattern. Add `did-finish-load` as a Linux-only
+  // fallback so the window still surfaces once the renderer has loaded
+  // the page. Other platforms keep the no-flash `ready-to-show` path,
+  // since `did-finish-load` typically fires before the first paint there.
+  const revealSubscribers: RevealSubscription[] = [(fire) => window.once("ready-to-show", fire)];
+  if (process.platform === "linux") {
+    revealSubscribers.push((fire) => window.webContents.once("did-finish-load", fire));
+  }
+  bindFirstRevealTrigger(revealSubscribers, () => revealWindow(window));
 
   if (isDevelopment) {
     if (!options?.deferLoad) {
