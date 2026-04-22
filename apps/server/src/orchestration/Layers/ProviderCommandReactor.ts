@@ -746,8 +746,19 @@ const make = Effect.gen(function* () {
     }
 
     const now = event.payload.createdAt;
-    if (thread.session && thread.session.status !== "stopped") {
-      yield* providerService.stopSession({ threadId: thread.id });
+    if (thread.session) {
+      // Always call stopSession when a stop is requested — even if the orchestration
+      // session is already marked "stopped". The provider-side DB binding can still
+      // hold a stale resumeCursor from a crashed turn; calling stopSession clears it
+      // so the next turn starts truly fresh instead of re-resuming a dead session id.
+      yield* providerService.stopSession({ threadId: thread.id }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("provider command reactor skipped provider session stop", {
+            threadId: thread.id,
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      );
     }
 
     yield* setThreadSession({
