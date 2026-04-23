@@ -722,7 +722,47 @@ const make = Effect.gen(function* () {
     }
 
     // Orchestration turn ids are not provider turn ids, so interrupt by session.
-    yield* providerService.interruptTurn({ threadId: event.payload.threadId });
+    // If the provider can't interrupt (session was orphaned: process crashed,
+    // app closed mid-turn, no resume cursor persisted), we MUST still clear
+    // the orchestration session state — otherwise the UI stays stuck on the
+    // "Working…" indicator forever with no way out.
+    yield* providerService.interruptTurn({ threadId: event.payload.threadId }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.gen(function* () {
+          yield* Effect.logWarning(
+            "provider interruptTurn failed; force-clearing orchestration session state",
+            {
+              threadId: event.payload.threadId,
+              turnId: event.payload.turnId,
+              cause: Cause.pretty(cause),
+            },
+          );
+          const session = thread.session;
+          if (!session) return;
+          yield* setThreadSession({
+            threadId: event.payload.threadId,
+            session: {
+              ...session,
+              status: "interrupted",
+              activeTurnId: null,
+              lastError:
+                "Provider session was orphaned; force-stopped. Send a new message to resume.",
+              updatedAt: event.payload.createdAt,
+            },
+            createdAt: event.payload.createdAt,
+          });
+          yield* appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.turn.interrupt.failed",
+            summary: "Turn force-stopped",
+            detail:
+              "The provider session was no longer reachable. Marked as interrupted so you can send a new message.",
+            turnId: event.payload.turnId ?? null,
+            createdAt: event.payload.createdAt,
+          });
+        }),
+      ),
+    );
   });
 
   const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (

@@ -472,10 +472,16 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       });
       let metricProvider = "unknown";
       return yield* Effect.gen(function* () {
+        // Don't resurrect a dead session just to kill it. If the provider has
+        // no active session (process crashed, app was closed mid-turn, or
+        // recovery has no resume cursor), interrupt is a no-op from the
+        // adapter's perspective — the session is already gone. The reactor
+        // still force-clears the orchestration thread state regardless, so
+        // the UI unblocks.
         const routed = yield* resolveRoutableSession({
           threadId: input.threadId,
           operation: "ProviderService.interruptTurn",
-          allowRecovery: true,
+          allowRecovery: false,
         });
         metricProvider = routed.adapter.provider;
         yield* Effect.annotateCurrentSpan({
@@ -484,7 +490,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.thread_id": input.threadId,
           "provider.turn_id": input.turnId,
         });
-        yield* routed.adapter.interruptTurn(routed.threadId, input.turnId);
+        if (routed.isActive) {
+          yield* routed.adapter.interruptTurn(routed.threadId, input.turnId);
+        }
       }).pipe(
         withMetrics({
           counter: providerTurnsTotal,
