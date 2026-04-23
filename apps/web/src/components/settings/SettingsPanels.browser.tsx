@@ -756,9 +756,11 @@ describe("GeneralSettingsPanel observability", () => {
     setServerConfigSnapshot(createBaseServerConfig());
 
     mounted = await render(
-      <AppAtomRegistryProvider>
-        <GeneralSettingsPanel />
-      </AppAtomRegistryProvider>,
+      <QueryClientProvider client={new QueryClient()}>
+        <AppAtomRegistryProvider>
+          <GeneralSettingsPanel />
+        </AppAtomRegistryProvider>
+      </QueryClientProvider>,
     );
 
     await page.getByLabelText("Toggle OpenCode details").click();
