@@ -179,6 +179,124 @@ function classifyToolAction(input: {
   return "other";
 }
 
+/**
+ * Classify a tool invocation into a canonical ToolLifecycleItemType that the
+ * web timeline card router understands. Provider-agnostic: accepts any subset
+ * of hints a provider adapter can supply. Matches in order: toolName prefix,
+ * toolName substring, ACP kind literal, title substring, then dynamic_tool_call.
+ */
+export function classifyToolLifecycleItemType(input: {
+  readonly toolName?: string | null | undefined;
+  readonly kind?: string | null | undefined;
+  readonly title?: string | null | undefined;
+}): ToolLifecycleItemType {
+  const toolName = asTrimmedString(input.toolName)?.toLowerCase();
+  const kind = asTrimmedString(input.kind)?.toLowerCase();
+  const title = asTrimmedString(input.title)?.toLowerCase();
+
+  if (toolName) {
+    if (toolName.startsWith("mcp__") || toolName.startsWith("mcp_")) {
+      return "mcp_tool_call";
+    }
+    const byTool = matchToolLifecycleItemType(toolName);
+    if (byTool) return byTool;
+  }
+
+  switch (kind) {
+    case "execute":
+      return "command_execution";
+    case "read":
+      return "file_read";
+    case "edit":
+    case "delete":
+    case "move":
+    case "write":
+      return "file_change";
+    case "search":
+      return "file_read";
+    case "fetch":
+      return "web_fetch";
+  }
+
+  if (title) {
+    const byTitle = matchToolLifecycleItemType(title);
+    if (byTitle) return byTitle;
+  }
+
+  return "dynamic_tool_call";
+}
+
+/** Token-based matcher shared between `toolName` and `title` classification. */
+function matchToolLifecycleItemType(value: string): ToolLifecycleItemType | undefined {
+  const tokens = value.split(/[\s_\-./]+/).filter((part) => part.length > 0);
+  const hasToken = (...candidates: ReadonlyArray<string>): boolean =>
+    tokens.some((token) => candidates.includes(token));
+  const hasSubstring = (substring: string): boolean => value.includes(substring);
+
+  if (hasToken("task", "subtask", "subagent") || hasSubstring("agent_") || hasSubstring("agent-")) {
+    return "collab_agent_tool_call";
+  }
+  if (hasToken("image") || hasSubstring("view_image") || hasSubstring("image_view")) {
+    return "image_view";
+  }
+  if (
+    hasSubstring("web_fetch") ||
+    hasSubstring("webfetch") ||
+    hasSubstring("fetch_url") ||
+    hasSubstring("fetchurl")
+  ) {
+    return "web_fetch";
+  }
+  if (hasSubstring("web_search") || hasSubstring("websearch")) {
+    return "web_search";
+  }
+  if (
+    hasToken("bash", "shell", "terminal") ||
+    hasSubstring("run_command") ||
+    hasSubstring("runcommand") ||
+    hasSubstring("run_terminal") ||
+    hasSubstring("runterminal") ||
+    hasSubstring("execute_command") ||
+    hasSubstring("executecommand")
+  ) {
+    return "command_execution";
+  }
+  if (
+    hasToken(
+      "write",
+      "edit",
+      "multiedit",
+      "patch",
+      "notebookedit",
+      "create",
+      "replace",
+      "delete",
+      "remove",
+      "move",
+      "rename",
+    ) ||
+    hasSubstring("str_replace") ||
+    hasSubstring("apply_patch")
+  ) {
+    return "file_change";
+  }
+  if (hasToken("read", "view", "cat")) {
+    return "file_read";
+  }
+  if (
+    hasToken("ls", "list", "glob", "tree", "grep", "ripgrep", "rg") ||
+    hasSubstring("codebase_search") ||
+    hasSubstring("codebasesearch") ||
+    hasSubstring("file_search") ||
+    hasSubstring("filesearch") ||
+    hasSubstring("find_files") ||
+    hasSubstring("findfiles")
+  ) {
+    return "file_read";
+  }
+  return undefined;
+}
+
 export interface ToolActivityPresentationInput {
   readonly itemType?: ToolLifecycleItemType | null | undefined;
   readonly title?: string | null | undefined;

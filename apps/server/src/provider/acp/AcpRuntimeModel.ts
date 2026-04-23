@@ -1,5 +1,8 @@
 import type * as EffectAcpSchema from "effect-acp/schema";
-import { deriveToolActivityPresentation } from "@marcode/shared/toolActivity";
+import {
+  classifyToolLifecycleItemType,
+  deriveToolActivityPresentation,
+} from "@marcode/shared/toolActivity";
 import type { ToolLifecycleItemType } from "@marcode/contracts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -241,20 +244,11 @@ function normalizeToolKind(kind: unknown): string | undefined {
   return typeof kind === "string" && kind.trim().length > 0 ? kind.trim() : undefined;
 }
 
-function canonicalItemTypeFromAcpToolKind(kind: string | undefined): ToolLifecycleItemType {
-  switch (kind) {
-    case "execute":
-      return "command_execution";
-    case "edit":
-    case "delete":
-    case "move":
-      return "file_change";
-    case "search":
-    case "fetch":
-      return "web_search";
-    default:
-      return "dynamic_tool_call";
-  }
+function canonicalItemTypeFromAcpToolKind(
+  kind: string | undefined,
+  title?: string | undefined,
+): ToolLifecycleItemType {
+  return classifyToolLifecycleItemType({ kind, title });
 }
 
 function makeToolCallState(
@@ -312,7 +306,7 @@ function makeToolCallState(
     textContent !== undefined;
   const presentation = hasPresentationSeed
     ? deriveToolActivityPresentation({
-        itemType: canonicalItemTypeFromAcpToolKind(kind),
+        itemType: canonicalItemTypeFromAcpToolKind(kind, title),
         title,
         detail: fallbackDetail,
         data,

@@ -11,6 +11,7 @@ import {
   type ToolLifecycleItemType,
   type TurnId,
 } from "@marcode/contracts";
+import { classifyToolLifecycleItemType } from "@marcode/shared/toolActivity";
 
 import type { AcpPermissionRequest, AcpPlanUpdate, AcpToolCallState } from "./AcpRuntimeModel.ts";
 
@@ -44,20 +45,16 @@ function canonicalRequestTypeFromAcpKind(kind: string | "unknown"): AcpCanonical
   }
 }
 
-function canonicalItemTypeFromAcpToolKind(kind: string | undefined): ToolLifecycleItemType {
-  switch (kind) {
-    case "execute":
-      return "command_execution";
-    case "edit":
-    case "delete":
-    case "move":
-      return "file_change";
-    case "search":
-    case "fetch":
-      return "web_search";
-    default:
-      return "dynamic_tool_call";
-  }
+export function canonicalItemTypeFromAcpToolCall(input: {
+  readonly kind?: string | undefined;
+  readonly title?: string | undefined;
+  readonly toolName?: string | undefined;
+}): ToolLifecycleItemType {
+  return classifyToolLifecycleItemType({
+    kind: input.kind,
+    title: input.title,
+    toolName: input.toolName,
+  });
 }
 
 function runtimeItemStatusFromAcpToolStatus(
@@ -177,7 +174,10 @@ export function makeAcpToolCallEvent(input: {
     turnId: input.turnId,
     itemId: RuntimeItemId.make(input.toolCall.toolCallId),
     payload: {
-      itemType: canonicalItemTypeFromAcpToolKind(input.toolCall.kind),
+      itemType: canonicalItemTypeFromAcpToolCall({
+        kind: input.toolCall.kind,
+        title: input.toolCall.title,
+      }),
       ...(runtimeStatus ? { status: runtimeStatus } : {}),
       ...(input.toolCall.title ? { title: input.toolCall.title } : {}),
       ...(input.toolCall.detail ? { detail: input.toolCall.detail } : {}),

@@ -17,6 +17,7 @@ import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { classifyToolLifecycleItemType } from "@marcode/shared/toolActivity";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
   ProviderAdapterProcessError,
@@ -155,35 +156,7 @@ function buildEventBase(input: {
 }
 
 function toToolLifecycleItemType(toolName: string): ToolLifecycleItemType {
-  const normalized = toolName.toLowerCase();
-  if (normalized.includes("bash") || normalized.includes("command")) {
-    return "command_execution";
-  }
-  if (
-    normalized.includes("edit") ||
-    normalized.includes("write") ||
-    normalized.includes("patch") ||
-    normalized.includes("multiedit")
-  ) {
-    return "file_change";
-  }
-  if (normalized.includes("web")) {
-    return "web_search";
-  }
-  if (normalized.includes("mcp")) {
-    return "mcp_tool_call";
-  }
-  if (normalized.includes("image")) {
-    return "image_view";
-  }
-  if (
-    normalized.includes("task") ||
-    normalized.includes("agent") ||
-    normalized.includes("subtask")
-  ) {
-    return "collab_agent_tool_call";
-  }
-  return "dynamic_tool_call";
+  return classifyToolLifecycleItemType({ toolName });
 }
 
 function mapPermissionToRequestType(
