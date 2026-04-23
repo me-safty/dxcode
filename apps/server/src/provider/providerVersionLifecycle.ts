@@ -5,6 +5,7 @@ import type {
 } from "@t3tools/contracts";
 
 import { compareCliVersions } from "./cliVersion.ts";
+import { resolveDevLatestProviderVersionOverride } from "./providerUpdateDevOverrides.ts";
 
 const LATEST_VERSION_CACHE_TTL_MS = 60 * 60 * 1_000;
 const LATEST_VERSION_TIMEOUT_MS = 4_000;
@@ -127,6 +128,26 @@ export function createProviderVersionAdvisory(input: {
   };
 }
 
+export function applyDevProviderVersionAdvisoryOverride(
+  snapshot: ServerProvider,
+  env: NodeJS.ProcessEnv = process.env,
+): ServerProvider {
+  const forcedLatestVersion = resolveDevLatestProviderVersionOverride(snapshot.driver, env);
+  if (!forcedLatestVersion) {
+    return snapshot;
+  }
+
+  return {
+    ...snapshot,
+    versionAdvisory: createProviderVersionAdvisory({
+      driver: snapshot.driver,
+      currentVersion: snapshot.version,
+      latestVersion: forcedLatestVersion,
+      checkedAt: snapshot.checkedAt,
+    }),
+  };
+}
+
 async function fetchNpmLatestVersion(packageName: string): Promise<string | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), LATEST_VERSION_TIMEOUT_MS);
@@ -174,26 +195,36 @@ export async function resolveLatestProviderVersion(
 
 export async function enrichProviderSnapshotWithVersionAdvisory(
   snapshot: ServerProvider,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<ServerProvider> {
+  const forcedLatestVersion = resolveDevLatestProviderVersionOverride(snapshot.driver, env);
   if (!snapshot.enabled || !snapshot.installed || !snapshot.version) {
-    return {
+    return applyDevProviderVersionAdvisoryOverride(
+      {
+        ...snapshot,
+        versionAdvisory: createProviderVersionAdvisory({
+          driver: snapshot.driver,
+          currentVersion: snapshot.version,
+          ...(forcedLatestVersion ? { latestVersion: forcedLatestVersion } : {}),
+          checkedAt: snapshot.checkedAt,
+        }),
+      },
+      env,
+    );
+  }
+
+  const latestVersion =
+    forcedLatestVersion ?? (await resolveLatestProviderVersion(snapshot.driver));
+  return applyDevProviderVersionAdvisoryOverride(
+    {
       ...snapshot,
       versionAdvisory: createProviderVersionAdvisory({
         driver: snapshot.driver,
         currentVersion: snapshot.version,
-        checkedAt: snapshot.checkedAt,
+        latestVersion,
+        checkedAt: new Date().toISOString(),
       }),
-    };
-  }
-
-  const latestVersion = await resolveLatestProviderVersion(snapshot.driver);
-  return {
-    ...snapshot,
-    versionAdvisory: createProviderVersionAdvisory({
-      driver: snapshot.driver,
-      currentVersion: snapshot.version,
-      latestVersion,
-      checkedAt: new Date().toISOString(),
-    }),
-  };
+    },
+    env,
+  );
 }

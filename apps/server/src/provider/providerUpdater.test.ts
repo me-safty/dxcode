@@ -145,6 +145,37 @@ describe("providerUpdater", () => {
     }),
   );
 
+  it.effect("simulates provider update results from dev env overrides", () =>
+    Effect.gen(function* () {
+      const { registry, updateStatesRef } = yield* makeRegistry();
+      let runUpdateCalled = false;
+      const updater = yield* makeProviderUpdater({
+        providerRegistry: registry,
+        runUpdate: async () => {
+          runUpdateCalled = true;
+          return okResult();
+        },
+        env: {
+          T3CODE_DEV_PROVIDER_UPDATE_RESULT: "codex:failed",
+          T3CODE_DEV_PROVIDER_UPDATE_DELAY_MS: "0",
+        },
+      });
+
+      const result = yield* updater.updateProvider("codex");
+
+      assert.strictEqual(runUpdateCalled, false);
+      assert.strictEqual(result.providers[0]?.updateState?.status, "failed");
+      assert.strictEqual(
+        result.providers[0]?.updateState?.message,
+        "Simulated provider update failed.",
+      );
+      assert.deepStrictEqual(
+        (yield* Ref.get(updateStatesRef)).map((state) => state.status),
+        ["queued", "running", "failed"],
+      );
+    }),
+  );
+
   it.effect(
     "marks successful commands as unchanged when the refreshed provider is still outdated",
     () =>

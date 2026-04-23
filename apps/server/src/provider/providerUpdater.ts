@@ -15,6 +15,10 @@ import {
   enrichProviderSnapshotWithVersionAdvisory,
   getProviderVersionLifecycle,
 } from "./providerVersionLifecycle.ts";
+import {
+  resolveDevSimulatedProviderUpdateDelayMs,
+  resolveDevSimulatedProviderUpdateStatus,
+} from "./providerUpdateDevOverrides.ts";
 
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const UPDATE_OUTPUT_MAX_BYTES = 10_000;
@@ -103,6 +107,7 @@ function makeUpdateState(input: {
 export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (input: {
   readonly providerRegistry: ProviderRegistryShape;
   readonly runUpdate?: ProviderUpdateRunner;
+  readonly env?: NodeJS.ProcessEnv;
 }) {
   const runningProvidersRef = yield* Ref.make<ReadonlySet<ProviderDriverKind>>(new Set());
   const updateLocks = new Map<string, Semaphore.Semaphore>();
@@ -113,6 +118,7 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
     }
   }
   const runUpdate = input.runUpdate ?? defaultRunner;
+  const env = input.env ?? process.env;
 
   const acquireProvider = Effect.fn("acquireProvider")(function* (provider: ProviderDriverKind) {
     return yield* Ref.modify(runningProvidersRef, (runningProviders) => {
@@ -225,6 +231,8 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
           .setProviderUpdateState(provider, state)
           .pipe(Effect.map((providers) => ({ providers })));
       const startedAtRef = yield* Ref.make<string | null>(null);
+      const simulatedStatus = resolveDevSimulatedProviderUpdateStatus(provider, env);
+      const simulatedDelayMs = resolveDevSimulatedProviderUpdateDelayMs(env);
 
       const run = Effect.gen(function* () {
         const startedAt = new Date().toISOString();
@@ -238,6 +246,29 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
             message: "Updating provider.",
           }),
         );
+
+        if (simulatedStatus) {
+          if (simulatedDelayMs > 0) {
+            yield* Effect.sleep(`${simulatedDelayMs} millis`);
+          }
+          return yield* finish(
+            makeUpdateState({
+              status: simulatedStatus,
+              startedAt,
+              finishedAt: new Date().toISOString(),
+              message:
+                simulatedStatus === "succeeded"
+                  ? "Provider updated."
+                  : simulatedStatus === "unchanged"
+                    ? "Update command completed, but T3 Code still detects an outdated provider version."
+                    : "Simulated provider update failed.",
+              output:
+                simulatedStatus === "failed"
+                  ? "Simulated update via T3CODE_DEV_PROVIDER_UPDATE_RESULT."
+                  : null,
+            }),
+          );
+        }
 
         const result = yield* Effect.promise<ProcessRunResult>(() =>
           runUpdate(updateExecutable, lifecycle.updateArgs),

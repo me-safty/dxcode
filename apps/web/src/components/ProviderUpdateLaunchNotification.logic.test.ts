@@ -8,12 +8,16 @@ import {
   getProviderUpdateInitialToastView,
   getProviderUpdateProgressToastView,
   getProviderUpdateRejectedToastView,
+  getProviderUpdateSidebarPillView,
+  getSingleProviderUpdateProgressToastView,
   isProviderUpdateCandidate,
   providerUpdateNotificationKey,
   type ProviderUpdateCandidate,
 } from "./ProviderUpdateLaunchNotification.logic";
 
 const checkedAt = "2026-04-23T10:00:00.000Z";
+const sessionStartedAtMs = Date.parse("2026-04-23T09:59:00.000Z");
+const laterCheckedAt = "2026-04-23T10:01:00.000Z";
 
 function provider(input: {
   readonly driver: ProviderDriverKind;
@@ -174,6 +178,28 @@ describe("provider update launch notification logic", () => {
     });
   });
 
+  it("resolves a single-provider completion view from the returned provider snapshot", () => {
+    const view = getSingleProviderUpdateProgressToastView(
+      provider({
+        provider: "codex",
+        updateState: {
+          status: "failed",
+          startedAt: checkedAt,
+          finishedAt: checkedAt,
+          message: "command failed",
+          output: "stderr",
+        },
+      }),
+    );
+
+    expect(view).toMatchObject({
+      phase: "failed",
+      type: "error",
+      title: "Codex v1.1.0 update failed",
+      description: "command failed",
+    });
+  });
+
   it("keeps unchanged providers actionable from settings", () => {
     const view = getProviderUpdateProgressToastView({
       providers: [
@@ -223,7 +249,31 @@ describe("provider update launch notification logic", () => {
       phase: "succeeded",
       type: "success",
       title: "Provider updated",
-      dismissAfterVisibleMs: 10_000,
+      dismissAfterVisibleMs: 3_000,
+    });
+  });
+
+  it("uses the updated version in the single-provider success toast title", () => {
+    const view = getSingleProviderUpdateProgressToastView(
+      provider({
+        provider: "codex",
+        version: "1.1.0",
+        latestVersion: "1.1.0",
+        advisoryStatus: "current",
+        updateState: {
+          status: "succeeded",
+          startedAt: checkedAt,
+          finishedAt: checkedAt,
+          message: "Provider updated.",
+          output: null,
+        },
+      }),
+    );
+
+    expect(view).toMatchObject({
+      phase: "succeeded",
+      type: "success",
+      title: "Codex updated: v1.1.0",
     });
   });
 
@@ -253,5 +303,214 @@ describe("provider update launch notification logic", () => {
         providerKinds: new Set<ProviderDriverKind>(["cursor"]),
       }),
     ).toEqual([cursor]);
+  });
+
+  it("summarizes active provider updates for the sidebar pill", () => {
+    const view = getProviderUpdateSidebarPillView([
+      provider({
+        provider: "codex",
+        updateState: {
+          status: "running",
+          startedAt: checkedAt,
+          finishedAt: null,
+          message: "Updating provider.",
+          output: null,
+        },
+      }),
+      provider({
+        provider: "cursor",
+        updateState: {
+          status: "queued",
+          startedAt: null,
+          finishedAt: null,
+          message: "Waiting for another provider update to finish.",
+          output: null,
+        },
+      }),
+    ]);
+
+    expect(view).toMatchObject({
+      tone: "loading",
+      title: "Updating 2 providers",
+      description: "Codex and Cursor updates are in progress.",
+    });
+  });
+
+  it("uses the provider name for single active sidebar pill updates", () => {
+    const view = getProviderUpdateSidebarPillView([
+      provider({
+        provider: "codex",
+        updateState: {
+          status: "running",
+          startedAt: checkedAt,
+          finishedAt: null,
+          message: "Updating provider.",
+          output: null,
+        },
+      }),
+    ]);
+
+    expect(view).toMatchObject({
+      key: "loading:codex:running",
+      tone: "loading",
+      title: "Updating Codex",
+      description: "Codex update in progress.",
+    });
+  });
+
+  it("uses the provider name for single failed sidebar pill updates", () => {
+    const view = getProviderUpdateSidebarPillView(
+      [
+        provider({
+          provider: "claudeAgent",
+          updateState: {
+            status: "failed",
+            startedAt: checkedAt,
+            finishedAt: checkedAt,
+            message: "Simulated provider update failed.",
+            output: null,
+          },
+        }),
+      ],
+      { visibleAfterMs: sessionStartedAtMs },
+    );
+
+    expect(view).toMatchObject({
+      key: "failed:claudeAgent:2026-04-23T10:00:00.000Z:Simulated provider update failed.",
+      tone: "error",
+      title: "Claude v1.1.0 update failed",
+      description: "Simulated provider update failed.",
+      dismissible: true,
+    });
+  });
+
+  it("shows a short-lived success sidebar pill after a single provider update succeeds", () => {
+    const view = getProviderUpdateSidebarPillView(
+      [
+        provider({
+          provider: "codex",
+          version: "1.1.0",
+          latestVersion: "1.1.0",
+          advisoryStatus: "current",
+          updateState: {
+            status: "succeeded",
+            startedAt: checkedAt,
+            finishedAt: checkedAt,
+            message: "Provider updated.",
+            output: null,
+          },
+        }),
+      ],
+      { visibleAfterMs: sessionStartedAtMs },
+    );
+
+    expect(view).toMatchObject({
+      key: "succeeded:codex:2026-04-23T10:00:00.000Z:Provider updated.",
+      tone: "success",
+      title: "Codex updated: v1.1.0",
+      description: "Codex updated successfully.",
+      dismissAfterVisibleMs: 3_000,
+    });
+  });
+
+  it("keeps unchanged sidebar pill states dismissible", () => {
+    const view = getProviderUpdateSidebarPillView(
+      [
+        provider({
+          provider: "cursor",
+          updateState: {
+            status: "unchanged",
+            startedAt: checkedAt,
+            finishedAt: checkedAt,
+            message: "still old",
+            output: null,
+          },
+        }),
+      ],
+      { visibleAfterMs: sessionStartedAtMs },
+    );
+
+    expect(view).toMatchObject({
+      key: "unchanged:cursor:2026-04-23T10:00:00.000Z:still old",
+      tone: "warning",
+      title: "Cursor still needs an update",
+      dismissible: true,
+    });
+  });
+
+  it("does not show sidebar terminal states from before the current app session", () => {
+    expect(
+      getProviderUpdateSidebarPillView(
+        [
+          provider({
+            provider: "codex",
+            updateState: {
+              status: "failed",
+              startedAt: checkedAt,
+              finishedAt: checkedAt,
+              message: "command failed",
+              output: "stderr",
+            },
+          }),
+        ],
+        { visibleAfterMs: Date.parse("2026-04-23T10:00:01.000Z") },
+      ),
+    ).toBeNull();
+  });
+
+  it("shows a newer success before falling back to an older failure", () => {
+    const providers = [
+      provider({
+        provider: "claudeAgent",
+        updateState: {
+          status: "failed",
+          startedAt: checkedAt,
+          finishedAt: checkedAt,
+          message: "Simulated provider update failed.",
+          output: null,
+        },
+      }),
+      provider({
+        provider: "codex",
+        version: "1.2.0",
+        latestVersion: "1.2.0",
+        advisoryStatus: "current",
+        updateState: {
+          status: "succeeded",
+          startedAt: laterCheckedAt,
+          finishedAt: laterCheckedAt,
+          message: "Provider updated.",
+          output: null,
+        },
+      }),
+    ] satisfies ReadonlyArray<ServerProvider>;
+
+    const successView = getProviderUpdateSidebarPillView(providers, {
+      visibleAfterMs: sessionStartedAtMs,
+    });
+    expect(successView).toMatchObject({
+      key: "succeeded:codex:2026-04-23T10:01:00.000Z:Provider updated.",
+      tone: "success",
+      title: "Codex updated: v1.2.0",
+    });
+
+    const failureView = getProviderUpdateSidebarPillView(providers, {
+      visibleAfterMs: sessionStartedAtMs,
+      dismissedKeys: new Set(["succeeded:codex:2026-04-23T10:01:00.000Z:Provider updated."]),
+    });
+    expect(failureView).toMatchObject({
+      key: "failed:claudeAgent:2026-04-23T10:00:00.000Z:Simulated provider update failed.",
+      tone: "error",
+      title: "Claude v1.1.0 update failed",
+    });
+  });
+
+  it("does not show a sidebar pill for passive update availability", () => {
+    expect(
+      getProviderUpdateSidebarPillView([
+        provider({ provider: "codex", canUpdate: true }),
+        provider({ provider: "cursor", canUpdate: false }),
+      ]),
+    ).toBeNull();
   });
 });

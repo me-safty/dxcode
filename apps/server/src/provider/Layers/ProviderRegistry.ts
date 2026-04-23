@@ -35,6 +35,7 @@ import * as Semaphore from "effect/Semaphore";
 import { ServerConfig } from "../../config.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
+import { applyDevProviderVersionAdvisoryOverride } from "../providerVersionLifecycle.ts";
 import {
   hydrateCachedProvider,
   isCachedProviderCorrelated,
@@ -96,6 +97,30 @@ export const mergeProviderSnapshot = (
         ...nextProvider,
         models: mergeProviderModels(previousProvider.models, nextProvider.models),
       };
+
+export const mergeProviderSnapshots = (
+  previousProviders: ReadonlyArray<ServerProvider>,
+  nextProviders: ReadonlyArray<ServerProvider>,
+): ReadonlyArray<ServerProvider> => {
+  const mergedProviders = new Map(
+    previousProviders.map((provider) => [snapshotInstanceKey(provider), provider] as const),
+  );
+
+  for (const provider of nextProviders) {
+    mergedProviders.set(
+      snapshotInstanceKey(provider),
+      mergeProviderSnapshot(mergedProviders.get(snapshotInstanceKey(provider)), provider),
+    );
+  }
+
+  return orderProviderSnapshots([...mergedProviders.values()]);
+};
+
+export const selectProvidersByKind = (
+  providers: ReadonlyArray<ServerProvider>,
+  providerKinds: ReadonlySet<ProviderDriverKind>,
+): ReadonlyArray<ServerProvider> =>
+  providers.filter((provider) => providerKinds.has(provider.driver));
 
 export const haveProvidersChanged = (
   previousProviders: ReadonlyArray<ServerProvider>,
@@ -215,7 +240,9 @@ export const ProviderRegistryLive = Layer.effect(
                   cachedDriver: cachedProvider.driver ?? null,
                 }).pipe(Effect.as(undefined as ServerProvider | undefined));
               }
-              return Effect.succeed(hydrateCachedProvider(correlation));
+              return Effect.succeed(
+                applyDevProviderVersionAdvisoryOverride(hydrateCachedProvider(correlation)),
+              );
             }),
           );
         }),
@@ -292,7 +319,7 @@ export const ProviderRegistryLive = Layer.effect(
       },
     ) {
       const nextProvidersWithUpdateState = yield* Effect.forEach(
-        nextProviders,
+        nextProviders.map((provider) => applyDevProviderVersionAdvisoryOverride(provider)),
         applyProviderUpdateState,
         {
           concurrency: "unbounded",
