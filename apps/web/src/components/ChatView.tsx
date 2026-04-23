@@ -1345,11 +1345,7 @@ export default function ChatView({
   const selectedPromptEffort = composerProviderState.promptEffort;
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
   const selectedModelSelection = useMemo<ModelSelection>(
-    () => ({
-      provider: selectedProvider,
-      model: selectedModel,
-      ...(selectedModelOptionsForDispatch ? { options: selectedModelOptionsForDispatch } : {}),
-    }),
+    () => createModelSelection(selectedProvider, selectedModel, selectedModelOptionsForDispatch),
     [selectedModel, selectedModelOptionsForDispatch, selectedProvider],
   );
   const selectedModelForPicker = selectedModel;
@@ -1772,6 +1768,8 @@ export default function ChatView({
       codex: providerStatuses.find((provider) => provider.provider === "codex")?.models ?? [],
       claudeAgent:
         providerStatuses.find((provider) => provider.provider === "claudeAgent")?.models ?? [],
+      opencode: providerStatuses.find((provider) => provider.provider === "opencode")?.models ?? [],
+      cursor: providerStatuses.find((provider) => provider.provider === "cursor")?.models ?? [],
     }),
     [providerStatuses],
   );

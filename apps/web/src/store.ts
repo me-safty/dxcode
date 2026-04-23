@@ -1,3 +1,4 @@
+import { ProviderKind } from "@marcode/contracts";
 import type {
   EnvironmentId,
   MessageId,
@@ -16,7 +17,6 @@ import type {
   ProjectId,
   ScopedProjectRef,
   ScopedThreadRef,
-  ProviderKind,
   ThreadId,
   TurnId,
 } from "@marcode/contracts";

@@ -42,6 +42,7 @@ import {
   SqlitePersistenceMemory,
 } from "../../persistence/Layers/Sqlite.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { AnalyticsServiceNoopLive } from "../../telemetry/Layers/AnalyticsService.ts";
 
 const defaultServerSettingsLayer = ServerSettingsService.layerTest();
 
@@ -365,7 +366,7 @@ it.effect("ProviderServiceLive writes canonical events to the emitting thread se
       Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
       Layer.provide(directoryLayer),
       Layer.provide(defaultServerSettingsLayer),
-      Layer.provide(AnalyticsService.layerTest),
+      Layer.provide(AnalyticsServiceNoopLive),
     );
 
     yield* Effect.gen(function* () {

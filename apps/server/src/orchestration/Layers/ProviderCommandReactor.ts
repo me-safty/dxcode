@@ -693,7 +693,7 @@ const make = Effect.gen(function* () {
       Effect.catchCause((cause) => handleTurnStartFailure(cause).pipe(Effect.as(Option.none()))),
     );
 
-    if (Option.isNone(sendTurnRequest)) {
+    if (Option.isNone(sendTurnRequest) || sendTurnRequest.value === undefined) {
       return;
     }
 

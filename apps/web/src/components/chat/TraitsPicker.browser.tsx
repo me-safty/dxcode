@@ -496,6 +496,8 @@ async function mountCursorPicker(props: { model?: string; options?: CursorModelO
         nonPersistedImageIds: [],
         persistedAttachments: [],
         terminalContexts: [],
+        jiraTaskContexts: [],
+        quotedContexts: [],
         modelSelectionByProvider: {
           cursor: {
             provider: "cursor",
@@ -650,6 +652,8 @@ async function mountOpenCodePicker(props: {
       nonPersistedImageIds: [],
       persistedAttachments: [],
       terminalContexts: [],
+      jiraTaskContexts: [],
+      quotedContexts: [],
       modelSelectionByProvider: {
         opencode: {
           provider: "opencode",
