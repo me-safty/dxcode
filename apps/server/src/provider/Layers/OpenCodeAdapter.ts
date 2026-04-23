@@ -339,6 +339,16 @@ function detailFromToolPart(part: Extract<Part, { type: "tool" }>): string | und
   }
 }
 
+function openCodeToolInput(
+  state: Extract<Part, { type: "tool" }>["state"],
+): Record<string, unknown> | undefined {
+  if (state.status === "pending") return undefined;
+  const input = (state as { input?: unknown }).input;
+  return input && typeof input === "object" && !Array.isArray(input)
+    ? (input as Record<string, unknown>)
+    : undefined;
+}
+
 function toolStateCreatedAt(part: Extract<Part, { type: "tool" }>): string | undefined {
   switch (part.state.status) {
     case "running":
@@ -686,6 +696,9 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
               const title =
                 part.state.status === "running" ? (part.state.title ?? part.tool) : part.tool;
               const detail = detailFromToolPart(part);
+              const toolInput = openCodeToolInput(part.state);
+              const commandFromInput =
+                toolInput && typeof toolInput.command === "string" ? toolInput.command : undefined;
               const payload = {
                 itemType,
                 ...(part.state.status === "error"
@@ -696,6 +709,13 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                 ...(title ? { title } : {}),
                 ...(detail ? { detail } : {}),
                 data: {
+                  // Shape these fields the way client-side extractors expect:
+                  // `data.toolName` for ExplorationCard heading dispatch,
+                  // `data.input` for path/query extraction, `data.command` for
+                  // CommandExecutionCard. Keep `tool`/`state` for debugging.
+                  toolName: part.tool,
+                  ...(toolInput ? { input: toolInput } : {}),
+                  ...(commandFromInput ? { command: commandFromInput } : {}),
                   tool: part.tool,
                   state: part.state,
                 },

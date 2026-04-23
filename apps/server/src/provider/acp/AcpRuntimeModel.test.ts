@@ -97,7 +97,16 @@ describe("AcpRuntimeModel", () => {
           data: {
             toolCallId: "tool-1",
             kind: "execute",
+            // toolName + input are aliases surfaced so the client-side
+            // extractors (extractToolName / extractToolInput) and the
+            // ExplorationCard's per-tool heading logic see ACP activities
+            // the same way they see Claude/Codex ones.
+            toolName: "execute",
             command: "bun run typecheck",
+            input: {
+              executable: "bun",
+              args: ["run", "typecheck"],
+            },
             rawInput: {
               executable: "bun",
               args: ["run", "typecheck"],

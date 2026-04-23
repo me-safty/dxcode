@@ -155,25 +155,29 @@ function classifyToolAction(input: {
   readonly title?: string | undefined;
   readonly data?: Record<string, unknown> | undefined;
 }): "command" | "read" | "file_change" | "search" | "other" {
-  const itemType = input.itemType ?? undefined;
+  // Prefer the canonical `itemType` — by the time we get here it has already
+  // been classified by `classifyToolLifecycleItemType` (or by provider-specific
+  // emission), so trust it over ad-hoc `kind`/`title` heuristics that only
+  // recognize Claude/Codex vocabulary.
+  switch (input.itemType) {
+    case "command_execution":
+      return "command";
+    case "file_read":
+      return "read";
+    case "file_change":
+      return "file_change";
+    case "web_search":
+    case "web_fetch":
+      return "search";
+  }
   const kind = asTrimmedString(input.data?.kind)?.toLowerCase();
   const title = asTrimmedString(input.title)?.toLowerCase();
-  if (itemType === "command_execution" || kind === "execute" || title === "terminal") {
-    return "command";
-  }
-  if (kind === "read" || title === "read file") {
-    return "read";
-  }
-  if (
-    itemType === "file_change" ||
-    kind === "edit" ||
-    kind === "move" ||
-    kind === "delete" ||
-    kind === "write"
-  ) {
+  if (kind === "execute" || title === "terminal") return "command";
+  if (kind === "read" || title === "read file") return "read";
+  if (kind === "edit" || kind === "move" || kind === "delete" || kind === "write") {
     return "file_change";
   }
-  if (itemType === "web_search" || kind === "search" || title === "find" || title === "grep") {
+  if (kind === "search" || kind === "fetch" || title === "find" || title === "grep") {
     return "search";
   }
   return "other";

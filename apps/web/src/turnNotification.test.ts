@@ -10,6 +10,7 @@ import {
   markThreadUserStopped,
   markTurnLocallyInterrupted,
   subscribeToLocallyInterruptedTurns,
+  __resetTurnNotificationStateForTests,
 } from "./turnNotification";
 import type { Thread, Project } from "./types";
 
@@ -102,6 +103,7 @@ describe("buildNotificationContent", () => {
 describe("deriveTurnNotificationTriggers", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    __resetTurnNotificationStateForTests();
   });
 
   it("emits trigger for a completed turn", () => {
@@ -330,6 +332,86 @@ describe("deriveTurnNotificationTriggers", () => {
     );
 
     expect(triggers).toHaveLength(0);
+  });
+
+  describe("regression: ACP (Cursor/OpenCode) thread lifecycle", () => {
+    it("does NOT fire on session.started emitting status=ready with activeTurnId=null", () => {
+      // Repro for Bug 1: when Cursor/OpenCode open a session, the provider
+      // emits session.started → server dispatches thread.session-set with
+      // status=ready and activeTurnId=null. The previous check
+      // `activeTurnId !== undefined` mis-treated `null` as "has active turn"
+      // and fired a spurious turn-completed notification on thread creation.
+      const thread = makeThread({
+        session: { orchestrationStatus: "ready", activeTurnId: null },
+      } as Partial<Thread>);
+      const project = makeProject();
+      const events = [makeSessionSetEvent("thread-1", "ready", { activeTurnId: null })];
+
+      const triggers = deriveTurnNotificationTriggers(
+        events,
+        () => thread,
+        () => project,
+      );
+
+      expect(triggers).toHaveLength(0);
+    });
+
+    it("fires on follow-up turn completion even if stored session.status lags to ready", () => {
+      // Repro for Bug 2: shell-stream updates can write thread.session.status
+      // to "ready" before the detail-stream's thread.session-set event arrives
+      // for derivation, so `orchestrationStatus === "running"` reads false.
+      // The persistent threadsWithActiveTurn flag, armed by the earlier
+      // running event, makes the completion fire anyway.
+      const thread = makeThread({
+        session: { orchestrationStatus: "ready", activeTurnId: null },
+      } as Partial<Thread>);
+      const project = makeProject();
+
+      // Batch 1: running status arms the persistent flag.
+      deriveTurnNotificationTriggers(
+        [makeSessionSetEvent("thread-1", "running", { activeTurnId: "turn-42" })],
+        () => thread,
+        () => project,
+      );
+
+      // Batch 2: completion arrives after shell stream raced the status to
+      // "ready". No in-batch running transition and stored status no longer
+      // running — but the armed flag keeps us honest.
+      const triggers = deriveTurnNotificationTriggers(
+        [makeSessionSetEvent("thread-1", "ready")],
+        () => thread,
+        () => project,
+      );
+
+      expect(triggers).toHaveLength(1);
+      expect(triggers[0]!.reason).toBe("turn-completed");
+    });
+
+    it("dedupes completion across separate batches (Bug 3: doubled sound)", () => {
+      // Repro for Bug 3: applyEnvironmentThreadDetailEvent wraps each single
+      // event in its own batch, so thread.session-set (ready) and
+      // thread.turn-diff-completed each triggered the batch-local dedup set
+      // independently, firing twice. Cross-batch dedup with a 3s TTL collapses
+      // them to one sound per real turn end.
+      const thread = makeThread({
+        session: { orchestrationStatus: "running", activeTurnId: "turn-1" },
+      } as Partial<Thread>);
+      const project = makeProject();
+
+      const firstBatch = deriveTurnNotificationTriggers(
+        [makeSessionSetEvent("thread-1", "ready")],
+        () => thread,
+        () => project,
+      );
+      const secondBatch = deriveTurnNotificationTriggers(
+        [makeTurnDiffCompletedEvent("thread-1")],
+        () => thread,
+        () => project,
+      );
+
+      expect(firstBatch).toHaveLength(1);
+      expect(secondBatch).toHaveLength(0);
+    });
   });
 });
 

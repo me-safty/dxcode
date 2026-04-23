@@ -281,12 +281,21 @@ function makeToolCallState(
   const kind = normalizeToolKind(input.kind);
   if (kind) {
     data.kind = kind;
+    // Surface `toolName` so the client's extractToolName (`data.toolName`)
+    // and the ExplorationCard's per-tool heading logic (`lower === "read"` etc.)
+    // fire for ACP activities the same way they do for Claude/Codex.
+    data.toolName = kind;
   }
   if (command) {
     data.command = command;
   }
   if (input.rawInput !== undefined) {
     data.rawInput = input.rawInput;
+    // Alias as `input` so the client's extractToolInput (`data.input`) resolves
+    // tool parameters for path/query extraction in cards.
+    if (isRecord(input.rawInput)) {
+      data.input = input.rawInput;
+    }
   }
   if (input.rawOutput !== undefined) {
     data.rawOutput = input.rawOutput;
