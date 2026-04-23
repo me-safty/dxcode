@@ -335,13 +335,24 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }, [rows, threadId, isHydrating]);
 
   const hasFinishedInitialScrollRef = useRef(false);
-  const handleScroll = useCallback(() => {
-    if (!hasFinishedInitialScrollRef.current) return;
+  const isAtEndRef = useRef(true);
+  const updateIsAtEnd = useCallback(
+    (isAtEnd: boolean) => {
+      isAtEndRef.current = isAtEnd;
+      onIsAtEndChange(isAtEnd);
+    },
+    [onIsAtEndChange],
+  );
+  const syncIsAtEnd = useCallback(() => {
     const state = listRef.current?.getState?.();
     if (state) {
-      onIsAtEndChange(state.isAtEnd);
+      updateIsAtEnd(state.isAtEnd);
     }
-  }, [listRef, onIsAtEndChange]);
+  }, [listRef, updateIsAtEnd]);
+  const handleScroll = useCallback(() => {
+    if (!hasFinishedInitialScrollRef.current) return;
+    syncIsAtEnd();
+  }, [syncIsAtEnd]);
 
   const hasAutoScrolledOnMountRef = useRef(false);
   useEffect(() => {
@@ -349,7 +360,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     if (hasAutoScrolledOnMountRef.current) return;
     hasAutoScrolledOnMountRef.current = true;
 
-    onIsAtEndChange(true);
+    updateIsAtEnd(true);
 
     let cancelled = false;
     let completed = false;
@@ -365,10 +376,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         } else {
           completed = true;
           hasFinishedInitialScrollRef.current = true;
-          const state = listRef.current?.getState?.();
-          if (state) {
-            onIsAtEndChange(state.isAtEnd);
-          }
+          syncIsAtEnd();
         }
       });
     };
@@ -385,7 +393,40 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         hasAutoScrolledOnMountRef.current = false;
       }
     };
-  }, [listRef, onIsAtEndChange, rows.length]);
+  }, [listRef, rows.length, syncIsAtEnd, updateIsAtEnd]);
+
+  useEffect(() => {
+    if (rows.length === 0) return;
+    if (typeof ResizeObserver === "undefined") return;
+
+    const scrollContainer = listRef.current?.getScrollableNode?.();
+    const contentNode = scrollContainer?.firstElementChild;
+    if (!(contentNode instanceof HTMLElement)) return;
+
+    let rafId: number | null = null;
+    const scheduleFollow = () => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        if (!hasFinishedInitialScrollRef.current) return;
+        if (isAtEndRef.current) {
+          void listRef.current?.scrollToEnd?.({ animated: false });
+          return;
+        }
+        syncIsAtEnd();
+      });
+    };
+
+    const observer = new ResizeObserver(scheduleFollow);
+    observer.observe(contentNode);
+
+    return () => {
+      observer.disconnect();
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
+    };
+  }, [listRef, rows.length, syncIsAtEnd]);
 
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
