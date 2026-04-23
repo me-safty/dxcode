@@ -5,23 +5,28 @@
   "exports": {
     "./client": {
       "types": "./src/client.ts",
-      "import": "./src/client.ts"
+      "import": "./src/client.ts",
+      "default": "./src/client.ts"
     },
     "./schema": {
       "types": "./src/schema.ts",
-      "import": "./src/schema.ts"
+      "import": "./src/schema.ts",
+      "default": "./src/schema.ts"
     },
     "./rpc": {
       "types": "./src/rpc.ts",
-      "import": "./src/rpc.ts"
+      "import": "./src/rpc.ts",
+      "default": "./src/rpc.ts"
     },
     "./protocol": {
       "types": "./src/protocol.ts",
-      "import": "./src/protocol.ts"
+      "import": "./src/protocol.ts",
+      "default": "./src/protocol.ts"
     },
     "./errors": {
       "types": "./src/errors.ts",
-      "import": "./src/errors.ts"
+      "import": "./src/errors.ts",
+      "default": "./src/errors.ts"
     }
   },
   "scripts": {

@@ -9,7 +9,7 @@ export default defineConfig({
   outDir: "dist",
   sourcemap: true,
   clean: true,
-  noExternal: [/^@marcode\//, /^effect-acp(\/|$)/],
+  noExternal: [/^@marcode\//, /^effect-acp(\/|$)/, /^effect-codex-app-server(\/|$)/],
   inlineOnly: false,
   banner: {
     js: "#!/usr/bin/env node\n",
