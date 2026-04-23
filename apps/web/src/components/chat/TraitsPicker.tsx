@@ -32,6 +32,9 @@ import {
 } from "../ui/menu";
 import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
+import { shortcutLabelForCommand } from "../../keybindings";
+import { useServerKeybindings } from "../../rpc/serverState";
+import { Kbd } from "../ui/kbd";
 import { cn } from "~/lib/utils";
 
 type ProviderOptions = ProviderModelOptions[ProviderKind];
@@ -257,6 +260,8 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
+  const keybindings = useServerKeybindings();
+  const agentCycleLabel = shortcutLabelForCommand(keybindings, "agent.cycle");
   const updateModelOptions = useCallback(
     (nextOptions: ProviderOptions | undefined) => {
       if ("onModelOptionsChange" in persistence) {
@@ -452,7 +457,14 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
         <>
           {hasSectionsBeforeAgent ? <MenuDivider /> : null}
           <MenuGroup>
-            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Agent</div>
+            <div className="flex items-center justify-between px-2 py-1.5 font-medium text-muted-foreground text-xs">
+              <span>Agent</span>
+              {agentCycleLabel ? (
+                <Kbd className="h-4 min-w-0 shrink-0 rounded-sm px-1.5 text-[10px]">
+                  {agentCycleLabel}
+                </Kbd>
+              ) : null}
+            </div>
             <MenuRadioGroup
               value={selectedAgent ?? ""}
               onValueChange={(value) => {

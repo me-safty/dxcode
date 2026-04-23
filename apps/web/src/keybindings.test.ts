@@ -138,6 +138,11 @@ const DEFAULT_BINDINGS = compile([
     command: "modelPicker.jump.3",
     whenAst: whenIdentifier("modelPickerOpen"),
   },
+  {
+    shortcut: modShortcut("."),
+    command: "agent.cycle",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
 ]);
 
 describe("isTerminalToggleShortcut", () => {
@@ -314,6 +319,8 @@ describe("shortcutLabelForCommand", () => {
       }),
       "⌘3",
     );
+    assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "agent.cycle", "MacIntel"), "⌘.");
+    assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "agent.cycle", "Linux"), "Ctrl+.");
   });
 
   it("returns null for commands shadowed by a later conflicting shortcut", () => {
