@@ -82,6 +82,12 @@ function getProviderUpdatedTitle(provider: Pick<ServerProvider, "driver" | "vers
     : `${providerName} updated`;
 }
 
+function getProviderUpdatedDescription(providerCount: number): string {
+  return providerCount === 1
+    ? "New sessions will use the updated provider."
+    : "New sessions will use the updated providers.";
+}
+
 function getProviderFailedUpdateTitle(
   provider: Pick<ServerProvider, "driver" | "versionAdvisory">,
 ): string {
@@ -225,7 +231,7 @@ export function getProviderUpdateProgressToastView(input: {
       phase: "succeeded",
       type: "success",
       title: input.providerCount === 1 ? "Provider updated" : "Provider updates finished",
-      description: "Provider status will refresh automatically.",
+      description: getProviderUpdatedDescription(input.providerCount),
       dismissAfterVisibleMs: PROVIDER_UPDATE_SUCCESS_VISIBLE_MS,
     };
   }
@@ -433,10 +439,7 @@ export function getProviderUpdateSidebarPillView(
         succeededProviders.length === 1
           ? getProviderUpdatedTitle(succeededProvider)
           : `${succeededProviders.length} providers updated`,
-      description:
-        succeededProviders.length === 1
-          ? `${PROVIDER_DISPLAY_NAMES[succeededProvider.driver] ?? succeededProvider.driver} updated successfully.`
-          : `${formatProviderList(succeededProviders)} updated successfully.`,
+      description: getProviderUpdatedDescription(succeededProviders.length),
       dismissAfterVisibleMs: PROVIDER_UPDATE_SUCCESS_VISIBLE_MS,
     });
   }

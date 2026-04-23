@@ -249,6 +249,7 @@ describe("provider update launch notification logic", () => {
       phase: "succeeded",
       type: "success",
       title: "Provider updated",
+      description: "New sessions will use the updated provider.",
       dismissAfterVisibleMs: 3_000,
     });
   });
@@ -274,6 +275,7 @@ describe("provider update launch notification logic", () => {
       phase: "succeeded",
       type: "success",
       title: "Codex updated: v1.1.0",
+      description: "New sessions will use the updated provider.",
     });
   });
 
@@ -408,7 +410,7 @@ describe("provider update launch notification logic", () => {
       key: "succeeded:codex:2026-04-23T10:00:00.000Z:Provider updated.",
       tone: "success",
       title: "Codex updated: v1.1.0",
-      description: "Codex updated successfully.",
+      description: "New sessions will use the updated provider.",
       dismissAfterVisibleMs: 3_000,
     });
   });
