@@ -2,22 +2,15 @@ import type {
   ProviderDriverKind,
   ServerProvider,
   ServerProviderVersionAdvisory,
-  ServerProviderVersionAdvisoryStatus,
 } from "@t3tools/contracts";
 
-import testedVersions from "./providerTestedVersions.generated.json" with { type: "json" };
 import { compareCliVersions } from "./cliVersion.ts";
 
 const LATEST_VERSION_CACHE_TTL_MS = 60 * 60 * 1_000;
 const LATEST_VERSION_TIMEOUT_MS = 4_000;
+const PROVIDER_UPDATE_ACTION_TOAST_MESSAGE = "Install the update now or review provider settings.";
 
 type VersionLifecycleProvider = "codex" | "claudeAgent" | "cursor" | "opencode";
-
-type TestedVersionsManifest = {
-  readonly providers?: Partial<
-    Record<VersionLifecycleProvider, { readonly testedVersion?: string | null } | undefined>
-  >;
-};
 
 export interface ProviderVersionLifecycle {
   readonly provider: ProviderDriverKind;
@@ -94,54 +87,20 @@ export function getProviderVersionLifecycle(provider: ProviderDriverKind): Provi
   };
 }
 
-export function getProviderTestedVersion(provider: ProviderDriverKind): string | null {
-  if (!isVersionLifecycleProvider(provider)) {
-    return null;
-  }
-  const manifest = testedVersions as TestedVersionsManifest;
-  return nonEmptyString(manifest.providers?.[provider]?.testedVersion);
-}
-
-function formatVersion(value: string): string {
-  return value.startsWith("v") ? value : `v${value}`;
-}
-
-function deriveVersionAdvisoryStatus(input: {
+function deriveVersionAdvisory(input: {
   readonly currentVersion: string | null;
-  readonly testedVersion: string | null;
   readonly latestVersion: string | null;
-}): ServerProviderVersionAdvisoryStatus {
+}): Pick<ServerProviderVersionAdvisory, "status" | "message"> {
   if (!input.currentVersion) {
-    return "unknown";
-  }
-  if (input.testedVersion && compareCliVersions(input.currentVersion, input.testedVersion) < 0) {
-    return "behind_tested";
+    return { status: "unknown", message: null };
   }
   if (input.latestVersion && compareCliVersions(input.currentVersion, input.latestVersion) < 0) {
-    return "behind_latest";
+    return {
+      status: "behind_latest",
+      message: PROVIDER_UPDATE_ACTION_TOAST_MESSAGE,
+    };
   }
-  return "current";
-}
-
-function advisoryMessage(input: {
-  readonly status: ServerProviderVersionAdvisoryStatus;
-  readonly testedVersion: string | null;
-  readonly latestVersion: string | null;
-}): string | null {
-  switch (input.status) {
-    case "behind_tested":
-      return input.testedVersion
-        ? `Recommended update: this T3 Code build was tested with ${formatVersion(input.testedVersion)}.`
-        : "Recommended update: this provider is behind the version tested with this T3 Code build.";
-    case "behind_latest":
-      return input.latestVersion
-        ? `Update available: latest is ${formatVersion(input.latestVersion)}.`
-        : "Update available.";
-    case "unknown":
-      return null;
-    case "current":
-      return null;
-  }
+  return { status: "current", message: null };
 }
 
 export function createProviderVersionAdvisory(input: {
@@ -151,23 +110,20 @@ export function createProviderVersionAdvisory(input: {
   readonly checkedAt?: string | null;
 }): ServerProviderVersionAdvisory {
   const lifecycle = getProviderVersionLifecycle(input.driver);
-  const testedVersion = getProviderTestedVersion(input.driver);
   const latestVersion = input.latestVersion ?? null;
-  const status = deriveVersionAdvisoryStatus({
+  const advisory = deriveVersionAdvisory({
     currentVersion: input.currentVersion,
-    testedVersion,
     latestVersion,
   });
 
   return {
-    status,
+    status: advisory.status,
     currentVersion: input.currentVersion,
-    testedVersion,
     latestVersion,
     updateCommand: lifecycle.updateCommand,
     canUpdate: lifecycle.updateExecutable !== null,
     checkedAt: input.checkedAt ?? null,
-    message: advisoryMessage({ status, testedVersion, latestVersion }),
+    message: advisory.message,
   };
 }
 

@@ -112,7 +112,6 @@ export type ServerProviderContinuation = typeof ServerProviderContinuation.Type;
 export const ServerProviderVersionAdvisoryStatus = Schema.Literals([
   "unknown",
   "current",
-  "behind_tested",
   "behind_latest",
 ]);
 export type ServerProviderVersionAdvisoryStatus = typeof ServerProviderVersionAdvisoryStatus.Type;
@@ -120,7 +119,6 @@ export type ServerProviderVersionAdvisoryStatus = typeof ServerProviderVersionAd
 export const ServerProviderVersionAdvisory = Schema.Struct({
   status: ServerProviderVersionAdvisoryStatus,
   currentVersion: Schema.NullOr(TrimmedNonEmptyString),
-  testedVersion: Schema.NullOr(TrimmedNonEmptyString),
   latestVersion: Schema.NullOr(TrimmedNonEmptyString),
   updateCommand: Schema.NullOr(TrimmedNonEmptyString),
   canUpdate: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),

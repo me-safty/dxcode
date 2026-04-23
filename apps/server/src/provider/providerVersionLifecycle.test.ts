@@ -20,7 +20,7 @@ describe("providerVersionLifecycle", () => {
     });
   });
 
-  it("marks installed providers behind latest when no stronger tested-version advisory applies", () => {
+  it("marks installed providers behind latest when a newer provider version is available", () => {
     expect(
       createProviderVersionAdvisory({
         driver: "claudeAgent",
@@ -33,6 +33,7 @@ describe("providerVersionLifecycle", () => {
       latestVersion: "2.1.117",
       updateCommand: "npm install -g @anthropic-ai/claude-code@latest",
       canUpdate: true,
+      message: "Install the update now or review provider settings.",
     });
   });
 

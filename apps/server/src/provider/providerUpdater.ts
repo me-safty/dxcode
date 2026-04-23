@@ -81,10 +81,7 @@ function failureMessage(result: ProcessRunResult): string {
 }
 
 function isOutdatedProvider(provider: ServerProvider | undefined): boolean {
-  return (
-    provider?.versionAdvisory?.status === "behind_tested" ||
-    provider?.versionAdvisory?.status === "behind_latest"
-  );
+  return provider?.versionAdvisory?.status === "behind_latest";
 }
 
 function makeUpdateState(input: {

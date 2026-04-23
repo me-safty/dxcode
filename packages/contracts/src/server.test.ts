@@ -43,7 +43,6 @@ describe("ServerProvider", () => {
       versionAdvisory: {
         status: "behind_latest",
         currentVersion: "1.0.0",
-        testedVersion: null,
         latestVersion: "1.0.1",
         updateCommand: "npm install -g @openai/codex@latest",
         checkedAt: "2026-04-10T00:00:00.000Z",

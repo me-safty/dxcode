@@ -97,11 +97,8 @@ export function getProviderVersionAdvisoryPresentation(
     return null;
   }
 
-  const label = advisory.status === "behind_tested" ? "Recommended update" : "Update available";
-  const version =
-    advisory.status === "behind_tested"
-      ? advisory.testedVersion
-      : (advisory.latestVersion ?? advisory.testedVersion);
+  const label = "Update available";
+  const version = advisory.latestVersion;
   const versionLabel = getProviderVersionLabel(version);
 
   return {
@@ -111,6 +108,6 @@ export function getProviderVersionAdvisoryPresentation(
         ? `${label}: install ${versionLabel}.`
         : `${label}: install the latest provider version.`),
     updateCommand: advisory.updateCommand,
-    emphasis: advisory.status === "behind_tested" ? ("strong" as const) : ("normal" as const),
+    emphasis: "normal" as const,
   };
 }

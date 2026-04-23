@@ -149,20 +149,31 @@ describe("providerUpdater", () => {
     "marks successful commands as unchanged when the refreshed provider is still outdated",
     () =>
       Effect.gen(function* () {
-        const { registry } = yield* makeRegistry({
-          ...baseProvider,
-          installed: false,
-          version: "0.1.0",
-        });
-        const updater = yield* makeProviderUpdater({
-          providerRegistry: registry,
-          runUpdate: async () => okResult(),
-        });
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async () =>
+          new Response(JSON.stringify({ version: "9.9.9" }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          })) as unknown as typeof fetch;
 
-        const result = yield* updater.updateProvider("codex");
+        try {
+          const { registry } = yield* makeRegistry({
+            ...baseProvider,
+            installed: true,
+            version: "0.1.0",
+          });
+          const updater = yield* makeProviderUpdater({
+            providerRegistry: registry,
+            runUpdate: async () => okResult(),
+          });
 
-        assert.strictEqual(result.providers[0]?.updateState?.status, "unchanged");
-        assert.include(result.providers[0]?.updateState?.message ?? "", "still detects");
+          const result = yield* updater.updateProvider("codex");
+
+          assert.strictEqual(result.providers[0]?.updateState?.status, "unchanged");
+          assert.include(result.providers[0]?.updateState?.message ?? "", "still detects");
+        } finally {
+          globalThis.fetch = originalFetch;
+        }
       }),
   );
 
