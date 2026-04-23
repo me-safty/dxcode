@@ -799,21 +799,12 @@ function writeThreadShellState(
   }
 
   const previousSummary = state.sidebarThreadSummaryById[nextThread.shell.id];
-  const mergedSummary: SidebarThreadSummary = previousSummary
-    ? {
-        ...nextThread.summary,
-        hasPendingApprovals: previousSummary.hasPendingApprovals,
-        hasPendingUserInput: previousSummary.hasPendingUserInput,
-        hasActionableProposedPlan: previousSummary.hasActionableProposedPlan,
-      }
-    : nextThread.summary;
-
-  if (!sidebarThreadSummariesEqual(previousSummary, mergedSummary)) {
+  if (!sidebarThreadSummariesEqual(previousSummary, nextThread.summary)) {
     nextState = {
       ...nextState,
       sidebarThreadSummaryById: {
         ...nextState.sidebarThreadSummaryById,
-        [nextThread.shell.id]: mergedSummary,
+        [nextThread.shell.id]: nextThread.summary,
       },
     };
   }

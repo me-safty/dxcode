@@ -1342,7 +1342,19 @@ describe("incremental orchestration updates", () => {
   });
 });
 
-describe("shell events preserve detail-authoritative sidebar summary flags", () => {
+describe("shell events are authoritative for sidebar summary flags", () => {
+  // Post-f7fa62aa (shell snapshot queries), the server projection tracks
+  // pendingApprovalCount / pendingUserInputCount / hasActionableProposedPlan
+  // in SQL and updates them in the same transaction that persists the
+  // corresponding domain events. Every thread-aggregate event emits a fresh
+  // thread-upserted shell event derived from the updated projection, so the
+  // shell event's flags are always consistent with the detail stream state.
+  //
+  // Earlier MarCode code stickily preserved prior detail-derived flags across
+  // shell events to guard a theoretical race. That made resolved approvals
+  // linger in the sidebar indefinitely (ghost "Pending Approval" badges on
+  // completed threads). The shell event must win.
+
   function makeThreadUpsertedShellEvent(
     thread: Thread,
     overrides: Partial<OrchestrationThreadShell> = {},
@@ -1374,7 +1386,7 @@ describe("shell events preserve detail-authoritative sidebar summary flags", () 
     };
   }
 
-  it("keeps hasPendingUserInput after a thread-upserted shell event follows a detail activity", () => {
+  it("clears hasPendingUserInput when a later shell event reports the projection resolved it", () => {
     const thread = makeThread();
     const state = makeState(thread);
 
@@ -1424,11 +1436,10 @@ describe("shell events preserve detail-authoritative sidebar summary flags", () 
       localEnvironmentId,
     );
     const afterShellSummary = selectSidebarThreadSummaryByRef(afterShell, ref);
-    expect(afterShellSummary?.hasPendingUserInput).toBe(true);
-    expect(resolveThreadStatusPill({ thread: afterShellSummary! })?.label).toBe("Awaiting Input");
+    expect(afterShellSummary?.hasPendingUserInput).toBe(false);
   });
 
-  it("keeps hasActionableProposedPlan after a thread-upserted shell event follows a detail plan", () => {
+  it("clears hasActionableProposedPlan when a later shell event reports the projection resolved it", () => {
     const thread = makeThread({
       interactionMode: "plan",
       latestTurn: {
@@ -1470,7 +1481,6 @@ describe("shell events preserve detail-authoritative sidebar summary flags", () 
       localEnvironmentId,
     );
     const afterShellSummary = selectSidebarThreadSummaryByRef(afterShell, ref);
-    expect(afterShellSummary?.hasActionableProposedPlan).toBe(true);
-    expect(resolveThreadStatusPill({ thread: afterShellSummary! })?.label).toBe("Plan Ready");
+    expect(afterShellSummary?.hasActionableProposedPlan).toBe(false);
   });
 });
