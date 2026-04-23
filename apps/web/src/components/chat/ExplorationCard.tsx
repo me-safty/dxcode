@@ -145,9 +145,13 @@ function formatLineRange(input: Record<string, unknown> | undefined): string | n
   return null;
 }
 
-function explorationEntryHeading(entry: WorkLogEntry): string {
+function explorationEntryHeading(
+  entry: WorkLogEntry,
+  options?: { readonly pathMode?: "short" | "full" },
+): string {
   const input = entry.toolInput;
   const lower = entry.toolName?.toLowerCase();
+  const pathMode = options?.pathMode ?? "short";
   // Path source precedence: structured tool input → XML detail (Cursor/Codex
   // wrap tool output like `<path>/foo</path>`) → JSON-encoded detail.
   const pathFromInput = inputFilePath(input);
@@ -156,7 +160,13 @@ function explorationEntryHeading(entry: WorkLogEntry): string {
     ? extractFilePathFromValue(stripToolPrefix(entry.detail))
     : null;
   const resolvedPath = pathFromInput ?? pathFromXml ?? pathFromJsonDetail;
-  const shortPath = resolvedPath ? shortenPath(resolvedPath) : null;
+  // `short` collapses the project-rooted prefix for the inline row; `full`
+  // preserves the exact path the agent operated on, for the hover tooltip.
+  const shortPath = resolvedPath
+    ? pathMode === "full"
+      ? resolvedPath
+      : shortenPath(resolvedPath)
+    : null;
   const fileName = resolvedPath ? fileNameFromPath(resolvedPath) : null;
 
   // Route by specific tool name when we recognize it.
@@ -335,22 +345,11 @@ function ExplorationEntryRow(props: { entry: WorkLogEntry }) {
   const isRead = isReadEntry(entry);
   const Icon = isRead ? EyeIcon : SearchIcon;
   const heading = explorationEntryHeading(entry);
-  // Tooltip body: the full absolute path + any non-content detail, so users
-  // can hover to see everything that was truncated out of the inline heading.
-  const tooltipLines: string[] = [];
-  const input = entry.toolInput;
-  const fullPath =
-    inputFilePath(input) ??
-    extractPathFromXml(entry.detail) ??
-    (entry.detail ? extractFilePathFromValue(stripToolPrefix(entry.detail)) : null);
-  if (fullPath) tooltipLines.push(fullPath);
-  const pattern = input ? (inputStr(input, "pattern") ?? extractSearchQuery(input)) : null;
-  if (pattern) tooltipLines.push(`pattern: ${pattern}`);
-  const cleanedDetail = cleanDetailForTooltip(entry.detail);
-  if (cleanedDetail && cleanedDetail !== fullPath && cleanedDetail !== heading) {
-    tooltipLines.push(cleanedDetail);
-  }
-  const tooltipBody = tooltipLines.join("\n");
+  // Tooltip shows the same heading but with the FULL path, so hovering
+  // reveals whatever got truncated by the row's narrow layout (and shows
+  // the agent's actual absolute path, not just the project-relative form).
+  const fullHeading = explorationEntryHeading(entry, { pathMode: "full" });
+  const tooltipBody = fullHeading !== heading ? fullHeading : null;
 
   const rowContent = (
     <div className="flex items-center gap-2 rounded-lg px-1 py-0.5">
@@ -368,7 +367,7 @@ function ExplorationEntryRow(props: { entry: WorkLogEntry }) {
   return (
     <Tooltip>
       <TooltipTrigger render={rowContent} />
-      <TooltipPopup className="max-w-[min(90vw,640px)] whitespace-pre-wrap break-all text-[11px]">
+      <TooltipPopup className="max-w-[min(90vw,640px)] break-all text-[11px]">
         {tooltipBody}
       </TooltipPopup>
     </Tooltip>
