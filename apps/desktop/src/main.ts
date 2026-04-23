@@ -472,6 +472,10 @@ async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" |
     waitForHttpReady: () =>
       waitForBackendHttpReady(baseUrl, {
         timeoutMs: 60_000,
+        // Any non-5xx response means the backend is up and serving requests.
+        // In dev mode the root path returns a 302 redirect to the Vite dev URL,
+        // which would otherwise keep waitForHttpReady retrying until timeout.
+        isReady: (response) => response.status < 500,
       }),
     cancelHttpWait: cancelBackendReadinessWait,
   });
