@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseHostnameFromRemoteUrl, providerFromHostname } from "./RoutingGitHostCli";
+import { parseHostnameFromRemoteUrl, providerFromHostname } from "./RoutingGitHostCli.ts";
 
 describe("parseHostnameFromRemoteUrl", () => {
   it("extracts hostname from SSH URL", () => {

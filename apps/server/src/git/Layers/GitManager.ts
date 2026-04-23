@@ -29,7 +29,7 @@ import {
   type GitManagerShape,
   type GitRunStackedActionOptions,
 } from "../Services/GitManager.ts";
-import { GitCore, GitStatusDetails } from "../Services/GitCore.ts";
+import { GitCore, type GitStatusDetails } from "../Services/GitCore.ts";
 import { GitHostCli } from "../Services/GitHostCli.ts";
 import { TextGeneration } from "../Services/TextGeneration.ts";
 import { ProjectSetupScriptRunner } from "../../project/Services/ProjectSetupScriptRunner.ts";

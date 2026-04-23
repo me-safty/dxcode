@@ -9,8 +9,8 @@ import {
   readWindowState,
   resolveWindowBounds,
   writeWindowState,
-} from "./windowState";
-import type { WindowState } from "./windowState";
+} from "./windowState.ts";
+import type { WindowState } from "./windowState.ts";
 
 vi.mock("electron", () => ({
   screen: {

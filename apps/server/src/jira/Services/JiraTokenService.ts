@@ -1,5 +1,5 @@
 import { Context, Effect, Option, Stream } from "effect";
-import { JiraTokenError } from "../Errors";
+import { JiraTokenError } from "../Errors.ts";
 
 export interface JiraTokenSet {
   readonly accessToken: string;

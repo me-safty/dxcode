@@ -1,12 +1,12 @@
 import { Effect, FileSystem, Layer, Option, PubSub, Semaphore, Stream } from "effect";
-import { ServerConfig } from "../../config";
-import { JiraTokenError } from "../Errors";
+import { ServerConfig } from "../../config.ts";
+import { JiraTokenError } from "../Errors.ts";
 import {
   JiraTokenService,
   type JiraTokenServiceShape,
   type JiraTokenSet,
-} from "../Services/JiraTokenService";
-import { decryptTokens, deriveKey, encryptTokens } from "../crypto";
+} from "../Services/JiraTokenService.ts";
+import { decryptTokens, deriveKey, encryptTokens } from "../crypto.ts";
 
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
@@ -182,7 +182,7 @@ export const JiraTokenServiceLive = Layer.effect(
       }),
     );
 
-    const saveTokens: JiraTokenServiceShape["saveTokens"] = (tokens) =>
+    const saveTokens: JiraTokenServiceShape["saveTokens"] = (tokens: JiraTokenSet) =>
       semaphore.withPermits(1)(
         Effect.gen(function* () {
           cachedTokens = tokens;

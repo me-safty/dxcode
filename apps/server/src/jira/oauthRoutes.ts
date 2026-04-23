@@ -3,11 +3,11 @@ import * as http from "node:http";
 import { Effect, Option } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
-import { ServerConfig, type ServerConfigShape } from "../config";
-import { JiraTokenService } from "./Services/JiraTokenService";
-import type { JiraTokenSet } from "./Services/JiraTokenService";
-import { JiraApiClient } from "./Services/JiraApiClient";
-import { JiraOAuthError, JiraTokenError, JiraApiError } from "./Errors";
+import { ServerConfig, type ServerConfigShape } from "../config.ts";
+import { JiraTokenService } from "./Services/JiraTokenService.ts";
+import type { JiraTokenSet } from "./Services/JiraTokenService.ts";
+import { JiraApiClient } from "./Services/JiraApiClient.ts";
+import { JiraOAuthError, JiraTokenError, JiraApiError } from "./Errors.ts";
 
 const ATLASSIAN_AUTHORIZE_URL = "https://auth.atlassian.com/authorize";
 
