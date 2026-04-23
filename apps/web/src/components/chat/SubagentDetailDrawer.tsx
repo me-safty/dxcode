@@ -277,16 +277,19 @@ const ProgressTimeline = memo(function ProgressTimeline(props: { task: AgentTask
   );
 });
 
-const PromptSection = memo(function PromptSection(props: { prompt: string }) {
+const PromptSection = memo(function PromptSection(props: {
+  prompt: string;
+  markdownCwd: string | undefined;
+}) {
   return (
     <Section
       label="Prompt"
       icon={<MessageSquareTextIcon className="size-3.5" />}
       copyText={props.prompt}
     >
-      <pre className="whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-3 font-mono text-xs leading-relaxed text-foreground/80">
-        {props.prompt}
-      </pre>
+      <div className="rounded-lg bg-muted/40 p-3 text-sm">
+        <ChatMarkdown text={props.prompt} cwd={props.markdownCwd} />
+      </div>
     </Section>
   );
 });
@@ -429,7 +432,7 @@ export const SubagentDetailDrawer = memo(function SubagentDetailDrawer(
             <DrawerHeader task={task} />
             <SheetPanel>
               <div className="space-y-6">
-                {task.prompt && <PromptSection prompt={task.prompt} />}
+                {task.prompt && <PromptSection prompt={task.prompt} markdownCwd={markdownCwd} />}
                 <ProgressTimeline task={task} />
                 <ResponseSection
                   response={task.response}
