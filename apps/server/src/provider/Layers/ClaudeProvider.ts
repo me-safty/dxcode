@@ -27,11 +27,11 @@ import {
   providerModelsFromSettings,
   spawnAndCollect,
   type CommandResult,
-} from "../providerSnapshot";
-import { compareCliVersions } from "../cliVersion";
-import { makeManagedServerProvider } from "../makeManagedServerProvider";
-import { ClaudeProvider } from "../Services/ClaudeProvider";
-import { ServerSettingsService } from "../../serverSettings";
+} from "../providerSnapshot.ts";
+import { compareCliVersions } from "../cliVersion.ts";
+import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import { ClaudeProvider } from "../Services/ClaudeProvider.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { ServerSettingsError } from "@marcode/contracts";
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = {
@@ -750,6 +750,46 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   });
 });
 
+const makePendingClaudeProvider = (claudeSettings: ClaudeSettings): ServerProvider => {
+  const checkedAt = new Date().toISOString();
+  const models = providerModelsFromSettings(
+    BUILT_IN_MODELS,
+    PROVIDER,
+    claudeSettings.customModels,
+    DEFAULT_CLAUDE_MODEL_CAPABILITIES,
+  );
+
+  if (!claudeSettings.enabled) {
+    return buildServerProvider({
+      provider: PROVIDER,
+      enabled: false,
+      checkedAt,
+      models,
+      probe: {
+        installed: false,
+        version: null,
+        status: "warning",
+        auth: { status: "unknown" },
+        message: "Claude is disabled in T3 Code settings.",
+      },
+    });
+  }
+
+  return buildServerProvider({
+    provider: PROVIDER,
+    enabled: true,
+    checkedAt,
+    models,
+    probe: {
+      installed: false,
+      version: null,
+      status: "warning",
+      auth: { status: "unknown" },
+      message: "Claude provider status has not been checked in this session yet.",
+    },
+  });
+};
+
 export const ClaudeProviderLive = Layer.effect(
   ClaudeProvider,
   Effect.gen(function* () {
@@ -785,6 +825,7 @@ export const ClaudeProviderLive = Layer.effect(
         Stream.map((settings) => settings.providers.claudeAgent),
       ),
       haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
+      initialSnapshot: makePendingClaudeProvider,
       checkProvider,
     });
   }),

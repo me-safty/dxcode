@@ -39,7 +39,7 @@ import {
   Cause,
 } from "effect";
 import * as Semaphore from "effect/Semaphore";
-import { ServerConfig } from "./config";
+import { ServerConfig } from "./config.ts";
 import { type DeepPartial, deepMerge } from "@marcode/shared/Struct";
 import { fromLenientJson } from "@marcode/shared/schemaJson";
 import { applyServerSettingsPatch } from "@marcode/shared/serverSettings";

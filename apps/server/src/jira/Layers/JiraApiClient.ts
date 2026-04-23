@@ -1,18 +1,23 @@
 import { Effect, Layer, Option } from "effect";
-import { ServerConfig } from "../../config";
+import { ServerConfig } from "../../config.ts";
 import type {
   JiraConnectionStatus,
+  JiraGetAttachmentInput,
   JiraGetAttachmentResult,
+  JiraGetIssueInput,
   JiraIssue,
+  JiraListBoardsInput,
   JiraListBoardsResult,
+  JiraListIssuesInput,
   JiraListIssuesResult,
+  JiraListSprintsInput,
   JiraListSprintsResult,
   JiraSite,
   JiraUser,
 } from "@marcode/contracts";
-import { JiraApiClient, type JiraApiClientShape } from "../Services/JiraApiClient";
-import { JiraTokenService } from "../Services/JiraTokenService";
-import { JiraApiError } from "../Errors";
+import { JiraApiClient, type JiraApiClientShape } from "../Services/JiraApiClient.ts";
+import { JiraTokenService } from "../Services/JiraTokenService.ts";
+import { JiraApiError } from "../Errors.ts";
 
 const ATLASSIAN_API_BASE = "https://api.atlassian.com";
 
@@ -166,7 +171,7 @@ export const JiraApiClientLive = Layer.effect(
       } as unknown as JiraConnectionStatus;
     });
 
-    const listBoards: JiraApiClientShape["listBoards"] = (input) =>
+    const listBoards: JiraApiClientShape["listBoards"] = (input: JiraListBoardsInput) =>
       Effect.gen(function* () {
         const response = yield* authedFetch(
           `/ex/jira/${input.cloudId}/rest/api/3/project/search?maxResults=100&orderBy=name&status=live`,
@@ -187,10 +192,10 @@ export const JiraApiClientLive = Layer.effect(
         } as JiraListBoardsResult;
       });
 
-    const listSprints: JiraApiClientShape["listSprints"] = (_input) =>
+    const listSprints: JiraApiClientShape["listSprints"] = (_input: JiraListSprintsInput) =>
       Effect.succeed({ sprints: [] } as unknown as JiraListSprintsResult);
 
-    const listIssues: JiraApiClientShape["listIssues"] = (input) =>
+    const listIssues: JiraApiClientShape["listIssues"] = (input: JiraListIssuesInput) =>
       Effect.gen(function* () {
         const startAt = input.startAt ?? 0;
         const maxResults = input.maxResults ?? 50;
@@ -306,7 +311,7 @@ export const JiraApiClientLive = Layer.effect(
         } as unknown as JiraListIssuesResult;
       });
 
-    const getIssue: JiraApiClientShape["getIssue"] = (input) =>
+    const getIssue: JiraApiClientShape["getIssue"] = (input: JiraGetIssueInput) =>
       Effect.gen(function* () {
         const response = yield* authedFetch(
           `/ex/jira/${input.cloudId}/rest/api/3/issue/${input.issueKey}?fields=summary,status,issuetype,priority,assignee,description,labels,attachment,created,updated`,
@@ -320,7 +325,7 @@ export const JiraApiClientLive = Layer.effect(
         )(data) as unknown as JiraIssue;
       });
 
-    const getAttachment: JiraApiClientShape["getAttachment"] = (input) =>
+    const getAttachment: JiraApiClientShape["getAttachment"] = (input: JiraGetAttachmentInput) =>
       Effect.gen(function* () {
         const metaResponse = yield* authedFetch(
           `/ex/jira/${input.cloudId}/rest/api/3/attachment/${input.attachmentId}`,

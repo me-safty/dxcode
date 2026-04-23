@@ -4,7 +4,7 @@ const shared = {
   format: "cjs" as const,
   outDir: "dist-electron",
   sourcemap: true,
-  outExtensions: () => ({ js: ".js" }),
+  outExtensions: () => ({ js: ".cjs" }),
 };
 
 const EMBEDDED_JIRA_KEYS = ["MARCODE_JIRA_REDIRECT_URI", "MARCODE_JIRA_TOKEN_PROXY_URL"] as const;

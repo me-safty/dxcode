@@ -1,13 +1,13 @@
 import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
-import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas";
+import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 import {
   ClaudeModelOptions,
   CodexModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-} from "./model";
-import { ModelSelection, ProviderKind } from "./orchestration";
+} from "./model.ts";
+import { ModelSelection, ProviderKind } from "./orchestration.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 

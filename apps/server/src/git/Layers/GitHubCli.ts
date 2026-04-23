@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Effect, Layer, Schema, SchemaIssue } from "effect";
 import { PositiveInt, TrimmedNonEmptyString } from "@marcode/contracts";
 
-import { runProcess } from "../../processRunner";
+import { runProcess } from "../../processRunner.ts";
 import { GitHostCliError } from "@marcode/contracts";
 import {
   GitHubCli,

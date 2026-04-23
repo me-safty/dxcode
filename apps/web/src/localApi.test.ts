@@ -31,7 +31,7 @@ function registerListener<T>(listeners: Set<(event: T) => void>, listener: (even
 }
 
 const terminalEventListeners = new Set<(event: TerminalEvent) => void>();
-const shellStreamListeners = new Set<(event: unknown) => void>();
+const shellStreamListeners = new Set<(event: OrchestrationShellStreamItem) => void>();
 const threadStreamListeners = new Set<(event: unknown) => void>();
 const gitStatusListeners = new Set<(event: GitStatusResult) => void>();
 
@@ -102,11 +102,11 @@ const rpcClientMock = {
     getTurnDiff: vi.fn(),
     getFullThreadDiff: vi.fn(),
     replayEvents: vi.fn(),
-    subscribeShell: vi.fn((listener: (item: unknown) => void) =>
-      registerListener(shellStreamListeners as never, listener as never),
+    subscribeShell: vi.fn((listener: (event: OrchestrationShellStreamItem) => void) =>
+      registerListener(shellStreamListeners, listener),
     ),
     subscribeThread: vi.fn((_input: unknown, listener: (item: unknown) => void) =>
-      registerListener(threadStreamListeners as never, listener as never),
+      registerListener(threadStreamListeners, listener),
     ),
   },
 };

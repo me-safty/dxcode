@@ -13,7 +13,7 @@ import type {
   JiraListSprintsResult,
   JiraSite,
 } from "@marcode/contracts";
-import { JiraApiError, JiraTokenError } from "../Errors";
+import { JiraApiError, JiraTokenError } from "../Errors.ts";
 
 export interface JiraApiClientShape {
   readonly getConnectionStatus: Effect.Effect<JiraConnectionStatus, JiraApiError | JiraTokenError>;

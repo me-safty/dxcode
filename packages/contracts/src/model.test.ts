@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MODEL, DEFAULT_MODEL_BY_PROVIDER } from "./model";
+import { DEFAULT_MODEL, DEFAULT_MODEL_BY_PROVIDER } from "./model.ts";
 
 describe("model constants", () => {
   it("DEFAULT_MODEL equals claude-opus-4-6", () => {

@@ -20,7 +20,7 @@ import {
   THREAD_JUMP_KEYBINDING_COMMANDS,
   type ServerConfigIssue,
 } from "@marcode/contracts";
-import { Mutable } from "effect/Types";
+import type { Mutable } from "effect/Types";
 import {
   Array,
   Cache,
@@ -45,7 +45,7 @@ import {
   Stream,
 } from "effect";
 import * as Semaphore from "effect/Semaphore";
-import { ServerConfig } from "./config";
+import { ServerConfig } from "./config.ts";
 import { fromLenientJson } from "@marcode/shared/schemaJson";
 
 type WhenToken =

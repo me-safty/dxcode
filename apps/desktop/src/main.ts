@@ -37,13 +37,13 @@ import { autoUpdater } from "electron-updater";
 import type { ContextMenuItem } from "@marcode/contracts";
 import { RotatingFileSink } from "@marcode/shared/logging";
 import { parsePersistedServerObservabilitySettings } from "@marcode/shared/serverSettings";
-import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort";
+import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort.ts";
 import {
   DEFAULT_DESKTOP_SETTINGS,
   readDesktopSettings,
   setDesktopServerExposurePreference,
   writeDesktopSettings,
-} from "./desktopSettings";
+} from "./desktopSettings.ts";
 import {
   readClientSettings,
   readSavedEnvironmentRegistry,
@@ -52,12 +52,14 @@ import {
   writeClientSettings,
   writeSavedEnvironmentRegistry,
   writeSavedEnvironmentSecret,
-} from "./clientPersistence";
-import { isBackendReadinessAborted, waitForHttpReady } from "./backendReadiness";
-import { showDesktopConfirmDialog } from "./confirmDialog";
-import { resolveDesktopServerExposure } from "./serverExposure";
-import { syncShellEnvironment } from "./syncShellEnvironment";
-import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
+} from "./clientPersistence.ts";
+import { isBackendReadinessAborted, waitForHttpReady } from "./backendReadiness.ts";
+import { showDesktopConfirmDialog } from "./confirmDialog.ts";
+import { resolveDesktopServerExposure } from "./serverExposure.ts";
+import { syncShellEnvironment } from "./syncShellEnvironment.ts";
+import { waitForBackendStartupReady } from "./backendStartupReadiness.ts";
+import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState.ts";
+import { ServerListeningDetector } from "./serverListeningDetector.ts";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -69,10 +71,11 @@ import {
   reduceDesktopUpdateStateOnInstallFailure,
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
-} from "./updateMachine";
-import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
-import { readWindowState, resolveWindowBounds, writeWindowState } from "./windowState";
-import type { WindowState } from "./windowState";
+} from "./updateMachine.ts";
+import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch.ts";
+import { readWindowState, resolveWindowBounds, writeWindowState } from "./windowState.ts";
+import type { WindowState } from "./windowState.ts";
+import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal.ts";
 
 syncShellEnvironment();
 
@@ -206,6 +209,8 @@ let backendWsUrl = "";
 let backendEndpointUrl: string | null = null;
 let backendAdvertisedHost: string | null = null;
 let backendReadinessAbortController: AbortController | null = null;
+let backendInitialWindowOpenInFlight: Promise<void> | null = null;
+let backendListeningDetector: ServerListeningDetector | null = null;
 let restartAttempt = 0;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let isQuitting = false;
@@ -436,13 +441,17 @@ function getSafeTheme(rawTheme: unknown): DesktopTheme | null {
   return null;
 }
 
-async function waitForBackendHttpReady(baseUrl: string): Promise<void> {
+async function waitForBackendHttpReady(
+  baseUrl: string,
+  options?: Parameters<typeof waitForHttpReady>[1],
+): Promise<void> {
   cancelBackendReadinessWait();
   const controller = new AbortController();
   backendReadinessAbortController = controller;
 
   try {
     await waitForHttpReady(baseUrl, {
+      ...options,
       signal: controller.signal,
     });
   } finally {
@@ -455,6 +464,54 @@ async function waitForBackendHttpReady(baseUrl: string): Promise<void> {
 function cancelBackendReadinessWait(): void {
   backendReadinessAbortController?.abort();
   backendReadinessAbortController = null;
+}
+
+async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" | "http"> {
+  return await waitForBackendStartupReady({
+    listeningPromise: backendListeningDetector?.promise ?? null,
+    waitForHttpReady: () =>
+      waitForBackendHttpReady(baseUrl, {
+        timeoutMs: 60_000,
+        // Any non-5xx response means the backend is up and serving requests.
+        // In dev mode the root path returns a 302 redirect to the Vite dev URL,
+        // which would otherwise keep waitForHttpReady retrying until timeout.
+        isReady: (response) => response.status < 500,
+      }),
+    cancelHttpWait: cancelBackendReadinessWait,
+  });
+}
+
+function ensureInitialBackendWindowOpen(): void {
+  const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+  if (isDevelopment || existingWindow !== null || backendInitialWindowOpenInFlight !== null) {
+    return;
+  }
+
+  const nextOpen = waitForBackendWindowReady(backendHttpUrl)
+    .then((source) => {
+      writeDesktopLogHeader(`bootstrap backend ready source=${source}`);
+      if (mainWindow ?? BrowserWindow.getAllWindows()[0]) {
+        return;
+      }
+      mainWindow = createWindow();
+      writeDesktopLogHeader("bootstrap main window created");
+    })
+    .catch((error) => {
+      if (isBackendReadinessAborted(error)) {
+        return;
+      }
+      writeDesktopLogHeader(
+        `bootstrap backend readiness warning message=${formatErrorMessage(error)}`,
+      );
+      console.warn("[desktop] backend readiness check timed out during packaged bootstrap", error);
+    })
+    .finally(() => {
+      if (backendInitialWindowOpenInFlight === nextOpen) {
+        backendInitialWindowOpenInFlight = null;
+      }
+    });
+
+  backendInitialWindowOpenInFlight = nextOpen;
 }
 
 function writeDesktopStreamChunk(
@@ -534,14 +591,16 @@ function initializePackagedLogging(): void {
 }
 
 function captureBackendOutput(child: ChildProcess.ChildProcess): void {
-  if (!app.isPackaged || backendLogSink === null) return;
-  const writeChunk = (chunk: unknown): void => {
-    if (!backendLogSink) return;
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "utf8");
-    backendLogSink.write(buffer);
+  const attachStream = (stream: NodeJS.ReadableStream | null | undefined): void => {
+    stream?.on("data", (chunk: unknown) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "utf8");
+      backendLogSink?.write(buffer);
+      backendListeningDetector?.push(buffer);
+    });
   };
-  child.stdout?.on("data", writeChunk);
-  child.stderr?.on("data", writeChunk);
+
+  attachStream(child.stdout);
+  attachStream(child.stderr);
 }
 
 initializePackagedLogging();
@@ -1296,7 +1355,7 @@ function startBackend(): void {
     return;
   }
 
-  const captureBackendLogs = app.isPackaged && backendLogSink !== null;
+  const captureBackendLogs = !isDevelopment;
   const child = ChildProcess.spawn(process.execPath, [backendEntry, "--bootstrap-fd", "3"], {
     cwd: resolveBackendCwd(),
     // In Electron main, process.execPath points to the Electron binary.
@@ -1333,6 +1392,8 @@ function startBackend(): void {
     scheduleBackendRestart("missing desktop bootstrap pipe");
     return;
   }
+  const listeningDetector = new ServerListeningDetector();
+  backendListeningDetector = listeningDetector;
   backendProcess = child;
   let backendSessionClosed = false;
   const closeBackendSession = (details: string) => {
@@ -1351,6 +1412,10 @@ function startBackend(): void {
   });
 
   child.on("error", (error) => {
+    if (backendListeningDetector === listeningDetector) {
+      listeningDetector.fail(error);
+      backendListeningDetector = null;
+    }
     const wasExpected = expectedBackendExitChildren.has(child);
     if (backendProcess === child) {
       backendProcess = null;
@@ -1363,6 +1428,14 @@ function startBackend(): void {
   });
 
   child.on("exit", (code, signal) => {
+    if (backendListeningDetector === listeningDetector) {
+      listeningDetector.fail(
+        new Error(
+          `backend exited before logging readiness (code=${code ?? "null"} signal=${signal ?? "null"})`,
+        ),
+      );
+      backendListeningDetector = null;
+    }
     const wasExpected = expectedBackendExitChildren.has(child);
     if (backendProcess === child) {
       backendProcess = null;
@@ -1374,10 +1447,13 @@ function startBackend(): void {
     const reason = `code=${code ?? "null"} signal=${signal ?? "null"}`;
     scheduleBackendRestart(reason);
   });
+
+  ensureInitialBackendWindowOpen();
 }
 
 function stopBackend(): void {
   cancelBackendReadinessWait();
+  backendListeningDetector = null;
   if (restartTimer) {
     clearTimeout(restartTimer);
     restartTimer = null;
@@ -1801,14 +1877,14 @@ function createWindow(options?: { deferLoad?: boolean }): BrowserWindow {
     ...restoredBounds,
     minWidth: 840,
     minHeight: 620,
-    show: isDevelopment,
+    show: false,
     autoHideMenuBar: true,
     backgroundColor: getInitialWindowBackgroundColor(),
     ...getIconOption(),
     title: APP_DISPLAY_NAME,
     ...getWindowTitleBarOptions(),
     webPreferences: {
-      preload: Path.join(__dirname, "preload.js"),
+      preload: Path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -1897,22 +1973,26 @@ function createWindow(options?: { deferLoad?: boolean }): BrowserWindow {
   window.on("leave-full-screen", () => {
     window.webContents.send(FULLSCREEN_STATE_CHANNEL, false);
   });
-  if (!isDevelopment) {
-    window.once("ready-to-show", () => {
-      revealWindow(window);
-    });
+
+  // On Linux/Wayland with `show: false`, Electron's `ready-to-show` only
+  // fires after `show()` is called, deadlocking the standard "wait for
+  // ready, then show" pattern. Add `did-finish-load` as a Linux-only
+  // fallback so the window still surfaces once the renderer has loaded
+  // the page. Other platforms keep the no-flash `ready-to-show` path,
+  // since `did-finish-load` typically fires before the first paint there.
+  const revealSubscribers: RevealSubscription[] = [(fire) => window.once("ready-to-show", fire)];
+  if (process.platform === "linux") {
+    revealSubscribers.push((fire) => window.webContents.once("did-finish-load", fire));
   }
+  bindFirstRevealTrigger(revealSubscribers, () => revealWindow(window));
 
   if (isDevelopment) {
     if (!options?.deferLoad) {
       void window.loadURL(resolveDesktopDevServerUrl());
     }
     window.webContents.openDevTools({ mode: "detach" });
-    setImmediate(() => {
-      revealWindow(window);
-    });
   } else {
-    void window.loadURL(resolveDesktopWindowUrl());
+    void window.loadURL(backendHttpUrl);
   }
 
   window.on("closed", () => {
@@ -1922,14 +2002,6 @@ function createWindow(options?: { deferLoad?: boolean }): BrowserWindow {
   });
 
   return window;
-}
-
-function resolveDesktopWindowUrl(): string {
-  if (backendHttpUrl) {
-    return backendHttpUrl;
-  }
-
-  return `${DESKTOP_SCHEME}://app`;
 }
 
 // Override Electron's userData path before the `ready` event so that
@@ -1989,9 +2061,9 @@ async function bootstrap(): Promise<void> {
   if (isDevelopment) {
     mainWindow = createWindow({ deferLoad: true });
     writeDesktopLogHeader("bootstrap main window created (deferred load)");
-    void waitForBackendHttpReady(backendHttpUrl)
-      .then(() => {
-        writeDesktopLogHeader("bootstrap backend ready");
+    void waitForBackendWindowReady(backendHttpUrl)
+      .then((source) => {
+        writeDesktopLogHeader(`bootstrap backend ready source=${source}`);
         if (mainWindow && !mainWindow.isDestroyed()) {
           void mainWindow.loadURL(resolveDesktopDevServerUrl());
           writeDesktopLogHeader("bootstrap dev URL loaded after backend ready");
@@ -2012,10 +2084,7 @@ async function bootstrap(): Promise<void> {
     return;
   }
 
-  await waitForBackendHttpReady(backendHttpUrl);
-  writeDesktopLogHeader("bootstrap backend ready");
-  mainWindow = createWindow();
-  writeDesktopLogHeader("bootstrap main window created");
+  ensureInitialBackendWindowOpen();
 }
 
 app.on("before-quit", () => {
@@ -2052,7 +2121,11 @@ app
         revealWindow(existingWindow);
         return;
       }
-      mainWindow = createWindow();
+      if (isDevelopment) {
+        mainWindow = createWindow();
+        return;
+      }
+      ensureInitialBackendWindowOpen();
     });
   })
   .catch((error) => {

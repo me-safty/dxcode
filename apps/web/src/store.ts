@@ -4,7 +4,6 @@ import type {
   OrchestrationCheckpointSummary,
   OrchestrationEvent,
   OrchestrationMessage,
-  OrchestrationProjectShell,
   OrchestrationProposedPlan,
   OrchestrationReadModel,
   OrchestrationSession,
@@ -180,7 +179,9 @@ function mapTurnDiffSummary(checkpoint: OrchestrationCheckpointSummary): TurnDif
 }
 
 function mapProject(
-  project: OrchestrationReadModel["projects"][number],
+  project:
+    | OrchestrationReadModel["projects"][number]
+    | OrchestrationShellSnapshot["projects"][number],
   environmentId: EnvironmentId,
 ): Project {
   return {
@@ -223,26 +224,6 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     additionalDirectories: [...(thread.additionalDirectories ?? [])],
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
-  };
-}
-
-function mapProjectShell(
-  project: OrchestrationProjectShell,
-  environmentId: EnvironmentId,
-): Project {
-  return {
-    id: project.id,
-    environmentId,
-    name: project.title,
-    cwd: project.workspaceRoot,
-    repositoryIdentity: project.repositoryIdentity ?? null,
-    defaultModelSelection: project.defaultModelSelection
-      ? normalizeModelSelection(project.defaultModelSelection)
-      : null,
-    createdAt: project.createdAt,
-    updatedAt: project.updatedAt,
-    scripts: mapProjectScripts(project.scripts),
-    jiraBoard: project.jiraBoard ?? null,
   };
 }
 
@@ -818,21 +799,12 @@ function writeThreadShellState(
   }
 
   const previousSummary = state.sidebarThreadSummaryById[nextThread.shell.id];
-  const mergedSummary: SidebarThreadSummary = previousSummary
-    ? {
-        ...nextThread.summary,
-        hasPendingApprovals: previousSummary.hasPendingApprovals,
-        hasPendingUserInput: previousSummary.hasPendingUserInput,
-        hasActionableProposedPlan: previousSummary.hasActionableProposedPlan,
-      }
-    : nextThread.summary;
-
-  if (!sidebarThreadSummariesEqual(previousSummary, mergedSummary)) {
+  if (!sidebarThreadSummariesEqual(previousSummary, nextThread.summary)) {
     nextState = {
       ...nextState,
       sidebarThreadSummaryById: {
         ...nextState.sidebarThreadSummaryById,
-        [nextThread.shell.id]: mergedSummary,
+        [nextThread.shell.id]: nextThread.summary,
       },
     };
   }
@@ -1194,28 +1166,12 @@ function syncEnvironmentReadModel(
   };
 }
 
-export function syncServerReadModel(
-  state: AppState,
-  readModel: OrchestrationReadModel,
-  environmentId: EnvironmentId,
-): AppState {
-  return commitEnvironmentState(
-    state,
-    environmentId,
-    syncEnvironmentReadModel(
-      getStoredEnvironmentState(state, environmentId),
-      readModel,
-      environmentId,
-    ),
-  );
-}
-
 function syncEnvironmentShellSnapshot(
   state: EnvironmentState,
   snapshot: OrchestrationShellSnapshot,
   environmentId: EnvironmentId,
 ): EnvironmentState {
-  const nextProjects = snapshot.projects.map((project) => mapProjectShell(project, environmentId));
+  const nextProjects = snapshot.projects.map((project) => mapProject(project, environmentId));
   const nextThreadIds = new Set(snapshot.threads.map((thread) => thread.id));
   let nextState: EnvironmentState = {
     ...state,
@@ -1248,6 +1204,22 @@ function syncEnvironmentShellSnapshot(
   }
 
   return nextState;
+}
+
+export function syncServerReadModel(
+  state: AppState,
+  readModel: OrchestrationReadModel,
+  environmentId: EnvironmentId,
+): AppState {
+  return commitEnvironmentState(
+    state,
+    environmentId,
+    syncEnvironmentReadModel(
+      getStoredEnvironmentState(state, environmentId),
+      readModel,
+      environmentId,
+    ),
+  );
 }
 
 export function syncServerShellSnapshot(
@@ -1779,22 +1751,6 @@ function applyEnvironmentOrchestrationEvent(
   return state;
 }
 
-export function applyOrchestrationEvents(
-  state: AppState,
-  events: ReadonlyArray<OrchestrationEvent>,
-  environmentId: EnvironmentId,
-): AppState {
-  if (events.length === 0) {
-    return state;
-  }
-  const currentEnvironmentState = getStoredEnvironmentState(state, environmentId);
-  const nextEnvironmentState = events.reduce(
-    (nextState, event) => applyEnvironmentOrchestrationEvent(nextState, event, environmentId),
-    currentEnvironmentState,
-  );
-  return commitEnvironmentState(state, environmentId, nextEnvironmentState);
-}
-
 function applyEnvironmentShellEvent(
   state: EnvironmentState,
   event: OrchestrationShellStreamEvent,
@@ -1802,7 +1758,7 @@ function applyEnvironmentShellEvent(
 ): EnvironmentState {
   switch (event.kind) {
     case "project-upserted": {
-      const nextProject = mapProjectShell(event.project, environmentId);
+      const nextProject = mapProject(event.project, environmentId);
       const existingProjectId =
         state.projectIds.find(
           (projectId) =>
@@ -1854,6 +1810,22 @@ function applyEnvironmentShellEvent(
     case "thread-removed":
       return removeThreadState(state, event.threadId);
   }
+}
+
+export function applyOrchestrationEvents(
+  state: AppState,
+  events: ReadonlyArray<OrchestrationEvent>,
+  environmentId: EnvironmentId,
+): AppState {
+  if (events.length === 0) {
+    return state;
+  }
+  const currentEnvironmentState = getStoredEnvironmentState(state, environmentId);
+  const nextEnvironmentState = events.reduce(
+    (nextState, event) => applyEnvironmentOrchestrationEvent(nextState, event, environmentId),
+    currentEnvironmentState,
+  );
+  return commitEnvironmentState(state, environmentId, nextEnvironmentState);
 }
 
 export function applyShellEvent(

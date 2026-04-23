@@ -5,6 +5,7 @@ import {
   EnvironmentId,
   EventId,
   MessageId,
+  type OrchestrationShellSnapshot,
   ProjectId,
   ThreadId,
   TurnId,
@@ -28,6 +29,7 @@ import {
   setThreadBranch,
   selectThreadsAcrossEnvironments,
   syncServerReadModel,
+  syncServerShellSnapshot,
   type AppState,
   type EnvironmentState,
 } from "./store";
@@ -504,6 +506,85 @@ describe("store read model sync", () => {
       localEnvironmentId,
     );
 
+    expect(localEnvironmentStateOf(next).bootstrapComplete).toBe(true);
+  });
+
+  it("updates shell state without discarding hydrated thread detail", () => {
+    const initialState = makeState(
+      makeThread({
+        title: "Initial thread",
+        messages: [
+          {
+            id: MessageId.make("message-1"),
+            role: "assistant",
+            text: "hydrated body",
+            createdAt: "2026-02-13T00:00:01.000Z",
+            completedAt: "2026-02-13T00:00:01.000Z",
+            streaming: false,
+          },
+        ],
+      }),
+    );
+    const shellSnapshot: OrchestrationShellSnapshot = {
+      snapshotSequence: 2,
+      projects: [
+        {
+          id: ProjectId.make("project-1"),
+          title: "Project",
+          workspaceRoot: "/tmp/project",
+          repositoryIdentity: null,
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          scripts: [],
+          jiraBoard: null,
+          createdAt: "2026-02-13T00:00:00.000Z",
+          updatedAt: "2026-02-13T00:00:00.000Z",
+        },
+      ],
+      threads: [
+        {
+          id: ThreadId.make("thread-1"),
+          projectId: ProjectId.make("project-1"),
+          title: "Renamed thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: "feature/renamed",
+          worktreePath: null,
+          additionalDirectories: [],
+          latestTurn: null,
+          createdAt: "2026-02-13T00:00:00.000Z",
+          updatedAt: "2026-02-13T00:00:02.000Z",
+          archivedAt: null,
+          session: null,
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+        },
+      ],
+      updatedAt: "2026-02-13T00:00:02.000Z",
+    };
+
+    const next = syncServerShellSnapshot(initialState, shellSnapshot, localEnvironmentId);
+    const thread = selectThreadByRef(
+      next,
+      scopeThreadRef(localEnvironmentId, ThreadId.make("thread-1")),
+    );
+
+    expect(thread?.title).toBe("Renamed thread");
+    expect(thread?.branch).toBe("feature/renamed");
+    expect(thread?.messages).toEqual([
+      expect.objectContaining({
+        id: MessageId.make("message-1"),
+        text: "hydrated body",
+      }),
+    ]);
     expect(localEnvironmentStateOf(next).bootstrapComplete).toBe(true);
   });
 
@@ -1261,7 +1342,19 @@ describe("incremental orchestration updates", () => {
   });
 });
 
-describe("shell events preserve detail-authoritative sidebar summary flags", () => {
+describe("shell events are authoritative for sidebar summary flags", () => {
+  // Post-f7fa62aa (shell snapshot queries), the server projection tracks
+  // pendingApprovalCount / pendingUserInputCount / hasActionableProposedPlan
+  // in SQL and updates them in the same transaction that persists the
+  // corresponding domain events. Every thread-aggregate event emits a fresh
+  // thread-upserted shell event derived from the updated projection, so the
+  // shell event's flags are always consistent with the detail stream state.
+  //
+  // Earlier MarCode code stickily preserved prior detail-derived flags across
+  // shell events to guard a theoretical race. That made resolved approvals
+  // linger in the sidebar indefinitely (ghost "Pending Approval" badges on
+  // completed threads). The shell event must win.
+
   function makeThreadUpsertedShellEvent(
     thread: Thread,
     overrides: Partial<OrchestrationThreadShell> = {},
@@ -1293,7 +1386,7 @@ describe("shell events preserve detail-authoritative sidebar summary flags", () 
     };
   }
 
-  it("keeps hasPendingUserInput after a thread-upserted shell event follows a detail activity", () => {
+  it("clears hasPendingUserInput when a later shell event reports the projection resolved it", () => {
     const thread = makeThread();
     const state = makeState(thread);
 
@@ -1343,11 +1436,10 @@ describe("shell events preserve detail-authoritative sidebar summary flags", () 
       localEnvironmentId,
     );
     const afterShellSummary = selectSidebarThreadSummaryByRef(afterShell, ref);
-    expect(afterShellSummary?.hasPendingUserInput).toBe(true);
-    expect(resolveThreadStatusPill({ thread: afterShellSummary! })?.label).toBe("Awaiting Input");
+    expect(afterShellSummary?.hasPendingUserInput).toBe(false);
   });
 
-  it("keeps hasActionableProposedPlan after a thread-upserted shell event follows a detail plan", () => {
+  it("clears hasActionableProposedPlan when a later shell event reports the projection resolved it", () => {
     const thread = makeThread({
       interactionMode: "plan",
       latestTurn: {
@@ -1389,7 +1481,6 @@ describe("shell events preserve detail-authoritative sidebar summary flags", () 
       localEnvironmentId,
     );
     const afterShellSummary = selectSidebarThreadSummaryByRef(afterShell, ref);
-    expect(afterShellSummary?.hasActionableProposedPlan).toBe(true);
-    expect(resolveThreadStatusPill({ thread: afterShellSummary! })?.label).toBe("Plan Ready");
+    expect(afterShellSummary?.hasActionableProposedPlan).toBe(false);
   });
 });

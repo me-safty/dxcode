@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas";
+import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 export const JiraCloudId = TrimmedNonEmptyString.pipe(Schema.brand("JiraCloudId"));
 export type JiraCloudId = typeof JiraCloudId.Type;

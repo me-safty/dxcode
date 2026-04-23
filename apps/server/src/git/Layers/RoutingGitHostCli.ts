@@ -10,7 +10,7 @@
 import { Context, Effect, Layer } from "effect";
 
 import { GitHostCliError } from "@marcode/contracts";
-import { runProcess } from "../../processRunner";
+import { runProcess } from "../../processRunner.ts";
 import { GitCore } from "../Services/GitCore.ts";
 import { GitHubCli } from "../Services/GitHubCli.ts";
 import { GitHostCli, type GitHostCliShape, type GitHostProvider } from "../Services/GitHostCli.ts";

@@ -1,6 +1,6 @@
 import type { DesktopRuntimeInfo, DesktopUpdateState } from "@marcode/contracts";
 
-import { getCanRetryAfterDownloadFailure, nextStatusAfterDownloadFailure } from "./updateState";
+import { getCanRetryAfterDownloadFailure, nextStatusAfterDownloadFailure } from "./updateState.ts";
 
 export function createInitialDesktopUpdateState(
   currentVersion: string,

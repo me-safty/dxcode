@@ -2,11 +2,15 @@ import { Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
-import { RuntimeItemId, ThreadId } from "./baseSchemas";
+import { RuntimeItemId, ThreadId } from "./baseSchemas.ts";
 
-import { OpenError, OpenInEditorInput } from "./editor";
-import { AuthAccessStreamEvent } from "./auth";
-import { FilesystemBrowseInput, FilesystemBrowseResult, FilesystemBrowseError } from "./filesystem";
+import { OpenError, OpenInEditorInput } from "./editor.ts";
+import { AuthAccessStreamEvent } from "./auth.ts";
+import {
+  FilesystemBrowseInput,
+  FilesystemBrowseResult,
+  FilesystemBrowseError,
+} from "./filesystem.ts";
 import {
   GitActionProgressEvent,
   GitCheckoutInput,
@@ -33,8 +37,8 @@ import {
   GitStatusStreamEvent,
   GitWorkingTreeDiffInput,
   GitWorkingTreeDiffResult,
-} from "./git";
-import { KeybindingsConfigError } from "./keybindings";
+} from "./git.ts";
+import { KeybindingsConfigError } from "./keybindings.ts";
 import {
   ClientOrchestrationCommand,
   ORCHESTRATION_WS_METHODS,
@@ -47,7 +51,7 @@ import {
   OrchestrationReplayEventsError,
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
-} from "./orchestration";
+} from "./orchestration.ts";
 import {
   ProjectBrowseDirectoriesError,
   ProjectBrowseDirectoriesInput,
@@ -58,7 +62,7 @@ import {
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
-} from "./project";
+} from "./project.ts";
 import {
   TerminalClearInput,
   TerminalCloseInput,
@@ -69,7 +73,7 @@ import {
   TerminalRestartInput,
   TerminalSessionSnapshot,
   TerminalWriteInput,
-} from "./terminal";
+} from "./terminal.ts";
 import {
   ServerConfigStreamEvent,
   ServerConfig,
@@ -77,8 +81,8 @@ import {
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
-} from "./server";
-import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings";
+} from "./server.ts";
+import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   JIRA_WS_CHANNELS,
   JIRA_WS_METHODS,
@@ -95,7 +99,7 @@ import {
   JiraListSprintsResult,
   JiraRpcError,
   JiraSite,
-} from "./jira";
+} from "./jira.ts";
 
 export const WS_METHODS = {
   // Project registry methods
