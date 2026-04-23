@@ -1337,6 +1337,35 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.turn-start-requested": {
+          // Resolve orphaned pending approvals from earlier turns of this
+          // thread. Once the user submits a new turn, any approvals that were
+          // still pending from a previous turn are abandoned — the provider
+          // will never ask for them again. This most commonly happens when a
+          // batch of parallel tool calls is permitted via acceptForSession on
+          // the first request: the other pending canUseTool callbacks get
+          // unblocked via the updated session permissions without emitting a
+          // per-request approval.resolved activity, so the projection rows
+          // stay "pending" indefinitely. Without this sweep the sidebar shows
+          // a ghost "Pending Approval" badge on a thread that has nothing
+          // left to approve.
+          const rows = yield* projectionPendingApprovalRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          for (const row of rows) {
+            if (row.status !== "pending") {
+              continue;
+            }
+            yield* projectionPendingApprovalRepository.upsert({
+              ...row,
+              status: "resolved",
+              decision: null,
+              resolvedAt: event.payload.createdAt,
+            });
+          }
+          return;
+        }
+
         default:
           return;
       }

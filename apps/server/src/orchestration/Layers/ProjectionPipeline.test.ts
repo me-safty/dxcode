@@ -1639,6 +1639,162 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
+  it.effect("resolves orphaned pending approvals from earlier turns when a new turn starts", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.make("evt-orphan-approval-1"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.make("project-orphan-approval"),
+        occurredAt: "2026-02-26T13:00:00.000Z",
+        commandId: CommandId.make("cmd-orphan-approval-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-orphan-approval-1"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.make("project-orphan-approval"),
+          title: "Project Orphan Approval",
+          workspaceRoot: "/tmp/project-orphan-approval",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-02-26T13:00:00.000Z",
+          updatedAt: "2026-02-26T13:00:00.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.make("evt-orphan-approval-2"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-orphan-approval"),
+        occurredAt: "2026-02-26T13:00:01.000Z",
+        commandId: CommandId.make("cmd-orphan-approval-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-orphan-approval-2"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-orphan-approval"),
+          projectId: ProjectId.make("project-orphan-approval"),
+          title: "Thread Orphan Approval",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-02-26T13:00:01.000Z",
+          updatedAt: "2026-02-26T13:00:01.000Z",
+        },
+      });
+
+      // Batch of parallel approval.requested activities tied to the first
+      // turn that will never receive per-request approval.resolved events
+      // (simulating the acceptForSession scenario).
+      for (const [index, requestId] of ["orphan-req-1", "orphan-req-2", "orphan-req-3"].entries()) {
+        yield* appendAndProject({
+          type: "thread.activity-appended",
+          eventId: EventId.make(`evt-orphan-approval-3-${index}`),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-orphan-approval"),
+          occurredAt: `2026-02-26T13:00:0${2 + index}.000Z`,
+          commandId: CommandId.make(`cmd-orphan-approval-3-${index}`),
+          causationEventId: null,
+          correlationId: CorrelationId.make(`cmd-orphan-approval-3-${index}`),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-orphan-approval"),
+            activity: {
+              id: EventId.make(`activity-orphan-approval-${index}`),
+              tone: "approval",
+              kind: "approval.requested",
+              summary: "Command approval requested",
+              payload: {
+                requestId,
+                requestKind: "command",
+              },
+              turnId: TurnId.make("orphan-turn-1"),
+              createdAt: `2026-02-26T13:00:0${2 + index}.000Z`,
+            },
+          },
+        });
+      }
+
+      const before = yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count
+          FROM projection_pending_approvals
+          WHERE thread_id = 'thread-orphan-approval'
+            AND status = 'pending'
+        `;
+      assert.deepEqual(before, [{ count: 3 }]);
+
+      // User submits a new turn — should sweep the 3 orphaned rows.
+      yield* appendAndProject({
+        type: "thread.turn-start-requested",
+        eventId: EventId.make("evt-orphan-approval-4"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-orphan-approval"),
+        occurredAt: "2026-02-26T13:00:10.000Z",
+        commandId: CommandId.make("cmd-orphan-approval-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-orphan-approval-4"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-orphan-approval"),
+          messageId: MessageId.make("orphan-message-1"),
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          createdAt: "2026-02-26T13:00:10.000Z",
+        },
+      });
+
+      const after = yield* sql<{
+        readonly requestId: string;
+        readonly status: string;
+        readonly resolvedAt: string | null;
+        readonly decision: string | null;
+      }>`
+          SELECT
+            request_id AS "requestId",
+            status,
+            resolved_at AS "resolvedAt",
+            decision
+          FROM projection_pending_approvals
+          WHERE thread_id = 'thread-orphan-approval'
+          ORDER BY created_at ASC
+        `;
+      assert.deepEqual(after, [
+        {
+          requestId: "orphan-req-1",
+          status: "resolved",
+          resolvedAt: "2026-02-26T13:00:10.000Z",
+          decision: null,
+        },
+        {
+          requestId: "orphan-req-2",
+          status: "resolved",
+          resolvedAt: "2026-02-26T13:00:10.000Z",
+          decision: null,
+        },
+        {
+          requestId: "orphan-req-3",
+          status: "resolved",
+          resolvedAt: "2026-02-26T13:00:10.000Z",
+          decision: null,
+        },
+      ]);
+    }),
+  );
+
   it.effect("ignores non-stale provider approval response failures", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
