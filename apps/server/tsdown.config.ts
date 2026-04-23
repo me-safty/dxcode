@@ -9,7 +9,9 @@ export default defineConfig({
   outDir: "dist",
   sourcemap: true,
   clean: true,
-  noExternal: (id) => id.startsWith("@marcode/") || id.startsWith("effect-acp"),
+  deps: {
+    alwaysBundle: [/^@marcode\//, /^effect-acp(\/|$)/],
+  },
   inlineOnly: false,
   banner: {
     js: "#!/usr/bin/env node\n",
