@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ServerProvider } from "@t3tools/contracts";
-
 import {
   createProviderVersionAdvisory,
-  enrichProviderSnapshotWithVersionAdvisory,
   getProviderVersionLifecycle,
 } from "./providerVersionLifecycle.ts";
 
@@ -48,41 +45,5 @@ describe("providerVersionLifecycle", () => {
       updateArgs: ["update"],
       updateLockKey: "cursor-agent",
     });
-  });
-
-  it("honors dev advisory overrides without querying the registry", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (() => {
-      throw new Error("fetch should not be called when a dev advisory override is present");
-    }) as unknown as typeof fetch;
-
-    const snapshot: ServerProvider = {
-      provider: "codex",
-      enabled: true,
-      installed: true,
-      version: "1.0.0",
-      status: "ready",
-      auth: { status: "authenticated" },
-      checkedAt: "2026-04-23T12:00:00.000Z",
-      models: [],
-      slashCommands: [],
-      skills: [],
-    };
-
-    try {
-      await expect(
-        enrichProviderSnapshotWithVersionAdvisory(snapshot, {
-          T3CODE_DEV_PROVIDER_UPDATE_ADVISORY: "codex:9.9.9",
-        }),
-      ).resolves.toMatchObject({
-        versionAdvisory: {
-          status: "behind_latest",
-          latestVersion: "9.9.9",
-          currentVersion: "1.0.0",
-        },
-      });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
   });
 });

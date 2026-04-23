@@ -35,7 +35,6 @@ import * as Semaphore from "effect/Semaphore";
 import { ServerConfig } from "../../config.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
-import { applyDevProviderVersionAdvisoryOverride } from "../providerVersionLifecycle.ts";
 import {
   hydrateCachedProvider,
   isCachedProviderCorrelated,
@@ -240,9 +239,7 @@ export const ProviderRegistryLive = Layer.effect(
                   cachedDriver: cachedProvider.driver ?? null,
                 }).pipe(Effect.as(undefined as ServerProvider | undefined));
               }
-              return Effect.succeed(
-                applyDevProviderVersionAdvisoryOverride(hydrateCachedProvider(correlation)),
-              );
+              return Effect.succeed(hydrateCachedProvider(correlation));
             }),
           );
         }),
@@ -319,7 +316,7 @@ export const ProviderRegistryLive = Layer.effect(
       },
     ) {
       const nextProvidersWithUpdateState = yield* Effect.forEach(
-        nextProviders.map((provider) => applyDevProviderVersionAdvisoryOverride(provider)),
+        nextProviders,
         applyProviderUpdateState,
         {
           concurrency: "unbounded",

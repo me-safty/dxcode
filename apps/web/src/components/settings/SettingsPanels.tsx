@@ -476,7 +476,7 @@ export function GeneralSettingsPanel() {
       return;
     }
     const frame = window.requestAnimationFrame(() => {
-      document.getElementById("providers")?.scrollIntoView({
+      document.querySelector<HTMLElement>('[data-settings-section="providers"]')?.scrollIntoView({
         block: "start",
         behavior: "smooth",
       });
@@ -1183,7 +1183,7 @@ export function GeneralSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection
-        id="providers"
+        data-settings-section="providers"
         className="scroll-mt-4"
         title="Providers"
         headerAction={

@@ -367,7 +367,7 @@ describe("provider update launch notification logic", () => {
             status: "failed",
             startedAt: checkedAt,
             finishedAt: checkedAt,
-            message: "Simulated provider update failed.",
+            message: "Update command exited with code 1.",
             output: null,
           },
         }),
@@ -376,10 +376,10 @@ describe("provider update launch notification logic", () => {
     );
 
     expect(view).toMatchObject({
-      key: "failed:claudeAgent:2026-04-23T10:00:00.000Z:Simulated provider update failed.",
+      key: "failed:claudeAgent:2026-04-23T10:00:00.000Z:Update command exited with code 1.",
       tone: "error",
       title: "Claude v1.1.0 update failed",
-      description: "Simulated provider update failed.",
+      description: "Update command exited with code 1.",
       dismissible: true,
     });
   });
@@ -466,7 +466,7 @@ describe("provider update launch notification logic", () => {
           status: "failed",
           startedAt: checkedAt,
           finishedAt: checkedAt,
-          message: "Simulated provider update failed.",
+          message: "Update command exited with code 1.",
           output: null,
         },
       }),
@@ -499,7 +499,7 @@ describe("provider update launch notification logic", () => {
       dismissedKeys: new Set(["succeeded:codex:2026-04-23T10:01:00.000Z:Provider updated."]),
     });
     expect(failureView).toMatchObject({
-      key: "failed:claudeAgent:2026-04-23T10:00:00.000Z:Simulated provider update failed.",
+      key: "failed:claudeAgent:2026-04-23T10:00:00.000Z:Update command exited with code 1.",
       tone: "error",
       title: "Claude v1.1.0 update failed",
     });

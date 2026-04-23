@@ -81,9 +81,6 @@ export function SidebarProviderUpdatePill() {
       startExit(renderedView.key, view);
       return;
     }
-    if (view !== renderedView) {
-      setRenderedView(view);
-    }
   }, [exitingKey, renderedView, startExit, view]);
 
   useEffect(() => {
