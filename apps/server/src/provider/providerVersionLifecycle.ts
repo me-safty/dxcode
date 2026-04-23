@@ -94,7 +94,10 @@ function deriveVersionAdvisory(input: {
   if (!input.currentVersion) {
     return { status: "unknown", message: null };
   }
-  if (input.latestVersion && compareCliVersions(input.currentVersion, input.latestVersion) < 0) {
+  if (!input.latestVersion) {
+    return { status: "unknown", message: null };
+  }
+  if (compareCliVersions(input.currentVersion, input.latestVersion) < 0) {
     return {
       status: "behind_latest",
       message: PROVIDER_UPDATE_ACTION_TOAST_MESSAGE,

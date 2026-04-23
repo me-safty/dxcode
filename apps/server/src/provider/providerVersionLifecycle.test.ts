@@ -19,6 +19,21 @@ describe("providerVersionLifecycle", () => {
     });
   });
 
+  it("marks providers with unknown latest versions as unknown", () => {
+    expect(
+      createProviderVersionAdvisory({
+        provider: "codex",
+        currentVersion: "1.0.0",
+        latestVersion: null,
+      }),
+    ).toMatchObject({
+      status: "unknown",
+      currentVersion: "1.0.0",
+      latestVersion: null,
+      message: null,
+    });
+  });
+
   it("marks installed providers behind latest when a newer provider version is available", () => {
     expect(
       createProviderVersionAdvisory({
