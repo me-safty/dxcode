@@ -2293,6 +2293,8 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "agent.cycle") {
+        event.preventDefault();
+        event.stopPropagation();
         const ctx = composerRef.current?.getSendContext();
         if (!ctx) return;
         const caps = getProviderModelCapabilities(
@@ -2302,8 +2304,6 @@ export default function ChatView(props: ChatViewProps) {
         );
         const agents = caps.agentOptions ?? [];
         if (agents.length < 2) return;
-        event.preventDefault();
-        event.stopPropagation();
         const store = useComposerDraftStore.getState();
         const draft = store.getComposerDraft(composerDraftTarget);
         const currentOpts =
