@@ -2292,6 +2292,39 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "agent.cycle") {
+        event.preventDefault();
+        event.stopPropagation();
+        const ctx = composerRef.current?.getSendContext();
+        if (!ctx) return;
+        const caps = getProviderModelCapabilities(
+          ctx.selectedProviderModels,
+          ctx.selectedModel,
+          ctx.selectedProvider,
+        );
+        const agents = caps.agentOptions ?? [];
+        if (agents.length < 2) return;
+        const store = useComposerDraftStore.getState();
+        const draft = store.getComposerDraft(composerDraftTarget);
+        const currentOpts =
+          (draft?.modelSelectionByProvider?.[ctx.selectedProvider]?.options as
+            | Record<string, unknown>
+            | undefined) ?? {};
+        const rawAgent = (currentOpts.agent as string | undefined) ?? null;
+        const effectiveAgent = rawAgent
+          ? agents.find((a) => a.value === rawAgent)
+          : (agents.find((a) => a.isDefault) ?? agents[0]);
+        const currentIndex = effectiveAgent ? agents.indexOf(effectiveAgent) : -1;
+        const nextAgent = agents[(currentIndex + 1) % agents.length]!;
+        store.setProviderModelOptions(
+          composerDraftTarget,
+          ctx.selectedProvider,
+          { ...currentOpts, agent: nextAgent.value },
+          { model: ctx.selectedModel, persistSticky: true },
+        );
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
