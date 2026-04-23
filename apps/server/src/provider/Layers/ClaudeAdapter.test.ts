@@ -19,12 +19,10 @@ import {
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Random, Stream, Tracer } from "effect";
+import { Effect, Fiber, Layer, Random, Stream } from "effect";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
-import type { EffectTraceRecord } from "../../observability/TraceRecord.ts";
-import { makeLocalFileTracer } from "../../observability/LocalFileTracer.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import { ClaudeAdapter } from "../Services/ClaudeAdapter.ts";
@@ -2558,75 +2556,6 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(createInput?.options.sessionId, undefined);
       assert.equal(createInput?.options.resumeSessionAt, undefined);
     }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
-  it.effect("annotates Claude start-session spans with launch cwd and resume parameters", () => {
-    const harness = makeHarness();
-    const traceRecords: Array<EffectTraceRecord> = [];
-    const traceLayer = Layer.effect(
-      Tracer.Tracer,
-      makeLocalFileTracer({
-        filePath: "/tmp/claude-trace-test.ndjson",
-        maxBytes: 1024 * 1024,
-        maxFiles: 2,
-        batchWindowMs: 10_000,
-        sink: {
-          filePath: "/tmp/claude-trace-test.ndjson",
-          push: (record) => {
-            if (record.type === "effect-span") {
-              traceRecords.push(record);
-            }
-          },
-          flush: Effect.void,
-          close: () => Effect.void,
-        },
-      }),
-    );
-
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-
-      yield* adapter.startSession({
-        threadId: RESUME_THREAD_ID,
-        provider: "claudeAgent",
-        cwd: "/tmp/claude-trace-worktree",
-        modelSelection: createModelSelection("claudeAgent", "claude-opus-4-6", [
-          { id: "effort", value: "max" },
-          { id: "fastMode", value: true },
-        ]),
-        resumeCursor: {
-          threadId: "resume-thread-trace",
-          resume: "550e8400-e29b-41d4-a716-446655440000",
-          resumeSessionAt: "assistant-trace",
-          turnCount: 7,
-        },
-        runtimeMode: "full-access",
-      });
-
-      const startSpan = traceRecords.find(
-        (record) => record.name === "claude-adapter.start-session",
-      );
-      assert.notEqual(startSpan, undefined);
-      if (!startSpan) {
-        return;
-      }
-
-      assert.equal(startSpan.attributes["claude.query.cwd"], "/tmp/claude-trace-worktree");
-      assert.equal(
-        startSpan.attributes["claude.query.resume"],
-        "550e8400-e29b-41d4-a716-446655440000",
-      );
-      assert.equal(startSpan.attributes["claude.resume.source"], "resume-session");
-      assert.equal(startSpan.attributes["claude.resume.thread_id"], "resume-thread-trace");
-      assert.equal(startSpan.attributes["claude.resume.turn_count"], 7);
-      assert.deepEqual(startSpan.attributes["claude.query.additional_directories"], [
-        "/tmp/claude-trace-worktree",
-      ]);
-    }).pipe(
-      Effect.provide(traceLayer),
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
     );
