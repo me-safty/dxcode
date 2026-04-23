@@ -1,6 +1,5 @@
 import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useLocation } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   defaultInstanceIdForDriver,
@@ -448,8 +447,11 @@ export function useSettingsRestore(onRestored?: () => void) {
   };
 }
 
-export function GeneralSettingsPanel() {
-  const location = useLocation();
+export function GeneralSettingsPanel({
+  initialScrollTarget,
+}: {
+  initialScrollTarget?: "providers";
+}) {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
@@ -472,7 +474,7 @@ export function GeneralSettingsPanel() {
   const [openInstanceDetails, setOpenInstanceDetails] = useState<Record<string, boolean>>({});
   const refreshingRef = useRef(false);
   useEffect(() => {
-    if (location.hash !== "providers") {
+    if (initialScrollTarget !== "providers") {
       return;
     }
     const frame = window.requestAnimationFrame(() => {
@@ -482,7 +484,7 @@ export function GeneralSettingsPanel() {
       });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [location.hash]);
+  }, [initialScrollTarget]);
   const refreshProviders = useCallback(() => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
