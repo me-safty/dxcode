@@ -22,6 +22,7 @@ import type { MenuItemConstructorOptions, OpenDialogOptions } from "electron";
 import type {
   ClientSettings,
   DesktopTheme,
+  DesktopTitleBarMode,
   DesktopAppBranding,
   DesktopServerExposureMode,
   DesktopServerExposureState,
@@ -41,6 +42,7 @@ import {
   DEFAULT_DESKTOP_SETTINGS,
   readDesktopSettings,
   setDesktopServerExposurePreference,
+  setDesktopTitleBarModePreference,
   setDesktopUpdateChannelPreference,
   writeDesktopSettings,
 } from "./desktopSettings.ts";
@@ -102,6 +104,8 @@ const SET_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:set-saved-environment-secr
 const REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:remove-saved-environment-secret";
 const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
+const GET_TITLE_BAR_MODE_CHANNEL = "desktop:get-titlebar-mode";
+const SET_TITLE_BAR_MODE_CHANNEL = "desktop:set-titlebar-mode";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
@@ -430,6 +434,14 @@ function getSafeExternalUrl(rawUrl: unknown): string | null {
 function getSafeTheme(rawTheme: unknown): DesktopTheme | null {
   if (rawTheme === "light" || rawTheme === "dark" || rawTheme === "system") {
     return rawTheme;
+  }
+
+  return null;
+}
+
+function getSafeTitleBarMode(rawMode: unknown): DesktopTitleBarMode | null {
+  if (rawMode === "custom" || rawMode === "native") {
+    return rawMode;
   }
 
   return null;
@@ -1669,6 +1681,26 @@ function registerIpcHandlers(): void {
     return nextState;
   });
 
+  ipcMain.removeHandler(GET_TITLE_BAR_MODE_CHANNEL);
+  ipcMain.handle(GET_TITLE_BAR_MODE_CHANNEL, async () => desktopSettings.titleBarMode);
+
+  ipcMain.removeHandler(SET_TITLE_BAR_MODE_CHANNEL);
+  ipcMain.handle(SET_TITLE_BAR_MODE_CHANNEL, async (_event, rawMode: unknown) => {
+    const mode = getSafeTitleBarMode(rawMode);
+    if (!mode) {
+      throw new Error("Invalid titlebar mode input.");
+    }
+
+    if (desktopSettings.titleBarMode === mode) {
+      return mode;
+    }
+
+    desktopSettings = setDesktopTitleBarModePreference(desktopSettings, mode);
+    writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
+    relaunchDesktopApp(`titleBarMode=${mode}`);
+    return mode;
+  });
+
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
   ipcMain.handle(PICK_FOLDER_CHANNEL, async (_event, rawOptions: unknown) => {
     const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
@@ -1879,6 +1911,10 @@ function getInitialWindowBackgroundColor(): string {
 }
 
 function getWindowTitleBarOptions(): WindowTitleBarOptions {
+  if (desktopSettings.titleBarMode === "native") {
+    return {};
+  }
+
   if (process.platform === "darwin") {
     return {
       titleBarStyle: "hiddenInset",

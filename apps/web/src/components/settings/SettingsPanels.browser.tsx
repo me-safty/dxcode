@@ -23,6 +23,21 @@ import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/ser
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { GeneralSettingsPanel } from "./SettingsPanels";
 
+vi.mock("../../env", () => {
+  // Export a runtime getter for `isElectron` so tests that don't provide a
+  // QueryClientProvider can keep rendering the simpler AboutVersionTitle,
+  // while tests that set up a desktop bridge/nativeApi will exercise the
+  // full AboutVersionSection which calls `useQueryClient()`.
+  return {
+    get isElectron() {
+      return (
+        typeof window !== "undefined" &&
+        (window.desktopBridge !== undefined || window.nativeApi !== undefined)
+      );
+    },
+  };
+});
+
 const authAccessHarness = vi.hoisted(() => {
   type Snapshot = AuthAccessSnapshot;
   let snapshot: Snapshot = {
@@ -260,6 +275,8 @@ const createDesktopBridgeStub = (overrides?: {
   readonly serverExposureState?: Awaited<ReturnType<DesktopBridge["getServerExposureState"]>>;
   readonly setServerExposureMode?: DesktopBridge["setServerExposureMode"];
   readonly setUpdateChannel?: DesktopBridge["setUpdateChannel"];
+  readonly titleBarMode?: Awaited<ReturnType<DesktopBridge["getTitleBarMode"]>>;
+  readonly setTitleBarMode?: DesktopBridge["setTitleBarMode"];
 }): DesktopBridge => {
   const idleUpdateState: DesktopUpdateState = {
     enabled: false,
@@ -310,6 +327,8 @@ const createDesktopBridgeStub = (overrides?: {
     pickFolder: vi.fn().mockResolvedValue(null),
     confirm: vi.fn().mockResolvedValue(false),
     setTheme: vi.fn().mockResolvedValue(undefined),
+    getTitleBarMode: vi.fn().mockResolvedValue(overrides?.titleBarMode ?? "custom"),
+    setTitleBarMode: overrides?.setTitleBarMode ?? vi.fn().mockImplementation(async (mode) => mode),
     showContextMenu: vi.fn().mockResolvedValue(null),
     openExternal: vi.fn().mockResolvedValue(true),
     onMenuAction: () => () => {},
@@ -451,6 +470,28 @@ describe("GeneralSettingsPanel observability", () => {
         ),
       )
       .toBeInTheDocument();
+  });
+
+  it("changes desktop titlebar mode after confirmation", async () => {
+    const desktopBridge = createDesktopBridgeStub({
+      titleBarMode: "custom",
+    });
+    vi.mocked(desktopBridge.confirm).mockResolvedValue(true);
+    window.desktopBridge = desktopBridge;
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByLabelText("Window titlebar mode")).toBeInTheDocument();
+    await page.getByLabelText("Window titlebar mode").click();
+    await page.getByText("Native", { exact: true }).click();
+    await vi.waitFor(() => {
+      expect(desktopBridge.setTitleBarMode).toHaveBeenCalledWith("native");
+    });
   });
 
   it("creates and shows a pairing link when network access is enabled", async () => {

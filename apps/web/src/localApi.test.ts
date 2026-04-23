@@ -179,6 +179,8 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
       endpointUrl: null,
       advertisedHost: null,
     }),
+    getTitleBarMode: async () => "custom",
+    setTitleBarMode: async () => "custom",
     pickFolder: async () => null,
     confirm: async () => true,
     setTheme: async () => undefined,

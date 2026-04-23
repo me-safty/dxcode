@@ -9,6 +9,7 @@ import {
   readDesktopSettings,
   resolveDefaultDesktopSettings,
   setDesktopServerExposurePreference,
+  setDesktopTitleBarModePreference,
   setDesktopUpdateChannelPreference,
   writeDesktopSettings,
 } from "./desktopSettings.ts";
@@ -37,6 +38,7 @@ describe("desktopSettings", () => {
       serverExposureMode: "local-only",
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
+      titleBarMode: "custom",
     });
   });
 
@@ -47,12 +49,14 @@ describe("desktopSettings", () => {
       serverExposureMode: "network-accessible",
       updateChannel: "latest",
       updateChannelConfiguredByUser: true,
+      titleBarMode: "native",
     });
 
     expect(readDesktopSettings(settingsPath, "0.0.17")).toEqual({
       serverExposureMode: "network-accessible",
       updateChannel: "latest",
       updateChannelConfiguredByUser: true,
+      titleBarMode: "native",
     });
   });
 
@@ -63,6 +67,7 @@ describe("desktopSettings", () => {
           serverExposureMode: "local-only",
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
+          titleBarMode: "custom",
         },
         "network-accessible",
       ),
@@ -70,6 +75,7 @@ describe("desktopSettings", () => {
       serverExposureMode: "network-accessible",
       updateChannel: "latest",
       updateChannelConfiguredByUser: false,
+      titleBarMode: "custom",
     });
   });
 
@@ -80,6 +86,7 @@ describe("desktopSettings", () => {
           serverExposureMode: "local-only",
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
+          titleBarMode: "custom",
         },
         "nightly",
       ),
@@ -87,6 +94,26 @@ describe("desktopSettings", () => {
       serverExposureMode: "local-only",
       updateChannel: "nightly",
       updateChannelConfiguredByUser: true,
+      titleBarMode: "custom",
+    });
+  });
+
+  it("persists the requested titlebar mode", () => {
+    expect(
+      setDesktopTitleBarModePreference(
+        {
+          serverExposureMode: "local-only",
+          updateChannel: "latest",
+          updateChannelConfiguredByUser: false,
+          titleBarMode: "custom",
+        },
+        "native",
+      ),
+    ).toEqual({
+      serverExposureMode: "local-only",
+      updateChannel: "latest",
+      updateChannelConfiguredByUser: false,
+      titleBarMode: "native",
     });
   });
 
@@ -105,6 +132,7 @@ describe("desktopSettings", () => {
       serverExposureMode: "local-only",
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
+      titleBarMode: "custom",
     });
   });
 
@@ -123,6 +151,7 @@ describe("desktopSettings", () => {
       serverExposureMode: "local-only",
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
+      titleBarMode: "custom",
     });
   });
 
@@ -142,6 +171,7 @@ describe("desktopSettings", () => {
       serverExposureMode: "local-only",
       updateChannel: "latest",
       updateChannelConfiguredByUser: true,
+      titleBarMode: "custom",
     });
   });
 });

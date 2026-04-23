@@ -24,6 +24,8 @@ const SET_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:set-saved-environment-secr
 const REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:remove-saved-environment-secret";
 const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
+const GET_TITLE_BAR_MODE_CHANNEL = "desktop:get-titlebar-mode";
+const SET_TITLE_BAR_MODE_CHANNEL = "desktop:set-titlebar-mode";
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getAppBranding: () => {
@@ -53,6 +55,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.invoke(REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL, environmentId),
   getServerExposureState: () => ipcRenderer.invoke(GET_SERVER_EXPOSURE_STATE_CHANNEL),
   setServerExposureMode: (mode) => ipcRenderer.invoke(SET_SERVER_EXPOSURE_MODE_CHANNEL, mode),
+  getTitleBarMode: () => ipcRenderer.invoke(GET_TITLE_BAR_MODE_CHANNEL),
+  setTitleBarMode: (mode) => ipcRenderer.invoke(SET_TITLE_BAR_MODE_CHANNEL, mode),
   pickFolder: (options) => ipcRenderer.invoke(PICK_FOLDER_CHANNEL, options),
   confirm: (message) => ipcRenderer.invoke(CONFIRM_CHANNEL, message),
   setTheme: (theme) => ipcRenderer.invoke(SET_THEME_CHANNEL, theme),

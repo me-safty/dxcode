@@ -9,9 +9,10 @@ import {
   XIcon,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PROVIDER_DISPLAY_NAMES,
+  type DesktopTitleBarMode,
   type DesktopUpdateChannel,
   type ScopedThreadRef,
   type ProviderKind,
@@ -94,6 +95,14 @@ const THEME_OPTIONS = [
     label: "Dark",
   },
 ] as const;
+
+const TITLE_BAR_MODE_OPTIONS: ReadonlyArray<{
+  readonly value: DesktopTitleBarMode;
+  readonly label: string;
+}> = [
+  { value: "custom", label: "Custom" },
+  { value: "native", label: "Native" },
+];
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
@@ -530,6 +539,9 @@ export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
+  const [titleBarMode, setTitleBarMode] = useState<DesktopTitleBarMode>("custom");
+  const [isLoadingTitleBarMode, setIsLoadingTitleBarMode] = useState(false);
+  const [isUpdatingTitleBarMode, setIsUpdatingTitleBarMode] = useState(false);
   const [openingPathByTarget, setOpeningPathByTarget] = useState({
     keybindings: false,
     logsDirectory: false,
@@ -674,6 +686,76 @@ export function GeneralSettingsPanel() {
   const openDiagnosticsError = openPathErrorByTarget.logsDirectory ?? null;
   const isOpeningKeybindings = openingPathByTarget.keybindings;
   const isOpeningLogsDirectory = openingPathByTarget.logsDirectory;
+
+  useEffect(() => {
+    const bridge = window.desktopBridge;
+    if (!bridge) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingTitleBarMode(true);
+    void bridge
+      .getTitleBarMode()
+      .then((mode) => {
+        if (cancelled) return;
+        setTitleBarMode(mode);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        toastManager.add({
+          type: "error",
+          title: "Could not load titlebar mode",
+          description:
+            error instanceof Error ? error.message : "Failed to load desktop titlebar mode.",
+        });
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsLoadingTitleBarMode(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const updateTitleBarMode = useCallback(
+    async (nextMode: DesktopTitleBarMode) => {
+      const bridge = window.desktopBridge;
+      if (!bridge || nextMode === titleBarMode || isUpdatingTitleBarMode) {
+        return;
+      }
+
+      const api = readLocalApi();
+      const confirmed = await (api ?? ensureLocalApi()).dialogs.confirm(
+        [`Switch to the ${nextMode} titlebar?`, "T3 Code will restart to apply this change."].join(
+          "\n",
+        ),
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      setIsUpdatingTitleBarMode(true);
+      void bridge
+        .setTitleBarMode(nextMode)
+        .then((mode) => {
+          setTitleBarMode(mode);
+        })
+        .catch((error: unknown) => {
+          toastManager.add({
+            type: "error",
+            title: "Could not change titlebar mode",
+            description: error instanceof Error ? error.message : "Titlebar mode change failed.",
+          });
+        })
+        .finally(() => {
+          setIsUpdatingTitleBarMode(false);
+        });
+    },
+    [isUpdatingTitleBarMode, titleBarMode],
+  );
 
   const addCustomModel = useCallback(
     (provider: ProviderKind) => {
@@ -852,6 +934,51 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+
+        {isElectron ? (
+          <SettingsRow
+            title="Window titlebar"
+            description="Choose between T3 Code's integrated titlebar and your OS native window chrome. Changing this restarts T3 Code."
+            resetAction={
+              titleBarMode !== "custom" ? (
+                <SettingResetButton
+                  label="window titlebar"
+                  onClick={() => {
+                    void updateTitleBarMode("custom");
+                  }}
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={titleBarMode}
+                onValueChange={(value) => {
+                  if (value === "custom" || value === "native") {
+                    void updateTitleBarMode(value);
+                  }
+                }}
+              >
+                <SelectTrigger
+                  className="w-full sm:w-40"
+                  aria-label="Window titlebar mode"
+                  disabled={isLoadingTitleBarMode || isUpdatingTitleBarMode}
+                >
+                  <SelectValue>
+                    {TITLE_BAR_MODE_OPTIONS.find((option) => option.value === titleBarMode)
+                      ?.label ?? "Custom"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {TITLE_BAR_MODE_OPTIONS.map((option) => (
+                    <SelectItem hideIndicator key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            }
+          />
+        ) : null}
 
         <SettingsRow
           title="Time format"

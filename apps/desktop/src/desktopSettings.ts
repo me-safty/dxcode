@@ -1,6 +1,10 @@
 import * as FS from "node:fs";
 import * as Path from "node:path";
-import type { DesktopServerExposureMode, DesktopUpdateChannel } from "@t3tools/contracts";
+import type {
+  DesktopServerExposureMode,
+  DesktopTitleBarMode,
+  DesktopUpdateChannel,
+} from "@t3tools/contracts";
 
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
 
@@ -8,12 +12,14 @@ export interface DesktopSettings {
   readonly serverExposureMode: DesktopServerExposureMode;
   readonly updateChannel: DesktopUpdateChannel;
   readonly updateChannelConfiguredByUser: boolean;
+  readonly titleBarMode: DesktopTitleBarMode;
 }
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   serverExposureMode: "local-only",
   updateChannel: "latest",
   updateChannelConfiguredByUser: false,
+  titleBarMode: "custom",
 };
 
 export function resolveDefaultDesktopSettings(appVersion: string): DesktopSettings {
@@ -46,6 +52,18 @@ export function setDesktopUpdateChannelPreference(
   };
 }
 
+export function setDesktopTitleBarModePreference(
+  settings: DesktopSettings,
+  requestedMode: DesktopTitleBarMode,
+): DesktopSettings {
+  return settings.titleBarMode === requestedMode
+    ? settings
+    : {
+        ...settings,
+        titleBarMode: requestedMode,
+      };
+}
+
 export function readDesktopSettings(settingsPath: string, appVersion: string): DesktopSettings {
   const defaultSettings = resolveDefaultDesktopSettings(appVersion);
 
@@ -59,6 +77,7 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
       readonly serverExposureMode?: unknown;
       readonly updateChannel?: unknown;
       readonly updateChannelConfiguredByUser?: unknown;
+      readonly titleBarMode?: unknown;
     };
     const parsedUpdateChannel =
       parsed.updateChannel === "nightly" || parsed.updateChannel === "latest"
@@ -77,6 +96,7 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
           ? parsedUpdateChannel
           : defaultSettings.updateChannel,
       updateChannelConfiguredByUser,
+      titleBarMode: parsed.titleBarMode === "native" ? "native" : "custom",
     };
   } catch {
     return defaultSettings;

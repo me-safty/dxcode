@@ -76,6 +76,7 @@ export type DesktopUpdateStatus =
 export type DesktopRuntimeArch = "arm64" | "x64" | "other";
 export type DesktopTheme = "light" | "dark" | "system";
 export type DesktopUpdateChannel = "latest" | "nightly";
+export type DesktopTitleBarMode = "custom" | "native";
 export type DesktopAppStageLabel = "Alpha" | "Dev" | "Nightly";
 
 export interface DesktopAppBranding {
@@ -160,6 +161,8 @@ export interface DesktopBridge {
   removeSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<void>;
   getServerExposureState: () => Promise<DesktopServerExposureState>;
   setServerExposureMode: (mode: DesktopServerExposureMode) => Promise<DesktopServerExposureState>;
+  getTitleBarMode: () => Promise<DesktopTitleBarMode>;
+  setTitleBarMode: (mode: DesktopTitleBarMode) => Promise<DesktopTitleBarMode>;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
