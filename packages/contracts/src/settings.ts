@@ -2,7 +2,10 @@ import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
-import { DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER, ProviderOptionSelection } from "./model.ts";
+import {
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  ProviderOptionSelections,
+} from "./model.ts";
 import { ModelSelection, ProviderKind } from "./orchestration.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
@@ -168,22 +171,22 @@ const ModelSelectionPatch = Schema.Union([
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("codex")),
     model: Schema.optionalKey(TrimmedNonEmptyString),
-    options: Schema.optionalKey(Schema.Array(ProviderOptionSelection)),
+    options: Schema.optionalKey(ProviderOptionSelections),
   }),
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("claudeAgent")),
     model: Schema.optionalKey(TrimmedNonEmptyString),
-    options: Schema.optionalKey(Schema.Array(ProviderOptionSelection)),
+    options: Schema.optionalKey(ProviderOptionSelections),
   }),
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("cursor")),
     model: Schema.optionalKey(TrimmedNonEmptyString),
-    options: Schema.optionalKey(Schema.Array(ProviderOptionSelection)),
+    options: Schema.optionalKey(ProviderOptionSelections),
   }),
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("opencode")),
     model: Schema.optionalKey(TrimmedNonEmptyString),
-    options: Schema.optionalKey(Schema.Array(ProviderOptionSelection)),
+    options: Schema.optionalKey(ProviderOptionSelections),
   }),
 ]);
 

@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { DEFAULT_SERVER_SETTINGS, ServerSettingsPatch } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { assert, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Schema } from "effect";
@@ -39,6 +39,28 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         },
       );
     }),
+  );
+
+  it.effect(
+    "decodes legacy object-shaped textGenerationModelSelection.options from settings.json",
+    () =>
+      Effect.sync(() => {
+        const decode = Schema.decodeUnknownSync(ServerSettings);
+
+        const decoded = decode({
+          textGenerationModelSelection: {
+            provider: "codex",
+            model: "gpt-5.4-mini",
+            options: { reasoningEffort: "low" },
+          },
+        });
+
+        assert.deepEqual(decoded.textGenerationModelSelection, {
+          provider: "codex",
+          model: "gpt-5.4-mini",
+          options: [{ id: "reasoningEffort", value: "low" }],
+        });
+      }),
   );
 
   it.effect("deep merges nested settings updates without dropping siblings", () =>
