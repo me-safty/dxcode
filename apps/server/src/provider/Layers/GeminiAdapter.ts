@@ -72,6 +72,7 @@ import {
 } from "../acp/AcpCoreRuntimeEvents.ts";
 import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
 import {
+  type AcpPlanUpdate,
   type AcpParsedSessionEvent,
   type AcpPermissionRequest,
   parsePermissionRequest,
@@ -108,9 +109,12 @@ interface GeminiRecordedItem {
 
 interface GeminiTurnState {
   readonly turnId: TurnId;
+  readonly isPlanTurn: boolean;
   reasoningItemId: RuntimeItemId | undefined;
   readonly items: GeminiRecordedItem[];
   reasoningTextStarted: boolean;
+  latestPlanUpdate: AcpPlanUpdate | undefined;
+  proposedPlanCaptured: boolean;
 }
 
 interface GeminiStoredTurn {
@@ -414,6 +418,22 @@ function runtimeModeToGeminiModeId(runtimeMode: ProviderSession["runtimeMode"]):
   }
 }
 
+export function resolveRequestedGeminiModeId(input: {
+  readonly interactionMode: ProviderSendTurnInput["interactionMode"];
+  readonly runtimeModeId: string;
+  readonly currentModeId: string | undefined;
+}): string | undefined {
+  if (input.interactionMode === "plan") {
+    return "plan";
+  }
+
+  if (input.interactionMode === "default") {
+    return input.runtimeModeId;
+  }
+
+  return input.currentModeId;
+}
+
 function itemTypeFromAcpToolKind(kind: string | undefined): CanonicalItemType {
   switch (kind) {
     case "execute":
@@ -623,6 +643,62 @@ function upsertGeminiTurnItem(
   item.itemType = itemType;
   Object.assign(item, patch);
   return item;
+}
+
+function assistantMarkdownFromGeminiTurn(turnState: GeminiTurnState): string | undefined {
+  return trimToUndefined(
+    turnState.items
+      .filter(
+        (item): item is GeminiRecordedItem & { text: string } =>
+          item.itemType === "assistant_message" && typeof item.text === "string",
+      )
+      .map((item) => item.text)
+      .join(""),
+  );
+}
+
+function planMarkdownFromUpdate(planUpdate: AcpPlanUpdate | undefined): string | undefined {
+  if (!planUpdate) {
+    return undefined;
+  }
+
+  const explanation = trimToUndefined(planUpdate.explanation ?? undefined);
+  const steps = planUpdate.plan
+    .map((entry) => trimToUndefined(entry.step))
+    .filter((entry): entry is string => entry !== undefined);
+
+  if (!explanation && steps.length === 0) {
+    return undefined;
+  }
+
+  const lines = ["# Plan"];
+  if (explanation) {
+    lines.push("", explanation);
+  }
+  if (steps.length > 0) {
+    lines.push(
+      "",
+      ...planUpdate.plan.map((entry, index) => {
+        const step = trimToUndefined(entry.step) ?? `Step ${index + 1}`;
+        switch (entry.status) {
+          case "completed":
+            return `- [x] ${step}`;
+          case "inProgress":
+            return `- [ ] ${step} (in progress)`;
+          default:
+            return `- [ ] ${step}`;
+        }
+      }),
+    );
+  }
+
+  return trimToUndefined(lines.join("\n"));
+}
+
+function proposedPlanMarkdownFromGeminiTurn(turnState: GeminiTurnState): string | undefined {
+  return (
+    assistantMarkdownFromGeminiTurn(turnState) ?? planMarkdownFromUpdate(turnState.latestPlanUpdate)
+  );
 }
 
 function settlePendingApprovalsAsCancelled(
@@ -1014,6 +1090,9 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
             return;
           }
           case "PlanUpdated":
+            if (context.turnState) {
+              context.turnState.latestPlanUpdate = event.payload;
+            }
             yield* offerRuntimeEvent(
               makeAcpPlanUpdatedEvent({
                 stamp: makeEventStamp(),
@@ -1207,6 +1286,25 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
               title: "Reasoning",
             },
           });
+        }
+
+        if (
+          !turnState.proposedPlanCaptured &&
+          turnState.isPlanTurn &&
+          result.state === "completed"
+        ) {
+          const planMarkdown = proposedPlanMarkdownFromGeminiTurn(turnState);
+          if (planMarkdown) {
+            turnState.proposedPlanCaptured = true;
+            yield* offerRuntimeEvent({
+              ...makeEventBase(context),
+              turnId: turnState.turnId,
+              type: "turn.proposed.completed",
+              payload: {
+                planMarkdown,
+              },
+            });
+          }
         }
 
         const normalizedUsage = normalizeGeminiPromptUsage(result.usage);
@@ -1431,6 +1529,9 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
         const responseRecord = asRecord(response);
         const stopReason =
           typeof responseRecord?.stopReason === "string" ? responseRecord.stopReason : null;
+        // Let queued ACP session updates land on the notification fiber before
+        // finalizing the turn so derived plan/message state is complete.
+        yield* Effect.sleep("10 millis");
         yield* finishTurn(context, {
           state: stopReason === "cancelled" ? "cancelled" : "completed",
           stopReason,
@@ -1724,10 +1825,14 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
             });
           }
 
-          yield* setGeminiMode(
-            context,
-            input.interactionMode === "plan" ? "plan" : context.runtimeModeId,
-          );
+          const requestedModeId = resolveRequestedGeminiModeId({
+            interactionMode: input.interactionMode,
+            runtimeModeId: context.runtimeModeId,
+            currentModeId: context.currentModeId,
+          });
+          if (requestedModeId) {
+            yield* setGeminiMode(context, requestedModeId);
+          }
 
           const prompt = yield* buildPromptBlocks(input);
           if (prompt.length === 0) {
@@ -1741,9 +1846,12 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
           const turnId = TurnId.make(crypto.randomUUID());
           context.turnState = {
             turnId,
+            isPlanTurn: context.currentModeId === "plan",
             reasoningItemId: undefined,
             items: [],
             reasoningTextStarted: false,
+            latestPlanUpdate: undefined,
+            proposedPlanCaptured: false,
           };
           updateGeminiSession(context, {
             status: "running",

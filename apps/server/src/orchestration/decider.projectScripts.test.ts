@@ -141,8 +141,8 @@ describe("decider project scripts", () => {
             provider: "codex",
             model: "gpt-5-codex",
           },
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "approval-required",
+          interactionMode: "plan",
+          runtimeMode: "full-access",
           branch: null,
           worktreePath: null,
           createdAt: now,
@@ -193,6 +193,7 @@ describe("decider project scripts", () => {
         { id: "fastMode", value: true },
       ]),
       runtimeMode: "approval-required",
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     });
   });
 

@@ -18,6 +18,7 @@ import {
   buildGeminiThinkingModelConfigAliases,
   makeGeminiAdapterLive,
   normalizeGeminiPromptUsage,
+  resolveRequestedGeminiModeId,
 } from "./GeminiAdapter.ts";
 
 const tempDirs: Array<string> = [];
@@ -48,9 +49,15 @@ function writeFakeGeminiBinary(): {
 const readline = require("node:readline");
 
 let sessionCounter = 0;
+let currentModeId = "yolo";
+let currentSessionId = "session-" + process.pid + "-0";
 
 const reply = (id, result) => {
   process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+};
+
+const notify = (method, params) => {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\\n");
 };
 
 const rl = readline.createInterface({ input: process.stdin });
@@ -68,15 +75,66 @@ rl.on("line", (line) => {
       return;
     case "session/new":
       sessionCounter += 1;
+      currentSessionId = "session-" + process.pid + "-" + sessionCounter;
       reply(message.id, {
-        sessionId: "session-" + process.pid + "-" + sessionCounter,
+        sessionId: currentSessionId,
       });
       return;
     case "session/set_mode":
-    case "session/set_model":
-    case "session/prompt":
-      reply(message.id, { stopReason: "completed" });
+      if (message.params && typeof message.params.modeId === "string") {
+        currentModeId = message.params.modeId;
+      }
+      reply(message.id, {});
       return;
+    case "session/set_model":
+      reply(message.id, {});
+      return;
+    case "session/prompt": {
+      const sessionId =
+        message.params && typeof message.params.sessionId === "string"
+          ? message.params.sessionId
+          : currentSessionId;
+      if (currentModeId === "plan") {
+        notify("session/update", {
+          sessionId,
+          update: {
+            sessionUpdate: "plan",
+            entries: [
+              {
+                content: "Inspect the existing implementation",
+                priority: "high",
+                status: "completed",
+              },
+              {
+                content: "Ship the requested change",
+                priority: "high",
+                status: "in_progress",
+              },
+            ],
+          },
+        });
+        notify("session/update", {
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+              type: "text",
+              text: "# Gemini plan\\n\\n- inspect the existing implementation\\n- ship the requested change",
+            },
+          },
+        });
+      } else {
+        notify("session/update", {
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "hello from fake gemini" },
+          },
+        });
+      }
+      reply(message.id, { stopReason: "end_turn" });
+      return;
+    }
     default:
       reply(message.id, {});
   }
@@ -277,5 +335,90 @@ describe("GeminiAdapterLive", () => {
         }).pipe(Effect.provide(makeHarness())),
       ),
     );
+  });
+
+  it("captures Gemini plan turns as proposed plans for follow-up actions", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const adapter = yield* GeminiAdapter;
+          const eventsRef = yield* Ref.make<Array<ProviderRuntimeEvent>>([]);
+
+          yield* Stream.runForEach(adapter.streamEvents, (event) =>
+            Ref.update(eventsRef, (events) => [...events, event]),
+          ).pipe(Effect.forkScoped);
+
+          const threadId = ThreadId.make("thread-gemini-plan");
+          yield* adapter.startSession({
+            provider: "gemini",
+            threadId,
+            runtimeMode: "full-access",
+          });
+
+          yield* adapter.sendTurn({
+            threadId,
+            input: "plan this change",
+            interactionMode: "plan",
+            attachments: [],
+          });
+
+          for (let remainingAttempts = 50; remainingAttempts > 0; remainingAttempts -= 1) {
+            const events = yield* Ref.get(eventsRef);
+            if (
+              events.some((event) => event.type === "turn.proposed.completed") &&
+              events.some((event) => event.type === "turn.completed")
+            ) {
+              break;
+            }
+            yield* Effect.sleep("10 millis");
+          }
+
+          const events = yield* Ref.get(eventsRef);
+          const proposedEvent = events.find((event) => event.type === "turn.proposed.completed");
+          expect(proposedEvent).toBeDefined();
+          if (proposedEvent?.type !== "turn.proposed.completed") {
+            return;
+          }
+
+          expect(proposedEvent.payload.planMarkdown).toBe(
+            "# Gemini plan\n\n- inspect the existing implementation\n- ship the requested change",
+          );
+        }).pipe(Effect.provide(makeHarness())),
+      ),
+    );
+  });
+
+  it("restores the runtime-backed Gemini mode after leaving plan mode", () => {
+    expect(
+      resolveRequestedGeminiModeId({
+        interactionMode: "default",
+        runtimeModeId: "default",
+        currentModeId: "plan",
+      }),
+    ).toBe("default");
+    expect(
+      resolveRequestedGeminiModeId({
+        interactionMode: "default",
+        runtimeModeId: "auto_edit",
+        currentModeId: "plan",
+      }),
+    ).toBe("auto_edit");
+    expect(
+      resolveRequestedGeminiModeId({
+        interactionMode: "default",
+        runtimeModeId: "yolo",
+        currentModeId: "plan",
+      }),
+    ).toBe("yolo");
+  });
+
+  it("leaves the current Gemini mode unchanged when interaction mode is omitted", () => {
+    expect(
+      resolveRequestedGeminiModeId({
+        interactionMode: undefined,
+        runtimeModeId: "yolo",
+        currentModeId: "plan",
+      }),
+    ).toBe("plan");
   });
 });
