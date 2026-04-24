@@ -98,6 +98,32 @@ describe("classifyToolLifecycleItemType", () => {
       "command_execution",
     );
   });
+
+  // Cursor ACP emits `kind: "search"` for *both* codebase grep and web search,
+  // and distinguishes them only in the title. Title must beat kind so these
+  // route to the correct cards.
+  it("uses title to disambiguate Cursor's ambiguous ACP kinds", () => {
+    expect(classifyToolLifecycleItemType({ title: "Web Search", kind: "search" })).toBe(
+      "web_search",
+    );
+    expect(classifyToolLifecycleItemType({ title: "Web Fetch", kind: "search" })).toBe("web_fetch");
+    expect(classifyToolLifecycleItemType({ title: "grep", kind: "search" })).toBe("file_read");
+    expect(classifyToolLifecycleItemType({ title: "Terminal", kind: "execute" })).toBe(
+      "command_execution",
+    );
+  });
+
+  it("does not classify Cursor's 'Create Plan' as a file change", () => {
+    expect(classifyToolLifecycleItemType({ title: "Create Plan", kind: "other" })).toBe(
+      "dynamic_tool_call",
+    );
+  });
+
+  it("classifies Cursor's 'Task: Subagent task' as a subagent call", () => {
+    expect(classifyToolLifecycleItemType({ title: "Task: Subagent task", kind: "other" })).toBe(
+      "collab_agent_tool_call",
+    );
+  });
 });
 
 describe("toolActivity", () => {

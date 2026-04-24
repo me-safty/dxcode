@@ -1671,7 +1671,13 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
-  it("does not use command stdout as the detail when Cursor omits the command input", () => {
+  // Cursor ACP never emits the command text over the protocol — only the
+  // result stream (`rawOutput.stdout/stderr/exitCode`). Previously we hid the
+  // output to avoid it masquerading as the command, but the CommandExecutionCard
+  // draws a labelled pill ("Ran command") and a separate body for output, so
+  // surfacing stdout/exitCode gives the user useful context instead of a blank
+  // success chip.
+  it("surfaces Cursor Terminal stdout + exit code even when the command input is empty", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "cursor-command-complete",
@@ -1701,9 +1707,42 @@ describe("deriveWorkLogEntries", () => {
       label: "Ran command",
       itemType: "command_execution",
       toolTitle: "Ran command",
+      detail: "total 960",
+      exitCode: 0,
     });
-    expect(entry?.detail).toBeUndefined();
     expect(entry?.command).toBeUndefined();
+  });
+
+  it("surfaces Cursor Terminal stderr + non-zero exit code when stdout is empty", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "cursor-command-failed",
+        createdAt: "2026-04-16T22:41:00.000Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "tool-fail",
+            kind: "execute",
+            rawInput: {},
+            rawOutput: {
+              exitCode: 127,
+              stdout: "",
+              stderr: "(eval):1: command not found: rg\n",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry).toMatchObject({
+      id: "cursor-command-failed",
+      detail: "(eval):1: command not found: rg",
+      exitCode: 127,
+    });
   });
 
   it("collapses legacy completed tool rows that are missing tool metadata", () => {

@@ -374,11 +374,81 @@ function extractApplyPatchHunks(input: Record<string, unknown>): InlineDiffHunk[
   return hunks;
 }
 
+// Cursor ACP leaks unified-patch header fragments into the diff content it
+// ships: `oldText` often starts with `-- /dev/null` (indicating a new file),
+// and `newText` begins with `++ b/<path>` before the actual file contents.
+// These are artifacts of Cursor's own patch-rendering pipeline — if we
+// treat them as real content, every rendered diff gains a spurious first
+// line and the unified-patch we produce misaligns against the parser.
+const ACP_OLD_TEXT_DEVNULL_RE = /^-{1,3}\s+\/dev\/null(?:\r?\n|$)/;
+const ACP_NEW_TEXT_PATH_HEADER_RE = /^\+{1,3}\s+[ab]\/[^\r\n]*(?:\r?\n|$)/;
+
+function stripAcpOldTextDevnullHeader(value: string): string {
+  const match = ACP_OLD_TEXT_DEVNULL_RE.exec(value);
+  return match ? value.slice(match[0].length) : value;
+}
+
+function stripAcpNewTextPathHeader(value: string): string {
+  const match = ACP_NEW_TEXT_PATH_HEADER_RE.exec(value);
+  return match ? value.slice(match[0].length) : value;
+}
+
+/**
+ * Parse Cursor ACP's `ToolCallContent` diff entries
+ * (`{type: "diff", path, oldText?, newText}`). Cursor never populates
+ * `rawInput.oldString/newString/file_path` — the diff + path ride on the
+ * content array of the completion update instead. Without this extractor,
+ * FileChangeCard renders as a blank "Changed files" pill because the other
+ * branches find empty `rawInput`.
+ */
+function extractAcpDiffHunks(data: Record<string, unknown>): InlineDiffHunk[] {
+  const content = data.content;
+  if (!Array.isArray(content)) return [];
+
+  const hunks: InlineDiffHunk[] = [];
+  for (const entry of content) {
+    const record = asRecord(entry);
+    if (!record) continue;
+    if (record.type !== "diff") continue;
+    const filePath = asString(record.path);
+    const rawNewText = asString(record.newText);
+    if (!filePath || rawNewText == null) continue;
+    const rawOldText = asString(record.oldText) ?? "";
+    const oldText = stripAcpOldTextDevnullHeader(rawOldText);
+    const newText = stripAcpNewTextPathHeader(rawNewText);
+
+    const rawLines = computeLineDiff(oldText, newText);
+    const stats = diffStats(rawLines);
+    const isNewFile = oldText.length === 0;
+    const trimmed = isNewFile ? rawLines : trimContext(rawLines);
+    const { lines, fullLines, truncated } = truncateDiffLines(trimmed);
+    const patch = buildUnifiedPatch(filePath, rawLines, isNewFile);
+
+    hunks.push({
+      filePath,
+      operation: isNewFile ? "write" : "edit",
+      lines,
+      fullLines,
+      truncated,
+      stats,
+      patch,
+    });
+  }
+  return hunks;
+}
+
 export function extractDiffPreviews(payload: Record<string, unknown> | null): InlineDiffHunk[] {
   if (!payload) return [];
 
   const data = asRecord(payload.data);
   if (!data) return [];
+
+  // Cursor ACP delivers the diff on `data.content[]` regardless of the
+  // `toolName` value (it only exposes the coarse ACP kind like "edit"). Try
+  // that channel first so Edit File renders before falling through to the
+  // provider-specific rawInput extractors.
+  const acpHunks = extractAcpDiffHunks(data);
+  if (acpHunks.length > 0) return acpHunks;
 
   const toolName = asString(data.toolName);
   const input = asRecord(data.input);

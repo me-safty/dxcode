@@ -234,8 +234,14 @@ export function extractPlanStepsFromTodos(
 /**
  * Classify a tool invocation into a canonical ToolLifecycleItemType that the
  * web timeline card router understands. Provider-agnostic: accepts any subset
- * of hints a provider adapter can supply. Matches in order: toolName prefix,
- * toolName substring, ACP kind literal, title substring, then dynamic_tool_call.
+ * of hints a provider adapter can supply. Matches in order: toolName → title →
+ * ACP kind → dynamic_tool_call.
+ *
+ * Title is checked before the ACP `kind` fallback because ACP's kind enum is
+ * deliberately coarse (`search` covers both codebase grep and web search,
+ * `other` covers everything Cursor doesn't have a native slot for). The title
+ * is the only human-readable signal that tells "Web Search" apart from "grep",
+ * so letting it win over the kind gives us correct routing for Cursor.
  */
 export function classifyToolLifecycleItemType(input: {
   readonly toolName?: string | null | undefined;
@@ -254,6 +260,11 @@ export function classifyToolLifecycleItemType(input: {
     if (byTool) return byTool;
   }
 
+  if (title) {
+    const byTitle = matchToolLifecycleItemType(title);
+    if (byTitle) return byTitle;
+  }
+
   switch (kind) {
     case "execute":
       return "command_execution";
@@ -268,11 +279,6 @@ export function classifyToolLifecycleItemType(input: {
       return "file_read";
     case "fetch":
       return "web_fetch";
-  }
-
-  if (title) {
-    const byTitle = matchToolLifecycleItemType(title);
-    if (byTitle) return byTitle;
   }
 
   return "dynamic_tool_call";
@@ -291,15 +297,23 @@ function matchToolLifecycleItemType(value: string): ToolLifecycleItemType | unde
   if (hasToken("image") || hasSubstring("view_image") || hasSubstring("image_view")) {
     return "image_view";
   }
+  // Cursor emits human-readable titles like "Web Search" / "Web Fetch" (space),
+  // which lose the underscore/camel form that substring matches rely on. Also
+  // accept the token pair so those titles route correctly.
   if (
     hasSubstring("web_fetch") ||
     hasSubstring("webfetch") ||
     hasSubstring("fetch_url") ||
-    hasSubstring("fetchurl")
+    hasSubstring("fetchurl") ||
+    (hasToken("web") && hasToken("fetch"))
   ) {
     return "web_fetch";
   }
-  if (hasSubstring("web_search") || hasSubstring("websearch")) {
+  if (
+    hasSubstring("web_search") ||
+    hasSubstring("websearch") ||
+    (hasToken("web") && hasToken("search"))
+  ) {
     return "web_search";
   }
   if (
@@ -313,6 +327,10 @@ function matchToolLifecycleItemType(value: string): ToolLifecycleItemType | unde
   ) {
     return "command_execution";
   }
+  // "create" is intentionally not in this set — it collides with Cursor's
+  // "Create Plan" tool title which has nothing to do with file changes. All
+  // real file-creation tools in the wild (Claude Write, OpenCode write,
+  // Cursor writeToolCall) use "write" or an explicit patch verb instead.
   if (
     hasToken(
       "write",
@@ -320,7 +338,6 @@ function matchToolLifecycleItemType(value: string): ToolLifecycleItemType | unde
       "multiedit",
       "patch",
       "notebookedit",
-      "create",
       "replace",
       "delete",
       "remove",

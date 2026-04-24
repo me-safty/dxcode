@@ -191,6 +191,120 @@ describe("extractDiffPreviews", () => {
   });
 });
 
+// Cursor ACP never populates `rawInput.old_string / new_string / file_path` —
+// the diff comes through the `content[]` array of the completion update with
+// `{type: "diff", path, oldText, newText}`. Without parsing that channel,
+// FileChangeCard shows a blank "Changed files" pill because the other
+// extractors find nothing to work with.
+describe("extractDiffPreviews — Cursor ACP content channel", () => {
+  it("extracts a diff hunk from content[].type='diff' when rawInput is empty", () => {
+    const result = extractDiffPreviews({
+      data: {
+        toolName: "edit",
+        input: {},
+        rawInput: {},
+        content: [
+          {
+            type: "diff",
+            path: "/Users/dev/note.md",
+            oldText: "hello\n",
+            newText: "hello\nworld\n",
+          },
+        ],
+      },
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      filePath: "/Users/dev/note.md",
+      operation: "edit",
+      stats: { additions: 1, deletions: 0 },
+    });
+  });
+
+  it("treats an empty oldText as a file creation (write)", () => {
+    const result = extractDiffPreviews({
+      data: {
+        toolName: "edit",
+        input: {},
+        content: [
+          {
+            type: "diff",
+            path: "scratch/new.md",
+            oldText: "",
+            newText: "fresh content\n",
+          },
+        ],
+      },
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      filePath: "scratch/new.md",
+      operation: "write",
+      stats: { additions: 1, deletions: 0 },
+    });
+  });
+
+  it("emits one hunk per file when content[] holds multiple diffs", () => {
+    const result = extractDiffPreviews({
+      data: {
+        toolName: "edit",
+        input: {},
+        content: [
+          { type: "diff", path: "a.ts", oldText: "a\n", newText: "A\n" },
+          { type: "text", text: "unrelated" }, // should be skipped
+          { type: "diff", path: "b.ts", oldText: "b\n", newText: "B\n" },
+        ],
+      },
+    });
+    expect(result.map((h) => h.filePath)).toEqual(["a.ts", "b.ts"]);
+  });
+
+  // Cursor leaks unified-patch header fragments into the content it ships:
+  // `oldText: "-- /dev/null\n"` and `newText: "++ b/<path>\n<body>"`. These
+  // must be stripped before the diff is computed, otherwise the first rendered
+  // line of every Cursor-generated diff is a bogus "`-- /dev/null`" deletion
+  // with a matching "`++ b/<path>`" addition.
+  it("strips Cursor's patch-header pollution from oldText/newText", () => {
+    const result = extractDiffPreviews({
+      data: {
+        toolName: "edit",
+        input: {},
+        content: [
+          {
+            type: "diff",
+            path: "/Users/dev/scratch/new-file.md",
+            oldText: "-- /dev/null\n",
+            newText: "++ b//Users/dev/scratch/new-file.md\nline 1\nline 2\n",
+          },
+        ],
+      },
+    });
+    expect(result).toHaveLength(1);
+    const [hunk] = result;
+    expect(hunk!.operation).toBe("write");
+    // Only the real content — `line 1` and `line 2` — counts as additions;
+    // the `-- /dev/null` / `++ b/...` header lines must not leak through.
+    expect(hunk!.stats).toEqual({ additions: 2, deletions: 0 });
+    expect(hunk!.fullLines.map((l) => l.content)).toEqual(["line 1", "line 2"]);
+  });
+
+  it("falls back to rawInput-based extraction when content has no diff entries", () => {
+    const result = extractDiffPreviews({
+      data: {
+        toolName: "Edit",
+        content: [{ type: "text", text: "just output, no diff" }],
+        input: {
+          file_path: "foo.ts",
+          old_string: "old",
+          new_string: "new",
+        },
+      },
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]!.filePath).toBe("foo.ts");
+  });
+});
+
 describe("mergeDiffPreviews", () => {
   const hunkA: InlineDiffHunk = {
     filePath: "a.ts",

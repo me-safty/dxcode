@@ -21,46 +21,12 @@ Features implemented exclusively in MarCode that do **not** exist upstream. This
 
 ---
 
-## Performance & Architecture
-
-### CSS `content-visibility` Instead of JS Virtualization
-
-**Commits:** `6f9271c1`, `cb543830`
-**Files:** `apps/web/src/components/chat/MessagesTimeline.tsx`, `apps/web/src/lib/timelineHeight.ts`
-
-**CRITICAL: Never reintroduce `@tanstack/react-virtual` or any JS virtualizer.**
-
-Upstream uses `useVirtualizer` with absolute positioning + `transform: translateY()`, which causes persistent message overlap and scroll lag due to variable-height messages (markdown, code blocks, images, expandable diffs). MarCode replaced this with CSS `content-visibility: auto` with `contain-intrinsic-block-size` hints.
-
-```tsx
-// MarCode approach — all rows in normal document flow, overlap physically impossible
-<div
-  style={{
-    contentVisibility: "auto",
-    containIntrinsicBlockSize: `${estimatedHeight}px`,
-  }}
->
-  <TimelineRowContent ... />
-</div>
-```
-
-When merging upstream, **reject**: `useVirtualizer`, `measureElement`, `VirtualItem`, absolute-positioned row containers, `shouldAdjustScrollPositionOnItemSizeChange`.
-
 ### Incremental Event Handling & Structural Sharing
 
 **Commit:** `a57deb04` (described as "HUGE OPTIMIZATION WIN")
 **Files:** `apps/web/src/store.ts`, `apps/web/src/routes/__root.tsx`
 
 High-frequency events (`thread.message-sent`, `thread.activity-appended`, `thread.session-set`, `thread.turn-diff-completed`, `thread.proposed-plan-upserted`) are applied **incrementally** to the Zustand store from event payloads — no full snapshot fetch. `syncServerReadModel` uses structural sharing: each thread/project is compared field-by-field; unchanged objects retain the **same reference** to prevent Zustand re-renders.
-
-### Lazy Thread Hydration (Two-Phase Bootstrap)
-
-**Commit:** `485d4175`
-**Files:** `apps/web/src/store.ts`, `apps/web/src/routes/__root.tsx`, server `ProjectionSnapshotQuery.ts`
-
-Phase 1 fetches lightweight `OrchestrationThreadSummary` (metadata + pre-computed `latestUserMessageAt` via SQL aggregate). Sidebar renders immediately. Phase 2 hydrates full thread data only when navigated to.
-
----
 
 ## Chat UI Enhancements
 
@@ -250,12 +216,6 @@ OS-level notifications with sound when agent turns complete. Per-event notificat
 
 Thread-level additional directories via toolbar popover. Directories persist as `additionalDirectories` on `OrchestrationThread` metadata. Session restarts when directories change.
 
-### Todo Checklist Support
-
-**Commit:** `bf2eb248`
-
-Todo checklist support in the composer with improved agent task handling.
-
 ### Attachments Menu Consolidation
 
 **Commit:** `ec3110ba`
@@ -271,12 +231,6 @@ Footer controls consolidated into a single attachments menu for cleaner UX.
 **Commit:** `d25491b2`
 
 Display agent task groups in the timeline with a dedicated card and activity rendering.
-
-### Thread Name Generation
-
-**Commit:** `7a49599e`
-
-Automatic thread name generation from conversation content.
 
 ### ANSI-to-Spans Utility
 
@@ -354,22 +308,18 @@ Complete removal of PostHog analytics and telemetry services. All analytics coll
 
 After any upstream merge, verify each feature still works:
 
-- [ ] CSS `content-visibility` rendering (no JS virtualization)
 - [ ] Incremental event handling + structural sharing
-- [ ] Lazy thread hydration (two-phase bootstrap)
 - [ ] Selection reply / quoted context (`Cmd+Shift+R`)
 - [ ] Inline user message editing
 - [ ] Text reveal animation
 - [ ] Inline diff previews in work log
 - [ ] All rich tool display cards
 - [ ] GitLab MR support + dynamic PR/MR labels
-- [ ] Claude text generation for commits/PRs
 - [ ] Jira OAuth + board selection + task chips
 - [ ] All 24+ themes
 - [ ] Turn notifications with sound
 - [ ] Directory picker popover
 - [ ] Agent task groups in timeline
-- [ ] Thread name generation
 - [ ] Fullscreen desktop handling
 - [ ] Landing page
 - [ ] MarCode branding (no upstream references)

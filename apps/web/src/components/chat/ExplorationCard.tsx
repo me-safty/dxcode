@@ -145,7 +145,7 @@ function formatLineRange(input: Record<string, unknown> | undefined): string | n
   return null;
 }
 
-function explorationEntryHeading(
+export function explorationEntryHeading(
   entry: WorkLogEntry,
   options?: { readonly pathMode?: "short" | "full" },
 ): string {
@@ -282,6 +282,22 @@ function tryParseJson(value: string): Record<string, unknown> | null {
   }
 }
 
+// Matches values that look like filesystem paths and excludes source lines.
+// Requires a path separator and forbids anything that clearly identifies the
+// value as code (whitespace, quotes, braces, parens, angle brackets, etc.).
+// Without this guard, Cursor's `rawOutput.content` — which is literally the
+// file's contents — slips through because `import { X } from "@scope/pkg"`
+// contains a `/`, and the exploration card would render it as if it were a
+// path (the "Read import { ProviderKind }…" bug).
+const PATH_LIKE_DISALLOWED_CHARS_RE = /[\s"'`(){}[\];<>]/;
+
+function looksLikePath(value: string): boolean {
+  if (value.length === 0) return false;
+  if (!value.includes("/") && !value.includes("\\")) return false;
+  if (PATH_LIKE_DISALLOWED_CHARS_RE.test(value)) return false;
+  return true;
+}
+
 function extractFilePathFromValue(value: string): string | null {
   const parsed = tryParseJson(value);
   if (parsed) {
@@ -295,8 +311,8 @@ function extractFilePathFromValue(value: string): string | null {
             : null;
     return path;
   }
-  if (value.includes("/")) return value.trim();
-  return null;
+  const trimmed = value.trim();
+  return looksLikePath(trimmed) ? trimmed : null;
 }
 
 function extractFileNameFromDetail(detail: string | undefined): string {

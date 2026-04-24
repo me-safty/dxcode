@@ -60,6 +60,7 @@ import {
 import {
   type AcpSessionMode,
   type AcpSessionModeState,
+  type AcpToolCallState,
   parsePermissionRequest,
 } from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
@@ -105,6 +106,13 @@ interface CursorSessionContext {
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
+  // Cursor emits the real command/title in `session/request_permission`
+  // (title is backtick-wrapped like `` `rg -i 'effect'` ``), but the
+  // subsequent `session/update` tool_call only carries the coarse title
+  // "Terminal". Stash whatever we learn from the permission request here,
+  // keyed by `toolCallId`, so we can re-inject it into the tool_call event
+  // and show the user the actual command that ran.
+  readonly toolCallHints: Map<string, { readonly command?: string; readonly title?: string }>;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
   stopped: boolean;
@@ -262,6 +270,34 @@ function applyRequestedSessionConfiguration<E>(input: {
       ),
     );
   });
+}
+
+/**
+ * Overlay a command/title learned from a `session/request_permission` onto
+ * the subsequent `session/update` tool_call state. Cursor emits the actual
+ * command only on the permission request (the tool_call itself just says
+ * "Terminal"), so without this merge the client sees a "Ran command" pill
+ * with no command text.
+ *
+ * IMPORTANT: this only fills `command` (and `data.command`) — never `detail`.
+ * Detail is reserved for the command's *output*; the client's
+ * `summarizeToolRawOutput` derives it from `data.rawOutput.stdout/stderr`. If
+ * we clobbered detail with the command text, CommandExecutionCard's
+ * `detailIsDistinctOutput` guard would treat detail === command and hide the
+ * stdout body, leaving the user with a command pill but no visible output.
+ */
+export function applyToolCallHint(
+  state: AcpToolCallState,
+  hint: { readonly command?: string; readonly title?: string } | undefined,
+): AcpToolCallState {
+  if (!hint) return state;
+  if (state.command) return state;
+  if (!hint.command) return state;
+  return {
+    ...state,
+    command: hint.command,
+    data: { ...state.data, command: hint.command },
+  };
 }
 
 function selectAutoApprovedPermissionOption(
@@ -589,6 +625,21 @@ function makeCursorAdapter(options?: CursorAdapterLiveOptions) {
                   params,
                   "acp.jsonrpc",
                 );
+                const permissionRequest = parsePermissionRequest(params);
+                const hintToolCallId = params.toolCall.toolCallId.trim();
+                if (ctx && hintToolCallId) {
+                  const hint: { command?: string; title?: string } = {};
+                  if (permissionRequest.toolCall?.command) {
+                    hint.command = permissionRequest.toolCall.command;
+                  }
+                  const hintTitle = permissionRequest.toolCall?.title;
+                  if (hintTitle && hintTitle.toLowerCase() !== "ran command") {
+                    hint.title = hintTitle;
+                  }
+                  if (hint.command || hint.title) {
+                    ctx.toolCallHints.set(hintToolCallId, hint);
+                  }
+                }
                 if (input.runtimeMode === "full-access") {
                   const autoApprovedOptionId = selectAutoApprovedPermissionOption(params);
                   if (autoApprovedOptionId !== undefined) {
@@ -600,7 +651,6 @@ function makeCursorAdapter(options?: CursorAdapterLiveOptions) {
                     };
                   }
                 }
-                const permissionRequest = parsePermissionRequest(params);
                 const requestId = ApprovalRequestId.make(crypto.randomUUID());
                 const runtimeRequestId = RuntimeRequestId.make(requestId);
                 const decision = yield* Deferred.make<ProviderApprovalDecision>();
@@ -688,6 +738,7 @@ function makeCursorAdapter(options?: CursorAdapterLiveOptions) {
             pendingApprovals,
             pendingUserInputs,
             turns: [],
+            toolCallHints: new Map(),
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
             stopped: false,
@@ -751,7 +802,10 @@ function makeCursorAdapter(options?: CursorAdapterLiveOptions) {
                         provider: PROVIDER,
                         threadId: ctx.threadId,
                         turnId: ctx.activeTurnId,
-                        toolCall: event.toolCall,
+                        toolCall: applyToolCallHint(
+                          event.toolCall,
+                          ctx.toolCallHints.get(event.toolCall.toolCallId),
+                        ),
                         rawPayload: event.rawPayload,
                       }),
                     );

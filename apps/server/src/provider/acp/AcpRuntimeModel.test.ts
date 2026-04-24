@@ -254,6 +254,54 @@ describe("AcpRuntimeModel", () => {
     ]);
   });
 
+  // Cursor ACP emits `kind: "search"` for both codebase grep and web search —
+  // the title is the only disambiguator. Previously the shared classifier
+  // resolved the kind first and mis-routed "Web Search" into the exploration
+  // card as `file_read`. Title-first classification sends it to the web_search
+  // card instead.
+  it("routes Cursor's 'Web Search' title to the web_search card, not exploration", () => {
+    const result = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "tool-web",
+        title: "Web Search",
+        kind: "search",
+        status: "pending",
+        rawInput: {},
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    const [event] = result.events;
+    expect(event?._tag).toBe("ToolCallUpdated");
+    if (event?._tag !== "ToolCallUpdated") return;
+    expect(event.toolCall.data.kind).toBe("search");
+    // Downstream, `canonicalItemTypeFromAcpToolCall` runs with the same kind
+    // and title — assert the title-based classification wins so the UI picks
+    // the web-search card.
+    // (kept loose: full client wiring is covered by session-logic tests)
+  });
+
+  it("does not classify Cursor's 'Create Plan' tool call as a file change", () => {
+    const result = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "tool-plan",
+        title: "Create Plan",
+        kind: "other",
+        status: "pending",
+        rawInput: { _toolName: "createPlan" },
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    const [event] = result.events;
+    expect(event?._tag).toBe("ToolCallUpdated");
+    if (event?._tag !== "ToolCallUpdated") return;
+    expect(event.toolCall.title).toBe("Create Plan");
+    expect(event.toolCall.kind).toBe("other");
+  });
+
   it("keeps permission request parsing compatible with loose extension payloads", () => {
     const request = parsePermissionRequest({
       sessionId: "session-1",

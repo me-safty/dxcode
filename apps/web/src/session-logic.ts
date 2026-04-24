@@ -1011,6 +1011,15 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       entry.exitCode = exitCode;
     }
   }
+  // Cursor ACP reports exit codes via `data.rawOutput.exitCode` rather than a
+  // trailer inside `detail`, so CommandExecutionCard's Success/Exit N badge
+  // only lights up if we sample that channel.
+  if (entry.exitCode === undefined) {
+    const rawOutputExitCode = extractRawOutputExitCode(payload);
+    if (rawOutputExitCode !== undefined) {
+      entry.exitCode = rawOutputExitCode;
+    }
+  }
   if (commandPreview.command) {
     entry.command = commandPreview.command;
   }
@@ -1554,6 +1563,14 @@ function summarizeToolRawOutput(payload: Record<string, unknown> | null): string
     return `${totalFiles.toLocaleString()} file${totalFiles === 1 ? "" : "s"}${suffix}`;
   }
 
+  // Cursor's grep returns totalMatches/truncated instead of totalFiles — same
+  // idea, different key. Surface the count so the exploration row has content.
+  const totalMatches = asNumber(rawOutput.totalMatches);
+  if (totalMatches !== null) {
+    const suffix = rawOutput.truncated === true ? "+" : "";
+    return `${totalMatches.toLocaleString()} match${totalMatches === 1 ? "" : "es"}${suffix}`;
+  }
+
   const content = asTrimmedString(rawOutput.content);
   if (content) {
     return summarizeToolTextOutput(content);
@@ -1564,19 +1581,21 @@ function summarizeToolRawOutput(payload: Record<string, unknown> | null): string
     return summarizeToolTextOutput(stdout);
   }
 
+  // Fall back to stderr for failing Cursor commands (exitCode ≠ 0, empty
+  // stdout, error message only in stderr — e.g. "command not found: rg").
+  const stderr = asTrimmedString(rawOutput.stderr);
+  if (stderr) {
+    return summarizeToolTextOutput(stderr);
+  }
+
   return null;
 }
 
-function isCommandToolDetail(payload: Record<string, unknown> | null, heading: string): boolean {
+function extractRawOutputExitCode(payload: Record<string, unknown> | null): number | undefined {
   const data = asRecord(payload?.data);
-  const kind = asTrimmedString(data?.kind)?.toLowerCase();
-  const title = asTrimmedString(payload?.title ?? heading)?.toLowerCase();
-  return (
-    extractWorkLogItemType(payload) === "command_execution" ||
-    kind === "execute" ||
-    title === "terminal" ||
-    title === "ran command"
-  );
+  const rawOutput = asRecord(data?.rawOutput);
+  const code = rawOutput?.exitCode;
+  return typeof code === "number" && Number.isInteger(code) ? code : undefined;
 }
 
 function extractToolDetail(
@@ -1592,10 +1611,13 @@ function extractToolDetail(
     return detail;
   }
 
-  if (isCommandToolDetail(payload, heading)) {
-    return null;
-  }
-
+  // Previously we short-circuited command tools here on the assumption that
+  // `payload.detail` already held either the command text or output. That
+  // holds for Claude/OpenCode (SDKs include stdout in the result), but Cursor
+  // ACP never populates `payload.detail` for `kind: "execute"` — the command
+  // text isn't emitted over the protocol and stdout lives in `data.rawOutput`.
+  // Letting `summarizeToolRawOutput` run lets the card render Cursor's output
+  // instead of a bare "Ran command" pill.
   const rawOutputSummary = summarizeToolRawOutput(payload);
   if (rawOutputSummary) {
     const normalizedRawOutputSummary = normalizePreviewForComparison(rawOutputSummary);
@@ -1707,6 +1729,10 @@ function collectChangedFiles(value: unknown, target: string[], seen: Set<string>
     "patch",
     "patches",
     "operations",
+    // Cursor ACP attaches diff/resource entries on `data.content[]`; each
+    // entry carries `path`, so recursing into this channel is how we pick up
+    // Cursor Edit File's file path.
+    "content",
   ]) {
     if (!(nestedKey in record)) {
       continue;
