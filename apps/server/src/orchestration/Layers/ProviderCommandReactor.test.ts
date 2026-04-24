@@ -577,10 +577,10 @@ describe("ProviderCommandReactor", () => {
         modelSelection: {
           provider: "codex",
           model: "gpt-5.3-codex",
-          options: {
-            reasoningEffort: "high",
-            fastMode: true,
-          },
+          options: [
+            { id: "reasoningEffort", value: "high" },
+            { id: "fastMode", value: true },
+          ],
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
@@ -594,10 +594,10 @@ describe("ProviderCommandReactor", () => {
       modelSelection: {
         provider: "codex",
         model: "gpt-5.3-codex",
-        options: {
-          reasoningEffort: "high",
-          fastMode: true,
-        },
+        options: [
+          { id: "reasoningEffort", value: "high" },
+          { id: "fastMode", value: true },
+        ],
       },
     });
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
@@ -605,10 +605,10 @@ describe("ProviderCommandReactor", () => {
       modelSelection: {
         provider: "codex",
         model: "gpt-5.3-codex",
-        options: {
-          reasoningEffort: "high",
-          fastMode: true,
-        },
+        options: [
+          { id: "reasoningEffort", value: "high" },
+          { id: "fastMode", value: true },
+        ],
       },
     });
   });
@@ -633,9 +633,7 @@ describe("ProviderCommandReactor", () => {
         modelSelection: {
           provider: "claudeAgent",
           model: "claude-sonnet-4-6",
-          options: {
-            effort: "max",
-          },
+          options: [{ id: "effort", value: "max" }],
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
@@ -649,9 +647,7 @@ describe("ProviderCommandReactor", () => {
       modelSelection: {
         provider: "claudeAgent",
         model: "claude-sonnet-4-6",
-        options: {
-          effort: "max",
-        },
+        options: [{ id: "effort", value: "max" }],
       },
     });
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
@@ -659,9 +655,7 @@ describe("ProviderCommandReactor", () => {
       modelSelection: {
         provider: "claudeAgent",
         model: "claude-sonnet-4-6",
-        options: {
-          effort: "max",
-        },
+        options: [{ id: "effort", value: "max" }],
       },
     });
   });
@@ -686,9 +680,7 @@ describe("ProviderCommandReactor", () => {
         modelSelection: {
           provider: "claudeAgent",
           model: "claude-opus-4-6",
-          options: {
-            fastMode: true,
-          },
+          options: [{ id: "fastMode", value: true }],
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
@@ -702,9 +694,7 @@ describe("ProviderCommandReactor", () => {
       modelSelection: {
         provider: "claudeAgent",
         model: "claude-opus-4-6",
-        options: {
-          fastMode: true,
-        },
+        options: [{ id: "fastMode", value: true }],
       },
     });
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
@@ -712,9 +702,7 @@ describe("ProviderCommandReactor", () => {
       modelSelection: {
         provider: "claudeAgent",
         model: "claude-opus-4-6",
-        options: {
-          fastMode: true,
-        },
+        options: [{ id: "fastMode", value: true }],
       },
     });
   });
@@ -1004,9 +992,7 @@ describe("ProviderCommandReactor", () => {
         modelSelection: {
           provider: "claudeAgent",
           model: "claude-sonnet-4-6",
-          options: {
-            effort: "medium",
-          },
+          options: [{ id: "effort", value: "medium" }],
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
@@ -1031,9 +1017,7 @@ describe("ProviderCommandReactor", () => {
         modelSelection: {
           provider: "claudeAgent",
           model: "claude-sonnet-4-6",
-          options: {
-            effort: "max",
-          },
+          options: [{ id: "effort", value: "max" }],
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
@@ -1048,9 +1032,7 @@ describe("ProviderCommandReactor", () => {
       modelSelection: {
         provider: "claudeAgent",
         model: "claude-sonnet-4-6",
-        options: {
-          effort: "max",
-        },
+        options: [{ id: "effort", value: "max" }],
       },
     });
   });

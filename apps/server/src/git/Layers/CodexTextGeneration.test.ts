@@ -247,10 +247,10 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
             modelSelection: {
               provider: "codex",
               model: "gpt-5.4",
-              options: {
-                reasoningEffort: "xhigh",
-                fastMode: true,
-              },
+              options: [
+                { id: "reasoningEffort", value: "xhigh" },
+                { id: "fastMode", value: true },
+              ],
             },
           });
         }),

@@ -5,6 +5,10 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { CodexModelSelection } from "@marcode/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@marcode/shared/git";
+import {
+  getModelSelectionBooleanOptionValue,
+  getModelSelectionStringOptionValue,
+} from "@marcode/shared/model";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -156,7 +160,9 @@ const makeCodexTextGeneration = Effect.gen(function* () {
 
     const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
       const reasoningEffort =
-        modelSelection.options?.reasoningEffort ?? CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT;
+        getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
+        CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT;
+      const fastMode = getModelSelectionBooleanOptionValue(modelSelection, "fastMode") === true;
       const command = ChildProcess.make(
         codexSettings?.binaryPath || "codex",
         [
@@ -169,7 +175,7 @@ const makeCodexTextGeneration = Effect.gen(function* () {
           modelSelection.model,
           "--config",
           `model_reasoning_effort="${reasoningEffort}"`,
-          ...(modelSelection.options?.fastMode ? ["--config", `service_tier="fast"`] : []),
+          ...(fastMode ? ["--config", `service_tier="fast"`] : []),
           "--output-schema",
           schemaPath,
           "--output-last-message",

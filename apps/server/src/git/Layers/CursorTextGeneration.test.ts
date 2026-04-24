@@ -137,11 +137,11 @@ it.layer(CursorTextGenerationTestLayer)("CursorTextGenerationLive", (it) => {
           modelSelection: {
             provider: "cursor",
             model: "gpt-5.4",
-            options: {
-              reasoning: "xhigh",
-              fastMode: true,
-              contextWindow: "1m",
-            },
+            options: [
+              { id: "reasoning", value: "xhigh" },
+              { id: "fastMode", value: true },
+              { id: "contextWindow", value: "1m" },
+            ],
           },
         });
 

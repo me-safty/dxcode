@@ -167,10 +167,10 @@ describe("decider project scripts", () => {
           modelSelection: {
             provider: "codex",
             model: "gpt-5.3-codex",
-            options: {
-              reasoningEffort: "high",
-              fastMode: true,
-            },
+            options: [
+              { id: "reasoningEffort", value: "high" },
+              { id: "fastMode", value: true },
+            ],
           },
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           runtimeMode: "approval-required",
@@ -196,10 +196,10 @@ describe("decider project scripts", () => {
       modelSelection: {
         provider: "codex",
         model: "gpt-5.3-codex",
-        options: {
-          reasoningEffort: "high",
-          fastMode: true,
-        },
+        options: [
+          { id: "reasoningEffort", value: "high" },
+          { id: "fastMode", value: true },
+        ],
       },
       runtimeMode: "approval-required",
     });

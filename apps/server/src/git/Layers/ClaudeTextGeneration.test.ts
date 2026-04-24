@@ -202,10 +202,10 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGenerationLive", (it) => {
           modelSelection: {
             provider: "claudeAgent",
             model: "claude-haiku-4-5",
-            options: {
-              thinking: false,
-              effort: "high",
-            },
+            options: [
+              { id: "thinking", value: false },
+              { id: "effort", value: "high" },
+            ],
           },
         });
 
@@ -265,10 +265,10 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGenerationLive", (it) => {
           modelSelection: {
             provider: "claudeAgent",
             model: "claude-opus-4-6",
-            options: {
-              effort: "max",
-              fastMode: true,
-            },
+            options: [
+              { id: "effort", value: "max" },
+              { id: "fastMode", value: true },
+            ],
           },
         });
 

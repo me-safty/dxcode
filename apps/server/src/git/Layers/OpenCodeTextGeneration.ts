@@ -7,6 +7,7 @@ import {
   type OpenCodeModelSelection,
 } from "@marcode/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@marcode/shared/git";
+import { getModelSelectionStringOptionValue } from "@marcode/shared/model";
 
 import { ServerConfig } from "../../config.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -321,15 +322,13 @@ const makeOpenCodeTextGeneration = Effect.gen(function* () {
             throw new Error("OpenCode session.create returned no session payload.");
           }
 
+          const agent = getModelSelectionStringOptionValue(input.modelSelection, "agent");
+          const variant = getModelSelectionStringOptionValue(input.modelSelection, "variant");
           const result = await client.session.prompt({
             sessionID: session.data.id,
             model: parsedModel,
-            ...(input.modelSelection.options?.agent
-              ? { agent: input.modelSelection.options.agent }
-              : {}),
-            ...(input.modelSelection.options?.variant
-              ? { variant: input.modelSelection.options.variant }
-              : {}),
+            ...(agent ? { agent } : {}),
+            ...(variant ? { variant } : {}),
             parts: [{ type: "text", text: input.prompt }, ...fileParts],
           });
           const info = result.data?.info;
