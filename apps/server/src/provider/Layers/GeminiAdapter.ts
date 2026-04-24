@@ -1116,6 +1116,9 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
           return;
         }
         context.stopped = true;
+        if (context.turnState) {
+          context.interruptedTurnIds.add(context.turnState.turnId);
+        }
         yield* settlePendingApprovalsAsCancelled(context.pendingApprovals);
         if (context.notificationFiber) {
           yield* Fiber.interrupt(context.notificationFiber);

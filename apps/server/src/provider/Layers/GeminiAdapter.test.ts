@@ -520,6 +520,65 @@ describe("GeminiAdapterLive", () => {
     );
   });
 
+  it("does not emit ready after stopSession exits an active Gemini turn", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const adapter = yield* GeminiAdapter;
+          const eventsRef = yield* Ref.make<Array<ProviderRuntimeEvent>>([]);
+
+          yield* Stream.runForEach(adapter.streamEvents, (event) =>
+            Ref.update(eventsRef, (events) => [...events, event]),
+          ).pipe(Effect.forkScoped);
+
+          const threadId = ThreadId.make("thread-gemini-stop-active-turn");
+          yield* adapter.startSession({
+            provider: "gemini",
+            threadId,
+            runtimeMode: "full-access",
+          });
+
+          const started = yield* adapter.sendTurn({
+            threadId,
+            input: "wait for interrupt",
+            attachments: [],
+          });
+
+          for (let remainingAttempts = 50; remainingAttempts > 0; remainingAttempts -= 1) {
+            const events = yield* Ref.get(eventsRef);
+            if (
+              events.some(
+                (event) =>
+                  event.type === "content.delta" &&
+                  event.turnId === started.turnId &&
+                  event.payload.delta === "still working...",
+              )
+            ) {
+              break;
+            }
+            yield* Effect.sleep("10 millis");
+          }
+
+          yield* adapter.stopSession(threadId);
+          yield* Effect.sleep("250 millis");
+
+          const events = yield* Ref.get(eventsRef);
+          const exitIndex = events.findIndex((event) => event.type === "session.exited");
+          expect(exitIndex).toBeGreaterThanOrEqual(0);
+          expect(
+            events
+              .slice(exitIndex + 1)
+              .some(
+                (event) =>
+                  event.type === "session.state.changed" && event.payload.state === "ready",
+              ),
+          ).toBe(false);
+          expect(events.some((event) => event.type === "runtime.error")).toBe(false);
+        }).pipe(Effect.provide(makeHarness())),
+      ),
+    );
+  });
+
   it("restores the runtime-backed Gemini mode after leaving plan mode", () => {
     expect(
       resolveRequestedGeminiModeId({
