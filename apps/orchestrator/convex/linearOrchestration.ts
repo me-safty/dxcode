@@ -4,9 +4,9 @@ import { v } from "convex/values";
 
 import { createLinearPlatformAdapter } from "../src/adapters/linear.ts";
 import { buildLinearExecutionPrompt, buildLinearLifecycleReply } from "../src/linear/replies.ts";
-import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
-import { internalAction } from "./_generated/server";
+import { internal } from "./_generated/api.js";
+import type { Id } from "./_generated/dataModel.js";
+import { internalAction } from "./_generated/server.js";
 
 interface StartRunFromLinearWebhookResult {
   readonly acceptedAt: string;
@@ -71,8 +71,29 @@ export const handleLinearWebhookIngress = internalAction({
       }),
     ),
   }),
-  handler: async (ctx, args) => {
-    const result = await ctx.runMutation(internal.controlThreads.upsertFromLinearIngress, args);
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    controlThreadId: string;
+    threadKey: string;
+    createdThread: boolean;
+    eventApplied: boolean;
+    shouldStartRun: boolean;
+    executionRun?: {
+      acceptedAt: string;
+      controlThreadId: string;
+      executionRunId: string;
+      t3ThreadId: string;
+    };
+  }> => {
+    const result: {
+      controlThreadId: Id<"controlThreads">;
+      threadKey: string;
+      createdThread: boolean;
+      eventApplied: boolean;
+      shouldStartRun: boolean;
+    } = await ctx.runMutation(internal.controlThreads.upsertFromLinearIngress, args);
 
     let executionRun:
       | {
@@ -90,7 +111,11 @@ export const handleLinearWebhookIngress = internalAction({
       });
 
       if (existingRuns.length > 0 && existingRuns[0]!.t3ThreadId) {
-        const continueResult = await ctx.runAction(internal.executionRuns.continueWorkerRun, {
+        const continueResult: {
+          executionRunId: string;
+          t3ThreadId: string;
+          acceptedAt: string;
+        } = await ctx.runAction(internal.executionRuns.continueWorkerRun, {
           controlThreadId: result.controlThreadId,
           prompt: buildLinearExecutionPrompt({
             issueId: args.issueId,
@@ -196,6 +221,38 @@ export const startRunFromLinearWebhook = internalAction({
   },
 });
 
+export const forwardActivityToLinear = internalAction({
+  args: {
+    controlThreadId: v.string(),
+    activity: v.object({
+      type: v.union(v.literal("thought"), v.literal("action"), v.literal("error")),
+      body: v.optional(v.string()),
+      action: v.optional(v.string()),
+      parameter: v.optional(v.string()),
+      ephemeral: v.optional(v.boolean()),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const controlThread = (await ctx.runQuery(internal.controlThreads.getControlThread, {
+      controlThreadId: args.controlThreadId as Id<"controlThreads">,
+    })) as ControlThreadForReply | null;
+
+    if (controlThread === null || !controlThread.linearAgentSessionId) {
+      return;
+    }
+
+    const adapter = createLinearPlatformAdapter();
+    await adapter.postActivity(
+      {
+        platform: "linear",
+        issueId: controlThread.issueId,
+        agentSessionId: controlThread.linearAgentSessionId,
+      },
+      args.activity,
+    );
+  },
+});
+
 export const postExecutionReplyIfNeeded = internalAction({
   args: {
     executionRunId: v.string(),
@@ -276,7 +333,7 @@ export const postExecutionReplyIfNeeded = internalAction({
     return {
       posted: true,
       reason: "posted",
-      replyCommentId: messageRef.messageId,
+      replyCommentId,
     };
   },
 });

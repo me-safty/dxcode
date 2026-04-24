@@ -6,7 +6,7 @@ describe("linear reply helpers", () => {
   it("builds an execution prompt from the trigger comment", () => {
     const prompt = buildLinearExecutionPrompt({
       issueId: "issue-123",
-      linearThreadKey: "linear:issue-123:c:comment-9",
+      linearThreadKey: "linear:issue-123",
       messageId: "comment-9",
       authorName: "Vivek",
       body: "@Engineering please fix this bug",

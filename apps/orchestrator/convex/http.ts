@@ -9,12 +9,13 @@ import {
 } from "../src/linear/oauth.ts";
 import { normalizeLinearWebhookInput } from "../src/linear/ingress.ts";
 import { hasValidLinearSignature } from "../src/linear/webhookVerification.ts";
-import { httpAction } from "./_generated/server";
-import { internal } from "./_generated/api";
-import { ExecutionRunLifecycleEvent } from "@t3tools/contracts";
+import { httpAction } from "./_generated/server.js";
+import { internal } from "./_generated/api.js";
+import { ExecutionRunLifecycleEvent, ExecutionRunActivityEvent } from "@t3tools/contracts";
 
 const http = httpRouter();
 const decodeExecutionRunLifecycleEvent = Schema.decodeUnknownSync(ExecutionRunLifecycleEvent);
+const decodeExecutionRunActivityEvent = Schema.decodeUnknownSync(ExecutionRunActivityEvent);
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
 function requireBridgeAuthorization(request: Request) {
@@ -243,6 +244,46 @@ http.route({
       ...result,
       ...(linearReply !== undefined ? { linearReply } : {}),
     });
+  }),
+});
+
+http.route({
+  path: "/t3/execution-activities",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = requireBridgeAuthorization(request);
+    if (!auth.ok) {
+      return Response.json({ error: auth.message }, { status: auth.status });
+    }
+
+    let payload: typeof ExecutionRunActivityEvent.Type;
+    try {
+      payload = decodeExecutionRunActivityEvent(await request.json());
+    } catch {
+      return Response.json({ error: "Invalid activity event payload" }, { status: 400 });
+    }
+
+    try {
+      await ctx.runAction(internal.linearOrchestration.forwardActivityToLinear, {
+        controlThreadId: payload.controlThreadId,
+        activity: {
+          type: payload.activity.type,
+          ...(payload.activity.body !== undefined ? { body: payload.activity.body } : {}),
+          ...(payload.activity.action !== undefined ? { action: payload.activity.action } : {}),
+          ...(payload.activity.parameter !== undefined
+            ? { parameter: payload.activity.parameter }
+            : {}),
+          ...(payload.activity.ephemeral !== undefined
+            ? { ephemeral: payload.activity.ephemeral }
+            : {}),
+        },
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.warn(`Failed to forward activity to Linear: ${errorMessage}`);
+    }
+
+    return Response.json({ accepted: true });
   }),
 });
 

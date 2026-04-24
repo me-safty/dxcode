@@ -34,7 +34,7 @@ describe("linear ingress normalization", () => {
     expect(ingress?.threadKind).toBe("comment");
     expect(ingress?.commentId).toBe("comment-9");
     expect(ingress?.messageId).toBe("comment-9");
-    expect(ingress?.linearThreadKey).toBe("linear:issue-123:c:comment-9");
+    expect(ingress?.linearThreadKey).toBe("linear:issue-123");
     expect(ingress?.shouldStartRun).toBe(true);
   });
 
@@ -59,7 +59,7 @@ describe("linear ingress normalization", () => {
     expect(ingress).not.toBeNull();
     expect(ingress?.commentId).toBe("comment-9");
     expect(ingress?.messageId).toBe("comment-10");
-    expect(ingress?.linearThreadKey).toBe("linear:issue-123:c:comment-9");
+    expect(ingress?.linearThreadKey).toBe("linear:issue-123");
     expect(ingress?.shouldStartRun).toBe(false);
   });
 

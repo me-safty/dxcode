@@ -1,5 +1,6 @@
 import {
   type ExecutionRunLifecycleEvent,
+  type ExecutionRunActivityEvent,
   ExecutionRunCreateRequest,
   ExecutionRunContinueRequest,
   ExecutionRunInterruptRequest,
@@ -42,21 +43,21 @@ class ExecutionBridgeCallbackError extends Schema.TaggedErrorClass<ExecutionBrid
   },
 ) {}
 
-const postLifecycleEvent = (event: ExecutionRunLifecycleEvent) =>
-  Effect.tryPromise({
+function postToOrchestrator(path: string, body: unknown) {
+  return Effect.tryPromise({
     try: async () => {
       const config = readExecutionBridgeCallbackConfig();
       if (config === null) {
         return;
       }
 
-      const response = await fetch(`${config.baseUrl}/t3/execution-events`, {
+      const response = await fetch(`${config.baseUrl}${path}`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
           authorization: `Bearer ${config.sharedSecret}`,
         },
-        body: JSON.stringify(event),
+        body: JSON.stringify(body),
       });
       if (!response.ok) {
         const detail = await response.text();
@@ -70,6 +71,13 @@ const postLifecycleEvent = (event: ExecutionRunLifecycleEvent) =>
         message: error instanceof Error ? error.message : String(error),
       }),
   });
+}
+
+const postLifecycleEvent = (event: ExecutionRunLifecycleEvent) =>
+  postToOrchestrator("/t3/execution-events", event);
+
+const postActivityEvent = (event: ExecutionRunActivityEvent) =>
+  postToOrchestrator("/t3/execution-activities", event);
 
 function toLifecycleCheckpoint(
   event: Extract<OrchestrationEvent, { type: "thread.session-set" }>,
@@ -236,6 +244,57 @@ export const executionBridgeInterruptRouteLayer = HttpRouter.add(
   ),
 );
 
+function toActivityEvent(
+  event: Extract<OrchestrationEvent, { type: "thread.activity-appended" }>,
+  trackedRun: TrackedExecutionRun,
+): ExecutionRunActivityEvent | null {
+  const { activity } = event.payload;
+  const tone = activity.tone as string;
+
+  if (tone === "tool") {
+    return {
+      eventId: event.eventId,
+      controlThreadId: trackedRun.controlThreadId,
+      executionRunId: trackedRun.executionRunId,
+      activity: {
+        type: "action",
+        action: activity.kind,
+        parameter: activity.summary,
+        ephemeral: true,
+      },
+      occurredAt: event.occurredAt,
+    };
+  }
+
+  if (tone === "info") {
+    return {
+      eventId: event.eventId,
+      controlThreadId: trackedRun.controlThreadId,
+      executionRunId: trackedRun.executionRunId,
+      activity: {
+        type: "thought",
+        body: activity.summary,
+      },
+      occurredAt: event.occurredAt,
+    };
+  }
+
+  if (tone === "error") {
+    return {
+      eventId: event.eventId,
+      controlThreadId: trackedRun.controlThreadId,
+      executionRunId: trackedRun.executionRunId,
+      activity: {
+        type: "error",
+        body: activity.summary,
+      },
+      occurredAt: event.occurredAt,
+    };
+  }
+
+  return null;
+}
+
 export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
   Effect.gen(function* () {
     const callbackConfig = readExecutionBridgeCallbackConfig();
@@ -251,6 +310,30 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
 
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+        if (event.type === "thread.activity-appended") {
+          return Effect.gen(function* () {
+            const trackedRun = yield* runRegistry.getTrackedRun(event.payload.threadId);
+            if (trackedRun === null) {
+              return;
+            }
+
+            const activityPayload = toActivityEvent(event, trackedRun);
+            if (activityPayload === null) {
+              return;
+            }
+
+            yield* postActivityEvent(activityPayload);
+          }).pipe(
+            Effect.catch((error: Error) =>
+              Effect.logWarning("execution bridge failed to forward activity event", {
+                eventId: event.eventId,
+                threadId: String(event.payload.threadId),
+                message: error.message,
+              }),
+            ),
+          );
+        }
+
         if (event.type !== "thread.session-set") {
           return Effect.void;
         }

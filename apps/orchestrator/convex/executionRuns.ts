@@ -15,8 +15,8 @@ import {
 } from "../src/executionLifecycle.ts";
 import type { ExecutionRunStatus } from "../src/executionLifecycle.ts";
 import { createT3ExecutionBridgeClient } from "../src/t3/client.ts";
-import { internalAction, internalMutation, internalQuery } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { internalAction, internalMutation, internalQuery } from "./_generated/server.js";
+import { internal } from "./_generated/api.js";
 
 const createRequestedRunArgs = {
   controlThreadId: v.id("controlThreads"),

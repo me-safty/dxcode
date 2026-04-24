@@ -1,13 +1,13 @@
 import { Effect, Schema } from "effect";
 
-import { IsoDateTime, ThreadId, TrimmedNonEmptyString, TurnId } from "./baseSchemas";
+import { IsoDateTime, ThreadId, TrimmedNonEmptyString, TurnId } from "./baseSchemas.ts";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   ModelSelection,
   ProviderInteractionMode,
   RuntimeMode,
-} from "./orchestration";
+} from "./orchestration.ts";
 
 export const ExecutionRunId = TrimmedNonEmptyString;
 export type ExecutionRunId = typeof ExecutionRunId.Type;
@@ -105,3 +105,21 @@ export const ExecutionRunInterruptResponse = Schema.Struct({
   acceptedAt: IsoDateTime,
 });
 export type ExecutionRunInterruptResponse = typeof ExecutionRunInterruptResponse.Type;
+
+export const ExecutionRunActivityType = Schema.Literals(["thought", "action", "error"]);
+export type ExecutionRunActivityType = typeof ExecutionRunActivityType.Type;
+
+export const ExecutionRunActivityEvent = Schema.Struct({
+  eventId: TrimmedNonEmptyString,
+  controlThreadId: ControlThreadExternalId,
+  executionRunId: ExecutionRunId,
+  activity: Schema.Struct({
+    type: ExecutionRunActivityType,
+    body: Schema.optional(Schema.String),
+    action: Schema.optional(Schema.String),
+    parameter: Schema.optional(Schema.String),
+    ephemeral: Schema.optional(Schema.Boolean),
+  }),
+  occurredAt: IsoDateTime,
+});
+export type ExecutionRunActivityEvent = typeof ExecutionRunActivityEvent.Type;

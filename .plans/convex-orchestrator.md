@@ -689,24 +689,44 @@ The following cleanup was done after the initial Phase 8 implementation:
 ### What to build
 
 1. Extend the bridge callback contract with activity-level events:
-  - New `ExecutionRunActivityEvent` in `packages/contracts/src/executionBridge.ts`
-  - Activity types: `thought`, `action`, `response`, `error`
-2. Add a second background stream watcher in `apps/server/src/executionBridge/http.ts` that forwards selected T3 domain events as activities:
-  - `thread.activity-appended` with `tone: "tool"` → `action` activity (e.g. "Reading src/auth.ts")
-  - `thread.message.assistant.delta` batched → `thought` activity (debounced, not per-token)
-  - `thread.message.assistant.complete` → `response` activity (final T3 response)
-  - `thread.session-set` with `status: "error"` → `error` activity
+   - New `ExecutionRunActivityEvent` in `packages/contracts/src/executionBridge.ts`
+   - Activity types: `thought`, `action`, `error` (no `response` — the lifecycle completion handler owns the final response)
+2. Extend the existing stream watcher in `apps/server/src/executionBridge/http.ts` to forward `thread.activity-appended` events:
+   - `tone: "tool"` → `action` activity (ephemeral), `action` = activity `kind`, `parameter` = activity `summary`
+   - `tone: "info"` → `thought` activity (persistent), `body` = activity `summary`
+   - `tone: "error"` → `error` activity (persistent), `body` = activity `summary`
+   - `tone: "approval"` → ignored (not relevant to Linear)
 3. Add `POST /t3/execution-activities` route to `apps/orchestrator/convex/http.ts`
-4. Convex action forwards activities to `linearAdapter.postActivity()` when the control thread has an `agentSessionId`
+4. Add `forwardActivityToLinear` internal action in `apps/orchestrator/convex/linearOrchestration.ts` that forwards to `linearAdapter.postActivity()` when the control thread has an `agentSessionId`
+
+### Architectural decisions (Phase 9-specific)
+
+- **Fire-and-forget**: No `executionRunActivities` table. T3 already owns the durable event log; Convex is a pass-through.
+- **Linear-only**: Activities only stream to Linear's agent session UI. Slack gets nothing from this path (only final responses via the lifecycle completion handler). This is intentional: Slack has no native agent session UI, and posting every tool call as a message would be noise.
+- **T3 owns the mapping**: Domain events are translated into the `AgentActivity` vocabulary (`thought`/`action`/`error`) on the T3 server side. Convex passes through without transformation.
+- **Single watcher**: The existing `executionBridgeLifecycleCallbacksLive` stream watcher is extended with activity forwarding cases. No second subscription to `streamDomainEvents`.
+- **No debouncing**: Every `thread.activity-appended` event fires immediately. Throttle later if Linear rate limits become a problem. Cyrus (reference impl) fires every tool call individually — Linear's agent session UI handles high-frequency updates natively.
+- **No `response` from this path**: The lifecycle completion handler (`postExecutionReplyIfNeeded`) remains the sole owner of the final response. The activity stream handles in-progress events only. This avoids duplicate response activities.
+- **Ephemeral strategy** (matching Cyrus): `action` activities are `ephemeral: true` (routine tool calls — noise after session ends). `thought` and `error` activities are persistent (meaningful status updates worth keeping).
+- **Error handling**: `linearAdapter.postActivity()` already swallows failures with `console.warn`. No retries, no error propagation back to T3.
 
 ### Acceptance criteria
 
-- T3 tool use events appear as `action` activities in Linear's agent session UI
-- T3 assistant reasoning appears as `thought` activities (debounced)
-- T3 final response appears as a `response` activity
-- T3 errors appear as `error` activities
+- T3 tool use events appear as `action` activities in Linear's agent session UI (ephemeral)
+- T3 info-toned activities appear as `thought` activities (persistent)
+- T3 error-toned activities appear as `error` activities (persistent)
 - Activities only post when the control thread has an active agent session
 - Activity forwarding doesn't block or degrade the lifecycle callback path
+- No duplicate response activities (lifecycle handler owns the final response)
+
+### Implementation footprint
+
+Files changed:
+
+- `packages/contracts/src/executionBridge.ts` — added `ExecutionRunActivityEvent` schema
+- `apps/server/src/executionBridge/http.ts` — extended the stream watcher to forward `thread.activity-appended` events, added `postActivityEvent()` function
+- `apps/orchestrator/convex/http.ts` — added `POST /t3/execution-activities` route
+- `apps/orchestrator/convex/linearOrchestration.ts` — added `forwardActivityToLinear` internal action
 
 ---
 

@@ -104,9 +104,7 @@ export function linearThreadKeyFor(input: {
   readonly issueId: string;
   readonly commentId?: string;
 }) {
-  return input.commentId !== undefined
-    ? `linear:${input.issueId}:c:${input.commentId}`
-    : `linear:${input.issueId}`;
+  return `linear:${input.issueId}`;
 }
 
 export function normalizeLinearWebhookInput(
