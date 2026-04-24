@@ -3998,10 +3998,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
         codex: {
           provider: "codex",
           model: "gpt-5.3-codex",
-          options: {
-            reasoningEffort: "medium",
-            fastMode: true,
-          },
+          options: [
+            { id: "reasoningEffort", value: "medium" },
+            { id: "fastMode", value: true },
+          ],
         },
       },
       stickyActiveProvider: "codex",
@@ -4033,9 +4033,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           codex: {
             provider: "codex",
             model: "gpt-5.3-codex",
-            options: {
-              fastMode: true,
-            },
+            options: expect.arrayContaining([{ id: "fastMode", value: true }]),
           },
         },
         activeProvider: "codex",
@@ -4051,10 +4049,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
         claudeAgent: {
           provider: "claudeAgent",
           model: "claude-opus-4-6",
-          options: {
-            effort: "max",
-            fastMode: true,
-          },
+          options: [
+            { id: "effort", value: "max" },
+            { id: "fastMode", value: true },
+          ],
         },
       },
       stickyActiveProvider: "claudeAgent",
@@ -4086,10 +4084,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
           claudeAgent: {
             provider: "claudeAgent",
             model: "claude-opus-4-6",
-            options: {
-              effort: "max",
-              fastMode: true,
-            },
+            options: expect.arrayContaining([
+              { id: "effort", value: "max" },
+              { id: "fastMode", value: true },
+            ]),
           },
         },
         activeProvider: "claudeAgent",
@@ -4133,10 +4131,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
         codex: {
           provider: "codex",
           model: "gpt-5.3-codex",
-          options: {
-            reasoningEffort: "medium",
-            fastMode: true,
-          },
+          options: [
+            { id: "reasoningEffort", value: "medium" },
+            { id: "fastMode", value: true },
+          ],
         },
       },
       stickyActiveProvider: "codex",
@@ -4168,9 +4166,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           codex: {
             provider: "codex",
             model: "gpt-5.3-codex",
-            options: {
-              fastMode: true,
-            },
+            options: expect.arrayContaining([{ id: "fastMode", value: true }]),
           },
         },
         activeProvider: "codex",
@@ -4179,10 +4175,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
       useComposerDraftStore.getState().setModelSelection(draftId, {
         provider: "codex",
         model: "gpt-5.4",
-        options: {
-          reasoningEffort: "low",
-          fastMode: true,
-        },
+        options: [
+          { id: "reasoningEffort", value: "low" },
+          { id: "fastMode", value: true },
+        ],
       });
 
       await newThreadButton.click();
@@ -5929,11 +5925,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
                   name: "GPT-5.1 Codex Max",
                   isCustom: false,
                   capabilities: {
-                    supportsFastMode: true,
-                    supportsThinkingToggle: false,
-                    reasoningEffortLevels: [],
-                    promptInjectedEffortLevels: [],
-                    contextWindowOptions: [],
+                    optionDescriptors: [
+                      {
+                        id: "fastMode",
+                        label: "Fast mode",
+                        type: "boolean" as const,
+                      },
+                    ],
                   },
                 },
                 {
@@ -5941,11 +5939,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
                   name: "GPT-5.3 Codex",
                   isCustom: false,
                   capabilities: {
-                    supportsFastMode: true,
-                    supportsThinkingToggle: false,
-                    reasoningEffortLevels: [],
-                    promptInjectedEffortLevels: [],
-                    contextWindowOptions: [],
+                    optionDescriptors: [
+                      {
+                        id: "fastMode",
+                        label: "Fast mode",
+                        type: "boolean" as const,
+                      },
+                    ],
                   },
                 },
                 {
@@ -5953,11 +5953,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
                   name: "GPT-5.4",
                   isCustom: false,
                   capabilities: {
-                    supportsFastMode: true,
-                    supportsThinkingToggle: false,
-                    reasoningEffortLevels: [],
-                    promptInjectedEffortLevels: [],
-                    contextWindowOptions: [],
+                    optionDescriptors: [
+                      {
+                        id: "fastMode",
+                        label: "Fast mode",
+                        type: "boolean" as const,
+                      },
+                    ],
                   },
                 },
               ],

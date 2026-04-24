@@ -61,17 +61,22 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
             name: "Opus 4.6",
             isCustom: false,
             capabilities: {
-              reasoningEffortLevels: [
-                { value: "low", label: "Low" },
-                { value: "medium", label: "Medium" },
-                { value: "high", label: "High", isDefault: true },
-                { value: "max", label: "Max" },
-                { value: "ultrathink", label: "Ultrathink" },
+              optionDescriptors: [
+                {
+                  id: "effort",
+                  label: "Effort",
+                  type: "select" as const,
+                  options: [
+                    { id: "low", label: "Low" },
+                    { id: "medium", label: "Medium" },
+                    { id: "high", label: "High", isDefault: true },
+                    { id: "max", label: "Max" },
+                    { id: "ultrathink", label: "Ultrathink" },
+                  ],
+                  promptInjectedValues: ["ultrathink"],
+                },
+                { id: "fastMode", label: "Fast mode", type: "boolean" as const },
               ],
-              supportsFastMode: true,
-              supportsThinkingToggle: false,
-              contextWindowOptions: [],
-              promptInjectedEffortLevels: ["ultrathink"],
             },
           },
           {
@@ -79,11 +84,9 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
             name: "Haiku 4.5",
             isCustom: false,
             capabilities: {
-              reasoningEffortLevels: [],
-              supportsFastMode: false,
-              supportsThinkingToggle: true,
-              contextWindowOptions: [],
-              promptInjectedEffortLevels: [],
+              optionDescriptors: [
+                { id: "thinking", label: "Thinking", type: "boolean" as const },
+              ],
             },
           },
           {
@@ -91,16 +94,20 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
             name: "Sonnet 4.6",
             isCustom: false,
             capabilities: {
-              reasoningEffortLevels: [
-                { value: "low", label: "Low" },
-                { value: "medium", label: "Medium" },
-                { value: "high", label: "High", isDefault: true },
-                { value: "ultrathink", label: "Ultrathink" },
+              optionDescriptors: [
+                {
+                  id: "effort",
+                  label: "Effort",
+                  type: "select" as const,
+                  options: [
+                    { id: "low", label: "Low" },
+                    { id: "medium", label: "Medium" },
+                    { id: "high", label: "High", isDefault: true },
+                    { id: "ultrathink", label: "Ultrathink" },
+                  ],
+                  promptInjectedValues: ["ultrathink"],
+                },
               ],
-              supportsFastMode: false,
-              supportsThinkingToggle: false,
-              contextWindowOptions: [],
-              promptInjectedEffortLevels: ["ultrathink"],
             },
           },
         ]
@@ -110,14 +117,18 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
             name: "GPT-5.4",
             isCustom: false,
             capabilities: {
-              reasoningEffortLevels: [
-                { value: "xhigh", label: "Extra High" },
-                { value: "high", label: "High", isDefault: true },
+              optionDescriptors: [
+                {
+                  id: "reasoningEffort",
+                  label: "Reasoning effort",
+                  type: "select" as const,
+                  options: [
+                    { id: "xhigh", label: "Extra High" },
+                    { id: "high", label: "High", isDefault: true },
+                  ],
+                },
+                { id: "fastMode", label: "Fast mode", type: "boolean" as const },
               ],
-              supportsFastMode: true,
-              supportsThinkingToggle: false,
-              contextWindowOptions: [],
-              promptInjectedEffortLevels: [],
             },
           },
         ];
@@ -215,7 +226,7 @@ describe("CompactComposerControlsMenu", () => {
       modelSelection: {
         provider: "claudeAgent",
         model: "claude-haiku-4-5",
-        options: { thinking: true },
+        options: [{ id: "thinking", value: true }],
       },
     });
 
@@ -234,7 +245,7 @@ describe("CompactComposerControlsMenu", () => {
       modelSelection: {
         provider: "claudeAgent",
         model: "claude-opus-4-6",
-        options: { effort: "high" },
+        options: [{ id: "effort", value: "high" }],
       },
       prompt: "Ultrathink:\nInvestigate this",
     });
@@ -253,7 +264,7 @@ describe("CompactComposerControlsMenu", () => {
       modelSelection: {
         provider: "claudeAgent",
         model: "claude-opus-4-6",
-        options: { effort: "high" },
+        options: [{ id: "effort", value: "high" }],
       },
       prompt: "Ultrathink:\nplease ultrathink about this problem",
     });

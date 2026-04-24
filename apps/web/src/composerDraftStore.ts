@@ -1,16 +1,11 @@
 import {
-  CURSOR_REASONING_OPTIONS,
   DEFAULT_MODEL_BY_PROVIDER,
-  type CursorModelOptions,
-  type CursorReasoningOption,
-  ClaudeAgentEffort,
-  CodexReasoningEffort,
   type EnvironmentId,
   ModelSelection,
   ProjectId,
   ProviderInteractionMode,
   ProviderKind,
-  ProviderModelOptions,
+  ProviderOptionSelection,
   RuntimeMode,
   type ServerProvider,
   type ScopedProjectRef,
@@ -108,23 +103,30 @@ const PersistedComposerThreadDraftState = Schema.Struct({
 });
 type PersistedComposerThreadDraftState = typeof PersistedComposerThreadDraftState.Type;
 
-const LegacyCodexFields = Schema.Struct({
-  effort: Schema.optionalKey(CodexReasoningEffort),
-  codexFastMode: Schema.optionalKey(Schema.Boolean),
-  serviceTier: Schema.optionalKey(Schema.String),
-});
-type LegacyCodexFields = typeof LegacyCodexFields.Type;
+/**
+ * Per-provider record of generic option selections. Used as a transient
+ * representation when migrating legacy v2 storage payloads and when
+ * deriving per-provider option bundles for downstream consumers.
+ */
+type ProviderOptionSelectionsByProvider = Partial<
+  Record<ProviderKind, ReadonlyArray<ProviderOptionSelection>>
+>;
 
-const LegacyThreadModelFields = Schema.Struct({
-  provider: Schema.optionalKey(ProviderKind),
-  model: Schema.optionalKey(Schema.String),
-  modelOptions: Schema.optionalKey(Schema.NullOr(ProviderModelOptions)),
-});
-type LegacyThreadModelFields = typeof LegacyThreadModelFields.Type;
+type LegacyCodexFields = {
+  effort?: unknown;
+  codexFastMode?: unknown;
+  serviceTier?: unknown;
+};
+
+type LegacyThreadModelFields = {
+  provider?: unknown;
+  model?: unknown;
+  modelOptions?: unknown;
+};
 
 type LegacyV2ThreadDraftFields = {
   modelSelection?: ModelSelection | null;
-  modelOptions?: ProviderModelOptions | null;
+  modelOptions?: unknown;
 };
 
 type LegacyPersistedComposerThreadDraftState = PersistedComposerThreadDraftState &
@@ -132,16 +134,15 @@ type LegacyPersistedComposerThreadDraftState = PersistedComposerThreadDraftState
   LegacyThreadModelFields &
   LegacyV2ThreadDraftFields;
 
-const LegacyStickyModelFields = Schema.Struct({
-  stickyProvider: Schema.optionalKey(ProviderKind),
-  stickyModel: Schema.optionalKey(Schema.String),
-  stickyModelOptions: Schema.optionalKey(Schema.NullOr(ProviderModelOptions)),
-});
-type LegacyStickyModelFields = typeof LegacyStickyModelFields.Type;
+type LegacyStickyModelFields = {
+  stickyProvider?: unknown;
+  stickyModel?: unknown;
+  stickyModelOptions?: unknown;
+};
 
 type LegacyV2StoreFields = {
   stickyModelSelection?: ModelSelection | null;
-  stickyModelOptions?: ProviderModelOptions | null;
+  stickyModelOptions?: unknown;
   projectDraftThreadIdByProjectId?: Record<string, string> | null;
   draftsByThreadId?: Record<string, PersistedComposerThreadDraftState> | null;
   draftThreadsByThreadId?: Record<string, PersistedDraftThreadState> | null;
@@ -340,13 +341,13 @@ interface ComposerDraftStoreState {
   ) => void;
   setModelOptions: (
     threadRef: ComposerThreadTarget,
-    modelOptions: ProviderModelOptions | null | undefined,
+    modelOptions: ProviderOptionSelectionsByProvider | null | undefined,
   ) => void;
   applyStickyState: (threadRef: ComposerThreadTarget) => void;
   setProviderModelOptions: (
     threadRef: ComposerThreadTarget,
     provider: ProviderKind,
-    nextProviderOptions: ProviderModelOptions[ProviderKind] | null | undefined,
+    nextProviderOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined,
     options?: {
       model?: string | null | undefined;
       persistSticky?: boolean;
@@ -390,7 +391,7 @@ interface ComposerDraftStoreState {
 
 export interface EffectiveComposerModelState {
   selectedModel: string;
-  modelOptions: ProviderModelOptions | null;
+  modelOptions: ProviderOptionSelectionsByProvider | null;
 }
 
 interface ComposerDraftModelState {
@@ -400,27 +401,25 @@ interface ComposerDraftModelState {
 
 function providerModelOptionsFromSelection(
   modelSelection: ModelSelection | null | undefined,
-): ProviderModelOptions | null {
-  if (!modelSelection?.options) {
+): ProviderOptionSelectionsByProvider | null {
+  if (!modelSelection?.options || modelSelection.options.length === 0) {
     return null;
   }
 
-  return {
-    [modelSelection.provider]: modelSelection.options,
-  };
+  return { [modelSelection.provider]: modelSelection.options } as ProviderOptionSelectionsByProvider;
 }
 
 function modelSelectionByProviderToOptions(
   map: Partial<Record<ProviderKind, ModelSelection>> | null | undefined,
-): ProviderModelOptions | null {
+): ProviderOptionSelectionsByProvider | null {
   if (!map) return null;
-  const result: Record<string, unknown> = {};
+  const result: ProviderOptionSelectionsByProvider = {};
   for (const [provider, selection] of Object.entries(map)) {
-    if (selection?.options) {
-      result[provider] = selection.options;
+    if (selection?.options && selection.options.length > 0) {
+      result[provider as ProviderKind] = selection.options;
     }
   }
-  return Object.keys(result).length > 0 ? (result as ProviderModelOptions) : null;
+  return Object.keys(result).length > 0 ? result : null;
 }
 
 const EMPTY_PERSISTED_DRAFT_STORE_STATE = Object.freeze<PersistedComposerDraftStoreState>({
@@ -555,149 +554,98 @@ function normalizeProviderKind(value: unknown): ProviderKind | null {
     : null;
 }
 
+/**
+ * Coerce an arbitrary value into a list of `ProviderOptionSelection` entries.
+ *
+ * Two shapes are supported:
+ *   1. The canonical array shape `[{ id, value }, ...]` emitted by the
+ *      upstream option-array refactor.
+ *   2. A legacy object shape `{ reasoningEffort: "high", fastMode: true }`
+ *      which we migrate by promoting each key/value pair to an entry.
+ *
+ * Values other than strings/booleans are dropped. Empty results return
+ * `undefined` so callers can omit the provider entry entirely. This
+ * function does not validate ids against the provider's descriptor set —
+ * that's the responsibility of the capability layer, which is the source
+ * of truth for which option ids are meaningful for a given provider/model.
+ * Anything outside the descriptor list is harmless trailing data and will
+ * simply be ignored downstream.
+ */
+function coerceProviderOptionSelections(
+  value: unknown,
+): ReadonlyArray<ProviderOptionSelection> | undefined {
+  if (Array.isArray(value)) {
+    const out: ProviderOptionSelection[] = [];
+    for (const entry of value) {
+      if (!entry || typeof entry !== "object") continue;
+      const record = entry as Record<string, unknown>;
+      const id = record.id;
+      const optionValue = record.value;
+      if (typeof id !== "string" || id.length === 0) continue;
+      if (typeof optionValue === "string" || typeof optionValue === "boolean") {
+        out.push({ id, value: optionValue });
+      }
+    }
+    return out.length > 0 ? out : undefined;
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const out: ProviderOptionSelection[] = [];
+    for (const [id, raw] of Object.entries(record)) {
+      if (typeof raw === "string" || typeof raw === "boolean") {
+        out.push({ id, value: raw });
+      }
+    }
+    return out.length > 0 ? out : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Normalize a per-provider options bag from either the v3 or legacy v2 shape.
+ *
+ * `provider` and `legacy` parameters are migration-only inputs used to
+ * recover legacy codex fields (effort/codexFastMode/serviceTier) that lived
+ * directly on the draft instead of inside `modelOptions.codex`.
+ */
 function normalizeProviderModelOptions(
   value: unknown,
   provider?: ProviderKind | null,
   legacy?: LegacyCodexFields,
-): ProviderModelOptions | null {
+): ProviderOptionSelectionsByProvider | null {
   const candidate = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
-  const codexCandidate =
-    candidate?.codex && typeof candidate.codex === "object"
-      ? (candidate.codex as Record<string, unknown>)
-      : null;
-  const claudeCandidate =
-    candidate?.claudeAgent && typeof candidate.claudeAgent === "object"
-      ? (candidate.claudeAgent as Record<string, unknown>)
-      : null;
-  const cursorCandidate =
-    candidate?.cursor && typeof candidate.cursor === "object"
-      ? (candidate.cursor as Record<string, unknown>)
-      : null;
-  const openCodeCandidate =
-    candidate?.opencode && typeof candidate.opencode === "object"
-      ? (candidate.opencode as Record<string, unknown>)
-      : null;
-
-  const isCodexReasoningEffort = Schema.is(CodexReasoningEffort);
-  const isClaudeAgentEffort = Schema.is(ClaudeAgentEffort);
-
-  const codexReasoningEffort = isCodexReasoningEffort(codexCandidate?.reasoningEffort)
-    ? codexCandidate.reasoningEffort
-    : provider === "codex"
-      ? isCodexReasoningEffort(legacy?.effort)
-        ? legacy.effort
-        : undefined
-      : undefined;
-  const codexFastMode =
-    codexCandidate?.fastMode === true
-      ? true
-      : codexCandidate?.fastMode === false
-        ? false
-        : (provider === "codex" && legacy?.codexFastMode === true) ||
-            (typeof legacy?.serviceTier === "string" && legacy.serviceTier === "fast")
-          ? true
-          : undefined;
-  const codex =
-    codexReasoningEffort !== undefined || codexFastMode !== undefined
-      ? {
-          ...(codexReasoningEffort !== undefined ? { reasoningEffort: codexReasoningEffort } : {}),
-          ...(codexFastMode !== undefined ? { fastMode: codexFastMode } : {}),
-        }
-      : undefined;
-
-  const claudeThinking =
-    claudeCandidate?.thinking === true
-      ? true
-      : claudeCandidate?.thinking === false
-        ? false
-        : undefined;
-  const claudeEffort = isClaudeAgentEffort(claudeCandidate?.effort)
-    ? claudeCandidate.effort
-    : undefined;
-  const claudeFastMode =
-    claudeCandidate?.fastMode === true
-      ? true
-      : claudeCandidate?.fastMode === false
-        ? false
-        : undefined;
-  const claudeContextWindow =
-    typeof claudeCandidate?.contextWindow === "string" && claudeCandidate.contextWindow.length > 0
-      ? claudeCandidate.contextWindow
-      : undefined;
-  const claude =
-    claudeThinking !== undefined ||
-    claudeEffort !== undefined ||
-    claudeFastMode !== undefined ||
-    claudeContextWindow !== undefined
-      ? {
-          ...(claudeThinking !== undefined ? { thinking: claudeThinking } : {}),
-          ...(claudeEffort !== undefined ? { effort: claudeEffort } : {}),
-          ...(claudeFastMode !== undefined ? { fastMode: claudeFastMode } : {}),
-          ...(claudeContextWindow !== undefined ? { contextWindow: claudeContextWindow } : {}),
-        }
-      : undefined;
-
-  const cursorReasoningRaw = cursorCandidate?.reasoning;
-  const cursorReasoning: CursorReasoningOption | undefined =
-    typeof cursorReasoningRaw === "string" &&
-    (CURSOR_REASONING_OPTIONS as readonly string[]).includes(cursorReasoningRaw)
-      ? (cursorReasoningRaw as CursorReasoningOption)
-      : undefined;
-  const cursorFastMode =
-    cursorCandidate?.fastMode === true
-      ? true
-      : cursorCandidate?.fastMode === false
-        ? false
-        : undefined;
-  const cursorThinking =
-    cursorCandidate?.thinking === true
-      ? true
-      : cursorCandidate?.thinking === false
-        ? false
-        : undefined;
-  const cursorContextWindow =
-    typeof cursorCandidate?.contextWindow === "string" && cursorCandidate.contextWindow.length > 0
-      ? cursorCandidate.contextWindow
-      : undefined;
-
-  const cursor: CursorModelOptions | undefined =
-    cursorCandidate !== null
-      ? (() => {
-          const nextCursor = {
-            ...(cursorReasoning ? { reasoning: cursorReasoning } : {}),
-            ...(cursorFastMode !== undefined ? { fastMode: cursorFastMode } : {}),
-            ...(cursorThinking !== undefined ? { thinking: cursorThinking } : {}),
-            ...(cursorContextWindow !== undefined ? { contextWindow: cursorContextWindow } : {}),
-          } satisfies CursorModelOptions;
-          return Object.keys(nextCursor).length > 0 ? nextCursor : undefined;
-        })()
-      : undefined;
-
-  const openCodeVariant =
-    typeof openCodeCandidate?.variant === "string" && openCodeCandidate.variant.length > 0
-      ? openCodeCandidate.variant
-      : undefined;
-  const openCodeAgent =
-    typeof openCodeCandidate?.agent === "string" && openCodeCandidate.agent.length > 0
-      ? openCodeCandidate.agent
-      : undefined;
-  const opencode =
-    openCodeVariant !== undefined || openCodeAgent !== undefined
-      ? {
-          ...(openCodeVariant !== undefined ? { variant: openCodeVariant } : {}),
-          ...(openCodeAgent !== undefined ? { agent: openCodeAgent } : {}),
-        }
-      : undefined;
-
-  if (!codex && !claude && cursor === undefined && !opencode) {
-    return null;
+  const result: Partial<Record<ProviderKind, ReadonlyArray<ProviderOptionSelection>>> = {};
+  for (const providerKey of ["codex", "claudeAgent", "cursor", "opencode"] as const) {
+    const selections = coerceProviderOptionSelections(candidate?.[providerKey]);
+    if (selections) {
+      result[providerKey] = selections;
+    }
   }
-  return {
-    ...(codex ? { codex } : {}),
-    ...(claude ? { claudeAgent: claude } : {}),
-    ...(cursor !== undefined ? { cursor } : {}),
-    ...(opencode ? { opencode } : {}),
-  };
+
+  // Recover legacy codex fields that lived outside modelOptions.
+  if (provider === "codex" && legacy) {
+    const codexExtras: ProviderOptionSelection[] = [];
+    if (typeof legacy.effort === "string" && legacy.effort.length > 0) {
+      codexExtras.push({ id: "reasoningEffort", value: legacy.effort });
+    }
+    const fastMode =
+      legacy.codexFastMode === true ||
+      (typeof legacy.serviceTier === "string" && legacy.serviceTier === "fast");
+    if (fastMode) {
+      codexExtras.push({ id: "fastMode", value: true });
+    }
+    if (codexExtras.length > 0) {
+      const existing = result.codex ?? [];
+      const existingIds = new Set(existing.map((entry) => entry.id));
+      const merged = [...existing];
+      for (const extra of codexExtras) {
+        if (!existingIds.has(extra.id)) merged.push(extra);
+      }
+      result.codex = merged;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
 }
 
 function normalizeModelSelection(
@@ -722,6 +670,10 @@ function normalizeModelSelection(
   if (!model) {
     return null;
   }
+  if (Array.isArray(candidate?.options)) {
+    const selections = coerceProviderOptionSelections(candidate.options);
+    return createModelSelection(provider, model, selections);
+  }
   const modelOptions = normalizeProviderModelOptions(
     candidate?.options ? { [provider]: candidate.options } : legacy?.modelOptions,
     provider,
@@ -735,7 +687,7 @@ function normalizeModelSelection(
 
 function legacySyncModelSelectionOptions(
   modelSelection: ModelSelection | null,
-  modelOptions: ProviderModelOptions | null | undefined,
+  modelOptions: ProviderOptionSelectionsByProvider | null | undefined,
 ): ModelSelection | null {
   if (modelSelection === null) {
     return null;
@@ -746,9 +698,9 @@ function legacySyncModelSelectionOptions(
 
 function legacyMergeModelSelectionIntoProviderModelOptions(
   modelSelection: ModelSelection | null,
-  currentModelOptions: ProviderModelOptions | null | undefined,
-): ProviderModelOptions | null {
-  if (modelSelection?.options === undefined) {
+  currentModelOptions: ProviderOptionSelectionsByProvider | null | undefined,
+): ProviderOptionSelectionsByProvider | null {
+  if (!modelSelection?.options || modelSelection.options.length === 0) {
     return normalizeProviderModelOptions(currentModelOptions);
   }
   return legacyReplaceProviderModelOptions(
@@ -759,35 +711,31 @@ function legacyMergeModelSelectionIntoProviderModelOptions(
 }
 
 function legacyReplaceProviderModelOptions(
-  currentModelOptions: ProviderModelOptions | null | undefined,
+  currentModelOptions: ProviderOptionSelectionsByProvider | null | undefined,
   provider: ProviderKind,
-  nextProviderOptions: ProviderModelOptions[ProviderKind] | null | undefined,
-): ProviderModelOptions | null {
+  nextProviderOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+): ProviderOptionSelectionsByProvider | null {
   const { [provider]: _discardedProviderModelOptions, ...otherProviderModelOptions } =
     currentModelOptions ?? {};
-  const normalizedNextProviderOptions = normalizeProviderModelOptions(
-    { [provider]: nextProviderOptions },
-    provider,
-  );
-
-  return normalizeProviderModelOptions({
-    ...otherProviderModelOptions,
-    ...(normalizedNextProviderOptions ? normalizedNextProviderOptions : {}),
-  });
+  const merged: ProviderOptionSelectionsByProvider = { ...otherProviderModelOptions };
+  if (nextProviderOptions && nextProviderOptions.length > 0) {
+    merged[provider] = nextProviderOptions;
+  }
+  return Object.keys(merged).length > 0 ? merged : null;
 }
 
 // ── New helpers for the consolidated representation ────────────────────
 
 function legacyToModelSelectionByProvider(
   modelSelection: ModelSelection | null,
-  modelOptions: ProviderModelOptions | null | undefined,
+  modelOptions: ProviderOptionSelectionsByProvider | null | undefined,
 ): Partial<Record<ProviderKind, ModelSelection>> {
   const result: Partial<Record<ProviderKind, ModelSelection>> = {};
   // Add entries from the options bag (for non-active providers)
   if (modelOptions) {
     for (const provider of ["codex", "claudeAgent", "cursor", "opencode"] as const) {
       const options = modelOptions[provider];
-      if (options && Object.keys(options).length > 0) {
+      if (options && options.length > 0) {
         result[provider] = createModelSelection(
           provider,
           modelSelection?.provider === provider
@@ -1487,14 +1435,15 @@ function normalizePersistedDraftsByThreadId(
                 ? normalizeLegacyComposerStorageKey(threadKeyOrId, { environmentId })
                 : threadKeyOrId;
             })();
-    nextDraftsByThreadKey[normalizedThreadKey] = {
+    const persistedEntry = {
       prompt,
       attachments,
       ...(terminalContexts.length > 0 ? { terminalContexts } : {}),
       ...(hasModelData ? { modelSelectionByProvider, activeProvider } : {}),
       ...(runtimeMode ? { runtimeMode } : {}),
       ...(interactionMode ? { interactionMode } : {}),
-    };
+    } as DeepMutable<PersistedComposerThreadDraftState>;
+    nextDraftsByThreadKey[normalizedThreadKey] = persistedEntry;
   }
 
   return nextDraftsByThreadKey;
@@ -1574,7 +1523,7 @@ function partializeComposerDraftStoreState(
     ) {
       continue;
     }
-    const persistedDraft: DeepMutable<PersistedComposerThreadDraftState> = {
+    const persistedDraft = {
       prompt: draft.prompt,
       attachments: draft.persistedAttachments,
       ...(draft.terminalContexts.length > 0
@@ -1598,7 +1547,7 @@ function partializeComposerDraftStoreState(
         : {}),
       ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
       ...(draft.interactionMode ? { interactionMode: draft.interactionMode } : {}),
-    };
+    } as DeepMutable<PersistedComposerThreadDraftState>;
     persistedDraftsByThreadKey[threadKey] = persistedDraft;
   }
   return {

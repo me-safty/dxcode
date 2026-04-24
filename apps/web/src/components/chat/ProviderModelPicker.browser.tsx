@@ -68,11 +68,35 @@ vi.mock("../../environments/runtime", () => {
 
 function effort(value: string, isDefault = false) {
   return {
-    value,
+    id: value,
     label: value,
     ...(isDefault ? { isDefault: true } : {}),
   };
 }
+
+function buildEffortDescriptor(
+  id: "reasoningEffort" | "effort",
+  options: ReadonlyArray<{ id: string; label: string; isDefault?: boolean }>,
+) {
+  return {
+    id,
+    label: id === "effort" ? "Effort" : "Reasoning effort",
+    type: "select" as const,
+    options,
+  };
+}
+
+const FAST_MODE_DESCRIPTOR = {
+  id: "fastMode",
+  label: "Fast mode",
+  type: "boolean" as const,
+};
+
+const THINKING_DESCRIPTOR = {
+  id: "thinking",
+  label: "Thinking",
+  type: "boolean" as const,
+};
 
 const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
   {
@@ -91,11 +115,14 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         name: "GPT-5 Codex",
         isCustom: false,
         capabilities: {
-          reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-          supportsFastMode: true,
-          supportsThinkingToggle: false,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: [],
+          optionDescriptors: [
+            buildEffortDescriptor("reasoningEffort", [
+              effort("low"),
+              effort("medium", true),
+              effort("high"),
+            ]),
+            FAST_MODE_DESCRIPTOR,
+          ],
         },
       },
       {
@@ -103,11 +130,14 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         name: "GPT-5.3 Codex",
         isCustom: false,
         capabilities: {
-          reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-          supportsFastMode: true,
-          supportsThinkingToggle: false,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: [],
+          optionDescriptors: [
+            buildEffortDescriptor("reasoningEffort", [
+              effort("low"),
+              effort("medium", true),
+              effort("high"),
+            ]),
+            FAST_MODE_DESCRIPTOR,
+          ],
         },
       },
     ],
@@ -128,16 +158,15 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         name: "Claude Opus 4.6",
         isCustom: false,
         capabilities: {
-          reasoningEffortLevels: [
-            effort("low"),
-            effort("medium", true),
-            effort("high"),
-            effort("max"),
+          optionDescriptors: [
+            buildEffortDescriptor("effort", [
+              effort("low"),
+              effort("medium", true),
+              effort("high"),
+              effort("max"),
+            ]),
+            THINKING_DESCRIPTOR,
           ],
-          supportsFastMode: false,
-          supportsThinkingToggle: true,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: [],
         },
       },
       {
@@ -145,16 +174,15 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         name: "Claude Sonnet 4.6",
         isCustom: false,
         capabilities: {
-          reasoningEffortLevels: [
-            effort("low"),
-            effort("medium", true),
-            effort("high"),
-            effort("max"),
+          optionDescriptors: [
+            buildEffortDescriptor("effort", [
+              effort("low"),
+              effort("medium", true),
+              effort("high"),
+              effort("max"),
+            ]),
+            THINKING_DESCRIPTOR,
           ],
-          supportsFastMode: false,
-          supportsThinkingToggle: true,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: [],
         },
       },
       {
@@ -162,11 +190,14 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         name: "Claude Haiku 4.5",
         isCustom: false,
         capabilities: {
-          reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-          supportsFastMode: false,
-          supportsThinkingToggle: true,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: [],
+          optionDescriptors: [
+            buildEffortDescriptor("effort", [
+              effort("low"),
+              effort("medium", true),
+              effort("high"),
+            ]),
+            THINKING_DESCRIPTOR,
+          ],
         },
       },
     ],
@@ -735,11 +766,14 @@ describe("ProviderModelPicker", () => {
           name: "GPT-5.3 Codex",
           isCustom: false,
           capabilities: {
-            reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-            supportsFastMode: true,
-            supportsThinkingToggle: false,
-            contextWindowOptions: [],
-            promptInjectedEffortLevels: [],
+            optionDescriptors: [
+              buildEffortDescriptor("reasoningEffort", [
+                effort("low"),
+                effort("medium", true),
+                effort("high"),
+              ]),
+              FAST_MODE_DESCRIPTOR,
+            ],
           },
         },
       ]),
@@ -752,11 +786,14 @@ describe("ProviderModelPicker", () => {
           name: "GPT-5.3 Codex",
           isCustom: false,
           capabilities: {
-            reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-            supportsFastMode: true,
-            supportsThinkingToggle: false,
-            contextWindowOptions: [],
-            promptInjectedEffortLevels: [],
+            optionDescriptors: [
+              buildEffortDescriptor("reasoningEffort", [
+                effort("low"),
+                effort("medium", true),
+                effort("high"),
+              ]),
+              FAST_MODE_DESCRIPTOR,
+            ],
           },
         },
         {
@@ -764,11 +801,14 @@ describe("ProviderModelPicker", () => {
           name: "GPT-5.3 Codex Spark",
           isCustom: false,
           capabilities: {
-            reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-            supportsFastMode: true,
-            supportsThinkingToggle: false,
-            contextWindowOptions: [],
-            promptInjectedEffortLevels: [],
+            optionDescriptors: [
+              buildEffortDescriptor("reasoningEffort", [
+                effort("low"),
+                effort("medium", true),
+                effort("high"),
+              ]),
+              FAST_MODE_DESCRIPTOR,
+            ],
           },
         },
       ]),

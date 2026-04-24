@@ -1883,11 +1883,21 @@ export function GeneralSettingsPanel() {
                         {providerCard.models.map((model) => {
                           const caps = model.capabilities;
                           const capLabels: string[] = [];
-                          if (caps?.supportsFastMode) capLabels.push("Fast mode");
-                          if (caps?.supportsThinkingToggle) capLabels.push("Thinking");
+                          const descriptors = caps?.optionDescriptors ?? [];
+                          if (descriptors.some((descriptor) => descriptor.id === "fastMode")) {
+                            capLabels.push("Fast mode");
+                          }
+                          if (descriptors.some((descriptor) => descriptor.id === "thinking")) {
+                            capLabels.push("Thinking");
+                          }
                           if (
-                            caps?.reasoningEffortLevels &&
-                            caps.reasoningEffortLevels.length > 0
+                            descriptors.some(
+                              (descriptor) =>
+                                descriptor.type === "select" &&
+                                (descriptor.id === "effort" ||
+                                  descriptor.id === "reasoningEffort" ||
+                                  descriptor.id === "reasoning"),
+                            )
                           ) {
                             capLabels.push("Reasoning");
                           }

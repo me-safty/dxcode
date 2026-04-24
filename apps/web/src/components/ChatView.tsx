@@ -2,7 +2,6 @@ import {
   type ApprovalRequestId,
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER_KIND,
-  type ClaudeAgentEffort,
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
@@ -34,6 +33,7 @@ import {
 } from "@marcode/client-runtime";
 import {
   applyClaudePromptEffortPrefix,
+  resolvePromptInjectedEffort,
   createModelSelection,
   normalizeModelSlug,
 } from "@marcode/shared/model";
@@ -168,6 +168,7 @@ import { SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import {
+  getProviderInteractionModeToggle,
   getProviderModelCapabilities,
   getProviderModels,
   resolveSelectableProvider,
@@ -251,11 +252,10 @@ import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPa
 import { ComposerPlanFollowUpBanner } from "./chat/ComposerPlanFollowUpBanner";
 import { SubagentDetailDrawer } from "./chat/SubagentDetailDrawer";
 import {
-  getComposerProviderControls,
   getComposerProviderState,
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
-} from "./chat/composerProviderRegistry";
+} from "./chat/composerProviderState";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
@@ -393,10 +393,8 @@ function formatOutgoingPrompt(params: {
   text: string;
 }): string {
   const caps = getProviderModelCapabilities(params.models, params.model, params.provider);
-  if (params.effort && caps.promptInjectedEffortLevels.includes(params.effort)) {
-    return applyClaudePromptEffortPrefix(params.text, params.effort as ClaudeAgentEffort | null);
-  }
-  return params.text;
+  const promptEffort = resolvePromptInjectedEffort(caps, params.effort);
+  return applyClaudePromptEffortPrefix(params.text, promptEffort);
 }
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const SCRIPT_TERMINAL_COLS = 120;
@@ -1343,15 +1341,20 @@ export default function ChatView({
         model: selectedModel,
         models: selectedProviderModels,
         prompt,
-        modelOptions: composerModelOptions,
+        modelOptions: composerModelOptions?.[selectedProvider],
       }),
     [composerModelOptions, prompt, selectedModel, selectedProvider, selectedProviderModels],
   );
   const selectedPromptEffort = composerProviderState.promptEffort;
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
   const composerProviderControls = useMemo(
-    () => getComposerProviderControls(selectedProvider),
-    [selectedProvider],
+    () => ({
+      showInteractionModeToggle: getProviderInteractionModeToggle(
+        providerStatuses,
+        selectedProvider,
+      ),
+    }),
+    [providerStatuses, selectedProvider],
   );
   const selectedModelSelection = useMemo<ModelSelection>(
     () => createModelSelection(selectedProvider, selectedModel, selectedModelOptionsForDispatch),

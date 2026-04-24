@@ -9,7 +9,7 @@ import {
   normalizeModelSlug,
   resolveSelectableModel,
 } from "@marcode/shared/model";
-import { getComposerProviderState } from "./components/chat/composerProviderRegistry";
+import { getComposerProviderState } from "./components/chat/composerProviderState";
 import { UnifiedSettings } from "@marcode/contracts/settings";
 import {
   getDefaultServerModel,
@@ -222,9 +222,7 @@ export function resolveAppModelSelectionState(
     model,
     models: getProviderModels(providers, provider),
     prompt: "",
-    modelOptions: {
-      [provider]: provider === selection.provider ? selection.options : undefined,
-    },
+    modelOptions: provider === selection.provider ? selection.options : undefined,
   });
 
   return createModelSelection(provider, model, modelOptionsForDispatch);
