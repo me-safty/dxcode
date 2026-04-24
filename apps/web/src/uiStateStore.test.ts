@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   clearThreadUi,
-  dismissThreadStatus,
   hydratePersistedProjectState,
   markThreadUnread,
   PERSISTED_STATE_KEY,
@@ -22,7 +21,6 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectExpandedById: {},
     projectOrder: [],
     threadLastVisitedAtById: {},
-    threadDismissedStatusKeyById: {},
     threadChangedFilesExpandedById: {},
     ...overrides,
   };
@@ -74,17 +72,6 @@ describe("uiStateStore pure functions", () => {
     const next = markThreadUnread(initialState, threadId, null);
 
     expect(next).toBe(initialState);
-  });
-
-  it("dismissThreadStatus stores the active dismissal key per thread", () => {
-    const threadId = ThreadId.make("thread-1");
-    const initialState = makeUiState();
-
-    const next = dismissThreadStatus(initialState, threadId, "plan-ready:turn-1");
-
-    expect(next.threadDismissedStatusKeyById).toEqual({
-      [threadId]: "plan-ready:turn-1",
-    });
   });
 
   it("reorderProjects moves a project to a target index", () => {
@@ -340,10 +327,6 @@ describe("uiStateStore pure functions", () => {
         [thread1]: "2026-02-25T12:35:00.000Z",
         [thread2]: "2026-02-25T12:36:00.000Z",
       },
-      threadDismissedStatusKeyById: {
-        [thread1]: "plan-ready:turn-1",
-        [thread2]: "pending-approval:turn-2",
-      },
       threadChangedFilesExpandedById: {
         [thread1]: {
           "turn-1": false,
@@ -358,9 +341,6 @@ describe("uiStateStore pure functions", () => {
 
     expect(next.threadLastVisitedAtById).toEqual({
       [thread1]: "2026-02-25T12:35:00.000Z",
-    });
-    expect(next.threadDismissedStatusKeyById).toEqual({
-      [thread1]: "plan-ready:turn-1",
     });
     expect(next.threadChangedFilesExpandedById).toEqual({
       [thread1]: {
@@ -406,9 +386,6 @@ describe("uiStateStore pure functions", () => {
       threadLastVisitedAtById: {
         [thread1]: "2026-02-25T12:35:00.000Z",
       },
-      threadDismissedStatusKeyById: {
-        [thread1]: "plan-ready:turn-1",
-      },
       threadChangedFilesExpandedById: {
         [thread1]: {
           "turn-1": false,
@@ -419,7 +396,6 @@ describe("uiStateStore pure functions", () => {
     const next = clearThreadUi(initialState, thread1);
 
     expect(next.threadLastVisitedAtById).toEqual({});
-    expect(next.threadDismissedStatusKeyById).toEqual({});
     expect(next.threadChangedFilesExpandedById).toEqual({});
   });
 

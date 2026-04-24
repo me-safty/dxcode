@@ -1,5 +1,7 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
+  GEMINI_THINKING_BUDGET_OPTIONS,
+  GEMINI_THINKING_LEVEL_OPTIONS,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   type GeminiThinkingBudget,
   type GeminiThinkingLevel,
@@ -241,6 +243,75 @@ export function resolveGeminiApiModelId(
   input: ReadonlyArray<ProviderOptionSelection> | GeminiModelOptions | null | undefined,
 ): string {
   return getGeminiThinkingModelAlias(model, input) ?? model;
+}
+
+export function buildGeminiThinkingModelConfigAliases(
+  modelIds: ReadonlyArray<string>,
+): Record<string, Record<string, unknown>> {
+  const aliases: Record<string, Record<string, unknown>> = {};
+  const seen = new Set<string>();
+
+  for (const modelId of modelIds) {
+    const model = modelId.trim();
+    if (!model || seen.has(model)) {
+      continue;
+    }
+    seen.add(model);
+    const caps = geminiCapabilitiesForModel(model);
+
+    switch (getGeminiThinkingConfigKind(model)) {
+      case "level": {
+        for (const thinkingLevel of GEMINI_THINKING_LEVEL_OPTIONS) {
+          if (!hasEffortLevel(caps, thinkingLevel)) {
+            continue;
+          }
+          const alias = getGeminiThinkingModelAlias(model, { thinkingLevel });
+          if (!alias) {
+            continue;
+          }
+          aliases[alias] = {
+            extends: "chat-base-3",
+            modelConfig: {
+              model,
+              generateContentConfig: {
+                thinkingConfig: {
+                  thinkingLevel,
+                },
+              },
+            },
+          };
+        }
+        break;
+      }
+      case "budget": {
+        for (const thinkingBudget of GEMINI_THINKING_BUDGET_OPTIONS) {
+          if (!hasEffortLevel(caps, String(thinkingBudget))) {
+            continue;
+          }
+          const alias = getGeminiThinkingModelAlias(model, { thinkingBudget });
+          if (!alias) {
+            continue;
+          }
+          aliases[alias] = {
+            extends: "chat-base-2.5",
+            modelConfig: {
+              model,
+              generateContentConfig: {
+                thinkingConfig: {
+                  thinkingBudget,
+                },
+              },
+            },
+          };
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  return aliases;
 }
 
 function getRawSelectionValueById(

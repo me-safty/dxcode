@@ -1,6 +1,6 @@
 import type { GeminiSettings, ServerProvider } from "@t3tools/contracts";
 import { formatGeminiModelDisplayName } from "@t3tools/shared/gemini";
-import { Duration, Effect, Equal, Layer, Option, Result, Stream } from "effect";
+import { Effect, Equal, Layer, Option, Result, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -28,6 +28,7 @@ const GEMINI_PRESENTATION = {
   displayName: "Gemini",
   showInteractionModeToggle: true,
 } as const;
+const GEMINI_REFRESH_INTERVAL = "1 hour";
 
 const runGeminiCommand = Effect.fn("runGeminiCommand")(function* (args: ReadonlyArray<string>) {
   const serverSettings = yield* ServerSettingsService;
@@ -238,7 +239,7 @@ export const GeminiProviderLive = Layer.effect(
       haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
       initialSnapshot: makePendingGeminiProvider,
       checkProvider,
-      refreshInterval: Duration.minutes(2),
+      refreshInterval: GEMINI_REFRESH_INTERVAL,
     });
   }),
 );

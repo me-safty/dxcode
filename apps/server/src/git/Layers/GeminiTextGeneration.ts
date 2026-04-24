@@ -3,7 +3,12 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { GeminiModelSelection, TextGenerationError } from "@t3tools/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import { resolveApiModelId } from "@t3tools/shared/model";
 
+import {
+  cleanupGeminiSystemSettings,
+  writeGeminiModelAliasSettings,
+} from "../../provider/geminiCliFiles.ts";
 import { resolveGeminiBinaryPath } from "../../provider/geminiBinaryPath.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { type TextGenerationShape, TextGeneration } from "../Services/TextGeneration.ts";
@@ -72,13 +77,29 @@ const makeGeminiTextGeneration = Effect.gen(function* () {
 
     const runGeminiCommand = Effect.fn("runGeminiJson.runGeminiCommand")(function* () {
       const binaryPath = resolveGeminiBinaryPath(geminiSettings?.binaryPath);
+      const launchConfig = yield* Effect.tryPromise({
+        try: () =>
+          writeGeminiModelAliasSettings({
+            scopeId: `git-${operation}`,
+            modelIds: [modelSelection.model],
+          }),
+        catch: (cause) =>
+          new TextGenerationError({
+            operation,
+            detail: "Failed to prepare Gemini CLI model settings.",
+            cause,
+          }),
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => cleanupGeminiSystemSettings(launchConfig.systemSettingsPath)),
+      );
       const command = ChildProcess.make(
         binaryPath,
         [
           "--prompt",
           "",
           "--model",
-          modelSelection.model,
+          resolveApiModelId(modelSelection),
           "--output-format",
           "json",
           "--approval-mode",
@@ -86,6 +107,7 @@ const makeGeminiTextGeneration = Effect.gen(function* () {
         ],
         {
           cwd,
+          ...(launchConfig.env ? { env: { ...process.env, ...launchConfig.env } } : {}),
           shell: process.platform === "win32",
           stdin: {
             stream: Stream.encodeText(Stream.make(prompt)),

@@ -6,16 +6,12 @@
  *
  * @module GeminiAdapterLive
  */
-import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
   ApprovalRequestId,
   type CanonicalItemType,
   EventId,
-  type GeminiThinkingBudget,
-  type GeminiThinkingLevel,
   type ProviderApprovalDecision,
   type ProviderRuntimeEvent,
   type ProviderSendTurnInput,
@@ -26,13 +22,7 @@ import {
   type ThreadTokenUsageSnapshot,
   TurnId,
 } from "@t3tools/contracts";
-import {
-  geminiCapabilitiesForModel,
-  getGeminiThinkingConfigKind,
-  getGeminiThinkingModelAlias,
-  hasEffortLevel,
-  resolveApiModelId,
-} from "@t3tools/shared/model";
+import { resolveApiModelId } from "@t3tools/shared/model";
 import {
   Deferred,
   Effect,
@@ -79,19 +69,25 @@ import {
 } from "../acp/AcpRuntimeModel.ts";
 import { type AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
 import { makeGeminiAcpRuntime } from "../acp/GeminiAcpSupport.ts";
+import {
+  buildGeminiResumeCursor,
+  cleanupGeminiSystemSettings,
+  cloneGeminiSessionFile,
+  cloneGeminiStoredTurn,
+  cloneGeminiTurnItems,
+  findGeminiSessionFileById,
+  type GeminiStoredTurn,
+  readGeminiResumeSessionId,
+  readLegacyGeminiResumeTurns,
+  writeGeminiModelAliasSettings,
+} from "../geminiCliFiles.ts";
 import { resolveGeminiBinaryPath } from "../geminiBinaryPath.ts";
 import { GeminiAdapter, type GeminiAdapterShape } from "../Services/GeminiAdapter.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
-import { asArray, asNumber, asRecord, trimToUndefined } from "../jsonValue.ts";
+import { asNumber, asRecord, trimToUndefined } from "../jsonValue.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "gemini" as const;
-const GEMINI_TMP_DIR = path.join(os.homedir(), ".gemini", "tmp");
-const GEMINI_CHAT_DIR_NAME = "chats";
-const GEMINI_SESSION_FILE_PREFIX = "session-";
-const T3CODE_GEMINI_SETTINGS_DIR = path.join(os.tmpdir(), "t3code", "gemini");
-const GEMINI_3_THINKING_LEVELS: ReadonlyArray<GeminiThinkingLevel> = ["HIGH", "LOW"];
-const GEMINI_2_5_THINKING_BUDGETS: ReadonlyArray<GeminiThinkingBudget> = [-1, 512, 0];
 
 interface GeminiPendingApproval {
   readonly decision: Deferred.Deferred<ProviderApprovalDecision>;
@@ -115,13 +111,6 @@ interface GeminiTurnState {
   reasoningTextStarted: boolean;
   latestPlanUpdate: AcpPlanUpdate | undefined;
   proposedPlanCaptured: boolean;
-}
-
-interface GeminiStoredTurn {
-  readonly id: TurnId;
-  readonly items: Array<unknown>;
-  readonly snapshotSessionId?: string;
-  readonly snapshotFilePath?: string;
 }
 
 interface GeminiSessionContext {
@@ -177,234 +166,8 @@ function toSpawnEnv(
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
-export function buildGeminiThinkingModelConfigAliases(
-  modelIds: ReadonlyArray<string>,
-): Record<string, Record<string, unknown>> {
-  const aliases: Record<string, Record<string, unknown>> = {};
-  const seen = new Set<string>();
-
-  for (const modelId of modelIds) {
-    const model = modelId.trim();
-    if (!model || seen.has(model)) {
-      continue;
-    }
-    seen.add(model);
-    const caps = geminiCapabilitiesForModel(model);
-
-    switch (getGeminiThinkingConfigKind(model)) {
-      case "level": {
-        for (const thinkingLevel of GEMINI_3_THINKING_LEVELS) {
-          if (!hasEffortLevel(caps, thinkingLevel)) {
-            continue;
-          }
-          const alias = getGeminiThinkingModelAlias(model, { thinkingLevel });
-          if (!alias) {
-            continue;
-          }
-          aliases[alias] = {
-            extends: "chat-base-3",
-            modelConfig: {
-              model,
-              generateContentConfig: {
-                thinkingConfig: {
-                  thinkingLevel,
-                },
-              },
-            },
-          };
-        }
-        break;
-      }
-      case "budget": {
-        for (const thinkingBudget of GEMINI_2_5_THINKING_BUDGETS) {
-          if (!hasEffortLevel(caps, String(thinkingBudget))) {
-            continue;
-          }
-          const alias = getGeminiThinkingModelAlias(model, { thinkingBudget });
-          if (!alias) {
-            continue;
-          }
-          aliases[alias] = {
-            extends: "chat-base-2.5",
-            modelConfig: {
-              model,
-              generateContentConfig: {
-                thinkingConfig: {
-                  thinkingBudget,
-                },
-              },
-            },
-          };
-        }
-        break;
-      }
-      default:
-        break;
-    }
-  }
-
-  return aliases;
-}
-
-function readResumeSessionId(resumeCursor: unknown): string | undefined {
-  const record = asRecord(resumeCursor);
-  return trimToUndefined(record?.sessionId);
-}
-
-function cloneUnknownArray(items: ReadonlyArray<unknown>): Array<unknown> {
-  return items.map((item) => {
-    const record = asRecord(item);
-    return record ? Object.assign({}, record) : item;
-  });
-}
-
-function cloneStoredTurn(turn: GeminiStoredTurn): GeminiStoredTurn {
-  return {
-    id: turn.id,
-    items: cloneUnknownArray(turn.items),
-    ...(turn.snapshotSessionId ? { snapshotSessionId: turn.snapshotSessionId } : {}),
-    ...(turn.snapshotFilePath ? { snapshotFilePath: turn.snapshotFilePath } : {}),
-  };
-}
-
-function readResumeTurns(resumeCursor: unknown): Array<GeminiStoredTurn> {
-  const record = asRecord(resumeCursor);
-  return (
-    asArray(record?.snapshots)?.reduce<Array<GeminiStoredTurn>>((acc, entry) => {
-      const snapshot = asRecord(entry);
-      const turnId = trimToUndefined(snapshot?.turnId);
-      const sessionId = trimToUndefined(snapshot?.sessionId);
-      const items = asArray(snapshot?.items);
-      if (!turnId || !sessionId || !items) {
-        return acc;
-      }
-      const filePath = trimToUndefined(snapshot?.filePath);
-      const storedTurn = {
-        id: TurnId.make(turnId),
-        items: cloneUnknownArray(items),
-        snapshotSessionId: sessionId,
-      };
-      acc.push(
-        filePath
-          ? (Object.assign(storedTurn, {
-              snapshotFilePath: filePath,
-            }) satisfies GeminiStoredTurn)
-          : (storedTurn satisfies GeminiStoredTurn),
-      );
-      return acc;
-    }, []) ?? []
-  );
-}
-
 function buildResumeCursor(context: GeminiSessionContext) {
-  const snapshots = context.turns
-    .filter((turn) => turn.snapshotSessionId)
-    .map((turn) => {
-      const snapshot = {
-        turnId: turn.id,
-        sessionId: turn.snapshotSessionId as string,
-        items: cloneUnknownArray(turn.items),
-      };
-      return turn.snapshotFilePath
-        ? Object.assign(snapshot, { filePath: turn.snapshotFilePath })
-        : snapshot;
-    });
-
-  return {
-    sessionId: context.sessionId,
-    ...(snapshots.length > 0 ? { snapshots } : {}),
-  };
-}
-
-function isStoredGeminiSession(value: unknown): value is Record<string, unknown> & {
-  sessionId: string;
-  messages: Array<unknown>;
-  startTime: string;
-  lastUpdated: string;
-} {
-  const record = asRecord(value);
-  return Boolean(
-    trimToUndefined(record?.sessionId) &&
-    asArray(record?.messages) &&
-    trimToUndefined(record?.startTime) &&
-    trimToUndefined(record?.lastUpdated),
-  );
-}
-
-function makeGeminiSessionFileName(sessionId: string): string {
-  const timestamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
-  return `${GEMINI_SESSION_FILE_PREFIX}${timestamp}-${sessionId.slice(0, 8)}.json`;
-}
-
-async function readStoredGeminiSession(filePath: string) {
-  const content = JSON.parse(await fs.readFile(filePath, "utf8")) as unknown;
-  if (!isStoredGeminiSession(content)) {
-    throw new Error(`Invalid Gemini session file: ${filePath}`);
-  }
-  return content;
-}
-
-async function findGeminiSessionFileById(
-  sessionId: string,
-  hintedPath?: string,
-): Promise<string | undefined> {
-  const prefix = sessionId.slice(0, 8);
-  const candidatePaths = new Set<string>();
-  if (hintedPath) {
-    candidatePaths.add(hintedPath);
-  }
-
-  let projectDirs: Array<string> = [];
-  try {
-    projectDirs = (await fs.readdir(GEMINI_TMP_DIR, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(GEMINI_TMP_DIR, entry.name, GEMINI_CHAT_DIR_NAME));
-  } catch {
-    return undefined;
-  }
-
-  for (const chatsDir of projectDirs) {
-    try {
-      const files = await fs.readdir(chatsDir, { withFileTypes: true });
-      for (const entry of files) {
-        if (
-          entry.isFile() &&
-          entry.name.startsWith(GEMINI_SESSION_FILE_PREFIX) &&
-          entry.name.endsWith(".json") &&
-          entry.name.includes(prefix)
-        ) {
-          candidatePaths.add(path.join(chatsDir, entry.name));
-        }
-      }
-    } catch {
-      // Ignore project temp dirs without chats.
-    }
-  }
-
-  for (const candidatePath of candidatePaths) {
-    try {
-      const storedSession = await readStoredGeminiSession(candidatePath);
-      if (storedSession.sessionId === sessionId) {
-        return candidatePath;
-      }
-    } catch {
-      // Ignore unreadable or unrelated files.
-    }
-  }
-
-  return undefined;
-}
-
-async function cloneGeminiSessionFile(sourcePath: string, sessionId: string): Promise<string> {
-  const storedSession = await readStoredGeminiSession(sourcePath);
-  const nextSession = {
-    ...storedSession,
-    sessionId,
-    lastUpdated: new Date().toISOString(),
-  };
-  const destinationPath = path.join(path.dirname(sourcePath), makeGeminiSessionFileName(sessionId));
-  await fs.writeFile(destinationPath, `${JSON.stringify(nextSession, null, 2)}\n`, "utf8");
-  return destinationPath;
+  return buildGeminiResumeCursor(context.sessionId);
 }
 
 function runtimeModeToGeminiModeId(runtimeMode: ProviderSession["runtimeMode"]): string {
@@ -503,15 +266,6 @@ function permissionOutcomeFromGeminiOptions(
         },
       }
     : { outcome: { outcome: "cancelled" } };
-}
-
-function cleanupGeminiSystemSettings(systemSettingsPath: string | undefined): void {
-  if (!systemSettingsPath) {
-    return;
-  }
-  void fs.unlink(systemSettingsPath).catch(() => {
-    // Ignore already deleted temporary settings files.
-  });
 }
 
 function sumTokenUsageValue(
@@ -800,37 +554,14 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
       const candidateModels = [
         ...providerModels,
         ...(input.selectedModel ? [input.selectedModel] : []),
-      ].filter((model, index, collection) => collection.indexOf(model) === index);
-      const aliases = buildGeminiThinkingModelConfigAliases(candidateModels);
+      ];
 
-      if (Object.keys(aliases).length === 0) {
-        return {
-          env: undefined,
-          systemSettingsPath: undefined,
-        };
-      }
-
-      const systemSettingsPath = path.join(
-        T3CODE_GEMINI_SETTINGS_DIR,
-        `${input.threadId}-${crypto.randomUUID()}.json`,
-      );
-      yield* Effect.tryPromise({
-        try: async () => {
-          await fs.mkdir(T3CODE_GEMINI_SETTINGS_DIR, { recursive: true });
-          await fs.writeFile(
-            systemSettingsPath,
-            JSON.stringify(
-              {
-                modelConfigs: {
-                  aliases,
-                },
-              },
-              null,
-              2,
-            ),
-            "utf8",
-          );
-        },
+      return yield* Effect.tryPromise({
+        try: () =>
+          writeGeminiModelAliasSettings({
+            scopeId: input.threadId,
+            modelIds: candidateModels,
+          }),
         catch: (cause) =>
           new ProviderAdapterProcessError({
             provider: PROVIDER,
@@ -839,21 +570,13 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
             cause,
           }),
       });
-
-      return {
-        systemSettingsPath,
-        env: {
-          ...process.env,
-          GEMINI_CLI_SYSTEM_SETTINGS_PATH: systemSettingsPath,
-        },
-      };
     });
 
     const snapshotThread = (context: GeminiSessionContext) => ({
       threadId: context.threadId,
       turns: context.turns.map((turn) => ({
         id: turn.id,
-        items: cloneUnknownArray(turn.items),
+        items: cloneGeminiTurnItems(turn.items),
       })),
     });
 
@@ -1213,7 +936,7 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
     ) {
       const storedTurnBase: GeminiStoredTurn = {
         id: turnId,
-        items: cloneUnknownArray(items),
+        items: cloneGeminiTurnItems(items),
       };
       const liveSessionFilePath = yield* resolveSessionFilePath(context, { retries: 5 });
       if (!liveSessionFilePath) {
@@ -1359,7 +1082,7 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
               }).pipe(
                 Effect.as({
                   id: turnState.turnId,
-                  items: cloneUnknownArray(turnState.items),
+                  items: cloneGeminiTurnItems(turnState.items),
                 } satisfies GeminiStoredTurn),
               ),
             ),
@@ -1704,7 +1427,7 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
           acp,
           notificationFiber: undefined,
           pendingApprovals,
-          turns: (input.turns ?? []).map(cloneStoredTurn),
+          turns: (input.turns ?? []).map(cloneGeminiStoredTurn),
           runtimeModeId: input.runtimeModeId,
           sessionId: started.sessionId,
           currentModeId: trimToUndefined(asRecord(sessionSetupRecord?.modes)?.currentModeId),
@@ -1771,8 +1494,8 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
             input.modelSelection?.provider === PROVIDER
               ? resolveApiModelId(input.modelSelection)
               : undefined;
-          const requestedResumeSessionId = readResumeSessionId(input.resumeCursor);
-          const resumeTurns = readResumeTurns(input.resumeCursor);
+          const requestedResumeSessionId = readGeminiResumeSessionId(input.resumeCursor);
+          const resumeTurns = readLegacyGeminiResumeTurns(input.resumeCursor);
           const launchConfig = yield* prepareGeminiLaunchConfig({
             threadId: input.threadId,
             ...(selectedGeminiModel ? { selectedModel: selectedGeminiModel } : {}),
@@ -2023,7 +1746,7 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
           }
 
           const nextLength = Math.max(0, context.turns.length - numTurns);
-          const nextTurns = context.turns.slice(0, nextLength).map(cloneStoredTurn);
+          const nextTurns = context.turns.slice(0, nextLength).map(cloneGeminiStoredTurn);
           const cwd = context.session.cwd ?? process.cwd();
           const geminiSettings = yield* getGeminiSettings(threadId);
 

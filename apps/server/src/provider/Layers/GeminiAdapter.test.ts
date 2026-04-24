@@ -5,6 +5,7 @@ import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderRuntimeEvent, ThreadId, type ServerProvider } from "@t3tools/contracts";
+import { buildGeminiThinkingModelConfigAliases } from "@t3tools/shared/model";
 import { Effect, Layer, Ref, Stream } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -15,7 +16,6 @@ import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 import {
   accumulateGeminiPromptUsage,
   buildGeminiPromptUsageSnapshot,
-  buildGeminiThinkingModelConfigAliases,
   makeGeminiAdapterLive,
   normalizeGeminiPromptUsage,
   resolveRequestedGeminiModeId,
@@ -355,6 +355,41 @@ describe("GeminiAdapterLive", () => {
             false,
             "replaced sessions should not emit stale session.exited events",
           );
+        }).pipe(Effect.provide(makeHarness())),
+      ),
+    );
+  });
+
+  it("keeps Gemini resume cursors small and free of snapshot payloads", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const adapter = yield* GeminiAdapter;
+          const threadId = ThreadId.make("thread-gemini-small-resume-cursor");
+
+          const session = yield* adapter.startSession({
+            provider: "gemini",
+            threadId,
+            runtimeMode: "full-access",
+          });
+
+          const startedTurn = yield* adapter.sendTurn({
+            threadId,
+            input: "hello",
+            attachments: [],
+          });
+
+          expect(session.resumeCursor).toEqual({
+            schemaVersion: 1,
+            sessionId: expect.any(String),
+          });
+          expect(startedTurn.resumeCursor).toEqual({
+            schemaVersion: 1,
+            sessionId: expect.any(String),
+          });
+          expect(JSON.stringify(startedTurn.resumeCursor)).not.toContain("snapshots");
+          expect(JSON.stringify(startedTurn.resumeCursor)).not.toContain("filePath");
+          expect(JSON.stringify(startedTurn.resumeCursor)).not.toContain("items");
         }).pipe(Effect.provide(makeHarness())),
       ),
     );

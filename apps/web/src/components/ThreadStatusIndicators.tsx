@@ -181,9 +181,6 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
-  const dismissedStatusKey = useUiStateStore(
-    (state) => state.threadDismissedStatusKeyById[threadKey],
-  );
   const threadProjectCwd = useStore(
     useMemo(
       () => (state: AppState) =>
@@ -202,7 +199,6 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
-      dismissedStatusKey,
       lastVisitedAt,
     },
   });
