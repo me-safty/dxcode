@@ -96,6 +96,7 @@ export interface WsRpcClient {
     readonly checkout: RpcUnaryMethod<typeof WS_METHODS.gitCheckout>;
     readonly stashAndCheckout: RpcUnaryMethod<typeof WS_METHODS.gitStashAndCheckout>;
     readonly stashDrop: RpcUnaryMethod<typeof WS_METHODS.gitStashDrop>;
+    readonly stashInfo: RpcUnaryMethod<typeof WS_METHODS.gitStashInfo>;
     readonly init: RpcUnaryMethod<typeof WS_METHODS.gitInit>;
     readonly resolvePullRequest: RpcUnaryMethod<typeof WS_METHODS.gitResolvePullRequest>;
     readonly preparePullRequestThread: RpcUnaryMethod<
@@ -203,6 +204,7 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       stashAndCheckout: (input) =>
         transport.request((client) => client[WS_METHODS.gitStashAndCheckout](input)),
       stashDrop: (input) => transport.request((client) => client[WS_METHODS.gitStashDrop](input)),
+      stashInfo: (input) => transport.request((client) => client[WS_METHODS.gitStashInfo](input)),
       init: (input) => transport.request((client) => client[WS_METHODS.gitInit](input)),
       resolvePullRequest: (input) =>
         transport.request((client) => client[WS_METHODS.gitResolvePullRequest](input)),

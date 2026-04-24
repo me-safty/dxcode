@@ -33,6 +33,8 @@ import {
   GitRunStackedActionInput,
   GitStashAndCheckoutInput,
   GitStashDropInput,
+  GitStashInfoInput,
+  GitStashInfoResult,
   GitStatusInput,
   GitStatusResult,
   GitStatusStreamEvent,
@@ -105,6 +107,7 @@ export const WS_METHODS = {
   gitCheckout: "git.checkout",
   gitStashAndCheckout: "git.stashAndCheckout",
   gitStashDrop: "git.stashDrop",
+  gitStashInfo: "git.stashInfo",
   gitInit: "git.init",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
@@ -261,6 +264,12 @@ export const WsGitStashDropRpc = Rpc.make(WS_METHODS.gitStashDrop, {
   error: GitCommandError,
 });
 
+export const WsGitStashInfoRpc = Rpc.make(WS_METHODS.gitStashInfo, {
+  payload: GitStashInfoInput,
+  success: GitStashInfoResult,
+  error: GitCommandError,
+});
+
 export const WsGitInitRpc = Rpc.make(WS_METHODS.gitInit, {
   payload: GitInitInput,
   error: GitCommandError,
@@ -393,6 +402,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitCheckoutRpc,
   WsGitStashAndCheckoutRpc,
   WsGitStashDropRpc,
+  WsGitStashInfoRpc,
   WsGitInitRpc,
   WsTerminalOpenRpc,
   WsTerminalWriteRpc,

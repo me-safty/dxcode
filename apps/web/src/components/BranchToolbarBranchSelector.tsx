@@ -1,12 +1,17 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
-import type { EnvironmentApi, EnvironmentId, GitBranch, ThreadId } from "@t3tools/contracts";
+import type {
+  EnvironmentApi,
+  EnvironmentId,
+  GitBranch,
+  GitStashInfoResult,
+  ThreadId,
+} from "@t3tools/contracts";
 import { type QueryClient, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronDownIcon } from "lucide-react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { readEnvironmentApi } from "../environmentApi";
-import { readLocalApi } from "../localApi";
 import {
   gitBranchSearchInfiniteQueryOptions,
   gitQueryKeys,
@@ -37,6 +42,15 @@ import {
   ComboboxStatus,
   ComboboxTrigger,
 } from "./ui/combobox";
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "./ui/dialog";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 
 interface BranchToolbarBranchSelectorProps {
@@ -50,6 +64,13 @@ interface BranchToolbarBranchSelectorProps {
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
 }
+
+type StashDiscardDialogState = {
+  cwd: string;
+  error: string | null;
+  info: GitStashInfoResult | null;
+  loading: boolean;
+};
 
 function toBranchActionErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "An error occurred.";
@@ -157,6 +178,7 @@ function handleCheckoutError(
     onSuccess: () => void;
     fallbackTitle: string;
     runBranchAction: (action: () => Promise<void>) => void;
+    onRequestDiscardStash: (input: { cwd: string }) => void;
   },
 ): void {
   const dirtyWorktree = parseDirtyWorktreeError(error);
@@ -193,23 +215,7 @@ function handleCheckoutError(
                       actionProps: {
                         children: "Discard stash",
                         onClick: () => {
-                          ctx.runBranchAction(async () => {
-                            const confirmed = await readLocalApi()?.dialogs.confirm(
-                              "Drop the most recent stash entry? This cannot be undone.",
-                            );
-                            if (!confirmed) return;
-                            try {
-                              await ctx.api.git.stashDrop({ cwd: ctx.cwd });
-                            } catch (dropError) {
-                              toastManager.add(
-                                stackedThreadToast({
-                                  type: "error",
-                                  title: "Failed to drop stash.",
-                                  description: toBranchActionErrorMessage(dropError),
-                                }),
-                              );
-                            }
-                          });
+                          ctx.onRequestDiscardStash({ cwd: ctx.cwd });
                         },
                       },
                     }),
@@ -394,6 +400,10 @@ export function BranchToolbarBranchSelector({
   const queryClient = useQueryClient();
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
   const [branchQuery, setBranchQuery] = useState("");
+  const [stashDiscardDialog, setStashDiscardDialog] = useState<StashDiscardDialogState | null>(
+    null,
+  );
+  const [isDroppingStash, setIsDroppingStash] = useState(false);
   const deferredBranchQuery = useDeferredValue(branchQuery);
 
   const branchStatusQuery = useGitStatus({ environmentId, cwd: branchCwd });
@@ -503,26 +513,89 @@ export function BranchToolbarBranchSelector({
   // ---------------------------------------------------------------------------
   // Branch actions
   // ---------------------------------------------------------------------------
-  const runBranchAction = (action: () => Promise<void>) => {
-    if (isBranchActionPendingRef.current) {
-      return;
-    }
-
-    isBranchActionPendingRef.current = true;
-    setIsBranchActionPending(true);
-
-    void (async () => {
-      try {
-        await action().catch(() => undefined);
-        await queryClient
-          .invalidateQueries({ queryKey: gitQueryKeys.branches(environmentId, branchCwd) })
-          .catch(() => undefined);
-      } finally {
-        isBranchActionPendingRef.current = false;
-        setIsBranchActionPending(false);
+  const runBranchAction = useCallback(
+    (action: () => Promise<void>) => {
+      if (isBranchActionPendingRef.current) {
+        return;
       }
-    })();
-  };
+
+      isBranchActionPendingRef.current = true;
+      setIsBranchActionPending(true);
+
+      void (async () => {
+        try {
+          await action().catch(() => undefined);
+          await queryClient
+            .invalidateQueries({ queryKey: gitQueryKeys.branches(environmentId, branchCwd) })
+            .catch(() => undefined);
+        } finally {
+          isBranchActionPendingRef.current = false;
+          setIsBranchActionPending(false);
+        }
+      })();
+    },
+    [branchCwd, environmentId, queryClient],
+  );
+
+  const openStashDiscardDialog = useCallback(
+    (input: { cwd: string }) => {
+      const api = readEnvironmentApi(environmentId);
+      setStashDiscardDialog({
+        cwd: input.cwd,
+        error: api ? null : "Environment API is unavailable.",
+        info: null,
+        loading: Boolean(api),
+      });
+      if (!api) return;
+
+      void api.git.stashInfo({ cwd: input.cwd }).then(
+        (info) => {
+          setStashDiscardDialog((current) =>
+            current?.cwd === input.cwd
+              ? { ...current, error: null, info, loading: false }
+              : current,
+          );
+        },
+        (error) => {
+          setStashDiscardDialog((current) =>
+            current?.cwd === input.cwd
+              ? {
+                  ...current,
+                  error: toBranchActionErrorMessage(error),
+                  info: null,
+                  loading: false,
+                }
+              : current,
+          );
+        },
+      );
+    },
+    [environmentId],
+  );
+
+  const discardStashFromDialog = useCallback(() => {
+    const dialog = stashDiscardDialog;
+    const api = readEnvironmentApi(environmentId);
+    if (!dialog || !api || isDroppingStash) return;
+
+    setIsDroppingStash(true);
+    runBranchAction(async () => {
+      try {
+        await api.git.stashDrop({ cwd: dialog.cwd });
+        setStashDiscardDialog(null);
+      } catch (dropError) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to drop stash.",
+            description: toBranchActionErrorMessage(dropError),
+          }),
+        );
+      } finally {
+        setIsDroppingStash(false);
+      }
+    });
+  }, [environmentId, isDroppingStash, runBranchAction, stashDiscardDialog]);
 
   const selectBranch = (branch: GitBranch) => {
     const api = readEnvironmentApi(environmentId);
@@ -582,6 +655,7 @@ export function BranchToolbarBranchSelector({
           },
           fallbackTitle: "Failed to checkout branch.",
           runBranchAction,
+          onRequestDiscardStash: openStashDiscardDialog,
         });
       }
     });
@@ -620,6 +694,7 @@ export function BranchToolbarBranchSelector({
           },
           fallbackTitle: "Failed to create and checkout branch.",
           runBranchAction,
+          onRequestDiscardStash: openStashDiscardDialog,
         });
       }
     });
@@ -788,72 +863,170 @@ export function BranchToolbarBranchSelector({
   }
 
   return (
-    <Combobox
-      items={branchPickerItems}
-      filteredItems={filteredBranchPickerItems}
-      autoHighlight
-      virtualized={shouldVirtualizeBranchList}
-      onItemHighlighted={(_value, eventDetails) => {
-        if (!isBranchMenuOpen || eventDetails.index < 0 || eventDetails.reason !== "keyboard") {
-          return;
-        }
-        branchListRef.current?.scrollIndexIntoView?.({
-          index: eventDetails.index,
-          animated: false,
-        });
-      }}
-      onOpenChange={handleOpenChange}
-      open={isBranchMenuOpen}
-      value={resolvedActiveBranch}
-    >
-      <ComboboxTrigger
-        render={<Button variant="ghost" size="xs" />}
-        className="text-muted-foreground/70 hover:text-foreground/80"
-        disabled={(isBranchesSearchPending && branches.length === 0) || isBranchActionPending}
+    <>
+      <Combobox
+        items={branchPickerItems}
+        filteredItems={filteredBranchPickerItems}
+        autoHighlight
+        virtualized={shouldVirtualizeBranchList}
+        onItemHighlighted={(_value, eventDetails) => {
+          if (!isBranchMenuOpen || eventDetails.index < 0 || eventDetails.reason !== "keyboard") {
+            return;
+          }
+          branchListRef.current?.scrollIndexIntoView?.({
+            index: eventDetails.index,
+            animated: false,
+          });
+        }}
+        onOpenChange={handleOpenChange}
+        open={isBranchMenuOpen}
+        value={resolvedActiveBranch}
       >
-        <span className="max-w-[240px] truncate">{triggerLabel}</span>
-        <ChevronDownIcon />
-      </ComboboxTrigger>
-      <ComboboxPopup align="end" side="top" className="w-80">
-        <div className="border-b p-1">
-          <ComboboxInput
-            className="[&_input]:font-sans rounded-md"
-            inputClassName="ring-0"
-            placeholder="Search branches..."
-            showTrigger={false}
-            size="sm"
-            value={branchQuery}
-            onChange={(event) => setBranchQuery(event.target.value)}
-          />
-        </div>
-        <ComboboxEmpty>No branches found.</ComboboxEmpty>
-
-        {shouldVirtualizeBranchList ? (
-          <ComboboxListVirtualized>
-            <LegendList<string>
-              ref={branchListRef}
-              data={filteredBranchPickerItems}
-              keyExtractor={(item) => item}
-              renderItem={({ item, index }) => renderPickerItem(item, index)}
-              estimatedItemSize={28}
-              drawDistance={336}
-              onEndReached={() => {
-                if (hasNextPage && !isFetchingNextPage) {
-                  void fetchNextPage().catch(() => undefined);
-                }
-              }}
-              style={{ maxHeight: "14rem" }}
+        <ComboboxTrigger
+          render={<Button variant="ghost" size="xs" />}
+          className="text-muted-foreground/70 hover:text-foreground/80"
+          disabled={(isBranchesSearchPending && branches.length === 0) || isBranchActionPending}
+        >
+          <span className="max-w-[240px] truncate">{triggerLabel}</span>
+          <ChevronDownIcon />
+        </ComboboxTrigger>
+        <ComboboxPopup align="end" side="top" className="w-80">
+          <div className="border-b p-1">
+            <ComboboxInput
+              className="[&_input]:font-sans rounded-md"
+              inputClassName="ring-0"
+              placeholder="Search branches..."
+              showTrigger={false}
+              size="sm"
+              value={branchQuery}
+              onChange={(event) => setBranchQuery(event.target.value)}
             />
-          </ComboboxListVirtualized>
-        ) : (
-          <ComboboxList ref={setBranchListRef} className="max-h-56">
-            {filteredBranchPickerItems.map((itemValue, index) =>
-              renderPickerItem(itemValue, index),
-            )}
-          </ComboboxList>
-        )}
-        {branchStatusText ? <ComboboxStatus>{branchStatusText}</ComboboxStatus> : null}
-      </ComboboxPopup>
-    </Combobox>
+          </div>
+          <ComboboxEmpty>No branches found.</ComboboxEmpty>
+
+          {shouldVirtualizeBranchList ? (
+            <ComboboxListVirtualized>
+              <LegendList<string>
+                ref={branchListRef}
+                data={filteredBranchPickerItems}
+                keyExtractor={(item) => item}
+                renderItem={({ item, index }) => renderPickerItem(item, index)}
+                estimatedItemSize={28}
+                drawDistance={336}
+                onEndReached={() => {
+                  if (hasNextPage && !isFetchingNextPage) {
+                    void fetchNextPage().catch(() => undefined);
+                  }
+                }}
+                style={{ maxHeight: "14rem" }}
+              />
+            </ComboboxListVirtualized>
+          ) : (
+            <ComboboxList ref={setBranchListRef} className="max-h-56">
+              {filteredBranchPickerItems.map((itemValue, index) =>
+                renderPickerItem(itemValue, index),
+              )}
+            </ComboboxList>
+          )}
+          {branchStatusText ? <ComboboxStatus>{branchStatusText}</ComboboxStatus> : null}
+        </ComboboxPopup>
+      </Combobox>
+      <Dialog
+        open={stashDiscardDialog !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setStashDiscardDialog(null);
+            setIsDroppingStash(false);
+          }
+        }}
+      >
+        <DialogPopup className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Discard saved stash?</DialogTitle>
+            <DialogDescription>
+              This will permanently drop the stash entry that preserved your uncommitted changes.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4">
+            {stashDiscardDialog?.loading ? (
+              <p className="text-muted-foreground text-sm">Loading stash details...</p>
+            ) : stashDiscardDialog?.error ? (
+              <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm">
+                {stashDiscardDialog.error}
+              </p>
+            ) : stashDiscardDialog?.info ? (
+              <>
+                <div className="grid gap-2 rounded-lg border bg-muted/60 p-3 text-sm">
+                  <div className="flex min-w-0 gap-2">
+                    <span className="w-20 shrink-0 text-muted-foreground">Branch</span>
+                    <span className="min-w-0 truncate font-medium">
+                      {stashDiscardDialog.info.branch ?? currentGitBranch ?? "Detached HEAD"}
+                    </span>
+                  </div>
+                  <div className="flex min-w-0 gap-2">
+                    <span className="w-20 shrink-0 text-muted-foreground">Worktree</span>
+                    <span className="min-w-0 truncate font-mono text-xs">
+                      {stashDiscardDialog.info.cwd}
+                    </span>
+                  </div>
+                  <div className="flex min-w-0 gap-2">
+                    <span className="w-20 shrink-0 text-muted-foreground">Stash</span>
+                    <span className="min-w-0 truncate font-mono text-xs">
+                      {stashDiscardDialog.info.stashRef}
+                    </span>
+                  </div>
+                  <div className="flex min-w-0 gap-2">
+                    <span className="w-20 shrink-0 text-muted-foreground">Name</span>
+                    <span className="min-w-0 truncate">{stashDiscardDialog.info.message}</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <p className="font-medium text-sm">
+                    Changed files ({stashDiscardDialog.info.files.length})
+                  </p>
+                  {stashDiscardDialog.info.files.length > 0 ? (
+                    <ul className="max-h-48 overflow-auto rounded-lg border bg-muted/40 py-1">
+                      {stashDiscardDialog.info.files.map((file) => (
+                        <li
+                          className="truncate px-3 py-1 font-mono text-muted-foreground text-xs"
+                          key={file}
+                          title={file}
+                        >
+                          {file}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="rounded-lg border px-3 py-2 text-muted-foreground text-sm">
+                      Git did not report changed file names for this stash.
+                    </p>
+                  )}
+                </div>
+              </>
+            ) : null}
+          </DialogPanel>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => {
+                setStashDiscardDialog(null);
+                setIsDroppingStash(false);
+              }}
+            >
+              Keep stash
+            </Button>
+            <Button
+              variant="destructive"
+              type="button"
+              disabled={!stashDiscardDialog?.info || isDroppingStash}
+              onClick={discardStashFromDialog}
+            >
+              {isDroppingStash ? "Discarding..." : "Discard stash"}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+    </>
   );
 }

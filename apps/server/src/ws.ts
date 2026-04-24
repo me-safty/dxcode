@@ -927,6 +927,10 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             git.stashDrop(input.cwd).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
             { "rpc.aggregate": "git" },
           ),
+        [WS_METHODS.gitStashInfo]: (input) =>
+          observeRpcEffect(WS_METHODS.gitStashInfo, git.stashInfo(input), {
+            "rpc.aggregate": "git",
+          }),
         [WS_METHODS.gitInit]: (input) =>
           observeRpcEffect(
             WS_METHODS.gitInit,

@@ -2478,6 +2478,50 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       fallbackErrorMessage: "git stash drop failed",
     }).pipe(Effect.asVoid);
 
+  const stashInfo: GitCoreShape["stashInfo"] = (input) =>
+    Effect.gen(function* () {
+      const stashLine = (yield* runGitStdout("GitCore.stashInfo.list", input.cwd, [
+        "stash",
+        "list",
+        "-n",
+        "1",
+        "--format=%gd%x09%gs",
+      ])).trim();
+      const separatorIndex = stashLine.indexOf("\t");
+      const stashRef =
+        separatorIndex >= 0 ? stashLine.slice(0, separatorIndex).trim() : stashLine.trim();
+      const message =
+        separatorIndex >= 0 ? stashLine.slice(separatorIndex + 1).trim() : stashLine.trim();
+      if (stashRef.length === 0 || message.length === 0) {
+        return yield* createGitCommandError(
+          "GitCore.stashInfo",
+          input.cwd,
+          ["stash", "list", "-n", "1", "--format=%gd%x09%gs"],
+          "No stash entry is available.",
+        );
+      }
+
+      const branchOutput = yield* runGitStdout("GitCore.stashInfo.branch", input.cwd, [
+        "branch",
+        "--show-current",
+      ]).pipe(Effect.catch(() => Effect.succeed("")));
+      const filesOutput = yield* runGitStdout("GitCore.stashInfo.files", input.cwd, [
+        "stash",
+        "show",
+        "--include-untracked",
+        "--name-only",
+        stashRef,
+      ]).pipe(Effect.catch(() => Effect.succeed("")));
+
+      return {
+        cwd: input.cwd,
+        branch: branchOutput.trim() || null,
+        stashRef,
+        message,
+        files: parseNonEmptyLineList(filesOutput),
+      };
+    });
+
   const initRepo: GitCoreShape["initRepo"] = (input) =>
     executeGit("GitCore.initRepo", input.cwd, ["init"], {
       timeoutMs: 10_000,
@@ -2525,6 +2569,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     checkoutBranch,
     stashAndCheckout,
     stashDrop,
+    stashInfo,
     initRepo,
     listLocalBranchNames,
   } satisfies GitCoreShape;

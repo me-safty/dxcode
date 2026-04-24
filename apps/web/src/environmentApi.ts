@@ -34,6 +34,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       checkout: rpcClient.git.checkout,
       stashAndCheckout: rpcClient.git.stashAndCheckout,
       stashDrop: rpcClient.git.stashDrop,
+      stashInfo: rpcClient.git.stashInfo,
       init: rpcClient.git.init,
       resolvePullRequest: rpcClient.git.resolvePullRequest,
       preparePullRequestThread: rpcClient.git.preparePullRequestThread,

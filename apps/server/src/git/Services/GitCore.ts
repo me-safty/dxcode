@@ -20,6 +20,8 @@ import type {
   GitListBranchesResult,
   GitPullResult,
   GitRemoveWorktreeInput,
+  GitStashInfoInput,
+  GitStashInfoResult,
   GitStatusInput,
   GitStatusResult,
 } from "@t3tools/contracts";
@@ -299,6 +301,10 @@ export interface GitCoreShape {
   readonly stashAndCheckout: (input: GitCheckoutInput) => Effect.Effect<void, GitCommandError>;
 
   readonly stashDrop: (cwd: string) => Effect.Effect<void, GitCommandError>;
+
+  readonly stashInfo: (
+    input: GitStashInfoInput,
+  ) => Effect.Effect<GitStashInfoResult, GitCommandError>;
 
   /**
    * Initialize a repository in the provided directory.
