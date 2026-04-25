@@ -576,8 +576,7 @@ describe("selectUserMessageMinimapEntries", () => {
         message: {
           id: "user-1" as never,
           role: "user",
-          text:
-            "Look at the log\n\n<terminal_context>\n- session 1:\nhello\nworld\n</terminal_context>",
+          text: "Look at the log\n\n<terminal_context>\n- session 1:\nhello\nworld\n</terminal_context>",
           turnId: null,
           createdAt: "2026-01-01T00:00:00Z",
           streaming: false,

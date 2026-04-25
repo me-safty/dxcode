@@ -268,11 +268,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           ListHeaderComponent={<div className="h-3 sm:h-4" />}
           ListFooterComponent={<div className="h-3 sm:h-4" />}
         />
-        <ChatMinimap
-          listRef={listRef}
-          entries={minimapEntries}
-          threadKey={routeThreadKey}
-        />
+        <ChatMinimap listRef={listRef} entries={minimapEntries} threadKey={routeThreadKey} />
       </div>
     </TimelineRowCtx.Provider>
   );

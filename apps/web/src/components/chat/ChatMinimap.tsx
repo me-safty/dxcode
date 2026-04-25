@@ -3,10 +3,7 @@ import { type LegendListRef } from "@legendapp/list/react";
 
 import { cn } from "~/lib/utils";
 import { PreviewCard, PreviewCardTrigger } from "~/components/ui/preview-card";
-import {
-  computeActiveMinimapIndex,
-  type MinimapUserMessageEntry,
-} from "./ChatMinimap.logic";
+import { computeActiveMinimapIndex, type MinimapUserMessageEntry } from "./ChatMinimap.logic";
 
 interface ChatMinimapProps {
   listRef: React.RefObject<LegendListRef | null>;
@@ -170,7 +167,7 @@ function ExpandedMenu({
 }) {
   return (
     <ul
-      className="flex h-[min(60vh,24rem)] min-w-45 max-w-88 flex-col gap-0.5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-popover p-1.5 shadow-lg not-dark:bg-clip-padding"
+      className="mr-3 flex h-[min(60vh,24rem)] min-w-45 max-w-88 flex-col gap-0.5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-popover p-1.5 shadow-lg not-dark:bg-clip-padding"
       data-testid="chat-minimap-menu"
     >
       {entries.map((entry, index) => {

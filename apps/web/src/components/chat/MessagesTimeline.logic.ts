@@ -238,4 +238,3 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     }
   }
 }
-

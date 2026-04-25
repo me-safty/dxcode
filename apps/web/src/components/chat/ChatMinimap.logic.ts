@@ -29,11 +29,7 @@ export function selectUserMessageMinimapEntries(
     const displayed = deriveDisplayedUserMessageState(row.message.text ?? "");
     const visible = displayed.visibleText.trim();
     const previewText =
-      visible.length > 0
-        ? visible
-        : displayed.contextCount > 0
-          ? "(terminal context)"
-          : "";
+      visible.length > 0 ? visible : displayed.contextCount > 0 ? "(terminal context)" : "";
     entries.push({
       rowIndex,
       rowKey: row.id,
@@ -55,8 +51,7 @@ export function computeActiveMinimapIndex(
   let next = 0;
   for (let i = 0; i < entries.length; i += 1) {
     const entry = entries[i]!;
-    const position =
-      state.positionByKey?.(entry.rowKey) ?? state.positionAtIndex?.(entry.rowIndex);
+    const position = state.positionByKey?.(entry.rowKey) ?? state.positionAtIndex?.(entry.rowIndex);
     if (position === undefined) continue;
     if (position <= threshold) {
       next = i;
