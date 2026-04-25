@@ -46,6 +46,7 @@ import {
   type ThreadTerminalGroup,
 } from "../types";
 import { readEnvironmentApi } from "~/environmentApi";
+import { extractErrorMessage } from "~/lib/errorMessage";
 import { readLocalApi } from "~/localApi";
 import { selectTerminalEventEntries, useTerminalStateStore } from "../terminalStateStore";
 
@@ -517,10 +518,7 @@ export function TerminalViewport({
       void api.terminal
         .write({ threadId, terminalId, data })
         .catch((err) =>
-          writeSystemMessage(
-            terminal,
-            err instanceof Error ? err.message : "Terminal write failed",
-          ),
+          writeSystemMessage(terminal, extractErrorMessage(err, "Terminal write failed")),
         );
     });
 
@@ -702,10 +700,7 @@ export function TerminalViewport({
         }
       } catch (err) {
         if (disposed) return;
-        writeSystemMessage(
-          terminal,
-          err instanceof Error ? err.message : "Failed to open terminal",
-        );
+        writeSystemMessage(terminal, extractErrorMessage(err, "Failed to open terminal"));
       }
     };
 
