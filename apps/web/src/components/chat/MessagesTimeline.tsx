@@ -41,10 +41,10 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
-  selectUserMessageMinimapEntries,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
+import { selectUserMessageMinimapEntries } from "./ChatMinimap.logic";
 import { ChatMinimap } from "./ChatMinimap";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -268,7 +268,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           ListHeaderComponent={<div className="h-3 sm:h-4" />}
           ListFooterComponent={<div className="h-3 sm:h-4" />}
         />
-        <ChatMinimap listRef={listRef} entries={minimapEntries} threadKey={routeThreadKey} />
+        <ChatMinimap
+          listRef={listRef}
+          entries={minimapEntries}
+          threadKey={routeThreadKey}
+        />
       </div>
     </TimelineRowCtx.Provider>
   );

@@ -1,7 +1,6 @@
 import { type TimelineEntry, type WorkLogEntry } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { type MessageId } from "@t3tools/contracts";
-import { deriveDisplayedUserMessageState } from "../../lib/terminalContext";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 
@@ -240,39 +239,3 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
   }
 }
 
-/**
- * Minimap entries — compact summary of user messages used by ChatMinimap
- */
-export interface MinimapUserMessageEntry {
-  rowIndex: number;
-  rowKey: string;
-  messageId: MessageId;
-  previewText: string;
-}
-
-export function selectUserMessageMinimapEntries(
-  rows: ReadonlyArray<MessagesTimelineRow>,
-): MinimapUserMessageEntry[] {
-  const entries: MinimapUserMessageEntry[] = [];
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    const row = rows[rowIndex];
-    if (!row || row.kind !== "message" || row.message.role !== "user") {
-      continue;
-    }
-    const displayed = deriveDisplayedUserMessageState(row.message.text ?? "");
-    const visible = displayed.visibleText.trim();
-    const previewText =
-      visible.length > 0
-        ? visible
-        : displayed.contextCount > 0
-          ? "(terminal context)"
-          : "";
-    entries.push({
-      rowIndex,
-      rowKey: row.id,
-      messageId: row.message.id,
-      previewText,
-    });
-  }
-  return entries;
-}

@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
+import { type MessageId } from "@t3tools/contracts";
 import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
-  selectUserMessageMinimapEntries,
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
+import {
+  computeActiveMinimapIndex,
+  selectUserMessageMinimapEntries,
+  type MinimapListStateSnapshot,
+  type MinimapUserMessageEntry,
+} from "./ChatMinimap.logic";
 
 describe("computeMessageDurationStart", () => {
   it("returns message createdAt when there is no preceding user message", () => {
@@ -610,5 +616,129 @@ describe("selectUserMessageMinimapEntries", () => {
     const entries = selectUserMessageMinimapEntries(rows);
     expect(entries).toHaveLength(1);
     expect(entries[0]?.previewText).toBe("(terminal context)");
+  });
+});
+
+describe("computeActiveMinimapIndex", () => {
+  const makeEntry = (i: number, rowKey: string): MinimapUserMessageEntry => ({
+    rowIndex: i * 2,
+    rowKey,
+    messageId: `user-${i}` as MessageId,
+    previewText: `msg ${i}`,
+  });
+
+  const makeState = ({
+    scroll,
+    scrollLength = 500,
+    positionsByKey = {},
+    positionsByIndex = {},
+  }: {
+    scroll: number;
+    scrollLength?: number;
+    positionsByKey?: Record<string, number>;
+    positionsByIndex?: Record<number, number>;
+  }): MinimapListStateSnapshot => ({
+    scroll,
+    scrollLength,
+    positionByKey: (key) => positionsByKey[key],
+    positionAtIndex: (index) => positionsByIndex[index],
+  });
+
+  it("returns undefined when there are no entries so the caller leaves state alone", () => {
+    expect(computeActiveMinimapIndex(makeState({ scroll: 0 }), [])).toBeUndefined();
+  });
+
+  it("returns undefined before the list has been measured (scrollLength is 0)", () => {
+    const a = makeEntry(1, "a");
+    const state = makeState({
+      scroll: 0,
+      scrollLength: 0,
+      positionsByKey: { a: 100 },
+    });
+    expect(computeActiveMinimapIndex(state, [a])).toBeUndefined();
+  });
+
+  it("keeps the first entry active while the user is at the very top of the thread", () => {
+    const a = makeEntry(1, "a");
+    const b = makeEntry(2, "b");
+    const state = makeState({ scroll: 0, positionsByKey: { a: 100, b: 900 } });
+    expect(computeActiveMinimapIndex(state, [a, b])).toBe(0);
+  });
+
+  it("keeps the first entry active while the next entry's top is still below the viewport top", () => {
+    const a = makeEntry(1, "a");
+    const b = makeEntry(2, "b");
+    const state = makeState({ scroll: 500, positionsByKey: { a: 100, b: 900 } });
+    expect(computeActiveMinimapIndex(state, [a, b])).toBe(0);
+  });
+
+  it("activates the next entry once its top has scrolled at/above the viewport top", () => {
+    const a = makeEntry(1, "a");
+    const b = makeEntry(2, "b");
+    const c = makeEntry(3, "c");
+    const state = makeState({
+      scroll: 1000,
+      positionsByKey: { a: 100, b: 900, c: 1700 },
+    });
+    expect(computeActiveMinimapIndex(state, [a, b, c])).toBe(1);
+  });
+
+  it("activates the last entry when its top finally reaches the viewport top", () => {
+    const a = makeEntry(1, "a");
+    const b = makeEntry(2, "b");
+    const c = makeEntry(3, "c");
+    // scroll=1700 → threshold=1708. All three satisfy → c active.
+    const state = makeState({
+      scroll: 1700,
+      positionsByKey: { a: 100, b: 900, c: 1700 },
+    });
+    expect(computeActiveMinimapIndex(state, [a, b, c])).toBe(2);
+  });
+
+  it("does not activate the last entry when max scroll can't push its top above the viewport top", () => {
+    const a = makeEntry(1, "a");
+    const b = makeEntry(2, "b");
+    const c = makeEntry(3, "c");
+    const state = makeState({
+      scroll: 1500,
+      scrollLength: 500,
+      positionsByKey: { a: 100, b: 900, c: 1700 },
+    });
+    expect(computeActiveMinimapIndex(state, [a, b, c])).toBe(1);
+  });
+
+  it("advances past a prompt whose body has scrolled off when the next prompt enters from below", () => {
+    const a = makeEntry(1, "a");
+    const b = makeEntry(2, "b");
+    const c = makeEntry(3, "c");
+    const state = makeState({
+      scroll: 200,
+      positionsByKey: { a: 100, b: 500, c: 1200 },
+      positionsByIndex: { 3: 150, 5: 550 },
+    });
+    expect(computeActiveMinimapIndex(state, [a, b, c])).toBe(1);
+  });
+
+  it("does not advance past a prompt while any part of it is still visible", () => {
+    const a = makeEntry(1, "a");
+    const b = makeEntry(2, "b");
+    const state = makeState({
+      scroll: 100,
+      positionsByKey: { a: 100, b: 500 },
+      positionsByIndex: { 3: 150 },
+    });
+    expect(computeActiveMinimapIndex(state, [a, b])).toBe(0);
+  });
+
+  it("does not advance when the next prompt hasn't entered the viewport yet", () => {
+    const a = makeEntry(1, "a");
+    const b = makeEntry(2, "b");
+    const c = makeEntry(3, "c");
+    const state = makeState({
+      scroll: 600,
+      positionsByKey: { a: 100, b: 500, c: 1200 },
+      positionsByIndex: { 3: 150, 5: 550 },
+    });
+    expect(computeActiveMinimapIndex(state, [a, b, c])).toBe(1);
   });
 });
