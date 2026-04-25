@@ -1,0 +1,4532 @@
+---
+type PreviewThread = {
+  id: string;
+  title: string;
+  project: string;
+  age: string;
+  branch: string;
+  checkoutValue: string;
+  access: string;
+  composerText: string;
+  body: "empty" | "messages";
+  status?: string;
+  statusTone?: "working" | "completed";
+  messages?: {
+    user: string;
+    assistant: string;
+  };
+  toolCalls?: string[];
+};
+
+type PreviewTurn =
+  | {
+      type: "user" | "assistant";
+      text: string;
+    }
+  | {
+      type: "tool";
+      title: string;
+      calls: string[];
+    };
+
+const previewThreads: PreviewThread[] = [
+  {
+    id: "marketing-site",
+    title: "I need to create a marketing site for this app bef...",
+    project: "t3code-1",
+    age: "1m ago",
+    status: "Working",
+    statusTone: "working",
+    branch: "t3code-1",
+    checkoutValue: "main",
+    access: "Full access",
+    composerText: "",
+    body: "messages" as const,
+    messages: {
+      user:
+        "The repo doesn’t have existing Vercel/marketing-site wiring, so I have room to add a purpose-built app instead of working around prior deployment config. I’m checking the monorepo task conventions next, then I’ll scaffold apps/site and build the first version in one pass.",
+      assistant:
+        "I’ve confirmed the new app can stand alone without touching the product runtime. I’m inspecting the existing brand assets now so the marketing site can reuse what you already have rather than inventing a disconnected visual identity.",
+    },
+    toolCalls: [
+      "Command run complete  /bin/zsh -lc \"sed -n '1,220p' scripts/dev-runner.ts\"",
+      "Command run complete  /bin/zsh -lc \"sed -n '1,220p' apps/desktop/package.json\"",
+      "Command run complete  /bin/zsh -lc \"sed -n '1,240p' README.md\"",
+    ],
+  },
+  {
+    id: "mobile-thread",
+    title: "I want a way to mo...",
+    project: "t3code-1",
+    age: "6m ago",
+    status: "Working",
+    statusTone: "working",
+    branch: "t3code-1",
+    checkoutValue: "main",
+    access: "Auto-accept edits",
+    composerText: "Continue the mobile layout pass and keep the same app shell spacing.",
+    body: "messages" as const,
+    messages: {
+      user: "I want a way to move between active implementation threads faster.",
+      assistant: "I’m tightening the sidebar interaction and checking the keyboard path before changing the command palette.",
+    },
+  },
+  {
+    id: "hotkeys-thread",
+    title: "I want to add a h...",
+    project: "t3code-1",
+    age: "8m ago",
+    status: "Completed",
+    statusTone: "completed",
+    branch: "t3code-1",
+    checkoutValue: "main",
+    access: "Supervised",
+    composerText: "Add the global hotkey wiring and keep the shortcut labels consistent.",
+    body: "messages" as const,
+    messages: {
+      user: "I want to add a hotkey to jump back into the current thread.",
+      assistant: "Completed the shortcut registration and verified it does not collide with the existing search command.",
+    },
+  },
+  {
+    id: "old-hotkeys",
+    title: "I want to add a few hotkeys t...",
+    project: "t3code-1",
+    age: "13h ago",
+    branch: "t3code-1",
+    checkoutValue: "main",
+    access: "Full access",
+    composerText: "Review the old shortcut branch and extract anything still useful.",
+    body: "empty" as const,
+  },
+  {
+    id: "round-modernize",
+    title: "I want to moderniz...",
+    project: "round",
+    age: "9m ago",
+    status: "Working",
+    statusTone: "working",
+    branch: "round",
+    checkoutValue: "main",
+    access: "Full access",
+    composerText: "Modernize the UI without changing the route structure.",
+    body: "messages" as const,
+    messages: {
+      user: "I want to modernize the dashboard without making it feel like a separate product.",
+      assistant: "I’m mapping the existing surfaces first, then I’ll update the spacing and icon treatment in one contained pass.",
+    },
+  },
+  {
+    id: "lawn-hard",
+    title: "How hard would ...",
+    project: "lawn",
+    age: "7m ago",
+    status: "Completed",
+    statusTone: "completed",
+    branch: "lawn",
+    checkoutValue: "main",
+    access: "Supervised",
+    composerText: "Estimate the implementation path and call out any hidden risks.",
+    body: "messages" as const,
+    messages: {
+      user: "How hard would it be to replace the current onboarding flow?",
+      assistant: "The main cost is state migration, not the UI. I’d isolate the new flow behind the existing account boundary first.",
+    },
+  },
+  {
+    id: "lawn-security",
+    title: "What potential security issu...",
+    project: "lawn",
+    age: "7m ago",
+    branch: "lawn",
+    checkoutValue: "main",
+    access: "Full access",
+    composerText: "Audit the auth path and summarize the risky edges.",
+    body: "empty" as const,
+  },
+  {
+    id: "lawn-analyze",
+    title: "Help me analyze this project",
+    project: "lawn",
+    age: "9m ago",
+    branch: "lawn",
+    checkoutValue: "main",
+    access: "Full access",
+    composerText: "Build a concise project map from the repo structure.",
+    body: "empty" as const,
+  },
+  {
+    id: "shoo-secure",
+    title: "Is this app secure,...",
+    project: "shoo",
+    age: "just now",
+    status: "Working",
+    statusTone: "working",
+    branch: "shoo",
+    checkoutValue: "main",
+    access: "Full access",
+    composerText: "Inspect the app security posture and list the highest-risk fixes first.",
+    body: "messages" as const,
+    messages: {
+      user: "Is this app secure enough to put behind a public beta?",
+      assistant: "I’m checking auth boundaries, storage access, and server-only environment usage before making a recommendation.",
+    },
+  },
+] satisfies PreviewThread[];
+
+const previewProjects = [
+  {
+    id: "t3code-1",
+    title: "t3code-1",
+    icon: "t3",
+    threads: ["marketing-site", "mobile-thread", "hotkeys-thread", "old-hotkeys"],
+  },
+  {
+    id: "round",
+    title: "round",
+    icon: "round",
+    threads: ["round-modernize"],
+  },
+  {
+    id: "lawn",
+    title: "lawn",
+    icon: "lawn",
+    threads: ["lawn-hard", "lawn-security", "lawn-analyze"],
+  },
+  {
+    id: "shoo",
+    title: "shoo",
+    icon: "folder",
+    threads: ["shoo-secure"],
+  },
+] as const;
+
+const threadById = new Map(previewThreads.map((thread) => [thread.id, thread]));
+const isToolTurn = (turn: PreviewTurn): turn is Extract<PreviewTurn, { type: "tool" }> => turn.type === "tool";
+
+type PreviewToolCallIcon = "terminal" | "eye" | "pen" | "globe" | "wrench";
+
+const normalizeShellCommand = (value: string) => {
+  const withoutWrapper = value.replace(/^\/bin\/zsh -lc\s+/i, "").trim();
+  if (
+    (withoutWrapper.startsWith('"') && withoutWrapper.endsWith('"')) ||
+    (withoutWrapper.startsWith("'") && withoutWrapper.endsWith("'"))
+  ) {
+    return withoutWrapper.slice(1, -1);
+  }
+  return withoutWrapper;
+};
+
+const formatPreviewToolCall = (
+  value: string,
+): { icon: PreviewToolCallIcon; heading: string; preview: string | null } => {
+  const trimmed = value.trim().replace(/\s+/g, " ");
+
+  if (/^Command run complete(?:d)?\s+/i.test(trimmed)) {
+    return {
+      icon: "terminal",
+      heading: "Ran command",
+      preview: normalizeShellCommand(trimmed.replace(/^Command run complete(?:d)?\s+/i, "")),
+    };
+  }
+
+  if (/^Read complete\s+/i.test(trimmed)) {
+    return {
+      icon: "eye",
+      heading: "Read file",
+      preview: trimmed.replace(/^Read complete\s+/i, ""),
+    };
+  }
+
+  if (/^Image view complete\s+/i.test(trimmed)) {
+    return {
+      icon: "eye",
+      heading: "Viewed image",
+      preview: trimmed.replace(/^Image view complete\s+/i, ""),
+    };
+  }
+
+  if (/^Edit complete\s+/i.test(trimmed)) {
+    return {
+      icon: "pen",
+      heading: "Edited file",
+      preview: trimmed.replace(/^Edit complete\s+/i, ""),
+    };
+  }
+
+  if (/^Search complete\s+/i.test(trimmed)) {
+    return {
+      icon: "globe",
+      heading: "Searched",
+      preview: trimmed.replace(/^Search complete\s+/i, ""),
+    };
+  }
+
+  if (/^Network complete\s+/i.test(trimmed)) {
+    return {
+      icon: "globe",
+      heading: "Fetched",
+      preview: trimmed.replace(/^Network complete\s+/i, ""),
+    };
+  }
+
+  return {
+    icon: "wrench",
+    heading: trimmed,
+    preview: null,
+  };
+};
+
+const previewTurns: Record<string, PreviewTurn[]> = {
+  "marketing-site": [
+    {
+      type: "user",
+      text: "I need to create a marketing site for this app before launch. Keep it in this repo, use the existing brand assets, and don’t touch the app runtime.",
+    },
+    {
+      type: "assistant",
+      text: "The repo doesn’t have existing Vercel/marketing-site wiring, so I have room to add a purpose-built app instead of working around prior deployment config. I’m checking the monorepo task conventions next, then I’ll scaffold apps/site and build the first version in one pass.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (3)",
+      calls: [
+        "Command run complete  /bin/zsh -lc \"sed -n '1,220p' scripts/dev-runner.ts\"",
+        "Command run complete  /bin/zsh -lc \"sed -n '1,220p' apps/desktop/package.json\"",
+        "Command run complete  /bin/zsh -lc \"sed -n '1,240p' README.md\"",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "I’ve confirmed the new app can stand alone without touching the product runtime. I’m inspecting the existing brand assets now so the marketing site can reuse what you already have rather than inventing a disconnected visual identity.",
+    },
+    {
+      type: "user",
+      text: "Use the real screenshot space only. I do not want another explainer section or duplicated marketing copy around it.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (2)",
+      calls: [
+        "Image view complete  /Users/theo/Code/Work/t3code/clones/t3code-1/assets/T3 Code logo.svg",
+        "Image view complete  /Users/theo/Code/Work/t3code/clones/t3code-1/assets/T3 Code-macOS-Default.png",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "I’m replacing only the screenshot slot. The preview keeps the same aspect ratio as the live asset and uses the current product shell as the source of truth.",
+    },
+    {
+      type: "user",
+      text: "Make the fake data feel like an active product session, not a single static exchange.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (3)",
+      calls: [
+        "Network complete  GET https://t3.codes/screenshot.jpeg",
+        "Command run complete  identify -format \"%wx%h\" /tmp/t3-screenshot.jpeg",
+        "Edit complete  apps/marketing/src/components/AppPreview.astro",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "The preview now has several active threads, project groups, tool-call cards, and follow-up prompts so clicking around feels like a real workspace instead of a flat mock.",
+    },
+  ],
+  "mobile-thread": [
+    { type: "user", text: "I want a way to move between active implementation threads faster." },
+    {
+      type: "assistant",
+      text: "I’m tightening the sidebar interaction and checking the keyboard path before changing the command palette.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (2)",
+      calls: [
+        "Read complete  apps/web/src/components/CommandPalette.tsx",
+        "Search complete  rg \"activeThread|navigate\" apps/web/src",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "The quickest path is keeping thread switching in the sidebar and making the command palette reuse the same thread labels, age text, and project grouping.",
+    },
+    {
+      type: "user",
+      text: "Can you make it work from keyboard too? I switch threads while the composer is focused most of the time.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (3)",
+      calls: [
+        "Search complete  rg \"composerRef|focusComposer\" apps/web/src/components",
+        "Read complete  apps/web/src/components/ChatView.tsx",
+        "Edit complete  apps/web/src/components/ThreadSidebar.tsx",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "Yes. I’m keeping the shortcut at the shell level and preserving composer focus after navigation so the next prompt can be typed immediately.",
+    },
+  ],
+  "hotkeys-thread": [
+    { type: "user", text: "I want to add a hotkey to jump back into the current thread." },
+    {
+      type: "assistant",
+      text: "I’ll add the shortcut at the app shell boundary so it works from the editor, sidebar, and modal states without each feature reimplementing it.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (3)",
+      calls: [
+        "Search complete  rg \"keydown|hotkey|shortcut\" apps/web/src",
+        "Edit complete  apps/web/src/hooks/useGlobalShortcuts.ts",
+        "Command run complete  bun typecheck --filter @t3tools/web",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "Completed the shortcut registration and verified it does not collide with the existing search command.",
+    },
+    {
+      type: "user",
+      text: "Add the shortcut label anywhere the user can discover it, but do not make the sidebar noisier.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (2)",
+      calls: [
+        "Edit complete  apps/web/src/components/CommandPalette.tsx",
+        "Command run complete  bun lint --filter @t3tools/web",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "Added discovery in the command palette and kept the sidebar unchanged. The shortcut remains available globally without adding another persistent badge.",
+    },
+  ],
+  "old-hotkeys": [
+    { type: "user", text: "I want to add a few hotkeys to make common navigation less mouse-heavy." },
+    {
+      type: "assistant",
+      text: "The older branch already has useful command names, but the event handling is too local. I’d keep the labels and move the listeners to the shell.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (2)",
+      calls: ["Git diff inspected  shortcut-prototype", "Search complete  rg \"Meta|ctrlKey\" apps/web/src"],
+    },
+    {
+      type: "user",
+      text: "If anything in that branch is stale, ignore it. I only care about the parts that still fit the current shell.",
+    },
+    {
+      type: "assistant",
+      text: "The stale pieces are tied to removed local state. The reusable part is the command naming and the fallback behavior when no thread is active.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (2)",
+      calls: ["Read complete  apps/web/src/session-logic.ts", "Search complete  rg \"activeThreadId\" apps/web/src"],
+    },
+  ],
+  "round-modernize": [
+    { type: "user", text: "I want to modernize the dashboard without making it feel like a separate product." },
+    {
+      type: "assistant",
+      text: "I’m mapping the existing surfaces first, then I’ll update the spacing and icon treatment in one contained pass.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (3)",
+      calls: [
+        "Read complete  app/routes/dashboard.tsx",
+        "Read complete  app/components/project-list.tsx",
+        "Screenshot captured  localhost:3000/dashboard",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "The main issue is density drift: the cards use three spacing systems. I’m consolidating them around the current table rhythm and leaving route behavior untouched.",
+    },
+    {
+      type: "user",
+      text: "Do the empty states too. Those are the parts that make the app feel the oldest.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (3)",
+      calls: [
+        "Read complete  app/components/empty-state.tsx",
+        "Edit complete  app/routes/dashboard.tsx",
+        "Screenshot captured  localhost:3000/dashboard?empty=1",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "Empty states now share the same spacing, border, and icon scale as the populated cards, so the page no longer changes visual systems when data is missing.",
+    },
+  ],
+  "lawn-hard": [
+    { type: "user", text: "How hard would it be to replace the current onboarding flow?" },
+    {
+      type: "assistant",
+      text: "The main cost is state migration, not the UI. I’d isolate the new flow behind the existing account boundary first.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (2)",
+      calls: [
+        "Search complete  rg \"onboarding|welcome|firstRun\" .",
+        "Read complete  src/server/account-state.ts",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "Estimate: one focused pass for the UI, a second pass for migration tests, and a short beta window because existing users can re-enter this path.",
+    },
+    {
+      type: "user",
+      text: "What is the riskiest migration edge?",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (3)",
+      calls: [
+        "Read complete  src/server/user-profile.ts",
+        "Search complete  rg \"onboardingCompleted|firstSeen\" src",
+        "Command run complete  bun run test onboarding",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "Users with partially completed profiles are the risky edge. The migration should treat missing profile fields as resumable onboarding, not as a brand-new account.",
+    },
+  ],
+  "lawn-security": [
+    { type: "user", text: "What potential security issues should I fix before sharing this?" },
+    {
+      type: "assistant",
+      text: "I’m checking auth boundaries, server-only secrets, file uploads, and any route that trusts client-provided IDs.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (4)",
+      calls: [
+        "Search complete  rg \"process.env|PUBLIC_|SECRET\" .",
+        "Read complete  src/middleware.ts",
+        "Read complete  src/routes/api/upload.ts",
+        "Command run complete  bun typecheck",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "The highest-risk item is upload validation. Auth is centralized, but the file path accepts more MIME types than the UI advertises.",
+    },
+    {
+      type: "user",
+      text: "Can you rank the fixes by what blocks a beta versus what can wait?",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (3)",
+      calls: [
+        "Read complete  src/routes/api/session.ts",
+        "Read complete  src/lib/rate-limit.ts",
+        "Search complete  rg \"TODO|unsafe|any\" src/routes src/server",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "Beta blockers: upload MIME validation, rate limiting on auth routes, and removing debug token output. Later: stricter CSP and audit logging polish.",
+    },
+  ],
+  "lawn-analyze": [
+    { type: "user", text: "Help me analyze this project and tell me where to start." },
+    {
+      type: "assistant",
+      text: "I’m building a map of the app structure first, then I’ll separate product logic from styling-only debt.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (3)",
+      calls: ["List complete  src", "Read complete  package.json", "Search complete  rg \"TODO|FIXME|hack\" src"],
+    },
+    {
+      type: "assistant",
+      text: "Start with the data-loading layer. Most UI issues are downstream from duplicated loading state and inconsistent empty-state handling.",
+    },
+    {
+      type: "user",
+      text: "Give me the shortest path to a cleaner first PR.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (2)",
+      calls: [
+        "Search complete  rg \"isLoading|loading\" src",
+        "Read complete  src/components/project-shell.tsx",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "First PR: centralize loading and empty-state presentation inside the project shell. It touches fewer routes and makes later UI cleanup much smaller.",
+    },
+  ],
+  "shoo-secure": [
+    { type: "user", text: "Is this app secure enough to put behind a public beta?" },
+    {
+      type: "assistant",
+      text: "I’m checking auth boundaries, storage access, and server-only environment usage before making a recommendation.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (3)",
+      calls: [
+        "Read complete  src/App.tsx",
+        "Read complete  src/index.css",
+        "Search complete  rg \"token|claims|localStorage|cookie\" src",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "For a demo, yes. For beta, not yet: token display should be removed, refresh behavior needs a server validation path, and the callback route should document expected claims.",
+    },
+    {
+      type: "user",
+      text: "Patch the obvious token leak first and leave notes for the server validation work.",
+    },
+    {
+      type: "tool",
+      title: "Tool calls (3)",
+      calls: [
+        "Edit complete  src/App.tsx",
+        "Edit complete  src/auth-notes.md",
+        "Command run complete  bun typecheck",
+      ],
+    },
+    {
+      type: "assistant",
+      text: "The visible token output is removed. I left the server validation notes next to the auth flow so the beta hardening work has a clear next step.",
+    },
+  ],
+};
+
+---
+
+<div class="app-preview" data-active-thread={previewThreads[0]?.id}>
+  {
+    previewThreads.map((thread, index) => (
+      <input
+        class="app-preview__state"
+        type="radio"
+        name="app-preview-thread"
+        id={`app-preview-${thread.id}`}
+        checked={index === 0}
+      />
+    ))
+  }
+
+  <div class="app-preview__chrome">
+    <aside class="app-preview__sidebar">
+      <div class="app-preview__sidebar-topbar">
+        <div class="app-preview__sidebar-window-chrome" aria-hidden="true">
+          <span class="app-preview__traffic-lights">
+            <span class="app-preview__traffic-light app-preview__traffic-light--close"></span>
+            <span class="app-preview__traffic-light app-preview__traffic-light--minimize"></span>
+            <span class="app-preview__traffic-light app-preview__traffic-light--zoom"></span>
+          </span>
+        </div>
+
+        <button class="app-preview__brand" type="button" data-preview-select="marketing-site">
+          <span class="app-preview__brand-title">T3 Code</span>
+          <span class="app-preview__brand-badge">BETA</span>
+        </button>
+      </div>
+
+      <button class="app-preview__search" type="button" tabindex="-1" aria-hidden="true">
+        <span class="app-preview__icon app-preview__icon--muted">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m21 21-4.34-4.34" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.75"></path>
+            <circle cx="11" cy="11" r="8" fill="none" stroke="currentColor" stroke-width="1.75"></circle>
+          </svg>
+        </span>
+        <span class="app-preview__search-text">Search</span>
+        <span class="app-preview__shortcut">⌘K</span>
+      </button>
+
+      <div class="app-preview__sidebar-content">
+        <div class="app-preview__section-header">
+          <span>Projects</span>
+          <div class="app-preview__section-actions">
+            <button class="app-preview__section-action" type="button" data-preview-sort aria-label="Sort projects">
+              <span class="app-preview__icon app-preview__icon--xs">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="m21 16-4 4-4-4M17 20V4m-14 4 4-4 4 4M7 4v16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.75"
+                  ></path>
+                </svg>
+              </span>
+            </button>
+            <button class="app-preview__section-action" type="button" tabindex="-1" aria-hidden="true" aria-label="New thread">
+              <span class="app-preview__icon app-preview__icon--xs">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M12 5v14M5 12h14"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-width="1.75"
+                  ></path>
+                </svg>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div class="app-preview__project-list" data-preview-project-list>
+          {
+            previewProjects.map((project, projectIndex) => (
+              <div
+                class:list={["app-preview__project", projectIndex > 0 && "app-preview__project--secondary"]}
+                data-preview-project
+                data-project-id={project.id}
+                data-project-index={projectIndex}
+              >
+                <button class="app-preview__project-row" type="button" data-preview-project-toggle aria-expanded="true">
+                  <span class="app-preview__icon app-preview__icon--sm app-preview__icon--muted app-preview__chevron">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="m9 18 6-6-6-6"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="1.75"
+                      ></path>
+                    </svg>
+                  </span>
+                  {
+                    project.icon === "t3" ? (
+                      <span class="app-preview__project-mark app-preview__project-mark--t3">
+                        <svg viewBox="0 0 128 128" aria-hidden="true">
+                          <path d="M0 10C0 4.47715 4.47715 0 10 0H118C123.523 0 128 4.47715 128 10V118C128 123.523 123.523 128 118 128H10C4.47715 128 0 123.523 0 118V10Z" fill="black"></path>
+                          <path d="M33.4509 93V47.56H15.5309V37H64.3309V47.56H46.4109V93H33.4509ZM86.7253 93.96C82.832 93.96 78.9653 93.4533 75.1253 92.44C71.2853 91.3733 68.032 89.88 65.3653 87.96L70.4053 78.04C72.5386 79.5867 75.0186 80.8133 77.8453 81.72C80.672 82.6267 83.5253 83.08 86.4053 83.08C89.6586 83.08 92.2186 82.44 94.0853 81.16C95.952 79.88 96.8853 78.12 96.8853 75.88C96.8853 73.7467 96.0586 72.0667 94.4053 70.84C92.752 69.6133 90.0853 69 86.4053 69H80.4853V60.44L96.0853 42.76L97.5253 47.4H68.1653V37H107.365V45.4L91.8453 63.08L85.2853 59.32H89.0453C95.9253 59.32 101.125 60.8667 104.645 63.96C108.165 67.0533 109.925 71.0267 109.925 75.88C109.925 79.0267 109.099 81.9867 107.445 84.76C105.792 87.48 103.259 89.6933 99.8453 91.4C96.432 93.1067 92.0586 93.96 86.7253 93.96Z" fill="white"></path>
+                        </svg>
+                      </span>
+                    ) : project.icon === "round" ? (
+                      <span class="app-preview__project-mark app-preview__project-mark--round">
+                        <svg viewBox="0 0 45 45" aria-hidden="true">
+                          <g fill="none" stroke="currentColor" stroke-width="3.5" transform="translate(1 1)">
+                            <circle cx="22" cy="22" r="6"></circle>
+                            <circle cx="22" cy="22" r="14" opacity="0.45"></circle>
+                            <circle cx="22" cy="22" r="21" opacity="0.22"></circle>
+                          </g>
+                        </svg>
+                      </span>
+                    ) : project.icon === "lawn" ? (
+                      <span class="app-preview__project-mark app-preview__project-mark--lawn">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="m3 18 2-10 4.4 4.4L12 4l2.6 8.4L19 8l2 10Z" fill="currentColor"></path>
+                        </svg>
+                      </span>
+                    ) : (
+                      <span class="app-preview__icon app-preview__icon--sm app-preview__project-icon">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path
+                            d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-linejoin="round"
+                            stroke-width="1.75"
+                          ></path>
+                        </svg>
+                      </span>
+                    )
+                  }
+                  <span class="app-preview__project-name">{project.title}</span>
+                  <span class="app-preview__project-action" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path
+                        d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                      ></path>
+                      <path
+                        d="M18.375 2.625a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4Z"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                      ></path>
+                    </svg>
+                  </span>
+                </button>
+
+                <div class="app-preview__thread-list">
+                  {project.threads.map((threadId) => {
+                    const thread = threadById.get(threadId);
+
+                    return thread ? (
+                      <button
+                        type="button"
+                        class={`app-preview__thread app-preview__thread--${thread.id}`}
+                        data-preview-select={thread.id}
+                        data-preview-thread-id={thread.id}
+                        data-active={thread.id === previewThreads[0]?.id ? "true" : "false"}
+                      >
+                        <span class="app-preview__thread-main">
+                          {thread.status ? (
+                            <>
+                              <span class:list={["app-preview__status", `app-preview__status--${thread.statusTone ?? "working"}`]}>{thread.status}</span>
+                            </>
+                          ) : null}
+                          <span class="app-preview__thread-title">{thread.title}</span>
+                        </span>
+                        <span class="app-preview__thread-age">{thread.age}</span>
+                        <span class="app-preview__thread-action" aria-hidden="true">
+                          <svg viewBox="0 0 24 24">
+                            <rect
+                              width="20"
+                              height="5"
+                              x="2"
+                              y="3"
+                              rx="1"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                            ></rect>
+                            <path
+                              d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                            ></path>
+                          </svg>
+                        </span>
+                      </button>
+                    ) : null;
+                  })}
+                </div>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+
+      <div class="app-preview__settings" aria-hidden="true">
+        <span class="app-preview__icon app-preview__icon--sm app-preview__icon--muted">
+          <svg viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.75"></circle>
+            <path
+              d="M19.4 15a1 1 0 0 0 .2 1.1l.05.05a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.05-.05a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.92V20a2 2 0 0 1-4 0v-.07a1 1 0 0 0-.67-.95 1 1 0 0 0-1.1.2l-.05.05a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.05-.05a1 1 0 0 0 .2-1.1 1 1 0 0 0-.92-.6H4a2 2 0 0 1 0-4h.07a1 1 0 0 0 .95-.67 1 1 0 0 0-.2-1.1l-.05-.05a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.05.05a1 1 0 0 0 1.1.2H8.8a1 1 0 0 0 .6-.92V4a2 2 0 0 1 4 0v.07a1 1 0 0 0 .67.95 1 1 0 0 0 1.1-.2l.05-.05a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.05.05a1 1 0 0 0-.2 1.1v.05a1 1 0 0 0 .92.6H20a2 2 0 0 1 0 4h-.07a1 1 0 0 0-.95.67z"
+              fill="none"
+              stroke="currentColor"
+              stroke-linejoin="round"
+              stroke-width="1.5"
+            ></path>
+          </svg>
+        </span>
+        <span>Settings</span>
+      </div>
+    </aside>
+
+    <div class="app-preview__views">
+      {
+        previewThreads.map((thread) => (
+          <section
+            class={`app-preview__view app-preview__view--${thread.id}`}
+            data-preview-view
+            data-preview-thread-id={thread.id}
+            hidden={thread.id !== previewThreads[0]?.id}
+          >
+            <header class="app-preview__topbar">
+              <div class="app-preview__topbar-title">
+                <h3>{thread.title}</h3>
+                <span class="app-preview__badge">{thread.branch}</span>
+              </div>
+
+              <div class="app-preview__actions">
+                <button type="button" class="app-preview__action-button app-preview__action-button--inert" tabindex="-1" aria-hidden="true">
+                  <span class="app-preview__button-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path
+                        d="M12 5v14M5 12h14"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-linecap="round"
+                        stroke-width="1.75"
+                      ></path>
+                    </svg>
+                  </span>
+                  <span>Add action</span>
+                </button>
+                <div class="app-preview__action-group">
+                  <button type="button" class="app-preview__action-button app-preview__action-button--group-main" data-preview-menu="open">
+                    <span class="app-preview__button-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path
+                          d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-linejoin="round"
+                          stroke-width="1.75"
+                        ></path>
+                        <path
+                          d="M2 10h20"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-linecap="round"
+                          stroke-width="1.75"
+                        ></path>
+                      </svg>
+                    </span>
+                    <span>Open</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="app-preview__action-button app-preview__action-button--group-tail"
+                    data-preview-menu="open"
+                    aria-label="Open options"
+                  >
+                    <span class="app-preview__button-caret" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path
+                          d="m6 9 6 6 6-6"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="1.75"
+                        ></path>
+                      </svg>
+                    </span>
+                  </button>
+                </div>
+                <div class="app-preview__action-group app-preview__action-group--git">
+                  <button type="button" class="app-preview__action-button app-preview__action-button--group-main app-preview__git-action-main" data-preview-menu="push">
+                    <span class="app-preview__button-icon" aria-hidden="true">
+                      <svg viewBox="0 0 1024 1024" fill="none">
+                        <path
+                          d="M8 0C3.58 0 0 3.58 0 8C0 11.54 2.29 14.53 5.47 15.59C5.87 15.66 6.02 15.42 6.02 15.21C6.02 15.02 6.01 14.39 6.01 13.72C4 14.09 3.48 13.23 3.32 12.78C3.23 12.55 2.84 11.84 2.5 11.65C2.22 11.5 1.82 11.13 2.49 11.12C3.12 11.11 3.57 11.7 3.72 11.94C4.44 13.15 5.59 12.81 6.05 12.6C6.12 12.08 6.33 11.73 6.56 11.53C4.78 11.33 2.92 10.64 2.92 7.58C2.92 6.71 3.23 5.99 3.74 5.43C3.66 5.23 3.38 4.41 3.82 3.31C3.82 3.31 4.49 3.1 6.02 4.13C6.66 3.95 7.34 3.86 8.02 3.86C8.7 3.86 9.38 3.95 10.02 4.13C11.55 3.09 12.22 3.31 12.22 3.31C12.66 4.41 12.38 5.23 12.3 5.43C12.81 5.99 13.12 6.7 13.12 7.58C13.12 10.65 11.25 11.33 9.47 11.53C9.76 11.78 10.01 12.26 10.01 13.01C10.01 14.08 10 14.94 10 15.21C10 15.42 10.15 15.67 10.55 15.59C13.71 14.53 16 11.53 16 8C16 3.58 12.42 0 8 0Z"
+                          transform="scale(64)"
+                          fill="currentColor"
+                        ></path>
+                      </svg>
+                    </span>
+                    <span>Commit, push &amp; PR</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="app-preview__action-button app-preview__action-button--group-tail app-preview__git-action-tail"
+                    data-preview-menu="push"
+                    aria-label="Push options"
+                  >
+                    <span class="app-preview__button-caret" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path
+                          d="m6 9 6 6 6-6"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="1.75"
+                        ></path>
+                      </svg>
+                    </span>
+                  </button>
+                </div>
+                <button type="button" class="app-preview__icon-button" data-preview-toggle="terminal" aria-label="Toggle terminal drawer" title="Toggle terminal drawer">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 5.75h16A1.25 1.25 0 0 1 21.25 7v10A1.25 1.25 0 0 1 20 18.25H4A1.25 1.25 0 0 1 2.75 17V7A1.25 1.25 0 0 1 4 5.75Z" fill="none" stroke="currentColor" stroke-width="1.75"></path>
+                    <path d="m7.5 9.5 2.25 2.25L7.5 14M12.5 14h4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75"></path>
+                  </svg>
+                </button>
+                <button type="button" class="app-preview__icon-button" data-preview-toggle="diff" aria-label="Toggle diff panel" title="Toggle diff panel">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 3v14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.75"></path>
+                    <path d="M5 10h14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.75"></path>
+                    <path d="M5 21h14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.75"></path>
+                  </svg>
+                </button>
+              </div>
+            </header>
+
+            <div class="app-preview__body" data-preview-body data-preview-thread-id={thread.id}>
+              {!previewTurns[thread.id]?.length ? (
+                <div class="app-preview__empty-state" data-preview-empty-state>
+                  <p>Send a message to start the conversation.</p>
+                </div>
+              ) : (
+                <div class="app-preview__timeline" data-preview-timeline>
+                  <div class="app-preview__timeline-inner" data-preview-timeline-inner>
+                    {previewTurns[thread.id].map((turn) =>
+                      isToolTurn(turn) ? (
+                        <div class="app-preview__tool-group">
+                          {turn.calls.map((call: string) => {
+                            const formattedCall = formatPreviewToolCall(call);
+                            return (
+                              <div class="app-preview__tool-row">
+                                <span class="app-preview__tool-icon" aria-hidden="true">
+                                  {formattedCall.icon === "terminal" ? (
+                                    <svg viewBox="0 0 24 24">
+                                      <path
+                                        d="m6.25 7.75 4 4-4 4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="1.75"
+                                      ></path>
+                                      <path
+                                        d="M12.5 15.75h4.5"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-linecap="round"
+                                        stroke-width="1.75"
+                                      ></path>
+                                    </svg>
+                                  ) : formattedCall.icon === "eye" ? (
+                                    <svg viewBox="0 0 24 24">
+                                      <path
+                                        d="M2.75 12s3.4-5.25 9.25-5.25S21.25 12 21.25 12s-3.4 5.25-9.25 5.25S2.75 12 2.75 12Z"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="1.75"
+                                      ></path>
+                                      <circle cx="12" cy="12" r="2.25" fill="none" stroke="currentColor" stroke-width="1.75"></circle>
+                                    </svg>
+                                  ) : formattedCall.icon === "pen" ? (
+                                    <svg viewBox="0 0 24 24">
+                                      <path
+                                        d="m4 20 3.25-.5L18 8.75 15.25 6 4.5 16.75 4 20Z"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-linejoin="round"
+                                        stroke-width="1.75"
+                                      ></path>
+                                      <path
+                                        d="m13.75 7.5 2.75 2.75"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-linecap="round"
+                                        stroke-width="1.75"
+                                      ></path>
+                                    </svg>
+                                  ) : formattedCall.icon === "globe" ? (
+                                    <svg viewBox="0 0 24 24">
+                                      <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.75"></circle>
+                                      <path
+                                        d="M3.75 12h16.5M12 3.5a13 13 0 0 1 0 17M12 3.5a13 13 0 0 0 0 17"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-linecap="round"
+                                        stroke-width="1.75"
+                                      ></path>
+                                    </svg>
+                                  ) : (
+                                    <svg viewBox="0 0 24 24">
+                                      <path
+                                        d="M10.25 4.75 8.5 6.5l1.75 1.75M13.75 4.75 15.5 6.5l-1.75 1.75M4.75 10.25 6.5 8.5l1.75 1.75M19.25 10.25 17.5 8.5l-1.75 1.75M4.75 13.75 6.5 15.5l1.75-1.75M19.25 13.75 17.5 15.5l-1.75-1.75M10.25 19.25 8.5 17.5l1.75-1.75M13.75 19.25 15.5 17.5l-1.75-1.75"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="1.5"
+                                      ></path>
+                                      <circle cx="12" cy="12" r="2.25" fill="none" stroke="currentColor" stroke-width="1.5"></circle>
+                                    </svg>
+                                  )}
+                                </span>
+                                <p title={call}>
+                                  <span class="app-preview__tool-heading">{formattedCall.heading}</span>
+                                  {formattedCall.preview && (
+                                    <span class="app-preview__tool-preview"> - {formattedCall.preview}</span>
+                                  )}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : turn.type === "user" ? (
+                        <div class="app-preview__user-row">
+                          <div class="app-preview__user-bubble">
+                            <p>{turn.text}</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div class="app-preview__assistant-row">
+                          <p>{turn.text}</p>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </div>
+              )}
+              <div class="app-preview__scroll-bottom-wrap" data-preview-scroll-bottom-wrap hidden>
+                <button class="app-preview__scroll-bottom" type="button" data-preview-scroll-bottom>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="m6 9 6 6 6-6"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                    ></path>
+                  </svg>
+                  <span>Scroll to bottom</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="app-preview__composer-shell">
+              <div class="app-preview__composer-form">
+                <div class="app-preview__composer-frame">
+                  <div class="app-preview__composer-surface">
+                    <div class="app-preview__composer-editor-wrap">
+                      <span
+                        class="app-preview__composer-placeholder"
+                        data-preview-composer-placeholder
+                        data-preview-thread-id={thread.id}
+                        aria-hidden="true"
+                        hidden={Boolean(thread.composerText)}
+                      >
+                        Ask for follow-up changes or attach images
+                      </span>
+                      <div
+                        class="app-preview__composer-input"
+                        contenteditable="true"
+                        spellcheck="false"
+                        data-preview-composer-input
+                        data-preview-thread-id={thread.id}
+                      >
+                        {thread.composerText}
+                      </div>
+                    </div>
+
+                    <div class="app-preview__composer-footer">
+                      <div class="app-preview__composer-controls">
+                        <button type="button" class="app-preview__composer-control app-preview__composer-control--model" data-preview-menu="model">
+                          <span class="app-preview__composer-control-inner">
+                            <svg class="app-preview__composer-icon app-preview__composer-icon--provider app-preview__composer-icon--openai" data-preview-provider-icon data-provider="openai" preserveAspectRatio="xMidYMid" viewBox="0 0 256 260" fill="currentColor" aria-hidden="true">
+                              <path d="M239.184 106.203a64.716 64.716 0 0 0-5.576-53.103C219.452 28.459 191 15.784 163.213 21.74A65.586 65.586 0 0 0 52.096 45.22a64.716 64.716 0 0 0-43.23 31.36c-14.31 24.602-11.061 55.634 8.033 76.74a64.665 64.665 0 0 0 5.525 53.102c14.174 24.65 42.644 37.324 70.446 31.36a64.72 64.72 0 0 0 48.754 21.744c28.481.025 53.714-18.361 62.414-45.481a64.767 64.767 0 0 0 43.229-31.36c14.137-24.558 10.875-55.423-8.083-76.483Zm-97.56 136.338a48.397 48.397 0 0 1-31.105-11.255l1.535-.87 51.67-29.825a8.595 8.595 0 0 0 4.247-7.367v-72.85l21.845 12.636c.218.111.37.32.409.563v60.367c-.056 26.818-21.783 48.545-48.601 48.601Zm-104.466-44.61a48.345 48.345 0 0 1-5.781-32.589l1.534.921 51.722 29.826a8.339 8.339 0 0 0 8.441 0l63.181-36.425v25.221a.87.87 0 0 1-.358.665l-52.335 30.184c-23.257 13.398-52.97 5.431-66.404-17.803ZM23.549 85.38a48.499 48.499 0 0 1 25.58-21.333v61.39a8.288 8.288 0 0 0 4.195 7.316l62.874 36.272-21.845 12.636a.819.819 0 0 1-.767 0L41.353 151.53c-23.211-13.454-31.171-43.144-17.804-66.405v.256Zm179.466 41.695-63.08-36.63L161.73 77.86a.819.819 0 0 1 .768 0l52.233 30.184a48.6 48.6 0 0 1-7.316 87.635v-61.391a8.544 8.544 0 0 0-4.4-7.213Zm21.742-32.69-1.535-.922-51.619-30.081a8.39 8.39 0 0 0-8.492 0L99.98 99.808V74.587a.716.716 0 0 1 .307-.665l52.233-30.133a48.652 48.652 0 0 1 72.236 50.391v.205ZM88.061 139.097l-21.845-12.585a.87.87 0 0 1-.41-.614V65.685a48.652 48.652 0 0 1 79.757-37.346l-1.535.87-51.67 29.825a8.595 8.595 0 0 0-4.246 7.367l-.051 72.697Zm11.868-25.58 28.138-16.217 28.188 16.218v32.434l-28.086 16.218-28.188-16.218-.052-32.434Z"></path>
+                            </svg>
+                            <span class="app-preview__composer-control-label" data-preview-label="model">GPT-5.4</span>
+                            <svg class="app-preview__composer-chevron" viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+                            </svg>
+                          </span>
+                        </button>
+
+                        <span class="app-preview__composer-separator"></span>
+
+                        <button type="button" class="app-preview__composer-control app-preview__composer-control--trait" data-preview-menu="effort">
+                          <span class="app-preview__composer-control-inner">
+                            <span data-preview-label="effort">Low · Fast</span>
+                            <svg class="app-preview__composer-chevron" viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+                            </svg>
+                          </span>
+                        </button>
+
+                        <span class="app-preview__composer-separator"></span>
+
+                        <button type="button" class="app-preview__composer-control" data-preview-mode-toggle title="Default mode — click to enter plan mode">
+                          <svg class="app-preview__composer-icon" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M12 8V4H8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+                            <rect width="16" height="12" x="4" y="8" rx="2" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2"></rect>
+                            <path d="M2 14h2M20 14h2M15 13v2M9 13v2" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path>
+                          </svg>
+                          <span data-preview-label="mode">Build</span>
+                        </button>
+
+                        <span class="app-preview__composer-separator"></span>
+
+                        <button type="button" class="app-preview__composer-control app-preview__composer-control--runtime" data-preview-menu="access">
+                          <svg class="app-preview__composer-icon" data-preview-access-icon data-access-mode="full-access" viewBox="0 0 24 24" aria-hidden="true">
+                            <rect width="18" height="11" x="3" y="11" rx="2" ry="2" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2"></rect>
+                            <path d="M7 11V7a5 5 0 0 1 9.9-1" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path>
+                          </svg>
+                          <span data-preview-label="access">{thread.access}</span>
+                          <svg class="app-preview__composer-chevron app-preview__composer-chevron--runtime" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+                          </svg>
+                        </button>
+                      </div>
+
+                      <div class="app-preview__composer-actions">
+                        <div class="app-preview__context-meter" aria-hidden="true">
+                          <div class="app-preview__context-meter-ring">
+                            <span>67</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          class="app-preview__send is-disabled"
+                          aria-label="Send message"
+                          disabled
+                          aria-disabled="true"
+                          tabindex="-1"
+                        >
+                          <svg viewBox="0 0 14 14" aria-hidden="true">
+                            <path
+                              d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="1.8"
+                            ></path>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="app-preview__checkout">
+                <button type="button" class="app-preview__checkout-label" data-preview-menu="worktree">
+                  <span class="app-preview__control-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M3.75 7.5A1.75 1.75 0 0 1 5.5 5.75h4.16c.46 0 .9.183 1.224.509l1.107 1.107c.328.326.77.509 1.232.509h5.271A1.75 1.75 0 0 1 20.25 9.625v7.875A1.75 1.75 0 0 1 18.5 19.25h-13A1.75 1.75 0 0 1 3.75 17.5Z"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-linejoin="round"
+                        stroke-width="1.75"
+                      ></path>
+                    </svg>
+                  </span>
+                  <span data-preview-label="worktree">Current checkout</span>
+                  <span class="app-preview__button-caret" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path
+                        d="m7 10 5 5 5-5"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="1.75"
+                      ></path>
+                    </svg>
+                  </span>
+                </button>
+                <button type="button" class="app-preview__checkout-value" data-preview-menu="branch">
+                  <span data-preview-label="branch">{thread.checkoutValue}</span>
+                  <span class="app-preview__button-caret" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path
+                        d="m7 10 5 5 5-5"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="1.75"
+                      ></path>
+                    </svg>
+                  </span>
+                </button>
+              </div>
+
+            </div>
+          </section>
+        ))
+      }
+    </div>
+
+    <div class="app-preview__popover" data-preview-popover hidden>
+      <div class="app-preview__popover-title" data-preview-popover-title>Options</div>
+      <div class="app-preview__popover-items" data-preview-popover-items></div>
+    </div>
+
+</div>
+</div>
+
+<script>
+  type PreviewMenuItem = {
+    label: string;
+    detail?: string;
+    icon?: string;
+    target?: string;
+    shortcut?: string;
+    tone?: "default" | "muted" | "danger";
+    action?: "collapse-all" | "expand-all";
+  };
+
+  type PreviewMenuSection = {
+    label?: string;
+    items: PreviewMenuItem[];
+  };
+
+  const previewMenuOptions: Record<string, { title: string; width?: number; sections: PreviewMenuSection[] }> = {
+    open: {
+      title: "Open",
+      width: 144,
+      sections: [
+        {
+          items: [
+            { label: "Finder", icon: "folder", shortcut: "⌘O" },
+          ],
+        },
+      ],
+    },
+    push: {
+      title: "Git actions",
+      width: 274,
+      sections: [
+        {
+          items: [
+            { label: "Commit", icon: "commit" },
+            { label: "Push", icon: "upload", tone: "muted" },
+            { label: "Create PR", icon: "github", tone: "muted" },
+          ],
+        },
+      ],
+    },
+    diff: {
+      title: "Changed files",
+      width: 286,
+      sections: [
+        {
+          items: [
+            { label: "View diff", detail: "23 additions, 14 deletions" },
+            { label: "Collapse all", detail: "File tree", action: "collapse-all" },
+            { label: "Expand all", detail: "File tree", action: "expand-all" },
+          ],
+        },
+        {
+          label: "Files",
+          items: [
+            { label: "apps/marketing/src/components/AppPreview.astro", detail: "+23 -14" },
+            { label: "apps/marketing/src/pages/index.astro", detail: "+2 -1" },
+          ],
+        },
+      ],
+    },
+    model: {
+      title: "Model",
+      width: 252,
+      sections: [
+        {
+          label: "OpenAI",
+          items: [
+            { label: "GPT-5.4", detail: "Balanced", target: "model" },
+            { label: "GPT-5.4 Mini", detail: "Fast", target: "model" },
+            { label: "GPT-5.3 Codex", detail: "Code optimized", target: "model" },
+          ],
+        },
+        {
+          label: "Recent",
+          items: [{ label: "GPT-5.2", detail: "Long-running work", target: "model" }],
+        },
+      ],
+    },
+    effort: {
+      title: "Reasoning effort",
+      width: 238,
+      sections: [
+        {
+          items: [
+            { label: "Low", detail: "Quick edits", target: "effort" },
+            { label: "Medium", detail: "Balanced", target: "effort" },
+            { label: "High", detail: "Default", target: "effort" },
+            { label: "Extra high", detail: "Deep tasks", target: "effort" },
+          ],
+        },
+      ],
+    },
+    mode: {
+      title: "Mode",
+      width: 228,
+      sections: [
+        {
+          items: [
+            { label: "Build", detail: "Make changes", target: "mode" },
+            { label: "Plan", detail: "Discuss first", target: "mode" },
+            { label: "Review", detail: "Find issues", target: "mode" },
+          ],
+        },
+      ],
+    },
+    access: {
+      title: "Access",
+      width: 264,
+      sections: [
+        {
+          items: [
+            { label: "Full access", detail: "Can edit and run commands", target: "access" },
+            { label: "Auto-accept edits", detail: "Edits do not pause", target: "access" },
+            { label: "Supervised", detail: "Ask before sensitive actions", target: "access" },
+          ],
+        },
+      ],
+    },
+    worktree: {
+      title: "Worktree",
+      width: 288,
+      sections: [
+        {
+          label: "Run on",
+          items: [
+            { label: "Current checkout", detail: "apps/marketing", target: "worktree" },
+            { label: "New worktree", detail: "Isolated branch", target: "worktree" },
+            { label: "Existing worktree", detail: "Resume local path", target: "worktree" },
+          ],
+        },
+        {
+          label: "Recent",
+          items: [
+            { label: "t3code/marketing-ui-mirror", detail: "~/.t3/worktrees/..." },
+            { label: "feature/thread-hotkeys", detail: "apps/web" },
+          ],
+        },
+      ],
+    },
+    branch: {
+      title: "Branch",
+      width: 292,
+      sections: [
+        {
+          label: "Local branches",
+          items: [
+            { label: "main", detail: "Base branch", target: "branch" },
+            { label: "t3code/marketing-ui-mirror", detail: "Preview work", target: "branch" },
+            { label: "feature/thread-hotkeys", detail: "Recent work", target: "branch" },
+          ],
+        },
+        {
+          label: "Actions",
+          items: [
+            { label: "Create branch from current", detail: "New worktree" },
+            { label: "Refresh branches", detail: "git fetch" },
+          ],
+        },
+      ],
+    },
+    archive: {
+      title: "Archived threads",
+      width: 260,
+      sections: [
+        {
+          items: [
+            { label: "Restore marketing shell draft", detail: "2d ago" },
+            { label: "Delete stale hotkeys spike", detail: "13h ago", tone: "danger" },
+          ],
+        },
+      ],
+    },
+  };
+
+  const modelFavoriteKey = (providerId: string, model: string) => `${providerId}:${model}`;
+  const accessIconMarkup: Record<string, string> = {
+    "approval-required":
+      '<svg class="app-preview__composer-icon" data-preview-access-icon data-access-mode="approval-required" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></svg>',
+    "auto-accept-edits":
+      '<svg class="app-preview__composer-icon" data-preview-access-icon data-access-mode="auto-accept-edits" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path><path d="m16.5 3.5 4 4L7 21H3v-4L16.5 3.5Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>',
+    "full-access":
+      '<svg class="app-preview__composer-icon" data-preview-access-icon data-access-mode="full-access" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></svg>',
+  };
+
+  const initAppPreviewThreads = () => {
+    for (const preview of document.querySelectorAll(".app-preview")) {
+      const previewElement = preview as HTMLElement;
+      const popover = preview.querySelector<HTMLElement>("[data-preview-popover]");
+      const popoverTitle = preview.querySelector<HTMLElement>("[data-preview-popover-title]");
+      const popoverItems = preview.querySelector<HTMLElement>("[data-preview-popover-items]");
+      let openMenuTrigger: HTMLElement | null = null;
+
+      const syncComposerPlaceholder = (threadId: string) => {
+        const input = preview.querySelector<HTMLElement>(
+          `[data-preview-composer-input][data-preview-thread-id="${CSS.escape(threadId)}"]`,
+        );
+        const placeholder = preview.querySelector<HTMLElement>(
+          `[data-preview-composer-placeholder][data-preview-thread-id="${CSS.escape(threadId)}"]`,
+        );
+        if (!input || !placeholder) {
+          return;
+        }
+
+        placeholder.hidden = (input.textContent ?? "").trim().length > 0;
+      };
+
+      const closeTransient = () => {
+        if (popover) {
+          popover.hidden = true;
+          openMenuTrigger = null;
+        }
+      };
+
+      const setActiveThread = (threadId: string) => {
+        preview.setAttribute("data-active-thread", threadId);
+
+        for (const input of preview.querySelectorAll<HTMLInputElement>(".app-preview__state")) {
+          input.checked = input.id === `app-preview-${threadId}`;
+        }
+
+        for (const view of preview.querySelectorAll<HTMLElement>("[data-preview-view]")) {
+          view.hidden = view.dataset.previewThreadId !== threadId;
+        }
+
+        for (const thread of preview.querySelectorAll<HTMLElement>("[data-preview-thread-id]")) {
+          if (thread.matches("[data-preview-view]")) {
+            continue;
+          }
+
+          thread.dataset.active = String(thread.dataset.previewThreadId === threadId);
+        }
+
+        syncScrollBottomButton(threadId);
+        closeTransient();
+      };
+
+      for (const view of preview.querySelectorAll<HTMLElement>("[data-preview-view]")) {
+        const threadId = view.dataset.previewThreadId;
+        const timeline = view.querySelector<HTMLElement>("[data-preview-timeline]");
+        if (!threadId || !timeline) continue;
+
+        timeline.addEventListener("scroll", () => syncScrollBottomButton(threadId), { passive: true });
+        syncScrollBottomButton(threadId);
+      }
+
+      for (const composerInput of preview.querySelectorAll<HTMLElement>("[data-preview-composer-input]")) {
+        const threadId = composerInput.dataset.previewThreadId;
+        if (!threadId) {
+          continue;
+        }
+
+        syncComposerPlaceholder(threadId);
+        composerInput.addEventListener("input", () => {
+          syncComposerPlaceholder(threadId);
+        });
+      }
+
+      const updateVisibleLabels = (target: string | undefined, value: string) => {
+        if (!target) {
+          return;
+        }
+
+        for (const label of preview.querySelectorAll<HTMLElement>(`[data-preview-label="${CSS.escape(target)}"]`)) {
+          label.textContent = value;
+        }
+      };
+
+      const updateAccessIcon = (mode: string) => {
+        for (const existingIcon of preview.querySelectorAll<SVGElement>("[data-preview-access-icon]")) {
+          const wrapper = document.createElement("span");
+          wrapper.innerHTML = accessIconMarkup[mode] ?? accessIconMarkup["full-access"];
+          const nextIcon = wrapper.firstElementChild;
+          if (!(nextIcon instanceof SVGElement)) {
+            continue;
+          }
+          existingIcon.replaceWith(nextIcon);
+        }
+      };
+
+      function syncScrollBottomButton(threadId: string) {
+        const view = preview.querySelector<HTMLElement>(`[data-preview-view][data-preview-thread-id="${CSS.escape(threadId)}"]`);
+        const timeline = view?.querySelector<HTMLElement>("[data-preview-timeline]");
+        const buttonWrap = view?.querySelector<HTMLElement>("[data-preview-scroll-bottom-wrap]");
+        if (!buttonWrap) return;
+        if (!timeline) {
+          buttonWrap.hidden = true;
+          return;
+        }
+
+        const distanceFromBottom = timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop;
+        buttonWrap.hidden = timeline.scrollHeight <= timeline.clientHeight + 1 || distanceFromBottom < 24;
+      }
+
+      function scrollTimelineToBottom(threadId: string) {
+        const view = preview.querySelector<HTMLElement>(`[data-preview-view][data-preview-thread-id="${CSS.escape(threadId)}"]`);
+        const timeline = view?.querySelector<HTMLElement>("[data-preview-timeline]");
+        if (!timeline) return;
+
+        timeline.scrollTo({ top: timeline.scrollHeight, behavior: "smooth" });
+        window.setTimeout(() => syncScrollBottomButton(threadId), 180);
+      }
+
+      const getSelectedValue = (target: string | undefined) => {
+        if (!target) {
+          return null;
+        }
+
+        return preview.querySelector<HTMLElement>(`[data-preview-label="${CSS.escape(target)}"]`)?.textContent?.trim() ?? null;
+      };
+
+      const providerIconMarkup: Record<string, string> = {
+        openai:
+          '<svg preserveAspectRatio="xMidYMid" viewBox="0 0 256 260" fill="currentColor" aria-hidden="true"><path d="M239.184 106.203a64.716 64.716 0 0 0-5.576-53.103C219.452 28.459 191 15.784 163.213 21.74A65.586 65.586 0 0 0 52.096 45.22a64.716 64.716 0 0 0-43.23 31.36c-14.31 24.602-11.061 55.634 8.033 76.74a64.665 64.665 0 0 0 5.525 53.102c14.174 24.65 42.644 37.324 70.446 31.36a64.72 64.72 0 0 0 48.754 21.744c28.481.025 53.714-18.361 62.414-45.481a64.767 64.767 0 0 0 43.229-31.36c14.137-24.558 10.875-55.423-8.083-76.483Zm-97.56 136.338a48.397 48.397 0 0 1-31.105-11.255l1.535-.87 51.67-29.825a8.595 8.595 0 0 0 4.247-7.367v-72.85l21.845 12.636c.218.111.37.32.409.563v60.367c-.056 26.818-21.783 48.545-48.601 48.601Zm-104.466-44.61a48.345 48.345 0 0 1-5.781-32.589l1.534.921 51.722 29.826a8.339 8.339 0 0 0 8.441 0l63.181-36.425v25.221a.87.87 0 0 1-.358.665l-52.335 30.184c-23.257 13.398-52.97 5.431-66.404-17.803ZM23.549 85.38a48.499 48.499 0 0 1 25.58-21.333v61.39a8.288 8.288 0 0 0 4.195 7.316l62.874 36.272-21.845 12.636a.819.819 0 0 1-.767 0L41.353 151.53c-23.211-13.454-31.171-43.144-17.804-66.405v.256Zm179.466 41.695-63.08-36.63L161.73 77.86a.819.819 0 0 1 .768 0l52.233 30.184a48.6 48.6 0 0 1-7.316 87.635v-61.391a8.544 8.544 0 0 0-4.4-7.213Zm21.742-32.69-1.535-.922-51.619-30.081a8.39 8.39 0 0 0-8.492 0L99.98 99.808V74.587a.716.716 0 0 1 .307-.665l52.233-30.133a48.652 48.652 0 0 1 72.236 50.391v.205ZM88.061 139.097l-21.845-12.585a.87.87 0 0 1-.41-.614V65.685a48.652 48.652 0 0 1 79.757-37.346l-1.535.87-51.67 29.825a8.595 8.595 0 0 0-4.246 7.367l-.051 72.697Zm11.868-25.58 28.138-16.217 28.188 16.218v32.434l-28.086 16.218-28.188-16.218-.052-32.434Z"></path></svg>',
+        claude:
+          '<svg preserveAspectRatio="xMidYMid" viewBox="0 0 256 257" aria-hidden="true"><path fill="currentColor" d="m50.228 170.321 50.357-28.257.843-2.463-.843-1.361h-2.462l-8.426-.518-28.775-.778-24.952-1.037-24.175-1.296-6.092-1.297L0 125.796l.583-3.759 5.12-3.434 7.324.648 16.202 1.101 24.304 1.685 17.629 1.037 26.118 2.722h4.148l.583-1.685-1.426-1.037-1.101-1.037-25.147-17.045-27.22-18.017-14.258-10.37-7.713-5.25-3.888-4.925-1.685-10.758 7-7.713 9.397.649 2.398.648 9.527 7.323 20.35 15.75L94.817 91.9l3.889 3.24 1.555-1.102.195-.777-1.75-2.917-14.453-26.118-15.425-26.572-6.87-11.018-1.814-6.61c-.648-2.723-1.102-4.991-1.102-7.778l7.972-10.823L71.42 0 82.05 1.426l4.472 3.888 6.61 15.101 10.694 23.786 16.591 32.34 4.861 9.592 2.592 8.879.973 2.722h1.685v-1.556l1.36-18.211 2.528-22.36 2.463-28.776.843-8.1 4.018-9.722 7.971-5.25 6.222 2.981 5.12 7.324-.713 4.73-3.046 19.768-5.962 30.98-3.889 20.739h2.268l2.593-2.593 10.499-13.934 17.628-22.036 7.778-8.749 9.073-9.657 5.833-4.601h11.018l8.1 12.055-3.628 12.443-11.342 14.388-9.398 12.184-13.48 18.147-8.426 14.518.778 1.166 2.01-.194 30.46-6.481 16.462-2.982 19.637-3.37 8.88 4.148.971 4.213-3.5 8.62-20.998 5.184-24.628 4.926-36.682 8.685-.454.324.519.648 16.526 1.555 7.065.389h17.304l32.21 2.398 8.426 5.574 5.055 6.805-.843 5.184-12.962 6.611-17.498-4.148-40.83-9.721-14-3.5h-1.944v1.167l11.666 11.406 21.387 19.314 26.767 24.887 1.36 6.157-3.434 4.86-3.63-.518-23.526-17.693-9.073-7.972-20.545-17.304h-1.36v1.814l4.73 6.935 25.017 37.59 1.296 11.536-1.814 3.76-6.481 2.268-7.13-1.297-14.647-20.544-15.1-23.138-12.185-20.739-1.49.843-7.194 77.448-3.37 3.953-7.778 2.981-6.48-4.925-3.436-7.972 3.435-15.749 4.148-20.544 3.37-16.333 3.046-20.285 1.815-6.74-.13-.454-1.49.194-15.295 20.999-23.267 31.433-18.406 19.702-4.407 1.75-7.648-3.954.713-7.064 4.277-6.286 25.47-32.405 15.36-20.092 9.917-11.6-.065-1.686h-.583L44.07 198.125l-12.055 1.555-5.185-4.86.648-7.972 2.463-2.593 20.35-13.999-.064.065Z"></path></svg>',
+        cursor:
+          '<svg viewBox="0 0 466.73 532.09" fill="currentColor" aria-hidden="true"><path d="M457.43,125.94L244.42,2.96c-6.84-3.95-15.28-3.95-22.12,0L9.3,125.94c-5.75,3.32-9.3,9.46-9.3,16.11v247.99c0,6.65,3.55,12.79,9.3,16.11l213.01,122.98c6.84,3.95,15.28,3.95,22.12,0l213.01-122.98c5.75-3.32,9.3-9.46,9.3-16.11v-247.99c0-6.65-3.55-12.79-9.3-16.11h-.01ZM444.05,151.99l-205.63,356.16c-1.39,2.4-5.06,1.42-5.06-1.36v-233.21c0-4.66-2.49-8.97-6.53-11.31L24.87,145.67c-2.4-1.39-1.42-5.06,1.36-5.06h411.26c5.84,0,9.49,6.33,6.57,11.39h-.01Z"></path></svg>',
+        opencode:
+          '<svg viewBox="0 0 32 40" fill="none" aria-hidden="true"><path d="M24 32H8V16H24V32Z" fill="#4B4646"></path><path d="M24 8H8V32H24V8ZM32 40H0V0H32V40Z" fill="#F1ECEC"></path></svg>',
+        gemini:
+          '<svg viewBox="0 0 296 298" fill="none" aria-hidden="true"><mask id="app-preview-gemini__a" width="296" height="298" x="0" y="0" maskUnits="userSpaceOnUse" style="mask-type: alpha;"><path fill="#3186FF" d="M141.201 4.886c2.282-6.17 11.042-6.071 13.184.148l5.985 17.37a184.004 184.004 0 0 0 111.257 113.049l19.304 6.997c6.143 2.227 6.156 10.91.02 13.155l-19.35 7.082a184.001 184.001 0 0 0-109.495 109.385l-7.573 20.629c-2.241 6.105-10.869 6.121-13.133.025l-7.908-21.296a184 184 0 0 0-109.02-108.658l-19.698-7.239c-6.102-2.243-6.118-10.867-.025-13.132l20.083-7.467A183.998 183.998 0 0 0 133.291 26.28l7.91-21.394Z"></path></mask><g mask="url(#app-preview-gemini__a)"><g filter="url(#app-preview-gemini__b)"><ellipse cx="163" cy="149" fill="#3689FF" rx="196" ry="159"></ellipse></g><g filter="url(#app-preview-gemini__c)"><ellipse cx="33.5" cy="142.5" fill="#F6C013" rx="68.5" ry="72.5"></ellipse></g><g filter="url(#app-preview-gemini__d)"><ellipse cx="19.5" cy="148.5" fill="#F6C013" rx="68.5" ry="72.5"></ellipse></g><g filter="url(#app-preview-gemini__e)"><path fill="#FA4340" d="M194 10.5C172 82.5 65.5 134.333 22.5 135L144-66l50 76.5Z"></path></g><g filter="url(#app-preview-gemini__f)"><path fill="#FA4340" d="M190.5-12.5C168.5 59.5 62 111.333 19 112L140.5-89l50 76.5Z"></path></g><g filter="url(#app-preview-gemini__g)"><path fill="#14BB69" d="M194.5 279.5C172.5 207.5 66 155.667 23 155l121.5 201 50-76.5Z"></path></g><g filter="url(#app-preview-gemini__h)"><path fill="#14BB69" d="M196.5 320.5C174.5 248.5 68 196.667 25 196l121.5 201 50-76.5Z"></path></g></g><defs><filter id="app-preview-gemini__b" width="464" height="390" x="-69" y="-46" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"></feFlood><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"></feBlend><feGaussianBlur result="effect1_foregroundBlur_69_17998" stdDeviation="18"></feGaussianBlur></filter><filter id="app-preview-gemini__c" width="265" height="273" x="-99" y="6" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"></feFlood><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"></feBlend><feGaussianBlur result="effect1_foregroundBlur_69_17998" stdDeviation="32"></feGaussianBlur></filter><filter id="app-preview-gemini__d" width="265" height="273" x="-113" y="12" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"></feFlood><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"></feBlend><feGaussianBlur result="effect1_foregroundBlur_69_17998" stdDeviation="32"></feGaussianBlur></filter><filter id="app-preview-gemini__e" width="299.5" height="329" x="-41.5" y="-130" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"></feFlood><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"></feBlend><feGaussianBlur result="effect1_foregroundBlur_69_17998" stdDeviation="32"></feGaussianBlur></filter><filter id="app-preview-gemini__f" width="299.5" height="329" x="-45" y="-153" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"></feFlood><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"></feBlend><feGaussianBlur result="effect1_foregroundBlur_69_17998" stdDeviation="32"></feGaussianBlur></filter><filter id="app-preview-gemini__g" width="299.5" height="329" x="-41" y="91" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"></feFlood><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"></feBlend><feGaussianBlur result="effect1_foregroundBlur_69_17998" stdDeviation="32"></feGaussianBlur></filter><filter id="app-preview-gemini__h" width="299.5" height="329" x="-39" y="132" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"></feFlood><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"></feBlend><feGaussianBlur result="effect1_foregroundBlur_69_17998" stdDeviation="32"></feGaussianBlur></filter></defs></svg>',
+      };
+
+      const menuIconMarkup: Record<string, string> = {
+        github:
+          '<svg viewBox="0 0 1024 1024" fill="none" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8C0 11.54 2.29 14.53 5.47 15.59C5.87 15.66 6.02 15.42 6.02 15.21C6.02 15.02 6.01 14.39 6.01 13.72C4 14.09 3.48 13.23 3.32 12.78C3.23 12.55 2.84 11.84 2.5 11.65C2.22 11.5 1.82 11.13 2.49 11.12C3.12 11.11 3.57 11.7 3.72 11.94C4.44 13.15 5.59 12.81 6.05 12.6C6.12 12.08 6.33 11.73 6.56 11.53C4.78 11.33 2.92 10.64 2.92 7.58C2.92 6.71 3.23 5.99 3.74 5.43C3.66 5.23 3.38 4.41 3.82 3.31C3.82 3.31 4.49 3.1 6.02 4.13C6.66 3.95 7.34 3.86 8.02 3.86C8.7 3.86 9.38 3.95 10.02 4.13C11.55 3.09 12.22 3.31 12.22 3.31C12.66 4.41 12.38 5.23 12.3 5.43C12.81 5.99 13.12 6.7 13.12 7.58C13.12 10.65 11.25 11.33 9.47 11.53C9.76 11.78 10.01 12.26 10.01 13.01C10.01 14.08 10 14.94 10 15.21C10 15.42 10.15 15.67 10.55 15.59C13.71 14.53 16 11.53 16 8C16 3.58 12.42 0 8 0Z" transform="scale(64)" fill="currentColor"></path></svg>',
+        upload:
+          '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 16V4m0 0 4 4m-4-4-4 4" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path><path d="M20 16.5v2A1.5 1.5 0 0 1 18.5 20h-13A1.5 1.5 0 0 1 4 18.5v-2" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></svg>',
+        commit:
+          '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"></circle><path d="M3 12h6m6 0h6" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></svg>',
+        info:
+          '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"></circle><path d="M12 11v5m0-8h.01" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></svg>',
+        folder:
+          '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3.75 7.5A1.75 1.75 0 0 1 5.5 5.75h4.16c.46 0 .9.183 1.224.509l1.107 1.107c.328.326.77.509 1.232.509h5.271A1.75 1.75 0 0 1 20.25 9.625v7.875A1.75 1.75 0 0 1 18.5 19.25h-13A1.75 1.75 0 0 1 3.75 17.5Z" stroke="currentColor" stroke-linejoin="round" stroke-width="1.75"></path></svg>',
+      };
+
+      const updateComposerProviderIcon = (providerId: string, iconMarkup: string) => {
+        previewElement.dataset.selectedModelProvider = providerId;
+
+        for (const existingIcon of preview.querySelectorAll<SVGElement>("[data-preview-provider-icon]")) {
+          const wrapper = document.createElement("span");
+          wrapper.innerHTML = iconMarkup;
+          const nextIcon = wrapper.firstElementChild;
+          if (!(nextIcon instanceof SVGElement)) {
+            continue;
+          }
+
+          nextIcon.classList.add("app-preview__composer-icon", "app-preview__composer-icon--provider");
+          nextIcon.setAttribute("data-preview-provider-icon", "");
+          nextIcon.setAttribute("data-provider", providerId);
+          nextIcon.setAttribute("width", "16");
+          nextIcon.setAttribute("height", "16");
+          existingIcon.replaceWith(nextIcon);
+        }
+
+        if (providerId !== "openai") {
+          const currentEffort = getSelectedValue("effort") ?? "Low";
+          updateVisibleLabels("effort", currentEffort.split(" · ")[0] ?? "Low");
+        }
+      };
+
+      const favoriteModelKeys = new Set<string>();
+
+      const renderModelMenu = (activeProviderId = "openai") => {
+        if (!popoverItems) {
+          return;
+        }
+
+        const selectedModel = getSelectedValue("model") ?? "GPT-5.4";
+        const modelProviders: Record<
+          string,
+          {
+            id: string;
+            icon: string;
+            label: string;
+            models: string[];
+            sparkle?: boolean;
+            clock?: boolean;
+            disabled?: boolean;
+          }
+        > = {
+          openai: {
+            id: "openai",
+            icon: "openai",
+            label: "Codex",
+            models: ["GPT-5.5", "GPT-5.4", "GPT-5.4-Mini", "GPT-5.3-Codex", "GPT-5.3-Codex-Spark", "GPT-5.2"],
+          },
+          claude: {
+            id: "claude",
+            icon: "claude",
+            label: "Claude",
+            models: ["Claude Opus 4.6", "Claude Sonnet 4.6", "Claude Haiku 4.5", "Claude Sonnet 4.5"],
+          },
+          opencode: {
+            id: "opencode",
+            icon: "opencode",
+            label: "OpenCode",
+            models: ["Qwen 3 Coder", "GLM-4.6", "DeepSeek V3.2", "Kimi K2 Thinking"],
+            sparkle: true,
+          },
+          cursor: {
+            id: "cursor",
+            icon: "cursor",
+            label: "Cursor",
+            models: ["Auto", "GPT-5.4", "Claude Sonnet 4.6", "Gemini 3 Pro"],
+            sparkle: true,
+          },
+          gemini: {
+            id: "gemini",
+            icon: "gemini",
+            label: "Gemini",
+            models: ["Gemini 3 Pro", "Gemini 2.5 Pro", "Gemini 2.5 Flash"],
+            clock: true,
+            disabled: true,
+          },
+        };
+        const isFavoritesView = activeProviderId === "favorites";
+        const activeProvider = modelProviders[activeProviderId] ?? modelProviders.openai;
+        const visibleModels = isFavoritesView
+          ? Object.values(modelProviders).flatMap((provider) =>
+              provider.models
+                .filter((model) => favoriteModelKeys.has(modelFavoriteKey(provider.id, model)))
+                .map((model) => ({ model, provider })),
+            )
+          : activeProvider.models.map((model) => ({ model, provider: activeProvider }));
+
+        popoverItems.replaceChildren();
+
+        const shell = document.createElement("div");
+        shell.className = "app-preview__model-command";
+
+        const rail = document.createElement("div");
+        rail.className = "app-preview__model-rail";
+        const railItems: {
+          id: string;
+          icon: string;
+          label: string;
+          sparkle?: boolean;
+          clock?: boolean;
+          disabled?: boolean;
+        }[] = [
+          { id: "favorites", icon: "star", label: "Favorites" },
+          ...Object.values(modelProviders),
+        ];
+
+        for (const item of railItems) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "app-preview__model-rail-item";
+          button.dataset.provider = item.id;
+          button.dataset.active = String(isFavoritesView ? item.id === "favorites" : item.id === activeProvider.id);
+          button.dataset.disabled = String(Boolean(item.disabled));
+          button.disabled = Boolean(item.disabled);
+          button.setAttribute("aria-label", item.label);
+          if (item.disabled) {
+            button.setAttribute("aria-disabled", "true");
+            button.title = `${item.label} coming soon`;
+          }
+          const icon =
+            item.icon === "star" ?
+              '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.92 5.92 6.53.95-4.72 4.6 1.11 6.5L12 17.4l-5.84 3.07 1.11-6.5-4.72-4.6 6.53-.95L12 2.5Z" fill="currentColor"></path></svg>'
+            : providerIconMarkup[item.icon] ?? "";
+          button.innerHTML = `${icon}${item.sparkle ? '<span class="app-preview__model-rail-badge">✦</span>' : ""}${item.clock ? '<span class="app-preview__model-rail-clock"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.7"></circle><path d="M12 8v4l2.5 1.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.7"></path></svg></span>' : ""}`;
+          if (!item.disabled) {
+            button.addEventListener("click", () => renderModelMenu(item.id));
+          }
+          rail.append(button);
+        }
+
+        const content = document.createElement("div");
+        content.className = "app-preview__model-command-content";
+        content.innerHTML = `<label class="app-preview__model-search"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.34-4.34" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"></path><circle cx="11" cy="11" r="8" fill="none" stroke="currentColor" stroke-width="1.8"></circle></svg><input value="" placeholder="Search models..." /></label>`;
+
+        const list = document.createElement("div");
+        list.className = "app-preview__model-command-list";
+
+        if (visibleModels.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "app-preview__model-empty";
+          empty.textContent = "Star models to keep them here.";
+          list.append(empty);
+        }
+
+        visibleModels.forEach(({ model, provider }, index) => {
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = "app-preview__model-command-row";
+          row.dataset.selected = String(model === selectedModel || (selectedModel === "GPT-5.4" && model === "GPT-5.4"));
+          row.dataset.provider = provider.id;
+          row.dataset.searchable = `${model} ${provider.label}`.toLowerCase();
+          const providerIcon = providerIconMarkup[provider.icon] ?? providerIconMarkup.openai;
+          const favoriteKey = modelFavoriteKey(provider.id, model);
+          const isFavorite = favoriteModelKeys.has(favoriteKey);
+          row.dataset.favorite = String(isFavorite);
+          row.innerHTML = `<span class="app-preview__model-favorite" role="button" tabindex="0" aria-label="${isFavorite ? "Unstar" : "Star"} ${model}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.92 5.92 6.53.95-4.72 4.6 1.11 6.5L12 17.4l-5.84 3.07 1.11-6.5-4.72-4.6 6.53-.95L12 2.5Z" fill="${isFavorite ? "currentColor" : "none"}" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"></path></svg></span><span class="app-preview__model-row-copy"><strong>${model}</strong><small>${providerIcon}<span>${provider.label}</span></small></span><kbd>⌘${index + 1}</kbd>`;
+          const favoriteButton = row.querySelector<HTMLElement>(".app-preview__model-favorite");
+          const toggleFavorite = () => {
+            if (favoriteModelKeys.has(favoriteKey)) {
+              favoriteModelKeys.delete(favoriteKey);
+            } else {
+              favoriteModelKeys.add(favoriteKey);
+            }
+            renderModelMenu(activeProviderId);
+          };
+          favoriteButton?.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleFavorite();
+          });
+          favoriteButton?.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter" && event.key !== " ") {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            toggleFavorite();
+          });
+          row.addEventListener("click", () => {
+            updateVisibleLabels("model", model);
+            updateComposerProviderIcon(provider.id, providerIcon);
+            if (popover) {
+              popover.hidden = true;
+            }
+          });
+          list.append(row);
+        });
+
+        content.append(list);
+        const input = content.querySelector<HTMLInputElement>("input");
+        input?.addEventListener("input", () => {
+          const query = input.value.trim().toLowerCase();
+          for (const row of list.querySelectorAll<HTMLElement>("[data-searchable]")) {
+            row.hidden = query.length > 0 && !(row.dataset.searchable ?? "").includes(query);
+          }
+        });
+
+        shell.append(rail, content);
+        popoverItems.append(shell);
+        window.setTimeout(() => input?.focus(), 0);
+      };
+
+      const renderRadioMenu = (menuName: string) => {
+        if (!popoverItems) {
+          return;
+        }
+
+        const selectedEffortLabel = getSelectedValue("effort") ?? "Low · Fast";
+        const selectedEffort = selectedEffortLabel.split(" · ")[0] ?? "Low";
+        const selectedProvider = previewElement.dataset.selectedModelProvider ?? "openai";
+        const showFastMode = selectedProvider === "openai";
+        const selectedFastMode = showFastMode && selectedEffortLabel.includes("Fast");
+        const selectedAccess = getSelectedValue("access") ?? "Full access";
+        const effortOptions = [
+          { label: "Low", detail: "" },
+          { label: "Medium", detail: "" },
+          { label: "High", detail: "" },
+          { label: "Extra High", detail: "" },
+        ] satisfies { label: string; detail?: string }[];
+        const accessOptions: { label: string; value: string; detail: string }[] = [
+          {
+            label: "Supervised",
+            value: "approval-required",
+            detail: "Ask before commands and file changes.",
+          },
+          {
+            label: "Auto-accept edits",
+            value: "auto-accept-edits",
+            detail: "Auto-approve edits, ask before other actions.",
+          },
+          {
+            label: "Full access",
+            value: "full-access",
+            detail: "Allow commands and edits without prompts.",
+          },
+        ];
+
+        const section = document.createElement("div");
+        section.className = menuName === "effort" ? "app-preview__select-section app-preview__select-section--effort" : "app-preview__select-section app-preview__select-section--access";
+        if (menuName === "effort") {
+          const label = document.createElement("div");
+          label.className = "app-preview__select-label";
+          label.textContent = "Reasoning";
+          section.append(label);
+        }
+
+        const options = menuName === "effort" ? effortOptions : accessOptions;
+        for (const option of options) {
+          const selected = menuName === "effort" ? option.label === selectedEffort : option.label === selectedAccess;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = menuName === "access" ? "app-preview__select-item app-preview__select-item--access" : "app-preview__select-item app-preview__select-item--effort";
+          button.dataset.selected = String(selected);
+          const accessValue = "value" in option && typeof option.value === "string" ? option.value : "";
+          const icon = menuName === "access" ? (accessIconMarkup[accessValue] ?? "") : "";
+          const checkIcon = selected ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.252 12.7 10.2 18.63 18.748 5.37" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>' : "";
+          button.innerHTML = `<span class="app-preview__select-check">${checkIcon}</span><span class="app-preview__select-copy">${menuName === "access" ? `<span class="app-preview__select-icon">${icon}</span>` : ""}<span><strong>${option.label}${menuName === "effort" && option.label === "Medium" ? " (default)" : ""}</strong>${option.detail ? `<small>${option.detail}</small>` : ""}</span></span>`;
+          button.addEventListener("click", () => {
+            if (menuName === "effort") {
+              updateVisibleLabels("effort", `${option.label}${selectedFastMode && showFastMode ? " · Fast" : ""}`);
+            } else {
+              updateVisibleLabels("access", option.label);
+              if (accessValue) {
+                updateAccessIcon(accessValue);
+              }
+            }
+            if (popover) {
+              popover.hidden = true;
+            }
+          });
+          section.append(button);
+        }
+
+        if (menuName === "effort" && showFastMode) {
+          const separator = document.createElement("div");
+          separator.className = "app-preview__select-separator";
+          section.append(separator);
+
+          const fastLabel = document.createElement("div");
+          fastLabel.className = "app-preview__select-label app-preview__select-label--fast";
+          fastLabel.textContent = "Fast Mode";
+          section.append(fastLabel);
+
+          for (const option of ["On", "Off"]) {
+            const selected = selectedFastMode ? option === "On" : option === "Off";
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "app-preview__select-item app-preview__select-item--effort";
+            button.dataset.selected = String(selected);
+            const checkIcon = selected ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.252 12.7 10.2 18.63 18.748 5.37" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>' : "";
+            button.innerHTML = `<span class="app-preview__select-check">${checkIcon}</span><span class="app-preview__select-copy"><span><strong>${option}</strong></span></span>`;
+            button.addEventListener("click", () => {
+              updateVisibleLabels("effort", `${selectedEffort}${option === "On" ? " · Fast" : ""}`);
+              if (popover) {
+                popover.hidden = true;
+              }
+            });
+            section.append(button);
+          }
+        }
+
+        popoverItems.replaceChildren(section);
+      };
+
+      const renderWorkspaceMenu = () => {
+        if (!popoverItems) {
+          return;
+        }
+
+        const selectedWorkspace = getSelectedValue("worktree") ?? "Current checkout";
+        const options = [
+          {
+            label: "Current checkout",
+            value: "local",
+            icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.75 7.5A1.75 1.75 0 0 1 5.5 5.75h4.16c.46 0 .9.183 1.224.509l1.107 1.107c.328.326.77.509 1.232.509h5.271A1.75 1.75 0 0 1 20.25 9.625v7.875A1.75 1.75 0 0 1 18.5 19.25h-13A1.75 1.75 0 0 1 3.75 17.5Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.75"></path></svg>',
+          },
+          {
+            label: "New worktree",
+            value: "worktree",
+            icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.75 7.5A1.75 1.75 0 0 1 5.5 5.75h4.16c.46 0 .9.183 1.224.509l1.107 1.107c.328.326.77.509 1.232.509h5.271A1.75 1.75 0 0 1 20.25 9.625v7.875A1.75 1.75 0 0 1 18.5 19.25h-13A1.75 1.75 0 0 1 3.75 17.5Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.75"></path><path d="M8.5 14.25h7M12 10.75v7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.75"></path></svg>',
+          },
+        ];
+
+        const section = document.createElement("div");
+        section.className = "app-preview__select-section app-preview__select-section--workspace";
+        const label = document.createElement("div");
+        label.className = "app-preview__select-label";
+        label.textContent = "Workspace";
+        section.append(label);
+
+        for (const option of options) {
+          const selected = option.label === selectedWorkspace;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "app-preview__select-item app-preview__select-item--workspace";
+          button.dataset.selected = String(selected);
+          const checkIcon = selected ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.252 12.7 10.2 18.63 18.748 5.37" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>' : "";
+          button.innerHTML = `<span class="app-preview__select-check">${checkIcon}</span><span class="app-preview__select-copy"><span class="app-preview__select-icon">${option.icon}</span><span><strong>${option.label}</strong></span></span>`;
+          button.addEventListener("click", () => {
+            updateVisibleLabels("worktree", option.label);
+            const currentBranch = getSelectedValue("branch") ?? "main";
+            updateVisibleLabels("branch", option.value === "worktree" ? `From ${currentBranch.replace(/^From /, "")}` : currentBranch.replace(/^From /, ""));
+            if (popover) {
+              popover.hidden = true;
+            }
+          });
+          section.append(button);
+        }
+
+        popoverItems.replaceChildren(section);
+      };
+
+      const renderBranchMenu = () => {
+        if (!popoverItems) {
+          return;
+        }
+
+        const selectedBranch = (getSelectedValue("branch") ?? "main").replace(/^From /, "");
+        const branches = [
+          { name: "main", badge: "current" },
+          { name: "t3code/marketing-ui-mirror", badge: "worktree" },
+          { name: "feature/thread-hotkeys", badge: "" },
+          { name: "release/homepage-polish", badge: "remote" },
+          { name: "docs/agent-browser-copy", badge: "" },
+          { name: "theo/screenshot-pass", badge: "default" },
+        ];
+
+        const shell = document.createElement("div");
+        shell.className = "app-preview__branch-combobox";
+        shell.innerHTML = `
+          <div class="app-preview__branch-search">
+            <input type="text" placeholder="Search branches..." aria-label="Search branches" />
+          </div>
+          <div class="app-preview__branch-list"></div>
+          <div class="app-preview__branch-empty" hidden>No branches found.</div>
+        `;
+        const input = shell.querySelector<HTMLInputElement>("input");
+        const list = shell.querySelector<HTMLElement>(".app-preview__branch-list");
+        const empty = shell.querySelector<HTMLElement>(".app-preview__branch-empty");
+
+        const renderRows = () => {
+          if (!list || !empty) {
+            return;
+          }
+          const query = input?.value.trim().toLowerCase() ?? "";
+          list.replaceChildren();
+          const visibleBranches = branches.filter((branch) => branch.name.toLowerCase().includes(query));
+          if (query && !visibleBranches.some((branch) => branch.name === query)) {
+            const createButton = document.createElement("button");
+            createButton.type = "button";
+            createButton.className = "app-preview__branch-item";
+            const createLabel = document.createElement("span");
+            createLabel.textContent = `Create new branch "${query}"`;
+            createButton.append(createLabel);
+            createButton.addEventListener("click", () => {
+              const workspace = getSelectedValue("worktree") ?? "Current checkout";
+              updateVisibleLabels("branch", workspace === "New worktree" ? `From ${query}` : query);
+              if (popover) {
+                popover.hidden = true;
+              }
+            });
+            list.append(createButton);
+          }
+          for (const branch of visibleBranches) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "app-preview__branch-item";
+            button.dataset.selected = String(branch.name === selectedBranch);
+            button.innerHTML = `<span>${branch.name}</span>${branch.badge ? `<small>${branch.badge}</small>` : ""}`;
+            button.addEventListener("click", () => {
+              const workspace = getSelectedValue("worktree") ?? "Current checkout";
+              updateVisibleLabels("branch", workspace === "New worktree" ? `From ${branch.name}` : branch.name);
+              if (popover) {
+                popover.hidden = true;
+              }
+            });
+            list.append(button);
+          }
+          empty.hidden = list.children.length > 0;
+        };
+
+        input?.addEventListener("input", renderRows);
+        renderRows();
+        popoverItems.replaceChildren(shell);
+        window.setTimeout(() => input?.focus(), 0);
+      };
+
+      const openMenu = (menuName: string, trigger: HTMLElement) => {
+        const menu = previewMenuOptions[menuName];
+        if (!menu || !popover || !popoverTitle || !popoverItems) {
+          return;
+        }
+
+        const anchorElement =
+          menuName === "open" || menuName === "push" ?
+            (trigger.closest(".app-preview__action-group") as HTMLElement | null) ?? trigger
+          : trigger;
+
+        if (!popover.hidden && popover.dataset.previewOpenMenu === menuName && openMenuTrigger === anchorElement) {
+          popover.hidden = true;
+          openMenuTrigger = null;
+          return;
+        }
+
+        popover.dataset.previewOpenMenu = menuName;
+        openMenuTrigger = anchorElement;
+        popoverTitle.textContent = menu.title;
+        const menuWidth = menu.width ?? 238;
+        popover.style.width = `${menuWidth}px`;
+        if (menuName === "model") {
+          popoverTitle.textContent = "";
+          popover.style.width = "440px";
+          renderModelMenu(previewElement.dataset.selectedModelProvider ?? "openai");
+        } else if (menuName === "effort" || menuName === "access") {
+          popoverTitle.textContent = "";
+          popover.style.width = menuName === "access" ? "264px" : "190px";
+          renderRadioMenu(menuName);
+        } else if (menuName === "worktree") {
+          popoverTitle.textContent = "";
+          popover.style.width = "190px";
+          renderWorkspaceMenu();
+        } else if (menuName === "branch") {
+          popoverTitle.textContent = "";
+          popover.style.width = "320px";
+          renderBranchMenu();
+        } else {
+          popoverItems.replaceChildren(
+            ...menu.sections.flatMap((section) => {
+              const nodes: HTMLElement[] = [];
+              if (section.label) {
+                const label = document.createElement("div");
+                label.className = "app-preview__popover-section";
+                label.textContent = section.label;
+                nodes.push(label);
+              }
+
+              for (const item of section.items) {
+                const selected = getSelectedValue(item.target) === item.label;
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "app-preview__popover-item";
+                button.dataset.tone = item.tone ?? "default";
+                button.dataset.selected = String(selected);
+                const icon = item.icon ? (menuIconMarkup[item.icon] ?? "") : "";
+                const shortcutMarkup =
+                  menuName === "open" && item.shortcut === "⌘O" ?
+                    '<kbd><span class="app-preview__shortcut-meta">⌘</span><span class="app-preview__shortcut-letter">O</span></kbd>'
+                  : item.shortcut ?
+                    `<kbd>${item.shortcut}</kbd>`
+                  : "";
+                button.innerHTML = `${icon ? `<span class="app-preview__popover-icon">${icon}</span>` : `<span class="app-preview__popover-check">${selected ? "✓" : ""}</span>`}<span class="app-preview__popover-copy"><span>${item.label}</span>${item.detail ? `<small>${item.detail}</small>` : ""}</span>${shortcutMarkup}`;
+                button.addEventListener("click", () => {
+                  updateVisibleLabels(item.target, item.label);
+                  if (item.action === "collapse-all" || item.action === "expand-all") {
+                    const collapsed = item.action === "collapse-all";
+                    for (const project of preview.querySelectorAll<HTMLElement>("[data-preview-project]")) {
+                      project.dataset.collapsed = String(collapsed);
+                      project.querySelector<HTMLElement>("[data-preview-project-toggle]")?.setAttribute("aria-expanded", String(!collapsed));
+                    }
+                  }
+                  popover.hidden = true;
+                  openMenuTrigger = null;
+                });
+                nodes.push(button);
+              }
+
+              return nodes;
+            }),
+          );
+        }
+
+        const previewRect = preview.getBoundingClientRect();
+        const triggerRect = anchorElement.getBoundingClientRect();
+        const actualMenuWidth =
+          menuName === "model" ? 440
+          : menuName === "access" ? 264
+          : menuName === "effort" ? 190
+          : menuName === "worktree" ? 190
+          : menuName === "branch" ? 320
+          : menuName === "push" ? 176
+          : menuName === "open" ? 144
+          : menuWidth;
+        const maxLeft = Math.max(8, previewRect.width - actualMenuWidth - 8);
+        popover.hidden = false;
+        popover.style.visibility = "hidden";
+        const popoverHeight = popover.offsetHeight;
+        popover.style.left = `${Math.max(8, Math.min(triggerRect.left - previewRect.left, maxLeft))}px`;
+        popover.style.top =
+          menuName === "model" || menuName === "effort" || menuName === "access" || menuName === "worktree" || menuName === "branch" ?
+            `${Math.max(8, triggerRect.top - previewRect.top - popoverHeight - 8)}px`
+          : `${Math.min(triggerRect.bottom - previewRect.top + 6, previewRect.height - 190)}px`;
+        popover.style.visibility = "";
+      };
+
+      preview.addEventListener("click", (event) => {
+        const element = event.target instanceof Element ? event.target : null;
+        const selectedThread = element?.closest<HTMLElement>("[data-preview-select]");
+        const menuTrigger = element?.closest<HTMLElement>("[data-preview-menu]");
+        const iconToggle = element?.closest<HTMLButtonElement>("[data-preview-toggle]");
+        const modeToggle = element?.closest<HTMLButtonElement>("[data-preview-mode-toggle]");
+        const scrollBottomTrigger = element?.closest<HTMLElement>("[data-preview-scroll-bottom]");
+        const projectToggle = element?.closest<HTMLElement>("[data-preview-project-toggle]");
+        const sortTrigger = element?.closest<HTMLElement>("[data-preview-sort]");
+        if (scrollBottomTrigger && preview.contains(scrollBottomTrigger)) {
+          const threadId = scrollBottomTrigger.closest<HTMLElement>("[data-preview-view]")?.dataset.previewThreadId;
+          if (threadId) scrollTimelineToBottom(threadId);
+          return;
+        }
+
+        if (sortTrigger && preview.contains(sortTrigger)) {
+          const list = preview.querySelector<HTMLElement>("[data-preview-project-list]");
+          if (!list) return;
+          const projects = Array.from(list.querySelectorAll<HTMLElement>("[data-preview-project]"));
+          const sorted = preview.getAttribute("data-project-sort") !== "alpha";
+          preview.setAttribute("data-project-sort", sorted ? "alpha" : "original");
+          projects
+            .toSorted((a, b) =>
+              sorted
+                ? (a.dataset.projectId ?? "").localeCompare(b.dataset.projectId ?? "")
+                : Number(a.dataset.projectIndex ?? 0) - Number(b.dataset.projectIndex ?? 0),
+            )
+            .forEach((project) => list.append(project));
+          return;
+        }
+
+        if (projectToggle && preview.contains(projectToggle)) {
+          const project = projectToggle.closest<HTMLElement>("[data-preview-project]");
+          if (!project) return;
+          const collapsed = project.dataset.collapsed !== "true";
+          project.dataset.collapsed = String(collapsed);
+          projectToggle.setAttribute("aria-expanded", String(!collapsed));
+          return;
+        }
+
+        if (modeToggle && preview.contains(modeToggle)) {
+          const currentMode = getSelectedValue("mode") ?? "Build";
+          const nextMode = currentMode === "Plan" ? "Build" : "Plan";
+          updateVisibleLabels("mode", nextMode);
+          modeToggle.title =
+            nextMode === "Plan" ?
+              "Plan mode — click to return to normal build mode"
+            : "Default mode — click to enter plan mode";
+          closeTransient();
+          return;
+        }
+
+        if (iconToggle && preview.contains(iconToggle)) {
+          const pressed = iconToggle.dataset.pressed === "true";
+          iconToggle.dataset.pressed = String(!pressed);
+          iconToggle.setAttribute("aria-pressed", String(!pressed));
+          closeTransient();
+          return;
+        }
+
+        if (menuTrigger && preview.contains(menuTrigger)) {
+          openMenu(menuTrigger.dataset.previewMenu ?? "", menuTrigger);
+          return;
+        }
+
+        if (!selectedThread || !preview.contains(selectedThread)) {
+          return;
+        }
+
+        const threadId = selectedThread.dataset.previewSelect;
+        if (!threadId) {
+          return;
+        }
+
+        setActiveThread(threadId);
+      });
+
+      document.addEventListener("keydown", (event: KeyboardEvent) => {
+        if (event.key === "Escape") {
+          closeTransient();
+          return;
+        }
+
+      });
+    }
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initAppPreviewThreads, { once: true });
+  } else {
+    initAppPreviewThreads();
+  }
+</script>
+
+<style>
+  .app-preview {
+    --preview-bg: color-mix(in srgb, #0a0a0a 95%, white);
+    --preview-surface: color-mix(in srgb, var(--preview-bg) 98%, white);
+    --preview-fg: #f5f5f5;
+    --preview-fg-94: color-mix(in srgb, var(--preview-fg) 94%, transparent);
+    --preview-fg-90: color-mix(in srgb, var(--preview-fg) 90%, transparent);
+    --preview-fg-86: color-mix(in srgb, var(--preview-fg) 86%, transparent);
+    --preview-fg-80: color-mix(in srgb, var(--preview-fg) 80%, transparent);
+    --preview-muted: color-mix(in srgb, #737373 90%, white);
+    --preview-muted-80: color-mix(in srgb, var(--preview-muted) 80%, transparent);
+    --preview-muted-70: color-mix(in srgb, var(--preview-muted) 70%, transparent);
+    --preview-muted-60: color-mix(in srgb, var(--preview-muted) 60%, transparent);
+    --preview-muted-55: color-mix(in srgb, var(--preview-muted) 55%, transparent);
+    --preview-muted-50: color-mix(in srgb, var(--preview-muted) 50%, transparent);
+    --preview-muted-45: color-mix(in srgb, var(--preview-muted) 45%, transparent);
+    --preview-muted-40: color-mix(in srgb, var(--preview-muted) 40%, transparent);
+    --preview-muted-35: color-mix(in srgb, var(--preview-muted) 35%, transparent);
+    --preview-muted-30: color-mix(in srgb, var(--preview-muted) 30%, transparent);
+    --preview-border: rgba(255, 255, 255, 0.06);
+    --preview-shell-border: rgba(255, 255, 255, 0.1);
+    --preview-input: rgba(255, 255, 255, 0.08);
+    --preview-accent: rgba(255, 255, 255, 0.04);
+    --preview-accent-strong: rgba(255, 255, 255, 0.055);
+    --preview-button-bg: rgba(255, 255, 255, 0.0256);
+    --preview-button-hover: rgba(255, 255, 255, 0.0512);
+    --preview-button-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --preview-ring: oklch(0.588 0.217 264 / 0.9);
+    --preview-working: rgb(125 211 252 / 0.8);
+    --preview-completed: rgb(110 231 183 / 0.9);
+    --preview-radius: 10px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--preview-shell-border);
+    border-radius: 16px;
+    background: var(--preview-bg);
+    color: var(--preview-fg);
+    font-family:
+      "DM Sans",
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      system-ui,
+      sans-serif;
+    aspect-ratio: 2764 / 1712;
+  }
+
+  .app-preview[data-preview-theme="light"] {
+    --preview-bg: #fbfbfb;
+    --preview-surface: #ffffff;
+    --preview-fg: #1f1f1f;
+    --preview-muted: color-mix(in srgb, #737373 90%, black);
+    --preview-border: rgba(0, 0, 0, 0.08);
+    --preview-shell-border: rgba(0, 0, 0, 0.14);
+    --preview-input: rgba(0, 0, 0, 0.08);
+    --preview-accent: rgba(0, 0, 0, 0.04);
+    --preview-accent-strong: rgba(0, 0, 0, 0.06);
+    --preview-button-bg: rgba(0, 0, 0, 0.025);
+    --preview-button-hover: rgba(0, 0, 0, 0.05);
+  }
+
+  .app-preview[data-preview-theme="light"] .app-preview__popover-item small,
+  .app-preview[data-preview-theme="light"] .app-preview__section-header,
+  .app-preview[data-preview-theme="light"] .app-preview__thread-age {
+    color: rgba(20, 20, 20, 0.38);
+  }
+
+  .app-preview__state {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .app-preview__chrome {
+    display: grid;
+    grid-template-columns: 254px minmax(0, 1fr);
+    height: 100%;
+  }
+
+  .app-preview__sidebar {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: 12px 10px 10px;
+    border-right: 1px solid var(--preview-border);
+    background: var(--preview-surface);
+  }
+
+  .app-preview__brand,
+  .app-preview__project-row,
+  .app-preview__thread,
+  .app-preview__actions button,
+  .app-preview__icon-button,
+  .app-preview__send {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .app-preview__brand,
+  .app-preview__project-row,
+  .app-preview__thread,
+  .app-preview__search,
+  .app-preview__section-action,
+  .app-preview__checkout-label,
+  .app-preview__checkout-value,
+  .app-preview__popover-item {
+    border: 0;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .app-preview__brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    width: fit-content;
+    color: var(--preview-fg);
+    text-decoration: none;
+  }
+
+  .app-preview__sidebar-topbar {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-bottom: 18px;
+    min-height: 24px;
+  }
+
+  .app-preview__brand-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .app-preview__brand-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    min-width: 18px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--preview-accent);
+    color: var(--preview-muted-60);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .app-preview__sidebar-window-chrome {
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 2px;
+    flex: none;
+  }
+
+  .app-preview__traffic-lights {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .app-preview__traffic-light {
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.18);
+  }
+
+  .app-preview__traffic-light--close {
+    background: #ff5f57;
+  }
+
+  .app-preview__traffic-light--minimize {
+    background: #febc2e;
+  }
+
+  .app-preview__traffic-light--zoom {
+    background: #28c840;
+  }
+
+  .app-preview__search {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 18px;
+    padding: 0 2px;
+    color: var(--preview-muted-70);
+    width: 100%;
+  }
+
+  .app-preview__search-text {
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .app-preview__shortcut {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 16px;
+    min-width: 16px;
+    padding: 0 6px;
+    border-radius: 4px;
+    background: var(--preview-accent);
+    color: var(--preview-muted-60);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .app-preview__sidebar-content {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .app-preview__section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 2px;
+    margin-bottom: 8px;
+    color: var(--preview-muted-60);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .app-preview__section-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .app-preview__section-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    color: var(--preview-muted-60);
+  }
+
+  .app-preview__project-list {
+    min-height: 0;
+  }
+
+  .app-preview__project-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 32px;
+    padding: 0 8px 0 2px;
+    border-radius: 8px;
+    color: var(--preview-fg-90);
+    transition:
+      background 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .app-preview__project-row:hover {
+    background: var(--preview-accent);
+  }
+
+  .app-preview__project--secondary {
+    margin-top: 10px;
+  }
+
+  .app-preview__project--secondary .app-preview__project-row {
+    color: var(--preview-muted-70);
+  }
+
+  .app-preview__project-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .app-preview__project-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin-left: auto;
+    border-radius: 6px;
+    color: var(--preview-muted-70);
+    opacity: 0;
+    transition:
+      opacity 0.15s ease,
+      color 0.15s ease,
+      background 0.15s ease;
+  }
+
+  .app-preview__project-action svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .app-preview__project-row:hover .app-preview__project-action,
+  .app-preview__project-row:focus-visible .app-preview__project-action {
+    opacity: 1;
+  }
+
+  .app-preview__project-icon {
+    color: var(--preview-muted-50);
+  }
+
+  .app-preview__project-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 16px;
+    height: 16px;
+  }
+
+  .app-preview__project-mark svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .app-preview__project-mark--t3 {
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .app-preview__project-mark--round {
+    color: #ec4899;
+  }
+
+  .app-preview__project-mark--lawn {
+    color: #22c55e;
+  }
+
+  .app-preview__chevron {
+    transform: rotate(90deg);
+    transition: transform 0.15s ease;
+  }
+
+  .app-preview__project[data-collapsed="true"] .app-preview__chevron {
+    transform: rotate(0deg);
+  }
+
+  .app-preview__project[data-collapsed="true"] .app-preview__thread-list {
+    display: none;
+  }
+
+  .app-preview__thread-list {
+    position: relative;
+    margin-left: 0;
+    padding-left: 10px;
+  }
+
+  .app-preview__thread-list::before {
+    content: "";
+    position: absolute;
+    top: 1px;
+    bottom: 1px;
+    left: 0;
+    width: 1px;
+    background: rgba(245, 245, 245, 0.07);
+  }
+
+  .app-preview__thread {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    margin: 1px 0;
+    padding: 0 8px;
+    border-radius: 10px;
+    color: var(--preview-muted-70);
+    outline: none;
+    transition:
+      background 0.15s ease,
+      color 0.15s ease,
+      transform 0.15s ease;
+  }
+
+  .app-preview__thread:hover {
+    background: var(--preview-accent);
+    color: var(--preview-fg);
+  }
+
+  .app-preview__thread:active {
+    transform: scale(0.995);
+  }
+
+  .app-preview__thread-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+  }
+
+  .app-preview__thread-main {
+    display: inline-flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    justify-self: start;
+  }
+
+  .app-preview__status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: none;
+    margin-right: 7px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .app-preview__status::before {
+    content: "";
+    width: 5.5px;
+    height: 5.5px;
+    border-radius: 999px;
+    background: currentColor;
+  }
+
+  .app-preview__status--working {
+    color: var(--preview-working);
+  }
+
+  .app-preview__status--working::before {
+    animation: app-preview-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .app-preview__status--completed {
+    color: var(--preview-completed);
+  }
+
+  .app-preview__thread-age {
+    justify-self: end;
+    color: var(--preview-muted-60);
+    font-size: 11px;
+    font-weight: 500;
+    text-align: right;
+    transition: opacity 0.15s ease;
+  }
+
+  .app-preview__thread-action {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    transform: translateY(-50%);
+    color: var(--preview-muted-70);
+    opacity: 0;
+    transition:
+      opacity 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .app-preview__thread-action svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .app-preview__thread:hover .app-preview__thread-age,
+  .app-preview__thread:focus-visible .app-preview__thread-age {
+    opacity: 0;
+  }
+
+  .app-preview__thread:hover .app-preview__thread-action,
+  .app-preview__thread:focus-visible .app-preview__thread-action {
+    opacity: 1;
+  }
+
+  .app-preview__settings {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    min-height: 28px;
+    margin-top: 8px;
+    padding: 0 2px;
+    color: var(--preview-muted-60);
+    font-size: 13px;
+    font-weight: 500;
+    pointer-events: none;
+  }
+
+  .app-preview__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+  }
+
+  .app-preview__icon svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .app-preview__icon--xs {
+    width: 12px;
+    height: 12px;
+  }
+
+  .app-preview__icon--sm {
+    width: 14px;
+    height: 14px;
+  }
+
+  .app-preview__icon--muted {
+    color: var(--preview-muted-50);
+  }
+
+  .app-preview__views {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .app-preview__view {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    height: 100%;
+    background: var(--preview-bg);
+  }
+
+  .app-preview__view[hidden] {
+    display: none !important;
+  }
+
+  .app-preview__topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 48px;
+    padding: 0 16px 0 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+  }
+
+  .app-preview__topbar-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .app-preview__topbar-title h3 {
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--preview-fg);
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  .app-preview__badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 19px;
+    min-width: 19px;
+    padding: 0 7px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.025);
+    color: var(--preview-fg-90);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+  }
+
+  .app-preview__actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .app-preview__actions button,
+  .app-preview__icon-button,
+  .app-preview__send {
+    appearance: none;
+    border: 0;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .app-preview__actions button,
+  .app-preview__icon-button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 7px;
+    border: 1px solid var(--preview-input);
+    border-radius: 6px;
+    background: var(--preview-button-bg);
+    color: var(--preview-fg);
+    font-size: 12px;
+    font-weight: 500;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition:
+      background-color 120ms ease,
+      color 120ms ease,
+      border-color 120ms ease;
+  }
+
+  .app-preview__actions button:hover,
+  .app-preview__icon-button:hover,
+  .app-preview__icon-button[data-pressed="true"] {
+    background: var(--preview-button-hover);
+    color: var(--preview-fg-90);
+  }
+
+  .app-preview__action-button {
+    letter-spacing: 0;
+  }
+
+  .app-preview__action-button--inert {
+    pointer-events: none;
+  }
+
+  .app-preview__action-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+  }
+
+  .app-preview__actions .app-preview__action-button--group-main {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    border-right: 0;
+  }
+
+  .app-preview__actions .app-preview__action-button--group-tail {
+    width: 24px;
+    padding: 0;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    margin-left: 0;
+  }
+
+  .app-preview__actions button.is-disabled {
+    color: rgba(245, 245, 245, 0.32);
+  }
+
+  .app-preview__button-icon,
+  .app-preview__button-caret,
+  .app-preview__control-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+  }
+
+  .app-preview__button-icon svg,
+  .app-preview__control-icon svg {
+    width: 14px;
+    height: 14px;
+    opacity: 0.8;
+  }
+
+  .app-preview__action-group:last-child .app-preview__button-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .app-preview__button-caret svg {
+    width: 16px;
+    height: 16px;
+    opacity: 0.8;
+  }
+
+  .app-preview__actions .app-preview__icon-button {
+    width: 24px;
+    padding: 0;
+  }
+
+  .app-preview__action-group--git {
+    color: rgba(245, 245, 245, 0.9);
+  }
+
+  .app-preview__actions .app-preview__git-action-main {
+    gap: 6px;
+    padding-right: 9px;
+    padding-left: 8px;
+    font-weight: 600;
+  }
+
+  .app-preview__actions .app-preview__git-action-tail {
+    color: var(--preview-muted-70);
+  }
+
+  .app-preview__actions .app-preview__icon-button svg {
+    width: 12px;
+    height: 12px;
+    opacity: 0.8;
+  }
+
+  .app-preview__body {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--preview-bg);
+  }
+
+  .app-preview__empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 0 24px;
+  }
+
+  .app-preview__empty-state p {
+    margin: 0;
+    color: var(--preview-muted-30);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .app-preview__timeline {
+    height: 100%;
+    overflow-y: auto;
+    padding: 16px 20px 8px;
+    scrollbar-color: rgba(245, 245, 245, 0.18) transparent;
+    scrollbar-width: thin;
+  }
+
+  .app-preview__timeline-inner {
+    width: 100%;
+    max-width: 768px;
+    margin: 0 auto;
+    padding-bottom: 24px;
+  }
+
+  .app-preview__scroll-bottom-wrap {
+    pointer-events: none;
+    position: absolute;
+    bottom: 4px;
+    left: 50%;
+    z-index: 6;
+    display: flex;
+    justify-content: center;
+    padding: 6px 0;
+    transform: translateX(-50%);
+  }
+
+  .app-preview__scroll-bottom-wrap[hidden] {
+    display: none !important;
+  }
+
+  .app-preview__scroll-bottom {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 24px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 999px;
+    background: var(--preview-surface);
+    color: var(--preview-muted-70);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 500;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+    cursor: pointer;
+    transition:
+      border-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .app-preview__scroll-bottom:hover {
+    border-color: rgba(255, 255, 255, 0.1);
+    color: var(--preview-fg);
+  }
+
+  .app-preview__scroll-bottom svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .app-preview__user-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 16px;
+  }
+
+  .app-preview__user-bubble {
+    max-width: 80%;
+    padding: 12px 16px;
+    border: 1px solid var(--preview-border);
+    border-radius: 16px 16px 6px 16px;
+    background: var(--preview-accent);
+  }
+
+  .app-preview__working-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 18px;
+    padding: 4px 2px;
+    color: var(--preview-working);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .app-preview__working-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: currentColor;
+    animation: app-preview-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .app-preview__working-label {
+    color: inherit;
+  }
+
+  .app-preview__assistant-row {
+    margin-bottom: 18px;
+    padding: 4px 2px;
+    color: var(--preview-fg-90);
+  }
+
+  .app-preview__tool-group {
+    display: grid;
+    gap: 2px;
+    margin: 12px 0 20px;
+    padding: 6px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.018);
+  }
+
+  .app-preview__tool-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 4px 2px;
+    border-radius: 8px;
+  }
+
+  .app-preview__tool-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    flex: none;
+    color: var(--preview-muted-70);
+  }
+
+  .app-preview__tool-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .app-preview__tool-row p {
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    color: var(--preview-muted-55);
+    font-size: 11px;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-preview__tool-heading {
+    color: inherit;
+    font-weight: 600;
+  }
+
+  .app-preview__tool-preview {
+    color: var(--preview-muted-55);
+  }
+
+  .app-preview__user-bubble p,
+  .app-preview__assistant-row p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+    letter-spacing: -0.01em;
+  }
+
+  .app-preview__composer-shell {
+    padding: 0 20px 12px;
+  }
+
+  .app-preview__composer-form {
+    width: 100%;
+    max-width: 832px;
+    min-width: 0;
+    margin: 0 auto;
+  }
+
+  .app-preview__composer-frame {
+    border-radius: 22px;
+    padding: 1px;
+  }
+
+  .app-preview__composer-surface {
+    overflow: hidden;
+    border: 1px solid var(--preview-border);
+    border-radius: 20px;
+    background: var(--preview-surface);
+    transition: border-color 0.2s;
+  }
+
+  .app-preview__composer-surface:focus-within {
+    border-color: color-mix(in srgb, var(--preview-ring) 45%, transparent);
+  }
+
+  .app-preview__composer-editor-wrap {
+    position: relative;
+    padding: 16px 16px 8px;
+  }
+
+  .app-preview__composer-placeholder {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    right: 16px;
+    overflow: hidden;
+    color: var(--preview-muted-35);
+    font-size: 14px;
+    line-height: 22.75px;
+    pointer-events: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-preview__composer-input {
+    display: block;
+    width: 100%;
+    min-height: 70px;
+    max-height: 200px;
+    overflow-y: auto;
+    outline: none;
+    background: transparent;
+    color: var(--preview-fg);
+    font-size: 14px;
+    line-height: 22.75px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .app-preview__composer-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0;
+    min-width: 0;
+    overflow: visible;
+    padding: 0 12px 12px;
+  }
+
+  .app-preview__composer-controls {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    gap: 4px;
+    min-width: 0;
+    margin: -4px;
+    padding: 4px;
+    overflow: hidden;
+    color: var(--preview-muted-70);
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .app-preview__composer-control {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 28px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--preview-muted-70);
+    font: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .app-preview__composer-control--runtime {
+    padding: 0 9px;
+  }
+
+  .app-preview__composer-control--model {
+    max-width: 210px;
+  }
+
+  .app-preview__composer-control-inner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .app-preview__composer-control-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .app-preview__composer-icon {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    opacity: 0.8;
+  }
+
+  .app-preview :global(.app-preview__composer-icon--provider) {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    opacity: 0.8;
+  }
+
+  .app-preview__composer-icon--provider[data-provider="openai"] {
+    color: var(--preview-fg);
+  }
+
+  .app-preview :global(.app-preview__composer-icon--provider[data-provider="openai"]) {
+    color: var(--preview-fg);
+  }
+
+  .app-preview__composer-icon--provider[data-provider="claude"] {
+    color: #d97757;
+  }
+
+  .app-preview :global(.app-preview__composer-icon--provider[data-provider="claude"]) {
+    color: #d97757;
+  }
+
+  .app-preview__composer-icon--provider[data-provider="opencode"] {
+    color: #f1ecec;
+  }
+
+  .app-preview :global(.app-preview__composer-icon--provider[data-provider="opencode"]) {
+    color: #f1ecec;
+  }
+
+  .app-preview__composer-icon--provider[data-provider="cursor"] {
+    color: #a8a8a8;
+  }
+
+  .app-preview :global(.app-preview__composer-icon--provider[data-provider="cursor"]) {
+    color: #a8a8a8;
+  }
+
+  .app-preview__composer-chevron {
+    width: 12px;
+    height: 12px;
+    flex: none;
+    opacity: 0.6;
+  }
+
+  .app-preview__composer-chevron--runtime {
+    opacity: 0.5;
+  }
+
+  .app-preview__composer-separator {
+    width: 1px;
+    height: 16px;
+    margin: 0 2px;
+    flex: none;
+    background: var(--preview-border);
+  }
+
+  .app-preview__composer-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+  }
+
+  .app-preview__context-meter {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+  }
+
+  .app-preview__context-meter-ring {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    background:
+      radial-gradient(circle at center, var(--preview-bg) 52%, transparent 54%),
+      conic-gradient(from 168deg, rgba(245, 245, 245, 0.56) 0deg 278deg, rgba(245, 245, 245, 0.15) 278deg 360deg);
+    color: var(--preview-muted-70);
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .app-preview__context-meter-ring::after {
+    content: "";
+    position: absolute;
+    inset: 5px;
+    border-radius: 999px;
+    background: var(--preview-bg);
+  }
+
+  .app-preview__context-meter-ring span {
+    position: relative;
+    z-index: 1;
+  }
+
+  .app-preview__send {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: oklch(0.588 0.217 264 / 0.9);
+    color: #fff;
+  }
+
+  .app-preview__send svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .app-preview__send.is-disabled {
+    opacity: 1;
+    pointer-events: none;
+  }
+
+  .app-preview__checkout {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    max-width: 832px;
+    margin: 8px auto 0;
+    padding: 0 10px 0 12px;
+    color: var(--preview-muted-70);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .app-preview__checkout-label,
+  .app-preview__checkout-value {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    height: 24px;
+    gap: 4px;
+    padding: 0 7px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--preview-muted-70);
+    font: inherit;
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .app-preview__checkout-label:hover,
+  .app-preview__checkout-value:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--preview-fg-80);
+  }
+
+  .app-preview__checkout-value {
+    max-width: 240px;
+    justify-content: flex-end;
+  }
+
+  .app-preview__checkout-value [data-preview-label="branch"] {
+    overflow: hidden;
+    min-width: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-preview__popover {
+    position: absolute;
+    z-index: 8;
+    width: 224px;
+    padding: 4px;
+    border: 1px solid var(--preview-border);
+    border-radius: 8px;
+    background: var(--preview-surface);
+    color: var(--preview-fg);
+    box-shadow: 0 18px 52px rgba(0, 0, 0, 0.46);
+  }
+
+  .app-preview__popover[hidden] {
+    display: none !important;
+  }
+
+  .app-preview__popover-title {
+    padding: 7px 8px 5px;
+    color: var(--preview-muted-60);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .app-preview__popover[data-preview-open-menu="model"] .app-preview__popover-title,
+  .app-preview__popover[data-preview-open-menu="effort"] .app-preview__popover-title,
+  .app-preview__popover[data-preview-open-menu="access"] .app-preview__popover-title,
+  .app-preview__popover[data-preview-open-menu="worktree"] .app-preview__popover-title,
+  .app-preview__popover[data-preview-open-menu="branch"] .app-preview__popover-title {
+    display: none;
+  }
+
+  .app-preview__popover[data-preview-open-menu="model"] {
+    padding: 0;
+    border-radius: 14px;
+    background: var(--preview-surface);
+    box-shadow: 0 24px 90px rgba(0, 0, 0, 0.62);
+  }
+
+  .app-preview__popover[data-preview-open-menu="effort"],
+  .app-preview__popover[data-preview-open-menu="access"],
+  .app-preview__popover[data-preview-open-menu="worktree"] {
+    padding: 4px;
+    border-radius: 8px;
+    background: var(--preview-surface);
+    box-shadow: 0 18px 52px rgba(0, 0, 0, 0.46);
+  }
+
+  .app-preview__popover[data-preview-open-menu="push"] {
+    width: 176px !important;
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--preview-surface);
+    box-shadow: 0 18px 52px rgba(0, 0, 0, 0.46);
+  }
+
+  .app-preview__popover[data-preview-open-menu="push"] .app-preview__popover-title {
+    display: none;
+  }
+
+  .app-preview__popover[data-preview-open-menu="open"] {
+    width: 144px !important;
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--preview-surface);
+    box-shadow: 0 18px 52px rgba(0, 0, 0, 0.46);
+  }
+
+  .app-preview__popover[data-preview-open-menu="open"] .app-preview__popover-title {
+    display: none;
+  }
+
+  .app-preview__popover[data-preview-open-menu="branch"] {
+    padding: 0;
+    border-radius: 8px;
+    background: var(--preview-surface);
+    box-shadow: 0 18px 52px rgba(0, 0, 0, 0.46);
+  }
+
+  .app-preview :global(.app-preview__model-command) {
+    display: grid;
+    grid-template-columns: 54px minmax(0, 1fr);
+    width: 440px;
+    height: 384px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    background: #1b1b1b;
+    color: var(--preview-fg);
+  }
+
+  .app-preview :global(.app-preview__model-rail) {
+    display: grid;
+    align-content: start;
+    justify-items: center;
+    gap: 8px;
+    padding: 10px 6px;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .app-preview :global(.app-preview__model-rail-item) {
+    appearance: none;
+    position: relative;
+    display: grid;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(245, 245, 245, 0.56);
+    cursor: pointer;
+  }
+
+  .app-preview :global(.app-preview__model-rail-item[data-active="true"]) {
+    background: rgba(0, 0, 0, 0.34);
+  }
+
+  .app-preview :global(.app-preview__model-rail-item[data-provider="favorites"]) {
+    color: #f5f5f5;
+  }
+
+  .app-preview :global(.app-preview__model-rail-item[data-provider="openai"]) {
+    color: #f4f4f0;
+  }
+
+  .app-preview :global(.app-preview__model-rail-item[data-provider="claude"]) {
+    color: #d97757;
+  }
+
+  .app-preview :global(.app-preview__model-rail-item[data-provider="opencode"]) {
+    color: #f1ecec;
+  }
+
+  .app-preview :global(.app-preview__model-rail-item[data-provider="cursor"]) {
+    color: #a8a8a8;
+  }
+
+  .app-preview :global(.app-preview__model-rail-item[data-provider="gemini"]) {
+    color: #f5f5f5;
+  }
+
+  .app-preview :global(.app-preview__model-rail-item[data-disabled="true"]) {
+    cursor: not-allowed;
+  }
+
+  .app-preview :global(.app-preview__model-rail-item[data-disabled="true"] > svg) {
+    opacity: 0.64;
+  }
+
+  .app-preview :global(.app-preview__model-rail-item[data-active="true"]::after) {
+    position: absolute;
+    right: -8px;
+    width: 2px;
+    height: 28px;
+    border-radius: 99px;
+    background: #3267ff;
+    content: "";
+  }
+
+  .app-preview :global(.app-preview__model-rail-item > svg) {
+    width: 25px;
+    height: 25px;
+  }
+
+  .app-preview :global(.app-preview__model-rail-badge),
+  .app-preview :global(.app-preview__model-rail-clock) {
+    position: absolute;
+    top: 1px;
+    right: 0;
+    display: grid;
+    width: 11px;
+    height: 11px;
+    place-items: center;
+    color: #c1a537;
+    font-size: 10px;
+  }
+
+  .app-preview :global(.app-preview__model-rail-clock) {
+    color: rgba(245, 245, 245, 0.34);
+  }
+
+  .app-preview :global(.app-preview__model-rail-clock svg) {
+    width: 11px;
+    height: 11px;
+  }
+
+  .app-preview :global(.app-preview__model-command-content) {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .app-preview :global(.app-preview__model-search) {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    margin: 8px 10px;
+    padding: 9px 12px;
+    border: 2px solid rgba(52, 94, 204, 0.9);
+    border-radius: 14px;
+    color: rgba(245, 245, 245, 0.34);
+    box-shadow: 0 0 0 1px rgba(52, 94, 204, 0.28);
+  }
+
+  .app-preview :global(.app-preview__model-search svg) {
+    width: 20px;
+    height: 20px;
+  }
+
+  .app-preview :global(.app-preview__model-search input) {
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: rgba(245, 245, 245, 0.84);
+    font: inherit;
+    font-size: 16px;
+  }
+
+  .app-preview :global(.app-preview__model-search input::placeholder) {
+    color: rgba(245, 245, 245, 0.38);
+  }
+
+  .app-preview :global(.app-preview__model-command-list) {
+    display: grid;
+    padding: 0 6px 10px 6px;
+  }
+
+  .app-preview :global(.app-preview__model-command-row) {
+    appearance: none;
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 56px;
+    padding: 8px 12px;
+    border: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--preview-fg);
+    font: inherit;
+    text-align: left;
+  }
+
+  .app-preview :global(.app-preview__model-command-row[data-selected="true"]),
+  .app-preview :global(.app-preview__model-command-row:hover) {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .app-preview :global(.app-preview__model-favorite svg) {
+    width: 21px;
+    height: 21px;
+    color: rgba(245, 245, 245, 0.42);
+  }
+
+  .app-preview :global(.app-preview__model-favorite) {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .app-preview :global(.app-preview__model-favorite:hover svg),
+  .app-preview :global(.app-preview__model-favorite:focus-visible svg) {
+    color: #f5f5f5;
+  }
+
+  .app-preview :global(.app-preview__model-command-row[data-favorite="true"] .app-preview__model-favorite svg) {
+    color: #c1a537;
+  }
+
+  .app-preview :global(.app-preview__model-favorite:focus-visible) {
+    outline: 1px solid rgba(52, 94, 204, 0.9);
+    outline-offset: 1px;
+  }
+
+  .app-preview :global(.app-preview__model-empty) {
+    padding: 26px 18px;
+    color: rgba(245, 245, 245, 0.38);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .app-preview :global(.app-preview__model-row-copy) {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .app-preview :global(.app-preview__model-row-copy strong) {
+    overflow: hidden;
+    color: rgba(245, 245, 245, 0.94);
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-preview :global(.app-preview__model-row-copy small) {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: rgba(245, 245, 245, 0.38);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .app-preview :global(.app-preview__model-row-copy small svg) {
+    width: 14px;
+    height: 14px;
+    color: rgba(245, 245, 245, 0.82);
+  }
+
+  .app-preview :global(.app-preview__model-command-row[data-provider="openai"] .app-preview__model-row-copy small svg) {
+    color: #f4f4f0;
+  }
+
+  .app-preview :global(.app-preview__model-command-row[data-provider="claude"] .app-preview__model-row-copy small svg) {
+    color: #d97757;
+  }
+
+  .app-preview :global(.app-preview__model-command-row[data-provider="opencode"] .app-preview__model-row-copy small svg) {
+    color: #f1ecec;
+  }
+
+  .app-preview :global(.app-preview__model-command-row[data-provider="cursor"] .app-preview__model-row-copy small svg) {
+    color: #a8a8a8;
+  }
+
+  .app-preview :global(.app-preview__model-command-row[data-provider="gemini"] .app-preview__model-row-copy small svg) {
+    color: #8ab4f8;
+  }
+
+  .app-preview :global(.app-preview__model-command-row kbd) {
+    padding: 4px 8px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.055);
+    color: rgba(245, 245, 245, 0.5);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .app-preview :global(.app-preview__select-section) {
+    display: grid;
+  }
+
+  .app-preview :global(.app-preview__select-section--effort) {
+    min-width: 180px;
+  }
+
+  .app-preview :global(.app-preview__select-section--access) {
+    min-width: 256px;
+  }
+
+  .app-preview :global(.app-preview__select-section--workspace) {
+    min-width: 180px;
+  }
+
+  .app-preview :global(.app-preview__select-label) {
+    padding: 10px 8px 6px;
+    color: rgba(245, 245, 245, 0.42);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .app-preview :global(.app-preview__select-label--fast) {
+    padding-top: 8px;
+  }
+
+  .app-preview :global(.app-preview__select-item) {
+    appearance: none;
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 28px;
+    padding: 4px 16px 4px 8px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: rgba(245, 245, 245, 0.88);
+    font: inherit;
+    font-size: 13px;
+    line-height: 20px;
+    text-align: left;
+  }
+
+  .app-preview :global(.app-preview__select-item--effort) {
+    min-height: 36px;
+    padding: 4px 16px 4px 8px;
+  }
+
+  .app-preview :global(.app-preview__select-item--access) {
+    min-height: 48px;
+    padding: 8px 16px 8px 8px;
+  }
+
+  .app-preview :global(.app-preview__select-item--workspace) {
+    min-height: 28px;
+    padding: 4px 16px 4px 8px;
+  }
+
+  .app-preview :global(.app-preview__select-item:hover) {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .app-preview :global(.app-preview__select-check) {
+    display: inline-grid;
+    width: 16px;
+    height: 16px;
+    place-items: center;
+    color: rgba(245, 245, 245, 0.62);
+  }
+
+  .app-preview :global(.app-preview__select-check svg) {
+    width: 16px;
+    height: 16px;
+  }
+
+  .app-preview :global(.app-preview__select-separator) {
+    height: 1px;
+    margin: 6px 8px;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .app-preview :global(.app-preview__select-copy) {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .app-preview :global(.app-preview__select-copy > span:last-child) {
+    display: grid;
+    min-width: 0;
+    gap: 1px;
+  }
+
+  .app-preview :global(.app-preview__select-copy strong) {
+    overflow: hidden;
+    color: rgba(245, 245, 245, 0.9);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 18px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-preview :global(.app-preview__select-item--effort .app-preview__select-copy strong) {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+  }
+
+  .app-preview :global(.app-preview__select-copy small) {
+    overflow: hidden;
+    color: rgba(245, 245, 245, 0.42);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 15px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-preview :global(.app-preview__select-icon) {
+    display: inline-grid;
+    width: 16px;
+    height: 16px;
+    flex: none;
+    place-items: center;
+    color: rgba(245, 245, 245, 0.55);
+  }
+
+  .app-preview :global(.app-preview__select-icon svg) {
+    width: 16px;
+    height: 16px;
+  }
+
+  .app-preview :global(.app-preview__branch-combobox) {
+    display: flex;
+    max-height: 368px;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 8px;
+    background: #1b1b1b;
+    color: rgba(245, 245, 245, 0.9);
+  }
+
+  .app-preview :global(.app-preview__branch-search) {
+    padding: 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .app-preview :global(.app-preview__branch-search input) {
+    display: block;
+    width: 100%;
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 6px;
+    outline: none;
+    background: rgba(255, 255, 255, 0.025);
+    color: rgba(245, 245, 245, 0.9);
+    font: inherit;
+    font-size: 13px;
+  }
+
+  .app-preview :global(.app-preview__branch-search input:focus) {
+    border-color: rgba(58, 111, 255, 0.8);
+    box-shadow: 0 0 0 2px rgba(58, 111, 255, 0.26);
+  }
+
+  .app-preview :global(.app-preview__branch-search input::placeholder) {
+    color: rgba(245, 245, 245, 0.36);
+  }
+
+  .app-preview :global(.app-preview__branch-list) {
+    display: grid;
+    max-height: 224px;
+    overflow: auto;
+    padding: 4px;
+  }
+
+  .app-preview :global(.app-preview__branch-item) {
+    appearance: none;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 28px;
+    padding: 4px 8px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: rgba(245, 245, 245, 0.88);
+    font: inherit;
+    font-size: 13px;
+    line-height: 20px;
+    text-align: left;
+  }
+
+  .app-preview :global(.app-preview__branch-item:hover),
+  .app-preview :global(.app-preview__branch-item[data-selected="true"]) {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .app-preview :global(.app-preview__branch-item span) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-preview :global(.app-preview__branch-item small) {
+    color: rgba(245, 245, 245, 0.42);
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  .app-preview :global(.app-preview__branch-empty) {
+    padding: 8px;
+    color: rgba(245, 245, 245, 0.42);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  .app-preview__popover-section {
+    padding: 8px 8px 4px;
+    color: rgba(245, 245, 245, 0.3);
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .app-preview__model-menu {
+    display: grid;
+    grid-template-columns: 168px minmax(0, 1fr);
+    gap: 4px;
+    padding: 0;
+  }
+
+  .app-preview__model-providers,
+  .app-preview__model-options {
+    display: grid;
+    align-content: start;
+    gap: 1px;
+  }
+
+  .app-preview__model-providers {
+    padding-right: 4px;
+    border-right: 1px solid var(--preview-border);
+  }
+
+  .app-preview__model-provider,
+  .app-preview__model-option {
+    appearance: none;
+    display: grid;
+    width: 100%;
+    min-height: 28px;
+    align-items: center;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: rgba(245, 245, 245, 0.86);
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+  }
+
+  .app-preview__model-provider {
+    grid-template-columns: 18px minmax(0, 1fr) 12px;
+    gap: 8px;
+    padding: 5px 8px;
+  }
+
+  .app-preview__model-provider[data-active="true"],
+  .app-preview__model-provider:hover,
+  .app-preview__model-option:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--preview-fg);
+  }
+
+  .app-preview__model-provider[data-disabled="true"] {
+    color: rgba(245, 245, 245, 0.34);
+  }
+
+  .app-preview__model-provider-icon {
+    display: inline-grid;
+    width: 18px;
+    height: 18px;
+    place-items: center;
+    color: rgba(245, 245, 245, 0.6);
+    font-size: 13px;
+  }
+
+  .app-preview__model-provider-copy {
+    display: grid;
+    min-width: 0;
+    gap: 1px;
+  }
+
+  .app-preview__model-provider-copy > span,
+  .app-preview__model-option > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-preview__model-provider-copy small {
+    color: rgba(245, 245, 245, 0.34);
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .app-preview__model-provider-arrow {
+    color: rgba(245, 245, 245, 0.42);
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  .app-preview__model-options {
+    padding-left: 4px;
+  }
+
+  .app-preview__model-options-label {
+    padding: 6px 8px 5px;
+    color: rgba(245, 245, 245, 0.34);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .app-preview__model-option {
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 8px;
+    padding: 5px 10px 5px 8px;
+  }
+
+  .app-preview__model-option[data-selected="true"] {
+    background: rgba(255, 255, 255, 0.045);
+  }
+
+  .app-preview__model-check {
+    color: rgba(245, 245, 245, 0.62);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .app-preview :global(.app-preview__model-menu) {
+    display: grid;
+    grid-template-columns: 190px 210px;
+    align-items: start;
+    gap: 4px;
+  }
+
+  .app-preview :global(.app-preview__model-panel) {
+    display: grid;
+    align-content: start;
+    gap: 1px;
+    width: 100%;
+    padding: 4px;
+    border: 1px solid var(--preview-border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--preview-bg) 98%, white);
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.42);
+  }
+
+  .app-preview :global(.app-preview__model-menu:not(:has(.app-preview__model-options))) {
+    grid-template-columns: 190px;
+  }
+
+  .app-preview :global(.app-preview__model-separator) {
+    height: 1px;
+    margin: 4px 8px;
+    background: var(--preview-border);
+  }
+
+  .app-preview :global(.app-preview__model-provider),
+  .app-preview :global(.app-preview__model-option),
+  .app-preview :global(.app-preview__popover-item) {
+    appearance: none;
+    display: grid;
+    width: 100%;
+    min-height: 28px;
+    align-items: center;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: rgba(245, 245, 245, 0.86);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+  }
+
+  .app-preview :global(.app-preview__model-provider) {
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+    gap: 8px;
+    min-height: 28px;
+    padding: 4px 8px;
+  }
+
+  .app-preview :global(.app-preview__model-provider[data-active="true"]),
+  .app-preview :global(.app-preview__model-provider:hover),
+  .app-preview :global(.app-preview__model-option:hover),
+  .app-preview :global(.app-preview__popover-item:hover) {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--preview-fg);
+  }
+
+  .app-preview :global(.app-preview__model-provider[data-disabled="true"]) {
+    color: rgba(245, 245, 245, 0.34);
+  }
+
+  .app-preview :global(.app-preview__model-provider-icon) {
+    display: inline-grid;
+    width: 16px;
+    height: 16px;
+    place-items: center;
+    color: rgba(245, 245, 245, 0.72);
+  }
+
+  .app-preview :global(.app-preview__model-provider-icon svg) {
+    width: 16px;
+    height: 16px;
+  }
+
+  .app-preview :global(.app-preview__model-provider[data-disabled="true"] .app-preview__model-provider-icon) {
+    opacity: 0.8;
+  }
+
+  .app-preview :global(.app-preview__model-provider-copy) {
+    min-width: 0;
+  }
+
+  .app-preview :global(.app-preview__model-provider-copy > span),
+  .app-preview :global(.app-preview__model-option > span:last-child),
+  .app-preview :global(.app-preview__popover-copy > span) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-preview :global(.app-preview__model-provider-arrow) {
+    display: inline-grid;
+    width: 14px;
+    place-items: center;
+    color: rgba(245, 245, 245, 0.42);
+  }
+
+  .app-preview :global(.app-preview__model-provider-arrow svg) {
+    width: 14px;
+    height: 14px;
+  }
+
+  .app-preview :global(.app-preview__model-provider-state) {
+    color: rgba(245, 245, 245, 0.5);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+
+  .app-preview :global(.app-preview__model-options) {
+    min-width: 210px;
+  }
+
+  .app-preview :global(.app-preview__model-options-label),
+  .app-preview :global(.app-preview__popover-section) {
+    padding: 4px 8px 5px;
+    color: rgba(245, 245, 245, 0.42);
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .app-preview :global(.app-preview__model-option) {
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 8px;
+    min-height: 28px;
+    padding: 4px 16px 4px 8px;
+  }
+
+  .app-preview :global(.app-preview__model-option[data-selected="true"]),
+  .app-preview :global(.app-preview__popover-item[data-selected="true"]) {
+    background: rgba(255, 255, 255, 0.045);
+  }
+
+  .app-preview :global(.app-preview__model-check),
+  .app-preview :global(.app-preview__popover-check),
+  .app-preview :global(.app-preview__popover-icon) {
+    display: inline-grid;
+    place-items: center;
+    color: rgba(245, 245, 245, 0.62);
+  }
+
+  .app-preview :global(.app-preview__model-check svg),
+  .app-preview :global(.app-preview__popover-icon svg) {
+    width: 16px;
+    height: 16px;
+  }
+
+  .app-preview :global(.app-preview__popover-item) {
+    grid-template-columns: 14px minmax(0, 1fr) auto;
+    column-gap: 12px;
+    padding: 5px 8px;
+  }
+
+  .app-preview :global(.app-preview__popover-copy) {
+    display: grid;
+    min-width: 0;
+    gap: 1px;
+  }
+
+  .app-preview :global(.app-preview__popover-item kbd) {
+    color: rgba(245, 245, 245, 0.34);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+  }
+
+  .app-preview__popover-items {
+    display: grid;
+  }
+
+  .app-preview__popover-item {
+    appearance: none;
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 12px;
+    width: 100%;
+    min-height: 28px;
+    padding: 5px 8px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: rgba(245, 245, 245, 0.86);
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: default;
+  }
+
+  .app-preview__popover-item[data-selected="true"] {
+    background: rgba(255, 255, 255, 0.045);
+  }
+
+  .app-preview__popover-item[data-tone="muted"] {
+    color: rgba(245, 245, 245, 0.38);
+  }
+
+  .app-preview__popover-item[data-tone="danger"] {
+    color: #ff8f8f;
+  }
+
+  .app-preview__popover-check {
+    color: rgba(245, 245, 245, 0.56);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  @keyframes app-preview-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+
+    50% {
+      opacity: 0.5;
+    }
+  }
+
+  .app-preview__popover-copy {
+    display: grid;
+    min-width: 0;
+    gap: 1px;
+  }
+
+  .app-preview__popover-copy > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-preview__popover-item kbd {
+    color: rgba(245, 245, 245, 0.34);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+  }
+
+  .app-preview__popover-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--preview-fg);
+  }
+
+  .app-preview__popover-item small {
+    color: rgba(245, 245, 245, 0.38);
+    font-size: 10px;
+    font-weight: 500;
+    text-align: right;
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="push"] .app-preview__popover-items) {
+    display: grid;
+    gap: 2px;
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="push"] .app-preview__popover-item) {
+    grid-template-columns: 20px minmax(0, 1fr);
+    min-height: 34px;
+    column-gap: 8px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    color: rgba(245, 245, 245, 0.88);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="push"] .app-preview__popover-item:hover) {
+    background: rgba(255, 255, 255, 0.055);
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="push"] .app-preview__popover-item[data-tone="muted"]) {
+    color: rgba(245, 245, 245, 0.46);
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="push"] .app-preview__popover-icon) {
+    width: 16px;
+    height: 16px;
+    color: currentColor;
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="push"] .app-preview__popover-icon svg) {
+    width: 16px;
+    height: 16px;
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="push"] .app-preview__popover-copy) {
+    display: block;
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="open"] .app-preview__popover-items) {
+    display: grid;
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="open"] .app-preview__popover-item) {
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    min-height: 30px;
+    column-gap: 8px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    color: rgba(245, 245, 245, 0.9);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="open"] .app-preview__popover-item:hover) {
+    background: rgba(255, 255, 255, 0.055);
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="open"] .app-preview__popover-icon) {
+    width: 16px;
+    height: 16px;
+    color: rgba(245, 245, 245, 0.62);
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="open"] .app-preview__popover-icon svg) {
+    width: 16px;
+    height: 16px;
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="open"] .app-preview__popover-copy) {
+    display: block;
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="open"] .app-preview__popover-item kbd) {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    color: rgba(245, 245, 245, 0.42);
+    font-size: 10px;
+    font-family: inherit;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    font-variant-numeric: normal;
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="open"] .app-preview__shortcut-meta) {
+    font-weight: 500;
+  }
+
+  .app-preview :global(.app-preview__popover[data-preview-open-menu="open"] .app-preview__shortcut-letter) {
+    font-family: inherit;
+    font-size: 10px;
+    font-style: normal;
+    font-variant-numeric: normal;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  .app-preview__thread[data-active="true"] {
+    background: var(--preview-accent-strong);
+    color: var(--preview-fg);
+  }
+
+  @media (max-width: 940px) {
+    .app-preview {
+      aspect-ratio: auto;
+      min-height: 520px;
+    }
+
+    .app-preview__chrome {
+      grid-template-columns: 1fr;
+    }
+
+    .app-preview__sidebar {
+      display: none;
+    }
+
+    .app-preview__topbar {
+      padding-inline: 12px;
+    }
+
+    .app-preview__composer-shell {
+      padding-inline: 12px;
+    }
+
+    .app-preview__timeline {
+      padding-inline: 12px;
+    }
+  }
+</style>
