@@ -49,6 +49,36 @@ describe("TerminalOpenInput", () => {
     ).toBe(false);
   });
 
+  it("accepts maximum cols and rows", () => {
+    expect(
+      decodes(TerminalOpenInput, {
+        threadId: "thread-1",
+        cwd: "/tmp/project",
+        cols: 1000,
+        rows: 500,
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects cols and rows above maximum", () => {
+    expect(
+      decodes(TerminalOpenInput, {
+        threadId: "thread-1",
+        cwd: "/tmp/project",
+        cols: 1001,
+        rows: 24,
+      }),
+    ).toBe(false);
+    expect(
+      decodes(TerminalOpenInput, {
+        threadId: "thread-1",
+        cwd: "/tmp/project",
+        cols: 80,
+        rows: 501,
+      }),
+    ).toBe(false);
+  });
+
   it("defaults terminalId when missing", () => {
     const parsed = decodeSync(TerminalOpenInput, {
       threadId: "thread-1",
