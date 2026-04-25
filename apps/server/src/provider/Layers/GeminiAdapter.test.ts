@@ -590,10 +590,10 @@ describe("GeminiAdapterLive", () => {
     expect(
       resolveRequestedGeminiModeId({
         interactionMode: "default",
-        runtimeModeId: "auto_edit",
+        runtimeModeId: "autoEdit",
         currentModeId: "plan",
       }),
-    ).toBe("auto_edit");
+    ).toBe("autoEdit");
     expect(
       resolveRequestedGeminiModeId({
         interactionMode: "default",

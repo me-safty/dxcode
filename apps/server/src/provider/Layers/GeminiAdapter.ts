@@ -175,11 +175,18 @@ function runtimeModeToGeminiModeId(runtimeMode: ProviderSession["runtimeMode"]):
     case "approval-required":
       return "default";
     case "auto-accept-edits":
-      return "auto_edit";
+      return "autoEdit";
     case "full-access":
     default:
       return "yolo";
   }
+}
+
+function getGeminiCliApprovalModeFlag(runtimeModeId: string): string {
+  if (runtimeModeId === "autoEdit") {
+    return "auto_edit";
+  }
+  return runtimeModeId;
 }
 
 export function resolveRequestedGeminiModeId(input: {
@@ -1321,6 +1328,7 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
           childProcessSpawner,
           binaryPath: input.binaryPath,
           cwd: input.cwd,
+          approvalMode: getGeminiCliApprovalModeFlag(input.runtimeModeId),
           ...(spawnEnv ? { env: spawnEnv } : {}),
           ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
           ...(input.allowResumeFallback !== undefined

@@ -16,16 +16,18 @@ export interface GeminiAcpRuntimeInput extends Omit<
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly binaryPath: string;
   readonly env?: Readonly<Record<string, string>>;
+  readonly approvalMode?: string;
 }
 
 export function buildGeminiAcpSpawnInput(input: {
   readonly binaryPath: string;
   readonly cwd: string;
   readonly env?: Readonly<Record<string, string>>;
+  readonly approvalMode?: string;
 }): AcpSpawnInput {
   return {
     command: input.binaryPath,
-    args: ["--acp"],
+    args: ["--acp", ...(input.approvalMode ? [`--approval-mode=${input.approvalMode}`] : [])],
     cwd: input.cwd,
     ...(input.env ? { env: input.env } : {}),
   };
