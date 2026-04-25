@@ -1446,6 +1446,11 @@ const previewTurns: Record<string, PreviewTurn[]> = {
   const initAppPreviewThreads = () => {
     for (const preview of document.querySelectorAll(".app-preview")) {
       const previewElement = preview as HTMLElement;
+      if (previewElement.dataset.previewInitialized === "true") {
+        continue;
+      }
+      previewElement.dataset.previewInitialized = "true";
+
       const popover = preview.querySelector<HTMLElement>("[data-preview-popover]");
       const popoverTitle = preview.querySelector<HTMLElement>("[data-preview-popover-title]");
       const popoverItems = preview.querySelector<HTMLElement>("[data-preview-popover-items]");
@@ -2210,11 +2215,13 @@ const previewTurns: Record<string, PreviewTurn[]> = {
       });
 
       document.addEventListener("keydown", (event: KeyboardEvent) => {
-        if (event.key === "Escape") {
-          closeTransient();
+        if (!(event.target instanceof Node) || !preview.contains(event.target)) {
           return;
         }
 
+        if (event.key === "Escape") {
+          closeTransient();
+        }
       });
     }
   };
