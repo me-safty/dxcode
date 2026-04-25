@@ -166,34 +166,36 @@ function ExpandedMenu({
   activeButtonRef: React.RefObject<HTMLButtonElement | null>;
 }) {
   return (
-    <ul
-      className="mr-3 flex h-[min(60vh,24rem)] min-w-45 max-w-88 flex-col gap-0.5 overflow-y-auto overscroll-contain rounded-xl border border-border bg-popover p-1.5 shadow-lg not-dark:bg-clip-padding"
+    <div
+      className="mr-3 flex h-[min(60vh,24rem)] min-w-45 max-w-88 flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-lg not-dark:bg-clip-padding"
       data-testid="chat-minimap-menu"
     >
-      {entries.map((entry, index) => {
-        const isActive = activeIndex === index;
-        const preview = displayPreviewText(entry);
-        return (
-          <li key={entry.rowKey}>
-            <button
-              type="button"
-              data-testid="chat-minimap-menu-item"
-              data-active={isActive ? "true" : undefined}
-              data-message-id={entry.messageId}
-              aria-current={isActive ? "true" : undefined}
-              ref={isActive ? activeButtonRef : null}
-              onClick={() => onNavigate(entry)}
-              className={cn(
-                "w-full cursor-pointer rounded-md px-3 py-1.5 text-left text-sm transition-colors",
-                "hover:bg-muted hover:text-foreground",
-                isActive ? "bg-muted/70 text-foreground" : "text-foreground/75",
-              )}
-            >
-              <span className="block truncate">{preview}</span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+      <ul className="flex flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain p-1.5">
+        {entries.map((entry, index) => {
+          const isActive = activeIndex === index;
+          const preview = displayPreviewText(entry);
+          return (
+            <li key={entry.rowKey}>
+              <button
+                type="button"
+                data-testid="chat-minimap-menu-item"
+                data-active={isActive ? "true" : undefined}
+                data-message-id={entry.messageId}
+                aria-current={isActive ? "true" : undefined}
+                ref={isActive ? activeButtonRef : null}
+                onClick={() => onNavigate(entry)}
+                className={cn(
+                  "w-full cursor-pointer rounded-md px-3 py-1.5 text-left text-sm transition-colors",
+                  "hover:bg-muted hover:text-foreground",
+                  isActive ? "bg-muted/70 text-foreground" : "text-foreground/75",
+                )}
+              >
+                <span className="block truncate">{preview}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
