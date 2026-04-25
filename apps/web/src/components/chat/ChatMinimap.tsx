@@ -51,7 +51,7 @@ export const ChatMinimap = memo(function ChatMinimap({
     scrollNode?.addEventListener("scroll", recompute, { passive: true });
     // `listen` lives on the state object, not the ref itself. Payload is a
     // timestamp we don't need — we just want a pulse on each remeasure.
-    const unsubscribe = list.getState?.().listen?.("lastPositionUpdate", () => {
+    const unsubscribe = list.getState?.()?.listen?.("lastPositionUpdate", () => {
       recompute();
     });
 
