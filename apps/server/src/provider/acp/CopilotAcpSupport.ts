@@ -39,6 +39,7 @@ export const makeCopilotAcpRuntime = (
       AcpSessionRuntime.layer({
         ...input,
         spawn: buildCopilotAcpSpawnInput(input.copilotSettings, input.cwd),
+        authMethodId: "copilot-login",
       }).pipe(
         Layer.provide(
           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),

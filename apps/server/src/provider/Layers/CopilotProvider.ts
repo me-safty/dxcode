@@ -1,11 +1,13 @@
 import type {
   CopilotSettings,
   ModelCapabilities,
+  ServerProviderAuth,
   ServerProvider,
   ServerProviderModel,
 } from "@t3tools/contracts";
+import { AcpRequestError } from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
-import { Cause, Effect, Equal, Exit, Layer, Option, Stream } from "effect";
+import { Cause, Effect, Equal, Exit, Layer, Option, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerSettingsError } from "@t3tools/contracts";
@@ -49,6 +51,9 @@ const FALLBACK_MODELS: ReadonlyArray<ServerProviderModel> = [
     capabilities: DEFAULT_COPILOT_MODEL_CAPABILITIES,
   },
 ];
+
+const COPILOT_AUTH_REQUIRED_MESSAGE =
+  "GitHub Copilot is not authenticated. Run `copilot login` and try again.";
 
 interface CopilotSessionSelectOption {
   readonly value: string;
@@ -150,6 +155,15 @@ function buildCopilotDiscoveredModelsFromConfigOptions(
       } satisfies ServerProviderModel,
     ];
   });
+}
+
+function isCopilotAuthRequiredCause(cause: Cause.Cause<unknown>): boolean {
+  const error = Cause.squash(cause);
+  return (
+    Schema.is(AcpRequestError)(error) &&
+    error.code === -32000 &&
+    error.errorMessage.toLowerCase().includes("authentication required")
+  );
 }
 
 const withCopilotAcpProbeRuntime = <A, E, R>(
@@ -298,21 +312,28 @@ export const checkCopilotProviderStatus = Effect.fn("checkCopilotProviderStatus"
 
     let discoveredModels = Option.none<ReadonlyArray<ServerProviderModel>>();
     let discoveryWarning: string | undefined;
+    let auth: ServerProviderAuth = { status: "unknown" };
     const discoveryExit = yield* Effect.exit(
       discoverCopilotModelsViaAcp(copilotSettings).pipe(
         Effect.timeoutOption(COPILOT_ACP_MODEL_DISCOVERY_TIMEOUT_MS),
       ),
     );
     if (Exit.isFailure(discoveryExit)) {
-      yield* Effect.logWarning("Copilot ACP model discovery failed", {
-        cause: Cause.pretty(discoveryExit.cause),
-      });
-      discoveryWarning = "Copilot ACP model discovery failed. Check server logs for details.";
+      if (isCopilotAuthRequiredCause(discoveryExit.cause)) {
+        auth = { status: "unauthenticated" };
+        discoveryWarning = COPILOT_AUTH_REQUIRED_MESSAGE;
+      } else {
+        yield* Effect.logWarning("Copilot ACP model discovery failed", {
+          cause: Cause.pretty(discoveryExit.cause),
+        });
+        discoveryWarning = "Copilot ACP model discovery failed. Check server logs for details.";
+      }
     } else if (Option.isNone(discoveryExit.value)) {
       discoveryWarning = `Copilot ACP model discovery timed out after ${COPILOT_ACP_MODEL_DISCOVERY_TIMEOUT_MS}ms.`;
     } else if (discoveryExit.value.value.length === 0) {
       discoveryWarning = "Copilot ACP model discovery returned no built-in models.";
     } else {
+      auth = { status: "authenticated" };
       discoveredModels = discoveryExit.value;
     }
     const models = getCopilotModels(
@@ -331,8 +352,9 @@ export const checkCopilotProviderStatus = Effect.fn("checkCopilotProviderStatus"
       probe: {
         installed: true,
         version,
-        status: discoveryWarning ? "warning" : "ready",
-        auth: { status: "unknown" },
+        status:
+          auth.status === "unauthenticated" ? "error" : discoveryWarning ? "warning" : "ready",
+        auth,
         ...(discoveryWarning ? { message: discoveryWarning } : {}),
       },
     });
