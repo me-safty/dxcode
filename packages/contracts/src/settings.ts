@@ -30,6 +30,16 @@ export const SidebarProjectGroupingMode = Schema.Literals([
 export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
 export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
 
+export const DEFAULT_TTS_SERVER_URL = "http://127.0.0.1:8880";
+export const DEFAULT_TTS_VOICE = "af_heart";
+
+export const TtsClientSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  serverUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_TTS_SERVER_URL))),
+  voice: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_TTS_VOICE))),
+});
+export type TtsClientSettings = typeof TtsClientSettings.Type;
+
 export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -57,6 +67,7 @@ export const ClientSettingsSchema = Schema.Struct({
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
   ),
+  tts: TtsClientSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 

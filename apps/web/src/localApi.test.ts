@@ -541,6 +541,11 @@ describe("wsApi", () => {
       sidebarProjectSortOrder: "manual" as const,
       sidebarThreadSortOrder: "created_at" as const,
       timestampFormat: "24-hour" as const,
+      tts: {
+        enabled: true,
+        serverUrl: "http://127.0.0.1:8880",
+        voice: "af_heart",
+      },
     };
     const getClientSettings = vi.fn().mockResolvedValue({
       ...clientSettings,
@@ -600,6 +605,11 @@ describe("wsApi", () => {
       sidebarProjectSortOrder: "manual" as const,
       sidebarThreadSortOrder: "created_at" as const,
       timestampFormat: "24-hour" as const,
+      tts: {
+        enabled: true,
+        serverUrl: "http://127.0.0.1:8880",
+        voice: "af_heart",
+      },
     };
 
     await api.persistence.setClientSettings(clientSettings);

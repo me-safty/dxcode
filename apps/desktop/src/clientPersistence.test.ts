@@ -61,6 +61,11 @@ const clientSettings: ClientSettings = {
   sidebarProjectSortOrder: "manual",
   sidebarThreadSortOrder: "created_at",
   timestampFormat: "24-hour",
+  tts: {
+    enabled: true,
+    serverUrl: "http://127.0.0.1:8880",
+    voice: "af_heart",
+  },
 };
 
 const savedRegistryRecord: PersistedSavedEnvironmentRecord = {

@@ -5,6 +5,7 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveAssistantMessagePlayState,
 } from "./MessagesTimeline.logic";
 
 describe("computeMessageDurationStart", () => {
@@ -199,6 +200,78 @@ describe("resolveAssistantMessageCopyState", () => {
       }),
     ).toEqual({
       text: "Interim thought",
+      visible: false,
+    });
+  });
+});
+
+describe("resolveAssistantMessagePlayState", () => {
+  it("returns enabled play state for completed assistant messages when tts is enabled", () => {
+    expect(
+      resolveAssistantMessagePlayState({
+        showCopyButton: true,
+        text: "Ship it",
+        streaming: false,
+        ttsEnabled: true,
+      }),
+    ).toEqual({
+      text: "Ship it",
+      visible: true,
+    });
+  });
+
+  it("hides play while an assistant message is still streaming", () => {
+    expect(
+      resolveAssistantMessagePlayState({
+        showCopyButton: true,
+        text: "Still streaming",
+        streaming: true,
+        ttsEnabled: true,
+      }),
+    ).toEqual({
+      text: "Still streaming",
+      visible: false,
+    });
+  });
+
+  it("hides play for empty completed assistant messages", () => {
+    expect(
+      resolveAssistantMessagePlayState({
+        showCopyButton: true,
+        text: "   ",
+        streaming: false,
+        ttsEnabled: true,
+      }),
+    ).toEqual({
+      text: null,
+      visible: false,
+    });
+  });
+
+  it("hides play for non-terminal assistant messages", () => {
+    expect(
+      resolveAssistantMessagePlayState({
+        showCopyButton: false,
+        text: "Interim thought",
+        streaming: false,
+        ttsEnabled: true,
+      }),
+    ).toEqual({
+      text: "Interim thought",
+      visible: false,
+    });
+  });
+
+  it("hides play when tts is disabled even on a completed assistant message", () => {
+    expect(
+      resolveAssistantMessagePlayState({
+        showCopyButton: true,
+        text: "Ship it",
+        streaming: false,
+        ttsEnabled: false,
+      }),
+    ).toEqual({
+      text: "Ship it",
       visible: false,
     });
   });

@@ -81,6 +81,24 @@ export function resolveAssistantMessageCopyState({
   };
 }
 
+export function resolveAssistantMessagePlayState({
+  text,
+  showCopyButton,
+  streaming,
+  ttsEnabled,
+}: {
+  text: string | null;
+  showCopyButton: boolean;
+  streaming: boolean;
+  ttsEnabled: boolean;
+}) {
+  const hasText = text !== null && text.trim().length > 0;
+  return {
+    text: hasText ? text : null,
+    visible: ttsEnabled && showCopyButton && hasText && !streaming,
+  };
+}
+
 function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<TimelineEntry>) {
   const lastAssistantMessageIdByResponseKey = new Map<string, string>();
   let nullTurnResponseIndex = 0;

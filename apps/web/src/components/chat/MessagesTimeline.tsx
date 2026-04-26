@@ -35,12 +35,15 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { MessagePlayButton } from "./MessagePlayButton";
+import { stopPlayback as stopTtsPlayback } from "~/hooks/useTtsPlayer";
 import {
   computeStableMessagesTimelineRows,
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveAssistantMessagePlayState,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
@@ -81,6 +84,7 @@ interface TimelineRowSharedState {
   resolvedTheme: "light" | "dark";
   workspaceRoot: string | undefined;
   activeThreadEnvironmentId: EnvironmentId;
+  ttsEnabled: boolean;
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
@@ -113,6 +117,7 @@ interface MessagesTimelineProps {
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
+  ttsEnabled: boolean;
   onIsAtEndChange: (isAtEnd: boolean) => void;
 }
 
@@ -141,6 +146,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   resolvedTheme,
   timestampFormat,
   workspaceRoot,
+  ttsEnabled,
   onIsAtEndChange,
 }: MessagesTimelineProps) {
   const rawRows = useMemo(
@@ -170,6 +176,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onIsAtEndChange(state.isAtEnd);
     }
   }, [listRef, onIsAtEndChange]);
+
+  // Audio is owned by a module-level singleton (see useTtsPlayer.ts) so it
+  // survives row unmounts during scroll. ChatView gives MessagesTimeline a
+  // `key={activeThread.id}` prop, so this cleanup fires exactly when the
+  // user navigates to a different thread — which is when we want playback
+  // to stop.
+  useEffect(() => {
+    return () => {
+      stopTtsPlayback();
+    };
+  }, []);
 
   const previousRowCountRef = useRef(rows.length);
   useEffect(() => {
@@ -204,6 +221,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       resolvedTheme,
       workspaceRoot,
       activeThreadEnvironmentId,
+      ttsEnabled,
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
@@ -220,6 +238,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       resolvedTheme,
       workspaceRoot,
       activeThreadEnvironmentId,
+      ttsEnabled,
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
@@ -390,6 +409,12 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
             showCopyButton: row.showAssistantCopyButton,
             streaming: row.message.streaming || assistantTurnStillInProgress,
           });
+          const assistantPlayState = resolveAssistantMessagePlayState({
+            text: row.message.text ?? null,
+            showCopyButton: row.showAssistantCopyButton,
+            streaming: row.message.streaming || assistantTurnStillInProgress,
+            ttsEnabled: ctx.ttsEnabled,
+          });
           return (
             <>
               {row.showCompletionDivider && (
@@ -429,14 +454,25 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                       )
                     )}
                   </p>
-                  {assistantCopyState.visible ? (
-                    <div className="flex items-center opacity-0 transition-opacity duration-200  group-hover/assistant:opacity-100">
-                      <MessageCopyButton
-                        text={assistantCopyState.text ?? ""}
-                        size="icon-xs"
-                        variant="outline"
-                        className="border-border/50 bg-background/35 text-muted-foreground/45 shadow-none hover:border-border/70 hover:bg-background/55 hover:text-muted-foreground/70"
-                      />
+                  {assistantCopyState.visible || assistantPlayState.visible ? (
+                    <div className="flex items-center gap-1 opacity-0 transition-opacity duration-200  group-hover/assistant:opacity-100">
+                      {assistantPlayState.visible ? (
+                        <MessagePlayButton
+                          messageId={row.message.id}
+                          text={assistantPlayState.text ?? ""}
+                          size="icon-xs"
+                          variant="outline"
+                          className="border-border/50 bg-background/35 text-muted-foreground/45 shadow-none hover:border-border/70 hover:bg-background/55 hover:text-muted-foreground/70"
+                        />
+                      ) : null}
+                      {assistantCopyState.visible ? (
+                        <MessageCopyButton
+                          text={assistantCopyState.text ?? ""}
+                          size="icon-xs"
+                          variant="outline"
+                          className="border-border/50 bg-background/35 text-muted-foreground/45 shadow-none hover:border-border/70 hover:bg-background/55 hover:text-muted-foreground/70"
+                        />
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
