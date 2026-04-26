@@ -1287,6 +1287,12 @@ const previewTurns: Record<string, PreviewTurn[]> = {
       '<svg class="app-preview__composer-icon" data-preview-access-icon data-access-mode="full-access" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path></svg>',
   };
 
+  const syncProjectOrderClasses = (list: HTMLElement) => {
+    Array.from(list.querySelectorAll<HTMLElement>("[data-preview-project]")).forEach((project, index) => {
+      project.classList.toggle("app-preview__project--secondary", index > 0);
+    });
+  };
+
   const initAppPreviewThreads = () => {
     for (const preview of document.querySelectorAll(".app-preview")) {
       const previewElement = preview as HTMLElement;
@@ -2065,6 +2071,7 @@ const previewTurns: Record<string, PreviewTurn[]> = {
                 : Number(a.dataset.projectIndex ?? 0) - Number(b.dataset.projectIndex ?? 0),
             )
             .forEach((project) => list.append(project));
+          syncProjectOrderClasses(list);
           return;
         }
 
