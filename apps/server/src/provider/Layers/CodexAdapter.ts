@@ -267,8 +267,7 @@ function itemTitle(itemType: CanonicalItemType, item?: CodexLifecycleItem): stri
   }
 }
 
-function itemDetail(item: CodexLifecycleItem): string | undefined {
-  const itemType = toCanonicalItemType(item.type);
+function itemDetail(itemType: CanonicalItemType, item: CodexLifecycleItem): string | undefined {
   const itemRecord = item as Record<string, unknown>;
   const action = itemRecord.action as Record<string, unknown> | undefined;
   const candidates = [
@@ -470,7 +469,7 @@ function mapItemLifecycle(
     return undefined;
   }
 
-  const detail = itemDetail(item);
+  const detail = itemDetail(itemType, item);
   const status =
     lifecycle === "item.started"
       ? "inProgress"
@@ -844,7 +843,7 @@ function mapToRuntimeEvents(
     }
     const itemType = toCanonicalItemType(item.type);
     if (itemType === "plan") {
-      const detail = itemDetail(item);
+      const detail = itemDetail(itemType, item);
       if (!detail) {
         return [];
       }
