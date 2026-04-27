@@ -40,6 +40,84 @@ export function selectUserMessageMinimapEntries(
   return entries;
 }
 
+// Visual constants matched to the DashesStrip CSS in `ChatMinimap.tsx`.
+// Keep these in sync with `h-0.75` (dash height), `gap-1` (vertical gap), and
+// `py-1` (vertical padding) on the strip's <ul>.
+const MINIMAP_DASH_HEIGHT_PX = 3;
+const MINIMAP_DASH_GAP_PX = 4;
+const MINIMAP_STRIP_VERTICAL_PADDING_PX = 8;
+const MINIMAP_PIXELS_PER_ROW = MINIMAP_DASH_HEIGHT_PX + MINIMAP_DASH_GAP_PX;
+
+interface SelectVisibleMinimapEntriesArgs {
+  entries: ReadonlyArray<MinimapUserMessageEntry>;
+  /** Total available height for the strip in pixels, or `null` before the strip has been measured. */
+  navHeight: number | null;
+  activeIndex: number | null;
+}
+
+interface SelectVisibleMinimapEntriesResult {
+  visibleEntries: ReadonlyArray<MinimapUserMessageEntry>;
+  visibleActiveIndex: number | null;
+}
+
+/**
+ * Choose which entries to draw and which one to highlight.
+ *
+ * If every entry fits at natural density (one dash per user message) we pass
+ * them through unchanged. Once there isn't room for one row per message we
+ * sample evenly down to the column's capacity — keeping the first and last
+ * entries pinned and mapping the active index to the nearest sampled slot.
+ *
+ * The strip never scrolls and dashes never overlap; if a thread is so long
+ * that there isn't room for one dash per message, multiple messages share a
+ * single dash. The expanded preview card remains the source of truth for
+ * exact navigation.
+ */
+export function selectVisibleMinimapEntries({
+  entries,
+  navHeight,
+  activeIndex,
+}: SelectVisibleMinimapEntriesArgs): SelectVisibleMinimapEntriesResult {
+  if (entries.length === 0) {
+    return { visibleEntries: entries, visibleActiveIndex: null };
+  }
+
+  // Before the strip has been measured, render every entry. The
+  // ResizeObserver fires synchronously on attach, so this initial pass is
+  // brief and avoids a "popping in" flash for short threads.
+  if (navHeight === null) {
+    return { visibleEntries: entries, visibleActiveIndex: activeIndex };
+  }
+
+  const usable = Math.max(0, navHeight - MINIMAP_STRIP_VERTICAL_PADDING_PX);
+  const capacity = Math.max(1, Math.floor(usable / MINIMAP_PIXELS_PER_ROW));
+
+  if (entries.length <= capacity) {
+    return { visibleEntries: entries, visibleActiveIndex: activeIndex };
+  }
+
+  // Degenerate single-slot case — just surface whichever entry is currently
+  // active so the highlight has something meaningful to land on.
+  if (capacity === 1) {
+    const sourceIndex = activeIndex ?? 0;
+    return { visibleEntries: [entries[sourceIndex]!], visibleActiveIndex: 0 };
+  }
+
+  const step = (entries.length - 1) / (capacity - 1);
+  const visibleEntries: MinimapUserMessageEntry[] = [];
+  for (let i = 0; i < capacity; i += 1) {
+    visibleEntries.push(entries[Math.round(i * step)]!);
+  }
+
+  let visibleActiveIndex: number | null = null;
+  if (activeIndex !== null) {
+    const projected = Math.round((activeIndex * (capacity - 1)) / (entries.length - 1));
+    visibleActiveIndex = Math.max(0, Math.min(capacity - 1, projected));
+  }
+
+  return { visibleEntries, visibleActiveIndex };
+}
+
 export function computeActiveMinimapIndex(
   state: MinimapListStateSnapshot,
   entries: ReadonlyArray<MinimapUserMessageEntry>,

@@ -1,9 +1,14 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type LegendListRef } from "@legendapp/list/react";
 
 import { cn } from "~/lib/utils";
 import { PreviewCard, PreviewCardTrigger } from "~/components/ui/preview-card";
-import { computeActiveMinimapIndex, type MinimapUserMessageEntry } from "./ChatMinimap.logic";
+import { useSettings } from "~/hooks/useSettings";
+import {
+  computeActiveMinimapIndex,
+  selectVisibleMinimapEntries,
+  type MinimapUserMessageEntry,
+} from "./ChatMinimap.logic";
 
 interface ChatMinimapProps {
   listRef: React.RefObject<LegendListRef | null>;
@@ -22,9 +27,37 @@ export const ChatMinimap = memo(function ChatMinimap({
   entries,
   threadKey,
 }: ChatMinimapProps) {
+  const hideChatMinimap = useSettings((s) => s.hideChatMinimap);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const [navHeight, setNavHeight] = useState<number | null>(null);
   const activeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+
+  // Track the nav's height so the strip can decide how many dashes will fit.
+  // A callback ref is used so we re-attach the observer if the nav element
+  // itself unmounts (e.g. when `hideChatMinimap` toggles); a plain useRef +
+  // useEffect would race with the conditional render.
+  const navCallbackRef = useCallback((nav: HTMLElement | null) => {
+    resizeObserverRef.current?.disconnect();
+    resizeObserverRef.current = null;
+    if (!nav) {
+      setNavHeight(null);
+      return;
+    }
+    setNavHeight(nav.clientHeight);
+    const observer = new ResizeObserver(() => setNavHeight(nav.clientHeight));
+    observer.observe(nav);
+    resizeObserverRef.current = observer;
+  }, []);
+
+  useEffect(
+    () => () => {
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
+    },
+    [],
+  );
 
   // Reset active highlight + collapse the menu on thread switch so a stale
   // index or an open menu doesn't flash against the freshly-loaded thread.
@@ -84,18 +117,19 @@ export const ChatMinimap = memo(function ChatMinimap({
     [listRef],
   );
 
-  if (entries.length === 0) return null;
+  if (hideChatMinimap || entries.length === 0) return null;
 
   return (
     <PreviewCard open={isOpen} onOpenChange={setIsOpen}>
       <nav
+        ref={navCallbackRef}
         aria-label="User messages minimap"
-        className="pointer-events-none absolute top-3 right-1 sm:right-2 z-20 flex max-h-[calc(100%-1.5rem)] flex-col items-end"
+        className="pointer-events-none absolute top-3 right-1 bottom-3 z-20 flex flex-col items-end @md/chat:right-2"
         data-testid="chat-minimap"
         data-expanded={isOpen ? "true" : undefined}
       >
         <PreviewCardTrigger
-          className="pointer-events-auto"
+          className="pointer-events-auto flex h-full min-h-0 flex-col items-end"
           closeDelay={COLLAPSE_DELAY_MS}
           delay={EXPAND_DELAY_MS}
           render={<div />}
@@ -108,7 +142,11 @@ export const ChatMinimap = memo(function ChatMinimap({
               activeButtonRef={activeButtonRef}
             />
           ) : (
-            <DashesStrip entries={entries} activeIndex={activeIndex} />
+            <DashesStrip
+              entries={entries}
+              activeIndex={activeIndex}
+              navHeight={navHeight}
+            />
           )}
         </PreviewCardTrigger>
       </nav>
@@ -118,21 +156,34 @@ export const ChatMinimap = memo(function ChatMinimap({
 
 /**
  * Collapsed view — thin vertical strip of dashes.
+ *
+ * Dashes always render at their natural size (`h-0.75` / `gap-1`). When a
+ * thread has too many user messages to fit one dash per row, we sample down
+ * to whatever the column can hold (see `selectVisibleMinimapEntries`). The
+ * strip never scrolls and dashes never overlap; the expanded preview card
+ * remains the source of truth for exact navigation.
  */
 function DashesStrip({
   entries,
   activeIndex,
+  navHeight,
 }: {
   entries: ReadonlyArray<MinimapUserMessageEntry>;
   activeIndex: number | null;
+  navHeight: number | null;
 }) {
+  const { visibleEntries, visibleActiveIndex } = useMemo(
+    () => selectVisibleMinimapEntries({ entries, navHeight, activeIndex }),
+    [entries, navHeight, activeIndex],
+  );
+
   return (
     <ul
-      className="flex max-h-full flex-col items-end gap-1 sm:gap-1.5 overflow-y-auto rounded-md px-1 sm:px-1.5 py-1"
+      className="flex max-h-full flex-col items-end gap-1 overflow-hidden px-1 py-1 @md/chat:px-1.5"
       data-testid="chat-minimap-list"
     >
-      {entries.map((entry, index) => {
-        const isActive = activeIndex === index;
+      {visibleEntries.map((entry, index) => {
+        const isActive = visibleActiveIndex === index;
         return (
           <li key={entry.rowKey} className="flex justify-end">
             <button
@@ -140,7 +191,7 @@ function DashesStrip({
               data-testid="chat-minimap-dash"
               aria-current={isActive ? "true" : undefined}
               className={cn(
-                "h-0.75 w-4 cursor-pointer rounded-full transition-[background-color,width] duration-150 hover:w-5 hover:bg-foreground sm:hover:w-7",
+                "h-0.75 w-3 cursor-pointer rounded-full transition-[background-color,width] duration-150 hover:w-4 hover:bg-foreground @md/chat:w-3.5 @md/chat:hover:w-5 @lg/chat:hover:w-7",
                 isActive ? "bg-foreground" : "bg-foreground/10",
               )}
             />

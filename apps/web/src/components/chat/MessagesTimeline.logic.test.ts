@@ -11,6 +11,7 @@ import {
 import {
   computeActiveMinimapIndex,
   selectUserMessageMinimapEntries,
+  selectVisibleMinimapEntries,
   type MinimapListStateSnapshot,
   type MinimapUserMessageEntry,
 } from "./ChatMinimap.logic";
@@ -739,5 +740,119 @@ describe("computeActiveMinimapIndex", () => {
       positionsByIndex: { 3: 150, 5: 550 },
     });
     expect(computeActiveMinimapIndex(state, [a, b, c])).toBe(1);
+  });
+});
+
+describe("selectVisibleMinimapEntries", () => {
+  const make = (count: number): MinimapUserMessageEntry[] =>
+    Array.from({ length: count }, (_, i) => ({
+      rowIndex: i * 2,
+      rowKey: `entry-${i}`,
+      messageId: `user-${i}` as MessageId,
+      previewText: `msg ${i}`,
+    }));
+
+  it("returns the input untouched when there are no entries", () => {
+    const result = selectVisibleMinimapEntries({
+      entries: [],
+      navHeight: 600,
+      activeIndex: null,
+    });
+    expect(result.visibleEntries).toEqual([]);
+    expect(result.visibleActiveIndex).toBeNull();
+  });
+
+  it("renders every entry before the strip has been measured to avoid a popping flash", () => {
+    const entries = make(40);
+    const result = selectVisibleMinimapEntries({
+      entries,
+      navHeight: null,
+      activeIndex: 3,
+    });
+    expect(result.visibleEntries).toBe(entries);
+    expect(result.visibleActiveIndex).toBe(3);
+  });
+
+  it("renders all entries naturally when they fit at one dash per row", () => {
+    // (600 - 8) / 7 = 84 rows of capacity → 50 entries fit comfortably
+    const entries = make(50);
+    const result = selectVisibleMinimapEntries({
+      entries,
+      navHeight: 600,
+      activeIndex: 25,
+    });
+    expect(result.visibleEntries).toBe(entries);
+    expect(result.visibleActiveIndex).toBe(25);
+  });
+
+  it("samples down to capacity when there are more entries than rows fit", () => {
+    // (700 - 8) / 7 = 98 → cap at 98 visible entries
+    const entries = make(200);
+    const result = selectVisibleMinimapEntries({
+      entries,
+      navHeight: 700,
+      activeIndex: 0,
+    });
+    expect(result.visibleEntries.length).toBe(98);
+    // First and last source entries are pinned.
+    expect(result.visibleEntries[0]).toBe(entries[0]);
+    expect(result.visibleEntries[result.visibleEntries.length - 1]).toBe(entries[199]);
+  });
+
+  it("places the active highlight at the visible slot closest to the source active index", () => {
+    // capacity = (700 - 8) / 7 = 98
+    const entries = make(200);
+    const middleResult = selectVisibleMinimapEntries({
+      entries,
+      navHeight: 700,
+      activeIndex: 100,
+    });
+    expect(middleResult.visibleActiveIndex).toBe(49);
+
+    const firstResult = selectVisibleMinimapEntries({
+      entries,
+      navHeight: 700,
+      activeIndex: 0,
+    });
+    expect(firstResult.visibleActiveIndex).toBe(0);
+
+    const lastResult = selectVisibleMinimapEntries({
+      entries,
+      navHeight: 700,
+      activeIndex: 199,
+    });
+    expect(lastResult.visibleActiveIndex).toBe(97);
+  });
+
+  it("collapses to a single dash when the strip can only fit one row", () => {
+    const entries = make(20);
+    const result = selectVisibleMinimapEntries({
+      entries,
+      navHeight: 12,
+      activeIndex: 8,
+    });
+    expect(result.visibleEntries).toEqual([entries[8]]);
+    expect(result.visibleActiveIndex).toBe(0);
+  });
+
+  it("falls back to the first entry when capacity is one and nothing is active", () => {
+    const entries = make(20);
+    const result = selectVisibleMinimapEntries({
+      entries,
+      navHeight: 12,
+      activeIndex: null,
+    });
+    expect(result.visibleEntries).toEqual([entries[0]]);
+    expect(result.visibleActiveIndex).toBe(0);
+  });
+
+  it("clamps an out-of-range active index into the visible window", () => {
+    const entries = make(200);
+    const result = selectVisibleMinimapEntries({
+      entries,
+      navHeight: 700,
+      activeIndex: 250,
+    });
+    expect(result.visibleActiveIndex).toBe(97);
   });
 });

@@ -252,7 +252,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   return (
     <TimelineRowCtx.Provider value={sharedState}>
-      <div className="relative h-full">
+      <div className="@container/chat relative h-full">
         <LegendList<MessagesTimelineRow>
           ref={listRef}
           data={rows}
