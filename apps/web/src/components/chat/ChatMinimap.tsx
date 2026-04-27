@@ -182,12 +182,11 @@ function DashesStrip({
         const isActive = visibleActiveIndex === index;
         return (
           <li key={entry.rowKey} className="flex justify-end">
-            <button
-              type="button"
+            <span
               data-testid="chat-minimap-dash"
               aria-current={isActive ? "true" : undefined}
               className={cn(
-                "h-0.75 w-3 cursor-pointer rounded-full transition-[background-color,width] duration-150 hover:w-4 hover:bg-foreground @md/chat:w-3.5 @md/chat:hover:w-5 @lg/chat:hover:w-7",
+                "h-0.75 w-3 rounded-full transition-colors duration-150 @md/chat:w-3.5",
                 isActive ? "bg-foreground" : "bg-foreground/10",
               )}
             />

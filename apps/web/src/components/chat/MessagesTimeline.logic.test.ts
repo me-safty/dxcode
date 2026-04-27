@@ -658,6 +658,13 @@ describe("computeActiveMinimapIndex", () => {
     expect(computeActiveMinimapIndex(state, [a])).toBeUndefined();
   });
 
+  it("returns undefined until at least one entry position has been measured", () => {
+    const a = makeEntry(1, "a");
+    const b = makeEntry(2, "b");
+    const state = makeState({ scroll: 1000 });
+    expect(computeActiveMinimapIndex(state, [a, b])).toBeUndefined();
+  });
+
   it("keeps the first entry active while the user is at the very top of the thread", () => {
     const a = makeEntry(1, "a");
     const b = makeEntry(2, "b");
@@ -740,6 +747,17 @@ describe("computeActiveMinimapIndex", () => {
       positionsByIndex: { 3: 150, 5: 550 },
     });
     expect(computeActiveMinimapIndex(state, [a, b, c])).toBe(1);
+  });
+
+  it("stops at unmeasured gaps instead of skipping ahead to later measured entries", () => {
+    const a = makeEntry(1, "a");
+    const b = makeEntry(2, "b");
+    const c = makeEntry(3, "c");
+    const state = makeState({
+      scroll: 1300,
+      positionsByKey: { a: 100, c: 1200 },
+    });
+    expect(computeActiveMinimapIndex(state, [a, b, c])).toBe(0);
   });
 });
 
@@ -843,6 +861,17 @@ describe("selectVisibleMinimapEntries", () => {
       activeIndex: null,
     });
     expect(result.visibleEntries).toEqual([entries[0]]);
+    expect(result.visibleActiveIndex).toBe(0);
+  });
+
+  it("clamps stale active index when capacity is one", () => {
+    const entries = make(20);
+    const result = selectVisibleMinimapEntries({
+      entries,
+      navHeight: 12,
+      activeIndex: 250,
+    });
+    expect(result.visibleEntries).toEqual([entries[19]]);
     expect(result.visibleActiveIndex).toBe(0);
   });
 

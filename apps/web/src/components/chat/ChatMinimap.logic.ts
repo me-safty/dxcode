@@ -60,6 +60,8 @@ interface SelectVisibleMinimapEntriesResult {
   visibleActiveIndex: number | null;
 }
 
+const clampIndex = (index: number, length: number) => Math.max(0, Math.min(length - 1, index));
+
 /**
  * Choose which entries to draw and which one to highlight.
  *
@@ -82,24 +84,26 @@ export function selectVisibleMinimapEntries({
     return { visibleEntries: entries, visibleActiveIndex: null };
   }
 
+  const sourceActiveIndex = activeIndex === null ? null : clampIndex(activeIndex, entries.length);
+
   // Before the strip has been measured, render every entry. The
   // ResizeObserver fires synchronously on attach, so this initial pass is
   // brief and avoids a "popping in" flash for short threads.
   if (navHeight === null) {
-    return { visibleEntries: entries, visibleActiveIndex: activeIndex };
+    return { visibleEntries: entries, visibleActiveIndex: sourceActiveIndex };
   }
 
   const usable = Math.max(0, navHeight - MINIMAP_STRIP_VERTICAL_PADDING_PX);
   const capacity = Math.max(1, Math.floor(usable / MINIMAP_PIXELS_PER_ROW));
 
   if (entries.length <= capacity) {
-    return { visibleEntries: entries, visibleActiveIndex: activeIndex };
+    return { visibleEntries: entries, visibleActiveIndex: sourceActiveIndex };
   }
 
   // Degenerate single-slot case — just surface whichever entry is currently
   // active so the highlight has something meaningful to land on.
   if (capacity === 1) {
-    const sourceIndex = activeIndex ?? 0;
+    const sourceIndex = sourceActiveIndex ?? 0;
     return { visibleEntries: [entries[sourceIndex]!], visibleActiveIndex: 0 };
   }
 
@@ -110,8 +114,8 @@ export function selectVisibleMinimapEntries({
   }
 
   let visibleActiveIndex: number | null = null;
-  if (activeIndex !== null) {
-    const projected = Math.round((activeIndex * (capacity - 1)) / (entries.length - 1));
+  if (sourceActiveIndex !== null) {
+    const projected = Math.round((sourceActiveIndex * (capacity - 1)) / (entries.length - 1));
     visibleActiveIndex = Math.max(0, Math.min(capacity - 1, projected));
   }
 
@@ -126,17 +130,23 @@ export function computeActiveMinimapIndex(
   if (state.scrollLength <= 0) return undefined;
 
   const threshold = state.scroll + 8;
-  let next = 0;
+  let next: number | undefined;
   for (let i = 0; i < entries.length; i += 1) {
     const entry = entries[i]!;
     const position = state.positionByKey?.(entry.rowKey) ?? state.positionAtIndex?.(entry.rowIndex);
-    if (position === undefined) continue;
+    if (position === undefined) {
+      if (next === undefined) continue;
+      break;
+    }
     if (position <= threshold) {
       next = i;
     } else {
+      if (next === undefined && i === 0) return 0;
       break;
     }
   }
+
+  if (next === undefined) return undefined;
 
   while (next + 1 < entries.length) {
     const currentEntry = entries[next]!;

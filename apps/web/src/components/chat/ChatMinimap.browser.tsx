@@ -103,6 +103,8 @@ describe("ChatMinimap", () => {
     try {
       const dashes = screen.container.querySelectorAll('[data-testid="chat-minimap-dash"]');
       expect(dashes).toHaveLength(2);
+      expect(Array.from(dashes).map((dash) => dash.tagName)).toEqual(["SPAN", "SPAN"]);
+      expect(screen.container.querySelector('button[data-testid="chat-minimap-dash"]')).toBeNull();
     } finally {
       await screen.unmount();
     }
