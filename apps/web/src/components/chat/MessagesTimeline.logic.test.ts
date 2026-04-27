@@ -780,7 +780,7 @@ describe("selectVisibleMinimapEntries", () => {
     expect(result.visibleActiveIndex).toBeNull();
   });
 
-  it("renders every entry before the strip has been measured to avoid a popping flash", () => {
+  it("renders short threads fully before the strip has been measured", () => {
     const entries = make(40);
     const result = selectVisibleMinimapEntries({
       entries,
@@ -789,6 +789,19 @@ describe("selectVisibleMinimapEntries", () => {
     });
     expect(result.visibleEntries).toBe(entries);
     expect(result.visibleActiveIndex).toBe(3);
+  });
+
+  it("samples long threads before measurement so the rail never renders an overflowing full list", () => {
+    const entries = make(200);
+    const result = selectVisibleMinimapEntries({
+      entries,
+      navHeight: null,
+      activeIndex: 100,
+    });
+    expect(result.visibleEntries.length).toBe(80);
+    expect(result.visibleEntries[0]).toBe(entries[0]);
+    expect(result.visibleEntries[result.visibleEntries.length - 1]).toBe(entries[199]);
+    expect(result.visibleActiveIndex).toBe(40);
   });
 
   it("renders all entries naturally when they fit at one dash per row", () => {

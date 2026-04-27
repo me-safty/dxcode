@@ -47,6 +47,7 @@ const MINIMAP_DASH_HEIGHT_PX = 3;
 const MINIMAP_DASH_GAP_PX = 4;
 const MINIMAP_STRIP_VERTICAL_PADDING_PX = 8;
 const MINIMAP_PIXELS_PER_ROW = MINIMAP_DASH_HEIGHT_PX + MINIMAP_DASH_GAP_PX;
+const MINIMAP_UNMEASURED_CAPACITY = 80;
 
 interface SelectVisibleMinimapEntriesArgs {
   entries: ReadonlyArray<MinimapUserMessageEntry>;
@@ -86,15 +87,15 @@ export function selectVisibleMinimapEntries({
 
   const sourceActiveIndex = activeIndex === null ? null : clampIndex(activeIndex, entries.length);
 
-  // Before the strip has been measured, render every entry. The
-  // ResizeObserver fires synchronously on attach, so this initial pass is
-  // brief and avoids a "popping in" flash for short threads.
-  if (navHeight === null) {
-    return { visibleEntries: entries, visibleActiveIndex: sourceActiveIndex };
-  }
-
-  const usable = Math.max(0, navHeight - MINIMAP_STRIP_VERTICAL_PADDING_PX);
-  const capacity = Math.max(1, Math.floor(usable / MINIMAP_PIXELS_PER_ROW));
+  const capacity =
+    navHeight === null
+      ? MINIMAP_UNMEASURED_CAPACITY
+      : Math.max(
+          1,
+          Math.floor(
+            Math.max(0, navHeight - MINIMAP_STRIP_VERTICAL_PADDING_PX) / MINIMAP_PIXELS_PER_ROW,
+          ),
+        );
 
   if (entries.length <= capacity) {
     return { visibleEntries: entries, visibleActiveIndex: sourceActiveIndex };
