@@ -10,6 +10,7 @@ import {
   listThreadsByProjectId,
   requireProject,
   requireProjectAbsent,
+  requireWorkspaceRootUnique,
   requireThread,
   requireThreadArchived,
   requireThreadAbsent,
@@ -99,6 +100,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
+      yield* requireWorkspaceRootUnique({
+        readModel,
+        command,
+        workspaceRoot: command.workspaceRoot,
+      });
 
       return {
         ...withEventBase({
@@ -126,6 +132,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
+      if (command.workspaceRoot !== undefined) {
+        yield* requireWorkspaceRootUnique({
+          readModel,
+          command,
+          workspaceRoot: command.workspaceRoot,
+          excludeProjectId: command.projectId,
+        });
+      }
       const occurredAt = nowIso();
       return {
         ...withEventBase({
