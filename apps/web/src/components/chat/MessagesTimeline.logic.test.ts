@@ -791,41 +791,45 @@ describe("selectVisibleMinimapEntries", () => {
     expect(result.visibleActiveIndex).toBe(3);
   });
 
-  it("renders all entries naturally when they fit at one dash per row", () => {
-    // (600 - 8) / 7 = 84 rows of capacity → 50 entries fit comfortably
-    const entries = make(50);
+  it("renders all entries naturally when they fit under the cap", () => {
+    // 8 ≤ MAX_VISIBLE_MINIMAP_DASHES (10) → no sampling, no overflow label.
+    const entries = make(8);
     const result = selectVisibleMinimapEntries({
       entries,
       navHeight: 600,
-      activeIndex: 25,
+      activeIndex: 3,
     });
     expect(result.visibleEntries).toBe(entries);
-    expect(result.visibleActiveIndex).toBe(25);
+    expect(result.visibleActiveIndex).toBe(3);
+    expect(result.hiddenCount).toBe(0);
   });
 
-  it("samples down to capacity when there are more entries than rows fit", () => {
-    // (700 - 8) / 7 = 98 → cap at 98 visible entries
+  it("samples down to MAX_VISIBLE_MINIMAP_DASHES when entries exceed the cap", () => {
+    // navHeight=700 fits ~98 dashes pixel-wise but the hard 10-dash cap wins.
     const entries = make(200);
     const result = selectVisibleMinimapEntries({
       entries,
       navHeight: 700,
       activeIndex: 0,
     });
-    expect(result.visibleEntries.length).toBe(98);
-    // First and last source entries are pinned.
+    expect(result.visibleEntries.length).toBe(10);
+    // First and last source entries stay pinned even after the cap kicks in.
     expect(result.visibleEntries[0]).toBe(entries[0]);
     expect(result.visibleEntries[result.visibleEntries.length - 1]).toBe(entries[199]);
   });
 
   it("places the active highlight at the visible slot closest to the source active index", () => {
-    // capacity = (700 - 8) / 7 = 98
+    // capacity = min(MAX_VISIBLE_MINIMAP_DASHES, pixelCapacity) = 10.
+    // Projection: round(sourceActive * (capacity - 1) / (entries.length - 1))
+    //   = round(sourceActive * 9 / 199).
     const entries = make(200);
     const middleResult = selectVisibleMinimapEntries({
       entries,
       navHeight: 700,
       activeIndex: 100,
     });
-    expect(middleResult.visibleActiveIndex).toBe(49);
+    // round(100 * 9 / 199) = round(4.522…) = 5
+    expect(middleResult.visibleActiveIndex).toBe(5);
 
     const firstResult = selectVisibleMinimapEntries({
       entries,
@@ -839,7 +843,8 @@ describe("selectVisibleMinimapEntries", () => {
       navHeight: 700,
       activeIndex: 199,
     });
-    expect(lastResult.visibleActiveIndex).toBe(97);
+    // round(199 * 9 / 199) = 9 (last slot)
+    expect(lastResult.visibleActiveIndex).toBe(9);
   });
 
   it("collapses to a single dash when the strip can only fit one row", () => {
@@ -882,6 +887,76 @@ describe("selectVisibleMinimapEntries", () => {
       navHeight: 700,
       activeIndex: 250,
     });
-    expect(result.visibleActiveIndex).toBe(97);
+    // activeIndex 250 clamps to 199 (last entry); projected slot is the last.
+    expect(result.visibleActiveIndex).toBe(9);
+  });
+
+  it("caps visible entries at MAX_VISIBLE_MINIMAP_DASHES even when navHeight could fit more", () => {
+    // navHeight=2000 has pixel capacity for ~284 dashes, but the hard cap is 10.
+    const entries = make(50);
+    const result = selectVisibleMinimapEntries({
+      entries,
+      navHeight: 2000,
+      activeIndex: null,
+    });
+    expect(result.visibleEntries.length).toBe(10);
+  });
+
+  it("reports hiddenCount = 0 when every entry fits within the cap", () => {
+    const result = selectVisibleMinimapEntries({
+      entries: make(7),
+      navHeight: 600,
+      activeIndex: null,
+    });
+    expect(result.hiddenCount).toBe(0);
+  });
+
+  it("reports hiddenCount = entries.length - visibleEntries.length when sampling", () => {
+    // 50 entries sampled to 10 → 40 hidden, surfaced as the "+40" label.
+    const entries = make(50);
+    const result = selectVisibleMinimapEntries({
+      entries,
+      navHeight: 600,
+      activeIndex: null,
+    });
+    expect(result.visibleEntries.length).toBe(10);
+    expect(result.hiddenCount).toBe(40);
+  });
+
+  it("pins the first and last entries after the cap kicks in", () => {
+    // The whole-thread "scrollbar" affordance relies on first and last always
+    // being represented — the user should never lose sight of either end.
+    const entries = make(50);
+    const result = selectVisibleMinimapEntries({
+      entries,
+      navHeight: 600,
+      activeIndex: null,
+    });
+    expect(result.visibleEntries[0]).toBe(entries[0]);
+    expect(result.visibleEntries[result.visibleEntries.length - 1]).toBe(entries[49]);
+  });
+
+  it("reports hiddenCount on the single-slot fallback so the label still appears", () => {
+    // navHeight=12 → pixel capacity 1, so the cap doesn't change anything,
+    // but the result still needs a non-zero hiddenCount because 19 of 20
+    // entries are absent from the strip.
+    const entries = make(20);
+    const result = selectVisibleMinimapEntries({
+      entries,
+      navHeight: 12,
+      activeIndex: 4,
+    });
+    expect(result.visibleEntries).toEqual([entries[4]]);
+    expect(result.hiddenCount).toBe(19);
+  });
+
+  it("reports hiddenCount = 0 before measurement and on empty input", () => {
+    expect(
+      selectVisibleMinimapEntries({ entries: [], navHeight: 600, activeIndex: null }).hiddenCount,
+    ).toBe(0);
+    expect(
+      selectVisibleMinimapEntries({ entries: make(50), navHeight: null, activeIndex: 0 })
+        .hiddenCount,
+    ).toBe(0);
   });
 });

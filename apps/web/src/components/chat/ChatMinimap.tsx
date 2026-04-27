@@ -168,32 +168,43 @@ function DashesStrip({
   activeIndex: number | null;
   navHeight: number | null;
 }) {
-  const { visibleEntries, visibleActiveIndex } = useMemo(
+  const { visibleEntries, visibleActiveIndex, hiddenCount } = useMemo(
     () => selectVisibleMinimapEntries({ entries, navHeight, activeIndex }),
     [entries, navHeight, activeIndex],
   );
 
   return (
-    <ul
-      className="flex flex-col items-end gap-1 px-1 py-1 @md/chat:px-1.5"
-      data-testid="chat-minimap-list"
-    >
-      {visibleEntries.map((entry, index) => {
-        const isActive = visibleActiveIndex === index;
-        return (
-          <li key={entry.rowKey} className="flex justify-end">
-            <span
-              data-testid="chat-minimap-dash"
-              aria-current={isActive ? "true" : undefined}
-              className={cn(
-                "h-0.75 w-3 rounded-full transition-colors duration-150 @md/chat:w-3.5",
-                isActive ? "bg-foreground" : "bg-foreground/10",
-              )}
-            />
-          </li>
-        );
-      })}
-    </ul>
+    <div className="flex flex-col items-end gap-0.5">
+      <ul
+        className="flex flex-col items-end gap-1 px-1 py-1 @md/chat:px-1.5"
+        data-testid="chat-minimap-list"
+      >
+        {visibleEntries.map((entry, index) => {
+          const isActive = visibleActiveIndex === index;
+          return (
+            <li key={entry.rowKey} className="flex justify-end">
+              <span
+                data-testid="chat-minimap-dash"
+                aria-current={isActive ? "true" : undefined}
+                className={cn(
+                  "h-0.75 w-3 rounded-full transition-colors duration-150 @md/chat:w-3.5",
+                  isActive ? "bg-foreground" : "bg-foreground/10",
+                )}
+              />
+            </li>
+          );
+        })}
+      </ul>
+      {hiddenCount > 0 && (
+        <span
+          data-testid="chat-minimap-overflow"
+          aria-label={`${hiddenCount} more user messages not shown`}
+          className="px-1 text-[9px] tabular-nums text-foreground/40 @md/chat:px-1.5"
+        >
+          +{hiddenCount}
+        </span>
+      )}
+    </div>
   );
 }
 

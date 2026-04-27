@@ -48,6 +48,13 @@ const MINIMAP_DASH_GAP_PX = 4;
 const MINIMAP_STRIP_VERTICAL_PADDING_PX = 8;
 const MINIMAP_PIXELS_PER_ROW = MINIMAP_DASH_HEIGHT_PX + MINIMAP_DASH_GAP_PX;
 
+/** Hard ceiling on the dash count regardless of viewport size — long threads
+ *  get sampled down to this many dashes. Reduces visual noise while the
+ *  expanded preview menu remains the source of truth for exact navigation.
+ *  Mirrors the `MAX_VISIBLE_WORK_LOG_ENTRIES = 6` precedent in
+ *  `MessagesTimeline.logic.ts`. */
+const MAX_VISIBLE_MINIMAP_DASHES = 10;
+
 interface SelectVisibleMinimapEntriesArgs {
   entries: ReadonlyArray<MinimapUserMessageEntry>;
   /** Total available height for the strip in pixels, or `null` before the strip has been measured. */
@@ -58,6 +65,11 @@ interface SelectVisibleMinimapEntriesArgs {
 interface SelectVisibleMinimapEntriesResult {
   visibleEntries: ReadonlyArray<MinimapUserMessageEntry>;
   visibleActiveIndex: number | null;
+  /** Entries not represented by their own dash. `0` when every entry fits
+   *  (one-dash-per-message). Positive when sampling is in effect — the
+   *  caller surfaces this as a small "+N more" label below the strip so
+   *  the reader knows the strip is a compressed view. */
+  hiddenCount: number;
 }
 
 const clampIndex = (index: number, length: number) => Math.max(0, Math.min(length - 1, index));
@@ -81,7 +93,7 @@ export function selectVisibleMinimapEntries({
   activeIndex,
 }: SelectVisibleMinimapEntriesArgs): SelectVisibleMinimapEntriesResult {
   if (entries.length === 0) {
-    return { visibleEntries: entries, visibleActiveIndex: null };
+    return { visibleEntries: entries, visibleActiveIndex: null, hiddenCount: 0 };
   }
 
   const sourceActiveIndex = activeIndex === null ? null : clampIndex(activeIndex, entries.length);
@@ -90,21 +102,29 @@ export function selectVisibleMinimapEntries({
   // ResizeObserver fires synchronously on attach, so this initial pass is
   // brief and avoids a "popping in" flash for short threads.
   if (navHeight === null) {
-    return { visibleEntries: entries, visibleActiveIndex: sourceActiveIndex };
+    return { visibleEntries: entries, visibleActiveIndex: sourceActiveIndex, hiddenCount: 0 };
   }
 
   const usable = Math.max(0, navHeight - MINIMAP_STRIP_VERTICAL_PADDING_PX);
-  const capacity = Math.max(1, Math.floor(usable / MINIMAP_PIXELS_PER_ROW));
+  // Two ceilings: the column's pixel capacity and the hard 10-dash cap. We
+  // take the smaller so a tall viewport never grows past `MAX_VISIBLE_MINIMAP_DASHES`,
+  // and a very short column still falls back to whatever it can physically fit.
+  const pixelCapacity = Math.max(1, Math.floor(usable / MINIMAP_PIXELS_PER_ROW));
+  const capacity = Math.min(MAX_VISIBLE_MINIMAP_DASHES, pixelCapacity);
 
   if (entries.length <= capacity) {
-    return { visibleEntries: entries, visibleActiveIndex: sourceActiveIndex };
+    return { visibleEntries: entries, visibleActiveIndex: sourceActiveIndex, hiddenCount: 0 };
   }
 
   // Degenerate single-slot case — just surface whichever entry is currently
   // active so the highlight has something meaningful to land on.
   if (capacity === 1) {
     const sourceIndex = sourceActiveIndex ?? 0;
-    return { visibleEntries: [entries[sourceIndex]!], visibleActiveIndex: 0 };
+    return {
+      visibleEntries: [entries[sourceIndex]!],
+      visibleActiveIndex: 0,
+      hiddenCount: entries.length - 1,
+    };
   }
 
   const step = (entries.length - 1) / (capacity - 1);
@@ -119,7 +139,11 @@ export function selectVisibleMinimapEntries({
     visibleActiveIndex = Math.max(0, Math.min(capacity - 1, projected));
   }
 
-  return { visibleEntries, visibleActiveIndex };
+  return {
+    visibleEntries,
+    visibleActiveIndex,
+    hiddenCount: entries.length - visibleEntries.length,
+  };
 }
 
 export function computeActiveMinimapIndex(

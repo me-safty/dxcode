@@ -271,6 +271,52 @@ describe("ChatMinimap", () => {
     }
   });
 
+  it("renders an overflow indicator when entries exceed the dash cap", async () => {
+    // 15 user prompts → strip caps at 10 dashes and surfaces a "+5" label
+    // beneath. We only assert the label here; the dash count + sampling math
+    // are covered by `selectVisibleMinimapEntries` unit tests.
+    const entries = Array.from({ length: 15 }, (_, i) =>
+      makeEntry(i + 1, `Message ${i + 1}`),
+    );
+    const positionsByKey = Object.fromEntries(
+      entries.map((entry, i) => [entry.rowKey, 100 + i * 200]),
+    );
+    const { listRef } = buildMockListRef({ positionsByKey });
+
+    const screen = await render(
+      <ChatMinimap listRef={listRef} entries={entries} threadKey="thread-overflow" />,
+    );
+
+    try {
+      await expect.element(page.getByTestId("chat-minimap-overflow")).toBeVisible();
+      await expect.element(page.getByTestId("chat-minimap-overflow")).toHaveTextContent("+5");
+      const dashes = screen.container.querySelectorAll('[data-testid="chat-minimap-dash"]');
+      expect(dashes.length).toBeLessThanOrEqual(10);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("does not render the overflow indicator when entries fit under the cap", async () => {
+    const a = makeEntry(1, "First");
+    const b = makeEntry(2, "Second");
+    const { listRef } = buildMockListRef({
+      positionsByKey: { [a.rowKey]: 100, [b.rowKey]: 400 },
+    });
+
+    const screen = await render(
+      <ChatMinimap listRef={listRef} entries={[a, b]} threadKey="thread-no-overflow" />,
+    );
+
+    try {
+      await expect
+        .element(page.getByTestId("chat-minimap-overflow"))
+        .not.toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("mouse-leave collapses the menu after a delay", async () => {
     const a = makeEntry(1, "First");
     const b = makeEntry(2, "Second");
