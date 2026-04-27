@@ -183,6 +183,7 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
       endpointUrl: null,
       advertisedHost: null,
     }),
+    getAdvertisedEndpoints: async () => [],
     pickFolder: async () => null,
     confirm: async () => true,
     setTheme: async () => undefined,
