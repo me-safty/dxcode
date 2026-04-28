@@ -51,10 +51,15 @@
   }
   html {
     background-color: var(--app-chrome-background);
+    /* iOS Safari ignores `user-scalable=no` in many contexts; touch-action
+       blocks pinch-zoom while still allowing pan/scroll. Touch-only input,
+       so desktop browsers are unaffected. */
+    touch-action: pan-x pan-y;
   }
   body {
     @apply text-foreground relative;
     background-color: var(--app-chrome-background);
+    touch-action: pan-x pan-y;
   }
 }
 
