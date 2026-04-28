@@ -990,12 +990,17 @@ function configureApplicationMenu(): void {
 }
 
 function resolveResourcePath(fileName: string): string | null {
-  const candidates = [
+  const appResourceCandidates = [
     Path.join(__dirname, "../resources", fileName),
     Path.join(__dirname, "../prod-resources", fileName),
+  ];
+  const unpackedResourceCandidates = [
     Path.join(process.resourcesPath, "resources", fileName),
     Path.join(process.resourcesPath, fileName),
   ];
+  const candidates = isDevelopment
+    ? [...appResourceCandidates, ...unpackedResourceCandidates]
+    : [...unpackedResourceCandidates, ...appResourceCandidates];
 
   for (const candidate of candidates) {
     if (FS.existsSync(candidate)) {
@@ -1867,11 +1872,31 @@ function registerIpcHandlers(): void {
   });
 }
 
-function getIconOption(): { icon: string } | Record<string, never> {
-  if (process.platform === "darwin") return {}; // macOS uses .icns from app bundle
-  const ext = process.platform === "win32" ? "ico" : "png";
-  const iconPath = resolveIconPath(ext);
-  return iconPath ? { icon: iconPath } : {};
+function resolveWindowIcon(): Electron.NativeImage | null {
+  if (process.platform === "darwin") return null; // macOS uses .icns from app bundle
+  const extensions: Array<"ico" | "png"> = process.platform === "win32" ? ["ico", "png"] : ["png"];
+
+  for (const ext of extensions) {
+    const iconPath = resolveIconPath(ext);
+    if (!iconPath) continue;
+
+    const icon = nativeImage.createFromPath(iconPath);
+    if (icon.isEmpty()) {
+      writeDesktopLogHeader(`window icon candidate empty path=${iconPath}`);
+      continue;
+    }
+
+    writeDesktopLogHeader(`window icon loaded path=${iconPath}`);
+    return icon;
+  }
+
+  writeDesktopLogHeader("window icon unavailable");
+  return null;
+}
+
+function getIconOption(): { icon: Electron.NativeImage } | Record<string, never> {
+  const icon = resolveWindowIcon();
+  return icon ? { icon } : {};
 }
 
 function getInitialWindowBackgroundColor(): string {
@@ -1919,6 +1944,7 @@ function syncAllWindowAppearance(): void {
 nativeTheme.on("updated", syncAllWindowAppearance);
 
 function createWindow(): BrowserWindow {
+  const iconOption = getIconOption();
   const window = new BrowserWindow({
     width: 1100,
     height: 780,
@@ -1927,7 +1953,7 @@ function createWindow(): BrowserWindow {
     show: false,
     autoHideMenuBar: true,
     backgroundColor: getInitialWindowBackgroundColor(),
-    ...getIconOption(),
+    ...iconOption,
     title: APP_DISPLAY_NAME,
     ...getWindowTitleBarOptions(),
     webPreferences: {
@@ -1937,6 +1963,10 @@ function createWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+
+  if ("icon" in iconOption && process.platform !== "darwin") {
+    window.setIcon(iconOption.icon);
+  }
 
   window.webContents.on("context-menu", (event, params) => {
     event.preventDefault();

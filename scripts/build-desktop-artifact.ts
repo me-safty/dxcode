@@ -617,9 +617,17 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     };
     if (signed) {
       winConfig.azureSignOptions = yield* AzureTrustedSigningOptionsConfig;
-    } else {
-      winConfig.signAndEditExecutable = false;
     }
+    buildConfig.extraResources = [
+      {
+        from: "apps/desktop/resources/icon.ico",
+        to: "icon.ico",
+      },
+      {
+        from: "apps/desktop/resources/icon.png",
+        to: "icon.png",
+      },
+    ];
     buildConfig.win = winConfig;
   }
 
