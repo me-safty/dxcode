@@ -53,6 +53,7 @@ import {
   type ParsedTerminalContextEntry,
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
+import { useSettings } from "~/hooks/useSettings";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
@@ -166,6 +167,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const rows = useStableRows(rawRows);
   const minimapEntries = useMemo(() => selectUserMessageMinimapEntries(rows), [rows]);
+  const hideChatMinimap = useSettings((s) => s.hideChatMinimap);
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -264,7 +266,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           maintainScrollAtEndThreshold={0.1}
           maintainVisibleContentPosition
           onScroll={handleScroll}
-          className="h-full overflow-x-hidden overscroll-y-contain pl-3 pr-5 sm:pl-5 sm:pr-7"
+          className={cn(
+            "h-full overflow-x-hidden overscroll-y-contain",
+            hideChatMinimap ? "px-3 sm:px-5" : "pl-3 pr-5 sm:pl-5 sm:pr-7",
+          )}
           ListHeaderComponent={<div className="h-3 sm:h-4" />}
           ListFooterComponent={<div className="h-3 sm:h-4" />}
         />
