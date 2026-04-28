@@ -19,6 +19,9 @@ import {
   type SDKUserMessage,
   type ModelUsage,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { Span } from "@sentry/node";
+import * as path from "node:path";
+
 import { parseCliArgs } from "@t3tools/shared/cliArgs";
 import {
   ApprovalRequestId,
@@ -70,6 +73,14 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
+  finishExecuteToolSpan,
+  finishGenAiRequestSpan,
+  finishInvokeAgentSpan,
+  startExecuteToolSpan,
+  startGenAiRequestSpan,
+  startInvokeAgentSpan,
+} from "../../observability/GenAiSpan.ts";
+import {
   getClaudeModelCapabilities,
   normalizeClaudeCliEffort,
   resolveClaudeApiModelId,
@@ -118,6 +129,18 @@ interface ClaudeTurnState {
   readonly assistantTextBlockOrder: Array<AssistantTextBlockState>;
   readonly capturedProposedPlanKeys: Set<string>;
   nextSyntheticAssistantBlockIndex: number;
+  readonly genAiSpan?: Span;
+  /** JSON-stringified messages sent to start the turn, reused on each request span. */
+  readonly genAiUserMessages?: string;
+  /**
+   * Open `gen_ai.request` span for the in-flight model HTTP request. Opened
+   * lazily on the first stream event after a turn starts (or after the
+   * previous request finished); closed when the matching assistant message
+   * is delivered. Mutated as the turn progresses through multiple model calls.
+   * The explicit `| undefined` is required because the field is reassigned to
+   * `undefined` when a request span closes (`exactOptionalPropertyTypes`).
+   */
+  currentRequestSpan?: Span | undefined;
 }
 
 interface AssistantTextBlockState {
@@ -150,6 +173,8 @@ interface ToolInFlight {
   readonly input: Record<string, unknown>;
   readonly partialInputJson: string;
   readonly lastEmittedInputFingerprint?: string;
+  /** Open `gen_ai.execute_tool` span for this tool call; closed when the matching tool_result arrives. */
+  readonly genAiToolSpan?: Span;
 }
 
 interface ClaudeSessionContext {
@@ -361,6 +386,44 @@ function normalizeClaudeTokenUsage(
     ...(typeof usage.duration_ms === "number" && Number.isFinite(usage.duration_ms)
       ? { durationMs: usage.duration_ms }
       : {}),
+  };
+}
+
+function readFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function genAiAgentName(cwd: string | undefined): string {
+  if (cwd) {
+    const base = path.basename(cwd).trim();
+    if (base.length > 0) return base;
+  }
+  return "claude";
+}
+
+function claudeGenAiSpanFinish(
+  status: ProviderRuntimeTurnStatus,
+  errorMessage: string | undefined,
+  result: SDKResultMessage | undefined,
+): import("../../observability/GenAiSpan.ts").InvokeAgentSpanFinish {
+  const usage = (result?.usage ?? undefined) as Record<string, unknown> | undefined;
+  const fresh = readFiniteNumber(usage?.input_tokens) ?? 0;
+  const cacheRead = readFiniteNumber(usage?.cache_read_input_tokens) ?? 0;
+  const cacheWrite = readFiniteNumber(usage?.cache_creation_input_tokens) ?? 0;
+  // Per Sentry conventions: gen_ai.usage.input_tokens is the TOTAL (already
+  // includes cached). cached/cache_write are subset attributes.
+  const inputTokens = fresh + cacheRead + cacheWrite;
+  const outputTokens = readFiniteNumber(usage?.output_tokens);
+  const totalTokens = readFiniteNumber(usage?.total_tokens) ?? inputTokens + (outputTokens ?? 0);
+  const failureMessage = errorMessage ?? (status === "failed" ? "Claude turn failed" : undefined);
+
+  return {
+    ...(inputTokens > 0 ? { inputTokens } : {}),
+    ...(outputTokens !== undefined && outputTokens > 0 ? { outputTokens } : {}),
+    ...(totalTokens > 0 ? { totalTokens } : {}),
+    ...(cacheRead > 0 ? { cachedInputTokens: cacheRead } : {}),
+    ...(cacheWrite > 0 ? { cacheWriteInputTokens: cacheWrite } : {}),
+    ...(failureMessage ? { errorMessage: failureMessage } : {}),
   };
 }
 
@@ -1564,6 +1627,24 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       providerRefs: nativeProviderRefs(context),
     });
 
+    // Defensively close any in-flight gen_ai child spans BEFORE the parent
+    // invoke_agent span ends, so they remain valid descendants of the trace.
+    if (turnState.currentRequestSpan) {
+      finishGenAiRequestSpan(turnState.currentRequestSpan, {
+        ...(errorMessage ? { errorMessage } : {}),
+      });
+      turnState.currentRequestSpan = undefined;
+    }
+    for (const inFlightTool of context.inFlightTools.values()) {
+      if (inFlightTool.genAiToolSpan) {
+        finishExecuteToolSpan(inFlightTool.genAiToolSpan, {
+          errorMessage: errorMessage ?? "tool did not complete before turn ended",
+        });
+      }
+    }
+
+    finishInvokeAgentSpan(turnState.genAiSpan, claudeGenAiSpanFinish(status, errorMessage, result));
+
     const updatedAt = yield* nowIso;
     context.turnState = undefined;
     context.session = {
@@ -1739,6 +1820,25 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     if (event.type === "content_block_start") {
+      // Lazily open the per-request gen_ai.request span on the first content
+      // block of the current model response. We re-open across multiple model
+      // calls within a single turn (e.g. after tool_results trigger another
+      // assistant message).
+      if (
+        context.turnState &&
+        context.turnState.genAiSpan &&
+        !context.turnState.currentRequestSpan
+      ) {
+        context.turnState.currentRequestSpan = startGenAiRequestSpan(context.turnState.genAiSpan, {
+          model: context.session.model ?? "unknown",
+          system: "anthropic",
+          ...(context.session.threadId ? { conversationId: context.session.threadId } : {}),
+          ...(context.turnState.genAiUserMessages
+            ? { messages: context.turnState.genAiUserMessages }
+            : {}),
+        });
+      }
+
       const { index, content_block: block } = event;
       if (block.type === "text") {
         yield* ensureAssistantTextBlock(context, index, {
@@ -1765,6 +1865,19 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const inputFingerprint =
         Object.keys(toolInput).length > 0 ? toolInputFingerprint(toolInput) : undefined;
 
+      const genAiToolSpan = context.turnState?.genAiSpan
+        ? startExecuteToolSpan(context.turnState.genAiSpan, {
+            toolName,
+            toolInput: JSON.stringify(toolInput),
+            toolType:
+              block.type === "mcp_tool_use"
+                ? "mcp"
+                : block.type === "server_tool_use"
+                  ? "server"
+                  : "function",
+          })
+        : undefined;
+
       const tool: ToolInFlight = {
         itemId,
         itemType,
@@ -1774,6 +1887,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         input: toolInput,
         partialInputJson: "",
         ...(inputFingerprint ? { lastEmittedInputFingerprint: inputFingerprint } : {}),
+        ...(genAiToolSpan ? { genAiToolSpan } : {}),
       };
       context.inFlightTools.set(index, tool);
 
@@ -1932,6 +2046,19 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         },
       });
 
+      // Close the gen_ai.execute_tool span for this tool call, capturing the
+      // tool's output text (or full result block JSON if no plain text).
+      if (tool.genAiToolSpan) {
+        const toolOutput =
+          toolResult.text.length > 0 ? toolResult.text : JSON.stringify(toolResult.block);
+        finishExecuteToolSpan(tool.genAiToolSpan, {
+          toolOutput,
+          ...(toolResult.isError
+            ? { errorMessage: toolResult.text || "tool execution failed" }
+            : {}),
+        });
+      }
+
       context.inFlightTools.delete(index);
     }
   });
@@ -1957,6 +2084,19 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         assistantTextBlockOrder: [],
         capturedProposedPlanKeys: new Set(),
         nextSyntheticAssistantBlockIndex: -1,
+        genAiSpan: startInvokeAgentSpan({
+          agentName: genAiAgentName(context.session.cwd),
+          system: "anthropic",
+          model: context.session.model ?? "unknown",
+          conversationId: context.session.threadId,
+          extraAttributes: {
+            "t3.provider": PROVIDER,
+            "t3.thread.id": context.session.threadId,
+            "t3.turn.id": turnId,
+            "t3.turn.synthetic": true,
+            ...(context.session.cwd ? { "t3.workspace.cwd": context.session.cwd } : {}),
+          },
+        }),
       };
       context.session = {
         ...context.session,
@@ -2017,6 +2157,79 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (context.turnState) {
       context.turnState.items.push(message.message);
       yield* backfillAssistantTextBlocksFromSnapshot(context, message);
+    }
+
+    // Close the per-request gen_ai.request span using usage data from this
+    // assistant message. Per-message usage (not the cumulative result usage)
+    // is what we want here so each request's token cost is attributable.
+    //
+    // With `includePartialMessages: true` the SDK emits multiple `assistant`
+    // SDKMessages per real API call (partial running states plus the final).
+    // Only the final message has `stop_reason` set; partials leave it null.
+    // Gate on stop_reason so each real API call produces exactly one span —
+    // verified empirically against trace 75d8c8c3... where ungated closing
+    // produced 1–3 duplicate spans per call, all stamped with the cumulative
+    // running totals at their close moment.
+    if (context.turnState?.currentRequestSpan) {
+      const sdkMessage = (message.message ?? undefined) as unknown as
+        | {
+            usage?: Record<string, unknown>;
+            content?: unknown;
+            stop_reason?: unknown;
+            model?: unknown;
+          }
+        | undefined;
+      if (typeof sdkMessage?.stop_reason !== "string") {
+        return;
+      }
+      const usage = sdkMessage?.usage ?? {};
+      const fresh = readFiniteNumber(usage.input_tokens) ?? 0;
+      const cacheRead = readFiniteNumber(usage.cache_read_input_tokens) ?? 0;
+      const cacheWrite = readFiniteNumber(usage.cache_creation_input_tokens) ?? 0;
+      // Sentry conventions: input_tokens is the TOTAL (already includes cached).
+      const inputTokens = fresh + cacheRead + cacheWrite;
+      const outputTokens = readFiniteNumber(usage.output_tokens);
+      const totalTokens = readFiniteNumber(usage.total_tokens) ?? inputTokens + (outputTokens ?? 0);
+
+      const blocks = Array.isArray(sdkMessage?.content) ? sdkMessage.content : [];
+      const textParts: Array<string> = [];
+      const toolCalls: Array<{
+        id: unknown;
+        name: unknown;
+        input: unknown;
+      }> = [];
+      for (const entry of blocks) {
+        if (!entry || typeof entry !== "object") continue;
+        const b = entry as {
+          type?: unknown;
+          text?: unknown;
+          id?: unknown;
+          name?: unknown;
+          input?: unknown;
+        };
+        if (b.type === "text" && typeof b.text === "string") {
+          textParts.push(b.text);
+        }
+        if (b.type === "tool_use" || b.type === "server_tool_use" || b.type === "mcp_tool_use") {
+          toolCalls.push({ id: b.id, name: b.name, input: b.input });
+        }
+      }
+      const responseText = textParts.length > 0 ? textParts.join("\n") : undefined;
+      const toolCallsJson = toolCalls.length > 0 ? JSON.stringify(toolCalls) : undefined;
+      const stopReason =
+        typeof sdkMessage?.stop_reason === "string" ? sdkMessage.stop_reason : undefined;
+
+      finishGenAiRequestSpan(context.turnState.currentRequestSpan, {
+        ...(inputTokens > 0 ? { inputTokens } : {}),
+        ...(outputTokens !== undefined && outputTokens > 0 ? { outputTokens } : {}),
+        ...(totalTokens > 0 ? { totalTokens } : {}),
+        ...(cacheRead > 0 ? { cachedInputTokens: cacheRead } : {}),
+        ...(cacheWrite > 0 ? { cacheWriteInputTokens: cacheWrite } : {}),
+        ...(responseText !== undefined ? { responseText } : {}),
+        ...(toolCallsJson !== undefined ? { toolCallsJson } : {}),
+        ...(stopReason !== undefined ? { finishReason: stopReason } : {}),
+      });
+      context.turnState.currentRequestSpan = undefined;
     }
 
     context.lastAssistantUuid = message.uuid;
@@ -3088,6 +3301,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     const turnId = TurnId.make(yield* Random.nextUUIDv4);
+    const turnModel = modelSelection?.model ?? context.session.model ?? "unknown";
+    const userPromptText = buildPromptText(input, boundInstanceId);
+    const userMessagesJson =
+      userPromptText.length > 0
+        ? JSON.stringify([{ role: "user", content: userPromptText }])
+        : undefined;
     const turnState: ClaudeTurnState = {
       turnId,
       startedAt: yield* nowIso,
@@ -3096,6 +3315,20 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       assistantTextBlockOrder: [],
       capturedProposedPlanKeys: new Set(),
       nextSyntheticAssistantBlockIndex: -1,
+      genAiSpan: startInvokeAgentSpan({
+        agentName: genAiAgentName(context.session.cwd),
+        system: "anthropic",
+        model: turnModel,
+        conversationId: context.session.threadId,
+        ...(userMessagesJson ? { messages: userMessagesJson } : {}),
+        extraAttributes: {
+          "t3.provider": PROVIDER,
+          "t3.thread.id": context.session.threadId,
+          "t3.turn.id": turnId,
+          ...(context.session.cwd ? { "t3.workspace.cwd": context.session.cwd } : {}),
+        },
+      }),
+      ...(userMessagesJson ? { genAiUserMessages: userMessagesJson } : {}),
     };
 
     const updatedAt = yield* nowIso;
