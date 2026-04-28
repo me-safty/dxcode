@@ -1748,9 +1748,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return true;
       }
     }
-    if (key === "Enter" && !event.shiftKey) {
-      submitComposer();
-      return true;
+    if (key === "Enter") {
+      const sendKey = settings.composerSendKey;
+      const wantsSend =
+        sendKey === "enter" ? !event.shiftKey : sendKey === "shift-enter" ? event.shiftKey : false;
+      if (wantsSend) {
+        submitComposer();
+        return true;
+      }
     }
     return false;
   };
