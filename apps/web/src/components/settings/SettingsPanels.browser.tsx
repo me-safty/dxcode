@@ -649,9 +649,7 @@ describe("GeneralSettingsPanel observability", () => {
       </AppAtomRegistryProvider>,
     );
 
-    await expect
-      .element(page.getByText("Reachable at http://192.168.86.39:3773/"))
-      .toBeInTheDocument();
+    await expect.element(page.getByText("http://192.168.86.39:3773/")).toBeInTheDocument();
     await expect.element(page.getByRole("button", { name: "+2" })).toBeInTheDocument();
     await expect
       .element(page.getByRole("heading", { name: "Local network", exact: true }))
@@ -664,7 +662,7 @@ describe("GeneralSettingsPanel observability", () => {
       .toBeInTheDocument();
     await expect.element(page.getByText("Default", { exact: true })).toBeInTheDocument();
     await page.getByRole("button", { name: "Set as default" }).first().click();
-    await expect.element(page.getByText("Reachable at http://127.0.0.1:3773/")).toBeInTheDocument();
+    await expect.element(page.getByText("http://127.0.0.1:3773/").first()).toBeInTheDocument();
   });
 
   it("shows diagnostics inside About with a single logs-folder action", async () => {
@@ -917,9 +915,7 @@ describe("GeneralSettingsPanel observability", () => {
     await vi.waitFor(() => {
       expect(desktopBridge.setServerExposureMode).toHaveBeenCalledWith("network-accessible");
     });
-    await expect
-      .element(page.getByText("Reachable at http://192.168.1.44:3773"))
-      .toBeInTheDocument();
+    await expect.element(page.getByText("http://192.168.1.44:3773")).toBeInTheDocument();
   });
 
   it("adds desktop ssh environments from the add-environment dialog", async () => {
