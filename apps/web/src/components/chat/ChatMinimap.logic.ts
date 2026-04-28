@@ -104,19 +104,24 @@ export function selectVisibleMinimapEntries({
 
   const sourceActiveIndex = activeIndex === null ? null : clampIndex(activeIndex, entries.length);
 
-  // Before the strip has been measured, render every entry. The
-  // ResizeObserver fires synchronously on attach, so this initial pass is
-  // brief and avoids a "popping in" flash for short threads.
-  if (navHeight === null) {
-    return { visibleEntries: entries, visibleActiveIndex: sourceActiveIndex, hiddenCount: 0 };
-  }
-
-  const usable = Math.max(0, navHeight - MINIMAP_STRIP_VERTICAL_PADDING_PX);
-  // Two ceilings: the column's pixel capacity and the hard 10-dash cap. We
-  // take the smaller so a tall viewport never grows past `MAX_VISIBLE_MINIMAP_DASHES`,
-  // and a very short column still falls back to whatever it can physically fit.
-  const pixelCapacity = Math.max(1, Math.floor(usable / MINIMAP_PIXELS_PER_ROW));
-  const capacity = Math.min(MAX_VISIBLE_MINIMAP_DASHES, pixelCapacity);
+  // The 10-dash cap applies whether or not the strip has been measured.
+  // When unmeasured, capping at MAX_VISIBLE_MINIMAP_DASHES doubles as the
+  // overflow guard for long initial-render threads (no flash, no jank). When
+  // measured, take the smaller of the column's pixel capacity and the cap so
+  // a tall viewport never grows past `MAX_VISIBLE_MINIMAP_DASHES`, and a very
+  // short column still falls back to whatever it can physically fit.
+  const capacity =
+    navHeight === null
+      ? MAX_VISIBLE_MINIMAP_DASHES
+      : Math.min(
+          MAX_VISIBLE_MINIMAP_DASHES,
+          Math.max(
+            1,
+            Math.floor(
+              Math.max(0, navHeight - MINIMAP_STRIP_VERTICAL_PADDING_PX) / MINIMAP_PIXELS_PER_ROW,
+            ),
+          ),
+        );
 
   if (entries.length <= capacity) {
     return { visibleEntries: entries, visibleActiveIndex: sourceActiveIndex, hiddenCount: 0 };

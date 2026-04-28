@@ -817,8 +817,9 @@ describe("selectVisibleMinimapEntries", () => {
     expect(result.visibleActiveIndex).toBeNull();
   });
 
-  it("renders every entry before the strip has been measured to avoid a popping flash", () => {
-    const entries = make(40);
+  it("renders short threads fully before the strip has been measured", () => {
+    // 8 ≤ MAX_VISIBLE_MINIMAP_DASHES (10) → all entries pass through unchanged.
+    const entries = make(8);
     const result = selectVisibleMinimapEntries({
       entries,
       navHeight: null,
@@ -826,6 +827,20 @@ describe("selectVisibleMinimapEntries", () => {
     });
     expect(result.visibleEntries).toBe(entries);
     expect(result.visibleActiveIndex).toBe(3);
+  });
+
+  it("samples long threads before measurement so the rail never renders an overflowing full list", () => {
+    // The cap applies even before navHeight is known, so a 200-message thread
+    // never paints all 200 dashes during the initial unmeasured frame.
+    const entries = make(200);
+    const result = selectVisibleMinimapEntries({
+      entries,
+      navHeight: null,
+      activeIndex: 100,
+    });
+    expect(result.visibleEntries.length).toBe(10);
+    expect(result.visibleEntries[0]).toBe(entries[0]);
+    expect(result.visibleEntries[result.visibleEntries.length - 1]).toBe(entries[199]);
   });
 
   it("renders all entries naturally when they fit under the cap", () => {
@@ -987,12 +1002,12 @@ describe("selectVisibleMinimapEntries", () => {
     expect(result.hiddenCount).toBe(19);
   });
 
-  it("reports hiddenCount = 0 before measurement and on empty input", () => {
+  it("reports hiddenCount = 0 when entries fit under the cap and on empty input", () => {
     expect(
       selectVisibleMinimapEntries({ entries: [], navHeight: 600, activeIndex: null }).hiddenCount,
     ).toBe(0);
     expect(
-      selectVisibleMinimapEntries({ entries: make(50), navHeight: null, activeIndex: 0 })
+      selectVisibleMinimapEntries({ entries: make(8), navHeight: null, activeIndex: 0 })
         .hiddenCount,
     ).toBe(0);
   });
