@@ -214,6 +214,10 @@ describe("ChatMinimap", () => {
 
     try {
       await page.getByTestId(MOUSE_PARK_TESTID).hover();
+      await vi.waitFor(() => {
+        const nav = screen.container.querySelector('[data-testid="chat-minimap"]');
+        expect(nav?.getAttribute("data-expanded")).toBeNull();
+      });
       await page.getByTestId("chat-minimap-list").hover();
 
       await expect.element(page.getByTestId("chat-minimap-menu")).toBeVisible();
@@ -246,6 +250,10 @@ describe("ChatMinimap", () => {
 
     try {
       await page.getByTestId(MOUSE_PARK_TESTID).hover();
+      await vi.waitFor(() => {
+        const nav = screen.container.querySelector('[data-testid="chat-minimap"]');
+        expect(nav?.getAttribute("data-expanded")).toBeNull();
+      });
       await page.getByTestId("chat-minimap-list").hover();
       await expect.element(page.getByTestId("chat-minimap-menu")).toBeVisible();
 
