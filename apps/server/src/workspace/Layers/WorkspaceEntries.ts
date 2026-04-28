@@ -1,6 +1,7 @@
 import * as OS from "node:os";
 import fsPromises from "node:fs/promises";
 import type { Dirent } from "node:fs";
+import { execFile } from "node:child_process";
 
 import { Cache, Duration, Effect, Exit, Layer, Option, Path } from "effect";
 
@@ -140,6 +141,134 @@ function directoryAncestorsOf(relativePath: string): string[] {
     directories.push(segments.slice(0, index).join("/"));
   }
   return directories;
+}
+
+// Cap parallelism when probing directory entries for Finder-alias magic
+// bytes. Each probe opens a file and reads 4 bytes, so on huge directories
+// unbounded parallelism can saturate file descriptors and the kernel's I/O
+// queue. Sixteen is a good middle ground — small enough to stay polite,
+// large enough to overlap I/O latency.
+const ALIAS_PROBE_CONCURRENCY = 16;
+
+async function mapWithConcurrency<A, B>(
+  items: readonly A[],
+  concurrency: number,
+  fn: (item: A, index: number) => Promise<B>,
+): Promise<B[]> {
+  if (items.length === 0) return [];
+  const results: B[] = Array.from({ length: items.length });
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      const item = items[index];
+      if (item === undefined) continue;
+      results[index] = await fn(item, index);
+    }
+  };
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
+// macOS Finder aliases are binary files (not symlinks). Modern ones (10.5+)
+// are bookmark-format NSURL data and start with magic bytes "book". Pre-10.5
+// "alis"-format aliases stored their type/creator metadata in the HFS
+// FinderInfo extended attribute rather than the file body; detecting those
+// would require reading `com.apple.FinderInfo`, which has no native Node API
+// and is essentially extinct on modern installs. We intentionally only
+// support modern bookmark aliases here.
+const MACOS_BOOKMARK_ALIAS_MAGIC = "book";
+// Real Finder bookmark files are tiny (typically well under 2 KB). Capping
+// the probe at 64 KB lets us skip media, archives, binaries, etc. with a
+// single cheap `stat` syscall in directories like ~/Downloads, instead of
+// paying for an `open + read + close` on every file matching the prefix.
+const MACOS_ALIAS_MAX_PROBE_BYTES = 64 * 1024;
+// The script emits one resolved path per alias in argv order, using NUL as
+// the terminator. POSIX paths cannot contain NUL bytes, so this is the only
+// delimiter that is guaranteed to be unambiguous; tabs and newlines are legal
+// in filenames and would break simpler formats.
+const MACOS_ALIAS_RESOLVE_SCRIPT = `on run argv
+  set results to ""
+  set nul to ASCII character 0
+  repeat with rawPath in argv
+    set p to rawPath as string
+    try
+      tell application "Finder"
+        set theTarget to original item of (POSIX file p as alias)
+        set resolved to POSIX path of (theTarget as alias)
+      end tell
+      set results to results & resolved & nul
+    on error
+      set results to results & nul
+    end try
+  end repeat
+  return results
+end run`;
+
+export async function isMacOSBookmarkAlias(filePath: string): Promise<boolean> {
+  // Cheap stat prefilter: bookmark files are small, so anything outside the
+  // plausible range can't be one and isn't worth opening.
+  try {
+    const stats = await fsPromises.stat(filePath);
+    if (stats.size < 4 || stats.size > MACOS_ALIAS_MAX_PROBE_BYTES) return false;
+  } catch {
+    return false;
+  }
+  let handle: fsPromises.FileHandle | undefined;
+  try {
+    handle = await fsPromises.open(filePath, "r");
+    const buffer = Buffer.alloc(4);
+    const { bytesRead } = await handle.read(buffer, 0, 4, 0);
+    if (bytesRead < 4) return false;
+    return buffer.toString("ascii") === MACOS_BOOKMARK_ALIAS_MAGIC;
+  } catch {
+    return false;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function resolveMacOSAliasTargets(
+  aliasPaths: readonly string[],
+): Promise<Map<string, string>> {
+  if (process.platform !== "darwin" || aliasPaths.length === 0) {
+    return new Map();
+  }
+  // The first osascript invocation on a given install triggers macOS's TCC
+  // prompt to "control Finder". If the user doesn't click Allow immediately,
+  // osascript blocks waiting for their response. A short timeout would kill
+  // the subprocess before they can react and leave aliases silently missing
+  // from the picker, so we use a generous ceiling. Subsequent calls are
+  // effectively instantaneous.
+  const stdout = await new Promise<string>((resolve) => {
+    execFile(
+      "osascript",
+      ["-e", MACOS_ALIAS_RESOLVE_SCRIPT, "--", ...aliasPaths],
+      { timeout: 30_000, maxBuffer: 1_024 * 1_024 },
+      (error, out) => {
+        if (error) {
+          resolve("");
+          return;
+        }
+        resolve(out);
+      },
+    );
+  });
+  const map = new Map<string, string>();
+  // The script emits `<resolved>\0` for each argv entry (empty chunk for
+  // unresolvable aliases). Split on NUL and match positionally to aliasPaths.
+  const chunks = stdout.split("\0");
+  for (let i = 0; i < aliasPaths.length; i += 1) {
+    const aliasPath = aliasPaths[i];
+    const resolved = chunks[i]?.replace(/\/$/, "") ?? "";
+    if (aliasPath && resolved) {
+      map.set(aliasPath, resolved);
+    }
+  }
+  return map;
 }
 
 const resolveBrowseTarget = (
@@ -426,8 +555,37 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     function* (input) {
       const resolvedInputPath = yield* resolveBrowseTarget(input, path);
       const endsWithSeparator = /[\\/]$/.test(input.partialPath) || input.partialPath === "~";
-      const parentPath = endsWithSeparator ? resolvedInputPath : path.dirname(resolvedInputPath);
+      const initialParentPath = endsWithSeparator
+        ? resolvedInputPath
+        : path.dirname(resolvedInputPath);
       const prefix = endsWithSeparator ? "" : path.basename(resolvedInputPath);
+
+      // If the user typed a path whose last component is a macOS Finder alias
+      // (e.g. `~/mongodb-test-alis/`), the entry is a regular file on disk and
+      // readdir would fail. Resolve it to its target directory first so the
+      // listing works and the returned parentPath reflects the real location.
+      const parentPath = yield* Effect.promise(async () => {
+        try {
+          if (process.platform !== "darwin" || !endsWithSeparator) {
+            return initialParentPath;
+          }
+          try {
+            const stats = await fsPromises.lstat(initialParentPath);
+            if (!stats.isFile()) return initialParentPath;
+          } catch {
+            return initialParentPath;
+          }
+          if (!(await isMacOSBookmarkAlias(initialParentPath))) {
+            return initialParentPath;
+          }
+          const resolved = await resolveMacOSAliasTargets([initialParentPath]);
+          return resolved.get(initialParentPath) ?? initialParentPath;
+        } catch {
+          // Defense in depth: alias resolution is best-effort; never let an
+          // unexpected rejection here become an Effect defect.
+          return initialParentPath;
+        }
+      });
 
       const dirents = yield* Effect.tryPromise({
         try: () => fsPromises.readdir(parentPath, { withFileTypes: true }),
@@ -444,19 +602,106 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       const showHidden = endsWithSeparator || prefix.startsWith(".");
       const lowerPrefix = prefix.toLowerCase();
 
+      const isDarwin = process.platform === "darwin";
+
+      const candidates = dirents.filter((dirent) => {
+        if (!dirent.name.toLowerCase().startsWith(lowerPrefix)) return false;
+        if (!showHidden && dirent.name.startsWith(".")) return false;
+        if (dirent.isDirectory() || dirent.isSymbolicLink()) return true;
+        // On macOS, regular files can be Finder aliases (binary bookmark
+        // files). We detect them by magic bytes below before resolving.
+        if (isDarwin && dirent.isFile()) return true;
+        return false;
+      });
+
+      // Follow symlinks (e.g. ~/Dropbox -> ~/Library/CloudStorage/Dropbox) and
+      // macOS Finder aliases so they show up in the picker alongside real
+      // directories. Aliases are resolved in a single batched osascript call.
+      const { resolved, aliasTargets } = yield* Effect.promise(async () => {
+        try {
+          const initial = await mapWithConcurrency(
+            candidates,
+            ALIAS_PROBE_CONCURRENCY,
+            async (dirent) => {
+              if (dirent.isDirectory()) {
+                return { dirent, pointsToDirectory: true, isAlias: false };
+              }
+              if (dirent.isSymbolicLink()) {
+                try {
+                  const stats = await fsPromises.stat(path.join(parentPath, dirent.name));
+                  return { dirent, pointsToDirectory: stats.isDirectory(), isAlias: false };
+                } catch {
+                  return { dirent, pointsToDirectory: false, isAlias: false };
+                }
+              }
+              if (isDarwin && dirent.isFile()) {
+                const fullPath = path.join(parentPath, dirent.name);
+                if (await isMacOSBookmarkAlias(fullPath)) {
+                  return { dirent, pointsToDirectory: false, isAlias: true };
+                }
+              }
+              return { dirent, pointsToDirectory: false, isAlias: false };
+            },
+          );
+
+          const aliasCandidatePaths = initial
+            .filter((item) => item.isAlias)
+            .map((item) => path.join(parentPath, item.dirent.name));
+          const aliasTargets = await resolveMacOSAliasTargets(aliasCandidatePaths);
+
+          const finalItems = await mapWithConcurrency(
+            initial,
+            ALIAS_PROBE_CONCURRENCY,
+            async (item) => {
+              if (!item.isAlias) return item;
+              const aliasPath = path.join(parentPath, item.dirent.name);
+              const target = aliasTargets.get(aliasPath);
+              if (!target) return item;
+              try {
+                const stats = await fsPromises.stat(target);
+                return { ...item, pointsToDirectory: stats.isDirectory() };
+              } catch {
+                return item;
+              }
+            },
+          );
+
+          return { resolved: finalItems, aliasTargets };
+        } catch {
+          // Defense in depth: alias/symlink resolution is best-effort. Fall
+          // back to the raw dirent list without any target-directory
+          // promotion rather than letting an unexpected rejection surface as
+          // an Effect defect.
+          return {
+            resolved: candidates.map((dirent) => ({
+              dirent,
+              pointsToDirectory: dirent.isDirectory(),
+              isAlias: false,
+            })),
+            aliasTargets: new Map<string, string>(),
+          };
+        }
+      });
+
       return {
         parentPath,
-        entries: dirents
-          .filter(
-            (dirent) =>
-              dirent.isDirectory() &&
-              dirent.name.toLowerCase().startsWith(lowerPrefix) &&
-              (showHidden || !dirent.name.startsWith(".")),
-          )
-          .map((dirent) => ({
-            name: dirent.name,
-            fullPath: path.join(parentPath, dirent.name),
-          }))
+        entries: resolved
+          .filter((item) => item.pointsToDirectory)
+          .map(({ dirent, isAlias }) => {
+            const joined = path.join(parentPath, dirent.name);
+            const entry: {
+              name: string;
+              fullPath: string;
+              isSymlink?: boolean;
+              isAlias?: boolean;
+            } = {
+              name: dirent.name,
+              fullPath: isAlias ? (aliasTargets.get(joined) ?? joined) : joined,
+            };
+            if (dirent.isSymbolicLink() || isAlias) entry.isSymlink = true;
+            if (isAlias) entry.isAlias = true;
+            return entry;
+          })
           .toSorted((left, right) => left.name.localeCompare(right.name)),
       };
     },

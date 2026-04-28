@@ -8,7 +8,7 @@ import { ServerConfig } from "../../config.ts";
 import { GitCoreLive } from "../../git/Layers/GitCore.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { WorkspaceEntries } from "../Services/WorkspaceEntries.ts";
-import { WorkspaceEntriesLive } from "./WorkspaceEntries.ts";
+import { WorkspaceEntriesLive, isMacOSBookmarkAlias } from "./WorkspaceEntries.ts";
 import { WorkspacePathsLive } from "./WorkspacePaths.ts";
 
 const TestLayer = Layer.empty.pipe(
@@ -358,6 +358,108 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
           .pipe(Effect.flip);
 
         expect(error.detail).toBe("Relative filesystem browse paths require a current project.");
+      }),
+    );
+
+    it.effect(
+      "includes symlinks that resolve to directories and excludes file/broken symlinks",
+      () =>
+        Effect.gen(function* () {
+          const workspaceEntries = yield* WorkspaceEntries;
+          const path = yield* Path.Path;
+          const cwd = yield* makeTempDir({ prefix: "t3code-workspace-browse-symlink-" });
+          yield* writeTextFile(cwd, "real-dir/index.ts", "export {};\n");
+          yield* writeTextFile(cwd, "real-file.txt", "hello");
+
+          yield* Effect.promise(() =>
+            fsPromises.symlink(path.join(cwd, "real-dir"), path.join(cwd, "linked-dir")),
+          );
+          yield* Effect.promise(() =>
+            fsPromises.symlink(path.join(cwd, "real-file.txt"), path.join(cwd, "linked-file")),
+          );
+          yield* Effect.promise(() =>
+            fsPromises.symlink(path.join(cwd, "missing-target"), path.join(cwd, "broken-link")),
+          );
+
+          const result = yield* workspaceEntries.browse({
+            partialPath: appendSeparator(cwd),
+          });
+
+          expect(result.entries).toEqual([
+            { name: "linked-dir", fullPath: path.join(cwd, "linked-dir"), isSymlink: true },
+            { name: "real-dir", fullPath: path.join(cwd, "real-dir") },
+          ]);
+        }),
+    );
+  });
+
+  describe("isMacOSBookmarkAlias", () => {
+    it.effect("detects files starting with the bookmark magic", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir({ prefix: "t3code-bookmark-magic-" });
+        const aliasPath = path.join(cwd, "alias.bin");
+        // Minimal header: "book\x00\x00\x00\x00mark\x00\x00\x00\x00" matches
+        // the modern macOS alias format we care about; only the first four
+        // bytes are read.
+        yield* Effect.promise(() =>
+          fsPromises.writeFile(
+            aliasPath,
+            Buffer.from("book\x00\x00\x00\x00mark\x00\x00\x00\x00", "binary"),
+          ),
+        );
+        const result = yield* Effect.promise(() => isMacOSBookmarkAlias(aliasPath));
+        expect(result).toBe(true);
+      }),
+    );
+
+    it.effect("returns false for regular text files", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir({ prefix: "t3code-bookmark-magic-" });
+        const textPath = path.join(cwd, "note.txt");
+        yield* writeTextFile(cwd, "note.txt", "hello world");
+        const result = yield* Effect.promise(() => isMacOSBookmarkAlias(textPath));
+        expect(result).toBe(false);
+      }),
+    );
+
+    it.effect("returns false for files shorter than the magic", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir({ prefix: "t3code-bookmark-magic-" });
+        const shortPath = path.join(cwd, "short.bin");
+        yield* Effect.promise(() => fsPromises.writeFile(shortPath, Buffer.from("bo")));
+        const result = yield* Effect.promise(() => isMacOSBookmarkAlias(shortPath));
+        expect(result).toBe(false);
+      }),
+    );
+
+    it.effect("returns false for missing files", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir({ prefix: "t3code-bookmark-magic-" });
+        const missing = path.join(cwd, "does-not-exist.bin");
+        const result = yield* Effect.promise(() => isMacOSBookmarkAlias(missing));
+        expect(result).toBe(false);
+      }),
+    );
+
+    it.effect("rejects files larger than the probe cap without reading magic", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir({ prefix: "t3code-bookmark-magic-" });
+        const largePath = path.join(cwd, "big-fake-alias.bin");
+        // Starts with the bookmark magic but is larger than the probe cap
+        // (64 KB). Without the size prefilter this would return true; with
+        // it the file is skipped before we open it.
+        const header = Buffer.from("book\x00\x00\x00\x00mark\x00\x00\x00\x00", "binary");
+        const padding = Buffer.alloc(128 * 1024, 0);
+        yield* Effect.promise(() =>
+          fsPromises.writeFile(largePath, Buffer.concat([header, padding])),
+        );
+        const result = yield* Effect.promise(() => isMacOSBookmarkAlias(largePath));
+        expect(result).toBe(false);
       }),
     );
   });

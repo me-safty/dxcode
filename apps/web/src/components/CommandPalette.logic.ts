@@ -51,6 +51,22 @@ export interface CommandPaletteView {
 
 export type CommandPaletteMode = "root" | "root-browse" | "submenu" | "submenu-browse";
 
+// Browse palette values have two shapes:
+//   - `browse:${fullPath}` for regular directories and symlinks
+//   - `browse:alias:${name}:${fullPath}` for macOS Finder aliases, where two
+//     aliases in the same listing can resolve to the same target and we need
+//     the visible name to disambiguate them.
+// The consumer never parses this string — it recomputes the value via
+// buildBrowseItemValue(entry) and compares. That way filename characters
+// (colons, spaces, …) never collide with the `:` delimiter.
+export function buildBrowseItemValue(
+  entry: Pick<FilesystemBrowseEntry, "name" | "fullPath" | "isAlias">,
+): string {
+  return entry.isAlias
+    ? `browse:alias:${entry.name}:${entry.fullPath}`
+    : `browse:${entry.fullPath}`;
+}
+
 export function filterBrowseEntries(input: {
   browseEntries: ReadonlyArray<FilesystemBrowseEntry>;
   browseFilterQuery: string;
@@ -70,9 +86,10 @@ export function filterBrowseEntries(input: {
   );
 
   let highlightedEntry: FilesystemBrowseEntry | null = null;
-  if (input.highlightedItemValue?.startsWith("browse:")) {
-    const highlightedPath = input.highlightedItemValue.slice("browse:".length);
-    highlightedEntry = filteredEntries.find((entry) => entry.fullPath === highlightedPath) ?? null;
+  const highlighted = input.highlightedItemValue;
+  if (highlighted && highlighted.startsWith("browse:")) {
+    highlightedEntry =
+      filteredEntries.find((entry) => buildBrowseItemValue(entry) === highlighted) ?? null;
   }
 
   const exactEntry =
@@ -285,8 +302,10 @@ export function buildBrowseGroups(input: {
   canBrowseUp: boolean;
   upIcon: ReactNode;
   directoryIcon: ReactNode;
+  symlinkIcon: ReactNode;
   browseUp: () => void;
   browseTo: (name: string) => void;
+  browseToPath: (fullPath: string) => void;
 }): CommandPaletteGroup[] {
   const items: CommandPaletteActionItem[] = [];
 
@@ -307,13 +326,20 @@ export function buildBrowseGroups(input: {
   for (const entry of input.browseEntries) {
     items.push({
       kind: "action",
-      value: `browse:${entry.fullPath}`,
+      value: buildBrowseItemValue(entry),
       searchTerms: [input.browseQuery, entry.fullPath, entry.name],
       title: entry.name,
-      icon: input.directoryIcon,
+      icon: entry.isSymlink ? input.symlinkIcon : input.directoryIcon,
       keepOpen: true,
       run: async () => {
-        input.browseTo(entry.name);
+        // Finder aliases resolve to a target elsewhere on disk. Appending the
+        // alias file name to the current path would fail to readdir, so we
+        // jump straight to the resolved fullPath.
+        if (entry.isAlias) {
+          input.browseToPath(entry.fullPath);
+        } else {
+          input.browseTo(entry.name);
+        }
       },
     });
   }
