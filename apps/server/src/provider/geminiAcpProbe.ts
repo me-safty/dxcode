@@ -15,6 +15,7 @@ import { Cause, Effect, Option } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeGeminiAcpRuntime } from "./acp/GeminiAcpSupport.ts";
+import { readGeminiLaunchEnv } from "./geminiCliFiles.ts";
 import { asNumber, asRecord, trimToUndefined } from "./jsonValue.ts";
 
 const GEMINI_ACP_PROBE_TIMEOUT_MS = 8_000;
@@ -114,10 +115,15 @@ export const probeGeminiCapabilities = (input: {
   Effect.scoped(
     Effect.gen(function* () {
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const env = yield* Effect.tryPromise({
+        try: () => readGeminiLaunchEnv(),
+        catch: () => undefined,
+      });
       const runtime = yield* makeGeminiAcpRuntime({
         childProcessSpawner,
         binaryPath: input.binaryPath,
         cwd: input.cwd,
+        ...(env ? { env } : {}),
         clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
         clientCapabilities: {
           fs: { readTextFile: false, writeTextFile: false },

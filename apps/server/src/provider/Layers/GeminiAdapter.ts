@@ -78,6 +78,7 @@ import {
   findGeminiSessionFileById,
   type GeminiStoredTurn,
   readGeminiResumeSessionId,
+  readGeminiLaunchEnv,
   readLegacyGeminiResumeTurns,
   writeGeminiModelAliasSettings,
 } from "../geminiCliFiles.ts";
@@ -564,16 +565,22 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
       ];
 
       return yield* Effect.tryPromise({
-        try: () =>
-          writeGeminiModelAliasSettings({
+        try: async () => {
+          const modelAliasSettings = await writeGeminiModelAliasSettings({
             scopeId: input.threadId,
             modelIds: candidateModels,
-          }),
+          });
+          const env = await readGeminiLaunchEnv(modelAliasSettings.env);
+          return {
+            ...modelAliasSettings,
+            ...(env ? { env } : {}),
+          };
+        },
         catch: (cause) =>
           new ProviderAdapterProcessError({
             provider: PROVIDER,
             threadId: input.threadId,
-            detail: `Failed to prepare Gemini thinking settings: ${toMessage(cause, "write failed")}`,
+            detail: `Failed to prepare Gemini launch environment: ${toMessage(cause, "prepare failed")}`,
             cause,
           }),
       });

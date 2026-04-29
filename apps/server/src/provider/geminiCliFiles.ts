@@ -9,6 +9,7 @@ import { asArray, asNumber, asRecord, trimToUndefined } from "./jsonValue.ts";
 
 const GEMINI_RESUME_CURSOR_VERSION = 1;
 const GEMINI_TMP_DIR = path.join(os.homedir(), ".gemini", "tmp");
+const GEMINI_USER_ENV_PATH = path.join(os.homedir(), ".gemini", ".env");
 const GEMINI_CHAT_DIR_NAME = "chats";
 const GEMINI_SESSION_FILE_PREFIX = "session-";
 const T3CODE_GEMINI_SETTINGS_DIR = path.join(os.tmpdir(), "t3code", "gemini");
@@ -223,6 +224,73 @@ export async function writeGeminiModelAliasSettings(input: {
       GEMINI_CLI_SYSTEM_SETTINGS_PATH: systemSettingsPath,
     },
   };
+}
+
+function unquoteEnvValue(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length < 2) {
+    return trimmed;
+  }
+
+  const quote = trimmed[0];
+  if ((quote !== `"` && quote !== `'`) || trimmed.at(-1) !== quote) {
+    return trimmed;
+  }
+
+  const inner = trimmed.slice(1, -1);
+  return quote === `"`
+    ? inner.replaceAll(String.raw`\n`, "\n").replaceAll(String.raw`\"`, `"`)
+    : inner;
+}
+
+export function parseGeminiEnvFile(content: string): Readonly<Record<string, string>> {
+  const env: Record<string, string> = {};
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+
+    const normalizedLine = line.startsWith("export ") ? line.slice("export ".length).trim() : line;
+    const separatorIndex = normalizedLine.indexOf("=");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = normalizedLine.slice(0, separatorIndex).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      continue;
+    }
+
+    const value = normalizedLine.slice(separatorIndex + 1);
+    env[key] = unquoteEnvValue(value);
+  }
+
+  return env;
+}
+
+export async function readGeminiUserEnv(): Promise<Readonly<Record<string, string>>> {
+  try {
+    return parseGeminiEnvFile(await fs.readFile(GEMINI_USER_ENV_PATH, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+export async function readGeminiLaunchEnv(
+  overrides?: Readonly<Record<string, string>>,
+): Promise<Readonly<Record<string, string>> | undefined> {
+  const userEnv = await readGeminiUserEnv();
+  const merged = {
+    ...userEnv,
+    ...process.env,
+    ...overrides,
+  };
+  const entries = Object.entries(merged).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string",
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 export function cleanupGeminiSystemSettings(systemSettingsPath: string | undefined): void {
