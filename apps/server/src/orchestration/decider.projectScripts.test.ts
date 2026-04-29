@@ -143,7 +143,7 @@ describe("decider project scripts", () => {
             model: "gpt-5-codex",
           },
           interactionMode: "plan",
-          runtimeMode: "full-access",
+          runtimeMode: "approval-required",
           branch: null,
           worktreePath: null,
           createdAt: now,
@@ -169,7 +169,7 @@ describe("decider project scripts", () => {
             { id: "fastMode", value: true },
           ]),
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "approval-required",
+          runtimeMode: "full-access",
           createdAt: now,
         },
         readModel,
@@ -194,7 +194,7 @@ describe("decider project scripts", () => {
         { id: "fastMode", value: true },
       ]),
       runtimeMode: "approval-required",
-      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      interactionMode: "plan",
     });
   });
 

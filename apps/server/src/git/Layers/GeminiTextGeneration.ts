@@ -7,6 +7,7 @@ import { resolveApiModelId } from "@t3tools/shared/model";
 
 import {
   cleanupGeminiSystemSettings,
+  readGeminiLaunchEnv,
   writeGeminiModelAliasSettings,
 } from "../../provider/geminiCliFiles.ts";
 import { resolveGeminiBinaryPath } from "../../provider/geminiBinaryPath.ts";
@@ -78,15 +79,21 @@ const makeGeminiTextGeneration = Effect.gen(function* () {
     const runGeminiCommand = Effect.fn("runGeminiJson.runGeminiCommand")(function* () {
       const binaryPath = resolveGeminiBinaryPath(geminiSettings?.binaryPath);
       const launchConfig = yield* Effect.tryPromise({
-        try: () =>
-          writeGeminiModelAliasSettings({
+        try: async () => {
+          const modelAliasSettings = await writeGeminiModelAliasSettings({
             scopeId: `git-${operation}`,
             modelIds: [modelSelection.model],
-          }),
+          });
+          const env = await readGeminiLaunchEnv(modelAliasSettings.env);
+          return {
+            ...modelAliasSettings,
+            ...(env ? { env } : {}),
+          };
+        },
         catch: (cause) =>
           new TextGenerationError({
             operation,
-            detail: "Failed to prepare Gemini CLI model settings.",
+            detail: "Failed to prepare Gemini CLI launch environment.",
             cause,
           }),
       });
@@ -107,7 +114,7 @@ const makeGeminiTextGeneration = Effect.gen(function* () {
         ],
         {
           cwd,
-          ...(launchConfig.env ? { env: { ...process.env, ...launchConfig.env } } : {}),
+          ...(launchConfig.env ? { env: launchConfig.env } : {}),
           shell: process.platform === "win32",
           stdin: {
             stream: Stream.encodeText(Stream.make(prompt)),
