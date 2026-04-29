@@ -330,6 +330,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
       const child = yield* spawner
         .spawn(
           ChildProcess.make(input.binaryPath, args, {
+            shell: process.platform === "win32",
             env: {
               ...process.env,
               OPENCODE_CONFIG_CONTENT: JSON.stringify({}),
