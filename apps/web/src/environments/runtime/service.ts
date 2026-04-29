@@ -143,6 +143,66 @@ const INITIAL_SERVER_CONFIG_SNAPSHOT_WAIT_MS = 150;
 const NOOP = () => undefined;
 const SSH_HTTP_STATUS_RE = /^\[ssh_http:(\d+)\]\s/u;
 
+function createDeferredPromise<T>() {
+  let resolve: ((value: T) => void) | null = null;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+
+  return {
+    promise,
+    resolve: (value: T) => {
+      resolve?.(value);
+      resolve = null;
+    },
+  };
+}
+
+async function waitForConfigSnapshot(
+  promise: Promise<ServerConfig>,
+  timeoutMs: number,
+): Promise<ServerConfig | null> {
+  return await new Promise<ServerConfig | null>((resolve) => {
+    const timeoutId = globalThis.setTimeout(() => resolve(null), timeoutMs);
+    promise.then(
+      (config) => {
+        clearTimeout(timeoutId);
+        resolve(config);
+      },
+      () => {
+        clearTimeout(timeoutId);
+        resolve(null);
+      },
+    );
+  });
+}
+
+function createSavedEnvironmentSyncScheduler() {
+  let activeSync: Promise<void> | null = null;
+  let queued = false;
+
+  const run = async (): Promise<void> => {
+    do {
+      queued = false;
+      await syncSavedEnvironmentConnections(listSavedEnvironmentRecords());
+    } while (queued);
+  };
+
+  return () => {
+    if (activeSync) {
+      queued = true;
+      return activeSync;
+    }
+
+    activeSync = run()
+      .catch(() => undefined)
+      .finally(() => {
+        activeSync = null;
+      });
+
+    return activeSync;
+  };
+}
 function compareAppliedProjectionVersion(
   left: { readonly sequence: number; readonly updatedAt: string | null },
   right: { readonly sequence: number; readonly updatedAt: string | null },
