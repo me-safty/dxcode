@@ -238,9 +238,29 @@ function unquoteEnvValue(value: string): string {
   }
 
   const inner = trimmed.slice(1, -1);
-  return quote === `"`
-    ? inner.replaceAll(String.raw`\n`, "\n").replaceAll(String.raw`\"`, `"`)
-    : inner;
+  if (quote !== `"`) {
+    return inner;
+  }
+
+  let result = "";
+  for (let index = 0; index < inner.length; index += 1) {
+    const char = inner[index];
+    if (char !== "\\" || index === inner.length - 1) {
+      result += char;
+      continue;
+    }
+
+    const next = inner[index + 1];
+    index += 1;
+    if (next === "n") {
+      result += "\n";
+    } else if (next === `"` || next === "\\") {
+      result += next;
+    } else {
+      result += `${char}${next}`;
+    }
+  }
+  return result;
 }
 
 export function parseGeminiEnvFile(content: string): Readonly<Record<string, string>> {
