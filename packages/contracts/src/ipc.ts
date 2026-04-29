@@ -160,6 +160,7 @@ export interface DesktopSshPasswordPromptRequest {
   destination: string;
   username: string | null;
   prompt: string;
+  expiresAt: string;
 }
 
 export interface PersistedSavedEnvironmentRecord {
@@ -203,6 +204,7 @@ export interface DesktopBridge {
     target: DesktopSshEnvironmentTarget,
     options?: { issuePairingToken?: boolean },
   ) => Promise<DesktopSshEnvironmentBootstrap>;
+  disconnectSshEnvironment: (target: DesktopSshEnvironmentTarget) => Promise<void>;
   fetchSshEnvironmentDescriptor: (httpBaseUrl: string) => Promise<ExecutionEnvironmentDescriptor>;
   bootstrapSshBearerSession: (
     httpBaseUrl: string,

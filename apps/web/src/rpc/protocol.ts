@@ -14,15 +14,25 @@ import {
   recordWsConnectionClosed,
   recordWsConnectionErrored,
   recordWsConnectionOpened,
+  type WsConnectionMetadata,
   WS_RECONNECT_MAX_RETRIES,
 } from "./wsConnectionState";
 
+export interface WsProtocolCloseContext {
+  readonly intentional: boolean;
+}
+
 export interface WsProtocolLifecycleHandlers {
+  readonly getConnectionLabel?: () => string | null;
+  readonly isCloseIntentional?: () => boolean;
   readonly isActive?: () => boolean;
   readonly onAttempt?: (socketUrl: string) => void;
   readonly onOpen?: () => void;
   readonly onError?: (message: string) => void;
-  readonly onClose?: (details: { readonly code: number; readonly reason: string }) => void;
+  readonly onClose?: (
+    details: { readonly code: number; readonly reason: string },
+    context: WsProtocolCloseContext,
+  ) => void;
 }
 
 export const makeWsRpcProtocolClient = RpcClient.make(WsRpcGroup);
@@ -48,27 +58,46 @@ function resolveWsRpcSocketUrl(rawUrl: string): string {
   return resolved.toString();
 }
 
-function defaultLifecycleHandlers(): Required<WsProtocolLifecycleHandlers> {
+function resolveConnectionMetadata(handlers?: WsProtocolLifecycleHandlers): WsConnectionMetadata {
+  return {
+    connectionLabel: handlers?.getConnectionLabel?.() ?? null,
+  };
+}
+
+type ComposedWsProtocolLifecycleHandlers = Required<
+  Pick<WsProtocolLifecycleHandlers, "isActive" | "onAttempt" | "onOpen" | "onError" | "onClose">
+>;
+
+function defaultLifecycleHandlers(
+  handlers?: WsProtocolLifecycleHandlers,
+): ComposedWsProtocolLifecycleHandlers {
   return {
     isActive: () => true,
-    onAttempt: recordWsConnectionAttempt,
-    onOpen: recordWsConnectionOpened,
+    onAttempt: (socketUrl) => {
+      recordWsConnectionAttempt(socketUrl, resolveConnectionMetadata(handlers));
+    },
+    onOpen: () => {
+      recordWsConnectionOpened(resolveConnectionMetadata(handlers));
+    },
     onError: (message) => {
       clearAllTrackedRpcRequests();
       recordWsConnectionErrored(message);
     },
-    onClose: (details) => {
+    onClose: (details, context) => {
       clearAllTrackedRpcRequests();
-      recordWsConnectionClosed(details);
+      if (context.intentional) {
+        return;
+      }
+      recordWsConnectionClosed(details, resolveConnectionMetadata(handlers));
     },
   };
 }
 
 function composeLifecycleHandlers(
   handlers?: WsProtocolLifecycleHandlers,
-): Required<WsProtocolLifecycleHandlers> {
-  const defaults = defaultLifecycleHandlers();
-  const isActive = handlers?.isActive ?? (() => true);
+): ComposedWsProtocolLifecycleHandlers {
+  const defaults = defaultLifecycleHandlers(handlers);
+  const isActive = handlers?.isActive ?? defaults.isActive;
 
   return {
     isActive,
@@ -93,12 +122,12 @@ function composeLifecycleHandlers(
       defaults.onError(message);
       handlers?.onError?.(message);
     },
-    onClose: (details) => {
+    onClose: (details, context) => {
       if (!isActive()) {
         return;
       }
-      defaults.onClose(details);
-      handlers?.onClose?.(details);
+      defaults.onClose(details, context);
+      handlers?.onClose?.(details, context);
     },
   };
 }
@@ -144,10 +173,15 @@ export function createWsRpcProtocolLayer(
       socket.addEventListener(
         "close",
         (event) => {
-          lifecycle.onClose({
-            code: event.code,
-            reason: event.reason,
-          });
+          lifecycle.onClose(
+            {
+              code: event.code,
+              reason: event.reason,
+            },
+            {
+              intentional: handlers?.isCloseIntentional?.() ?? false,
+            },
+          );
         },
         { once: true },
       );
