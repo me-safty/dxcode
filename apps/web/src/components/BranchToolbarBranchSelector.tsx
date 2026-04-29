@@ -514,9 +514,9 @@ export function BranchToolbarBranchSelector({
   // Branch actions
   // ---------------------------------------------------------------------------
   const runBranchAction = useCallback(
-    (action: () => Promise<void>) => {
+    (action: () => Promise<void>): boolean => {
       if (isBranchActionPendingRef.current) {
-        return;
+        return false;
       }
 
       isBranchActionPendingRef.current = true;
@@ -533,6 +533,7 @@ export function BranchToolbarBranchSelector({
           setIsBranchActionPending(false);
         }
       })();
+      return true;
     },
     [branchCwd, environmentId, queryClient],
   );
@@ -576,10 +577,10 @@ export function BranchToolbarBranchSelector({
   const discardStashFromDialog = useCallback(() => {
     const dialog = stashDiscardDialog;
     const api = readEnvironmentApi(environmentId);
-    if (!dialog || !api || isDroppingStash) return;
+    if (!dialog || !api || isDroppingStash || isBranchActionPending) return;
 
-    setIsDroppingStash(true);
     runBranchAction(async () => {
+      setIsDroppingStash(true);
       try {
         await api.git.stashDrop({ cwd: dialog.cwd });
         setStashDiscardDialog(null);
@@ -595,7 +596,7 @@ export function BranchToolbarBranchSelector({
         setIsDroppingStash(false);
       }
     });
-  }, [environmentId, isDroppingStash, runBranchAction, stashDiscardDialog]);
+  }, [environmentId, isBranchActionPending, isDroppingStash, runBranchAction, stashDiscardDialog]);
 
   const selectBranch = (branch: GitBranch) => {
     const api = readEnvironmentApi(environmentId);
