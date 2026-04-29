@@ -1146,7 +1146,7 @@ export function makeOpenCodeAdapter(
         (context.session.model
           ? { instanceId: boundInstanceId, model: context.session.model }
           : undefined);
-      if (modelSelection?.instanceId !== boundInstanceId) {
+      if (modelSelection !== undefined && modelSelection.instanceId !== boundInstanceId) {
         return yield* new ProviderAdapterValidationError({
           provider: PROVIDER,
           operation: "sendTurn",
