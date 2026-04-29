@@ -177,7 +177,7 @@ function handleCheckoutError(
     queryClient: QueryClient;
     onSuccess: () => void;
     fallbackTitle: string;
-    runBranchAction: (action: () => Promise<void>) => void;
+    runBranchAction: (action: () => Promise<void>) => boolean;
     onRequestDiscardStash: (input: { cwd: string }) => void;
   },
 ): void {
@@ -191,7 +191,7 @@ function handleCheckoutError(
         actionProps: {
           children: "Stash & Switch",
           onClick: () => {
-            ctx.runBranchAction(async () => {
+            const accepted = ctx.runBranchAction(async () => {
               try {
                 await ctx.api.git.stashAndCheckout({ cwd: ctx.cwd, branch: ctx.branch });
                 await invalidateGitQueries(ctx.queryClient, {
@@ -240,6 +240,15 @@ function handleCheckoutError(
                 }
               }
             });
+            if (!accepted) {
+              toastManager.add(
+                stackedThreadToast({
+                  type: "warning",
+                  title: "Branch action already running.",
+                  description: "Wait for the current branch action to finish, then try again.",
+                }),
+              );
+            }
           },
         },
       }),
