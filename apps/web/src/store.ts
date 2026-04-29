@@ -408,7 +408,7 @@ function sidebarThreadSummariesEqual(
 function sidebarThreadSummaryShellFieldsEqual(
   left: SidebarThreadSummary | undefined,
   right: SidebarThreadSummary,
-): left is SidebarThreadSummary {
+): boolean {
   return (
     left !== undefined &&
     left.id === right.id &&
@@ -527,7 +527,7 @@ function withSidebarAgentCommandStatus(
 
 function updateSidebarAgentCommandStatus(
   state: EnvironmentState,
-  thread: Pick<Thread, "id" | "activities">,
+  thread: Pick<Thread, "id" | "activities" | "latestTurn">,
 ): EnvironmentState {
   const existingSummary = state.sidebarThreadSummaryById[thread.id];
   if (!existingSummary) {
@@ -535,7 +535,7 @@ function updateSidebarAgentCommandStatus(
   }
   const nextAgentCommandStatus = deriveSidebarAgentCommandStatus(
     thread.activities,
-    existingSummary.latestTurn?.turnId ?? null,
+    thread.latestTurn?.turnId ?? null,
   );
   if (
     sidebarAgentCommandStatusesEqual(existingSummary.agentCommandStatus, nextAgentCommandStatus)
@@ -837,17 +837,35 @@ function writeThreadShellState(
   // the stored summary instead of rebuilding the full activity list on every
   // shell tick.
   const existingSummary = state.sidebarThreadSummaryById[nextThread.shell.id];
-  const desiredSummary = sidebarThreadSummaryShellFieldsEqual(existingSummary, nextThread.summary)
-    ? existingSummary
-    : withSidebarAgentCommandStatus(
-        nextThread.summary,
-        (nextState.activityIdsByThreadId[nextThread.shell.id] ?? EMPTY_ACTIVITY_IDS).flatMap(
-          (id) => {
-            const activity = nextState.activityByThreadId[nextThread.shell.id]?.[id];
-            return activity ? [activity] : [];
-          },
-        ),
-      );
+  const activityIds = nextState.activityIdsByThreadId[nextThread.shell.id] ?? EMPTY_ACTIVITY_IDS;
+  let desiredSummary: SidebarThreadSummary;
+  if (
+    existingSummary &&
+    sidebarThreadSummaryShellFieldsEqual(existingSummary, nextThread.summary)
+  ) {
+    desiredSummary = existingSummary;
+  } else if (activityIds.length > 0) {
+    desiredSummary = withSidebarAgentCommandStatus(
+      nextThread.summary,
+      activityIds.flatMap((id) => {
+        const activity = nextState.activityByThreadId[nextThread.shell.id]?.[id];
+        return activity ? [activity] : [];
+      }),
+    );
+  } else if (
+    existingSummary &&
+    !sidebarAgentCommandStatusesEqual(
+      nextThread.summary.agentCommandStatus,
+      existingSummary.agentCommandStatus,
+    )
+  ) {
+    desiredSummary = {
+      ...nextThread.summary,
+      agentCommandStatus: existingSummary.agentCommandStatus,
+    };
+  } else {
+    desiredSummary = nextThread.summary;
+  }
   if (
     !sidebarThreadSummariesEqual(
       state.sidebarThreadSummaryById[nextThread.shell.id],
