@@ -4,11 +4,13 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 export const DEFAULT_TERMINAL_ID = "default";
 
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
+const MAX_TERMINAL_COLS = 1_000;
+const MAX_TERMINAL_ROWS = 500;
 const TerminalColsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(20)).check(
-  Schema.isLessThanOrEqualTo(400),
+  Schema.isLessThanOrEqualTo(MAX_TERMINAL_COLS),
 );
 const TerminalRowsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(5)).check(
-  Schema.isLessThanOrEqualTo(200),
+  Schema.isLessThanOrEqualTo(MAX_TERMINAL_ROWS),
 );
 const TerminalIdSchema = TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(128));
 const TerminalEnvKeySchema = Schema.String.check(
