@@ -128,12 +128,17 @@ async function runProbe(environmentId: EnvironmentId): Promise<void> {
   registry.inFlight = true;
   try {
     const result = await probePorts({ ports });
+    if (registries.get(environmentId) !== registry) {
+      return;
+    }
     usePortProbeStore.getState().applyProbe(environmentId, result.results);
   } catch {
     // Probe failures are non-fatal; we silently keep last-known state and try
     // again on the next tick.
   } finally {
-    registry.inFlight = false;
+    if (registries.get(environmentId) === registry) {
+      registry.inFlight = false;
+    }
   }
 }
 
