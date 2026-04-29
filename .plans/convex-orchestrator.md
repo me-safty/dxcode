@@ -885,4 +885,3 @@ These items are intentionally out of scope for this plan:
 - Operational dashboards and day-2 observability tooling
 - Any migration or cutover plan from the current production machine
 - Any future decision to make the T3 UI Convex-aware
-
