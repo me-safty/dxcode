@@ -20,6 +20,7 @@ import {
 import { resolveGeminiBinaryPath } from "../geminiBinaryPath.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import { GeminiProvider } from "../Services/GeminiProvider.ts";
+import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ServerSettingsError } from "@t3tools/contracts";
 
@@ -50,8 +51,9 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
 ): Effect.fn.Return<
   ServerProvider,
   ServerSettingsError,
-  ChildProcessSpawner.ChildProcessSpawner | ServerSettingsService
+  ChildProcessSpawner.ChildProcessSpawner | ServerConfig | ServerSettingsService
 > {
+  const serverConfig = yield* ServerConfig;
   const serverSettings = yield* ServerSettingsService;
   const geminiSettings = yield* serverSettings.getSettings.pipe(
     Effect.map((settings) => settings.providers.gemini),
@@ -149,7 +151,7 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
 
   const capabilityProbe = yield* (resolveCapabilities ?? probeGeminiCapabilities)({
     binaryPath,
-    cwd: process.cwd(),
+    cwd: serverConfig.cwd,
   });
   const models = providerModelsFromSettings(
     capabilityProbe.models,
@@ -222,8 +224,10 @@ export const GeminiProviderLive = Layer.effect(
   GeminiProvider,
   Effect.gen(function* () {
     const serverSettings = yield* ServerSettingsService;
+    const serverConfig = yield* ServerConfig;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const checkProvider = checkGeminiProviderStatus().pipe(
+      Effect.provideService(ServerConfig, serverConfig),
       Effect.provideService(ServerSettingsService, serverSettings),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );

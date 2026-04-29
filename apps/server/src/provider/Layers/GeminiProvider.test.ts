@@ -12,6 +12,7 @@ import {
   parseGeminiDiscoveredModels,
 } from "../geminiAcpProbe.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { ServerConfig, type ServerConfigShape } from "../../config.ts";
 
 const encoder = new TextEncoder();
 
@@ -45,6 +46,50 @@ function mockSpawnerLayer(
       return Effect.succeed(mockHandle(handler({ command: cmd.command, args: cmd.args })));
     }),
   );
+}
+
+function makeServerConfigLayer(cwd: string) {
+  return Layer.succeed(ServerConfig, {
+    logLevel: "Error",
+    traceMinLevel: "Info",
+    traceTimingEnabled: true,
+    traceBatchWindowMs: 200,
+    traceMaxBytes: 10 * 1024 * 1024,
+    traceMaxFiles: 10,
+    otlpTracesUrl: undefined,
+    otlpMetricsUrl: undefined,
+    otlpExportIntervalMs: 10_000,
+    otlpServiceName: "t3-server",
+    mode: "web",
+    port: 0,
+    host: undefined,
+    cwd,
+    baseDir: "/tmp/t3code-gemini-provider-test",
+    staticDir: undefined,
+    devUrl: undefined,
+    noBrowser: false,
+    startupPresentation: "browser",
+    desktopBootstrapToken: undefined,
+    autoBootstrapProjectFromCwd: false,
+    logWebSocketEvents: false,
+    stateDir: "/tmp/t3code-gemini-provider-test/state",
+    dbPath: "/tmp/t3code-gemini-provider-test/state/state.sqlite",
+    keybindingsConfigPath: "/tmp/t3code-gemini-provider-test/state/keybindings.json",
+    settingsPath: "/tmp/t3code-gemini-provider-test/state/settings.json",
+    providerStatusCacheDir: "/tmp/t3code-gemini-provider-test/caches",
+    worktreesDir: "/tmp/t3code-gemini-provider-test/worktrees",
+    attachmentsDir: "/tmp/t3code-gemini-provider-test/state/attachments",
+    logsDir: "/tmp/t3code-gemini-provider-test/state/logs",
+    serverLogPath: "/tmp/t3code-gemini-provider-test/state/logs/server.log",
+    serverTracePath: "/tmp/t3code-gemini-provider-test/state/logs/server.trace.ndjson",
+    providerLogsDir: "/tmp/t3code-gemini-provider-test/state/logs/provider",
+    providerEventLogPath: "/tmp/t3code-gemini-provider-test/state/logs/provider/events.log",
+    terminalLogsDir: "/tmp/t3code-gemini-provider-test/state/logs/terminals",
+    anonymousIdPath: "/tmp/t3code-gemini-provider-test/state/anonymous-id",
+    environmentIdPath: "/tmp/t3code-gemini-provider-test/state/environment-id",
+    serverRuntimeStatePath: "/tmp/t3code-gemini-provider-test/state/server-runtime.json",
+    secretsDir: "/tmp/t3code-gemini-provider-test/state/secrets",
+  } satisfies ServerConfigShape);
 }
 
 describe("parseGeminiDiscoveredModels", () => {
@@ -115,10 +160,13 @@ describe("checkGeminiProviderStatus", () => {
   it.effect("falls back to the system gemini binary when the configured path is blank", () => {
     const commands: string[] = [];
     const probedBinaryPaths: string[] = [];
+    const probedCwds: string[] = [];
+    const projectCwd = "/tmp/t3code-gemini-project";
 
     return Effect.gen(function* () {
       const status = yield* checkGeminiProviderStatus((input) => {
         probedBinaryPaths.push(input.binaryPath);
+        probedCwds.push(input.cwd);
         return Effect.succeed({
           status: "ready" as const,
           auth: { status: "authenticated" as const },
@@ -131,9 +179,11 @@ describe("checkGeminiProviderStatus", () => {
       assert.strictEqual(status.status, "ready");
       assert.deepStrictEqual(commands, ["gemini"]);
       assert.deepStrictEqual(probedBinaryPaths, ["gemini"]);
+      assert.deepStrictEqual(probedCwds, [projectCwd]);
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
+          makeServerConfigLayer(projectCwd),
           ServerSettingsService.layerTest({
             providers: {
               gemini: {
@@ -195,6 +245,7 @@ describe("checkGeminiProviderStatus", () => {
               },
             },
           }),
+          makeServerConfigLayer("/tmp/t3code-gemini-models"),
           mockSpawnerLayer(({ args }) => {
             const joined = args.join(" ");
             if (joined === "--version") {
@@ -228,6 +279,7 @@ describe("checkGeminiProviderStatus", () => {
         Effect.provide(
           Layer.mergeAll(
             ServerSettingsService.layerTest(),
+            makeServerConfigLayer("/tmp/t3code-gemini-unavailable"),
             mockSpawnerLayer(({ args }) => {
               const joined = args.join(" ");
               if (joined === "--version") {
