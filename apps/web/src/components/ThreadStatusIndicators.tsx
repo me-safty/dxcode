@@ -122,6 +122,20 @@ export function ThreadStatusLabel({
   );
 }
 
+export function resolveThreadRowStatus(input: {
+  thread: SidebarThreadSummary;
+  lastVisitedAt?: string | undefined;
+  dismissedStatusKey?: string | undefined;
+}): ThreadStatusPill | null {
+  return resolveThreadStatusPill({
+    thread: {
+      ...input.thread,
+      lastVisitedAt: input.lastVisitedAt,
+      dismissedStatusKey: input.dismissedStatusKey,
+    },
+  });
+}
+
 /**
  * Non-interactive leading status icons for a thread row in compact contexts
  * like the command palette. Shows the PR state icon (if present) and the
@@ -129,8 +143,10 @@ export function ThreadStatusLabel({
  */
 export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummary }) {
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
-  const lastVisitedAt = useUiStateStore(
-    (state) => state.threadLastVisitedAtById[scopedThreadKey(threadRef)],
+  const threadKey = scopedThreadKey(threadRef);
+  const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
+  const dismissedStatusKey = useUiStateStore(
+    (state) => state.threadDismissedStatusKeyById[threadKey],
   );
   const threadProjectCwd = useStore(
     useMemo(
@@ -147,12 +163,7 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
   });
   const pr = resolveThreadPr(thread.branch, gitStatus.data);
   const prStatus = prStatusIndicator(pr);
-  const threadStatus = resolveThreadStatusPill({
-    thread: {
-      ...thread,
-      lastVisitedAt,
-    },
-  });
+  const threadStatus = resolveThreadRowStatus({ thread, lastVisitedAt, dismissedStatusKey });
 
   if (!prStatus && !threadStatus) {
     return null;
