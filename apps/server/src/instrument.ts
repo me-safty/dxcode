@@ -7,12 +7,17 @@ Sentry.init({
   // Verbose SDK logs — prints every event/span dispatched and any transport
   // errors. Useful for confirming spans are being created and flushed. Remove
   // once gen_ai instrumentation is verified.
-  debug: true,
+  debug: false,
 
   sendDefaultPii: true,
   includeLocalVariables: true,
 
-  integrations: [nodeProfilingIntegration()],
+  integrations: [
+    nodeProfilingIntegration(),
+    Sentry.httpIntegration({
+      ignoreIncomingRequests: (url) => url.includes("/api/observability/"),
+    }),
+  ],
 
   // Performance Monitoring.
   // NODE_ENV isn't reliably passed through turbo to workspace dev scripts

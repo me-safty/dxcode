@@ -19,6 +19,7 @@ import {
   type SDKUserMessage,
   type ModelUsage,
 } from "@anthropic-ai/claude-agent-sdk";
+import * as Sentry from "@sentry/node";
 import type { Span } from "@sentry/node";
 import * as path from "node:path";
 
@@ -141,6 +142,8 @@ interface ClaudeTurnState {
    * `undefined` when a request span closes (`exactOptionalPropertyTypes`).
    */
   currentRequestSpan?: Span | undefined;
+  /** Accumulated response text for the current request, for gen_ai.response.text */
+  currentResponseText: string;
 }
 
 interface AssistantTextBlockState {
@@ -418,11 +421,11 @@ function claudeGenAiSpanFinish(
   const failureMessage = errorMessage ?? (status === "failed" ? "Claude turn failed" : undefined);
 
   return {
-    ...(inputTokens > 0 ? { inputTokens } : {}),
-    ...(outputTokens !== undefined && outputTokens > 0 ? { outputTokens } : {}),
-    ...(totalTokens > 0 ? { totalTokens } : {}),
-    ...(cacheRead > 0 ? { cachedInputTokens: cacheRead } : {}),
-    ...(cacheWrite > 0 ? { cacheWriteInputTokens: cacheWrite } : {}),
+    inputTokens,
+    outputTokens: outputTokens ?? 0,
+    totalTokens,
+    cachedInputTokens: cacheRead,
+    cacheWriteInputTokens: cacheWrite,
     ...(failureMessage ? { errorMessage: failureMessage } : {}),
   };
 }
@@ -1627,22 +1630,51 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       providerRefs: nativeProviderRefs(context),
     });
 
-    // Defensively close any in-flight gen_ai child spans BEFORE the parent
-    // invoke_agent span ends, so they remain valid descendants of the trace.
+    // The `result` message often arrives before the final `assistant` message,
+    // so the request span is still open here. Close it with the result's usage
+    // data so token counts and response text appear on the span.
     if (turnState.currentRequestSpan) {
+      const usage = (result?.usage ?? undefined) as Record<string, unknown> | undefined;
+      const fresh = readFiniteNumber(usage?.input_tokens) ?? 0;
+      const cacheRead = readFiniteNumber(usage?.cache_read_input_tokens) ?? 0;
+      const cacheWrite = readFiniteNumber(usage?.cache_creation_input_tokens) ?? 0;
+      const inputTokens = fresh + cacheRead + cacheWrite;
+      const outputTokens = readFiniteNumber(usage?.output_tokens);
+      const totalTokens = readFiniteNumber(usage?.total_tokens) ?? inputTokens + (outputTokens ?? 0);
+      const stopReason = result?.stop_reason;
+
+      Sentry.logger.info("gen_ai.request span closing from result message", {
+        threadId: context.session.threadId,
+        turnId: turnState.turnId,
+        inputTokens,
+        outputTokens: outputTokens ?? 0,
+        totalTokens,
+        cachedInputTokens: cacheRead,
+        stopReason: typeof stopReason === "string" ? stopReason : "none",
+      });
       finishGenAiRequestSpan(turnState.currentRequestSpan, {
+        inputTokens,
+        outputTokens: outputTokens ?? 0,
+        totalTokens,
+        cachedInputTokens: cacheRead,
+        cacheWriteInputTokens: cacheWrite,
+        ...(turnState.currentResponseText.length > 0 ? { responseText: turnState.currentResponseText } : {}),
+        ...(typeof stopReason === "string" ? { finishReason: stopReason } : {}),
         ...(errorMessage ? { errorMessage } : {}),
       });
       turnState.currentRequestSpan = undefined;
+      turnState.currentResponseText = "";
     }
     for (const inFlightTool of context.inFlightTools.values()) {
       if (inFlightTool.genAiToolSpan) {
+        Sentry.logger.warn("gen_ai.execute_tool span force-closed at turn end", { threadId: context.session.threadId, tool: inFlightTool.toolName });
         finishExecuteToolSpan(inFlightTool.genAiToolSpan, {
           errorMessage: errorMessage ?? "tool did not complete before turn ended",
         });
       }
     }
 
+    Sentry.logger.info("gen_ai.invoke_agent span closing", { threadId: context.session.threadId, turnId: turnState.turnId, status });
     finishInvokeAgentSpan(turnState.genAiSpan, claudeGenAiSpanFinish(status, errorMessage, result));
 
     const updatedAt = yield* nowIso;
@@ -1680,6 +1712,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               : "";
         if (deltaText.length === 0) {
           return;
+        }
+        if (event.delta.type === "text_delta") {
+          context.turnState.currentResponseText += deltaText;
         }
         const streamKind = streamKindFromDeltaType(event.delta.type);
         const assistantBlockEntry =
@@ -1832,11 +1867,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         context.turnState.currentRequestSpan = startGenAiRequestSpan(context.turnState.genAiSpan, {
           model: context.session.model ?? "unknown",
           system: "anthropic",
-          ...(context.session.threadId ? { conversationId: context.session.threadId } : {}),
+          conversationId: context.session.threadId,
           ...(context.turnState.genAiUserMessages
             ? { messages: context.turnState.genAiUserMessages }
             : {}),
         });
+        Sentry.logger.info("gen_ai.request span opened", { threadId: context.session.threadId, turnId: context.turnState.turnId, model: context.session.model ?? "unknown" });
       }
 
       const { index, content_block: block } = event;
@@ -2051,6 +2087,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       if (tool.genAiToolSpan) {
         const toolOutput =
           toolResult.text.length > 0 ? toolResult.text : JSON.stringify(toolResult.block);
+        Sentry.logger.info("gen_ai.execute_tool span closing", { threadId: context.session.threadId, tool: tool.toolName, isError: toolResult.isError });
         finishExecuteToolSpan(tool.genAiToolSpan, {
           toolOutput,
           ...(toolResult.isError
@@ -2084,6 +2121,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         assistantTextBlockOrder: [],
         capturedProposedPlanKeys: new Set(),
         nextSyntheticAssistantBlockIndex: -1,
+        currentResponseText: "",
         genAiSpan: startInvokeAgentSpan({
           agentName: genAiAgentName(context.session.cwd),
           system: "anthropic",
@@ -2170,6 +2208,26 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     // verified empirically against trace 75d8c8c3... where ungated closing
     // produced 1–3 duplicate spans per call, all stamped with the cumulative
     // running totals at their close moment.
+    // Retroactively open a gen_ai.request span for follow-up API calls where the
+    // SDK didn't emit stream_event content_block_start (e.g. second model call
+    // after tool use). Check early so the span is available for the close logic.
+    if (
+      context.turnState &&
+      context.turnState.genAiSpan &&
+      !context.turnState.currentRequestSpan
+    ) {
+      const peekStop = (message.message as { stop_reason?: unknown } | undefined)?.stop_reason;
+      const peekModel = (message.message as { model?: unknown } | undefined)?.model;
+      if (typeof peekStop === "string") {
+        Sentry.logger.warn("gen_ai.request span opened retroactively from assistant message", { threadId: context.session.threadId, turnId: context.turnState.turnId, stopReason: String(peekStop) });
+        context.turnState.currentRequestSpan = startGenAiRequestSpan(context.turnState.genAiSpan, {
+          model: (typeof peekModel === "string" ? peekModel : undefined) ?? context.session.model ?? "unknown",
+          system: "anthropic",
+          conversationId: context.session.threadId,
+        });
+      }
+    }
+
     if (context.turnState?.currentRequestSpan) {
       const sdkMessage = (message.message ?? undefined) as unknown as
         | {
@@ -2219,16 +2277,28 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const stopReason =
         typeof sdkMessage?.stop_reason === "string" ? sdkMessage.stop_reason : undefined;
 
-      finishGenAiRequestSpan(context.turnState.currentRequestSpan, {
-        ...(inputTokens > 0 ? { inputTokens } : {}),
-        ...(outputTokens !== undefined && outputTokens > 0 ? { outputTokens } : {}),
-        ...(totalTokens > 0 ? { totalTokens } : {}),
-        ...(cacheRead > 0 ? { cachedInputTokens: cacheRead } : {}),
-        ...(cacheWrite > 0 ? { cacheWriteInputTokens: cacheWrite } : {}),
+      Sentry.logger.info("gen_ai.request span closing", { threadId: context.session.threadId, turnId: context.turnState.turnId, stopReason: stopReason ?? "none", inputTokens, outputTokens: outputTokens ?? 0, toolCalls: toolCalls.length });
+
+      const requestFinish: import("../../observability/GenAiSpan.ts").GenAiRequestSpanFinish = {
+        inputTokens,
+        outputTokens: outputTokens ?? 0,
+        totalTokens,
+        cachedInputTokens: cacheRead,
+        cacheWriteInputTokens: cacheWrite,
         ...(responseText !== undefined ? { responseText } : {}),
         ...(toolCallsJson !== undefined ? { toolCallsJson } : {}),
         ...(stopReason !== undefined ? { finishReason: stopReason } : {}),
+      };
+      Sentry.logger.info("gen_ai.request span closing from assistant message", {
+        threadId: context.session.threadId,
+        turnId: context.turnState.turnId,
+        stopReason: stopReason ?? "none",
+        inputTokens,
+        outputTokens: outputTokens ?? 0,
+        toolCalls: toolCalls.length,
+        hasResponseText: responseText !== undefined,
       });
+      finishGenAiRequestSpan(context.turnState.currentRequestSpan, requestFinish);
       context.turnState.currentRequestSpan = undefined;
     }
 
@@ -2533,6 +2603,31 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   ) {
     yield* logNativeSdkMessage(context, message);
     yield* ensureThreadId(context, message);
+
+    if (message.type === "stream_event" && message.event?.type === "content_block_start") {
+      Sentry.logger.debug("sdk message: content_block_start", {
+        threadId: context.session.threadId,
+        blockType: message.event.content_block?.type ?? "unknown",
+        blockIndex: message.event.index ?? -1,
+        hasRequestSpan: !!context.turnState?.currentRequestSpan,
+      });
+    } else if (message.type === "assistant") {
+      const msg = message.message as { stop_reason?: unknown; usage?: unknown; model?: unknown } | undefined;
+      Sentry.logger.debug("sdk message: assistant", {
+        threadId: context.session.threadId,
+        stopReason: typeof msg?.stop_reason === "string" ? msg.stop_reason : "none",
+        hasUsage: msg?.usage !== undefined,
+        hasRequestSpan: !!context.turnState?.currentRequestSpan,
+      });
+    } else if (message.type === "result") {
+      const stopReason = (message as { stop_reason?: unknown }).stop_reason;
+      Sentry.logger.debug("sdk message: result", {
+        threadId: context.session.threadId,
+        subtype: message.subtype,
+        stopReason: typeof stopReason === "string" ? stopReason : "none",
+        hasRequestSpan: !!context.turnState?.currentRequestSpan,
+      });
+    }
 
     switch (message.type) {
       case "stream_event":
@@ -3315,6 +3410,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       assistantTextBlockOrder: [],
       capturedProposedPlanKeys: new Set(),
       nextSyntheticAssistantBlockIndex: -1,
+      currentResponseText: "",
       genAiSpan: startInvokeAgentSpan({
         agentName: genAiAgentName(context.session.cwd),
         system: "anthropic",
@@ -3330,6 +3426,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }),
       ...(userMessagesJson ? { genAiUserMessages: userMessagesJson } : {}),
     };
+
+    Sentry.logger.info("gen_ai.invoke_agent span opened", { threadId: context.session.threadId, turnId, model: turnModel });
 
     const updatedAt = yield* nowIso;
     context.turnState = turnState;

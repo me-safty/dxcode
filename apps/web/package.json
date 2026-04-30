@@ -24,6 +24,7 @@
     "@legendapp/list": "3.0.0-beta.44",
     "@lexical/react": "^0.41.0",
     "@pierre/diffs": "^1.1.0-beta.16",
+    "@sentry/react": "^10.50.0",
     "@t3tools/client-runtime": "workspace:*",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
@@ -46,6 +47,7 @@
   "devDependencies": {
     "@effect/language-service": "catalog:",
     "@rolldown/plugin-babel": "^0.2.0",
+    "@sentry/vite-plugin": "^5.2.1",
     "@tailwindcss/vite": "^4.0.0",
     "@tanstack/router-plugin": "^1.161.0",
     "@types/babel__core": "^7.20.5",

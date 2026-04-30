@@ -1,3 +1,5 @@
+import * as Sentry from "@sentry/node";
+import { propagationContextFromHeaders } from "@sentry/core";
 import { Cause, Duration, Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
 import {
   type AuthAccessStreamEvent,
@@ -1076,6 +1078,22 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         const serverAuth = yield* ServerAuth;
         const sessions = yield* SessionCredentialService;
         const session = yield* serverAuth.authenticateWebSocketUpgrade(request);
+
+        // Browser injects sentry-trace/baggage as WS URL query params.
+        // Set the propagation context on the isolation scope so gen_ai spans
+        // created during this WS session are linked to the browser's trace.
+        // Safe for the single-user local server model t3code targets.
+        const url = HttpServerRequest.toURL(request);
+        if (Option.isSome(url)) {
+          const sentryTrace = url.value.searchParams.get("sentry-trace") ?? undefined;
+          const baggage = url.value.searchParams.get("baggage") ?? undefined;
+          if (sentryTrace) {
+            Sentry.getIsolationScope().setPropagationContext(
+              propagationContextFromHeaders(sentryTrace, baggage),
+            );
+          }
+        }
+
         const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
           spanPrefix: "ws.rpc",
           spanAttributes: {

@@ -28,11 +28,20 @@ import { Effect, Exit, Fiber, FileSystem, Queue, Schema, Scope, Stream } from "e
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
+import * as Sentry from "@sentry/node";
+import type { Span } from "@sentry/node";
 
 import {
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
 } from "@t3tools/shared/model";
+
+import {
+  startInvokeAgentSpan,
+  finishInvokeAgentSpan,
+  startExecuteToolSpan,
+  finishExecuteToolSpan,
+} from "../../observability/GenAiSpan.ts";
 
 import {
   ProviderAdapterRequestError,
@@ -54,8 +63,27 @@ import {
   type CodexSessionRuntimeShape,
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import path from "node:path";
 
 const PROVIDER = ProviderDriverKind.make("codex");
+
+interface CodexTurnSpanState {
+  invokeAgentSpan: Span;
+  toolSpans: Map<string, Span>;
+  lastInputTokens?: number;
+  lastOutputTokens?: number;
+  lastTotalTokens?: number;
+  lastCachedInputTokens?: number;
+  lastReasoningOutputTokens?: number;
+}
+
+function codexAgentName(cwd: string | undefined): string {
+  if (cwd) {
+    const base = path.basename(cwd).trim();
+    if (base.length > 0) return base;
+  }
+  return "codex";
+}
 
 export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
@@ -76,6 +104,7 @@ interface CodexAdapterSessionContext {
   readonly scope: Scope.Closeable;
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
+  readonly turnSpans: Map<string, CodexTurnSpanState>;
   stopped: boolean;
 }
 
@@ -1322,15 +1351,143 @@ function mapToRuntimeEvents(
   return [];
 }
 
-/**
- * Build a Codex provider adapter bound to a specific `CodexSettings` payload.
- *
- * The adapter is a captured closure over `codexConfig` — the `binaryPath` and
- * `homePath` are read from that payload, not from `ServerSettingsService`.
- * This is what makes multi-instance routing possible: each `ProviderInstance`
- * in the registry owns its own closure with its own config, so two Codex
- * instances with different `homePath`s cannot step on each other.
- */
+function processCodexGenAiEvent(
+  event: ProviderEvent,
+  threadId: ThreadId,
+  getModel: () => string,
+  getCwd: () => string | undefined,
+  turnSpans: Map<string, CodexTurnSpanState>,
+): void {
+  // readRouteFields in CodexSessionRuntime doesn't extract turnId for all event
+  // types (rawResponseItem/completed, thread/tokenUsage/updated fall to default).
+  // Fall back to the payload's turnId when event.turnId is missing.
+  const turnId =
+    event.turnId ??
+    ((event.payload as { turnId?: string } | undefined)?.turnId as string | undefined);
+
+  Sentry.logger.debug("codex event", { method: event.method, turnId: turnId ?? "none" });
+
+  if (event.method === "turn/started" && turnId) {
+    const cwd = getCwd();
+    const model = getModel();
+    const span = startInvokeAgentSpan({
+      agentName: codexAgentName(cwd),
+      system: "openai",
+      model,
+      conversationId: threadId,
+      extraAttributes: {
+        "t3.provider": PROVIDER,
+        "t3.thread.id": threadId,
+        "t3.turn.id": turnId,
+        ...(cwd ? { "t3.workspace.cwd": cwd } : {}),
+      },
+    });
+    turnSpans.set(turnId, {
+      invokeAgentSpan: span,
+      toolSpans: new Map(),
+    });
+    Sentry.logger.info("codex gen_ai.invoke_agent span opened", { threadId, turnId, model });
+    return;
+  }
+
+  if (event.method === "thread/tokenUsage/updated" && turnId) {
+    const state = turnSpans.get(turnId);
+    if (state) {
+      const payload = readPayload(
+        EffectCodexSchema.V2ThreadTokenUsageUpdatedNotification,
+        event.payload,
+      );
+      const last = payload?.tokenUsage.last;
+      if (last) {
+        state.lastInputTokens = last.inputTokens;
+        state.lastOutputTokens = last.outputTokens;
+        state.lastTotalTokens = last.totalTokens;
+        state.lastCachedInputTokens = last.cachedInputTokens;
+        state.lastReasoningOutputTokens = last.reasoningOutputTokens;
+      }
+    }
+    return;
+  }
+
+  if (event.method === "rawResponseItem/completed" && turnId) {
+    const state = turnSpans.get(turnId);
+    if (state) {
+      const payload = readPayload(
+        EffectCodexSchema.V2RawResponseItemCompletedNotification,
+        event.payload,
+      );
+      const item = payload?.item;
+      if (!item) {
+        Sentry.logger.warn("codex rawResponseItem/completed: payload parse failed", { threadId, turnId });
+        return;
+      }
+      if (
+        item.type === "function_call" ||
+        item.type === "local_shell_call" ||
+        item.type === "custom_tool_call"
+      ) {
+        const toolName =
+          ("name" in item ? item.name : undefined) ?? item.type;
+        const toolInput =
+          "arguments" in item && typeof item.arguments === "string"
+            ? item.arguments
+            : "input" in item && typeof item.input === "string"
+              ? item.input
+              : undefined;
+        const toolSpan = startExecuteToolSpan(state.invokeAgentSpan, {
+          toolName,
+          ...(toolInput ? { toolInput } : {}),
+        });
+        Sentry.logger.info("codex gen_ai.execute_tool span", { threadId, turnId, tool: toolName });
+        finishExecuteToolSpan(toolSpan, {});
+      }
+    }
+    return;
+  }
+
+  if (event.method === "turn/completed" && turnId) {
+    const state = turnSpans.get(turnId);
+    if (state) {
+      for (const toolSpan of state.toolSpans.values()) {
+        finishExecuteToolSpan(toolSpan, {});
+      }
+
+      const payload = readPayload(
+        EffectCodexSchema.V2TurnCompletedNotification,
+        event.payload,
+      );
+      const errorMessage =
+        payload?.turn.status === "failed" ? payload.turn.error?.message : undefined;
+
+      Sentry.logger.info("codex gen_ai.invoke_agent span closing", { threadId, turnId, inputTokens: state.lastInputTokens ?? 0, outputTokens: state.lastOutputTokens ?? 0 });
+      finishInvokeAgentSpan(state.invokeAgentSpan, {
+        ...(state.lastInputTokens !== undefined ? { inputTokens: state.lastInputTokens } : {}),
+        ...(state.lastOutputTokens !== undefined ? { outputTokens: state.lastOutputTokens } : {}),
+        ...(state.lastTotalTokens !== undefined ? { totalTokens: state.lastTotalTokens } : {}),
+        ...(state.lastCachedInputTokens !== undefined
+          ? { cachedInputTokens: state.lastCachedInputTokens }
+          : {}),
+        ...(state.lastReasoningOutputTokens !== undefined
+          ? { reasoningOutputTokens: state.lastReasoningOutputTokens }
+          : {}),
+        ...(errorMessage ? { errorMessage } : {}),
+      });
+      turnSpans.delete(turnId);
+    }
+    return;
+  }
+}
+
+function cleanupCodexTurnSpans(turnSpans: Map<string, CodexTurnSpanState>): void {
+  for (const state of turnSpans.values()) {
+    for (const toolSpan of state.toolSpans.values()) {
+      finishExecuteToolSpan(toolSpan, { errorMessage: "session closed" });
+    }
+    finishInvokeAgentSpan(state.invokeAgentSpan, { errorMessage: "session closed" });
+  }
+  turnSpans.clear();
+}
+
 export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   codexConfig: CodexSettings,
   options?: CodexAdapterLiveOptions,
@@ -1406,8 +1563,20 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ),
         );
 
+        const turnSpans = new Map<string, CodexTurnSpanState>();
+        let sessionModel =
+          input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection.model : "unknown";
+        let sessionCwd: string | undefined = input.cwd ?? process.cwd();
+
         const eventFiber = yield* Stream.runForEach(runtime.events, (event) =>
           Effect.gen(function* () {
+            processCodexGenAiEvent(
+              event,
+              input.threadId,
+              () => sessionModel,
+              () => sessionCwd,
+              turnSpans,
+            );
             yield* writeNativeEvent(event);
             const runtimeEvents = mapToRuntimeEvents(event, event.threadId);
             if (runtimeEvents.length === 0) {
@@ -1442,11 +1611,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ),
         );
 
+        if (started.model) sessionModel = started.model;
+        if (started.cwd) sessionCwd = started.cwd;
+
         sessions.set(input.threadId, {
           threadId: input.threadId,
           scope: sessionScope,
           runtime,
           eventFiber,
+          turnSpans,
           stopped: false,
         });
         sessionScopeTransferred = true;
@@ -1620,6 +1793,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     }
     session.stopped = true;
     sessions.delete(session.threadId);
+    cleanupCodexTurnSpans(session.turnSpans);
     yield* session.runtime.close.pipe(Effect.ignore);
     yield* Effect.ignore(Scope.close(session.scope, Exit.void));
     yield* Fiber.interrupt(session.eventFiber).pipe(Effect.ignore);

@@ -1,3 +1,4 @@
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
@@ -54,6 +55,11 @@ export default defineConfig({
       presets: [reactCompilerPreset()],
     }),
     tailwindcss(),
+    sentryVitePlugin({
+      org: "sentry-developer-experience",
+      project: "t3toolsweb",
+      sourcemaps: { filesToDeleteAfterUpload: ["./dist/**/*.map"] },
+    }),
   ],
   optimizeDeps: {
     include: [

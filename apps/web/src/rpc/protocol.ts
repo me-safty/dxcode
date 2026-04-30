@@ -1,4 +1,5 @@
 import { WsRpcGroup } from "@t3tools/contracts";
+import * as Sentry from "@sentry/react";
 import { Duration, Effect, Layer, Schedule } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
@@ -36,6 +37,17 @@ function formatSocketErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+function appendSentryTraceContext(socketUrl: string): string {
+  const traceData = Sentry.getTraceData();
+  if (!traceData["sentry-trace"]) return socketUrl;
+  const url = new URL(socketUrl);
+  url.searchParams.set("sentry-trace", traceData["sentry-trace"]);
+  if (traceData.baggage) {
+    url.searchParams.set("baggage", traceData.baggage);
+  }
+  return url.toString();
 }
 
 function resolveWsRpcSocketUrl(rawUrl: string): string {
@@ -125,7 +137,8 @@ export function createWsRpcProtocolLayer(
     Socket.WebSocketConstructor,
     (socketUrl, protocols) => {
       lifecycle.onAttempt(socketUrl);
-      const socket = new globalThis.WebSocket(socketUrl, protocols);
+      const tracedUrl = appendSentryTraceContext(socketUrl);
+      const socket = new globalThis.WebSocket(tracedUrl, protocols);
 
       socket.addEventListener(
         "open",
