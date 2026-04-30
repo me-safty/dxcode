@@ -109,6 +109,7 @@ interface CodexAdapterSessionContext {
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
   readonly turnSpans: Map<string, CodexTurnSpanState>;
+  readonly sentryScope: ReturnType<typeof Sentry.getIsolationScope>;
   stopped: boolean;
 }
 
@@ -1607,14 +1608,19 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection.model : "unknown";
         let sessionCwd: string | undefined = input.cwd ?? process.cwd();
 
+        const sentryScope = Sentry.getIsolationScope().clone();
+        sentryScope.setConversationId(input.threadId);
+
         const eventFiber = yield* Stream.runForEach(runtime.events, (event) =>
           Effect.gen(function* () {
-            processCodexGenAiEvent(
-              event,
-              input.threadId,
-              () => sessionModel,
-              () => sessionCwd,
-              turnSpans,
+            Sentry.withIsolationScope(sentryScope, () =>
+              processCodexGenAiEvent(
+                event,
+                input.threadId,
+                () => sessionModel,
+                () => sessionCwd,
+                turnSpans,
+              ),
             );
             yield* writeNativeEvent(event);
             const runtimeEvents = mapToRuntimeEvents(event, event.threadId);
@@ -1659,6 +1665,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           runtime,
           eventFiber,
           turnSpans,
+          sentryScope,
           stopped: false,
         });
         sessionScopeTransferred = true;
@@ -1715,15 +1722,16 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       input.modelSelection?.instanceId === boundInstanceId
         ? getModelSelectionBooleanOptionValue(input.modelSelection, "fastMode")
         : undefined;
-    Sentry.setConversationId(input.threadId);
-    if (input.input !== undefined) {
-      const userText = typeof input.input === "string" ? input.input : JSON.stringify(input.input);
-      const messagesJson = JSON.stringify([{ role: "user", content: userText }]);
-      for (const state of session.turnSpans.values()) {
-        state.invokeAgentSpan.setAttribute("gen_ai.input.messages", messagesJson);
-        state.requestSpan?.setAttribute("gen_ai.input.messages", messagesJson);
+    Sentry.withIsolationScope(session.sentryScope, () => {
+      if (input.input !== undefined) {
+        const userText = typeof input.input === "string" ? input.input : JSON.stringify(input.input);
+        const messagesJson = JSON.stringify([{ role: "user", content: userText }]);
+        for (const state of session.turnSpans.values()) {
+          state.invokeAgentSpan.setAttribute("gen_ai.input.messages", messagesJson);
+          state.requestSpan?.setAttribute("gen_ai.input.messages", messagesJson);
+        }
       }
-    }
+    });
 
     return yield* session.runtime
       .sendTurn({
