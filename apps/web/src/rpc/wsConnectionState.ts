@@ -69,6 +69,7 @@ function updateWsConnectionStatus(
 
 export interface WsConnectionMetadata {
   readonly connectionLabel?: string | null;
+  readonly versionMismatchHint?: string | null;
 }
 
 function normalizeConnectionLabel(label: string | null | undefined): string | null {
@@ -130,10 +131,24 @@ export function recordWsConnectionOpened(metadata?: WsConnectionMetadata): WsCon
   }));
 }
 
-export function recordWsConnectionErrored(message?: string | null): WsConnectionStatus {
+function appendHint(message: string | null | undefined, hint: string | null | undefined) {
+  const normalizedMessage = message?.trim();
+  const normalizedHint = hint?.trim();
+  if (!normalizedMessage) {
+    return normalizedHint ? `Hint: ${normalizedHint}` : null;
+  }
+  return normalizedHint ? `${normalizedMessage} Hint: ${normalizedHint}` : normalizedMessage;
+}
+
+export function recordWsConnectionErrored(
+  message?: string | null,
+  metadata?: WsConnectionMetadata,
+): WsConnectionStatus {
   return updateWsConnectionStatus((current) =>
     applyDisconnectState(current, {
-      lastError: message?.trim() ? message : current.lastError,
+      lastError:
+        appendHint(message, metadata?.versionMismatchHint) ??
+        appendHint(current.lastError, metadata?.versionMismatchHint),
       lastErrorAt: isoNow(),
     }),
   );
@@ -152,7 +167,9 @@ export function recordWsConnectionClosed(
       current,
       {
         closeCode: details?.code ?? current.closeCode,
-        closeReason: details?.reason?.trim() ? details.reason : current.closeReason,
+        closeReason:
+          appendHint(details?.reason, metadata?.versionMismatchHint) ??
+          appendHint(current.closeReason, metadata?.versionMismatchHint),
       },
       connectionLabel === null ? undefined : { connectionLabel },
     ),

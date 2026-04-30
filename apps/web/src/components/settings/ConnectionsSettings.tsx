@@ -5,6 +5,7 @@ import {
   QrCodeIcon,
   RefreshCwIcon,
   TerminalIcon,
+  TriangleAlertIcon,
 } from "lucide-react";
 import {
   type ReactNode,
@@ -103,6 +104,8 @@ import {
   removeSavedEnvironment,
 } from "~/environments/runtime";
 import { useUiStateStore } from "~/uiStateStore";
+import { resolveServerConfigVersionMismatch } from "~/versionSkew";
+import { useServerConfig } from "~/rpc/serverState";
 
 const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 
@@ -1339,6 +1342,7 @@ function SavedBackendListRow({
   const descriptorLabel = runtime?.descriptor?.label ?? null;
   const displayLabel = descriptorLabel ?? record.label;
   const statusTooltip = getSavedBackendStatusTooltip(runtime, record, nowMs);
+  const versionMismatch = resolveServerConfigVersionMismatch(runtime?.serverConfig);
   const metadataBits = [
     record.desktopSsh ? `SSH ${formatDesktopSshTarget(record.desktopSsh)}` : null,
     roleLabel,
@@ -1363,6 +1367,13 @@ function SavedBackendListRow({
           </div>
           {metadataBits.length > 0 ? (
             <p className="text-xs text-muted-foreground">{metadataBits.join(" · ")}</p>
+          ) : null}
+          {versionMismatch ? (
+            <p className="flex items-center gap-1 text-warning text-xs">
+              <TriangleAlertIcon className="size-3.5 shrink-0" />
+              Version drift: client {versionMismatch.clientVersion}, server{" "}
+              {versionMismatch.serverVersion}.
+            </p>
           ) : null}
         </div>
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
@@ -1544,6 +1555,8 @@ export function ConnectionsSettings() {
   const [pendingDesktopServerExposureMode, setPendingDesktopServerExposureMode] = useState<
     DesktopServerExposureState["mode"] | null
   >(null);
+  const primaryServerConfig = useServerConfig();
+  const primaryVersionMismatch = resolveServerConfigVersionMismatch(primaryServerConfig);
   const [isAdvertisedEndpointListExpanded, setIsAdvertisedEndpointListExpanded] = useState(false);
   const defaultAdvertisedEndpointKey = useUiStateStore(
     (state) => state.defaultAdvertisedEndpointKey,
@@ -2486,6 +2499,19 @@ export function ConnectionsSettings() {
       {canManageLocalBackend ? (
         <>
           <SettingsSection title="Manage local backend">
+            {primaryVersionMismatch ? (
+              <SettingsRow
+                title="Version drift"
+                description={
+                  <span className="flex items-center gap-1 text-warning">
+                    <TriangleAlertIcon className="size-3.5 shrink-0" />
+                    Client {primaryVersionMismatch.clientVersion}, server{" "}
+                    {primaryVersionMismatch.serverVersion}. Sync them if RPC calls or reconnects
+                    fail.
+                  </span>
+                }
+              />
+            ) : null}
             {desktopBridge ? (
               <>
                 {renderNetworkAccessRow()}

@@ -104,7 +104,7 @@ import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import { ChevronDownIcon, WifiOffIcon } from "lucide-react";
+import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
@@ -149,6 +149,7 @@ import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
+import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
@@ -181,8 +182,8 @@ import {
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
+import { resolveServerConfigVersionMismatch } from "../versionSkew";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -875,6 +876,7 @@ export default function ChatView(props: ChatViewProps) {
     : "connected";
   const activeEnvironmentUnavailable =
     activeSavedEnvironmentRecord !== null && activeSavedEnvironmentConnectionState !== "connected";
+  const activeSavedEnvironmentId = activeSavedEnvironmentRecord?.environmentId ?? null;
   const activeEnvironmentUnavailableLabel = activeSavedEnvironmentRecord
     ? resolveEnvironmentOptionLabel({
         isPrimary: false,
@@ -883,18 +885,30 @@ export default function ChatView(props: ChatViewProps) {
         savedLabel: activeSavedEnvironmentRecord.label,
       })
     : null;
-  const activeEnvironmentUnavailableState: EnvironmentUnavailableState | null =
-    activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel
-      ? {
-          environmentId: activeSavedEnvironmentRecord.environmentId,
-          label: activeEnvironmentUnavailableLabel,
-          connectionState:
-            activeSavedEnvironmentConnectionState === "connecting" ||
-            activeSavedEnvironmentConnectionState === "error"
-              ? activeSavedEnvironmentConnectionState
-              : "disconnected",
-        }
-      : null;
+  const activeEnvironmentUnavailableState = useMemo<EnvironmentUnavailableState | null>(() => {
+    if (
+      !activeEnvironmentUnavailable ||
+      !activeEnvironmentUnavailableLabel ||
+      !activeSavedEnvironmentId
+    ) {
+      return null;
+    }
+
+    return {
+      environmentId: activeSavedEnvironmentId,
+      label: activeEnvironmentUnavailableLabel,
+      connectionState:
+        activeSavedEnvironmentConnectionState === "connecting" ||
+        activeSavedEnvironmentConnectionState === "error"
+          ? activeSavedEnvironmentConnectionState
+          : "disconnected",
+    };
+  }, [
+    activeEnvironmentUnavailable,
+    activeEnvironmentUnavailableLabel,
+    activeSavedEnvironmentConnectionState,
+    activeSavedEnvironmentId,
+  ]);
   const [reconnectingEnvironmentId, setReconnectingEnvironmentId] = useState<EnvironmentId | null>(
     null,
   );
@@ -1122,6 +1136,90 @@ export default function ChatView(props: ChatViewProps) {
     primaryEnvironmentId && activeThread?.environmentId === primaryEnvironmentId
       ? primaryServerConfig
       : (activeEnvRuntimeState?.serverConfig ?? primaryServerConfig);
+  const versionMismatch = resolveServerConfigVersionMismatch(serverConfig);
+  const versionMismatchDismissKey =
+    versionMismatch && activeThread
+      ? `${activeThread.environmentId}:${versionMismatch.clientVersion}:${versionMismatch.serverVersion}`
+      : null;
+  const [dismissedVersionMismatchKey, setDismissedVersionMismatchKey] = useState<string | null>(
+    null,
+  );
+  const showVersionMismatchBanner =
+    versionMismatch !== null && versionMismatchDismissKey !== dismissedVersionMismatchKey;
+  const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
+    const items: ComposerBannerStackItem[] = [];
+    if (activeEnvironmentUnavailableState) {
+      items.push({
+        id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
+        variant:
+          activeEnvironmentUnavailableState.connectionState === "error" ? "error" : "warning",
+        icon: <WifiOffIcon />,
+        title: (
+          <>
+            {activeEnvironmentUnavailableState.label} is{" "}
+            {activeEnvironmentUnavailableState.connectionState === "connecting"
+              ? "connecting"
+              : "disconnected"}
+          </>
+        ),
+        description: "Reconnect this environment before sending messages or running actions.",
+        actions: (
+          <>
+            <Button
+              size="xs"
+              disabled={
+                activeEnvironmentUnavailableState.connectionState === "connecting" ||
+                reconnectingEnvironmentId === activeEnvironmentUnavailableState.environmentId
+              }
+              onClick={() =>
+                void handleReconnectActiveEnvironment(
+                  activeEnvironmentUnavailableState.environmentId,
+                  activeEnvironmentUnavailableState.label,
+                )
+              }
+            >
+              {activeEnvironmentUnavailableState.connectionState === "connecting" ||
+              reconnectingEnvironmentId === activeEnvironmentUnavailableState.environmentId
+                ? "Reconnecting..."
+                : "Reconnect"}
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => void navigate({ to: "/settings/connections" })}
+            >
+              Connections
+            </Button>
+          </>
+        ),
+      });
+    }
+    if (showVersionMismatchBanner && versionMismatch && versionMismatchDismissKey) {
+      items.push({
+        id: `version-mismatch:${versionMismatchDismissKey}`,
+        variant: "warning",
+        icon: <TriangleAlertIcon />,
+        title: "Client and server versions differ",
+        description: (
+          <>
+            Client {versionMismatch.clientVersion} is connected to server{" "}
+            {versionMismatch.serverVersion}. Sync them if RPC calls or reconnects fail.
+          </>
+        ),
+        dismissLabel: "Dismiss version mismatch warning",
+        onDismiss: () => setDismissedVersionMismatchKey(versionMismatchDismissKey),
+      });
+    }
+    return items;
+  }, [
+    activeEnvironmentUnavailableState,
+    handleReconnectActiveEnvironment,
+    navigate,
+    reconnectingEnvironmentId,
+    showVersionMismatchBanner,
+    versionMismatch,
+    versionMismatchDismissKey,
+  ]);
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
   const unlockedSelectedProvider = resolveSelectableProvider(
     providerStatuses,
@@ -3466,6 +3564,7 @@ export default function ChatView(props: ChatViewProps) {
                 : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
             )}
           >
+            <ComposerBannerStack items={composerBannerItems} />
             <ChatComposer
               ref={composerRef}
               composerDraftTarget={composerDraftTarget}

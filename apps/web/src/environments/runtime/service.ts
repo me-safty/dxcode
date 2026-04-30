@@ -64,8 +64,10 @@ import {
 import { useTerminalStateStore } from "~/terminalStateStore";
 import { useUiStateStore } from "~/uiStateStore";
 import type { WsProtocolCloseContext } from "../../rpc/protocol";
+import { getServerConfig } from "../../rpc/serverState";
 import { WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
+import { appendVersionMismatchHint, resolveServerConfigVersionMismatch } from "../../versionSkew";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKey,
@@ -1030,6 +1032,8 @@ function createPrimaryEnvironmentClient(
   return createWsRpcClient(
     new WsTransport(wsBaseUrl, {
       getConnectionLabel: () => connectionLabel,
+      getVersionMismatchHint: () =>
+        resolveServerConfigVersionMismatch(getServerConfig())?.hint ?? null,
     }),
   );
 }
@@ -1061,6 +1065,10 @@ function createSavedEnvironmentClient(
       },
       {
         getConnectionLabel: () => getSavedEnvironmentRecord(environmentId)?.label ?? null,
+        getVersionMismatchHint: () =>
+          resolveServerConfigVersionMismatch(
+            useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
+          )?.hint ?? null,
         onAttempt: () => {
           setRuntimeConnecting(environmentId);
         },
@@ -1068,9 +1076,12 @@ function createSavedEnvironmentClient(
           setRuntimeConnected(environmentId);
         },
         onError: (message: string) => {
+          const mismatch = resolveServerConfigVersionMismatch(
+            useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
+          );
           useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
             connectionState: "error",
-            lastError: message,
+            lastError: appendVersionMismatchHint(message, mismatch),
             lastErrorAt: isoNow(),
           });
         },
@@ -1081,7 +1092,15 @@ function createSavedEnvironmentClient(
           if (context.intentional) {
             return;
           }
-          setRuntimeDisconnected(environmentId, details.reason);
+          setRuntimeDisconnected(
+            environmentId,
+            appendVersionMismatchHint(
+              details.reason,
+              resolveServerConfigVersionMismatch(
+                useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
+              ),
+            ),
+          );
         },
       },
     ),

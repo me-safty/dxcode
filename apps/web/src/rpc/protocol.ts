@@ -24,6 +24,7 @@ export interface WsProtocolCloseContext {
 
 export interface WsProtocolLifecycleHandlers {
   readonly getConnectionLabel?: () => string | null;
+  readonly getVersionMismatchHint?: () => string | null;
   readonly isCloseIntentional?: () => boolean;
   readonly isActive?: () => boolean;
   readonly onAttempt?: (socketUrl: string) => void;
@@ -61,6 +62,7 @@ function resolveWsRpcSocketUrl(rawUrl: string): string {
 function resolveConnectionMetadata(handlers?: WsProtocolLifecycleHandlers): WsConnectionMetadata {
   return {
     connectionLabel: handlers?.getConnectionLabel?.() ?? null,
+    versionMismatchHint: handlers?.getVersionMismatchHint?.() ?? null,
   };
 }
 
@@ -81,7 +83,7 @@ function defaultLifecycleHandlers(
     },
     onError: (message) => {
       clearAllTrackedRpcRequests();
-      recordWsConnectionErrored(message);
+      recordWsConnectionErrored(message, resolveConnectionMetadata(handlers));
     },
     onClose: (details, context) => {
       clearAllTrackedRpcRequests();
