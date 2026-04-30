@@ -1715,6 +1715,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       input.modelSelection?.instanceId === boundInstanceId
         ? getModelSelectionBooleanOptionValue(input.modelSelection, "fastMode")
         : undefined;
+    if (input.input !== undefined) {
+      const userText = typeof input.input === "string" ? input.input : JSON.stringify(input.input);
+      const messagesJson = JSON.stringify([{ role: "user", content: userText }]);
+      for (const state of session.turnSpans.values()) {
+        state.invokeAgentSpan.setAttribute("gen_ai.input.messages", messagesJson);
+        state.requestSpan?.setAttribute("gen_ai.input.messages", messagesJson);
+      }
+    }
+
     return yield* session.runtime
       .sendTurn({
         ...(input.input !== undefined ? { input: input.input } : {}),
