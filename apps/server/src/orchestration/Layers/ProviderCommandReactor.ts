@@ -12,6 +12,7 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
+import * as Sentry from "@sentry/node";
 import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
@@ -763,9 +764,16 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    yield* providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+    const sentryTrace = (event.payload as { sentryTrace?: string }).sentryTrace;
+    const sentryBaggage = (event.payload as { sentryBaggage?: string }).sentryBaggage;
+    const sendEffect = sentryTrace
+      ? Effect.sync(() =>
+          Sentry.continueTrace({ sentryTrace, baggage: sentryBaggage }, () => {
+            Sentry.getIsolationScope().setConversationId(event.payload.threadId);
+          }),
+        ).pipe(Effect.andThen(providerService.sendTurn(sendTurnRequest.value)))
+      : providerService.sendTurn(sendTurnRequest.value);
+    yield* sendEffect.pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (

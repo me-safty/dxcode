@@ -444,6 +444,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: targetThread.interactionMode,
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
           createdAt: command.createdAt,
+          ...(command.sentryTrace ? { sentryTrace: command.sentryTrace } : {}),
+          ...(command.sentryBaggage ? { sentryBaggage: command.sentryBaggage } : {}),
         },
       };
       return [userMessageEvent, turnStartRequestedEvent];

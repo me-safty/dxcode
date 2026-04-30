@@ -577,6 +577,8 @@ export const ThreadTurnStartCommand = Schema.Struct({
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
+  sentryTrace: Schema.optional(Schema.String),
+  sentryBaggage: Schema.optional(Schema.String),
 });
 
 const ClientThreadTurnStartCommand = Schema.Struct({

@@ -2650,8 +2650,9 @@ export default function ChatView(props: ChatViewProps) {
             "t3.effort": ctxSelectedPromptEffort ?? "default",
           },
         },
-        () =>
-          api.orchestration.dispatchCommand({
+        () => {
+          const traceData = Sentry.getTraceData();
+          return api.orchestration.dispatchCommand({
             type: "thread.turn.start",
             commandId: newCommandId(),
             threadId: threadIdForSend,
@@ -2667,7 +2668,10 @@ export default function ChatView(props: ChatViewProps) {
             interactionMode,
             ...(bootstrap ? { bootstrap } : {}),
             createdAt: messageCreatedAt,
-          }),
+            ...(traceData["sentry-trace"] ? { sentryTrace: traceData["sentry-trace"] } : {}),
+            ...(traceData.baggage ? { sentryBaggage: traceData.baggage } : {}),
+          });
+        },
       );
       turnStartSucceeded = true;
     })().catch(async (err: unknown) => {
