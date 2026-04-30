@@ -11,6 +11,7 @@ import {
 import { memo, useMemo } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { useStore } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
 import {
@@ -219,41 +220,45 @@ export const BranchToolbar = memo(function BranchToolbar({
   const showEnvironmentPicker = Boolean(
     availableEnvironments && availableEnvironments.length > 1 && onEnvironmentChange,
   );
+  const isMobile = useIsMobile();
 
   if (!hasActiveThread || !activeProject) return null;
 
   return (
     <div className="mx-auto flex w-full max-w-208 items-center gap-2 px-2.5 pb-3 pt-1 sm:px-3">
-      <MobileRunContextSelector
-        envLocked={envLocked}
-        envModeLocked={envModeLocked}
-        environmentId={environmentId}
-        availableEnvironments={availableEnvironments}
-        showEnvironmentPicker={showEnvironmentPicker}
-        onEnvironmentChange={onEnvironmentChange}
-        effectiveEnvMode={effectiveEnvMode}
-        activeWorktreePath={activeWorktreePath}
-        onEnvModeChange={onEnvModeChange}
-      />
-      <div className="hidden min-w-0 shrink-0 items-center gap-1 md:flex">
-        {showEnvironmentPicker && availableEnvironments && onEnvironmentChange && (
-          <>
-            <BranchToolbarEnvironmentSelector
-              envLocked={envLocked}
-              environmentId={environmentId}
-              availableEnvironments={availableEnvironments}
-              onEnvironmentChange={onEnvironmentChange}
-            />
-            <Separator orientation="vertical" className="mx-0.5 h-3.5!" />
-          </>
-        )}
-        <BranchToolbarEnvModeSelector
-          envLocked={envModeLocked}
+      {isMobile ? (
+        <MobileRunContextSelector
+          envLocked={envLocked}
+          envModeLocked={envModeLocked}
+          environmentId={environmentId}
+          availableEnvironments={availableEnvironments}
+          showEnvironmentPicker={showEnvironmentPicker}
+          onEnvironmentChange={onEnvironmentChange}
           effectiveEnvMode={effectiveEnvMode}
           activeWorktreePath={activeWorktreePath}
           onEnvModeChange={onEnvModeChange}
         />
-      </div>
+      ) : (
+        <div className="flex min-w-0 shrink-0 items-center gap-1">
+          {showEnvironmentPicker && availableEnvironments && onEnvironmentChange && (
+            <>
+              <BranchToolbarEnvironmentSelector
+                envLocked={envLocked}
+                environmentId={environmentId}
+                availableEnvironments={availableEnvironments}
+                onEnvironmentChange={onEnvironmentChange}
+              />
+              <Separator orientation="vertical" className="mx-0.5 h-3.5!" />
+            </>
+          )}
+          <BranchToolbarEnvModeSelector
+            envLocked={envModeLocked}
+            effectiveEnvMode={effectiveEnvMode}
+            activeWorktreePath={activeWorktreePath}
+            onEnvModeChange={onEnvModeChange}
+          />
+        </div>
+      )}
 
       <BranchToolbarBranchSelector
         className="min-w-0 flex-1 justify-end md:ml-auto md:flex-none"
