@@ -7,15 +7,17 @@ import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
+  listThreadsByProjectId,
   requireProject,
   requireProjectAbsent,
   requireThread,
+  requireThreadArchived,
   requireThreadAbsent,
+  requireThreadNotArchived,
 } from "./commandInvariants.ts";
+import { projectEvent } from "./projector.ts";
 
 const nowIso = () => new Date().toISOString();
-const DEFAULT_ASSISTANT_DELIVERY_MODE = "buffered" as const;
-
 const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
   eventId: crypto.randomUUID() as OrchestrationEvent["eventId"],
   aggregateKind: "thread",
@@ -47,16 +49,49 @@ function withEventBase(
   };
 }
 
+type PlannedOrchestrationEvent = Omit<OrchestrationEvent, "sequence">;
+
+type DecideOrchestrationCommandResult =
+  | PlannedOrchestrationEvent
+  | ReadonlyArray<PlannedOrchestrationEvent>;
+
+const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
+  commands,
+  readModel,
+}: {
+  readonly commands: ReadonlyArray<OrchestrationCommand>;
+  readonly readModel: OrchestrationReadModel;
+}): Effect.fn.Return<ReadonlyArray<PlannedOrchestrationEvent>, OrchestrationCommandInvariantError> {
+  let nextReadModel = readModel;
+  let nextSequence = readModel.snapshotSequence;
+  const plannedEvents: PlannedOrchestrationEvent[] = [];
+
+  for (const nextCommand of commands) {
+    const decided = yield* decideOrchestrationCommand({
+      command: nextCommand,
+      readModel: nextReadModel,
+    });
+    const nextEvents = Array.isArray(decided) ? decided : [decided];
+    for (const nextEvent of nextEvents) {
+      plannedEvents.push(nextEvent);
+      nextSequence += 1;
+      nextReadModel = yield* projectEvent(nextReadModel, {
+        ...nextEvent,
+        sequence: nextSequence,
+      }).pipe(Effect.orDie);
+    }
+  }
+
+  return plannedEvents;
+});
+
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
   readModel,
 }: {
   readonly command: OrchestrationCommand;
   readonly readModel: OrchestrationReadModel;
-}): Effect.fn.Return<
-  Omit<OrchestrationEvent, "sequence"> | ReadonlyArray<Omit<OrchestrationEvent, "sequence">>,
-  OrchestrationCommandInvariantError
-> {
+}): Effect.fn.Return<DecideOrchestrationCommandResult, OrchestrationCommandInvariantError> {
   switch (command.type) {
     case "project.create": {
       yield* requireProjectAbsent({
@@ -77,7 +112,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           projectId: command.projectId,
           title: command.title,
           workspaceRoot: command.workspaceRoot,
-          defaultModel: command.defaultModel ?? null,
+          defaultModelSelection: command.defaultModelSelection ?? null,
           scripts: [],
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
@@ -104,7 +139,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           projectId: command.projectId,
           ...(command.title !== undefined ? { title: command.title } : {}),
           ...(command.workspaceRoot !== undefined ? { workspaceRoot: command.workspaceRoot } : {}),
-          ...(command.defaultModel !== undefined ? { defaultModel: command.defaultModel } : {}),
+          ...(command.defaultModelSelection !== undefined
+            ? { defaultModelSelection: command.defaultModelSelection }
+            : {}),
           ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
           updatedAt: occurredAt,
         },
@@ -117,6 +154,35 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
+      const activeThreads = listThreadsByProjectId(readModel, command.projectId).filter(
+        (thread) => thread.deletedAt === null,
+      );
+      if (activeThreads.length > 0 && command.force !== true) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' is not empty and cannot be deleted without force=true.`,
+        });
+      }
+      if (activeThreads.length > 0) {
+        return yield* decideCommandSequence({
+          readModel,
+          commands: [
+            ...activeThreads.map(
+              (thread): Extract<OrchestrationCommand, { type: "thread.delete" }> => ({
+                type: "thread.delete",
+                commandId: command.commandId,
+                threadId: thread.id,
+              }),
+            ),
+            {
+              type: "project.delete",
+              commandId: command.commandId,
+              projectId: command.projectId,
+            },
+          ],
+        });
+      }
+
       const occurredAt = nowIso();
       return {
         ...withEventBase({
@@ -125,7 +191,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           occurredAt,
           commandId: command.commandId,
         }),
-        type: "project.deleted",
+        type: "project.deleted" as const,
         payload: {
           projectId: command.projectId,
           deletedAt: occurredAt,
@@ -156,7 +222,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           projectId: command.projectId,
           title: command.title,
-          model: command.model,
+          modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
           branch: command.branch,
@@ -189,6 +255,51 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.archive": {
+      yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.archived",
+        payload: {
+          threadId: command.threadId,
+          archivedAt: occurredAt,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.unarchive": {
+      yield* requireThreadArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.unarchived",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "thread.meta.update": {
       yield* requireThread({
         readModel,
@@ -207,7 +318,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           ...(command.title !== undefined ? { title: command.title } : {}),
-          ...(command.model !== undefined ? { model: command.model } : {}),
+          ...(command.modelSelection !== undefined
+            ? { modelSelection: command.modelSelection }
+            : {}),
           ...(command.branch !== undefined ? { branch: command.branch } : {}),
           ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
           updatedAt: occurredAt,
@@ -323,13 +436,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           messageId: command.message.messageId,
-          ...(command.provider !== undefined ? { provider: command.provider } : {}),
-          ...(command.model !== undefined ? { model: command.model } : {}),
-          ...(command.modelOptions !== undefined ? { modelOptions: command.modelOptions } : {}),
-          ...(command.providerOptions !== undefined
-            ? { providerOptions: command.providerOptions }
+          ...(command.modelSelection !== undefined
+            ? { modelSelection: command.modelSelection }
             : {}),
-          assistantDeliveryMode: command.assistantDeliveryMode ?? DEFAULT_ASSISTANT_DELIVERY_MODE,
+          ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
           runtimeMode: targetThread.runtimeMode,
           interactionMode: targetThread.interactionMode,
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),

@@ -1,7 +1,7 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  entry: ["src/bin.ts"],
   format: ["esm", "cjs"],
   checks: {
     legacyCjs: false,
@@ -9,7 +9,7 @@ export default defineConfig({
   outDir: "dist",
   sourcemap: true,
   clean: true,
-  noExternal: (id) => id.startsWith("@t3tools/"),
+  noExternal: (id) => id.startsWith("@t3tools/") || id.startsWith("effect-acp"),
   inlineOnly: false,
   banner: {
     js: "#!/usr/bin/env node\n",
