@@ -335,4 +335,39 @@ describe("providerUpdater", () => {
       ]);
     }),
   );
+
+  it.effect("releases the running-provider marker when the update lock key is unsupported", () =>
+    Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseProvider);
+      const updater = yield* makeProviderUpdater({
+        providerRegistry: {
+          ...registry,
+          getProviderVersionLifecycle: (provider) =>
+            Effect.succeed({
+              provider,
+              packageName: "@openai/codex",
+              updateCommand: "npm install -g @openai/codex@latest",
+              updateExecutable: "npm",
+              updateArgs: ["install", "-g", "@openai/codex@latest"],
+              updateLockKey: "unknown-lock-key",
+            }),
+        },
+      });
+
+      const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.exit);
+      assert.strictEqual(Exit.isFailure(first), true);
+
+      const second = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.exit);
+      assert.strictEqual(Exit.isFailure(second), true);
+
+      if (Exit.isFailure(second)) {
+        const error = Cause.squash(second.cause);
+        assert.strictEqual(Schema.is(ServerProviderUpdateError)(error), true);
+        if (Schema.is(ServerProviderUpdateError)(error)) {
+          assert.include(error.reason, "Unsupported provider update lock key");
+          assert.notInclude(error.reason, "already running");
+        }
+      }
+    }),
+  );
 });
