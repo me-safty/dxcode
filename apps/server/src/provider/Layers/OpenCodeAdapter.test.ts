@@ -565,17 +565,47 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
-  it.effect("deduplicates overlapping assistant text deltas after part updates", () =>
+  it.effect("keeps raw OpenCode delta chunks intact across ordinary token boundaries", () =>
     Effect.sync(() => {
-      const firstUpdate = mergeOpenCodeAssistantText(undefined, "Hello");
-      const overlapDelta = appendOpenCodeAssistantTextDelta(firstUpdate.latestText, "lo world");
-      const secondUpdate = mergeOpenCodeAssistantText(overlapDelta.nextText, "Hello world!");
-
-      assert.deepEqual(
-        [firstUpdate.deltaToEmit, overlapDelta.deltaToEmit, secondUpdate.deltaToEmit],
-        ["Hello", " world", "!"],
+      const result = appendOpenCodeAssistantTextDelta(
+        'Did you have something else in mind for "',
+        "different",
       );
-      assert.equal(secondUpdate.latestText, "Hello world!");
+
+      assert.equal(result.deltaToEmit, "different");
+      assert.equal(result.nextText, 'Did you have something else in mind for "different');
+    }),
+  );
+
+  it.effect("preserves full raw delta chunks even when they resemble prior suffixes", () =>
+    Effect.sync(() => {
+      assert.deepEqual(appendOpenCodeAssistantTextDelta("B", "onus"), {
+        nextText: "Bonus",
+        deltaToEmit: "onus",
+      });
+      assert.deepEqual(appendOpenCodeAssistantTextDelta("later", " usage"), {
+        nextText: "later usage",
+        deltaToEmit: " usage",
+      });
+      assert.deepEqual(appendOpenCodeAssistantTextDelta("ly", "and"), {
+        nextText: "lyand",
+        deltaToEmit: "and",
+      });
+    }),
+  );
+
+  it.effect("treats a matching part snapshot as idempotent after raw delta concatenation", () =>
+    Effect.sync(() => {
+      const deltas = [
+        "Thanks for the detailed request! After examining ",
+        "`AccountTab.tsx` and `ProgressBar.tsx`",
+        ", here's what I understand and my proposed plan:",
+      ];
+      const streamedText = deltas.join("");
+      const merged = mergeOpenCodeAssistantText(streamedText, streamedText);
+
+      assert.equal(merged.latestText, streamedText);
+      assert.equal(merged.deltaToEmit, "");
     }),
   );
 

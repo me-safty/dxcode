@@ -27,11 +27,7 @@ The installer:
 - installs Termux packages needed to build native npm modules;
 - installs the Termux Codex CLI fork when `codex` is missing;
 - creates `~/t3code-termux`;
-<<<<<<< HEAD
 - installs `t3@nightly` with Android native build settings;
-=======
-- installs `t3@nightly` with Android native build settings;
->>>>>>> cf624553 (Add Termux Android install guide)
 - adds `npm start`, `npm run serve`, and `npm run rebuild-native` helper scripts.
 
 Start T3 Code:
@@ -83,11 +79,7 @@ mkdir -p ~/t3code-termux
 cd ~/t3code-termux
 npm init -y
 
-<<<<<<< HEAD
 npm_config_android_ndk_path="$PREFIX" npm install t3@nightly
-=======
-npm_config_android_ndk_path="$PREFIX" npm install t3@nightly
->>>>>>> cf624553 (Add Termux Android install guide)
 npm pkg set "scripts.start=t3 start --host 127.0.0.1 --port 8787 --no-browser $HOME"
 npm start
 ```
