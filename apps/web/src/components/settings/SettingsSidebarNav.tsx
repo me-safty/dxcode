@@ -42,12 +42,15 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     [isMobile, navigate, setOpenMobile],
   );
   const handleBackClick = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
     if (canGoBack) {
       window.history.back();
       return;
     }
     void navigate({ to: "/" });
-  }, [canGoBack, navigate]);
+  }, [canGoBack, isMobile, navigate, setOpenMobile]);
 
   return (
     <>
