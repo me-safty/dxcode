@@ -3502,6 +3502,7 @@ export default function ChatView(props: ChatViewProps) {
             timestampFormat={timestampFormat}
             mode="sidebar"
             onClose={closePlanSidebar}
+            onImplementPlanInNewThread={onImplementPlanInNewThread}
           />
         ) : null}
       </div>
@@ -3536,6 +3537,7 @@ export default function ChatView(props: ChatViewProps) {
             timestampFormat={timestampFormat}
             mode="sheet"
             onClose={closePlanSidebar}
+            onImplementPlanInNewThread={onImplementPlanInNewThread}
           />
         </RightPanelSheet>
       ) : null}
