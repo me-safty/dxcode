@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/react";
 import {
   type ApprovalRequestId,
   DEFAULT_MODEL,
@@ -2633,23 +2634,41 @@ export default function ChatView(props: ChatViewProps) {
             }
           : undefined;
       beginLocalDispatch({ preparingWorktree: false });
-      await api.orchestration.dispatchCommand({
-        type: "thread.turn.start",
-        commandId: newCommandId(),
-        threadId: threadIdForSend,
-        message: {
-          messageId: messageIdForSend,
-          role: "user",
-          text: outgoingMessageText,
-          attachments: turnAttachments,
+      await Sentry.startSpan(
+        {
+          op: "ui.submit_prompt",
+          name: `prompt ${ctxSelectedProvider ?? "unknown"}`,
+          attributes: {
+            "t3.thread.id": threadIdForSend,
+            "t3.provider": ctxSelectedProvider ?? "unknown",
+            "t3.model": ctxSelectedModel ?? "unknown",
+            "t3.runtime_mode": runtimeMode,
+            "t3.interaction_mode": interactionMode,
+            "t3.instance_id": ctxSelectedModelSelection.instanceId,
+            "t3.prompt_length": outgoingMessageText.length,
+            "t3.has_attachments": turnAttachments.length > 0,
+            "t3.effort": ctxSelectedPromptEffort ?? "default",
+          },
         },
-        modelSelection: ctxSelectedModelSelection,
-        titleSeed: title,
-        runtimeMode,
-        interactionMode,
-        ...(bootstrap ? { bootstrap } : {}),
-        createdAt: messageCreatedAt,
-      });
+        () =>
+          api.orchestration.dispatchCommand({
+            type: "thread.turn.start",
+            commandId: newCommandId(),
+            threadId: threadIdForSend,
+            message: {
+              messageId: messageIdForSend,
+              role: "user",
+              text: outgoingMessageText,
+              attachments: turnAttachments,
+            },
+            modelSelection: ctxSelectedModelSelection,
+            titleSeed: title,
+            runtimeMode,
+            interactionMode,
+            ...(bootstrap ? { bootstrap } : {}),
+            createdAt: messageCreatedAt,
+          }),
+      );
       turnStartSucceeded = true;
     })().catch(async (err: unknown) => {
       if (

@@ -39,6 +39,8 @@ import {
 import {
   startInvokeAgentSpan,
   finishInvokeAgentSpan,
+  startGenAiRequestSpan,
+  finishGenAiRequestSpan,
   startExecuteToolSpan,
   finishExecuteToolSpan,
 } from "../../observability/GenAiSpan.ts";
@@ -69,12 +71,14 @@ const PROVIDER = ProviderDriverKind.make("codex");
 
 interface CodexTurnSpanState {
   invokeAgentSpan: Span;
+  requestSpan?: Span;
   toolSpans: Map<string, Span>;
   lastInputTokens?: number;
   lastOutputTokens?: number;
   lastTotalTokens?: number;
   lastCachedInputTokens?: number;
   lastReasoningOutputTokens?: number;
+  lastResponseText?: string;
 }
 
 function codexAgentName(cwd: string | undefined): string {
@@ -1351,6 +1355,21 @@ function mapToRuntimeEvents(
   return [];
 }
 
+const CODEX_TOOL_ITEM_TYPES = new Set([
+  "commandExecution",
+  "fileChange",
+  "mcpToolCall",
+  "dynamicToolCall",
+]);
+
+function codexItemToolName(item: { type: string; command?: string }): string {
+  if (item.type === "commandExecution") return item.command ?? "command";
+  if (item.type === "fileChange") return "file_edit";
+  if (item.type === "mcpToolCall") return "mcp_tool";
+  if (item.type === "dynamicToolCall") return "dynamic_tool";
+  return item.type;
+}
+
 function processCodexGenAiEvent(
   event: ProviderEvent,
   threadId: ThreadId,
@@ -1358,19 +1377,14 @@ function processCodexGenAiEvent(
   getCwd: () => string | undefined,
   turnSpans: Map<string, CodexTurnSpanState>,
 ): void {
-  // readRouteFields in CodexSessionRuntime doesn't extract turnId for all event
-  // types (rawResponseItem/completed, thread/tokenUsage/updated fall to default).
-  // Fall back to the payload's turnId when event.turnId is missing.
   const turnId =
     event.turnId ??
     ((event.payload as { turnId?: string } | undefined)?.turnId as string | undefined);
 
-  Sentry.logger.debug("codex event", { method: event.method, turnId: turnId ?? "none" });
-
   if (event.method === "turn/started" && turnId) {
     const cwd = getCwd();
     const model = getModel();
-    const span = startInvokeAgentSpan({
+    const invokeSpan = startInvokeAgentSpan({
       agentName: codexAgentName(cwd),
       system: "openai",
       model,
@@ -1382,64 +1396,77 @@ function processCodexGenAiEvent(
         ...(cwd ? { "t3.workspace.cwd": cwd } : {}),
       },
     });
+    const requestSpan = startGenAiRequestSpan(invokeSpan, {
+      model,
+      system: "openai",
+      conversationId: threadId,
+    });
     turnSpans.set(turnId, {
-      invokeAgentSpan: span,
+      invokeAgentSpan: invokeSpan,
+      requestSpan,
       toolSpans: new Map(),
     });
-    Sentry.logger.info("codex gen_ai.invoke_agent span opened", { threadId, turnId, model });
     return;
   }
 
-  if (event.method === "thread/tokenUsage/updated" && turnId) {
-    const state = turnSpans.get(turnId);
-    if (state) {
-      const payload = readPayload(
-        EffectCodexSchema.V2ThreadTokenUsageUpdatedNotification,
-        event.payload,
-      );
-      const last = payload?.tokenUsage.last;
-      if (last) {
-        state.lastInputTokens = last.inputTokens;
-        state.lastOutputTokens = last.outputTokens;
-        state.lastTotalTokens = last.totalTokens;
-        state.lastCachedInputTokens = last.cachedInputTokens;
-        state.lastReasoningOutputTokens = last.reasoningOutputTokens;
-      }
+  if (event.method === "thread/tokenUsage/updated") {
+    const payload = readPayload(
+      EffectCodexSchema.V2ThreadTokenUsageUpdatedNotification,
+      event.payload,
+    );
+    const payloadTurnId = payload?.turnId ?? turnId;
+    const state = payloadTurnId ? turnSpans.get(payloadTurnId) : undefined;
+    if (state && payload) {
+      const last = payload.tokenUsage.last;
+      state.lastInputTokens = last.inputTokens;
+      state.lastOutputTokens = last.outputTokens;
+      state.lastTotalTokens = last.totalTokens;
+      state.lastCachedInputTokens = last.cachedInputTokens;
+      state.lastReasoningOutputTokens = last.reasoningOutputTokens;
     }
     return;
   }
 
-  if (event.method === "rawResponseItem/completed" && turnId) {
+  if (event.method === "item/started" && turnId) {
     const state = turnSpans.get(turnId);
-    if (state) {
-      const payload = readPayload(
-        EffectCodexSchema.V2RawResponseItemCompletedNotification,
-        event.payload,
-      );
-      const item = payload?.item;
-      if (!item) {
-        Sentry.logger.warn("codex rawResponseItem/completed: payload parse failed", { threadId, turnId });
-        return;
-      }
-      if (
-        item.type === "function_call" ||
-        item.type === "local_shell_call" ||
-        item.type === "custom_tool_call"
-      ) {
-        const toolName =
-          ("name" in item ? item.name : undefined) ?? item.type;
-        const toolInput =
-          "arguments" in item && typeof item.arguments === "string"
-            ? item.arguments
-            : "input" in item && typeof item.input === "string"
-              ? item.input
-              : undefined;
-        const toolSpan = startExecuteToolSpan(state.invokeAgentSpan, {
-          toolName,
-          ...(toolInput ? { toolInput } : {}),
-        });
-        Sentry.logger.info("codex gen_ai.execute_tool span", { threadId, turnId, tool: toolName });
-        finishExecuteToolSpan(toolSpan, {});
+    if (!state) return;
+    const payload = readPayload(EffectCodexSchema.V2ItemStartedNotification, event.payload);
+    const item = payload?.item;
+    if (!item || !CODEX_TOOL_ITEM_TYPES.has(item.type)) return;
+    const toolName = codexItemToolName(item as { type: string; command?: string });
+    const toolSpan = startExecuteToolSpan(state.invokeAgentSpan, { toolName });
+    if (event.itemId) {
+      state.toolSpans.set(event.itemId, toolSpan);
+    }
+    return;
+  }
+
+  if (event.method === "item/completed" && turnId) {
+    const state = turnSpans.get(turnId);
+    if (!state) return;
+    const payload = readPayload(EffectCodexSchema.V2ItemCompletedNotification, event.payload);
+    const item = payload?.item;
+    if (!item) return;
+
+    if (item.type === "agentMessage" && "text" in item && typeof item.text === "string") {
+      state.lastResponseText = (state.lastResponseText ?? "") + item.text;
+    }
+
+    if (CODEX_TOOL_ITEM_TYPES.has(item.type)) {
+      const existingSpan = event.itemId ? state.toolSpans.get(event.itemId) : undefined;
+      const toolName = codexItemToolName(item as { type: string; command?: string });
+      const toolOutput =
+        "aggregatedOutput" in item && typeof item.aggregatedOutput === "string"
+          ? item.aggregatedOutput
+          : undefined;
+      const finish: import("../../observability/GenAiSpan.ts").ExecuteToolSpanFinish =
+        toolOutput !== undefined ? { toolOutput } : {};
+      if (existingSpan) {
+        finishExecuteToolSpan(existingSpan, finish);
+        if (event.itemId) state.toolSpans.delete(event.itemId);
+      } else {
+        const toolSpan = startExecuteToolSpan(state.invokeAgentSpan, { toolName });
+        finishExecuteToolSpan(toolSpan, finish);
       }
     }
     return;
@@ -1447,33 +1474,42 @@ function processCodexGenAiEvent(
 
   if (event.method === "turn/completed" && turnId) {
     const state = turnSpans.get(turnId);
-    if (state) {
-      for (const toolSpan of state.toolSpans.values()) {
-        finishExecuteToolSpan(toolSpan, {});
-      }
+    if (!state) return;
 
-      const payload = readPayload(
-        EffectCodexSchema.V2TurnCompletedNotification,
-        event.payload,
-      );
-      const errorMessage =
-        payload?.turn.status === "failed" ? payload.turn.error?.message : undefined;
-
-      Sentry.logger.info("codex gen_ai.invoke_agent span closing", { threadId, turnId, inputTokens: state.lastInputTokens ?? 0, outputTokens: state.lastOutputTokens ?? 0 });
-      finishInvokeAgentSpan(state.invokeAgentSpan, {
-        ...(state.lastInputTokens !== undefined ? { inputTokens: state.lastInputTokens } : {}),
-        ...(state.lastOutputTokens !== undefined ? { outputTokens: state.lastOutputTokens } : {}),
-        ...(state.lastTotalTokens !== undefined ? { totalTokens: state.lastTotalTokens } : {}),
-        ...(state.lastCachedInputTokens !== undefined
-          ? { cachedInputTokens: state.lastCachedInputTokens }
-          : {}),
-        ...(state.lastReasoningOutputTokens !== undefined
-          ? { reasoningOutputTokens: state.lastReasoningOutputTokens }
-          : {}),
-        ...(errorMessage ? { errorMessage } : {}),
-      });
-      turnSpans.delete(turnId);
+    for (const toolSpan of state.toolSpans.values()) {
+      finishExecuteToolSpan(toolSpan, {});
     }
+
+    const payload = readPayload(EffectCodexSchema.V2TurnCompletedNotification, event.payload);
+    const errorMessage =
+      payload?.turn.status === "failed" ? payload.turn.error?.message : undefined;
+    const tokenFinish = {
+      inputTokens: state.lastInputTokens ?? 0,
+      outputTokens: state.lastOutputTokens ?? 0,
+      totalTokens: state.lastTotalTokens ?? 0,
+      ...(state.lastCachedInputTokens !== undefined
+        ? { cachedInputTokens: state.lastCachedInputTokens }
+        : {}),
+      ...(state.lastReasoningOutputTokens !== undefined
+        ? { reasoningOutputTokens: state.lastReasoningOutputTokens }
+        : {}),
+    };
+
+    if (state.requestSpan) {
+      finishGenAiRequestSpan(state.requestSpan, {
+        ...tokenFinish,
+        ...(state.lastResponseText ? { responseText: state.lastResponseText } : {}),
+        ...(errorMessage ? { errorMessage } : {}),
+        finishReason: errorMessage ? "error" : "stop",
+      });
+    }
+
+    finishInvokeAgentSpan(state.invokeAgentSpan, {
+      ...tokenFinish,
+      ...(state.lastResponseText ? { responseText: state.lastResponseText } : {}),
+      ...(errorMessage ? { errorMessage } : {}),
+    });
+    turnSpans.delete(turnId);
     return;
   }
 }
@@ -1482,6 +1518,9 @@ function cleanupCodexTurnSpans(turnSpans: Map<string, CodexTurnSpanState>): void
   for (const state of turnSpans.values()) {
     for (const toolSpan of state.toolSpans.values()) {
       finishExecuteToolSpan(toolSpan, { errorMessage: "session closed" });
+    }
+    if (state.requestSpan) {
+      finishGenAiRequestSpan(state.requestSpan, { errorMessage: "session closed" });
     }
     finishInvokeAgentSpan(state.invokeAgentSpan, { errorMessage: "session closed" });
   }
