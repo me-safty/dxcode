@@ -3564,76 +3564,82 @@ export default function ChatView(props: ChatViewProps) {
                 : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
             )}
           >
-            <ComposerBannerStack items={composerBannerItems} />
-            <ChatComposer
-              ref={composerRef}
-              composerDraftTarget={composerDraftTarget}
-              environmentId={environmentId}
-              routeKind={routeKind}
-              routeThreadRef={routeThreadRef}
-              draftId={draftId}
-              activeThreadId={activeThreadId}
-              activeThreadEnvironmentId={activeThread?.environmentId}
-              activeThread={activeThread}
-              isServerThread={isServerThread}
-              isLocalDraftThread={isLocalDraftThread}
-              phase={phase}
-              isConnecting={isConnecting}
-              isSendBusy={isSendBusy}
-              isPreparingWorktree={isPreparingWorktree}
-              environmentUnavailable={activeEnvironmentUnavailableState}
-              activePendingApproval={activePendingApproval}
-              pendingApprovals={pendingApprovals}
-              pendingUserInputs={pendingUserInputs}
-              activePendingProgress={activePendingProgress}
-              activePendingResolvedAnswers={activePendingResolvedAnswers}
-              activePendingIsResponding={activePendingIsResponding}
-              activePendingDraftAnswers={activePendingDraftAnswers}
-              activePendingQuestionIndex={activePendingQuestionIndex}
-              respondingRequestIds={respondingRequestIds}
-              showPlanFollowUpPrompt={showPlanFollowUpPrompt}
-              activeProposedPlan={activeProposedPlan}
-              activePlan={activePlan as { turnId?: TurnId } | null}
-              sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
-              planSidebarLabel={planSidebarLabel}
-              planSidebarOpen={planSidebarOpen}
-              runtimeMode={runtimeMode}
-              interactionMode={interactionMode}
-              lockedProvider={lockedProvider}
-              providerStatuses={providerStatuses as ServerProvider[]}
-              activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
-              activeThreadModelSelection={activeThread?.modelSelection}
-              activeThreadActivities={activeThread?.activities}
-              resolvedTheme={resolvedTheme}
-              settings={settings}
-              keybindings={keybindings}
-              terminalOpen={Boolean(terminalState.terminalOpen)}
-              gitCwd={gitCwd}
-              promptRef={promptRef}
-              composerImagesRef={composerImagesRef}
-              composerTerminalContextsRef={composerTerminalContextsRef}
-              shouldAutoScrollRef={isAtEndRef}
-              scheduleStickToBottom={scrollToEnd}
-              onSend={onSend}
-              onInterrupt={onInterrupt}
-              onImplementPlanInNewThread={onImplementPlanInNewThread}
-              onRespondToApproval={onRespondToApproval}
-              onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
-              onAdvanceActivePendingUserInput={onAdvanceActivePendingUserInput}
-              onPreviousActivePendingUserInputQuestion={onPreviousActivePendingUserInputQuestion}
-              onChangeActivePendingUserInputCustomAnswer={
-                onChangeActivePendingUserInputCustomAnswer
-              }
-              onProviderModelSelect={onProviderModelSelect}
-              toggleInteractionMode={toggleInteractionMode}
-              handleRuntimeModeChange={handleRuntimeModeChange}
-              handleInteractionModeChange={handleInteractionModeChange}
-              togglePlanSidebar={togglePlanSidebar}
-              focusComposer={focusComposer}
-              scheduleComposerFocus={scheduleComposerFocus}
-              setThreadError={setThreadError}
-              onExpandImage={onExpandTimelineImage}
-            />
+            <div className="relative isolate">
+              <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+              <div className="relative z-10">
+                <ChatComposer
+                  ref={composerRef}
+                  composerDraftTarget={composerDraftTarget}
+                  environmentId={environmentId}
+                  routeKind={routeKind}
+                  routeThreadRef={routeThreadRef}
+                  draftId={draftId}
+                  activeThreadId={activeThreadId}
+                  activeThreadEnvironmentId={activeThread?.environmentId}
+                  activeThread={activeThread}
+                  isServerThread={isServerThread}
+                  isLocalDraftThread={isLocalDraftThread}
+                  phase={phase}
+                  isConnecting={isConnecting}
+                  isSendBusy={isSendBusy}
+                  isPreparingWorktree={isPreparingWorktree}
+                  environmentUnavailable={activeEnvironmentUnavailableState}
+                  activePendingApproval={activePendingApproval}
+                  pendingApprovals={pendingApprovals}
+                  pendingUserInputs={pendingUserInputs}
+                  activePendingProgress={activePendingProgress}
+                  activePendingResolvedAnswers={activePendingResolvedAnswers}
+                  activePendingIsResponding={activePendingIsResponding}
+                  activePendingDraftAnswers={activePendingDraftAnswers}
+                  activePendingQuestionIndex={activePendingQuestionIndex}
+                  respondingRequestIds={respondingRequestIds}
+                  showPlanFollowUpPrompt={showPlanFollowUpPrompt}
+                  activeProposedPlan={activeProposedPlan}
+                  activePlan={activePlan as { turnId?: TurnId } | null}
+                  sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
+                  planSidebarLabel={planSidebarLabel}
+                  planSidebarOpen={planSidebarOpen}
+                  runtimeMode={runtimeMode}
+                  interactionMode={interactionMode}
+                  lockedProvider={lockedProvider}
+                  providerStatuses={providerStatuses as ServerProvider[]}
+                  activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
+                  activeThreadModelSelection={activeThread?.modelSelection}
+                  activeThreadActivities={activeThread?.activities}
+                  resolvedTheme={resolvedTheme}
+                  settings={settings}
+                  keybindings={keybindings}
+                  terminalOpen={Boolean(terminalState.terminalOpen)}
+                  gitCwd={gitCwd}
+                  promptRef={promptRef}
+                  composerImagesRef={composerImagesRef}
+                  composerTerminalContextsRef={composerTerminalContextsRef}
+                  shouldAutoScrollRef={isAtEndRef}
+                  scheduleStickToBottom={scrollToEnd}
+                  onSend={onSend}
+                  onInterrupt={onInterrupt}
+                  onImplementPlanInNewThread={onImplementPlanInNewThread}
+                  onRespondToApproval={onRespondToApproval}
+                  onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
+                  onAdvanceActivePendingUserInput={onAdvanceActivePendingUserInput}
+                  onPreviousActivePendingUserInputQuestion={
+                    onPreviousActivePendingUserInputQuestion
+                  }
+                  onChangeActivePendingUserInputCustomAnswer={
+                    onChangeActivePendingUserInputCustomAnswer
+                  }
+                  onProviderModelSelect={onProviderModelSelect}
+                  toggleInteractionMode={toggleInteractionMode}
+                  handleRuntimeModeChange={handleRuntimeModeChange}
+                  handleInteractionModeChange={handleInteractionModeChange}
+                  togglePlanSidebar={togglePlanSidebar}
+                  focusComposer={focusComposer}
+                  scheduleComposerFocus={scheduleComposerFocus}
+                  setThreadError={setThreadError}
+                  onExpandImage={onExpandTimelineImage}
+                />
+              </div>
+            </div>
             {isGitRepo && (
               <BranchToolbar
                 environmentId={activeThread.environmentId}

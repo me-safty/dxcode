@@ -1,9 +1,27 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { XIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
 import { Button } from "../ui/button";
+
+const DISMISS_TRANSITION_MS = 220;
+const frontExitStyle = {
+  opacity: 0,
+  transform: "translate3d(0, 4rem, 0)",
+} satisfies CSSProperties;
+const stackedExitStyle = {
+  opacity: 0,
+  transform: "translate3d(0, 7rem, 0)",
+} satisfies CSSProperties;
+const restingStyle = {
+  opacity: 1,
+  transform: "translate3d(0, 0, 0)",
+} satisfies CSSProperties;
+const exitTransitionStyle = {
+  transition: `transform ${DISMISS_TRANSITION_MS}ms ease-in, opacity ${DISMISS_TRANSITION_MS}ms ease-in`,
+  willChange: "transform, opacity",
+} satisfies CSSProperties;
 
 export interface ComposerBannerStackItem {
   readonly id: string;
@@ -22,6 +40,23 @@ interface ComposerBannerStackProps {
 }
 
 export function ComposerBannerStack({ className, items }: ComposerBannerStackProps) {
+  const [exitingItemId, setExitingItemId] = useState<string | null>(null);
+  const dismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (exitingItemId && !items.some((item) => item.id === exitingItemId)) {
+      setExitingItemId(null);
+    }
+  }, [exitingItemId, items]);
+
+  useEffect(() => {
+    return () => {
+      if (dismissTimeoutRef.current) {
+        clearTimeout(dismissTimeoutRef.current);
+      }
+    };
+  }, []);
+
   if (items.length === 0) {
     return null;
   }
@@ -32,6 +67,21 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
   }
   const stackedItems = items.slice(1);
   const hasStack = stackedItems.length > 0;
+  const showCollapsedStackCap = hasStack && exitingItemId !== frontItem.id;
+
+  const requestDismiss = (item: ComposerBannerStackItem) => {
+    if (!item.onDismiss || exitingItemId) {
+      return;
+    }
+    setExitingItemId(item.id);
+    if (dismissTimeoutRef.current) {
+      clearTimeout(dismissTimeoutRef.current);
+    }
+    dismissTimeoutRef.current = setTimeout(() => {
+      dismissTimeoutRef.current = null;
+      item.onDismiss?.();
+    }, DISMISS_TRANSITION_MS);
+  };
 
   return (
     <div className={cn("group/banner-stack mx-auto mb-2 max-w-208", className)}>
@@ -41,7 +91,7 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
           hasStack ? "group-hover/banner-stack:z-50 group-focus-within/banner-stack:z-50" : null,
         )}
       >
-        {hasStack ? (
+        {showCollapsedStackCap ? (
           <div
             className={cn(
               "pointer-events-none absolute inset-x-0 -top-3 z-0 mx-auto h-3 rounded-t-xl",
@@ -53,8 +103,21 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
             aria-hidden="true"
           />
         ) : null}
-        <div className="relative z-10">
-          <ComposerBannerStackAlert item={frontItem} />
+        <div
+          className={cn(
+            "relative z-10",
+            exitingItemId === frontItem.id ? "pointer-events-none" : null,
+          )}
+          style={{
+            ...exitTransitionStyle,
+            ...(exitingItemId === frontItem.id ? frontExitStyle : restingStyle),
+          }}
+        >
+          <ComposerBannerStackAlert
+            item={frontItem}
+            exiting={exitingItemId === frontItem.id}
+            onDismissRequest={() => requestDismiss(frontItem)}
+          />
         </div>
         {hasStack ? (
           <div
@@ -67,8 +130,19 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
             )}
           >
             {stackedItems.map((item) => (
-              <div key={item.id}>
-                <ComposerBannerStackAlert item={item} />
+              <div
+                key={item.id}
+                className={cn(exitingItemId === item.id ? "pointer-events-none" : null)}
+                style={{
+                  ...exitTransitionStyle,
+                  ...(exitingItemId === item.id ? stackedExitStyle : restingStyle),
+                }}
+              >
+                <ComposerBannerStackAlert
+                  item={item}
+                  exiting={exitingItemId === item.id}
+                  onDismissRequest={() => requestDismiss(item)}
+                />
               </div>
             ))}
           </div>
@@ -78,7 +152,15 @@ export function ComposerBannerStack({ className, items }: ComposerBannerStackPro
   );
 }
 
-function ComposerBannerStackAlert({ item }: { readonly item: ComposerBannerStackItem }) {
+function ComposerBannerStackAlert({
+  item,
+  exiting,
+  onDismissRequest,
+}: {
+  readonly item: ComposerBannerStackItem;
+  readonly exiting: boolean;
+  readonly onDismissRequest: () => void;
+}) {
   return (
     <Alert variant={item.variant}>
       {item.icon}
@@ -92,7 +174,8 @@ function ComposerBannerStackAlert({ item }: { readonly item: ComposerBannerStack
               size="icon-xs"
               variant="ghost"
               aria-label={item.dismissLabel ?? "Dismiss warning"}
-              onClick={item.onDismiss}
+              disabled={exiting}
+              onClick={onDismissRequest}
             >
               <XIcon className="size-3.5" />
             </Button>
