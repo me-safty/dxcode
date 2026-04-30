@@ -97,6 +97,7 @@ function RootRouteView() {
   return (
     <ToastProvider>
       <AnchoredToastProvider>
+        <VisualViewportBootstrap />
         <AuthenticatedTracingBootstrap />
         <ServerStateBootstrap />
         <EnvironmentConnectionManagerBootstrap />
@@ -113,6 +114,44 @@ function RootRouteView() {
       </AnchoredToastProvider>
     </ToastProvider>
   );
+}
+
+function VisualViewportBootstrap() {
+  useEffect(() => {
+    const root = document.documentElement;
+    let frame: number | null = null;
+
+    const writeViewportHeight = () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        root.style.setProperty(
+          "--app-visual-viewport-height",
+          `${window.visualViewport?.height ?? window.innerHeight}px`,
+        );
+      });
+    };
+
+    writeViewportHeight();
+    window.addEventListener("resize", writeViewportHeight);
+    window.addEventListener("orientationchange", writeViewportHeight);
+    window.visualViewport?.addEventListener("resize", writeViewportHeight);
+    window.visualViewport?.addEventListener("scroll", writeViewportHeight);
+
+    return () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      window.removeEventListener("resize", writeViewportHeight);
+      window.removeEventListener("orientationchange", writeViewportHeight);
+      window.visualViewport?.removeEventListener("resize", writeViewportHeight);
+      window.visualViewport?.removeEventListener("scroll", writeViewportHeight);
+    };
+  }, []);
+
+  return null;
 }
 
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {

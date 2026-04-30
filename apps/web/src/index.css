@@ -60,13 +60,7 @@
 
 @layer utilities {
   .h-app-viewport {
-    height: 100dvh;
-  }
-
-  @supports (height: 100svh) {
-    .h-app-viewport {
-      height: 100svh;
-    }
+    height: var(--app-visual-viewport-height, 100dvh);
   }
 
   .safe-area-top-x {

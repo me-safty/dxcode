@@ -1949,7 +1949,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
           size="sm"
-          className={`gap-2 px-2 py-1.5 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground ${
+          className={`min-w-0 gap-2 px-2 py-1.5 pr-8 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground ${
             isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
           }`}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
@@ -1982,8 +1982,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             />
           )}
           <ProjectFavicon environmentId={project.environmentId} cwd={project.cwd} />
-          <span className="flex min-w-0 flex-1 items-center gap-2">
-            <span className="truncate text-xs font-medium text-foreground/90">
+          <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+            <span
+              className="min-w-0 truncate text-xs font-medium text-foreground/90"
+              title={project.displayName}
+            >
               {project.displayName}
             </span>
             {project.groupedProjectCount > 1 ? (
