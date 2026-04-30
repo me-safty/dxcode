@@ -3423,7 +3423,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           "t3.turn.id": turnId,
           ...(context.session.cwd ? { "t3.workspace.cwd": context.session.cwd } : {}),
         },
-      }),
+      }, Sentry.getActiveSpan() ?? undefined),
       ...(userMessagesJson ? { genAiUserMessages: userMessagesJson } : {}),
     };
 

@@ -1723,6 +1723,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     const cwd = process.cwd();
 
     Sentry.withIsolationScope(session.sentryScope, () => {
+      const activeSpan = Sentry.getActiveSpan();
       const invokeSpan = startInvokeAgentSpan({
         agentName: codexAgentName(cwd),
         system: "openai",
@@ -1734,7 +1735,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           "t3.thread.id": input.threadId,
           ...(cwd ? { "t3.workspace.cwd": cwd } : {}),
         },
-      });
+      }, activeSpan ?? undefined);
       const requestSpan = startGenAiRequestSpan(invokeSpan, {
         model,
         system: "openai",

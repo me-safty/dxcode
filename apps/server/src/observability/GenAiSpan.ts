@@ -25,9 +25,9 @@ export interface InvokeAgentSpanFinish {
 
 const SPAN_STATUS_ERROR = 2 as const;
 
-export function startInvokeAgentSpan(init: InvokeAgentSpanInit): Span {
+export function startInvokeAgentSpan(init: InvokeAgentSpanInit, parentSpan?: Span): Span {
   Sentry.setConversationId(init.conversationId);
-  return Sentry.startInactiveSpan({
+  const spanOptions = {
     op: "gen_ai.invoke_agent",
     name: `invoke_agent ${init.agentName}`,
     attributes: {
@@ -42,7 +42,11 @@ export function startInvokeAgentSpan(init: InvokeAgentSpanInit): Span {
         : {}),
       ...(init.extraAttributes ?? {}),
     },
-  });
+  } as const;
+  if (parentSpan) {
+    return Sentry.withActiveSpan(parentSpan, () => Sentry.startInactiveSpan(spanOptions));
+  }
+  return Sentry.startInactiveSpan(spanOptions);
 }
 
 export function finishInvokeAgentSpan(span: Span | undefined, finish: InvokeAgentSpanFinish): void {
