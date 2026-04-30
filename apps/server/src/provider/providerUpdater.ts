@@ -16,6 +16,7 @@ import type { ProviderVersionLifecycle } from "./providerVersionLifecycle.ts";
 
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const UPDATE_OUTPUT_MAX_BYTES = 10_000;
+const SHARED_UPDATE_LOCK_KEYS = ["npm-global", "bun-global", "cursor-agent"] as const;
 
 export type ProviderUpdateRunner = (
   command: string,
@@ -96,7 +97,11 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
   readonly runUpdate?: ProviderUpdateRunner;
 }) {
   const runningProvidersRef = yield* Ref.make<ReadonlySet<ProviderDriverKind>>(new Set());
-  const updateLocks = new Map<string, Semaphore.Semaphore>();
+  const updateLocks = new Map<string, Semaphore.Semaphore>(
+    yield* Effect.forEach(SHARED_UPDATE_LOCK_KEYS, (updateLockKey) =>
+      Semaphore.make(1).pipe(Effect.map((semaphore) => [updateLockKey, semaphore] as const)),
+    ),
+  );
   const runUpdate = input.runUpdate ?? defaultRunner;
 
   const acquireProvider = Effect.fn("acquireProvider")(function* (provider: ProviderDriverKind) {
@@ -116,16 +121,6 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
       next.delete(provider);
       return next;
     });
-
-  const getUpdateLock = Effect.fn("getUpdateLock")(function* (updateLockKey: string) {
-    const existing = updateLocks.get(updateLockKey);
-    if (existing) {
-      return existing;
-    }
-    const next = yield* Semaphore.make(1);
-    updateLocks.set(updateLockKey, next);
-    return next;
-  });
 
   const verifyRefreshedProvider = (
     provider: ProviderDriverKind,
@@ -272,7 +267,13 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
           }),
         );
       });
-      const lock = yield* getUpdateLock(updateLockKey);
+      const lock = updateLocks.get(updateLockKey);
+      if (!lock) {
+        return yield* new ServerProviderUpdateError({
+          provider,
+          reason: `Unsupported provider update lock key: ${updateLockKey}`,
+        });
+      }
 
       return yield* lock
         .withPermits(1)(run)

@@ -15,8 +15,10 @@ import { getProviderVersionLifecycle } from "./providerVersionLifecycle.ts";
 
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const CURSOR_DRIVER = ProviderDriverKind.make("cursor");
+const OPENCODE_DRIVER = ProviderDriverKind.make("opencode");
 const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
 const CURSOR_INSTANCE_ID = ProviderInstanceId.make("cursor");
+const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
 
 const baseProvider: ServerProvider = {
   instanceId: CODEX_INSTANCE_ID,
@@ -36,6 +38,12 @@ const baseCursorProvider: ServerProvider = {
   ...baseProvider,
   instanceId: CURSOR_INSTANCE_ID,
   driver: CURSOR_DRIVER,
+};
+
+const baseOpenCodeProvider: ServerProvider = {
+  ...baseProvider,
+  instanceId: OPENCODE_INSTANCE_ID,
+  driver: OPENCODE_DRIVER,
 };
 
 const okResult = (stdout = ""): ProcessRunResult => ({
@@ -266,6 +274,65 @@ describe("providerUpdater", () => {
 
       releaseLatch.resolve();
       yield* Fiber.join(first);
+    }),
+  );
+
+  it.effect("serializes different providers that share the same update lock key", () =>
+    Effect.gen(function* () {
+      const { registry } = yield* makeRegistry([baseProvider, baseOpenCodeProvider]);
+      const firstStartedLatch: { resolve: () => void } = { resolve: () => {} };
+      const releaseFirstLatch: { resolve: () => void } = { resolve: () => {} };
+      const firstStarted = new Promise<void>((resolve) => {
+        firstStartedLatch.resolve = resolve;
+      });
+      const releaseFirst = new Promise<void>((resolve) => {
+        releaseFirstLatch.resolve = resolve;
+      });
+      const calls: Array<string> = [];
+      const updater = yield* makeProviderUpdater({
+        providerRegistry: {
+          ...registry,
+          getProviderVersionLifecycle: (provider) =>
+            Effect.succeed({
+              provider,
+              packageName: provider === OPENCODE_DRIVER ? "opencode-ai" : "@openai/codex",
+              updateCommand:
+                provider === OPENCODE_DRIVER
+                  ? "npm install -g opencode-ai@latest"
+                  : "npm install -g @openai/codex@latest",
+              updateExecutable: "npm",
+              updateArgs:
+                provider === OPENCODE_DRIVER
+                  ? ["install", "-g", "opencode-ai@latest"]
+                  : ["install", "-g", "@openai/codex@latest"],
+              updateLockKey: "npm-global",
+            }),
+        },
+        runUpdate: async (_command, args) => {
+          calls.push(args.join(" "));
+          if (calls.length === 1) {
+            firstStartedLatch.resolve();
+            await releaseFirst;
+          }
+          return okResult();
+        },
+      });
+
+      const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
+      yield* Effect.promise(() => firstStarted);
+
+      const second = yield* updater.updateProvider(OPENCODE_DRIVER).pipe(Effect.forkScoped);
+      yield* Effect.promise(() => Promise.resolve());
+      yield* Effect.promise(() => Promise.resolve());
+      assert.deepStrictEqual(calls, ["install -g @openai/codex@latest"]);
+
+      releaseFirstLatch.resolve();
+      yield* Fiber.join(first);
+      yield* Fiber.join(second);
+      assert.deepStrictEqual(calls, [
+        "install -g @openai/codex@latest",
+        "install -g opencode-ai@latest",
+      ]);
     }),
   );
 });
