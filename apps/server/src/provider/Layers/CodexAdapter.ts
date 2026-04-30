@@ -1715,6 +1715,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       input.modelSelection?.instanceId === boundInstanceId
         ? getModelSelectionBooleanOptionValue(input.modelSelection, "fastMode")
         : undefined;
+    Sentry.setConversationId(input.threadId);
     if (input.input !== undefined) {
       const userText = typeof input.input === "string" ? input.input : JSON.stringify(input.input);
       const messagesJson = JSON.stringify([{ role: "user", content: userText }]);
