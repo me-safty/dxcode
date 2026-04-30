@@ -1492,13 +1492,20 @@ function ComposerPromptEditorInner({
       const boundedCursor = clampCollapsedComposerCursor(snapshotRef.current.value, nextCursor);
       const scrollX = window.scrollX;
       const scrollY = window.scrollY;
+      const restoreScroll = () => {
+        if (window.scrollX !== scrollX || window.scrollY !== scrollY) {
+          window.scrollTo(scrollX, scrollY);
+        }
+      };
       rootElement.focus({ preventScroll: true });
       editor.update(() => {
         $setSelectionAtComposerOffset(boundedCursor);
       });
-      if (window.scrollX !== scrollX || window.scrollY !== scrollY) {
-        window.scrollTo(scrollX, scrollY);
-      }
+      restoreScroll();
+      requestAnimationFrame(() => {
+        restoreScroll();
+        requestAnimationFrame(restoreScroll);
+      });
       snapshotRef.current = {
         value: snapshotRef.current.value,
         cursor: boundedCursor,

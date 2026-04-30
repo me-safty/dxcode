@@ -30,6 +30,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
@@ -1838,6 +1839,9 @@ export const ChatComposer = memo(
           return;
         }
         setIsComposerFocused(false);
+        requestAnimationFrame(() => {
+          window.scrollTo(0, 0);
+        });
       });
     }, []);
 
@@ -1887,10 +1891,10 @@ export const ChatComposer = memo(
             }}
             onClick={() => {
               if (isComposerCollapsedMobile) {
-                setIsComposerFocused(true);
-                requestAnimationFrame(() => {
-                  composerEditorRef.current?.focusAtEnd();
+                flushSync(() => {
+                  setIsComposerFocused(true);
                 });
+                composerEditorRef.current?.focusAtEnd();
               }
             }}
           >
