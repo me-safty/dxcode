@@ -803,7 +803,7 @@ describe("GeneralSettingsPanel observability", () => {
       .element(page.getByText("Client · Mobile · iOS · Safari · 192.168.1.88"))
       .toBeInTheDocument();
     await expect
-      .element(page.getByRole("button", { name: /^(Copy code|Show link)$/ }))
+      .element(page.getByRole("button", { name: /^Copy pairing URL for:/ }))
       .toBeInTheDocument();
     await expect.element(page.getByText("Revoke others")).toBeInTheDocument();
   });
@@ -956,10 +956,11 @@ describe("GeneralSettingsPanel observability", () => {
     );
 
     await page.getByRole("button", { name: "Add environment", exact: true }).click();
+    const addEnvironmentDialog = page.getByRole("dialog", { name: "Add Environment" });
     await expect
-      .element(page.getByRole("heading", { name: "Add Environment", exact: true }))
+      .element(addEnvironmentDialog.getByRole("heading", { name: "Add Environment", exact: true }))
       .toBeInTheDocument();
-    await page.getByRole("button", { name: "SSH", exact: true }).click();
+    await addEnvironmentDialog.getByRole("button", { name: /^SSH\b/ }).click();
     await vi.waitFor(() => {
       expect(discoverSshHosts).toHaveBeenCalledTimes(1);
     });
@@ -967,12 +968,13 @@ describe("GeneralSettingsPanel observability", () => {
       .element(page.getByRole("heading", { name: "devbox", exact: true }))
       .toBeInTheDocument();
 
-    await page.getByText("Enter a host manually").click();
-    await page.getByLabelText("Label").fill("Build box");
-    await page.getByLabelText("SSH host or alias").fill("devbox.example.com");
-    await page.getByLabelText("Username").fill("julius");
-    await page.getByLabelText("Port").fill("2222");
-    await page.getByRole("button", { name: "Connect SSH host", exact: true }).click();
+    await addEnvironmentDialog.getByLabelText("SSH host or alias").fill("devbox.example.com");
+    await addEnvironmentDialog.getByLabelText("Username").fill("julius");
+    await addEnvironmentDialog.getByLabelText("Port").fill("2222");
+    await addEnvironmentDialog
+      .getByRole("button", { name: "Add environment", exact: true })
+      .first()
+      .click();
 
     await vi.waitFor(() => {
       expect(mockConnectDesktopSshEnvironment).toHaveBeenCalledWith(
@@ -982,7 +984,7 @@ describe("GeneralSettingsPanel observability", () => {
           username: "julius",
           port: 2222,
         },
-        { label: "Build box" },
+        { label: "" },
       );
     });
   });
