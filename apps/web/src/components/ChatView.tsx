@@ -335,6 +335,44 @@ type ChatViewProps =
       draftId: DraftId;
     };
 
+function useMobileRootScrollReset(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") {
+      return;
+    }
+
+    let rafId: number | null = null;
+    const resetRootScroll = () => {
+      if (rafId !== null) {
+        return;
+      }
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        if (window.scrollX !== 0 || window.scrollY !== 0) {
+          window.scrollTo(0, 0);
+        }
+      });
+    };
+
+    resetRootScroll();
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener("resize", resetRootScroll);
+    visualViewport?.addEventListener("scroll", resetRootScroll);
+    window.addEventListener("resize", resetRootScroll);
+    window.addEventListener("focusout", resetRootScroll, true);
+
+    return () => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
+      visualViewport?.removeEventListener("resize", resetRootScroll);
+      visualViewport?.removeEventListener("scroll", resetRootScroll);
+      window.removeEventListener("resize", resetRootScroll);
+      window.removeEventListener("focusout", resetRootScroll, true);
+    };
+  }, [enabled]);
+}
+
 interface TerminalLaunchContext {
   threadId: ThreadId;
   cwd: string;
@@ -686,7 +724,9 @@ export default function ChatView(props: ChatViewProps) {
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  const isMobileViewport = useMediaQuery("max-md");
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  useMobileRootScrollReset(isMobileViewport);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
