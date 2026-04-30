@@ -44,6 +44,11 @@ import {
   writeProviderStatusCache,
 } from "../providerStatusCache.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
+import {
+  disableProviderVersionLifecycleUpdates,
+  getProviderVersionLifecycle as getDefaultProviderVersionLifecycle,
+  haveProviderVersionLifecyclesEqual,
+} from "../providerVersionLifecycle.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
 
 const loadProviders = (
@@ -445,6 +450,31 @@ export const ProviderRegistryLive = Layer.effect(
       return yield* refreshOneSource(providerSource);
     });
 
+    const getProviderVersionLifecycle = Effect.fn("getProviderVersionLifecycle")(function* (
+      provider: ProviderDriverKind,
+    ) {
+      const instances = Array.from((yield* Ref.get(liveSubsRef)).values()).filter(
+        (instance) => instance.driverKind === provider,
+      );
+      if (instances.length === 0) {
+        return getDefaultProviderVersionLifecycle(provider);
+      }
+
+      const [firstInstance, ...restInstances] = instances;
+      const firstLifecycle = firstInstance?.snapshot.versionLifecycle;
+      if (!firstLifecycle) {
+        return getDefaultProviderVersionLifecycle(provider);
+      }
+
+      const hasMixedLifecycles = restInstances.some(
+        (instance) =>
+          !haveProviderVersionLifecyclesEqual(firstLifecycle, instance.snapshot.versionLifecycle),
+      );
+      return hasMixedLifecycles
+        ? disableProviderVersionLifecycleUpdates(firstLifecycle)
+        : firstLifecycle;
+    });
+
     /**
      * Diff the aggregator's live-source set against the current
      * `ProviderInstanceRegistry` and:
@@ -635,6 +665,7 @@ export const ProviderRegistryLive = Layer.effect(
         refresh(provider).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshInstance: (instanceId: ProviderInstanceId) =>
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
+      getProviderVersionLifecycle,
       setProviderUpdateState,
       get streamChanges() {
         return Stream.fromPubSub(changesPubSub);

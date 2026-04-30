@@ -7,6 +7,7 @@ import { ensureLocalApi } from "../localApi";
 import { useServerProviders } from "../rpc/serverState";
 import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import {
+  canOneClickUpdateProviderCandidate,
   collectProviderUpdateCandidates,
   collectUpdatedProviderSnapshots,
   firstRejectedProviderUpdateMessage,
@@ -109,13 +110,8 @@ export function ProviderUpdateLaunchNotification() {
   );
   const oneClickProviders = useMemo(
     () =>
-      updateProviders.filter(
-        (provider) =>
-          provider.versionAdvisory.canUpdate === true &&
-          provider.updateState?.status !== "queued" &&
-          provider.updateState?.status !== "running",
-      ),
-    [updateProviders],
+      updateProviders.filter((provider) => canOneClickUpdateProviderCandidate(provider, providers)),
+    [providers, updateProviders],
   );
 
   const openProviderSettings = useCallback(

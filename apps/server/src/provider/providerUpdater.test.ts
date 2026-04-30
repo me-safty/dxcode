@@ -11,6 +11,7 @@ import { Cause, Effect, Exit, Fiber, Ref, Schema, Stream } from "effect";
 import type { ProcessRunResult } from "../processRunner.ts";
 import type { ProviderRegistryShape } from "./Services/ProviderRegistry.ts";
 import { makeProviderUpdater, type ProviderUpdateRunner } from "./providerUpdater.ts";
+import { getProviderVersionLifecycle } from "./providerVersionLifecycle.ts";
 
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const CURSOR_DRIVER = ProviderDriverKind.make("cursor");
@@ -95,6 +96,8 @@ function makeRegistry(
       getProviders: Ref.get(providersRef),
       refresh: () => Ref.get(providersRef),
       refreshInstance: () => Ref.get(providersRef),
+      getProviderVersionLifecycle: (provider) =>
+        Effect.succeed(getProviderVersionLifecycle(provider)),
       setProviderUpdateState,
       streamChanges: Stream.empty,
     };
@@ -131,6 +134,50 @@ describe("providerUpdater", () => {
         (yield* Ref.get(updateStatesRef)).map((state) => state.status),
         ["queued", "running", "succeeded"],
       );
+    }),
+  );
+
+  it.effect("uses the resolved provider lifecycle when choosing the update executable", () =>
+    Effect.gen(function* () {
+      const { registry } = yield* makeRegistry({
+        ...baseProvider,
+        versionAdvisory: {
+          status: "behind_latest",
+          currentVersion: "2.0.14",
+          latestVersion: "2.1.123",
+          updateCommand: "bun add -g @anthropic-ai/claude-code@latest",
+          canUpdate: true,
+          checkedAt: "2026-04-30T12:00:00.000Z",
+          message: "Update available.",
+        },
+      });
+      const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
+      const updater = yield* makeProviderUpdater({
+        providerRegistry: {
+          ...registry,
+          getProviderVersionLifecycle: () =>
+            Effect.succeed({
+              provider: CODEX_DRIVER,
+              packageName: "@openai/codex",
+              updateCommand: "bun add -g @openai/codex@latest",
+              updateExecutable: "bun",
+              updateArgs: ["add", "-g", "@openai/codex@latest"],
+              updateLockKey: "bun-global",
+            }),
+        },
+        runUpdate: async (command, args) => {
+          calls.push({ command, args });
+          return okResult("updated");
+        },
+      });
+
+      yield* updater.updateProvider(CODEX_DRIVER);
+      assert.deepStrictEqual(calls, [
+        {
+          command: "bun",
+          args: ["add", "-g", "@openai/codex@latest"],
+        },
+      ]);
     }),
   );
 

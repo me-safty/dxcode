@@ -11,10 +11,8 @@ import * as Semaphore from "effect/Semaphore";
 import type { ProcessRunResult } from "../processRunner.ts";
 import { runProcess } from "../processRunner.ts";
 import type { ProviderRegistryShape } from "./Services/ProviderRegistry.ts";
-import {
-  enrichProviderSnapshotWithVersionAdvisory,
-  getProviderVersionLifecycle,
-} from "./providerVersionLifecycle.ts";
+import { enrichProviderSnapshotWithVersionAdvisory } from "./providerVersionLifecycle.ts";
+import type { ProviderVersionLifecycle } from "./providerVersionLifecycle.ts";
 
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const UPDATE_OUTPUT_MAX_BYTES = 10_000;
@@ -34,13 +32,6 @@ interface VerifiedProviderRefresh {
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly verifiedProviders: ReadonlyArray<ServerProvider>;
 }
-
-const UPDATE_LOCK_PROVIDERS = [
-  ProviderDriverKind.make("codex"),
-  ProviderDriverKind.make("claudeAgent"),
-  ProviderDriverKind.make("cursor"),
-  ProviderDriverKind.make("opencode"),
-] as const satisfies ReadonlyArray<ProviderDriverKind>;
 
 const defaultRunner: ProviderUpdateRunner = (command, args) =>
   runProcess(command, args, {
@@ -106,12 +97,6 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
 }) {
   const runningProvidersRef = yield* Ref.make<ReadonlySet<ProviderDriverKind>>(new Set());
   const updateLocks = new Map<string, Semaphore.Semaphore>();
-  for (const provider of UPDATE_LOCK_PROVIDERS) {
-    const lifecycle = getProviderVersionLifecycle(provider);
-    if (lifecycle.updateLockKey && !updateLocks.has(lifecycle.updateLockKey)) {
-      updateLocks.set(lifecycle.updateLockKey, yield* Semaphore.make(1));
-    }
-  }
   const runUpdate = input.runUpdate ?? defaultRunner;
 
   const acquireProvider = Effect.fn("acquireProvider")(function* (provider: ProviderDriverKind) {
@@ -132,8 +117,19 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
       return next;
     });
 
+  const getUpdateLock = Effect.fn("getUpdateLock")(function* (updateLockKey: string) {
+    const existing = updateLocks.get(updateLockKey);
+    if (existing) {
+      return existing;
+    }
+    const next = yield* Semaphore.make(1);
+    updateLocks.set(updateLockKey, next);
+    return next;
+  });
+
   const verifyRefreshedProvider = (
     provider: ProviderDriverKind,
+    versionLifecycle: ProviderVersionLifecycle,
   ): Effect.Effect<VerifiedProviderRefresh> =>
     input.providerRegistry.getProviders.pipe(
       Effect.map((providers) =>
@@ -165,7 +161,7 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
           refreshedProviders,
           (refreshedProvider) =>
             Effect.promise<ServerProvider>(() =>
-              enrichProviderSnapshotWithVersionAdvisory(refreshedProvider),
+              enrichProviderSnapshotWithVersionAdvisory(refreshedProvider, versionLifecycle),
             ),
           {
             concurrency: "unbounded",
@@ -194,7 +190,7 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
 
   const updateProvider: ProviderUpdaterShape["updateProvider"] = (provider) =>
     Effect.gen(function* () {
-      const lifecycle = getProviderVersionLifecycle(provider);
+      const lifecycle = yield* input.providerRegistry.getProviderVersionLifecycle(provider);
       const updateExecutable = lifecycle.updateExecutable;
       const updateLockKey = lifecycle.updateLockKey;
       if (!updateExecutable || !updateLockKey) {
@@ -257,7 +253,7 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
           );
         }
 
-        const { verifiedProviders } = yield* verifyRefreshedProvider(provider);
+        const { verifiedProviders } = yield* verifyRefreshedProvider(provider, lifecycle);
         const couldNotVerify = verifiedProviders.length === 0;
         const stillOutdated =
           couldNotVerify ||
@@ -276,7 +272,7 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
           }),
         );
       });
-      const lock = updateLocks.get(updateLockKey)!;
+      const lock = yield* getUpdateLock(updateLockKey);
 
       return yield* lock
         .withPermits(1)(run)

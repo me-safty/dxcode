@@ -91,6 +91,10 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies OpenCodeSettings;
+      const versionLifecycle = getProviderVersionLifecycle(DRIVER_KIND, {
+        binaryPath: effectiveConfig.binaryPath,
+        env: processEnv,
+      });
 
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         instanceId,
@@ -106,16 +110,16 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       ).pipe(Effect.map(stampIdentity), Effect.provideService(OpenCodeRuntime, openCodeRuntime));
 
       const snapshot = yield* makeManagedServerProvider<OpenCodeSettings>({
-        versionLifecycle: getProviderVersionLifecycle(DRIVER_KIND),
+        versionLifecycle,
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
         initialSnapshot: (settings) => stampIdentity(makePendingOpenCodeProvider(settings)),
         checkProvider,
         enrichSnapshot: ({ snapshot, publishSnapshot }) =>
-          Effect.promise(() => enrichProviderSnapshotWithVersionAdvisory(snapshot)).pipe(
-            Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
-          ),
+          Effect.promise(() =>
+            enrichProviderSnapshotWithVersionAdvisory(snapshot, versionLifecycle),
+          ).pipe(Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot))),
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(
         Effect.mapError(

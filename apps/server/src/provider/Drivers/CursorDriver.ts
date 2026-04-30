@@ -88,6 +88,10 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies CursorSettings;
+      const versionLifecycle = getProviderVersionLifecycle(DRIVER_KIND, {
+        binaryPath: effectiveConfig.binaryPath,
+        env: processEnv,
+      });
 
       const adapter = yield* makeCursorAdapter(effectiveConfig, {
         environment: processEnv,
@@ -104,7 +108,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       );
 
       const snapshot = yield* makeManagedServerProvider<CursorSettings>({
-        versionLifecycle: getProviderVersionLifecycle(DRIVER_KIND),
+        versionLifecycle,
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,

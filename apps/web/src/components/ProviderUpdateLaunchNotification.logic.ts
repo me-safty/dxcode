@@ -118,6 +118,36 @@ export function collectProviderUpdateCandidates(
   return dedupeProvidersByDriver(providers.filter(isProviderUpdateCandidate));
 }
 
+export function canOneClickUpdateProviderCandidate(
+  candidate: ProviderUpdateCandidate,
+  providers: ReadonlyArray<ServerProvider>,
+): boolean {
+  if (
+    candidate.versionAdvisory.canUpdate !== true ||
+    candidate.versionAdvisory.updateCommand === null ||
+    candidate.updateState?.status === "queued" ||
+    candidate.updateState?.status === "running"
+  ) {
+    return false;
+  }
+
+  const driverProviders = providers.filter((provider) => provider.driver === candidate.driver);
+  if (driverProviders.length === 0) {
+    return false;
+  }
+
+  const updateCommands = new Set<string>();
+  for (const provider of driverProviders) {
+    const advisory = provider.versionAdvisory;
+    if (!advisory || advisory.canUpdate !== true || advisory.updateCommand === null) {
+      return false;
+    }
+    updateCommands.add(advisory.updateCommand);
+  }
+
+  return updateCommands.size === 1;
+}
+
 export function providerUpdateNotificationKey(
   providers: ReadonlyArray<ProviderUpdateCandidate>,
 ): string | null {

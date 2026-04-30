@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 
 import {
+  canOneClickUpdateProviderCandidate,
   collectProviderUpdateCandidates,
   collectUpdatedProviderSnapshots,
   firstRejectedProviderUpdateMessage,
@@ -29,6 +30,7 @@ function provider(input: {
   readonly version?: string | null;
   readonly latestVersion?: string | null;
   readonly canUpdate?: boolean;
+  readonly updateCommand?: string | null;
   readonly updateState?: ServerProvider["updateState"];
   readonly advisoryStatus?: NonNullable<ServerProvider["versionAdvisory"]>["status"];
 }): ServerProvider {
@@ -48,7 +50,7 @@ function provider(input: {
       status: input.advisoryStatus ?? "behind_latest",
       currentVersion: input.version ?? "1.0.0",
       latestVersion: "latestVersion" in input ? input.latestVersion : "1.1.0",
-      updateCommand: "npm install -g provider",
+      updateCommand: "updateCommand" in input ? input.updateCommand : "npm install -g provider",
       canUpdate: input.canUpdate ?? true,
       checkedAt,
       message: "Update available.",
@@ -98,6 +100,27 @@ describe("provider update launch notification logic", () => {
         provider({ driver: driver("cursor"), latestVersion: "0.3.0" }),
       ]),
     ).toHaveLength(2);
+  });
+
+  it("disables one-click updates when provider instances disagree on the update command", () => {
+    const candidate = updateCandidate({
+      driver: driver("claudeAgent"),
+      instanceId: instanceId("claude_personal"),
+      latestVersion: "2.1.123",
+    });
+
+    expect(
+      canOneClickUpdateProviderCandidate(candidate, [
+        candidate,
+        provider({
+          driver: driver("claudeAgent"),
+          instanceId: instanceId("claude_work"),
+          latestVersion: "2.1.123",
+          canUpdate: true,
+          updateCommand: "bun add -g @anthropic-ai/claude-code@latest",
+        }),
+      ]),
+    ).toBe(false);
   });
 
   it("builds a notification key from the update advisory fields", () => {

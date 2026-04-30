@@ -14,6 +14,7 @@ import type {
 } from "@t3tools/contracts";
 import { Context } from "effect";
 import type { Effect, Stream } from "effect";
+import type { ProviderVersionLifecycle } from "../providerVersionLifecycle.ts";
 
 export interface ProviderRegistryShape {
   /**
@@ -43,6 +44,15 @@ export interface ProviderRegistryShape {
   readonly refreshInstance: (
     instanceId: ProviderInstanceId,
   ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+
+  /**
+   * Resolve the currently active update lifecycle for a provider driver
+   * across its live instances. Mixed or unsafe instance strategies are
+   * downgraded to a manual-only lifecycle.
+   */
+  readonly getProviderVersionLifecycle: (
+    provider: ProviderDriverKind,
+  ) => Effect.Effect<ProviderVersionLifecycle>;
 
   /**
    * Apply volatile provider-update state to every live snapshot for the

@@ -86,6 +86,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         instanceId,
       });
       const effectiveConfig = { ...config, enabled } satisfies ClaudeSettings;
+      const versionLifecycle = getProviderVersionLifecycle(DRIVER_KIND, {
+        binaryPath: effectiveConfig.binaryPath,
+        env: processEnv,
+      });
       const continuationGroupKey = yield* makeClaudeContinuationGroupKey(effectiveConfig);
       const stampIdentity = withInstanceIdentity({
         instanceId,
@@ -125,16 +129,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       );
 
       const snapshot = yield* makeManagedServerProvider<ClaudeSettings>({
-        versionLifecycle: getProviderVersionLifecycle(DRIVER_KIND),
+        versionLifecycle,
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
         initialSnapshot: (settings) => stampIdentity(makePendingClaudeProvider(settings)),
         checkProvider,
         enrichSnapshot: ({ snapshot, publishSnapshot }) =>
-          Effect.promise(() => enrichProviderSnapshotWithVersionAdvisory(snapshot)).pipe(
-            Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
-          ),
+          Effect.promise(() =>
+            enrichProviderSnapshotWithVersionAdvisory(snapshot, versionLifecycle),
+          ).pipe(Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot))),
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(
         Effect.mapError(

@@ -119,6 +119,10 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         enabled,
         homePath: homeLayout.effectiveHomePath ?? "",
       } satisfies CodexSettings;
+      const versionLifecycle = getProviderVersionLifecycle(DRIVER_KIND, {
+        binaryPath: effectiveConfig.binaryPath,
+        env: processEnv,
+      });
 
       // `makeCodexAdapter` and `makeCodexTextGeneration` have `never` error
       // channels at construction time — their failure modes are all on the
@@ -142,16 +146,16 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
       const snapshot = yield* makeManagedServerProvider<CodexSettings>({
-        versionLifecycle: getProviderVersionLifecycle(DRIVER_KIND),
+        versionLifecycle,
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
         initialSnapshot: (settings) => stampIdentity(makePendingCodexProvider(settings)),
         checkProvider,
         enrichSnapshot: ({ snapshot, publishSnapshot }) =>
-          Effect.promise(() => enrichProviderSnapshotWithVersionAdvisory(snapshot)).pipe(
-            Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
-          ),
+          Effect.promise(() =>
+            enrichProviderSnapshotWithVersionAdvisory(snapshot, versionLifecycle),
+          ).pipe(Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot))),
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(
         Effect.mapError(

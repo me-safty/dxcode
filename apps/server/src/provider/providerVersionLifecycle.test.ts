@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdirSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { ProviderDriverKind } from "@t3tools/contracts";
 import {
   createProviderVersionAdvisory,
@@ -62,6 +65,51 @@ describe("providerVersionLifecycle", () => {
       updateExecutable: "agent",
       updateArgs: ["update"],
       updateLockKey: "cursor-agent",
+    });
+  });
+
+  it("switches package-managed providers to bun updates when the resolved binary lives in bun's global bin", () => {
+    const tempDir = path.join(os.tmpdir(), `t3-bun-lifecycle-${Date.now()}`);
+    const bunBinDir = path.join(tempDir, ".bun", "bin");
+    mkdirSync(bunBinDir, { recursive: true });
+    writeFileSync(path.join(bunBinDir, "claude.exe"), "MZ");
+
+    expect(
+      getProviderVersionLifecycle(driver("claudeAgent"), {
+        binaryPath: "claude",
+        platform: "win32",
+        env: {
+          PATH: bunBinDir,
+          PATHEXT: ".COM;.EXE;.BAT;.CMD",
+        },
+      }),
+    ).toEqual({
+      provider: driver("claudeAgent"),
+      packageName: "@anthropic-ai/claude-code",
+      updateCommand: "bun add -g @anthropic-ai/claude-code@latest",
+      updateExecutable: "bun",
+      updateArgs: ["add", "-g", "@anthropic-ai/claude-code@latest"],
+      updateLockKey: "bun-global",
+    });
+  });
+
+  it("disables one-click updates for explicit custom binary paths it cannot safely map", () => {
+    expect(
+      getProviderVersionLifecycle(driver("codex"), {
+        binaryPath: "C:\\Tools\\codex\\codex.exe",
+        platform: "win32",
+        env: {
+          PATH: "",
+          PATHEXT: ".COM;.EXE;.BAT;.CMD",
+        },
+      }),
+    ).toEqual({
+      provider: driver("codex"),
+      packageName: "@openai/codex",
+      updateCommand: null,
+      updateExecutable: null,
+      updateArgs: [],
+      updateLockKey: null,
     });
   });
 });

@@ -3,6 +3,7 @@ import {
   type ServerProvider,
   type ServerProviderVersionAdvisory,
 } from "@t3tools/contracts";
+import { resolveCommandPath } from "@t3tools/shared/shell";
 
 import { compareCliVersions } from "./cliVersion.ts";
 
@@ -26,22 +27,25 @@ export interface ProviderVersionLifecycle {
   readonly updateLockKey: string | null;
 }
 
+interface ProviderVersionLifecycleResolutionOptions {
+  readonly binaryPath?: string | null;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly platform?: NodeJS.Platform;
+}
+
+interface PackageManagedProviderVersionLifecycleDefinition {
+  readonly provider: ProviderDriverKind;
+  readonly packageName: string;
+}
+
 const PROVIDER_VERSION_LIFECYCLES = {
   codex: {
     provider: CODEX_DRIVER,
     packageName: "@openai/codex",
-    updateCommand: "npm install -g @openai/codex@latest",
-    updateExecutable: "npm",
-    updateArgs: ["install", "-g", "@openai/codex@latest"],
-    updateLockKey: "npm-global",
   },
   claudeAgent: {
     provider: CLAUDE_AGENT_DRIVER,
     packageName: "@anthropic-ai/claude-code",
-    updateCommand: "npm install -g @anthropic-ai/claude-code@latest",
-    updateExecutable: "npm",
-    updateArgs: ["install", "-g", "@anthropic-ai/claude-code@latest"],
-    updateLockKey: "npm-global",
   },
   cursor: {
     provider: CURSOR_DRIVER,
@@ -54,12 +58,13 @@ const PROVIDER_VERSION_LIFECYCLES = {
   opencode: {
     provider: OPENCODE_DRIVER,
     packageName: "opencode-ai",
-    updateCommand: "npm install -g opencode-ai@latest",
-    updateExecutable: "npm",
-    updateArgs: ["install", "-g", "opencode-ai@latest"],
-    updateLockKey: "npm-global",
   },
-} as const satisfies Record<VersionLifecycleProvider, ProviderVersionLifecycle>;
+} as const satisfies Record<
+  Exclude<VersionLifecycleProvider, "cursor">,
+  PackageManagedProviderVersionLifecycleDefinition
+> & {
+  readonly cursor: ProviderVersionLifecycle;
+};
 
 interface LatestVersionCacheEntry {
   readonly expiresAt: number;
@@ -76,21 +81,138 @@ function isVersionLifecycleProvider(provider: string): provider is VersionLifecy
   return provider in PROVIDER_VERSION_LIFECYCLES;
 }
 
-export function getProviderVersionLifecycle(
-  provider: ProviderDriverKind,
-): ProviderVersionLifecycle {
-  const providerKey = String(provider);
-  if (isVersionLifecycleProvider(providerKey)) {
-    return PROVIDER_VERSION_LIFECYCLES[providerKey];
-  }
+function makeProviderVersionLifecycle(input: {
+  readonly provider: ProviderDriverKind;
+  readonly packageName: string | null;
+  readonly updateExecutable: string | null;
+  readonly updateArgs: ReadonlyArray<string>;
+  readonly updateLockKey: string | null;
+}): ProviderVersionLifecycle {
   return {
-    provider,
-    packageName: null,
-    updateCommand: null,
+    provider: input.provider,
+    packageName: input.packageName,
+    updateCommand:
+      input.updateExecutable === null
+        ? null
+        : [input.updateExecutable, ...input.updateArgs].join(" "),
+    updateExecutable: input.updateExecutable,
+    updateArgs: input.updateArgs,
+    updateLockKey: input.updateLockKey,
+  };
+}
+
+function makeManualOnlyProviderVersionLifecycle(input: {
+  readonly provider: ProviderDriverKind;
+  readonly packageName: string | null;
+}): ProviderVersionLifecycle {
+  return makeProviderVersionLifecycle({
+    provider: input.provider,
+    packageName: input.packageName,
     updateExecutable: null,
     updateArgs: [],
     updateLockKey: null,
-  };
+  });
+}
+
+function makeNpmGlobalProviderVersionLifecycle(
+  definition: PackageManagedProviderVersionLifecycleDefinition,
+): ProviderVersionLifecycle {
+  return makeProviderVersionLifecycle({
+    provider: definition.provider,
+    packageName: definition.packageName,
+    updateExecutable: "npm",
+    updateArgs: ["install", "-g", `${definition.packageName}@latest`],
+    updateLockKey: "npm-global",
+  });
+}
+
+function makeBunGlobalProviderVersionLifecycle(
+  definition: PackageManagedProviderVersionLifecycleDefinition,
+): ProviderVersionLifecycle {
+  return makeProviderVersionLifecycle({
+    provider: definition.provider,
+    packageName: definition.packageName,
+    updateExecutable: "bun",
+    updateArgs: ["add", "-g", `${definition.packageName}@latest`],
+    updateLockKey: "bun-global",
+  });
+}
+
+function hasPathSeparator(value: string): boolean {
+  return value.includes("/") || value.includes("\\");
+}
+
+function isBunGlobalCommandPath(commandPath: string): boolean {
+  return commandPath.replaceAll("\\", "/").toLowerCase().includes("/.bun/bin/");
+}
+
+function resolvePackageManagedProviderVersionLifecycle(
+  definition: PackageManagedProviderVersionLifecycleDefinition,
+  options?: ProviderVersionLifecycleResolutionOptions,
+): ProviderVersionLifecycle {
+  const binaryPath = nonEmptyString(options?.binaryPath);
+  if (!binaryPath) {
+    return makeNpmGlobalProviderVersionLifecycle(definition);
+  }
+
+  const resolvedCommandPath =
+    resolveCommandPath(binaryPath, {
+      ...(options?.platform ? { platform: options.platform } : {}),
+      ...(options?.env ? { env: options.env } : {}),
+    }) ?? (hasPathSeparator(binaryPath) ? binaryPath : null);
+  if (resolvedCommandPath && isBunGlobalCommandPath(resolvedCommandPath)) {
+    return makeBunGlobalProviderVersionLifecycle(definition);
+  }
+
+  if (!hasPathSeparator(binaryPath)) {
+    return makeNpmGlobalProviderVersionLifecycle(definition);
+  }
+
+  return makeManualOnlyProviderVersionLifecycle(definition);
+}
+
+export function haveProviderVersionLifecyclesEqual(
+  left: ProviderVersionLifecycle,
+  right: ProviderVersionLifecycle,
+): boolean {
+  return (
+    left.provider === right.provider &&
+    left.packageName === right.packageName &&
+    left.updateCommand === right.updateCommand &&
+    left.updateExecutable === right.updateExecutable &&
+    left.updateLockKey === right.updateLockKey &&
+    left.updateArgs.length === right.updateArgs.length &&
+    left.updateArgs.every((value, index) => value === right.updateArgs[index])
+  );
+}
+
+export function disableProviderVersionLifecycleUpdates(
+  lifecycle: ProviderVersionLifecycle,
+): ProviderVersionLifecycle {
+  return makeManualOnlyProviderVersionLifecycle({
+    provider: lifecycle.provider,
+    packageName: lifecycle.packageName,
+  });
+}
+
+export function getProviderVersionLifecycle(
+  provider: ProviderDriverKind,
+  options?: ProviderVersionLifecycleResolutionOptions,
+): ProviderVersionLifecycle {
+  const providerKey = String(provider);
+  if (isVersionLifecycleProvider(providerKey)) {
+    if (providerKey === "cursor") {
+      return PROVIDER_VERSION_LIFECYCLES.cursor;
+    }
+    return resolvePackageManagedProviderVersionLifecycle(
+      PROVIDER_VERSION_LIFECYCLES[providerKey],
+      options,
+    );
+  }
+  return makeManualOnlyProviderVersionLifecycle({
+    provider,
+    packageName: null,
+  });
 }
 
 function deriveVersionAdvisory(input: {
@@ -117,8 +239,9 @@ export function createProviderVersionAdvisory(input: {
   readonly currentVersion: string | null;
   readonly latestVersion?: string | null;
   readonly checkedAt?: string | null;
+  readonly versionLifecycle?: ProviderVersionLifecycle;
 }): ServerProviderVersionAdvisory {
-  const lifecycle = getProviderVersionLifecycle(input.driver);
+  const lifecycle = input.versionLifecycle ?? getProviderVersionLifecycle(input.driver);
   const latestVersion = input.latestVersion ?? null;
   const advisory = deriveVersionAdvisory({
     currentVersion: input.currentVersion,
@@ -183,7 +306,9 @@ export async function resolveLatestProviderVersion(
 
 export async function enrichProviderSnapshotWithVersionAdvisory(
   snapshot: ServerProvider,
+  versionLifecycle?: ProviderVersionLifecycle,
 ): Promise<ServerProvider> {
+  const lifecycle = versionLifecycle ?? getProviderVersionLifecycle(snapshot.driver);
   if (!snapshot.enabled || !snapshot.installed || !snapshot.version) {
     return {
       ...snapshot,
@@ -191,6 +316,7 @@ export async function enrichProviderSnapshotWithVersionAdvisory(
         driver: snapshot.driver,
         currentVersion: snapshot.version,
         checkedAt: snapshot.checkedAt,
+        versionLifecycle: lifecycle,
       }),
     };
   }
@@ -203,6 +329,7 @@ export async function enrichProviderSnapshotWithVersionAdvisory(
       currentVersion: snapshot.version,
       latestVersion,
       checkedAt: new Date().toISOString(),
+      versionLifecycle: lifecycle,
     }),
   };
 }
