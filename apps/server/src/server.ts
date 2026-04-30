@@ -330,38 +330,47 @@ export const makeServerLayer = Layer.unwrap(
     const tailscaleServeLayer = config.tailscaleServeEnabled
       ? Layer.effectDiscard(
           Effect.acquireRelease(
-            ensureTailscaleServe({
-              localPort: config.port,
-              servePort: config.tailscaleServePort,
-              localHost: "127.0.0.1",
-            }).pipe(
-              Effect.as(true),
-              Effect.tap(() =>
-                Effect.logInfo("Tailscale Serve configured", {
-                  localPort: config.port,
-                  servePort: config.tailscaleServePort,
-                }),
-              ),
-              Effect.catch((cause) =>
-                Effect.logWarning("Failed to configure Tailscale Serve", {
-                  cause,
-                  localPort: config.port,
-                  servePort: config.tailscaleServePort,
-                }).pipe(Effect.as(false)),
-              ),
-            ),
+            Effect.gen(function* () {
+              const server = yield* HttpServer.HttpServer;
+              const address = server.address;
+              if (typeof address === "string" || !("port" in address)) {
+                return null;
+              }
+
+              const localPort = address.port;
+              return yield* ensureTailscaleServe({
+                localPort,
+                servePort: config.tailscaleServePort,
+                localHost: "127.0.0.1",
+              }).pipe(
+                Effect.as({ localPort, servePort: config.tailscaleServePort }),
+                Effect.tap(() =>
+                  Effect.logInfo("Tailscale Serve configured", {
+                    localPort,
+                    servePort: config.tailscaleServePort,
+                  }),
+                ),
+                Effect.catch((cause) =>
+                  Effect.logWarning("Failed to configure Tailscale Serve", {
+                    cause,
+                    localPort,
+                    servePort: config.tailscaleServePort,
+                  }).pipe(Effect.as(null)),
+                ),
+              );
+            }),
             (configured) =>
               configured
-                ? disableTailscaleServe.pipe(
+                ? disableTailscaleServe({ servePort: configured.servePort }).pipe(
                     Effect.tap(() =>
                       Effect.logInfo("Tailscale Serve disabled", {
-                        servePort: config.tailscaleServePort,
+                        servePort: configured.servePort,
                       }),
                     ),
                     Effect.catch((cause) =>
                       Effect.logWarning("Failed to disable Tailscale Serve", {
                         cause,
-                        servePort: config.tailscaleServePort,
+                        servePort: configured.servePort,
                       }),
                     ),
                   )

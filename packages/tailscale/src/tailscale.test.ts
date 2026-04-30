@@ -120,12 +120,29 @@ describe("tailscale", () => {
   });
 
   it.effect("disables tailscale serve through the process spawner service", () => {
+    const commands: {
+      readonly command: string;
+      readonly args: ReadonlyArray<string>;
+    }[] = [];
     const layer = mockSpawnerLayer((command, args) => {
+      commands.push({ command, args });
       assert.equal(command, "tailscale");
-      assert.deepEqual(args, ["serve", "off"]);
+      if (args[0] === "status") {
+        assert.deepEqual(args, ["status", "--json"]);
+        return {
+          stdout: tailscaleStatusJson,
+        };
+      }
+      assert.deepEqual(args, ["serve", "clear", "desktop.tail.ts.net:8443"]);
       return {};
     });
 
-    return disableTailscaleServe.pipe(Effect.provide(layer));
+    return Effect.gen(function* () {
+      yield* disableTailscaleServe({ servePort: 8443 }).pipe(Effect.provide(layer));
+      assert.deepEqual(commands, [
+        { command: "tailscale", args: ["status", "--json"] },
+        { command: "tailscale", args: ["serve", "clear", "desktop.tail.ts.net:8443"] },
+      ]);
+    });
   });
 });

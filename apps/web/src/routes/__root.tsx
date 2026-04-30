@@ -82,29 +82,13 @@ export const Route = createRootRouteWithContext<{
       };
     }
 
-    try {
-      const [, authGateState] = await Promise.all([
-        ensurePrimaryEnvironmentReady(),
-        resolveInitialServerAuthGateState(),
-      ]);
-      return {
-        authGateState,
-      };
-    } catch (error) {
-      if (location.pathname === "/pair") {
-        throw error;
-      }
-      if (!isHostedStaticApp(new URL(window.location.href))) {
-        throw error;
-      }
-
-      await waitForSavedEnvironmentRegistryHydration();
-      return {
-        authGateState: {
-          status: "hosted-static",
-        } as const,
-      };
-    }
+    const [, authGateState] = await Promise.all([
+      ensurePrimaryEnvironmentReady(),
+      resolveInitialServerAuthGateState(),
+    ]);
+    return {
+      authGateState,
+    };
   },
   component: RootRouteView,
   errorComponent: RootRouteErrorView,
