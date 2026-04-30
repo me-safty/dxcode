@@ -35,6 +35,23 @@ const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
+const SSH_PASSWORD_PROMPT_CANCELLED_RESULT = "ssh-password-prompt-cancelled";
+
+function unwrapEnsureSshEnvironmentResult(result: unknown) {
+  if (
+    typeof result === "object" &&
+    result !== null &&
+    "type" in result &&
+    result.type === SSH_PASSWORD_PROMPT_CANCELLED_RESULT
+  ) {
+    const message =
+      "message" in result && typeof result.message === "string"
+        ? result.message
+        : "SSH authentication cancelled.";
+    throw new Error(message);
+  }
+  return result as Awaited<ReturnType<DesktopBridge["ensureSshEnvironment"]>>;
+}
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getAppBranding: () => {
@@ -63,8 +80,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   removeSavedEnvironmentSecret: (environmentId) =>
     ipcRenderer.invoke(REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL, environmentId),
   discoverSshHosts: () => ipcRenderer.invoke(DISCOVER_SSH_HOSTS_CHANNEL),
-  ensureSshEnvironment: (target, options) =>
-    ipcRenderer.invoke(ENSURE_SSH_ENVIRONMENT_CHANNEL, target, options),
+  ensureSshEnvironment: async (target, options) =>
+    unwrapEnsureSshEnvironmentResult(
+      await ipcRenderer.invoke(ENSURE_SSH_ENVIRONMENT_CHANNEL, target, options),
+    ),
   disconnectSshEnvironment: (target) =>
     ipcRenderer.invoke(DISCONNECT_SSH_ENVIRONMENT_CHANNEL, target),
   fetchSshEnvironmentDescriptor: (httpBaseUrl) =>

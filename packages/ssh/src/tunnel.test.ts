@@ -1,7 +1,8 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NetService } from "@t3tools/shared/Net";
-import { Effect, Layer, Sink, Stream } from "effect";
+import { Duration, Effect, Fiber, Layer, Result, Sink, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -14,6 +15,7 @@ import {
   issueRemotePairingToken,
   REMOTE_PICK_PORT_SCRIPT,
   SshEnvironmentManager,
+  waitForHttpReady,
 } from "./tunnel.ts";
 
 const makeSuccessfulProcess = (stdout: string) => {
@@ -63,6 +65,8 @@ const testHttpClient = HttpClient.make((request) =>
   Effect.succeed(HttpClientResponse.fromWeb(request, new Response("", { status: 200 }))),
 );
 
+const hangingHttpClient = HttpClient.make(() => Effect.never);
+
 const testNetService = NetService.of({
   canListenOnHost: () => Effect.succeed(true),
   isPortAvailableOnLoopback: () => Effect.succeed(true),
@@ -111,7 +115,9 @@ describe("ssh tunnel scripts", () => {
     );
     assert.include(buildRemoteLaunchScript(), "RUNNER_CHANGED=1");
     assert.include(buildRemoteLaunchScript(), 'kill "$REMOTE_PID" 2>/dev/null || true');
+    assert.include(buildRemoteLaunchScript(), "wait_ready");
     assert.include(buildRemoteLaunchScript(), '"$RUNNER_FILE" serve --host 127.0.0.1');
+    assert.include(buildRemoteLaunchScript(), "Remote T3 server did not become ready");
     assert.include(buildRemoteLaunchScript({ packageSpec: "t3@nightly" }), "t3@nightly");
     assert.include(
       buildRemotePairingScript(target),
@@ -125,6 +131,34 @@ describe("ssh tunnel scripts", () => {
   it("allows the remote port picker to run without a state file path", () => {
     assert.include(REMOTE_PICK_PORT_SCRIPT, 'const filePath = process.argv[2] ?? "";');
   });
+
+  it.effect("bounds each HTTP readiness probe so retries cannot hang on one request", () =>
+    Effect.gen(function* () {
+      const fiber = yield* Effect.forkChild(
+        Effect.result(
+          waitForHttpReady({
+            baseUrl: "http://127.0.0.1:41773/",
+            timeoutMs: 1_000,
+            intervalMs: 100,
+            probeTimeoutMs: 250,
+          }),
+        ),
+      );
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust(Duration.millis(1_000));
+
+      const result = yield* Fiber.join(fiber);
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isFailure(result)) {
+        assert.include(result.failure.message, "Timed out waiting 1000ms");
+      }
+    }).pipe(
+      Effect.provide(
+        Layer.merge(TestClock.layer(), Layer.succeed(HttpClient.HttpClient, hangingHttpClient)),
+      ),
+    ),
+  );
 
   it.effect("accepts pretty-printed pairing JSON from the remote CLI", () => {
     const target = {

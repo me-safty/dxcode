@@ -38,6 +38,7 @@ const ISSUE_SSH_WEBSOCKET_TOKEN_CHANNEL = "desktop:issue-ssh-websocket-token";
 const SSH_PASSWORD_PROMPT_CHANNEL = "desktop:ssh-password-prompt";
 const RESOLVE_SSH_PASSWORD_PROMPT_CHANNEL = "desktop:resolve-ssh-password-prompt";
 const DEFAULT_SSH_PASSWORD_PROMPT_TIMEOUT_MS = 3 * 60 * 1000;
+const SSH_PASSWORD_PROMPT_CANCELLED_RESULT = "ssh-password-prompt-cancelled";
 
 interface DesktopSshEnvironmentManagerOptions {
   readonly passwordProvider?: (request: SshPasswordRequest) => Promise<string | null>;
@@ -202,6 +203,12 @@ interface PendingSshPasswordPrompt {
   readonly timeout: ReturnType<typeof setTimeout>;
 }
 
+function isSshPasswordPromptCancellation(error: unknown): error is SshPasswordPromptError {
+  return (
+    error instanceof SshPasswordPromptError && error.message.toLowerCase().includes("cancelled")
+  );
+}
+
 /**
  * Wires the SSH environment manager to Electron IPC, owning the renderer-facing
  * password prompt state so `main.ts` only needs to register, cancel, and dispose.
@@ -244,9 +251,19 @@ export class DesktopSshEnvironmentBridge {
         "issuePairingToken" in rawOptions &&
         (rawOptions as { issuePairingToken?: unknown }).issuePairingToken === true;
 
-      return await this.manager.ensureEnvironment(target, {
-        issuePairingToken,
-      });
+      try {
+        return await this.manager.ensureEnvironment(target, {
+          issuePairingToken,
+        });
+      } catch (error) {
+        if (isSshPasswordPromptCancellation(error)) {
+          return {
+            type: SSH_PASSWORD_PROMPT_CANCELLED_RESULT,
+            message: error.message,
+          };
+        }
+        throw error;
+      }
     });
 
     ipcMain.removeHandler(DISCONNECT_SSH_ENVIRONMENT_CHANNEL);

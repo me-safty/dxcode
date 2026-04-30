@@ -1399,6 +1399,7 @@ export async function removeSavedEnvironment(environmentId: EnvironmentId): Prom
   await disconnectSavedEnvironment(environmentId);
   useSavedEnvironmentRegistryStore.getState().remove(environmentId);
   useSavedEnvironmentRuntimeStore.getState().clear(environmentId);
+  useStore.getState().removeEnvironmentState(environmentId);
   await removeSavedEnvironmentBearerToken(environmentId);
 }
 

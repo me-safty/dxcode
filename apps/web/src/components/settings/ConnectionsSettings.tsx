@@ -67,7 +67,15 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Button } from "../ui/button";
 import { Group, GroupSeparator } from "../ui/group";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import { Textarea } from "../ui/textarea";
 import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "../../pairingUrl";
 import { readHostedPairingRequest } from "../../hostedPairing";
@@ -366,6 +374,23 @@ const ENDPOINT_ROW_CLASSNAME = "border-t border-border/60 px-4 py-2.5 first:bord
 const ITEM_ROW_INNER_CLASSNAME =
   "flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between";
 
+type AccessSectionPresentation = "current" | "endpoint-rail";
+
+function accessRowClassName(_presentation: AccessSectionPresentation) {
+  return ITEM_ROW_CLASSNAME;
+}
+
+function endpointRowClassName(presentation: AccessSectionPresentation, isAvailable: boolean) {
+  if (presentation === "endpoint-rail") {
+    return cn(
+      "relative border-t border-border/60 px-4 py-3 first:border-t-0 sm:px-5",
+      !isAvailable && "bg-muted/20",
+    );
+  }
+
+  return cn(ENDPOINT_ROW_CLASSNAME, !isAvailable && "bg-muted/24");
+}
+
 function sortDesktopPairingLinks(links: ReadonlyArray<ServerPairingLinkRecord>) {
   return [...links].toSorted(
     (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
@@ -524,6 +549,7 @@ type PairingLinkListRowProps = {
   endpointUrl: string | null | undefined;
   endpoints: ReadonlyArray<AdvertisedEndpoint>;
   defaultEndpointKey: string | null;
+  presentation?: AccessSectionPresentation;
   revokingPairingLinkId: string | null;
   onRevoke: (id: string) => void;
 };
@@ -533,6 +559,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
   endpointUrl,
   endpoints,
   defaultEndpointKey,
+  presentation = "current",
   revokingPairingLinkId,
   onRevoke,
 }: PairingLinkListRowProps) {
@@ -583,23 +610,27 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
   const revealValue = shareablePairingUrl ?? pairingLink.credential;
   const isShareableHostedAppPairingUrl =
     shareablePairingUrl !== null && isHostedAppPairingUrl(shareablePairingUrl);
-  const copyLinkLabel = isShareableHostedAppPairingUrl
-    ? "Copy hosted app link"
-    : "Copy pairing URL";
   const canCopyToClipboard =
     typeof window !== "undefined" &&
     window.isSecureContext &&
     navigator.clipboard?.writeText != null;
 
-  const { copyToClipboard } = useCopyToClipboard<"code" | "link">({
+  const { copyToClipboard } = useCopyToClipboard<"code" | "hosted-link" | "link">({
     onCopy: (kind) => {
       toastManager.add({
         type: "success",
-        title: kind === "link" ? "Pairing URL copied" : "Pairing code copied",
+        title:
+          kind === "hosted-link"
+            ? "Hosted app link copied"
+            : kind === "link"
+              ? "Pairing URL copied"
+              : "Pairing code copied",
         description:
-          kind === "link"
-            ? "Open it in the client you want to pair to this environment."
-            : "Paste it into another client to finish pairing.",
+          kind === "hosted-link"
+            ? "Open it in the browser on the device you want to connect."
+            : kind === "link"
+              ? "Open it in the client you want to pair to this environment."
+              : "Paste it into another client to finish pairing.",
       });
     },
     onError: (error, kind) => {
@@ -608,9 +639,11 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
         stackedThreadToast({
           type: "error",
           title: canCopyToClipboard
-            ? kind === "link"
-              ? "Could not copy pairing URL"
-              : "Could not copy pairing code"
+            ? kind === "hosted-link"
+              ? "Could not copy hosted app link"
+              : kind === "link"
+                ? "Could not copy pairing URL"
+                : "Could not copy pairing code"
             : "Clipboard copy unavailable",
           description: canCopyToClipboard ? error.message : "Showing the full value instead.",
         }),
@@ -619,10 +652,15 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
   });
 
   const copyPairingValue = useCallback(
-    (value: string, kind: "code" | "link") => {
+    (value: string, kind: "code" | "hosted-link" | "link") => {
       copyToClipboard(value, kind);
     },
     [copyToClipboard],
+  );
+
+  const copyKindForUrl = useCallback(
+    (url: string): "hosted-link" | "link" => (isHostedAppPairingUrl(url) ? "hosted-link" : "link"),
+    [],
   );
 
   const handleCopyCode = useCallback(() => {
@@ -631,20 +669,102 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
 
   const handleCopyDefaultLink = useCallback(() => {
     if (!shareablePairingUrl) return;
-    copyPairingValue(shareablePairingUrl, "link");
-  }, [copyPairingValue, shareablePairingUrl]);
+    copyPairingValue(shareablePairingUrl, copyKindForUrl(shareablePairingUrl));
+  }, [copyKindForUrl, copyPairingValue, shareablePairingUrl]);
 
   const expiresAbsolute = formatAccessTimestamp(pairingLink.expiresAt);
 
   const roleLabel = pairingLink.role === "owner" ? "Owner" : "Client";
   const primaryLabel = pairingLink.label ?? `${roleLabel} link`;
+  const defaultEndpointCopyOption =
+    endpointCopyOptions.find((option) => option.key === defaultEndpointKey) ??
+    endpointCopyOptions[0] ??
+    null;
+  const defaultEndpointCopyLabel = defaultEndpointCopyOption?.label ?? "URL";
+  const backendEndpointCopyOptions = endpointCopyOptions.filter(
+    (option) => !isHostedAppPairingUrl(option.url),
+  );
+  const hostedEndpointCopyOptions = endpointCopyOptions.filter((option) =>
+    isHostedAppPairingUrl(option.url),
+  );
+  const renderEndpointMenuItems = (
+    options: typeof endpointCopyOptions = endpointCopyOptions,
+    renderDetail = true,
+  ) =>
+    options.map((option) => (
+      <MenuItem
+        key={option.key}
+        onClick={() => copyPairingValue(option.url, copyKindForUrl(option.url))}
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{option.label}</span>
+          {renderDetail ? (
+            <span className="block truncate text-[11px] text-muted-foreground">
+              {option.detail}
+            </span>
+          ) : null}
+        </span>
+      </MenuItem>
+    ));
+  const renderPairingCodeMenuItem = (renderDetail = true) => (
+    <MenuItem onClick={handleCopyCode}>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">Copy code</span>
+        {renderDetail ? (
+          <span className="block truncate text-[11px] text-muted-foreground">Token only</span>
+        ) : null}
+      </span>
+    </MenuItem>
+  );
+  const renderCompactEndpointGroup = (
+    label: string,
+    options: typeof endpointCopyOptions,
+    includeSeparator: boolean,
+  ) =>
+    options.length > 0 ? (
+      <>
+        {includeSeparator ? <MenuSeparator /> : null}
+        <MenuGroup>
+          <MenuGroupLabel>{label}</MenuGroupLabel>
+          {renderEndpointMenuItems(options, false)}
+        </MenuGroup>
+      </>
+    ) : null;
+  const renderGroupedCopyMenuItems = (options?: { codeFirst?: boolean }) => (
+    <>
+      {options?.codeFirst ? (
+        <>
+          <MenuGroup>
+            <MenuGroupLabel>Pairing code</MenuGroupLabel>
+            {renderPairingCodeMenuItem(false)}
+          </MenuGroup>
+          {endpointCopyOptions.length > 0 ? <MenuSeparator /> : null}
+        </>
+      ) : null}
+      {renderCompactEndpointGroup("Pairing URLs", backendEndpointCopyOptions, false)}
+      {renderCompactEndpointGroup(
+        "Hosted app link",
+        hostedEndpointCopyOptions,
+        backendEndpointCopyOptions.length > 0,
+      )}
+      {!options?.codeFirst ? (
+        <>
+          {endpointCopyOptions.length > 0 ? <MenuSeparator /> : null}
+          <MenuGroup>
+            <MenuGroupLabel>Pairing code</MenuGroupLabel>
+            {renderPairingCodeMenuItem(false)}
+          </MenuGroup>
+        </>
+      ) : null}
+    </>
+  );
 
   if (expiresAtMs <= nowMs) {
     return null;
   }
 
   return (
-    <div className={ITEM_ROW_CLASSNAME}>
+    <div className={accessRowClassName(presentation)}>
       <div className={ITEM_ROW_INNER_CLASSNAME}>
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-h-5 items-center gap-1.5">
@@ -696,51 +816,42 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
           <Dialog open={isRevealDialogOpen} onOpenChange={setIsRevealDialogOpen}>
             {canCopyToClipboard ? (
               <>
-                <Button size="xs" variant="outline" onClick={handleCopyCode}>
-                  Copy code
-                </Button>
                 {shareablePairingUrl ? (
-                  endpointCopyOptions.length > 1 ? (
-                    <Group aria-label="Copy pairing URL">
-                      <Button size="xs" variant="outline" onClick={handleCopyDefaultLink}>
-                        {copyLinkLabel}
-                      </Button>
-                      <GroupSeparator />
-                      <Menu>
-                        <MenuTrigger
-                          render={
-                            <Button
-                              size="icon-xs"
-                              variant="outline"
-                              aria-label="Pairing URL copy options"
-                            />
-                          }
-                        >
-                          <ChevronDownIcon className="size-3.5" />
-                        </MenuTrigger>
-                        <MenuPopup align="end" className="min-w-52">
-                          {endpointCopyOptions.map((option) => (
-                            <MenuItem
-                              key={option.key}
-                              onClick={() => copyPairingValue(option.url, "link")}
-                            >
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate">{option.label}</span>
-                                <span className="block truncate text-[11px] text-muted-foreground">
-                                  {option.detail}
-                                </span>
-                              </span>
-                            </MenuItem>
-                          ))}
-                        </MenuPopup>
-                      </Menu>
-                    </Group>
-                  ) : (
-                    <Button size="xs" variant="outline" onClick={handleCopyDefaultLink}>
-                      {copyLinkLabel}
+                  <Group aria-label="Copy selected endpoint">
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      className="max-w-56"
+                      title={`Copy pairing URL for: ${defaultEndpointCopyLabel}`}
+                      onClick={handleCopyDefaultLink}
+                    >
+                      <span className="truncate">
+                        Copy pairing URL for: {defaultEndpointCopyLabel}
+                      </span>
                     </Button>
-                  )
-                ) : null}
+                    <GroupSeparator />
+                    <Menu>
+                      <MenuTrigger
+                        render={
+                          <Button
+                            size="icon-xs"
+                            variant="outline"
+                            aria-label="Choose endpoint to copy"
+                          />
+                        }
+                      >
+                        <ChevronDownIcon className="size-3.5" />
+                      </MenuTrigger>
+                      <MenuPopup align="end" className="min-w-60">
+                        {renderGroupedCopyMenuItems()}
+                      </MenuPopup>
+                    </Menu>
+                  </Group>
+                ) : (
+                  <Button size="xs" variant="outline" onClick={handleCopyCode}>
+                    Copy code
+                  </Button>
+                )}
               </>
             ) : (
               <DialogTrigger render={<Button size="xs" variant="outline" />}>
@@ -813,12 +924,14 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
 
 type ConnectedClientListRowProps = {
   clientSession: ServerClientSessionRecord;
+  presentation?: AccessSectionPresentation;
   revokingClientSessionId: string | null;
   onRevokeSession: (sessionId: ServerClientSessionRecord["sessionId"]) => void;
 };
 
 const ConnectedClientListRow = memo(function ConnectedClientListRow({
   clientSession,
+  presentation = "current",
   revokingClientSessionId,
   onRevokeSession,
 }: ConnectedClientListRowProps) {
@@ -847,7 +960,7 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
       clientSession.subject);
 
   return (
-    <div className={ITEM_ROW_CLASSNAME}>
+    <div className={accessRowClassName(presentation)}>
       <div className={ITEM_ROW_INNER_CLASSNAME}>
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-h-5 items-center gap-1.5">
@@ -992,6 +1105,7 @@ type PairingClientsListProps = {
   endpointUrl: string | null | undefined;
   endpoints: ReadonlyArray<AdvertisedEndpoint>;
   defaultEndpointKey: string | null;
+  presentation?: AccessSectionPresentation;
   isLoading: boolean;
   pairingLinks: ReadonlyArray<ServerPairingLinkRecord>;
   clientSessions: ReadonlyArray<ServerClientSessionRecord>;
@@ -1005,6 +1119,7 @@ const PairingClientsList = memo(function PairingClientsList({
   endpointUrl,
   endpoints,
   defaultEndpointKey,
+  presentation = "current",
   isLoading,
   pairingLinks,
   clientSessions,
@@ -1022,6 +1137,7 @@ const PairingClientsList = memo(function PairingClientsList({
           endpointUrl={endpointUrl}
           endpoints={endpoints}
           defaultEndpointKey={defaultEndpointKey}
+          presentation={presentation}
           revokingPairingLinkId={revokingPairingLinkId}
           onRevoke={onRevokePairingLink}
         />
@@ -1031,13 +1147,14 @@ const PairingClientsList = memo(function PairingClientsList({
         <ConnectedClientListRow
           key={clientSession.sessionId}
           clientSession={clientSession}
+          presentation={presentation}
           revokingClientSessionId={revokingClientSessionId}
           onRevokeSession={onRevokeClientSession}
         />
       ))}
 
       {pairingLinks.length === 0 && clientSessions.length === 0 && !isLoading ? (
-        <div className={ITEM_ROW_CLASSNAME}>
+        <div className={accessRowClassName(presentation)}>
           <p className="text-xs text-muted-foreground/60">No pairing links or client sessions.</p>
         </div>
       ) : null}
@@ -1048,6 +1165,7 @@ const PairingClientsList = memo(function PairingClientsList({
 type AdvertisedEndpointListRowProps = {
   endpoint: AdvertisedEndpoint;
   isDefault: boolean;
+  presentation?: AccessSectionPresentation;
   onSetDefault: (endpoint: AdvertisedEndpoint) => void;
   onSetupTailscaleServe: (endpoint: AdvertisedEndpoint) => void;
   onDisableTailscaleServe: (endpoint: AdvertisedEndpoint) => void;
@@ -1057,6 +1175,7 @@ type AdvertisedEndpointListRowProps = {
 const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
   endpoint,
   isDefault,
+  presentation = "current",
   onSetDefault,
   onSetupTailscaleServe,
   onDisableTailscaleServe,
@@ -1067,8 +1186,12 @@ const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
   const canDisableTailscaleServe =
     isTailscaleHttpsEndpoint(endpoint) && endpoint.status === "available";
   const shouldShowEndpointUrl = !needsTailscaleSetup;
+  const isEndpointRail = presentation === "endpoint-rail";
   return (
-    <div className={cn(ENDPOINT_ROW_CLASSNAME, !isAvailable && "bg-muted/24")}>
+    <div className={endpointRowClassName(presentation, isAvailable)}>
+      {isEndpointRail && isDefault ? (
+        <span className="absolute inset-y-2 left-0 w-1 rounded-r-full bg-primary" aria-hidden />
+      ) : null}
       <div className="flex min-h-6 min-w-0 flex-col gap-2 sm:-my-0.5 sm:flex-row sm:items-center">
         <div className="flex min-w-0 items-baseline gap-3">
           <h3 className="shrink-0 text-sm leading-5 font-medium text-foreground">
@@ -1410,6 +1533,7 @@ export function ConnectionsSettings() {
   const [removingSavedEnvironmentId, setRemovingSavedEnvironmentId] =
     useState<EnvironmentId | null>(null);
   const [isUpdatingDesktopServerExposure, setIsUpdatingDesktopServerExposure] = useState(false);
+  const [isDesktopServerExposureDialogOpen, setIsDesktopServerExposureDialogOpen] = useState(false);
   const [isUpdatingTailscaleServe, setIsUpdatingTailscaleServe] = useState(false);
   const [pendingTailscaleServeEndpoint, setPendingTailscaleServeEndpoint] =
     useState<AdvertisedEndpoint | null>(null);
@@ -1464,12 +1588,12 @@ export function ConnectionsSettings() {
           checked ? "network-accessible" : "local-only",
         );
         setDesktopServerExposureState(nextState);
-        setPendingDesktopServerExposureMode(null);
+        setIsDesktopServerExposureDialogOpen(false);
         setIsUpdatingDesktopServerExposure(false);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to update network exposure.";
-        setPendingDesktopServerExposureMode(null);
+        setIsDesktopServerExposureDialogOpen(false);
         setDesktopServerExposureError(message);
         toastManager.add(
           stackedThreadToast({
@@ -2216,6 +2340,147 @@ export function ConnectionsSettings() {
       </div>
     </div>
   );
+  const renderNetworkAccessToggle = () => (
+    <Switch
+      checked={desktopServerExposureState?.mode === "network-accessible"}
+      disabled={!desktopServerExposureState || isUpdatingDesktopServerExposure}
+      onCheckedChange={(checked) => {
+        setPendingDesktopServerExposureMode(checked ? "network-accessible" : "local-only");
+        setIsDesktopServerExposureDialogOpen(true);
+      }}
+      aria-label="Enable network access"
+    />
+  );
+  const renderEndpointRows = (presentation: AccessSectionPresentation) =>
+    isAdvertisedEndpointListExpanded
+      ? visibleDesktopNetworkAdvertisedEndpoints.map((endpoint) => {
+          const endpointKey = endpointDefaultPreferenceKey(endpoint);
+          return (
+            <AdvertisedEndpointListRow
+              key={endpoint.id}
+              endpoint={endpoint}
+              isDefault={endpointKey === defaultDesktopAdvertisedEndpointKey}
+              presentation={presentation}
+              onSetDefault={handleSetDefaultAdvertisedEndpoint}
+              onSetupTailscaleServe={handleStartTailscaleServeSetup}
+              onDisableTailscaleServe={handleStartTailscaleServeDisable}
+              isUpdatingTailscaleServe={isUpdatingTailscaleServe}
+            />
+          );
+        })
+      : null;
+  const renderTailscaleRow = () => (
+    <SettingsRow
+      title="Tailscale HTTPS"
+      description={
+        tailscaleHttpsEndpoint
+          ? tailscaleHttpsEndpoint.status === "available"
+            ? tailscaleHttpsEndpoint.httpBaseUrl
+            : "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL."
+          : "Start Tailscale to set up HTTPS access through MagicDNS."
+      }
+      control={
+        tailscaleHttpsEndpoint ? (
+          <Switch
+            checked={tailscaleHttpsEndpoint.status === "available"}
+            disabled={isUpdatingTailscaleServe}
+            onCheckedChange={(checked) => {
+              if (checked) {
+                handleStartTailscaleServeSetup(tailscaleHttpsEndpoint);
+                return;
+              }
+              handleStartTailscaleServeDisable(tailscaleHttpsEndpoint);
+            }}
+            aria-label="Enable Tailscale HTTPS"
+          />
+        ) : null
+      }
+    />
+  );
+  const renderAuthorizedClients = (presentation: AccessSectionPresentation) => (
+    <>
+      {desktopAccessManagementError ? (
+        <div className={accessRowClassName(presentation)}>
+          <p className="text-xs text-destructive">{desktopAccessManagementError}</p>
+        </div>
+      ) : null}
+      <PairingClientsList
+        endpointUrl={desktopServerExposureState?.endpointUrl}
+        endpoints={visibleDesktopAdvertisedEndpoints}
+        defaultEndpointKey={defaultDesktopAdvertisedEndpointKey}
+        presentation={presentation}
+        isLoading={isLoadingDesktopAccessManagement}
+        pairingLinks={visibleDesktopPairingLinks}
+        clientSessions={desktopClientSessions}
+        revokingPairingLinkId={revokingDesktopPairingLinkId}
+        revokingClientSessionId={revokingDesktopClientSessionId}
+        onRevokePairingLink={handleRevokeDesktopPairingLink}
+        onRevokeClientSession={handleRevokeDesktopClientSession}
+      />
+    </>
+  );
+  const renderNetworkAccessRow = () => (
+    <SettingsRow
+      title="Network access"
+      description={
+        isLocalBackendNetworkAccessible ? (
+          <NetworkAccessDescription
+            endpoint={defaultDesktopNetworkAdvertisedEndpoint}
+            hiddenEndpointCount={Math.max(visibleDesktopNetworkAdvertisedEndpoints.length - 1, 0)}
+            expanded={isAdvertisedEndpointListExpanded}
+            onToggleExpanded={() => setIsAdvertisedEndpointListExpanded((expanded) => !expanded)}
+            fallback={
+              desktopServerExposureState?.endpointUrl
+                ? `Reachable at ${desktopServerExposureState.endpointUrl}`
+                : desktopServerExposureState?.advertisedHost
+                  ? `Exposed on all interfaces. Pairing links use ${desktopServerExposureState.advertisedHost}.`
+                  : "Exposed on all interfaces."
+            }
+          />
+        ) : desktopServerExposureState ? (
+          "Limited to this machine."
+        ) : (
+          "Loading…"
+        )
+      }
+      status={
+        desktopServerExposureError ? (
+          <span className="block text-destructive">{desktopServerExposureError}</span>
+        ) : null
+      }
+      control={renderNetworkAccessToggle()}
+    />
+  );
+  const renderDisabledNetworkAccessRow = () => (
+    <SettingsRow
+      title="Network access"
+      description={
+        currentAuthPolicy === "remote-reachable"
+          ? "This backend is already configured for remote access. Network exposure changes must be made where the server is launched."
+          : "This backend is only reachable on this machine. Restart it with a non-loopback host to enable remote pairing."
+      }
+      control={
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span className="inline-flex">
+                <Switch
+                  checked={isLocalBackendNetworkAccessible}
+                  disabled
+                  aria-label="Enable network access"
+                />
+              </span>
+            }
+          />
+          <TooltipPopup side="top">
+            Network exposure changes restart the backend and must be controlled where the server
+            process is launched.
+          </TooltipPopup>
+        </Tooltip>
+      }
+    />
+  );
+
   return (
     <SettingsPageContainer>
       {canManageLocalBackend ? (
@@ -2223,287 +2488,12 @@ export function ConnectionsSettings() {
           <SettingsSection title="Manage local backend">
             {desktopBridge ? (
               <>
-                <SettingsRow
-                  title="Network access"
-                  description={
-                    isLocalBackendNetworkAccessible ? (
-                      <NetworkAccessDescription
-                        endpoint={defaultDesktopNetworkAdvertisedEndpoint}
-                        hiddenEndpointCount={Math.max(
-                          visibleDesktopNetworkAdvertisedEndpoints.length - 1,
-                          0,
-                        )}
-                        expanded={isAdvertisedEndpointListExpanded}
-                        onToggleExpanded={() =>
-                          setIsAdvertisedEndpointListExpanded((expanded) => !expanded)
-                        }
-                        fallback={
-                          desktopServerExposureState?.endpointUrl
-                            ? `Reachable at ${desktopServerExposureState.endpointUrl}`
-                            : desktopServerExposureState?.advertisedHost
-                              ? `Exposed on all interfaces. Pairing links use ${desktopServerExposureState.advertisedHost}.`
-                              : "Exposed on all interfaces."
-                        }
-                      />
-                    ) : desktopServerExposureState ? (
-                      "Limited to this machine."
-                    ) : (
-                      "Loading…"
-                    )
-                  }
-                  status={
-                    desktopServerExposureError ? (
-                      <span className="block text-destructive">{desktopServerExposureError}</span>
-                    ) : null
-                  }
-                  control={
-                    <AlertDialog
-                      open={pendingDesktopServerExposureMode !== null}
-                      onOpenChange={(open) => {
-                        if (isUpdatingDesktopServerExposure) return;
-                        if (!open) setPendingDesktopServerExposureMode(null);
-                      }}
-                    >
-                      <Switch
-                        checked={desktopServerExposureState?.mode === "network-accessible"}
-                        disabled={!desktopServerExposureState || isUpdatingDesktopServerExposure}
-                        onCheckedChange={(checked) => {
-                          setPendingDesktopServerExposureMode(
-                            checked ? "network-accessible" : "local-only",
-                          );
-                        }}
-                        aria-label="Enable network access"
-                      />
-                      <AlertDialogPopup>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>
-                            {pendingDesktopServerExposureMode === "network-accessible"
-                              ? "Enable network access?"
-                              : "Disable network access?"}
-                          </AlertDialogTitle>
-                          <AlertDialogDescription>
-                            {pendingDesktopServerExposureMode === "network-accessible"
-                              ? "T3 Code will restart to expose this environment over the network."
-                              : "T3 Code will restart and limit this environment back to this machine."}
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogClose
-                            disabled={isUpdatingDesktopServerExposure}
-                            render={
-                              <Button
-                                variant="outline"
-                                disabled={isUpdatingDesktopServerExposure}
-                              />
-                            }
-                          >
-                            Cancel
-                          </AlertDialogClose>
-                          <Button
-                            variant={
-                              pendingDesktopServerExposureMode === "local-only"
-                                ? "destructive"
-                                : "default"
-                            }
-                            onClick={handleConfirmDesktopServerExposureChange}
-                            disabled={
-                              pendingDesktopServerExposureMode === null ||
-                              isUpdatingDesktopServerExposure
-                            }
-                          >
-                            {isUpdatingDesktopServerExposure ? (
-                              <>
-                                <Spinner className="size-3.5" />
-                                Restarting…
-                              </>
-                            ) : pendingDesktopServerExposureMode === "network-accessible" ? (
-                              "Restart and enable"
-                            ) : (
-                              "Restart and disable"
-                            )}
-                          </Button>
-                        </AlertDialogFooter>
-                      </AlertDialogPopup>
-                    </AlertDialog>
-                  }
-                />
-                {isAdvertisedEndpointListExpanded
-                  ? visibleDesktopNetworkAdvertisedEndpoints.map((endpoint) => {
-                      const endpointKey = endpointDefaultPreferenceKey(endpoint);
-                      return (
-                        <AdvertisedEndpointListRow
-                          key={endpoint.id}
-                          endpoint={endpoint}
-                          isDefault={endpointKey === defaultDesktopAdvertisedEndpointKey}
-                          onSetDefault={handleSetDefaultAdvertisedEndpoint}
-                          onSetupTailscaleServe={handleStartTailscaleServeSetup}
-                          onDisableTailscaleServe={handleStartTailscaleServeDisable}
-                          isUpdatingTailscaleServe={isUpdatingTailscaleServe}
-                        />
-                      );
-                    })
-                  : null}
-                <SettingsRow
-                  title="Tailscale HTTPS"
-                  description={
-                    tailscaleHttpsEndpoint
-                      ? tailscaleHttpsEndpoint.status === "available"
-                        ? tailscaleHttpsEndpoint.httpBaseUrl
-                        : "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL."
-                      : "Start Tailscale to set up HTTPS access through MagicDNS."
-                  }
-                  control={
-                    tailscaleHttpsEndpoint ? (
-                      <Switch
-                        checked={tailscaleHttpsEndpoint.status === "available"}
-                        disabled={isUpdatingTailscaleServe}
-                        onCheckedChange={(checked) => {
-                          if (checked) {
-                            handleStartTailscaleServeSetup(tailscaleHttpsEndpoint);
-                            return;
-                          }
-                          handleStartTailscaleServeDisable(tailscaleHttpsEndpoint);
-                        }}
-                        aria-label="Enable Tailscale HTTPS"
-                      />
-                    ) : null
-                  }
-                />
-                <AlertDialog
-                  open={disableTailscaleServeDialogOpen}
-                  onOpenChange={(open) => {
-                    if (isUpdatingTailscaleServe) return;
-                    setDisableTailscaleServeDialogOpen(open);
-                  }}
-                >
-                  <AlertDialogPopup>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Disable Tailscale HTTPS?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        T3 Code will restart the local backend without Tailscale Serve.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogClose
-                        disabled={isUpdatingTailscaleServe}
-                        render={<Button variant="outline" disabled={isUpdatingTailscaleServe} />}
-                      >
-                        Cancel
-                      </AlertDialogClose>
-                      <Button
-                        variant="destructive"
-                        onClick={() => void handleConfirmTailscaleServeDisable()}
-                        disabled={isUpdatingTailscaleServe}
-                      >
-                        {isUpdatingTailscaleServe ? (
-                          <>
-                            <Spinner className="size-3.5" />
-                            Restarting…
-                          </>
-                        ) : (
-                          "Restart and disable"
-                        )}
-                      </Button>
-                    </AlertDialogFooter>
-                  </AlertDialogPopup>
-                </AlertDialog>
-                <Dialog
-                  open={pendingTailscaleServeEndpoint !== null}
-                  onOpenChange={(open) => {
-                    if (isUpdatingTailscaleServe) return;
-                    if (!open) setPendingTailscaleServeEndpoint(null);
-                  }}
-                >
-                  <DialogPopup className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Set up Tailscale HTTPS?</DialogTitle>
-                      <DialogDescription>
-                        T3 Code will restart the local backend with Tailscale Serve enabled and ask
-                        Tailscale to proxy HTTPS traffic to this backend.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <DialogPanel className="space-y-4">
-                      <label className="block">
-                        <span className="text-sm font-medium text-foreground">HTTPS port</span>
-                        <Input
-                          className="mt-2"
-                          type="number"
-                          inputMode="numeric"
-                          min={1}
-                          max={65_535}
-                          step={1}
-                          value={tailscaleServePortInput}
-                          onChange={(event) => setTailscaleServePortInput(event.target.value)}
-                          disabled={isUpdatingTailscaleServe}
-                        />
-                      </label>
-                      {!isTailscaleServePortValid ? (
-                        <p className="mt-2 text-xs text-destructive">
-                          Enter a port from 1 to 65535.
-                        </p>
-                      ) : null}
-                      <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2">
-                        <p className="text-xs font-medium text-muted-foreground">HTTPS endpoint</p>
-                        <p
-                          className="mt-1 truncate text-sm text-foreground"
-                          title={pendingTailscaleServeBaseUrl ?? undefined}
-                        >
-                          {pendingTailscaleServeBaseUrl ?? "Pending MagicDNS endpoint"}
-                        </p>
-                      </div>
-                    </DialogPanel>
-                    <DialogFooter>
-                      <DialogClose
-                        disabled={isUpdatingTailscaleServe}
-                        render={<Button variant="outline" disabled={isUpdatingTailscaleServe} />}
-                      >
-                        Cancel
-                      </DialogClose>
-                      <Button
-                        onClick={() => void handleConfirmTailscaleServeSetup()}
-                        disabled={isUpdatingTailscaleServe || !isTailscaleServePortValid}
-                      >
-                        {isUpdatingTailscaleServe ? (
-                          <>
-                            <Spinner className="size-3.5" />
-                            Restarting…
-                          </>
-                        ) : (
-                          "Enable"
-                        )}
-                      </Button>
-                    </DialogFooter>
-                  </DialogPopup>
-                </Dialog>
+                {renderNetworkAccessRow()}
+                {renderEndpointRows("endpoint-rail")}
+                {renderTailscaleRow()}
               </>
             ) : (
-              <SettingsRow
-                title="Network access"
-                description={
-                  currentAuthPolicy === "remote-reachable"
-                    ? "This backend is already configured for remote access. Network exposure changes must be made where the server is launched."
-                    : "This backend is only reachable on this machine. Restart it with a non-loopback host to enable remote pairing."
-                }
-                control={
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span className="inline-flex">
-                          <Switch
-                            checked={isLocalBackendNetworkAccessible}
-                            disabled
-                            aria-label="Enable network access"
-                          />
-                        </span>
-                      }
-                    />
-                    <TooltipPopup side="top">
-                      Network exposure changes restart the backend and must be controlled where the
-                      server process is launched.
-                    </TooltipPopup>
-                  </Tooltip>
-                }
-              />
+              renderDisabledNetworkAccessRow()
             )}
           </SettingsSection>
 
@@ -2518,25 +2508,166 @@ export function ConnectionsSettings() {
                 />
               }
             >
-              {desktopAccessManagementError ? (
-                <div className={ITEM_ROW_CLASSNAME}>
-                  <p className="text-xs text-destructive">{desktopAccessManagementError}</p>
-                </div>
-              ) : null}
-              <PairingClientsList
-                endpointUrl={desktopServerExposureState?.endpointUrl}
-                endpoints={visibleDesktopAdvertisedEndpoints}
-                defaultEndpointKey={defaultDesktopAdvertisedEndpointKey}
-                isLoading={isLoadingDesktopAccessManagement}
-                pairingLinks={visibleDesktopPairingLinks}
-                clientSessions={desktopClientSessions}
-                revokingPairingLinkId={revokingDesktopPairingLinkId}
-                revokingClientSessionId={revokingDesktopClientSessionId}
-                onRevokePairingLink={handleRevokeDesktopPairingLink}
-                onRevokeClientSession={handleRevokeDesktopClientSession}
-              />
+              {renderAuthorizedClients("current")}
             </SettingsSection>
           ) : null}
+          <AlertDialog
+            open={isDesktopServerExposureDialogOpen}
+            onOpenChange={(open) => {
+              if (isUpdatingDesktopServerExposure) return;
+              setIsDesktopServerExposureDialogOpen(open);
+            }}
+            onOpenChangeComplete={(open) => {
+              if (!open) setPendingDesktopServerExposureMode(null);
+            }}
+          >
+            <AlertDialogPopup>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {pendingDesktopServerExposureMode === "network-accessible"
+                    ? "Enable network access?"
+                    : "Disable network access?"}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {pendingDesktopServerExposureMode === "network-accessible"
+                    ? "T3 Code will restart to expose this environment over the network."
+                    : "T3 Code will restart and limit this environment back to this machine."}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogClose
+                  disabled={isUpdatingDesktopServerExposure}
+                  render={<Button variant="outline" disabled={isUpdatingDesktopServerExposure} />}
+                >
+                  Cancel
+                </AlertDialogClose>
+                <Button
+                  variant={
+                    pendingDesktopServerExposureMode === "local-only" ? "destructive" : "default"
+                  }
+                  onClick={handleConfirmDesktopServerExposureChange}
+                  disabled={
+                    pendingDesktopServerExposureMode === null || isUpdatingDesktopServerExposure
+                  }
+                >
+                  {isUpdatingDesktopServerExposure ? (
+                    <>
+                      <Spinner className="size-3.5" />
+                      Restarting…
+                    </>
+                  ) : pendingDesktopServerExposureMode === "network-accessible" ? (
+                    "Restart and enable"
+                  ) : (
+                    "Restart and disable"
+                  )}
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogPopup>
+          </AlertDialog>
+          <AlertDialog
+            open={disableTailscaleServeDialogOpen}
+            onOpenChange={(open) => {
+              if (isUpdatingTailscaleServe) return;
+              setDisableTailscaleServeDialogOpen(open);
+            }}
+          >
+            <AlertDialogPopup>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Disable Tailscale HTTPS?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  T3 Code will restart the local backend without Tailscale Serve.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogClose
+                  disabled={isUpdatingTailscaleServe}
+                  render={<Button variant="outline" disabled={isUpdatingTailscaleServe} />}
+                >
+                  Cancel
+                </AlertDialogClose>
+                <Button
+                  variant="destructive"
+                  onClick={() => void handleConfirmTailscaleServeDisable()}
+                  disabled={isUpdatingTailscaleServe}
+                >
+                  {isUpdatingTailscaleServe ? (
+                    <>
+                      <Spinner className="size-3.5" />
+                      Restarting…
+                    </>
+                  ) : (
+                    "Restart and disable"
+                  )}
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogPopup>
+          </AlertDialog>
+          <Dialog
+            open={pendingTailscaleServeEndpoint !== null}
+            onOpenChange={(open) => {
+              if (isUpdatingTailscaleServe) return;
+              if (!open) setPendingTailscaleServeEndpoint(null);
+            }}
+          >
+            <DialogPopup className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Set up Tailscale HTTPS?</DialogTitle>
+                <DialogDescription>
+                  T3 Code will restart the local backend with Tailscale Serve enabled and ask
+                  Tailscale to proxy HTTPS traffic to this backend.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogPanel className="space-y-4">
+                <label className="block">
+                  <span className="text-sm font-medium text-foreground">HTTPS port</span>
+                  <Input
+                    className="mt-2"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={65_535}
+                    step={1}
+                    value={tailscaleServePortInput}
+                    onChange={(event) => setTailscaleServePortInput(event.target.value)}
+                    disabled={isUpdatingTailscaleServe}
+                  />
+                </label>
+                {!isTailscaleServePortValid ? (
+                  <p className="mt-2 text-xs text-destructive">Enter a port from 1 to 65535.</p>
+                ) : null}
+                <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+                  <p className="text-xs font-medium text-muted-foreground">HTTPS endpoint</p>
+                  <p
+                    className="mt-1 truncate text-sm text-foreground"
+                    title={pendingTailscaleServeBaseUrl ?? undefined}
+                  >
+                    {pendingTailscaleServeBaseUrl ?? "Pending MagicDNS endpoint"}
+                  </p>
+                </div>
+              </DialogPanel>
+              <DialogFooter>
+                <DialogClose
+                  disabled={isUpdatingTailscaleServe}
+                  render={<Button variant="outline" disabled={isUpdatingTailscaleServe} />}
+                >
+                  Cancel
+                </DialogClose>
+                <Button
+                  onClick={() => void handleConfirmTailscaleServeSetup()}
+                  disabled={isUpdatingTailscaleServe || !isTailscaleServePortValid}
+                >
+                  {isUpdatingTailscaleServe ? (
+                    <>
+                      <Spinner className="size-3.5" />
+                      Restarting…
+                    </>
+                  ) : (
+                    "Enable"
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogPopup>
+          </Dialog>
         </>
       ) : (
         <SettingsSection title="Local backend access">

@@ -52,7 +52,10 @@ import {
 export const DEFAULT_REMOTE_PORT = 3773;
 const REMOTE_PORT_SCAN_WINDOW = 200;
 const SSH_READY_TIMEOUT_MS = 20_000;
+const SSH_READY_PROBE_TIMEOUT_MS = 1_000;
 const TUNNEL_SHUTDOWN_TIMEOUT_MS = 2_000;
+const REMOTE_READY_TIMEOUT_MS = 15_000;
+const REMOTE_REUSE_READY_TIMEOUT_MS = 2_000;
 
 export interface RemoteT3RunnerOptions {
   readonly packageSpec?: string;
@@ -187,6 +190,36 @@ function applyScriptPlaceholders(
   return result;
 }
 
+function describeReadinessCause(cause: unknown): unknown {
+  if (cause instanceof SshReadinessError) {
+    return {
+      _tag: cause._tag,
+      message: cause.message,
+      ...(cause.cause === undefined ? {} : { cause: describeReadinessCause(cause.cause) }),
+    };
+  }
+  if (cause instanceof Error) {
+    return {
+      name: cause.name,
+      message: cause.message,
+      ...(cause.cause === undefined ? {} : { cause: describeReadinessCause(cause.cause) }),
+    };
+  }
+  if (typeof cause !== "object" || cause === null) {
+    return cause;
+  }
+
+  const record = cause as Readonly<Record<string, unknown>>;
+  return {
+    ...(typeof record._tag === "string" ? { _tag: record._tag } : {}),
+    ...(typeof record.message === "string" ? { message: record.message } : {}),
+    ...(typeof record.reason === "object" && record.reason !== null
+      ? { reason: describeReadinessCause(record.reason) }
+      : {}),
+    ...(record.cause === undefined ? {} : { cause: describeReadinessCause(record.cause) }),
+  };
+}
+
 export const REMOTE_PICK_PORT_SCRIPT = `const fs = require("node:fs");
 const net = require("node:net");
 const filePath = process.argv[2] ?? "";
@@ -215,6 +248,54 @@ function tryPort(port) {
       process.stdout.write(String(port));
       return;
     }
+  }
+  process.exit(1);
+})().catch(() => process.exit(1));
+`;
+
+export const REMOTE_WAIT_READY_SCRIPT = `const http = require("node:http");
+const port = Number.parseInt(process.argv[2] ?? "", 10);
+const timeoutMs = Number.parseInt(process.argv[3] ?? "", 10);
+const probeTimeoutMs = Number.parseInt(process.argv[4] ?? "", 10);
+if (!Number.isInteger(port) || !Number.isInteger(timeoutMs) || !Number.isInteger(probeTimeoutMs)) {
+  process.exit(1);
+}
+const deadline = Date.now() + timeoutMs;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function probe() {
+  return new Promise((resolve) => {
+    const request = http.get(
+      {
+        hostname: "127.0.0.1",
+        port,
+        path: "/",
+        timeout: probeTimeoutMs,
+      },
+      (response) => {
+        response.resume();
+        response.once("end", () => {
+          resolve(response.statusCode >= 200 && response.statusCode < 300);
+        });
+      },
+    );
+    request.once("timeout", () => {
+      request.destroy();
+      resolve(false);
+    });
+    request.once("error", () => resolve(false));
+  });
+}
+
+(async () => {
+  while (Date.now() < deadline) {
+    if (await probe()) {
+      process.exit(0);
+    }
+    await sleep(100);
   }
   process.exit(1);
 })().catch(() => process.exit(1));
@@ -267,11 +348,30 @@ pick_port() {
 @@T3_PICK_PORT_SCRIPT@@
 NODE
 }
+wait_ready() {
+  node - "$REMOTE_PORT" "$1" "@@T3_READY_PROBE_TIMEOUT_MS@@" <<'NODE'
+@@T3_WAIT_READY_SCRIPT@@
+NODE
+}
+wait_for_pid_exit() {
+  PID_TO_WAIT="$1"
+  WAIT_COUNT=0
+  while kill -0 "$PID_TO_WAIT" 2>/dev/null && [ "$WAIT_COUNT" -lt 20 ]; do
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+    sleep 0.1
+  done
+}
 REMOTE_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
 REMOTE_PORT="$(cat "$PORT_FILE" 2>/dev/null || true)"
 if [ -n "$REMOTE_PID" ] && [ -n "$REMOTE_PORT" ] && kill -0 "$REMOTE_PID" 2>/dev/null; then
   if [ "$RUNNER_CHANGED" -eq 1 ]; then
     kill "$REMOTE_PID" 2>/dev/null || true
+    wait_for_pid_exit "$REMOTE_PID"
+    REMOTE_PID=""
+    REMOTE_PORT=""
+  elif ! wait_ready "@@T3_REUSE_READY_TIMEOUT_MS@@"; then
+    kill "$REMOTE_PID" 2>/dev/null || true
+    wait_for_pid_exit "$REMOTE_PID"
     REMOTE_PID=""
     REMOTE_PORT=""
   fi
@@ -289,6 +389,14 @@ if [ -z "$REMOTE_PID" ] || [ -z "$REMOTE_PORT" ]; then
   REMOTE_PID="$!"
   printf '%s\\n' "$REMOTE_PID" >"$PID_FILE"
   printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
+  if ! wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
+    printf 'Remote T3 server did not become ready on 127.0.0.1:%s.\\n' "$REMOTE_PORT" >&2
+    tail -n 80 "$LOG_FILE" >&2 2>/dev/null || true
+    kill "$REMOTE_PID" 2>/dev/null || true
+    wait_for_pid_exit "$REMOTE_PID"
+    rm -f "$PID_FILE" "$PORT_FILE"
+    exit 1
+  fi
 fi
 printf '{"remotePort":%s}\\n' "$REMOTE_PORT"
 `;
@@ -312,6 +420,11 @@ PORT_FILE="$STATE_DIR/port"
 REMOTE_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
 if [ -n "$REMOTE_PID" ] && kill -0 "$REMOTE_PID" 2>/dev/null; then
   kill "$REMOTE_PID" 2>/dev/null || true
+  WAIT_COUNT=0
+  while kill -0 "$REMOTE_PID" 2>/dev/null && [ "$WAIT_COUNT" -lt 20 ]; do
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+    sleep 0.1
+  done
 fi
 rm -f "$PID_FILE" "$PORT_FILE"
 printf '{"stopped":true}\\n'
@@ -340,8 +453,12 @@ export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
   return applyScriptPlaceholders(REMOTE_LAUNCH_SCRIPT, {
     T3_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteT3RunnerScript(input)),
     T3_PICK_PORT_SCRIPT: stripTrailingNewlines(REMOTE_PICK_PORT_SCRIPT),
+    T3_WAIT_READY_SCRIPT: stripTrailingNewlines(REMOTE_WAIT_READY_SCRIPT),
     T3_DEFAULT_REMOTE_PORT: String(DEFAULT_REMOTE_PORT),
     T3_REMOTE_PORT_SCAN_WINDOW: String(REMOTE_PORT_SCAN_WINDOW),
+    T3_READY_TIMEOUT_MS: String(REMOTE_READY_TIMEOUT_MS),
+    T3_REUSE_READY_TIMEOUT_MS: String(REMOTE_REUSE_READY_TIMEOUT_MS),
+    T3_READY_PROBE_TIMEOUT_MS: String(SSH_READY_PROBE_TIMEOUT_MS),
   });
 }
 
@@ -429,7 +546,7 @@ export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingT
   SshCommandError | SshInvalidTargetError | SshPairingError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
-  yield* Effect.logInfo("ssh.remoteServer.pairingToken.start", {
+  yield* Effect.logDebug("ssh.remoteServer.pairingToken.start", {
     ...sshTargetLogFields(target),
     stateKey: remoteStateKey(target),
   });
@@ -462,7 +579,7 @@ export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingT
       stdout: result.stdout,
     });
   }
-  yield* Effect.logInfo("ssh.remoteServer.pairingToken.created", {
+  yield* Effect.logDebug("ssh.remoteServer.pairingToken.created", {
     ...sshTargetLogFields(target),
     stateKey: remoteStateKey(target),
   });
@@ -517,46 +634,79 @@ export const waitForHttpReady = Effect.fn("ssh/tunnel.waitForHttpReady")(functio
   readonly baseUrl: string;
   readonly timeoutMs?: number;
   readonly intervalMs?: number;
+  readonly probeTimeoutMs?: number;
   readonly path?: string;
 }): Effect.fn.Return<void, SshReadinessError, HttpClient.HttpClient> {
   const timeoutMs = input.timeoutMs ?? 30_000;
   const intervalMs = input.intervalMs ?? 100;
-  const maxRetries = Math.max(0, Math.ceil(timeoutMs / intervalMs));
+  const probeTimeoutMs = input.probeTimeoutMs ?? SSH_READY_PROBE_TIMEOUT_MS;
+  const retryPolicy = Schedule.spaced(Duration.millis(intervalMs)).pipe(
+    Schedule.take(Math.max(0, Math.ceil(timeoutMs / intervalMs))),
+  );
   const requestUrl = new URL(input.path ?? "/", input.baseUrl).toString();
   const client = yield* HttpClient.HttpClient;
   const lastProbeFailure = yield* Ref.make<unknown>(null);
   let attempt = 0;
 
-  yield* Effect.logInfo("ssh.tunnel.httpReady.start", {
+  yield* Effect.logDebug("ssh.tunnel.httpReady.start", {
     baseUrl: input.baseUrl,
     requestUrl,
     timeoutMs,
     intervalMs,
+    probeTimeoutMs,
   });
 
-  const probe = Effect.gen(function* () {
-    attempt += 1;
-    const response = yield* client.execute(HttpClientRequest.get(requestUrl)).pipe(
-      Effect.mapError(
-        (cause) =>
-          new SshReadinessError({
-            message: `Backend readiness probe failed at ${requestUrl}.`,
-            cause,
+  const readinessClient = client.pipe(
+    HttpClient.filterStatusOk,
+    HttpClient.transform((effect) =>
+      Effect.gen(function* () {
+        attempt += 1;
+        const responseOption = yield* effect.pipe(
+          Effect.timeoutOption(Duration.millis(probeTimeoutMs)),
+          Effect.mapError(
+            (cause) =>
+              new SshReadinessError({
+                message: `Backend readiness probe failed at ${requestUrl}.`,
+                cause,
+              }),
+          ),
+        );
+        return yield* Option.match(responseOption, {
+          onSome: Effect.succeed,
+          onNone: () =>
+            Effect.fail(
+              new SshReadinessError({
+                message: `Backend readiness probe exceeded ${probeTimeoutMs}ms at ${requestUrl}.`,
+                cause: {
+                  kind: "probe-timeout",
+                  attempt,
+                  probeTimeoutMs,
+                },
+              }),
+            ),
+        });
+      }).pipe(
+        Effect.mapError((cause) =>
+          cause instanceof SshReadinessError
+            ? cause
+            : new SshReadinessError({
+                message: `Backend readiness probe failed at ${requestUrl}.`,
+                cause,
+              }),
+        ),
+        Effect.tapError((cause) =>
+          Ref.set(lastProbeFailure, {
+            attempt,
+            cause: describeReadinessCause(cause),
           }),
+        ),
       ),
-    );
-    if (response.status >= 200 && response.status < 300) {
-      return;
-    }
-    const text = yield* response.text.pipe(Effect.catch(() => Effect.succeed("")));
-    return yield* new SshReadinessError({
-      message: `Backend readiness probe returned HTTP ${response.status} at ${requestUrl}.`,
-      cause: {
-        status: response.status,
-        body: text.slice(0, 1_000),
-      },
-    });
-  }).pipe(
+    ),
+    HttpClient.tap((response) => response.text.pipe(Effect.ignore)),
+    HttpClient.retry(retryPolicy),
+  );
+
+  const result = yield* readinessClient.execute(HttpClientRequest.get(requestUrl)).pipe(
     Effect.mapError((cause) =>
       cause instanceof SshReadinessError
         ? cause
@@ -565,25 +715,12 @@ export const waitForHttpReady = Effect.fn("ssh/tunnel.waitForHttpReady")(functio
             cause,
           }),
     ),
-    Effect.tapError((cause) =>
-      Ref.set(lastProbeFailure, {
-        attempt,
-        cause,
-      }),
-    ),
-  );
-
-  const result = yield* probe.pipe(
-    Effect.retry({
-      schedule: Schedule.spaced(Duration.millis(intervalMs)),
-      times: maxRetries,
-    }),
     Effect.timeoutOption(Duration.millis(timeoutMs)),
   );
 
   return yield* Option.match(result, {
     onSome: () =>
-      Effect.logInfo("ssh.tunnel.httpReady.succeeded", {
+      Effect.logDebug("ssh.tunnel.httpReady.succeeded", {
         baseUrl: input.baseUrl,
         requestUrl,
         attempts: attempt,
@@ -596,6 +733,7 @@ export const waitForHttpReady = Effect.fn("ssh/tunnel.waitForHttpReady")(functio
           requestUrl,
           timeoutMs,
           intervalMs,
+          probeTimeoutMs,
           attempts: attempt,
           lastFailure,
         });
@@ -764,7 +902,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
   const tunnelCommand = ["ssh", ...args];
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const scope = yield* Scope.Scope;
-  yield* Effect.logInfo("ssh.tunnel.spawn.start", {
+  yield* Effect.logDebug("ssh.tunnel.spawn.start", {
     ...sshTargetLogFields(input.resolvedTarget),
     command: tunnelCommand,
     localPort: input.localPort,
@@ -797,7 +935,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
           }),
       ),
     );
-  yield* Effect.logInfo("ssh.tunnel.spawn.succeeded", {
+  yield* Effect.logDebug("ssh.tunnel.spawn.succeeded", {
     ...sshTargetLogFields(input.resolvedTarget),
     command: tunnelCommand,
     pid: child.pid,
@@ -939,7 +1077,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
   const closeTunnelEntry = Effect.fn("ssh/tunnel.closeTunnelEntry")(function* (
     entry: SshTunnelEntry,
   ) {
-    yield* Effect.logInfo("ssh.tunnel.close.start", {
+    yield* Effect.logDebug("ssh.tunnel.close.start", {
       ...sshTargetLogFields(entry.target),
       key: entry.key,
       localPort: entry.localPort,
@@ -1080,7 +1218,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     readonly resolvedTarget: DesktopSshEnvironmentTarget;
     readonly runner?: RemoteT3RunnerOptions;
   }): Effect.fn.Return<SshTunnelEntry, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
-    yield* Effect.logInfo("ssh.environment.tunnel.create.start", {
+    yield* Effect.logDebug("ssh.environment.tunnel.create.start", {
       ...sshTargetLogFields(input.resolvedTarget),
       ...sshRunnerLogFields(input.runner),
       key: input.key,
@@ -1091,7 +1229,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       operation: (authOptions) =>
         launchOrReuseRemoteServer(input.resolvedTarget, authOptions, input.runner),
     });
-    yield* Effect.logInfo("ssh.environment.remotePort.ready", {
+    yield* Effect.logDebug("ssh.environment.remotePort.ready", {
       ...sshTargetLogFields(input.resolvedTarget),
       key: input.key,
       remotePort,
@@ -1099,7 +1237,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     const localPort = yield* reserveLocalTunnelPort();
     const httpBaseUrl = `http://127.0.0.1:${localPort}/`;
     const wsBaseUrl = `ws://127.0.0.1:${localPort}/`;
-    yield* Effect.logInfo("ssh.environment.localPort.reserved", {
+    yield* Effect.logDebug("ssh.environment.localPort.reserved", {
       ...sshTargetLogFields(input.resolvedTarget),
       key: input.key,
       localPort,
@@ -1134,7 +1272,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
         if (tunnels.get(tunnelEntry.key) !== tunnelEntry) {
           return;
         }
-        yield* Effect.logInfo("ssh.environment.tunnel.finalizer.start", {
+        yield* Effect.logDebug("ssh.environment.tunnel.finalizer.start", {
           ...sshTargetLogFields(tunnelEntry.target),
           key: tunnelEntry.key,
           localPort: tunnelEntry.localPort,
@@ -1168,7 +1306,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
           ],
           { concurrency: "unbounded" },
         ).pipe(Effect.ignore);
-        yield* Effect.logInfo("ssh.environment.tunnel.finalizer.succeeded", {
+        yield* Effect.logDebug("ssh.environment.tunnel.finalizer.succeeded", {
           ...sshTargetLogFields(tunnelEntry.target),
           key: tunnelEntry.key,
           localPort: tunnelEntry.localPort,
@@ -1176,7 +1314,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
         });
       }).pipe(Effect.ignore),
     );
-    yield* Effect.logInfo("ssh.environment.tunnel.create.succeeded", {
+    yield* Effect.logDebug("ssh.environment.tunnel.create.succeeded", {
       ...sshTargetLogFields(input.resolvedTarget),
       key: input.key,
       localPort,
@@ -1203,7 +1341,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
         waitForHttpReady({ baseUrl: entry.httpBaseUrl, timeoutMs: 2_000 }),
       );
       if (Exit.isSuccess(readinessExit)) {
-        yield* Effect.logInfo("ssh.environment.tunnel.reused", {
+        yield* Effect.logDebug("ssh.environment.tunnel.reused", {
           ...sshTargetLogFields(resolvedTarget),
           key,
           localPort: entry.localPort,
@@ -1224,7 +1362,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
 
     const pending = pendingTunnelEntries.get(key);
     if (pending) {
-      yield* Effect.logInfo("ssh.environment.tunnel.pending.await", {
+      yield* Effect.logDebug("ssh.environment.tunnel.pending.await", {
         ...sshTargetLogFields(resolvedTarget),
         key,
       });
@@ -1275,7 +1413,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       ...(target.port !== null ? { port: target.port } : {}),
     };
     const key = targetConnectionKey(resolvedTarget);
-    yield* Effect.logInfo("ssh.environment.target.resolved", {
+    yield* Effect.logDebug("ssh.environment.target.resolved", {
       ...sshTargetLogFields(resolvedTarget),
       key,
     });
