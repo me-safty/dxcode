@@ -30,3 +30,5 @@ github:Yash-Singh1
 github:eggfriedrice24
 github:Ymit24
 github:shivamhwp
+github:jappyjan
+github:justsomelegs
