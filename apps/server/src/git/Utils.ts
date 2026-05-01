@@ -8,24 +8,13 @@ import { Schema } from "effect";
 import { TextGenerationError } from "@t3tools/contracts";
 
 import { existsSync } from "node:fs";
-import { dirname, join, parse } from "node:path";
+import { dirname, join } from "node:path";
 
-export function isGitRepository(cwd: string): boolean {
-  const root = parse(cwd).root;
-  let current = cwd;
-  while (true) {
-    if (existsSync(join(current, ".git"))) {
-      return true;
-    }
-    if (current === root) {
-      return false;
-    }
-    const parent = dirname(current);
-    if (parent === current) {
-      return false;
-    }
-    current = parent;
+export function isGitRepository(current: string): boolean {
+  while (current !== (current = dirname(current))) {
+    if (existsSync(join(current, ".git"))) return true;
   }
+  return false;
 }
 
 /** Convert an Effect Schema to a flat JSON Schema object, inlining `$defs` when present. */
