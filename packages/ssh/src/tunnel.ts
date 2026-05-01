@@ -1161,6 +1161,18 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     });
   });
 
+  const cancelPendingTunnelEntry = Effect.fn("ssh/tunnel.cancelPendingTunnelEntry")(function* (
+    key: string,
+    target: DesktopSshEnvironmentTarget,
+  ) {
+    const pending = pendingTunnelEntries.get(key);
+    if (!pending) {
+      return;
+    }
+    pendingTunnelEntries.delete(key);
+    yield* Deferred.fail(pending, makeSshTunnelCancelledError(target)).pipe(Effect.ignore);
+  });
+
   yield* Scope.addFinalizer(
     managerScope,
     Effect.sync(() => [...tunnels.values()]).pipe(
@@ -1429,6 +1441,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
         cause: readinessExit.cause,
       });
       yield* closeTunnelEntry(entry);
+      yield* cancelPendingTunnelEntry(key, resolvedTarget);
       entry = null;
     }
 
@@ -1547,13 +1560,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     if (entry !== null) {
       yield* closeTunnelEntry(entry);
     }
-    const pending = pendingTunnelEntries.get(key);
-    if (pending) {
-      pendingTunnelEntries.delete(key);
-      yield* Deferred.fail(pending, makeSshTunnelCancelledError(resolvedTarget)).pipe(
-        Effect.ignore,
-      );
-    }
+    yield* cancelPendingTunnelEntry(key, resolvedTarget);
     if (entry === null) {
       yield* runWithSshAuth({
         key,

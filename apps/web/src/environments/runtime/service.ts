@@ -726,6 +726,7 @@ async function issueDesktopSshBearerSession(record: SavedEnvironmentRecord): Pro
     issuePairingToken: true,
   });
   if (!prepared.pairingToken) {
+    await persistSavedEnvironmentRegistryRollback(registrySnapshot);
     throw new Error("Desktop SSH launch did not return a pairing token.");
   }
 

@@ -813,6 +813,54 @@ describe("addSavedEnvironment", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("rolls back ssh registry metadata when pairing token issuance fails", async () => {
+    const originalRecord = {
+      environmentId: EnvironmentId.make("environment-1"),
+      label: "Remote environment",
+      httpBaseUrl: "http://127.0.0.1:3773/",
+      wsBaseUrl: "ws://127.0.0.1:3773/",
+      createdAt: "2026-04-14T00:00:00.000Z",
+      lastConnectedAt: null,
+      desktopSsh: {
+        alias: "devbox",
+        hostname: "devbox.example.com",
+        username: "julius",
+        port: 22,
+      },
+    };
+    mockSavedRecords = [originalRecord];
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue(null);
+    mockEnsureSshEnvironment.mockResolvedValue({
+      target: {
+        alias: "devbox",
+        hostname: "devbox.example.com",
+        username: "julius",
+        port: 22,
+      },
+      httpBaseUrl: "http://127.0.0.1:3774/",
+      wsBaseUrl: "ws://127.0.0.1:3774/",
+      pairingToken: null,
+    });
+
+    const { reconnectSavedEnvironment, resetEnvironmentServiceForTests } =
+      await import("./service");
+
+    await expect(reconnectSavedEnvironment(EnvironmentId.make("environment-1"))).rejects.toThrow(
+      "Desktop SSH launch did not return a pairing token.",
+    );
+
+    expect(mockPersistSavedEnvironmentRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        httpBaseUrl: "http://127.0.0.1:3774/",
+      }),
+    );
+    expect(mockSetSavedEnvironmentRegistry).toHaveBeenCalledWith([originalRecord]);
+    expect(mockSavedRecords).toEqual([originalRecord]);
+    expect(mockBootstrapSshBearerSession).not.toHaveBeenCalled();
+
+    await resetEnvironmentServiceForTests();
+  });
+
   it("surfaces desktop ssh bootstrap failures during saved ssh reconnect", async () => {
     mockSavedRecords = [
       {
