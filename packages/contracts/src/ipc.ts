@@ -155,15 +155,6 @@ export interface DesktopSshEnvironmentBootstrap {
   pairingToken: string | null;
   remotePort?: number;
   remoteServerKind?: "external" | "managed";
-  pairingDiagnostics?: {
-    baseDir: string;
-    stateDir: string;
-    dbPath: string;
-    runtimePath: string;
-    devUrl: string | null;
-    t3codeHome: string | null;
-    runnerPath: string;
-  };
 }
 
 export interface DesktopSshPasswordPromptRequest {

@@ -135,8 +135,6 @@ describe("ssh tunnel scripts", () => {
       buildRemotePairingScript(target),
       '"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json',
     );
-    assert.include(buildRemotePairingScript(target), "diagnostics");
-    assert.include(buildRemotePairingScript(target), "VITE_DEV_SERVER_URL");
     assert.include(buildRemotePairingScript(target), 'PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"');
     assert.notInclude(buildRemotePairingScript(target), "server-home");
     assert.include(buildRemotePairingScript(target, { packageSpec: "t3@nightly" }), "t3@nightly");

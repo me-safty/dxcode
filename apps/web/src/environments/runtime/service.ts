@@ -662,7 +662,6 @@ async function prepareSavedEnvironmentRecordForConnection(
   readonly pairingToken: string | null;
   readonly remotePort: number | null;
   readonly remoteServerKind: "external" | "managed" | null;
-  readonly pairingDiagnostics: DesktopSshEnvironmentBootstrap["pairingDiagnostics"] | null;
 }> {
   if (!record.desktopSsh) {
     return {
@@ -670,7 +669,6 @@ async function prepareSavedEnvironmentRecordForConnection(
       pairingToken: null,
       remotePort: null,
       remoteServerKind: null,
-      pairingDiagnostics: null,
     };
   }
 
@@ -696,7 +694,6 @@ async function prepareSavedEnvironmentRecordForConnection(
     pairingToken: bootstrap.pairingToken,
     remotePort: bootstrap.remotePort ?? null,
     remoteServerKind: bootstrap.remoteServerKind ?? null,
-    pairingDiagnostics: bootstrap.pairingDiagnostics ?? null,
   };
 }
 
@@ -721,13 +718,6 @@ async function issueDesktopSshBearerSession(record: SavedEnvironmentRecord): Pro
       `local ${prepared.record.httpBaseUrl}`,
       `remote port ${prepared.remotePort ?? "unknown"}`,
       prepared.remoteServerKind ? `remote server ${prepared.remoteServerKind}` : null,
-      prepared.pairingDiagnostics ? `pairing db ${prepared.pairingDiagnostics.dbPath}` : null,
-      prepared.pairingDiagnostics
-        ? `pairing runtime ${prepared.pairingDiagnostics.runtimePath}`
-        : null,
-      prepared.pairingDiagnostics
-        ? `pairing devUrl ${prepared.pairingDiagnostics.devUrl ?? "none"}`
-        : null,
     ]
       .filter(Boolean)
       .join(", ");
@@ -1589,13 +1579,6 @@ export async function connectDesktopSshEnvironment(
       `local ${bootstrap.httpBaseUrl}`,
       `remote port ${bootstrap.remotePort ?? "unknown"}`,
       bootstrap.remoteServerKind ? `remote server ${bootstrap.remoteServerKind}` : null,
-      bootstrap.pairingDiagnostics ? `pairing db ${bootstrap.pairingDiagnostics.dbPath}` : null,
-      bootstrap.pairingDiagnostics
-        ? `pairing runtime ${bootstrap.pairingDiagnostics.runtimePath}`
-        : null,
-      bootstrap.pairingDiagnostics
-        ? `pairing devUrl ${bootstrap.pairingDiagnostics.devUrl ?? "none"}`
-        : null,
     ]
       .filter(Boolean)
       .join(", ");

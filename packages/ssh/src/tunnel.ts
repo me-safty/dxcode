@@ -158,17 +158,6 @@ const RemoteLaunchResult = Schema.Struct({
 
 const RemotePairingResult = Schema.Struct({
   credential: Schema.String,
-  diagnostics: Schema.optional(
-    Schema.Struct({
-      baseDir: Schema.String,
-      stateDir: Schema.String,
-      dbPath: Schema.String,
-      runtimePath: Schema.String,
-      devUrl: Schema.NullOr(Schema.String),
-      t3codeHome: Schema.NullOr(Schema.String),
-      runnerPath: Schema.String,
-    }),
-  ),
 });
 
 const RemoteHttpError = Schema.Struct({
@@ -473,44 +462,7 @@ cat >"$RUNNER_FILE" <<'SH'
 SH
 chmod 700 "$RUNNER_FILE"
 PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"
-PAIRING_OUTPUT="$("$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json)"
-PAIRING_OUTPUT="$PAIRING_OUTPUT" node - "$PAIRING_BASE_DIR" "$RUNNER_FILE" <<'NODE'
-const path = require("node:path");
-const baseDir = process.argv[2] ?? "";
-const runnerPath = process.argv[3] ?? "";
-const raw = process.env.PAIRING_OUTPUT ?? "";
-const trimmed = raw.trim();
-if (!trimmed) {
-  process.exit(1);
-}
-let result;
-try {
-  result = JSON.parse(trimmed);
-} catch {
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
-  if (start < 0 || end <= start) {
-    throw new Error("Unable to find JSON object in pairing command output.");
-  }
-  result = JSON.parse(trimmed.slice(start, end + 1));
-}
-const devUrl = process.env.VITE_DEV_SERVER_URL || null;
-const stateDir = path.join(baseDir, devUrl ? "dev" : "userdata");
-process.stdout.write(
-  JSON.stringify({
-    ...result,
-    diagnostics: {
-      baseDir,
-      stateDir,
-      dbPath: path.join(stateDir, "state.sqlite"),
-      runtimePath: path.join(stateDir, "server-runtime.json"),
-      devUrl,
-      t3codeHome: process.env.T3CODE_HOME || null,
-      runnerPath,
-    },
-  }) + "\\n",
-);
-NODE
+"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json
 `;
 
 export const REMOTE_STOP_SCRIPT = `set -eu
@@ -650,7 +602,6 @@ export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingT
 ): Effect.fn.Return<
   {
     readonly credential: string;
-    readonly diagnostics?: typeof RemotePairingResult.Type.diagnostics;
   },
   SshCommandError | SshInvalidTargetError | SshPairingError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
@@ -691,11 +642,9 @@ export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingT
   yield* Effect.logDebug("ssh.remoteServer.pairingToken.created", {
     ...sshTargetLogFields(target),
     stateKey: remoteStateKey(target),
-    diagnostics: parsed.diagnostics ?? null,
   });
   return {
     credential: parsed.credential,
-    ...(parsed.diagnostics ? { diagnostics: parsed.diagnostics } : {}),
   };
 });
 
@@ -1570,7 +1519,6 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       pairingToken,
       remotePort: entry.remotePort,
       ...(entry.remoteServerKind ? { remoteServerKind: entry.remoteServerKind } : {}),
-      ...(pairingResult?.diagnostics ? { pairingDiagnostics: pairingResult.diagnostics } : {}),
     };
   });
 
