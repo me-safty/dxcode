@@ -4,12 +4,7 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Config, Data, Effect, Layer, Schema } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientRequest,
-  HttpClientResponse,
-} from "effect/unstable/http";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 export type DiscordReleaseTarget = "prerelease" | "latest";
 
@@ -104,12 +99,12 @@ const postDiscordWebhook = Effect.fn("postDiscordWebhook")(function* (
       retryOn: "errors-and-responses",
       times: 3,
     }),
+    HttpClient.filterStatusOk,
   );
 
   yield* HttpClientRequest.post(webhookUrl).pipe(
     HttpClientRequest.bodyJson(payload),
     Effect.flatMap(httpClient.execute),
-    Effect.flatMap(HttpClientResponse.filterStatusOk),
     Effect.mapError(
       (cause) =>
         new DiscordReleaseAnnouncementError({
