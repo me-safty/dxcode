@@ -45,7 +45,7 @@ interface DiscordWebhookPayload {
 const DISCORD_RELEASE_TARGETS = ["prerelease", "latest"] as const;
 const DiscordRoleIdSchema = Schema.String.check(Schema.isPattern(/^\d+$/));
 const WebUrlSchema = Schema.String.check(Schema.isPattern(/^https?:\/\/\S+$/));
-const DiscordWebhookUrl = Config.nonEmptyString("DISCORD_WEBHOOK_URL");
+const DiscordWebhookUrl = Config.url("DISCORD_WEBHOOK_URL");
 
 class DiscordReleaseAnnouncementError extends Data.TaggedError("DiscordReleaseAnnouncementError")<{
   readonly message: string;
@@ -62,21 +62,12 @@ const targetColors = {
   latest: 0x2ecc71,
 } as const satisfies Record<DiscordReleaseTarget, number>;
 
-function describeWebhookUrl(webhookUrl: string) {
-  try {
-    const url = new URL(webhookUrl);
-    return {
-      configured: true,
-      origin: url.origin,
-      pathnameSegmentCount: url.pathname.split("/").filter(Boolean).length,
-    } as const;
-  } catch {
-    return {
-      configured: true,
-      origin: "invalid",
-      pathnameSegmentCount: 0,
-    } as const;
-  }
+function describeWebhookUrl(webhookUrl: URL) {
+  return {
+    configured: true,
+    origin: webhookUrl.origin,
+    pathnameSegmentCount: webhookUrl.pathname.split("/").filter(Boolean).length,
+  } as const;
 }
 
 function summarizePayload(payload: DiscordWebhookPayload) {
@@ -122,7 +113,7 @@ export const buildDiscordReleaseAnnouncement = (
 });
 
 const postDiscordWebhook = Effect.fn("postDiscordWebhook")(function* (
-  webhookUrl: string,
+  webhookUrl: URL,
   payload: DiscordWebhookPayload,
 ) {
   const httpClient = (yield* HttpClient.HttpClient).pipe(
@@ -137,7 +128,7 @@ const postDiscordWebhook = Effect.fn("postDiscordWebhook")(function* (
     ...summarizePayload(payload),
   });
 
-  const response = yield* HttpClientRequest.post(webhookUrl).pipe(
+  const response = yield* HttpClientRequest.post(webhookUrl.href).pipe(
     HttpClientRequest.bodyJson(payload),
     Effect.flatMap(httpClient.execute),
     Effect.mapError(
