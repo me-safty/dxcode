@@ -133,6 +133,7 @@ import {
 } from "../composerDraftStore";
 import {
   appendTerminalContextsToPrompt,
+  deriveDisplayedUserMessageState,
   formatTerminalContextLabel,
   type TerminalContextDraft,
   type TerminalContextSelection,
@@ -3271,6 +3272,28 @@ export default function ChatView(props: ChatViewProps) {
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
 
+  const onEditUserMessage = useCallback(
+    async (messageId: MessageId, text: string) => {
+      const targetTurnCount = revertTurnCountRef.current.get(messageId);
+      if (typeof targetTurnCount !== "number") {
+        return;
+      }
+
+      const displayedMessage = deriveDisplayedUserMessageState(text);
+      const draftText = displayedMessage.visibleText || text;
+      setComposerDraftPrompt(composerDraftTarget, draftText);
+      promptRef.current = draftText;
+      composerRef.current?.resetCursorState({
+        cursor: draftText.length,
+        prompt: draftText,
+        detectTrigger: true,
+      });
+      composerRef.current?.focusAtEnd();
+      await onRevertToTurnCountRef.current(targetTurnCount);
+    },
+    [composerDraftTarget, composerRef, setComposerDraftPrompt],
+  );
+
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
@@ -3349,6 +3372,7 @@ export default function ChatView(props: ChatViewProps) {
               onOpenTurnDiff={onOpenTurnDiff}
               revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
               onRevertUserMessage={onRevertUserMessage}
+              onEditUserMessage={onEditUserMessage}
               isRevertingCheckpoint={isRevertingCheckpoint}
               onImageExpand={onExpandTimelineImage}
               markdownCwd={gitCwd ?? undefined}
