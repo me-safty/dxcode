@@ -147,6 +147,11 @@ export interface PickFolderOptions {
   initialPath?: string | null;
 }
 
+export interface PasteClipboardAsFileResult {
+  fileName: string;
+  text: string;
+}
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
@@ -170,6 +175,7 @@ export interface DesktopBridge {
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
   onMenuAction: (listener: (action: string) => void) => () => void;
+  pasteClipboardAsFile: () => Promise<PasteClipboardAsFileResult | null>;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;

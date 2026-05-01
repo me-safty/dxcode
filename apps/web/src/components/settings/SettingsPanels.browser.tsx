@@ -328,6 +328,7 @@ const createDesktopBridgeStub = (overrides?: {
       .fn()
       .mockResolvedValue({ accepted: false, completed: false, state: idleUpdateState }),
     onUpdateState: () => () => {},
+    pasteClipboardAsFile: vi.fn().mockResolvedValue(null),
   };
 };
 
