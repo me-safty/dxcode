@@ -133,6 +133,8 @@ describe("ssh tunnel scripts", () => {
       buildRemotePairingScript(target),
       '"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json',
     );
+    assert.include(buildRemotePairingScript(target), "diagnostics");
+    assert.include(buildRemotePairingScript(target), "VITE_DEV_SERVER_URL");
     assert.include(buildRemotePairingScript(target), 'BASE_DIR_FILE="$STATE_DIR/base-dir"');
     assert.include(buildRemotePairingScript(target, { packageSpec: "t3@nightly" }), "t3@nightly");
     assert.include(
@@ -210,8 +212,8 @@ describe("ssh tunnel scripts", () => {
     const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner);
     const processLayer = Layer.merge(NodeServices.layer, spawnerLayer);
     return Effect.gen(function* () {
-      const credential = yield* issueRemotePairingToken(target);
-      assert.equal(credential, "LCL4R2TPHDKQ");
+      const result = yield* issueRemotePairingToken(target);
+      assert.equal(result.credential, "LCL4R2TPHDKQ");
     }).pipe(Effect.provide(processLayer));
   });
 

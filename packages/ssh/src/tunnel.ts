@@ -158,6 +158,17 @@ const RemoteLaunchResult = Schema.Struct({
 
 const RemotePairingResult = Schema.Struct({
   credential: Schema.String,
+  diagnostics: Schema.optional(
+    Schema.Struct({
+      baseDir: Schema.String,
+      stateDir: Schema.String,
+      dbPath: Schema.String,
+      runtimePath: Schema.String,
+      devUrl: Schema.NullOr(Schema.String),
+      t3codeHome: Schema.NullOr(Schema.String),
+      runnerPath: Schema.String,
+    }),
+  ),
 });
 
 const RemoteHttpError = Schema.Struct({
@@ -470,7 +481,38 @@ PAIRING_BASE_DIR="$(cat "$BASE_DIR_FILE" 2>/dev/null || true)"
 if [ -z "$PAIRING_BASE_DIR" ]; then
   PAIRING_BASE_DIR="$SERVER_HOME"
 fi
-"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json
+PAIRING_OUTPUT="$("$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json)"
+PAIRING_OUTPUT="$PAIRING_OUTPUT" node - "$PAIRING_BASE_DIR" "$RUNNER_FILE" <<'NODE'
+const path = require("node:path");
+const baseDir = process.argv[2] ?? "";
+const runnerPath = process.argv[3] ?? "";
+const raw = process.env.PAIRING_OUTPUT ?? "";
+const lines = raw
+  .split(/\\r?\\n/u)
+  .map((line) => line.trim())
+  .filter(Boolean);
+const lastLine = lines.at(-1);
+if (!lastLine) {
+  process.exit(1);
+}
+const result = JSON.parse(lastLine);
+const devUrl = process.env.VITE_DEV_SERVER_URL || null;
+const stateDir = path.join(baseDir, devUrl ? "dev" : "userdata");
+process.stdout.write(
+  JSON.stringify({
+    ...result,
+    diagnostics: {
+      baseDir,
+      stateDir,
+      dbPath: path.join(stateDir, "state.sqlite"),
+      runtimePath: path.join(stateDir, "server-runtime.json"),
+      devUrl,
+      t3codeHome: process.env.T3CODE_HOME || null,
+      runnerPath,
+    },
+  }) + "\\n",
+);
+NODE
 `;
 
 export const REMOTE_STOP_SCRIPT = `set -eu
@@ -609,7 +651,10 @@ export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingT
   input?: SshAuthOptions,
   runner?: RemoteT3RunnerOptions,
 ): Effect.fn.Return<
-  string,
+  {
+    readonly credential: string;
+    readonly diagnostics?: typeof RemotePairingResult.Type.diagnostics;
+  },
   SshCommandError | SshInvalidTargetError | SshPairingError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
@@ -649,8 +694,12 @@ export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingT
   yield* Effect.logDebug("ssh.remoteServer.pairingToken.created", {
     ...sshTargetLogFields(target),
     stateKey: remoteStateKey(target),
+    diagnostics: parsed.diagnostics ?? null,
   });
-  return parsed.credential;
+  return {
+    credential: parsed.credential,
+    ...(parsed.diagnostics ? { diagnostics: parsed.diagnostics } : {}),
+  };
 });
 
 export const stopRemoteServer = Effect.fn("ssh/tunnel.stopRemoteServer")(function* (
@@ -1500,13 +1549,14 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     });
     const entry = yield* ensureTunnelEntry(key, resolvedTarget, runner);
 
-    const pairingToken = requestOptions?.issuePairingToken
+    const pairingResult = requestOptions?.issuePairingToken
       ? yield* runWithSshAuth({
           key,
           target: entry.target,
           operation: (authOptions) => issueRemotePairingToken(entry.target, authOptions, runner),
         })
       : null;
+    const pairingToken = pairingResult?.credential ?? null;
 
     yield* Effect.logInfo("ssh.environment.ensure.succeeded", {
       ...sshTargetLogFields(entry.target),
@@ -1523,6 +1573,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       pairingToken,
       remotePort: entry.remotePort,
       ...(entry.remoteServerKind ? { remoteServerKind: entry.remoteServerKind } : {}),
+      ...(pairingResult?.diagnostics ? { pairingDiagnostics: pairingResult.diagnostics } : {}),
     };
   });
 
