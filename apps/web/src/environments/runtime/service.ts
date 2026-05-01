@@ -357,6 +357,25 @@ function disposeThreadDetailSubscriptionsForEnvironment(environmentId: Environme
   }
 }
 
+function detachThreadDetailSubscriptionsForEnvironment(environmentId: EnvironmentId): void {
+  for (const entry of threadDetailSubscriptions.values()) {
+    if (entry.environmentId !== environmentId) {
+      continue;
+    }
+    entry.unsubscribe();
+    entry.unsubscribe = NOOP;
+    watchThreadDetailSubscriptionConnection(entry);
+  }
+}
+
+function attachThreadDetailSubscriptionsForEnvironment(environmentId: EnvironmentId): void {
+  for (const entry of threadDetailSubscriptions.values()) {
+    if (entry.environmentId === environmentId) {
+      attachThreadDetailSubscription(entry);
+    }
+  }
+}
+
 function reconcileThreadDetailSubscriptionsForEnvironment(
   environmentId: EnvironmentId,
   threadIds: ReadonlyArray<ThreadId>,
@@ -1166,6 +1185,7 @@ function registerConnection(connection: EnvironmentConnection): EnvironmentConne
     throw new Error(`Environment ${connection.environmentId} already has an active connection.`);
   }
   environmentConnections.set(connection.environmentId, connection);
+  attachThreadDetailSubscriptionsForEnvironment(connection.environmentId);
   emitEnvironmentConnectionRegistryChange();
   return connection;
 }
@@ -1176,10 +1196,10 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
     return false;
   }
 
-  disposeThreadDetailSubscriptionsForEnvironment(environmentId);
   lastAppliedProjectionVersionByEnvironment.delete(environmentId);
   environmentConnections.delete(environmentId);
   emitEnvironmentConnectionRegistryChange();
+  detachThreadDetailSubscriptionsForEnvironment(environmentId);
   await connection.dispose();
   return true;
 }
@@ -1488,6 +1508,7 @@ export async function reconnectSavedEnvironment(environmentId: EnvironmentId): P
 
 export async function removeSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
   await disconnectSavedEnvironment(environmentId);
+  disposeThreadDetailSubscriptionsForEnvironment(environmentId);
   useSavedEnvironmentRegistryStore.getState().remove(environmentId);
   useSavedEnvironmentRuntimeStore.getState().clear(environmentId);
   useStore.getState().removeEnvironmentState(environmentId);
