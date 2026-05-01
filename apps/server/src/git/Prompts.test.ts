@@ -115,6 +115,14 @@ describe("buildThreadTitlePrompt", () => {
     expect(result.prompt).not.toContain("Attachment metadata:");
   });
 
+  it("instructs title generation to preserve the user's language", () => {
+    const result = buildThreadTitlePrompt({
+      message: "Investigate inconsistent generated chat title language",
+    });
+
+    expect(result.prompt).toContain("Use the user's language; do not translate.");
+  });
+
   it("includes attachment metadata when attachments are provided", () => {
     const result = buildThreadTitlePrompt({
       message: "Name this thread from the screenshot",
