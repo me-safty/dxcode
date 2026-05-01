@@ -627,7 +627,12 @@ function AssistantChangedFilesSectionInner({
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
   const allDirectoriesExpanded = useUiStateStore((store) =>
-    getThreadChangedFilesExpanded(store, routeThreadKey, defaultOpenChangedFiles),
+    getThreadChangedFilesExpanded(
+      store,
+      routeThreadKey,
+      turnSummary.turnId,
+      defaultOpenChangedFiles,
+    ),
   );
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
   const summaryStat = summarizeTurnDiffStats(checkpointFiles);
@@ -652,7 +657,12 @@ function AssistantChangedFilesSectionInner({
             variant="outline"
             data-scroll-anchor-ignore
             onClick={() =>
-              setExpanded(routeThreadKey, !allDirectoriesExpanded, defaultOpenChangedFiles)
+              setExpanded(
+                routeThreadKey,
+                turnSummary.turnId,
+                !allDirectoriesExpanded,
+                defaultOpenChangedFiles,
+              )
             }
           >
             {allDirectoriesExpanded ? "Collapse all" : "Expand all"}

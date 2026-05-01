@@ -353,8 +353,8 @@ describe("uiStateStore pure functions", () => {
         [thread2]: "2026-02-25T12:36:00.000Z",
       },
       threadChangedFilesExpandedById: {
-        [thread1]: false,
-        [thread2]: false,
+        [thread1]: { "turn-1": false },
+        [thread2]: { "turn-1": false },
       },
     });
 
@@ -364,7 +364,7 @@ describe("uiStateStore pure functions", () => {
       [thread1]: "2026-02-25T12:35:00.000Z",
     });
     expect(next.threadChangedFilesExpandedById).toEqual({
-      [thread1]: false,
+      [thread1]: { "turn-1": false },
     });
   });
 
@@ -406,7 +406,7 @@ describe("uiStateStore pure functions", () => {
         [thread1]: "2026-02-25T12:35:00.000Z",
       },
       threadChangedFilesExpandedById: {
-        [thread1]: false,
+        [thread1]: { "turn-1": false },
       },
     });
 
@@ -416,54 +416,73 @@ describe("uiStateStore pure functions", () => {
     expect(next.threadChangedFilesExpandedById).toEqual({});
   });
 
-  it("setThreadChangedFilesExpanded stores collapsed state per thread", () => {
+  it("setThreadChangedFilesExpanded stores collapsed state per turn", () => {
     const thread1 = ThreadId.make("thread-1");
+    const turn1 = "turn-1";
     const initialState = makeUiState();
 
-    const next = setThreadChangedFilesExpanded(initialState, thread1, false, true);
+    const next = setThreadChangedFilesExpanded(initialState, thread1, turn1, false, true);
 
     expect(next.threadChangedFilesExpandedById).toEqual({
-      [thread1]: false,
+      [thread1]: { [turn1]: false },
     });
   });
 
-  it("setThreadChangedFilesExpanded removes thread overrides when expanded again", () => {
+  it("setThreadChangedFilesExpanded removes turn overrides when expanded again", () => {
     const thread1 = ThreadId.make("thread-1");
+    const turn1 = "turn-1";
     const initialState = makeUiState({
       threadChangedFilesExpandedById: {
-        [thread1]: false,
+        [thread1]: { [turn1]: false },
       },
     });
 
-    const next = setThreadChangedFilesExpanded(initialState, thread1, true, true);
+    const next = setThreadChangedFilesExpanded(initialState, thread1, turn1, true, true);
 
     expect(next.threadChangedFilesExpandedById).toEqual({});
+  });
+
+  it("setThreadChangedFilesExpanded only updates the selected turn", () => {
+    const thread1 = ThreadId.make("thread-1");
+    const initialState = makeUiState({
+      threadChangedFilesExpandedById: {
+        [thread1]: { "turn-1": false, "turn-2": true },
+      },
+    });
+
+    const next = setThreadChangedFilesExpanded(initialState, thread1, "turn-1", true, true);
+
+    expect(next.threadChangedFilesExpandedById).toEqual({
+      [thread1]: { "turn-2": true },
+    });
   });
 
   it("stores an explicit expanded override when changed-files default to collapsed", () => {
     const thread1 = ThreadId.make("thread-1");
+    const turn1 = "turn-1";
     const initialState = makeUiState();
 
-    const next = setThreadChangedFilesExpanded(initialState, thread1, true, false);
+    const next = setThreadChangedFilesExpanded(initialState, thread1, turn1, true, false);
 
     expect(next.threadChangedFilesExpandedById).toEqual({
-      [thread1]: true,
+      [thread1]: { [turn1]: true },
     });
-    expect(getThreadChangedFilesExpanded(next, thread1, false)).toBe(true);
+    expect(getThreadChangedFilesExpanded(next, thread1, turn1, false)).toBe(true);
   });
 
   it("drops an override when toggled back to the default changed-files state", () => {
     const thread1 = ThreadId.make("thread-1");
+    const turn1 = "turn-1";
     const initialState = makeUiState({
       threadChangedFilesExpandedById: {
-        [thread1]: true,
+        [thread1]: { [turn1]: true },
       },
     });
 
-    const next = setThreadChangedFilesExpanded(initialState, thread1, false, false);
+    const next = setThreadChangedFilesExpanded(initialState, thread1, turn1, false, false);
 
     expect(next.threadChangedFilesExpandedById).toEqual({});
-    expect(getThreadChangedFilesExpanded(next, thread1, false)).toBe(false);
+    expect(getThreadChangedFilesExpanded(next, thread1, turn1, false)).toBe(false);
   });
 });
 
@@ -622,14 +641,14 @@ describe("uiStateStore persistence round-trip", () => {
     useUiStateStore.setState(makeUiState());
 
     localStorageStub.clear();
-    useUiStateStore.getState().setThreadChangedFilesExpanded(threadKey, false, true);
+    useUiStateStore.getState().setThreadChangedFilesExpanded(threadKey, "turn-1", false, true);
 
     const persisted = JSON.parse(
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
 
     expect(persisted.threadChangedFilesExpandedById).toEqual({
-      [threadKey]: false,
+      [threadKey]: { "turn-1": false },
     });
   });
 
@@ -639,18 +658,18 @@ describe("uiStateStore persistence round-trip", () => {
     useUiStateStore.setState(makeUiState());
 
     localStorageStub.clear();
-    useUiStateStore.getState().setThreadChangedFilesExpanded(threadKey, true, false);
+    useUiStateStore.getState().setThreadChangedFilesExpanded(threadKey, "turn-1", true, false);
 
     const persisted = JSON.parse(
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
 
     expect(persisted.threadChangedFilesExpandedById).toEqual({
-      [threadKey]: true,
+      [threadKey]: { "turn-1": true },
     });
   });
 
-  it("hydrates legacy per-turn changed-files collapse as a collapsed thread preference", async () => {
+  it("hydrates legacy per-turn changed-files collapse as turn preferences", async () => {
     const threadKey = "environment-local:thread-legacy";
 
     localStorageStub.setItem(
@@ -670,11 +689,11 @@ describe("uiStateStore persistence round-trip", () => {
     const { useUiStateStore: rehydratedStore } = await import("./uiStateStore");
 
     expect(rehydratedStore.getState().threadChangedFilesExpandedById).toEqual({
-      [threadKey]: false,
+      [threadKey]: { "turn-1": false },
     });
   });
 
-  it("hydrates explicit expanded thread overrides", async () => {
+  it("ignores obsolete thread-wide changed-files overrides", async () => {
     const threadKey = "environment-local:thread-expanded";
 
     localStorageStub.setItem(
@@ -692,6 +711,6 @@ describe("uiStateStore persistence round-trip", () => {
     const { getThreadChangedFilesExpanded: getExpanded, useUiStateStore: rehydratedStore } =
       await import("./uiStateStore");
 
-    expect(getExpanded(rehydratedStore.getState(), threadKey, false)).toBe(true);
+    expect(getExpanded(rehydratedStore.getState(), threadKey, "turn-1", false)).toBe(false);
   });
 });
