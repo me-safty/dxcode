@@ -4,7 +4,12 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Config, Data, Effect, Layer, Schema } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientRequest,
+  HttpClientResponse,
+} from "effect/unstable/http";
 
 export type DiscordReleaseTarget = "prerelease" | "latest";
 
@@ -94,10 +99,17 @@ const postDiscordWebhook = Effect.fn("postDiscordWebhook")(function* (
   webhookUrl: string,
   payload: DiscordWebhookPayload,
 ) {
-  const httpClient = yield* HttpClient.HttpClient;
-  const response = yield* HttpClientRequest.post(webhookUrl).pipe(
+  const httpClient = (yield* HttpClient.HttpClient).pipe(
+    HttpClient.retryTransient({
+      retryOn: "errors-and-responses",
+      times: 3,
+    }),
+  );
+
+  yield* HttpClientRequest.post(webhookUrl).pipe(
     HttpClientRequest.bodyJson(payload),
     Effect.flatMap(httpClient.execute),
+    Effect.flatMap(HttpClientResponse.filterStatusOk),
     Effect.mapError(
       (cause) =>
         new DiscordReleaseAnnouncementError({
@@ -106,15 +118,6 @@ const postDiscordWebhook = Effect.fn("postDiscordWebhook")(function* (
         }),
     ),
   );
-
-  if (response.status < 200 || response.status >= 300) {
-    const body = yield* response.text.pipe(Effect.catch(() => Effect.succeed("")));
-    return yield* new DiscordReleaseAnnouncementError({
-      message: `Discord release announcement failed with HTTP ${response.status}${
-        body ? `: ${body}` : ""
-      }`,
-    });
-  }
 });
 
 const runtimeLayer = Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer);
