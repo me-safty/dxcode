@@ -168,7 +168,7 @@ describe("MessagesTimeline", () => {
     }
   });
 
-  it("keeps changed-files collapsed for future turns in the same thread after a manual collapse", async () => {
+  it("keeps changed-files collapse scoped to the selected turn", async () => {
     const props = buildProps();
     const firstAssistantMessageId = MessageId.make("assistant-1");
     const secondAssistantMessageId = MessageId.make("assistant-2");
@@ -271,8 +271,8 @@ describe("MessagesTimeline", () => {
           const buttonLabels = [...document.querySelectorAll("button")].map((button) =>
             button.textContent?.trim(),
           );
-          expect(buttonLabels.filter((label) => label === "Expand all")).toHaveLength(2);
-          expect(buttonLabels).not.toContain("Collapse all");
+          expect(buttonLabels.filter((label) => label === "Expand all")).toHaveLength(1);
+          expect(buttonLabels.filter((label) => label === "Collapse all")).toHaveLength(1);
         },
         { timeout: 8_000, interval: 16 },
       );
