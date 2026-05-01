@@ -203,9 +203,11 @@ interface PendingSshPasswordPrompt {
   readonly timeout: ReturnType<typeof setTimeout>;
 }
 
-function isSshPasswordPromptCancellation(error: unknown): error is SshPasswordPromptError {
+export function isSshPasswordPromptCancellation(error: unknown): error is SshPasswordPromptError {
+  const message = error instanceof SshPasswordPromptError ? error.message.toLowerCase() : "";
   return (
-    error instanceof SshPasswordPromptError && error.message.toLowerCase().includes("cancelled")
+    error instanceof SshPasswordPromptError &&
+    (message.includes("cancelled") || message.includes("timed out"))
   );
 }
 
@@ -378,6 +380,11 @@ export class DesktopSshEnvironmentBridge {
     };
 
     return await new Promise<string | null>((resolve, reject) => {
+      const rejectPrompt = (error: Error) => {
+        clearTimeout(timeout);
+        this.pendingPrompts.delete(request.requestId);
+        reject(error);
+      };
       const timeout = setTimeout(() => {
         this.pendingPrompts.delete(request.requestId);
         reject(new Error(`SSH authentication timed out for ${input.destination}.`));
@@ -386,11 +393,28 @@ export class DesktopSshEnvironmentBridge {
 
       this.pendingPrompts.set(request.requestId, { resolve, reject, timeout });
 
-      window.webContents.send(SSH_PASSWORD_PROMPT_CHANNEL, request);
-      if (window.isMinimized()) {
-        window.restore();
+      try {
+        if (window.isDestroyed()) {
+          throw new Error("T3 Code window is not available for SSH authentication.");
+        }
+        window.webContents.send(SSH_PASSWORD_PROMPT_CHANNEL, request);
+        if (window.isDestroyed()) {
+          throw new Error("T3 Code window is not available for SSH authentication.");
+        }
+        if (window.isMinimized()) {
+          window.restore();
+        }
+        if (window.isDestroyed()) {
+          throw new Error("T3 Code window is not available for SSH authentication.");
+        }
+        window.focus();
+      } catch (error) {
+        rejectPrompt(
+          error instanceof Error
+            ? error
+            : new Error("T3 Code window is not available for SSH authentication."),
+        );
       }
-      window.focus();
     });
   }
 }

@@ -394,6 +394,10 @@ DEFAULT_REMOTE_PORT="$(resolve_default_runtime_port 2>/dev/null || true)"
 if [ -n "$DEFAULT_REMOTE_PORT" ]; then
   REMOTE_PORT="$DEFAULT_REMOTE_PORT"
   if wait_ready "@@T3_REUSE_READY_TIMEOUT_MS@@"; then
+    if [ "$REMOTE_MANAGED" = "managed" ] && [ -n "$REMOTE_PID" ] && kill -0 "$REMOTE_PID" 2>/dev/null; then
+      kill "$REMOTE_PID" 2>/dev/null || true
+      wait_for_pid_exit "$REMOTE_PID"
+    fi
     printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
     printf 'external\\n' >"$MANAGED_FILE"
     REMOTE_PID=""

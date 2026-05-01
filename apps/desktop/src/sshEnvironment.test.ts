@@ -4,7 +4,9 @@ import * as Path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { discoverDesktopSshHosts } from "./sshEnvironment.ts";
+import { SshPasswordPromptError } from "@t3tools/ssh/errors";
+
+import { discoverDesktopSshHosts, isSshPasswordPromptCancellation } from "./sshEnvironment.ts";
 
 const tempDirectories: string[] = [];
 
@@ -21,6 +23,16 @@ function makeTempHomeDir(): string {
 }
 
 describe("sshEnvironment", () => {
+  it("treats password prompt timeouts as cancellable authentication prompts", () => {
+    expect(
+      isSshPasswordPromptCancellation(
+        new SshPasswordPromptError({
+          message: "SSH authentication timed out for devbox.",
+        }),
+      ),
+    ).toBe(true);
+  });
+
   it("wires desktop host discovery through the ssh package runtime", async () => {
     const homeDir = makeTempHomeDir();
     const sshDir = Path.join(homeDir, ".ssh");

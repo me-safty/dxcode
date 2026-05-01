@@ -713,7 +713,8 @@ async function issueDesktopSshBearerSession(record: SavedEnvironmentRecord): Pro
   const bearerSession = await bootstrapDesktopSshBearerSession(
     prepared.record.httpBaseUrl,
     prepared.pairingToken,
-  ).catch((error) => {
+  ).catch(async (error) => {
+    await persistSavedEnvironmentRegistryRollback(registrySnapshot);
     const detail = [
       `local ${prepared.record.httpBaseUrl}`,
       `remote port ${prepared.remotePort ?? "unknown"}`,

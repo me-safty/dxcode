@@ -171,6 +171,7 @@ export function HostedPairingRouteSurface() {
       ? "Connecting to this backend."
       : "This pairing link is missing its backend host or token.",
   );
+  const [canRetry, setCanRetry] = useState(false);
   const submitAttemptedRef = useRef(false);
   const tokenSubmittedRef = useRef(false);
 
@@ -180,17 +181,20 @@ export function HostedPairingRouteSurface() {
     if (!request) {
       setStatus("error");
       setMessage("This pairing link is missing its backend host or token.");
+      setCanRetry(false);
       return;
     }
 
     if (tokenSubmittedRef.current) {
       setStatus("error");
       setMessage("This one-time pairing token was already submitted. Request a new pairing link.");
+      setCanRetry(false);
       return;
     }
 
     setStatus("pairing");
     setMessage("Connecting to this backend.");
+    setCanRetry(false);
     tokenSubmittedRef.current = true;
 
     try {
@@ -204,6 +208,7 @@ export function HostedPairingRouteSurface() {
     } catch (error) {
       tokenSubmittedRef.current = false;
       setStatus("error");
+      setCanRetry(true);
       setMessage(
         `${errorMessageFromUnknown(error)} If the backend accepted this one-time token, request a new pairing link before retrying.`,
       );
@@ -261,7 +266,7 @@ export function HostedPairingRouteSurface() {
             <Button disabled size="sm">
               Pairing...
             </Button>
-          ) : !tokenSubmittedRef.current ? (
+          ) : canRetry ? (
             <Button size="sm" onClick={() => void submitHostedPairingRequest()}>
               Try again
             </Button>
