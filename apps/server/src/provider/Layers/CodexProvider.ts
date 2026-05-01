@@ -35,7 +35,7 @@ export interface CodexAppServerProviderSnapshot {
 }
 
 const REASONING_EFFORT_LABELS: Record<CodexSchema.V2ModelListResponse__ReasoningEffort, string> = {
-  none: "None",
+  none: "Off",
   minimal: "Minimal",
   low: "Low",
   medium: "Medium",
@@ -84,7 +84,14 @@ function codexAccountEmail(account: CodexSchema.V2GetAccountResponse["account"])
 function mapCodexModelCapabilities(
   model: CodexSchema.V2ModelListResponse__Model,
 ): ModelCapabilities {
-  const reasoningOptions = model.supportedReasoningEfforts.map(({ reasoningEffort }) =>
+  const supportedReasoningEfforts = model.supportedReasoningEfforts.map(
+    ({ reasoningEffort }) => reasoningEffort,
+  );
+  const reasoningEfforts: ReadonlyArray<CodexSchema.V2ModelListResponse__ReasoningEffort> =
+    supportedReasoningEfforts.length === 0 || supportedReasoningEfforts.includes("none")
+      ? supportedReasoningEfforts
+      : ["none", ...supportedReasoningEfforts];
+  const reasoningOptions = reasoningEfforts.map((reasoningEffort) =>
     reasoningEffort === model.defaultReasoningEffort
       ? {
           id: reasoningEffort,
