@@ -487,15 +487,21 @@ const path = require("node:path");
 const baseDir = process.argv[2] ?? "";
 const runnerPath = process.argv[3] ?? "";
 const raw = process.env.PAIRING_OUTPUT ?? "";
-const lines = raw
-  .split(/\\r?\\n/u)
-  .map((line) => line.trim())
-  .filter(Boolean);
-const lastLine = lines.at(-1);
-if (!lastLine) {
+const trimmed = raw.trim();
+if (!trimmed) {
   process.exit(1);
 }
-const result = JSON.parse(lastLine);
+let result;
+try {
+  result = JSON.parse(trimmed);
+} catch {
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start < 0 || end <= start) {
+    throw new Error("Unable to find JSON object in pairing command output.");
+  }
+  result = JSON.parse(trimmed.slice(start, end + 1));
+}
 const devUrl = process.env.VITE_DEV_SERVER_URL || null;
 const stateDir = path.join(baseDir, devUrl ? "dev" : "userdata");
 process.stdout.write(
