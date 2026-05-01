@@ -136,6 +136,9 @@ describe("ssh tunnel scripts", () => {
     assert.include(buildRemotePairingScript(target), "diagnostics");
     assert.include(buildRemotePairingScript(target), "VITE_DEV_SERVER_URL");
     assert.include(buildRemotePairingScript(target), 'BASE_DIR_FILE="$STATE_DIR/base-dir"');
+    assert.include(buildRemotePairingScript(target), 'MANAGED_FILE="$STATE_DIR/managed"');
+    assert.include(buildRemotePairingScript(target), 'PAIRING_MANAGED="$(cat "$MANAGED_FILE"');
+    assert.include(buildRemotePairingScript(target), 'PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"');
     assert.include(buildRemotePairingScript(target, { packageSpec: "t3@nightly" }), "t3@nightly");
     assert.include(
       buildRemoteStopScript(target),

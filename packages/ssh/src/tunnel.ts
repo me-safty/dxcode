@@ -470,14 +470,44 @@ printf '{"remotePort":%s,"serverKind":"%s"}\\n' "$REMOTE_PORT" "\${REMOTE_MANAGE
 export const REMOTE_PAIRING_SCRIPT = `set -eu
 STATE_DIR="$HOME/.t3/ssh-launch/@@T3_STATE_KEY@@"
 SERVER_HOME="$STATE_DIR/server-home"
+DEFAULT_SERVER_HOME="$HOME/.t3"
+DEFAULT_RUNTIME_FILE="$DEFAULT_SERVER_HOME/userdata/server-runtime.json"
 BASE_DIR_FILE="$STATE_DIR/base-dir"
+MANAGED_FILE="$STATE_DIR/managed"
 RUNNER_FILE="$STATE_DIR/run-t3.sh"
 mkdir -p "$STATE_DIR" "$SERVER_HOME"
 cat >"$RUNNER_FILE" <<'SH'
 @@T3_RUNNER_SCRIPT@@
 SH
 chmod 700 "$RUNNER_FILE"
+default_runtime_is_ready() {
+  node - "$DEFAULT_RUNTIME_FILE" <<'NODE'
+const fs = require("node:fs");
+const runtimePath = process.argv[2] ?? "";
+try {
+  const runtime = JSON.parse(fs.readFileSync(runtimePath, "utf8"));
+  const pid = Number(runtime.pid);
+  const port = Number(runtime.port);
+  if (!Number.isInteger(pid) || !Number.isInteger(port)) {
+    process.exit(1);
+  }
+  const origin = new URL(String(runtime.origin ?? ""));
+  if (origin.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(origin.hostname)) {
+    process.exit(1);
+  }
+  process.kill(pid, 0);
+} catch {
+  process.exit(1);
+}
+NODE
+}
 PAIRING_BASE_DIR="$(cat "$BASE_DIR_FILE" 2>/dev/null || true)"
+PAIRING_MANAGED="$(cat "$MANAGED_FILE" 2>/dev/null || true)"
+if [ "$PAIRING_MANAGED" = "external" ]; then
+  PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"
+elif [ -z "$PAIRING_BASE_DIR" ] && default_runtime_is_ready 2>/dev/null; then
+  PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"
+fi
 if [ -z "$PAIRING_BASE_DIR" ]; then
   PAIRING_BASE_DIR="$SERVER_HOME"
 fi
