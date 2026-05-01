@@ -660,9 +660,11 @@ async function prepareSavedEnvironmentRecordForConnection(
 ): Promise<{
   readonly record: SavedEnvironmentRecord;
   readonly pairingToken: string | null;
+  readonly remotePort: number | null;
+  readonly remoteServerKind: "external" | "managed" | null;
 }> {
   if (!record.desktopSsh) {
-    return { record, pairingToken: null };
+    return { record, pairingToken: null, remotePort: null, remoteServerKind: null };
   }
 
   const bootstrap = await resolveDesktopSshEnvironmentBootstrap(record.desktopSsh, options);
@@ -685,6 +687,8 @@ async function prepareSavedEnvironmentRecordForConnection(
   return {
     record: nextRecord,
     pairingToken: bootstrap.pairingToken,
+    remotePort: bootstrap.remotePort ?? null,
+    remoteServerKind: bootstrap.remoteServerKind ?? null,
   };
 }
 
@@ -704,7 +708,17 @@ async function issueDesktopSshBearerSession(record: SavedEnvironmentRecord): Pro
   const bearerSession = await bootstrapDesktopSshBearerSession(
     prepared.record.httpBaseUrl,
     prepared.pairingToken,
-  );
+  ).catch((error) => {
+    const detail = [
+      `local ${prepared.record.httpBaseUrl}`,
+      `remote port ${prepared.remotePort ?? "unknown"}`,
+      prepared.remoteServerKind ? `remote server ${prepared.remoteServerKind}` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${message} (${detail})`);
+  });
   const didPersistBearerToken = await writeSavedEnvironmentBearerToken(
     prepared.record.environmentId,
     bearerSession.sessionToken,
@@ -1555,6 +1569,16 @@ export async function connectDesktopSshEnvironment(
     host: bootstrap.httpBaseUrl,
     pairingCode: bootstrap.pairingToken,
     desktopSsh: bootstrap.target,
+  }).catch((error) => {
+    const detail = [
+      `local ${bootstrap.httpBaseUrl}`,
+      `remote port ${bootstrap.remotePort ?? "unknown"}`,
+      bootstrap.remoteServerKind ? `remote server ${bootstrap.remoteServerKind}` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${message} (${detail})`);
   });
 }
 

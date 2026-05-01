@@ -71,6 +71,7 @@ interface SshTunnelEntry {
   readonly key: string;
   readonly target: DesktopSshEnvironmentTarget;
   readonly remotePort: number;
+  readonly remoteServerKind: "external" | "managed" | null;
   readonly localPort: number;
   readonly httpBaseUrl: string;
   readonly wsBaseUrl: string;
@@ -152,6 +153,7 @@ export interface SshEnvironmentManagerShape {
 
 const RemoteLaunchResult = Schema.Struct({
   remotePort: Schema.Number,
+  serverKind: Schema.optional(Schema.Literals(["external", "managed"])),
 });
 
 const RemotePairingResult = Schema.Struct({
@@ -451,7 +453,7 @@ if [ -z "$REMOTE_PID" ] || [ -z "$REMOTE_PORT" ]; then
     exit 1
   fi
 fi
-printf '{"remotePort":%s}\\n' "$REMOTE_PORT"
+printf '{"remotePort":%s,"serverKind":"%s"}\\n' "$REMOTE_PORT" "\${REMOTE_MANAGED:-managed}"
 `;
 
 export const REMOTE_PAIRING_SCRIPT = `set -eu
@@ -551,7 +553,7 @@ export const launchOrReuseRemoteServer = Effect.fn("ssh/tunnel.launchOrReuseRemo
     input?: SshAuthOptions,
     runner?: RemoteT3RunnerOptions,
   ): Effect.fn.Return<
-    number,
+    { readonly remotePort: number; readonly remoteServerKind: "external" | "managed" | null },
     SshCommandError | SshInvalidTargetError | SshLaunchError,
     ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
   > {
@@ -592,9 +594,13 @@ export const launchOrReuseRemoteServer = Effect.fn("ssh/tunnel.launchOrReuseRemo
     yield* Effect.logInfo("ssh.remoteServer.launch.ready", {
       ...sshTargetLogFields(target),
       remotePort: parsed.remotePort,
+      remoteServerKind: parsed.serverKind ?? null,
       stateKey: remoteStateKey(target),
     });
-    return parsed.remotePort;
+    return {
+      remotePort: parsed.remotePort,
+      remoteServerKind: parsed.serverKind ?? null,
+    };
   },
 );
 
@@ -887,7 +893,7 @@ export const fetchLoopbackSshJson = Effect.fn("ssh/tunnel.fetchLoopbackSshJson")
         : text || `SSH forwarded request failed (${response.status}).`;
     return yield* new SshHttpBridgeError({
       status: response.status,
-      message: `[ssh_http:${response.status}] ${message}`,
+      message: `[ssh_http:${response.status}] ${message} (${input.method ?? "GET"} ${requestUrl.toString()})`,
     });
   }
   return (yield* response.json.pipe(
@@ -914,6 +920,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
   readonly httpBaseUrl: string;
   readonly wsBaseUrl: string;
   readonly authOptions: SshAuthOptions;
+  readonly remoteServerKind: "external" | "managed" | null;
 }): Effect.fn.Return<
   SshTunnelEntry,
   SshCommandError | SshInvalidTargetError | SshReadinessError,
@@ -968,6 +975,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
     command: tunnelCommand,
     localPort: input.localPort,
     remotePort: input.remotePort,
+    remoteServerKind: input.remoteServerKind,
     httpBaseUrl: input.httpBaseUrl,
   });
   const child = yield* spawner
@@ -1008,6 +1016,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
     key: input.key,
     target: input.resolvedTarget,
     remotePort: input.remotePort,
+    remoteServerKind: input.remoteServerKind,
     localPort: input.localPort,
     httpBaseUrl: input.httpBaseUrl,
     wsBaseUrl: input.wsBaseUrl,
@@ -1284,16 +1293,18 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       ...sshRunnerLogFields(input.runner),
       key: input.key,
     });
-    const remotePort = yield* runWithSshAuth({
+    const remoteLaunch = yield* runWithSshAuth({
       key: input.key,
       target: input.resolvedTarget,
       operation: (authOptions) =>
         launchOrReuseRemoteServer(input.resolvedTarget, authOptions, input.runner),
     });
+    const remotePort = remoteLaunch.remotePort;
     yield* Effect.logDebug("ssh.environment.remotePort.ready", {
       ...sshTargetLogFields(input.resolvedTarget),
       key: input.key,
       remotePort,
+      remoteServerKind: remoteLaunch.remoteServerKind,
     });
     const localPort = yield* reserveLocalTunnelPort();
     const httpBaseUrl = `http://127.0.0.1:${localPort}/`;
@@ -1317,6 +1328,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
           httpBaseUrl,
           wsBaseUrl,
           authOptions,
+          remoteServerKind: remoteLaunch.remoteServerKind,
         }).pipe(Effect.provideService(Scope.Scope, entryScope)),
     }).pipe(
       Effect.onExit((exit) =>
@@ -1501,6 +1513,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       key,
       localPort: entry.localPort,
       remotePort: entry.remotePort,
+      remoteServerKind: entry.remoteServerKind,
       issuedPairingToken: pairingToken !== null,
     });
     return {
@@ -1508,6 +1521,8 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       httpBaseUrl: entry.httpBaseUrl,
       wsBaseUrl: entry.wsBaseUrl,
       pairingToken,
+      remotePort: entry.remotePort,
+      ...(entry.remoteServerKind ? { remoteServerKind: entry.remoteServerKind } : {}),
     };
   });
 

@@ -153,6 +153,8 @@ export interface DesktopSshEnvironmentBootstrap {
   httpBaseUrl: string;
   wsBaseUrl: string;
   pairingToken: string | null;
+  remotePort?: number;
+  remoteServerKind?: "external" | "managed";
 }
 
 export interface DesktopSshPasswordPromptRequest {
