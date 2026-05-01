@@ -19,7 +19,7 @@ interface DiscordReleaseAnnouncementOptions {
   readonly releaseName: string;
   readonly version: string;
   readonly tag: string;
-  readonly releaseUrl: string;
+  readonly releaseUrl: URL;
   readonly timestamp: string;
 }
 
@@ -44,7 +44,6 @@ interface DiscordWebhookPayload {
 
 const DISCORD_RELEASE_TARGETS = ["prerelease", "latest"] as const;
 const DiscordRoleIdSchema = Schema.String.check(Schema.isPattern(/^\d+$/));
-const WebUrlSchema = Schema.String.check(Schema.isPattern(/^https?:\/\/\S+$/));
 const DiscordWebhookUrl = Config.url("DISCORD_WEBHOOK_URL");
 
 class DiscordReleaseAnnouncementError extends Data.TaggedError("DiscordReleaseAnnouncementError")<{
@@ -89,7 +88,7 @@ export const buildDiscordReleaseAnnouncement = (
   embeds: [
     {
       title: options.releaseName,
-      url: options.releaseUrl,
+      url: options.releaseUrl.href,
       description:
         options.target === "prerelease"
           ? "A new T3 Code prerelease is available for nightly testers."
@@ -128,7 +127,7 @@ const postDiscordWebhook = Effect.fn("postDiscordWebhook")(function* (
     ...summarizePayload(payload),
   });
 
-  const response = yield* HttpClientRequest.post(webhookUrl.href).pipe(
+  const response = yield* HttpClientRequest.post(webhookUrl).pipe(
     HttpClientRequest.bodyJson(payload),
     Effect.flatMap(httpClient.execute),
     Effect.mapError(
@@ -185,7 +184,7 @@ export const notifyDiscordReleaseCommand = Command.make(
       Flag.withDescription("Git tag for the release."),
     ),
     releaseUrl: Flag.string("release-url").pipe(
-      Flag.withSchema(WebUrlSchema),
+      Flag.withSchema(Schema.URLFromString),
       Flag.withDescription("Public GitHub release URL."),
     ),
   },
