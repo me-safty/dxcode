@@ -458,28 +458,19 @@ printf '{"remotePort":%s,"serverKind":"%s"}\\n' "$REMOTE_PORT" "\${REMOTE_MANAGE
 
 export const REMOTE_PAIRING_SCRIPT = `set -eu
 STATE_DIR="$HOME/.t3/ssh-launch/@@T3_STATE_KEY@@"
+SERVER_HOME="$STATE_DIR/server-home"
 BASE_DIR_FILE="$STATE_DIR/base-dir"
+RUNNER_FILE="$STATE_DIR/run-t3.sh"
+mkdir -p "$STATE_DIR" "$SERVER_HOME"
+cat >"$RUNNER_FILE" <<'SH'
+@@T3_RUNNER_SCRIPT@@
+SH
+chmod 700 "$RUNNER_FILE"
 PAIRING_BASE_DIR="$(cat "$BASE_DIR_FILE" 2>/dev/null || true)"
 if [ -z "$PAIRING_BASE_DIR" ]; then
-  PAIRING_BASE_DIR="$STATE_DIR/server-home"
+  PAIRING_BASE_DIR="$SERVER_HOME"
 fi
-RUNTIME_FILE="$PAIRING_BASE_DIR/userdata/server-runtime.json"
-node - "$RUNTIME_FILE" <<'NODE'
-const fs = require("node:fs");
-const runtimePath = process.argv[2] ?? "";
-try {
-  const runtime = JSON.parse(fs.readFileSync(runtimePath, "utf8"));
-  const credential = String(runtime.sshBootstrapCredential ?? "").trim();
-  if (credential.length === 0) {
-    console.error("Remote T3 server runtime does not expose an SSH bootstrap credential.");
-    process.exit(1);
-  }
-  process.stdout.write(JSON.stringify({ credential }) + "\\n");
-} catch (error) {
-  console.error("Failed to read remote T3 server runtime state.");
-  process.exit(1);
-}
-NODE
+"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json
 `;
 
 export const REMOTE_STOP_SCRIPT = `set -eu
@@ -536,10 +527,11 @@ export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
 
 export function buildRemotePairingScript(
   target: DesktopSshEnvironmentTarget,
-  _input?: RemoteT3RunnerOptions,
+  input?: RemoteT3RunnerOptions,
 ): string {
   return applyScriptPlaceholders(REMOTE_PAIRING_SCRIPT, {
     T3_STATE_KEY: remoteStateKey(target),
+    T3_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteT3RunnerScript(input)),
   });
 }
 

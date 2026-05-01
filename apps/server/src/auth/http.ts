@@ -12,8 +12,6 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { AuthError, ServerAuth } from "./Services/ServerAuth.ts";
 import { SessionCredentialService } from "./Services/SessionCredentialService.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
-import { ServerConfig } from "../config.ts";
-import { readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 
 export const respondToAuthError = (error: AuthError) =>
   Effect.gen(function* () {
@@ -115,65 +113,6 @@ export const authBearerBootstrapRouteLayer = HttpRouter.add(
     return HttpServerResponse.jsonUnsafe(result satisfies AuthBearerBootstrapResult, {
       status: 200,
     });
-  }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
-);
-
-export const authSshBearerBootstrapRouteLayer = HttpRouter.add(
-  "POST",
-  "/api/auth/bootstrap/ssh-bearer",
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const config = yield* ServerConfig;
-    const sessions = yield* SessionCredentialService;
-    const payload = yield* HttpServerRequest.schemaBodyJson(AuthBootstrapInput).pipe(
-      Effect.mapError(
-        (cause) =>
-          new AuthError({
-            message: "Invalid bootstrap payload.",
-            status: 400,
-            cause,
-          }),
-      ),
-    );
-    const runtimeState = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
-    if (
-      runtimeState._tag !== "Some" ||
-      !runtimeState.value.sshBootstrapCredential ||
-      payload.credential !== runtimeState.value.sshBootstrapCredential
-    ) {
-      return yield* new AuthError({
-        message: "Invalid SSH bootstrap credential.",
-        status: 401,
-      });
-    }
-
-    const issued = yield* sessions
-      .issue({
-        method: "bearer-session-token",
-        subject: "ssh-bootstrap",
-        role: "client",
-        client: deriveAuthClientMetadata({ request }),
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new AuthError({
-              message: "Failed to issue authenticated session.",
-              status: 500,
-              cause,
-            }),
-        ),
-      );
-    return HttpServerResponse.jsonUnsafe(
-      {
-        authenticated: true,
-        role: issued.role,
-        sessionMethod: "bearer-session-token",
-        expiresAt: DateTime.toUtc(issued.expiresAt),
-        sessionToken: issued.token,
-      } satisfies AuthBearerBootstrapResult,
-      { status: 200 },
-    );
   }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
 );
 
