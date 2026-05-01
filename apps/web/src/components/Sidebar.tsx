@@ -4,10 +4,10 @@ import {
   ChevronRightIcon,
   CloudIcon,
   ExternalLinkIcon,
+  FolderPlusIcon,
   GitPullRequestIcon,
   GlobeIcon,
   PlugZapIcon,
-  PlusIcon,
   PowerIcon,
   SearchIcon,
   SettingsIcon,
@@ -19,6 +19,7 @@ import {
   AgentCommandStatusIcon,
   prStatusIndicator,
   resolveThreadPr,
+  terminalStatusFromRunningIds,
   ThreadStatusLabel,
 } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
@@ -149,6 +150,7 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useCommandPaletteStore } from "../commandPaletteStore";
@@ -659,6 +661,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   });
   const pr = resolveThreadPr(thread.branch, gitStatus.data);
   const prStatus = prStatusIndicator(pr);
+  const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const rawAgentCommandStatus = thread.agentCommandStatus;
   // Candidate ports come from any localhost URL the agent surfaced in the
   // current turn. We probe them to decide whether the icon should reflect a
@@ -699,7 +702,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
     : !isThreadRunning
-      ? "pointer-events-none transition-opacity duration-150 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
+      ? "pointer-events-none transition-opacity duration-150 max-sm:pr-6 group-hover/menu-sub-item:opacity-0 group-focus-within/menu-sub-item:opacity-0"
       : "pointer-events-none";
   const clearConfirmingArchive = useCallback(() => {
     setConfirmingArchiveThreadKey((current) => (current === threadKey ? null : current));
@@ -912,7 +915,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           {renamingThreadKey === threadKey ? (
             <input
               ref={handleRenameInputRef}
-              className="min-w-0 flex-1 truncate text-xs bg-transparent outline-none border border-ring rounded px-0.5"
+              className="min-w-0 flex-1 truncate text-base sm:text-xs bg-transparent outline-none border border-ring rounded px-0.5"
               value={renamingTitle}
               onChange={handleRenameInputChange}
               onKeyDown={handleRenameInputKeyDown}
@@ -938,7 +941,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <div className="flex min-w-12 justify-end">
+          {terminalStatus && (
+            <span
+              role="img"
+              aria-label={terminalStatus.label}
+              title={terminalStatus.label}
+              className={`inline-flex items-center justify-center ${terminalStatus.colorClass}`}
+            >
+              <TerminalIcon className={`size-3 ${terminalStatus.pulse ? "animate-pulse" : ""}`} />
+            </span>
+          )}
+          <div
+            className={`flex min-w-12 justify-end ${
+              isRemoteThread ? "max-sm:min-w-24" : "max-sm:min-w-20"
+            }`}
+          >
             {isConfirmingArchive ? (
               <button
                 ref={handleConfirmArchiveRef}
@@ -954,13 +971,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               </button>
             ) : !isThreadRunning ? (
               appSettingsConfirmThreadArchive ? (
-                <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
                   <button
                     type="button"
                     data-thread-selection-safe
                     data-testid={`thread-archive-${thread.id}`}
                     aria-label={`Archive ${thread.title}`}
-                    className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                    className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                     onPointerDown={stopPropagationOnPointerDown}
                     onClick={handleStartArchiveConfirmation}
                   >
@@ -971,13 +988,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 <Tooltip>
                   <TooltipTrigger
                     render={
-                      <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                      <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
                         <button
                           type="button"
                           data-thread-selection-safe
                           data-testid={`thread-archive-${thread.id}`}
                           aria-label={`Archive ${thread.title}`}
-                          className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                          className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                           onPointerDown={stopPropagationOnPointerDown}
                           onClick={handleArchiveImmediateClick}
                         >
@@ -998,11 +1015,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       render={
                         <span
                           aria-label={threadEnvironmentLabel ?? "Remote"}
-                          className="inline-flex items-center justify-center"
+                          className="inline-flex h-5 items-center justify-center"
                         />
                       }
                     >
-                      <CloudIcon className="size-3 text-muted-foreground/40" />
+                      <CloudIcon className="block size-3 text-muted-foreground/60" />
                     </TooltipTrigger>
                     <TooltipPopup side="top">{threadEnvironmentLabel}</TooltipPopup>
                   </Tooltip>
@@ -1274,6 +1291,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   }));
   const { updateSettings } = useUpdateSettings();
   const router = useRouter();
+  const { isMobile, setOpenMobile } = useSidebar();
   const markThreadUnread = useUiStateStore((state) => state.markThreadUnread);
   const toggleProject = useUiStateStore((state) => state.toggleProject);
   const toggleThreadSelection = useThreadSelectionStore((state) => state.toggleThread);
@@ -1862,12 +1880,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         clearSelection();
       }
       setSelectionAnchor(scopedThreadKey(threadRef));
+      if (isMobile) {
+        setOpenMobile(false);
+      }
       void router.navigate({
         to: "/$environmentId/$threadId",
         params: buildThreadRouteParams(threadRef),
       });
     },
-    [clearSelection, router, setSelectionAnchor],
+    [clearSelection, isMobile, router, setOpenMobile, setSelectionAnchor],
   );
 
   const handleThreadClick = useCallback(
@@ -1898,12 +1919,23 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         clearSelection();
       }
       setSelectionAnchor(threadKey);
+      if (isMobile) {
+        setOpenMobile(false);
+      }
       void router.navigate({
         to: "/$environmentId/$threadId",
         params: buildThreadRouteParams(threadRef),
       });
     },
-    [clearSelection, rangeSelectTo, router, setSelectionAnchor, toggleThreadSelection],
+    [
+      clearSelection,
+      isMobile,
+      rangeSelectTo,
+      router,
+      setOpenMobile,
+      setSelectionAnchor,
+      toggleThreadSelection,
+    ],
   );
 
   const handleMultiSelectContextMenu = useCallback(
@@ -2001,6 +2033,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               }
             : null,
       });
+      if (isMobile) {
+        setOpenMobile(false);
+      }
       void handleNewThread(scopeProjectRef(member.environmentId, member.id), {
         ...(seedContext.branch !== undefined ? { branch: seedContext.branch } : {}),
         ...(seedContext.worktreePath !== undefined
@@ -2009,7 +2044,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         envMode: seedContext.envMode,
       });
     },
-    [defaultThreadEnvMode, handleNewThread, router],
+    [defaultThreadEnvMode, handleNewThread, isMobile, router, setOpenMobile],
   );
 
   const handleCreateThreadClick = useCallback(
@@ -2292,7 +2327,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
           size="sm"
-          className={`gap-2 px-2 py-1.5 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground ${
+          className={`gap-2 px-2 py-1.5 pr-8 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground max-sm:pr-14 ${
             isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
           }`}
           {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
@@ -2349,7 +2384,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                       ? "Remote project"
                       : "Available in multiple environments"
                   }
-                  className="pointer-events-none absolute top-1 right-1.5 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/50 transition-opacity duration-150 group-hover/project-header:opacity-0 group-focus-within/project-header:opacity-0"
+                  className="pointer-events-none absolute top-1 right-1.5 inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/60 transition-opacity duration-150 max-sm:right-7 group-hover/project-header:opacity-0 group-focus-within/project-header:opacity-0 max-sm:group-hover/project-header:opacity-100 max-sm:group-focus-within/project-header:opacity-100"
                 />
               }
             >
@@ -2363,12 +2398,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         <Tooltip>
           <TooltipTrigger
             render={
-              <div className="pointer-events-none absolute top-1 right-1.5 opacity-0 transition-opacity duration-150 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
+              <div className="pointer-events-none absolute top-1 right-1.5 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
                 <button
                   type="button"
                   aria-label={`Create new thread in ${project.displayName}`}
                   data-testid="new-thread-button"
-                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                  className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                   onClick={handleCreateThreadClick}
                 >
                   <SquarePenIcon className="size-3.5" />
@@ -2744,9 +2779,13 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
+  const { isMobile, setOpenMobile } = useSidebar();
   const handleSettingsClick = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
     void navigate({ to: "/settings" });
-  }, [navigate]);
+  }, [isMobile, navigate, setOpenMobile]);
 
   return (
     <SidebarFooter className="p-2">
@@ -2937,7 +2976,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                   />
                 }
               >
-                <PlusIcon className="size-3.5" />
+                <FolderPlusIcon className="size-3.5" />
               </TooltipTrigger>
               <TooltipPopup side="right">Add project</TooltipPopup>
             </Tooltip>
@@ -3046,6 +3085,7 @@ export default function Sidebar() {
   const { updateSettings } = useUpdateSettings();
   const { handleNewThread } = useNewThreadHandler();
   const { archiveThread, deleteThread } = useThreadActions();
+  const { isMobile, setOpenMobile } = useSidebar();
   const routeThreadRef = useParams({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
@@ -3198,12 +3238,15 @@ export default function Sidebar() {
         clearSelection();
       }
       setSelectionAnchor(scopedThreadKey(threadRef));
+      if (isMobile) {
+        setOpenMobile(false);
+      }
       void navigate({
         to: "/$environmentId/$threadId",
         params: buildThreadRouteParams(threadRef),
       });
     },
-    [clearSelection, navigate, setSelectionAnchor],
+    [clearSelection, isMobile, navigate, setOpenMobile, setSelectionAnchor],
   );
 
   const projectDnDSensors = useSensors(

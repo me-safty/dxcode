@@ -1323,6 +1323,9 @@ const make = Effect.gen(function* () {
               threadId: thread.id,
               status,
               providerName: event.provider,
+              ...(event.providerInstanceId !== undefined
+                ? { providerInstanceId: event.providerInstanceId }
+                : {}),
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: nextActiveTurnId,
               lastError,
@@ -1577,6 +1580,9 @@ const make = Effect.gen(function* () {
               threadId: thread.id,
               status: "error",
               providerName: event.provider,
+              ...(event.providerInstanceId !== undefined
+                ? { providerInstanceId: event.providerInstanceId }
+                : {}),
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: eventTurnId ?? null,
               lastError: runtimeErrorMessage,
