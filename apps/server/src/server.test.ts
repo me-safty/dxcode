@@ -57,6 +57,7 @@ const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
+import { persistServerRuntimeState } from "./serverRuntimeState.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import {
   CheckpointDiffQuery,
@@ -768,6 +769,32 @@ const bootstrapBearerSession = (credential = defaultDesktopBootstrapToken) =>
     };
   });
 
+const bootstrapSshBearerSession = (credential: string) =>
+  Effect.gen(function* () {
+    const bootstrapUrl = yield* getHttpServerUrl("/api/auth/bootstrap/ssh-bearer");
+    const response = yield* Effect.promise(() =>
+      fetch(bootstrapUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          credential,
+        }),
+      }),
+    );
+    const body = (yield* Effect.promise(() => response.json())) as {
+      readonly authenticated?: boolean;
+      readonly sessionMethod?: string;
+      readonly sessionToken?: string;
+      readonly error?: string;
+    };
+    return {
+      response,
+      body,
+    };
+  });
+
 const getAuthenticatedSessionCookieHeader = (credential = defaultDesktopBootstrapToken) =>
   Effect.gen(function* () {
     const { response, cookie } = yield* bootstrapBrowserSession(credential);
@@ -1417,6 +1444,60 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         (second.body as { readonly error?: string }).error,
         "Invalid bootstrap credential.",
       );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("bootstraps an SSH bearer session from the live server runtime credential", () =>
+    Effect.gen(function* () {
+      const config = yield* buildAppUnderTest();
+      const serverUrl = yield* getHttpServerUrl();
+      const server = yield* HttpServer.HttpServer;
+      const address = server.address as HttpServer.TcpAddress;
+      yield* persistServerRuntimeState({
+        path: config.serverRuntimeStatePath,
+        state: {
+          version: 1,
+          pid: process.pid,
+          host: "127.0.0.1",
+          port: address.port,
+          origin: serverUrl,
+          startedAt: new Date().toISOString(),
+          sshBootstrapCredential: "ssh-runtime-bootstrap",
+        },
+      });
+
+      const bootstrapped = yield* bootstrapSshBearerSession("ssh-runtime-bootstrap");
+
+      assert.equal(bootstrapped.response.status, 200);
+      assert.equal(bootstrapped.body.authenticated, true);
+      assert.equal(bootstrapped.body.sessionMethod, "bearer-session-token");
+      assert.isString(bootstrapped.body.sessionToken);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects invalid SSH runtime bootstrap credentials", () =>
+    Effect.gen(function* () {
+      const config = yield* buildAppUnderTest();
+      const serverUrl = yield* getHttpServerUrl();
+      const server = yield* HttpServer.HttpServer;
+      const address = server.address as HttpServer.TcpAddress;
+      yield* persistServerRuntimeState({
+        path: config.serverRuntimeStatePath,
+        state: {
+          version: 1,
+          pid: process.pid,
+          host: "127.0.0.1",
+          port: address.port,
+          origin: serverUrl,
+          startedAt: new Date().toISOString(),
+          sshBootstrapCredential: "ssh-runtime-bootstrap",
+        },
+      });
+
+      const bootstrapped = yield* bootstrapSshBearerSession("wrong");
+
+      assert.equal(bootstrapped.response.status, 401);
+      assert.equal(bootstrapped.body.error, "Invalid SSH bootstrap credential.");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

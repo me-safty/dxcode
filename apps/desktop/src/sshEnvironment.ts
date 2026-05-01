@@ -293,7 +293,7 @@ export class DesktopSshEnvironmentBridge {
         sshRuntime.runPromise(
           fetchLoopbackSshJson<AuthBearerBootstrapResult>({
             httpBaseUrl: rawHttpBaseUrl,
-            pathname: "/api/auth/bootstrap/bearer",
+            pathname: "/api/auth/bootstrap/ssh-bearer",
             method: "POST",
             body: { credential: rawCredential },
           }),

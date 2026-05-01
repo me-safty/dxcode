@@ -131,10 +131,14 @@ describe("ssh tunnel scripts", () => {
     assert.include(buildRemoteLaunchScript({ packageSpec: "t3@nightly" }), "t3@nightly");
     assert.include(
       buildRemotePairingScript(target),
-      '"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json',
+      'RUNTIME_FILE="$PAIRING_BASE_DIR/userdata/server-runtime.json"',
     );
+    assert.include(buildRemotePairingScript(target), "sshBootstrapCredential");
     assert.include(buildRemotePairingScript(target), 'BASE_DIR_FILE="$STATE_DIR/base-dir"');
-    assert.include(buildRemotePairingScript(target, { packageSpec: "t3@nightly" }), "t3@nightly");
+    assert.notInclude(
+      buildRemotePairingScript(target, { packageSpec: "t3@nightly" }),
+      "t3@nightly",
+    );
     assert.include(
       buildRemoteStopScript(target),
       'if [ "$REMOTE_MANAGED" != "external" ] && [ -n "$REMOTE_PID" ]',

@@ -1,3 +1,5 @@
+import * as Crypto from "node:crypto";
+
 import { Effect, FileSystem, Option, Schema } from "effect";
 
 import { writeFileStringAtomically } from "./atomicWrite.ts";
@@ -11,6 +13,7 @@ export const PersistedServerRuntimeState = Schema.Struct({
   port: Schema.Int,
   origin: Schema.String,
   startedAt: Schema.String,
+  sshBootstrapCredential: Schema.optional(Schema.String),
 });
 export type PersistedServerRuntimeState = typeof PersistedServerRuntimeState.Type;
 
@@ -37,15 +40,20 @@ export const makePersistedServerRuntimeState = (input: {
   port: input.port,
   origin: runtimeOriginForConfig(input.config, input.port),
   startedAt: new Date().toISOString(),
+  sshBootstrapCredential: Crypto.randomBytes(32).toString("base64url"),
 });
 
 export const persistServerRuntimeState = (input: {
   readonly path: string;
   readonly state: PersistedServerRuntimeState;
 }) =>
-  writeFileStringAtomically({
-    filePath: input.path,
-    contents: `${JSON.stringify(input.state)}\n`,
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    yield* writeFileStringAtomically({
+      filePath: input.path,
+      contents: `${JSON.stringify(input.state)}\n`,
+    });
+    yield* fs.chmod(input.path, 0o600).pipe(Effect.ignore);
   });
 
 export const clearPersistedServerRuntimeState = (path: string) =>
