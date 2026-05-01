@@ -33,6 +33,9 @@ import {
   GitStatusInput,
   GitStatusResult,
   GitStatusStreamEvent,
+  GitSummarizeToolWorkLogInput,
+  GitSummarizeToolWorkLogResult,
+  TextGenerationError,
 } from "./git.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
@@ -104,6 +107,7 @@ export const WS_METHODS = {
   gitInit: "git.init",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
+  gitSummarizeToolWorkLog: "git.summarizeToolWorkLog",
 
   // Terminal methods
   terminalOpen: "terminal.open",
@@ -224,6 +228,12 @@ export const WsGitPreparePullRequestThreadRpc = Rpc.make(WS_METHODS.gitPreparePu
   payload: GitPreparePullRequestThreadInput,
   success: GitPreparePullRequestThreadResult,
   error: GitManagerServiceError,
+});
+
+export const WsGitSummarizeToolWorkLogRpc = Rpc.make(WS_METHODS.gitSummarizeToolWorkLog, {
+  payload: GitSummarizeToolWorkLogInput,
+  success: GitSummarizeToolWorkLogResult,
+  error: TextGenerationError,
 });
 
 export const WsGitListBranchesRpc = Rpc.make(WS_METHODS.gitListBranches, {
@@ -380,6 +390,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
+  WsGitSummarizeToolWorkLogRpc,
   WsGitListBranchesRpc,
   WsGitCreateWorktreeRpc,
   WsGitRemoveWorktreeRpc,

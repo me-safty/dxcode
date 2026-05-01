@@ -60,6 +60,7 @@ import {
 } from "./checkpointing/Services/CheckpointDiffQuery.ts";
 import { GitCore, type GitCoreShape } from "./git/Services/GitCore.ts";
 import { GitManager, type GitManagerShape } from "./git/Services/GitManager.ts";
+import { TextGeneration } from "./git/Services/TextGeneration.ts";
 import { GitStatusBroadcasterLive } from "./git/Layers/GitStatusBroadcaster.ts";
 import {
   GitStatusBroadcaster,
@@ -385,6 +386,13 @@ const buildAppUnderTest = (options?: {
     const gitManagerLayer = Layer.mock(GitManager)({
       ...options?.layers?.gitManager,
     });
+    const textGenerationTestLayer = Layer.succeed(TextGeneration, {
+      generateCommitMessage: () => Effect.die("generateCommitMessage not used in server.test"),
+      generatePrContent: () => Effect.die("generatePrContent not used in server.test"),
+      generateBranchName: () => Effect.die("generateBranchName not used in server.test"),
+      generateThreadTitle: () => Effect.die("generateThreadTitle not used in server.test"),
+      generateToolWorkLogSummary: () => Effect.succeed({ line: "Stub tool activity" }),
+    });
     const workspaceEntriesLayer = WorkspaceEntriesLive.pipe(
       Layer.provide(WorkspacePathsLive),
       Layer.provideMerge(gitCoreLayer),
@@ -443,6 +451,7 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(gitCoreLayer),
       Layer.provide(gitManagerLayer),
+      Layer.provide(textGenerationTestLayer),
       Layer.provideMerge(gitStatusBroadcasterLayer),
       Layer.provide(
         Layer.mock(ProjectSetupScriptRunner)({

@@ -97,6 +97,7 @@ function createTestClient() {
       init: vi.fn(async () => undefined),
       resolvePullRequest: vi.fn(async () => undefined),
       preparePullRequestThread: vi.fn(async () => undefined),
+      summarizeToolWorkLog: vi.fn(async () => ({ line: "Test summary" })),
     },
   } as unknown as WsRpcClient;
 

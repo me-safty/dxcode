@@ -102,7 +102,7 @@ import {
   CommandPanel,
 } from "./ui/command";
 import { Button } from "./ui/button";
-import { Kbd, KbdGroup } from "./ui/kbd";
+import { Shortcut } from "./ui/kbd";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { ComposerHandleContext, useComposerHandleContext } from "../composerHandleContext";
 import type { ChatComposerHandle } from "./chat/ChatComposer";
@@ -468,6 +468,7 @@ function OpenCommandPaletteDialog() {
       buildProjectActionItems({
         projects,
         valuePrefix: "new-thread-in",
+        shortcutCommand: "chat.new",
         icon: (project) => (
           <ProjectFavicon
             environmentId={project.environmentId}
@@ -1059,9 +1060,11 @@ function OpenCommandPaletteDialog() {
               title={`${submitActionLabel} (${addShortcutLabel})`}
             >
               <span>{submitActionLabel}</span>
-              <KbdGroup className="pointer-events-none -me-0.5 items-center gap-1">
-                <Kbd>{hasHighlightedBrowseItem ? `${submitModifierLabel} Enter` : "Enter"}</Kbd>
-              </KbdGroup>
+              <div className="pointer-events-none -me-0.5 inline-flex items-center gap-1">
+                <Shortcut>
+                  {hasHighlightedBrowseItem ? `${submitModifierLabel} Enter` : "Enter"}
+                </Shortcut>
+              </div>
             </Button>
           ) : null}
         </div>
@@ -1083,31 +1086,31 @@ function OpenCommandPaletteDialog() {
         </CommandPanel>
         <CommandFooter className="gap-3 max-sm:flex-col max-sm:items-start">
           <div className="flex items-center gap-3">
-            <KbdGroup className="items-center gap-1.5">
-              <Kbd>
+            <div className="inline-flex items-center gap-1.5">
+              <Shortcut>
                 <ArrowUpIcon />
-              </Kbd>
-              <Kbd>
+              </Shortcut>
+              <Shortcut>
                 <ArrowDownIcon />
-              </Kbd>
+              </Shortcut>
               <span className={cn("text-muted-foreground/80")}>Navigate</span>
-            </KbdGroup>
+            </div>
             {!canSubmitBrowsePath || hasHighlightedBrowseItem ? (
-              <KbdGroup className="items-center gap-1.5">
-                <Kbd>Enter</Kbd>
+              <div className="inline-flex items-center gap-1.5">
+                <Shortcut>Enter</Shortcut>
                 <span className={cn("text-muted-foreground/80")}>Select</span>
-              </KbdGroup>
+              </div>
             ) : null}
             {isSubmenu ? (
-              <KbdGroup className="items-center gap-1.5">
-                <Kbd>Backspace</Kbd>
+              <div className="inline-flex items-center gap-1.5">
+                <Shortcut>Backspace</Shortcut>
                 <span className={cn("text-muted-foreground/80")}>Back</span>
-              </KbdGroup>
+              </div>
             ) : null}
-            <KbdGroup className="items-center gap-1.5">
-              <Kbd>Esc</Kbd>
+            <div className="inline-flex items-center gap-1.5">
+              <Shortcut>Esc</Shortcut>
               <span className={cn("text-muted-foreground/80")}>Close</span>
-            </KbdGroup>
+            </div>
           </div>
           {canOpenProjectFromFileManager ? (
             <Button

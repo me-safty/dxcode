@@ -107,6 +107,7 @@ function createRegisteredGitStatusClient(environmentId: EnvironmentId) {
       init: vi.fn(async () => undefined),
       resolvePullRequest: vi.fn(async () => undefined),
       preparePullRequestThread: vi.fn(async () => undefined),
+      summarizeToolWorkLog: vi.fn(async () => ({ line: "Test summary" })),
     },
     server: {
       getConfig: vi.fn(async () => ({

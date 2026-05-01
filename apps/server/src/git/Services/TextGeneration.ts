@@ -73,6 +73,21 @@ export interface ThreadTitleGenerationResult {
   title: string;
 }
 
+export interface ToolWorkLogSummaryGenerationInput {
+  cwd: string;
+  label: string;
+  toolTitle?: string | undefined;
+  itemType?: string | undefined;
+  requestKind?: "command" | "file-read" | "file-change" | undefined;
+  command?: string | undefined;
+  detailSnippet?: string | undefined;
+  modelSelection: ModelSelection;
+}
+
+export interface ToolWorkLogSummaryGenerationResult {
+  line: string;
+}
+
 export interface TextGenerationService {
   generateCommitMessage(
     input: CommitMessageGenerationInput,
@@ -113,6 +128,13 @@ export interface TextGenerationShape {
   readonly generateThreadTitle: (
     input: ThreadTitleGenerationInput,
   ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+  /**
+   * Rewrite tool / work-log activity metadata into one short human-readable line.
+   */
+  readonly generateToolWorkLogSummary: (
+    input: ToolWorkLogSummaryGenerationInput,
+  ) => Effect.Effect<ToolWorkLogSummaryGenerationResult, TextGenerationError>;
 }
 
 /**

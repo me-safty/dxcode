@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDownIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import { ChevronDownIcon, InfoIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   isProviderDriverKind,
@@ -16,28 +16,22 @@ import { cn } from "../../lib/utils";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import { DraftInput } from "../ui/draft-input";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Switch } from "../ui/switch";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import type { DriverOption } from "./providerDriverMeta";
 import { ProviderModelsSection } from "./ProviderModelsSection";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
+import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
 import {
   PROVIDER_STATUS_STYLES,
   getProviderSummary,
   getProviderVersionLabel,
   type ProviderStatusKey,
 } from "./providerStatus";
-
-const PROVIDER_ACCENT_SWATCHES = [
-  "#2563eb",
-  "#16a34a",
-  "#ea580c",
-  "#dc2626",
-  "#7c3aed",
-  "#0891b2",
-] as const;
 
 const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -191,16 +185,16 @@ function ProviderAuthEmail(props: {
   if (!trimmed) return null;
 
   return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
+    <span className="inline min-w-0">
       {props.separator ? <span aria-hidden>·</span> : null}
-      {props.prefix ? <span className="text-muted-foreground/80">{props.prefix}</span> : null}
+      {props.prefix ? <span className="text-muted-foreground/80">{props.prefix} </span> : null}
       <Tooltip>
         <TooltipTrigger
           render={
             <button
               type="button"
               className={cn(
-                "min-w-0 cursor-pointer rounded-sm font-mono text-[11px] leading-none transition hover:text-foreground",
+                "min-w-0 cursor-pointer rounded-sm align-baseline font-mono text-[11px] leading-normal transition hover:text-foreground",
                 revealed ? "text-muted-foreground" : "select-none text-muted-foreground blur-[2px]",
               )}
               onClick={() => setRevealed((value) => !value)}
@@ -218,92 +212,25 @@ function ProviderAuthEmail(props: {
   );
 }
 
-function ProviderAccentColorPicker(props: {
-  readonly displayName: string;
-  readonly value: string | undefined;
-  readonly onCommit: (value: string) => void;
-}) {
-  const [draft, setDraft] = useState(props.value ?? "");
-  const [isEditing, setIsEditing] = useState(false);
-  const draftColor = normalizeProviderAccentColor(draft);
+function getProviderStatusTooltip(input: {
+  readonly provider: ServerProvider | undefined;
+  readonly enabled: boolean;
+}): string {
+  const { provider, enabled } = input;
+  if (!enabled || provider?.enabled === false) return "Disabled";
+  if (!provider) return "Checking";
+  if (!provider.installed) return "Missing Binary";
+  if (provider.auth.status === "authenticated") return "Authenticated";
+  if (provider.auth.status === "unauthenticated") return "Unauthenticated";
+  if (provider.status === "warning") return "Needs Attention";
+  if (provider.status === "error") return "Unavailable";
+  return "Available";
+}
 
-  useEffect(() => {
-    if (isEditing) return;
-    setDraft(props.value ?? "");
-  }, [isEditing, props.value]);
-
-  const commitDraft = () => {
-    setIsEditing(false);
-    props.onCommit(draftColor ?? "");
-  };
-
-  const commitSwatch = (swatch: string) => {
-    setIsEditing(false);
-    setDraft(swatch);
-    props.onCommit(swatch);
-  };
-
-  return (
-    <div className="grid gap-2">
-      <span className="text-xs font-medium text-foreground">Accent color</span>
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <input
-          type="color"
-          value={draftColor ?? PROVIDER_ACCENT_SWATCHES[0]}
-          onFocus={() => setIsEditing(true)}
-          onInput={(event) => {
-            setIsEditing(true);
-            setDraft(event.currentTarget.value);
-          }}
-          onChange={(event) => {
-            setIsEditing(true);
-            setDraft(event.currentTarget.value);
-          }}
-          onBlur={commitDraft}
-          aria-label={`Accent color for ${props.displayName}`}
-          className="h-8 w-10 cursor-pointer rounded border border-input bg-background p-0.5"
-        />
-        <div className="flex flex-wrap gap-1.5">
-          {PROVIDER_ACCENT_SWATCHES.map((swatch) => {
-            const selected = draftColor?.toLowerCase() === swatch;
-            return (
-              <button
-                key={swatch}
-                type="button"
-                className={cn(
-                  "size-6 cursor-pointer rounded-full border transition",
-                  selected
-                    ? "border-foreground ring-2 ring-ring ring-offset-1 ring-offset-background"
-                    : "border-black/10 hover:scale-105 dark:border-white/20",
-                )}
-                style={{ backgroundColor: swatch }}
-                onClick={() => commitSwatch(swatch)}
-                aria-label={`Use ${swatch} accent`}
-              />
-            );
-          })}
-        </div>
-        {draftColor ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2 text-xs text-muted-foreground"
-            onClick={() => {
-              setIsEditing(false);
-              setDraft("");
-              props.onCommit("");
-            }}
-          >
-            Clear
-          </Button>
-        ) : null}
-      </div>
-      <span className="text-xs text-muted-foreground">
-        Used to distinguish this instance in picker rails and model lists.
-      </span>
-    </div>
-  );
+function formatAuthenticatedUsageLabel(label: string | null | undefined): string | null {
+  const trimmed = label?.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/\bSubscription\b/gu, "subscription");
 }
 
 function ProviderEnvironmentSection(props: {
@@ -389,11 +316,17 @@ function ProviderEnvironmentSection(props: {
           Add variables to pass API keys, base URLs, or other per-instance CLI settings.
         </p>
       ) : (
-        <div className="grid gap-2">
+        <div className="overflow-hidden rounded-md border border-border/70">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_5rem_2rem] items-center gap-3 border-b border-border/70 bg-muted/25 px-3 py-2 text-[11px] font-medium text-muted-foreground">
+            <span>Variable</span>
+            <span>Value</span>
+            <span>Sensitive</span>
+            <span aria-hidden />
+          </div>
           {rows.map((variable, index) => (
             <div
               key={variable.id}
-              className="grid gap-2 rounded-md border border-border/70 bg-muted/20 p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto_auto] sm:items-center"
+              className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_5rem_2rem] items-center gap-3 border-b border-border/60 px-3 py-2 last:border-b-0 odd:bg-muted/20 even:bg-background/20"
             >
               <DraftInput
                 value={variable.name}
@@ -413,13 +346,11 @@ function ProviderEnvironmentSection(props: {
                 spellCheck={false}
                 aria-label={`Environment variable value ${index + 1}`}
               />
-              <label className="inline-flex h-8 items-center gap-2 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  className="size-3.5"
+              <div className="flex h-8 items-center justify-start">
+                <Checkbox
                   checked={variable.sensitive}
-                  onChange={(event) => {
-                    const sensitive = event.currentTarget.checked;
+                  onCheckedChange={(checked) => {
+                    const sensitive = Boolean(checked);
                     updateVariable(variable.id, {
                       sensitive,
                       ...(sensitive && variable.valueRedacted === undefined
@@ -427,14 +358,14 @@ function ProviderEnvironmentSection(props: {
                         : { valueRedacted: sensitive ? variable.valueRedacted : false }),
                     });
                   }}
+                  aria-label={`Mark environment variable ${variable.name || index + 1} as sensitive`}
                 />
-                Sensitive
-              </label>
+              </div>
               <Button
                 type="button"
                 size="icon-sm"
                 variant="ghost"
-                className="size-8 justify-self-start text-muted-foreground hover:text-destructive sm:justify-self-end"
+                className="size-8 justify-self-end text-muted-foreground hover:text-destructive"
                 onClick={() => removeVariable(variable.id)}
                 aria-label={`Remove environment variable ${variable.name || index + 1}`}
               >
@@ -535,9 +466,10 @@ export function ProviderInstanceCard({
   const hasAuthenticatedEmail =
     liveProvider?.auth.status === "authenticated" && Boolean(authEmail?.trim());
   const authenticatedDetail = hasAuthenticatedEmail
-    ? (liveProvider?.auth.label ?? liveProvider?.auth.type ?? null)
+    ? formatAuthenticatedUsageLabel(liveProvider?.auth.label ?? liveProvider?.auth.type ?? null)
     : null;
   const summary = rawSummary;
+  const statusTooltip = getProviderStatusTooltip({ provider: liveProvider, enabled });
   const versionLabel = getProviderVersionLabel(liveProvider?.version);
   const FallbackIconComponent = driverOption?.icon;
   const displayName =
@@ -617,31 +549,63 @@ export function ProviderInstanceCard({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 flex-1 space-y-1">
             <div className="flex min-h-5 items-center gap-1.5">
-              {driverKind ? (
-                <ProviderInstanceIcon
-                  driverKind={driverKind}
-                  displayName={displayName}
-                  accentColor={accentColor}
-                  showBadge={Boolean(accentColor)}
-                  statusDotClassName={statusStyle.dot}
-                  className="size-5"
-                  iconClassName="size-4 text-foreground/80"
-                  badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 text-[7px]"
-                />
-              ) : FallbackIconComponent ? (
-                <span className="relative inline-flex size-5 shrink-0 items-center justify-center">
-                  <FallbackIconComponent className="size-4 text-foreground/80" aria-hidden />
-                  <span
-                    className={cn(
-                      "pointer-events-none absolute -left-0.5 -top-0.5 size-2 rounded-full ring-2 ring-background",
-                      statusStyle.dot,
-                    )}
-                    aria-hidden
-                  />
-                </span>
-              ) : (
-                <span className={cn("size-2 shrink-0 rounded-full", statusStyle.dot)} />
-              )}
+              <TooltipProvider delay={100}>
+                {driverKind ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span className="-m-1 inline-flex size-7 items-center justify-center rounded-md">
+                          <ProviderInstanceIcon
+                            driverKind={driverKind}
+                            displayName={displayName}
+                            accentColor={accentColor}
+                            showBadge={Boolean(accentColor)}
+                            badgeContent="none"
+                            statusDotClassName={statusStyle.dot}
+                            indicatorBackground="var(--card)"
+                            className="size-5"
+                            iconClassName="size-4 text-foreground/80"
+                            badgeClassName="right-[-0.125rem] bottom-[-0.125rem] size-3 min-w-3 px-0"
+                          />
+                        </span>
+                      }
+                    />
+                    <TooltipPopup side="top">{statusTooltip}</TooltipPopup>
+                  </Tooltip>
+                ) : FallbackIconComponent ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span className="-m-1 relative inline-flex size-7 shrink-0 items-center justify-center rounded-md">
+                          <FallbackIconComponent
+                            className="size-4 text-foreground/80"
+                            aria-hidden
+                          />
+                          <span
+                            className={cn(
+                              "pointer-events-none absolute -left-0.5 -top-0.5 size-2 rounded-full ring-2 ring-card",
+                              statusStyle.dot,
+                            )}
+                            aria-hidden
+                          />
+                        </span>
+                      }
+                    />
+                    <TooltipPopup side="top">{statusTooltip}</TooltipPopup>
+                  </Tooltip>
+                ) : (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span className="-m-1 inline-flex size-7 items-center justify-center rounded-md">
+                          <span className={cn("size-2 shrink-0 rounded-full", statusStyle.dot)} />
+                        </span>
+                      }
+                    />
+                    <TooltipPopup side="top">{statusTooltip}</TooltipPopup>
+                  </Tooltip>
+                )}
+              </TooltipProvider>
               <h3 className="truncate text-sm font-medium text-foreground">{displayName}</h3>
               {String(instanceId) !== String(instance.driver) ? (
                 // Hide the id chip on a default slot whose id === the
@@ -687,20 +651,44 @@ export function ProviderInstanceCard({
                 </span>
               ) : null}
             </div>
-            <p className="flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+            <p className="min-w-0 pl-[1.625rem] text-xs leading-5 text-muted-foreground">
               {hasAuthenticatedEmail ? (
                 <>
-                  <span>Authenticated as</span>
+                  <span>Authenticated as </span>
                   <ProviderAuthEmail email={authEmail} />
-                  {authenticatedDetail ? <span>· {authenticatedDetail}</span> : null}
+                  {authenticatedDetail ? <span> using your {authenticatedDetail}.</span> : null}
                 </>
               ) : (
-                <>
+                <span className="inline-flex min-w-0 items-center gap-1 align-middle">
                   <span>{summary.headline}</span>
                   <ProviderAuthEmail email={authEmail} separator prefix="Email" />
-                </>
+                  {summary.detail ? (
+                    <Popover>
+                      <PopoverTrigger
+                        render={
+                          <Button
+                            type="button"
+                            size="icon-xs"
+                            variant="ghost"
+                            className="size-5 shrink-0 rounded-sm p-0 text-muted-foreground/60 hover:text-muted-foreground"
+                            aria-label={`${displayName} status details`}
+                          >
+                            <InfoIcon className="size-3" aria-hidden />
+                          </Button>
+                        }
+                      />
+                      <PopoverPopup
+                        side="top"
+                        align="start"
+                        tooltipStyle
+                        className="max-w-96 whitespace-normal leading-tight"
+                      >
+                        {summary.detail}
+                      </PopoverPopup>
+                    </Popover>
+                  ) : null}
+                </span>
               )}
-              {summary.detail ? <span>- {summary.detail}</span> : null}
             </p>
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
@@ -749,6 +737,7 @@ export function ProviderInstanceCard({
                 displayName={displayName}
                 value={accentColor}
                 onCommit={updateAccentColor}
+                description="Used to distinguish this instance in picker rails and model lists."
               />
             </div>
 

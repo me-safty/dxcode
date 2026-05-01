@@ -122,6 +122,33 @@ export function sanitizeThreadTitle(raw: string): string {
   return `${normalized.slice(0, 47).trimEnd()}...`;
 }
 
+/** Normalise model output for tool work-log rows (UI adds the >_ prefix). */
+export function sanitizeToolWorkLogSummaryLine(raw: string, fallbackLabel: string): string {
+  const stripped = raw
+    .trim()
+    .split(/\r?\n/g)[0]
+    ?.replace(/^>\s*[_＿]\s*/i, "")
+    .replace(/^>\s*/, "")
+    .trim()
+    .replace(/\s+/g, " ");
+
+  const base =
+    stripped && stripped.length > 0
+      ? stripped
+      : (fallbackLabel.trim().split(/\r?\n/g)[0]?.trim() ?? "").replace(/\s+/g, " ");
+
+  if (!base || base.length === 0) {
+    return "Working";
+  }
+
+  const withoutTrailingPeriod = base.replace(/[.]+$/g, "").trim();
+  const singleLine = withoutTrailingPeriod.length > 0 ? withoutTrailingPeriod : base;
+  if (singleLine.length <= 160) {
+    return singleLine;
+  }
+  return `${singleLine.slice(0, 157).trimEnd()}...`;
+}
+
 /** CLI name to human-readable label, e.g. "codex" → "Codex CLI (`codex`)" */
 function cliLabel(cliName: string): string {
   const capitalized = cliName.charAt(0).toUpperCase() + cliName.slice(1);

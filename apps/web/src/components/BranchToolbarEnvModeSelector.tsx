@@ -7,6 +7,7 @@ import {
   resolveLockedWorkspaceLabel,
   type EnvMode,
 } from "./BranchToolbar.logic";
+import { SelectedModelBadge } from "./chat/SelectedModelBadge";
 import {
   Select,
   SelectGroup,
@@ -76,21 +77,29 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       <SelectPopup>
         <SelectGroup>
           <SelectGroupLabel>Workspace</SelectGroupLabel>
-          <SelectItem value="local">
-            <span className="inline-flex items-center gap-1.5">
-              {activeWorktreePath ? (
-                <FolderGitIcon className="size-3" />
-              ) : (
-                <FolderIcon className="size-3" />
-              )}
-              {resolveCurrentWorkspaceLabel(activeWorktreePath)}
-            </span>
+          <SelectItem value="local" hideIndicator className="ps-2 pe-2">
+            <div className="flex w-full min-w-0 items-center justify-between gap-2">
+              <span className="inline-flex min-w-0 flex-1 items-center gap-1.5">
+                {activeWorktreePath ? (
+                  <FolderGitIcon className="size-3 shrink-0" />
+                ) : (
+                  <FolderIcon className="size-3 shrink-0" />
+                )}
+                <span className="min-w-0 truncate">
+                  {resolveCurrentWorkspaceLabel(activeWorktreePath)}
+                </span>
+              </span>
+              {effectiveEnvMode === "local" ? <SelectedModelBadge /> : null}
+            </div>
           </SelectItem>
-          <SelectItem value="worktree">
-            <span className="inline-flex items-center gap-1.5">
-              <FolderGit2Icon className="size-3" />
-              {resolveEnvModeLabel("worktree")}
-            </span>
+          <SelectItem value="worktree" hideIndicator className="ps-2 pe-2">
+            <div className="flex w-full min-w-0 items-center justify-between gap-2">
+              <span className="inline-flex min-w-0 flex-1 items-center gap-1.5">
+                <FolderGit2Icon className="size-3 shrink-0" />
+                <span className="min-w-0 truncate">{resolveEnvModeLabel("worktree")}</span>
+              </span>
+              {effectiveEnvMode === "worktree" ? <SelectedModelBadge /> : null}
+            </div>
           </SelectItem>
         </SelectGroup>
       </SelectPopup>

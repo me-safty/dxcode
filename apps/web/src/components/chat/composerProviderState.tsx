@@ -81,7 +81,14 @@ function renderTraitsControl(
   const hasTarget = threadRef !== undefined || draftId !== undefined;
   if (
     !hasTarget ||
-    !shouldRenderTraitsControls({ provider, models, model, modelOptions, prompt })
+    !shouldRenderTraitsControls({
+      provider,
+      models,
+      model,
+      modelOptions,
+      prompt,
+      hiddenDescriptorIds: ["agent"],
+    })
   ) {
     return null;
   }
@@ -95,6 +102,7 @@ function renderTraitsControl(
       modelOptions={modelOptions}
       prompt={prompt}
       onPromptChange={onPromptChange}
+      hiddenDescriptorIds={["agent"]}
     />
   );
 }

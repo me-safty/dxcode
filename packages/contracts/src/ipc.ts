@@ -17,6 +17,8 @@ import type {
   GitStatusInput,
   GitStatusResult,
   GitCreateBranchResult,
+  GitSummarizeToolWorkLogInput,
+  GitSummarizeToolWorkLogResult,
 } from "./git.ts";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type {
@@ -61,6 +63,10 @@ export interface ContextMenuItem<T extends string = string> {
   label: string;
   destructive?: boolean;
   disabled?: boolean;
+  /** Renders as a non-interactive section header label. Web fallback only — stripped on desktop native menus. */
+  header?: boolean;
+  /** Icon keyword resolved by the web fallback. Stripped on desktop native menus. */
+  icon?: string;
   children?: readonly ContextMenuItem<T>[];
 }
 
@@ -276,6 +282,9 @@ export interface EnvironmentApi {
         onResubscribe?: () => void;
       },
     ) => () => void;
+    summarizeToolWorkLog: (
+      input: GitSummarizeToolWorkLogInput,
+    ) => Promise<GitSummarizeToolWorkLogResult>;
   };
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;

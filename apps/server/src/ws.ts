@@ -32,6 +32,7 @@ import { ServerConfig } from "./config.ts";
 import { GitCore } from "./git/Services/GitCore.ts";
 import { GitManager } from "./git/Services/GitManager.ts";
 import { GitStatusBroadcaster } from "./git/Services/GitStatusBroadcaster.ts";
+import { TextGeneration } from "./git/Services/TextGeneration.ts";
 import { Keybindings } from "./keybindings.ts";
 import { Open, resolveAvailableEditors } from "./open.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
@@ -138,6 +139,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const open = yield* Open;
       const gitManager = yield* GitManager;
       const git = yield* GitCore;
+      const textGeneration = yield* TextGeneration;
       const gitStatusBroadcaster = yield* GitStatusBroadcaster;
       const terminalManager = yield* TerminalManager;
       const providerRegistry = yield* ProviderRegistry;
@@ -892,6 +894,21 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             gitManager
               .preparePullRequestThread(input)
               .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.gitSummarizeToolWorkLog]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitSummarizeToolWorkLog,
+            textGeneration.generateToolWorkLogSummary({
+              cwd: input.cwd,
+              label: input.label,
+              modelSelection: input.modelSelection,
+              ...(input.toolTitle !== undefined ? { toolTitle: input.toolTitle } : {}),
+              ...(input.itemType !== undefined ? { itemType: input.itemType } : {}),
+              ...(input.requestKind !== undefined ? { requestKind: input.requestKind } : {}),
+              ...(input.command !== undefined ? { command: input.command } : {}),
+              ...(input.detailSnippet !== undefined ? { detailSnippet: input.detailSnippet } : {}),
+            }),
             { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.gitListBranches]: (input) =>

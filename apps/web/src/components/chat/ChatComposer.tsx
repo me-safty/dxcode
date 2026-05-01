@@ -62,6 +62,7 @@ import {
 } from "../composerFooterLayout";
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { ProviderModelPicker } from "./ProviderModelPicker";
+import { SelectedModelBadge } from "./SelectedModelBadge";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
@@ -89,6 +90,7 @@ import {
   BotIcon,
   CircleAlertIcon,
   ListTodoIcon,
+  PencilRulerIcon,
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
@@ -138,7 +140,6 @@ const runtimeModeConfig: Record<
 const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
-
 const extendReplacementRangeForTrailingSpace = (
   text: string,
   rangeEnd: number,
@@ -189,7 +190,12 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
         <>
           <Button
             variant="ghost"
-            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+            className={cn(
+              "shrink-0 whitespace-nowrap px-2 sm:px-3",
+              props.interactionMode === "plan"
+                ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300"
+                : "text-muted-foreground/70 hover:text-foreground/80",
+            )}
             size="sm"
             type="button"
             onClick={props.onToggleInteractionMode}
@@ -199,7 +205,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                 : "Default mode — click to enter plan mode"
             }
           >
-            <BotIcon />
+            {props.interactionMode === "plan" ? <PencilRulerIcon /> : <BotIcon />}
             <span className="sr-only sm:not-sr-only">
               {props.interactionMode === "plan" ? "Plan" : "Build"}
             </span>
@@ -228,11 +234,12 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             const option = runtimeModeConfig[mode];
             const OptionIcon = option.icon;
             return (
-              <SelectItem key={mode} value={mode} className="min-w-64 py-2">
+              <SelectItem key={mode} value={mode} className="min-w-64 py-2" hideIndicator>
                 <div className="grid min-w-0 gap-0.5">
                   <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
                     <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
                     {option.label}
+                    {mode === props.runtimeMode ? <SelectedModelBadge /> : null}
                   </span>
                   <span className="text-muted-foreground text-xs leading-4">
                     {option.description}
@@ -452,6 +459,7 @@ export interface ChatComposerProps {
     expandedCursor: number,
     cursorAdjacentToMention: boolean,
   ) => void;
+  onSetActivePendingUserInputCustomAnswer: (questionId: string, value: string) => void;
 
   onProviderModelSelect: (instanceId: ProviderInstanceId, model: string) => void;
   toggleInteractionMode: () => void;
@@ -526,6 +534,7 @@ export const ChatComposer = memo(
       onAdvanceActivePendingUserInput,
       onPreviousActivePendingUserInputQuestion,
       onChangeActivePendingUserInputCustomAnswer,
+      onSetActivePendingUserInputCustomAnswer,
       onProviderModelSelect,
       toggleInteractionMode,
       handleRuntimeModeChange,
@@ -925,6 +934,7 @@ export const ChatComposer = memo(
 
     const isComposerApprovalState = activePendingApproval !== null;
     const activePendingUserInput = pendingUserInputs[0] ?? null;
+    const pendingUserInputsForDisplay = pendingUserInputs;
     const hasComposerHeader =
       isComposerApprovalState ||
       pendingUserInputs.length > 0 ||
@@ -1819,7 +1829,7 @@ export const ChatComposer = memo(
         >
           <div
             className={cn(
-              "rounded-[20px] border bg-card transition-colors duration-200 has-focus-visible:border-ring/45",
+              "rounded-[20px] border bg-card ring-foreground/12 transition-[box-shadow,border-color,background-color] duration-200 has-focus-visible:border-foreground/40 has-focus-visible:ring-[3px]",
               isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border",
               composerProviderState.composerSurfaceClassName,
             )}
@@ -1831,15 +1841,16 @@ export const ChatComposer = memo(
                   pendingCount={pendingApprovals.length}
                 />
               </div>
-            ) : pendingUserInputs.length > 0 ? (
+            ) : pendingUserInputsForDisplay.length > 0 ? (
               <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
                 <ComposerPendingUserInputPanel
-                  pendingUserInputs={pendingUserInputs}
+                  pendingUserInputs={pendingUserInputsForDisplay}
                   respondingRequestIds={respondingRequestIds}
                   answers={activePendingDraftAnswers}
                   questionIndex={activePendingQuestionIndex}
                   onToggleOption={onSelectActivePendingUserInputOption}
                   onAdvance={onAdvanceActivePendingUserInput}
+                  onChangeCustomAnswer={onSetActivePendingUserInputCustomAnswer}
                 />
               </div>
             ) : showPlanFollowUpPrompt && activeProposedPlan ? (
@@ -1858,7 +1869,7 @@ export const ChatComposer = memo(
               )}
             >
               {composerMenuOpen && !isComposerApprovalState && (
-                <div className="absolute inset-x-0 bottom-full z-20 mb-2 px-1">
+                <div className="absolute inset-x-0 bottom-full z-20 mb-2">
                   <ComposerCommandMenu
                     items={composerMenuItems}
                     resolvedTheme={resolvedTheme}

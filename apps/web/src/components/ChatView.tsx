@@ -2840,6 +2840,25 @@ export default function ChatView(props: ChatViewProps) {
     [activePendingUserInput],
   );
 
+  const onSetActivePendingUserInputCustomAnswer = useCallback(
+    (questionId: string, value: string) => {
+      if (!activePendingUserInput) {
+        return;
+      }
+      setPendingUserInputAnswersByRequestId((existing) => ({
+        ...existing,
+        [activePendingUserInput.requestId]: {
+          ...existing[activePendingUserInput.requestId],
+          [questionId]: setPendingUserInputCustomAnswer(
+            existing[activePendingUserInput.requestId]?.[questionId],
+            value,
+          ),
+        },
+      }));
+    },
+    [activePendingUserInput],
+  );
+
   const onAdvanceActivePendingUserInput = useCallback(() => {
     if (!activePendingUserInput || !activePendingProgress) {
       return;
@@ -3440,6 +3459,7 @@ export default function ChatView(props: ChatViewProps) {
               onChangeActivePendingUserInputCustomAnswer={
                 onChangeActivePendingUserInputCustomAnswer
               }
+              onSetActivePendingUserInputCustomAnswer={onSetActivePendingUserInputCustomAnswer}
               onProviderModelSelect={onProviderModelSelect}
               toggleInteractionMode={toggleInteractionMode}
               handleRuntimeModeChange={handleRuntimeModeChange}

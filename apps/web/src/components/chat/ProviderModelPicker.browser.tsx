@@ -935,12 +935,76 @@ describe("ProviderModelPicker", () => {
 
       await vi.waitFor(() => {
         const listText = getModelPickerListText();
-        expect(listText).toContain("OpenCode · GitHub Copilot");
+        expect(listText).toContain("OpenCode Go");
         expect(listText).toContain("Claude");
         expect(listText).not.toContain("OpenCodeClaude Opus 4.6");
       });
     } finally {
       await mounted.cleanup();
+    }
+  });
+
+  it("filters OpenCode models by Go and Zen tabs", async () => {
+    localStorage.removeItem("t3code:client-settings:v1");
+
+    const providers: ReadonlyArray<ServerProvider> = [
+      buildOpenCodeProvider([
+        {
+          slug: "opencode/gpt-5",
+          name: "GPT-5",
+          subProvider: "OpenCode Go",
+          isCustom: false,
+          capabilities: createModelCapabilities({
+            optionDescriptors: [
+              selectDescriptor("variant", "Variant", [
+                { id: "medium", label: "medium", isDefault: true },
+                { id: "high", label: "high" },
+              ]),
+            ],
+          }),
+        },
+        {
+          slug: "opencode-zen/claude-opus-4.7",
+          name: "Claude Opus 4.7",
+          subProvider: "OpenCode Zen",
+          isCustom: false,
+          capabilities: createModelCapabilities({
+            optionDescriptors: [
+              selectDescriptor("variant", "Variant", [
+                { id: "medium", label: "medium", isDefault: true },
+                { id: "high", label: "high" },
+              ]),
+            ],
+          }),
+        },
+      ]),
+    ];
+    const mounted = await mountPicker({
+      activeInstanceId: OPENCODE_INSTANCE_ID,
+      model: "opencode/gpt-5",
+      lockedProvider: null,
+      providers,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(getModelPickerListText()).toContain("GPT-5");
+        expect(getModelPickerListText()).not.toContain("Claude Opus 4.7");
+      });
+
+      await page.getByRole("tab", { name: "Zen" }).click();
+
+      await vi.waitFor(() => {
+        const listText = getModelPickerListText();
+        expect(listText).toContain("Claude Opus 4.7");
+        expect(listText).toContain("OpenCode Zen");
+        expect(listText).not.toContain("GPT-5");
+      });
+    } finally {
+      await mounted.cleanup();
+      localStorage.removeItem("t3code:client-settings:v1");
     }
   });
 

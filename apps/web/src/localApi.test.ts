@@ -74,6 +74,7 @@ const rpcClientMock = {
     init: vi.fn(),
     resolvePullRequest: vi.fn(),
     preparePullRequestThread: vi.fn(),
+    summarizeToolWorkLog: vi.fn(),
   },
   server: {
     getConfig: vi.fn(),
@@ -545,6 +546,7 @@ describe("wsApi", () => {
       sidebarProjectSortOrder: "manual" as const,
       sidebarThreadSortOrder: "created_at" as const,
       timestampFormat: "24-hour" as const,
+      toolCallSummaries: true,
     };
     const getClientSettings = vi.fn().mockResolvedValue({
       ...clientSettings,
@@ -605,6 +607,7 @@ describe("wsApi", () => {
       sidebarProjectSortOrder: "manual" as const,
       sidebarThreadSortOrder: "created_at" as const,
       timestampFormat: "24-hour" as const,
+      toolCallSummaries: true,
     };
 
     await api.persistence.setClientSettings(clientSettings);

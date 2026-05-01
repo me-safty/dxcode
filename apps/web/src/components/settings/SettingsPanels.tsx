@@ -176,8 +176,7 @@ function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }
     <span className="text-[11px] text-muted-foreground/60">
       {lastCheckedRelative.suffix ? (
         <>
-          Checked <span className="font-mono tabular-nums">{lastCheckedRelative.value}</span>{" "}
-          {lastCheckedRelative.suffix}
+          Checked {lastCheckedRelative.value} {lastCheckedRelative.suffix}
         </>
       ) : (
         <>Checked {lastCheckedRelative.value}</>
@@ -540,17 +539,6 @@ export function GeneralSettingsPanel() {
       ),
   );
   const logsDirectoryPath = observability?.logsDirectoryPath ?? null;
-  const diagnosticsDescription = (() => {
-    const exports: string[] = [];
-    if (observability?.otlpTracesEnabled && observability.otlpTracesUrl) {
-      exports.push(`traces to ${observability.otlpTracesUrl}`);
-    }
-    if (observability?.otlpMetricsEnabled && observability.otlpMetricsUrl) {
-      exports.push(`metrics to ${observability.otlpMetricsUrl}`);
-    }
-    const mode = observability?.localTracingEnabled ? "Local trace file" : "Terminal logs only";
-    return exports.length > 0 ? `${mode}. OTLP exporting ${exports.join(" and ")}.` : `${mode}.`;
-  })();
 
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenInstanceId = textGenerationModelSelection.instanceId;
@@ -618,6 +606,8 @@ export function GeneralSettingsPanel() {
   const openDiagnosticsError = openPathErrorByTarget.logsDirectory ?? null;
   const isOpeningKeybindings = openingPathByTarget.keybindings;
   const isOpeningLogsDirectory = openingPathByTarget.logsDirectory;
+  const keybindingsConfigPathLabel = keybindingsConfigPath ?? "Resolving keybindings path...";
+  const logsDirectoryPathLabel = logsDirectoryPath ?? "Resolving logs directory...";
 
   const lastCheckedAt =
     serverProviders.length > 0
@@ -1111,8 +1101,33 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          title="Tool call summaries"
+          description="Use the text generation model to write a friendly one-line summary for each tool call in the chat work log. When off, tool calls show their raw heading and details."
+          resetAction={
+            settings.toolCallSummaries !== DEFAULT_UNIFIED_SETTINGS.toolCallSummaries ? (
+              <SettingResetButton
+                label="tool call summaries"
+                onClick={() =>
+                  updateSettings({
+                    toolCallSummaries: DEFAULT_UNIFIED_SETTINGS.toolCallSummaries,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.toolCallSummaries}
+              onCheckedChange={(checked) => updateSettings({ toolCallSummaries: Boolean(checked) })}
+              aria-label="Tool call summaries"
+            />
+          }
+        />
+
+        <SettingsRow
           title="Text generation model"
-          description="Configure the model used for generated commit messages, PR titles, and similar Git text."
+          description="Configure the model used for generated commit messages, PR titles, friendly chat work-log lines (tool activity summaries), and similar Git text."
+          descriptionMinLines={2}
           resetAction={
             isGitWritingModelDirty ? (
               <SettingResetButton
@@ -1162,6 +1177,8 @@ export function GeneralSettingsPanel() {
                 onPromptChange={() => {}}
                 modelOptions={textGenModelOptions}
                 allowPromptInjectedEffort={false}
+                hiddenDescriptorIds={["agent"]}
+                showTriggerSeparators={false}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
                 onModelOptionsChange={(nextOptions) => {
@@ -1317,18 +1334,19 @@ export function GeneralSettingsPanel() {
       <SettingsSection title="Advanced">
         <SettingsRow
           title="Keybindings"
-          description="Open the persisted `keybindings.json` file to edit advanced bindings directly."
-          status={
+          description={
             <>
-              <span className="block break-all font-mono text-[11px] text-foreground">
-                {keybindingsConfigPath ?? "Resolving keybindings path..."}
-              </span>
-              {openKeybindingsError ? (
-                <span className="mt-1 block text-destructive">{openKeybindingsError}</span>
-              ) : (
-                <span className="mt-1 block">Opens in your preferred editor.</span>
-              )}
+              Keybindings are saved in a file to disk. You can open it at{" "}
+              <code className="rounded-md border border-border bg-muted px-[0.35rem] py-[0.1rem] font-mono text-[11px] text-foreground">
+                {keybindingsConfigPathLabel}
+              </code>{" "}
+              to edit it directly.
             </>
+          }
+          status={
+            openKeybindingsError ? (
+              <span className="block text-destructive">{openKeybindingsError}</span>
+            ) : null
           }
           control={
             <Button
@@ -1354,16 +1372,19 @@ export function GeneralSettingsPanel() {
         )}
         <SettingsRow
           title="Diagnostics"
-          description={diagnosticsDescription}
-          status={
+          description={
             <>
-              <span className="block break-all font-mono text-[11px] text-foreground">
-                {logsDirectoryPath ?? "Resolving logs directory..."}
-              </span>
-              {openDiagnosticsError ? (
-                <span className="mt-1 block text-destructive">{openDiagnosticsError}</span>
-              ) : null}
+              Diagnostics are saved to disk at{" "}
+              <code className="rounded-md border border-border bg-muted px-[0.35rem] py-[0.1rem] font-mono text-[11px] text-foreground">
+                {logsDirectoryPathLabel}
+              </code>
+              .
             </>
+          }
+          status={
+            openDiagnosticsError ? (
+              <span className="block text-destructive">{openDiagnosticsError}</span>
+            ) : null
           }
           control={
             <Button
