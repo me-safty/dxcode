@@ -20,7 +20,6 @@ import {
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
   resolveEffectiveEnvMode,
-  resolveLockedWorkspaceLabel,
 } from "./BranchToolbar.logic";
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
@@ -80,19 +79,33 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
     () => availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null,
     [availableEnvironments, environmentId],
   );
-  const environmentLabel = activeEnvironment?.label ?? "Run on";
-  const EnvironmentIcon = activeEnvironment?.isPrimary ? MonitorIcon : CloudIcon;
   const WorkspaceIcon =
     effectiveEnvMode === "worktree"
       ? FolderGit2Icon
       : activeWorktreePath
         ? FolderGitIcon
         : FolderIcon;
-  const workspaceLabel = envModeLocked
-    ? resolveLockedWorkspaceLabel(activeWorktreePath)
-    : effectiveEnvMode === "worktree"
-      ? resolveEnvModeLabel("worktree")
-      : resolveCurrentWorkspaceLabel(activeWorktreePath);
+  const isLocked = envLocked || envModeLocked;
+  const icon = (
+    <span className="relative size-3 shrink-0" aria-hidden="true">
+      <CloudIcon className="absolute inset-0 size-3" style={{ clipPath: "inset(0 50% 0 0)" }} />
+      <WorkspaceIcon className="absolute inset-0 size-3" style={{ clipPath: "inset(0 0 0 50%)" }} />
+    </span>
+  );
+  const triggerContent = (
+    <>
+      {icon}
+      <span className="min-w-0 truncate">{activeEnvironment?.label ?? "Run on"}</span>
+    </>
+  );
+
+  if (isLocked) {
+    return (
+      <span className="inline-flex min-w-0 max-w-[48%] flex-1 items-center justify-start gap-1 rounded-md border border-transparent px-[calc(--spacing(2)-1px)] text-sm font-medium text-muted-foreground/70 md:hidden">
+        {triggerContent}
+      </span>
+    );
+  }
 
   return (
     <Menu>
@@ -100,17 +113,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
         render={<Button variant="ghost" size="xs" />}
         className="min-w-0 max-w-[48%] flex-1 justify-start text-muted-foreground/70 hover:text-foreground/80 md:hidden"
       >
-        {showEnvironmentPicker ? (
-          <>
-            <EnvironmentIcon className="size-3 shrink-0" />
-            <span className="min-w-0 truncate">{environmentLabel}</span>
-          </>
-        ) : (
-          <>
-            <WorkspaceIcon className="size-3 shrink-0" />
-            <span className="min-w-0 truncate">{workspaceLabel}</span>
-          </>
-        )}
+        {triggerContent}
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-64">

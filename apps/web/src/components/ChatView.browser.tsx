@@ -1662,6 +1662,31 @@ describe("ChatView timeline estimator parity (full app)", () => {
     customWsRpcResolver = null;
     document.body.innerHTML = "";
   });
+
+  it("renders locked mobile run context as a static environment label", async () => {
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mobile-locked-workspace" as MessageId,
+        targetText: "locked mobile workspace",
+      }),
+    });
+
+    try {
+      await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLElement>("span")).find(
+            (element) => element.textContent?.trim() === "This device",
+          ) ?? null,
+        "Unable to find static mobile environment label.",
+      );
+
+      expect(findButtonByText("This device")).toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("re-expands the bootstrap project using its logical key", async () => {
     useUiStateStore.setState({
       projectExpandedById: {

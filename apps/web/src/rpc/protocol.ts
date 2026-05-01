@@ -29,6 +29,25 @@ export interface WsProtocolLifecycleHandlers {
   readonly isActive?: () => boolean;
   readonly onAttempt?: (socketUrl: string) => void;
   readonly onOpen?: () => void;
+  readonly onHeartbeatPing?: () => void;
+  readonly onHeartbeatPong?: () => void;
+  readonly onHeartbeatTimeout?: () => void;
+  readonly onRequestStart?: (info: {
+    readonly id: string;
+    readonly tag: string;
+    readonly stream: boolean;
+  }) => void;
+  readonly onRequestChunk?: (info: {
+    readonly id: string;
+    readonly tag: string;
+    readonly chunkCount: number;
+  }) => void;
+  readonly onRequestExit?: (info: {
+    readonly id: string;
+    readonly tag: string;
+    readonly stream: boolean;
+  }) => void;
+  readonly onRequestInterrupt?: (info: { readonly id: string; readonly tag?: string }) => void;
   readonly onError?: (message: string) => void;
   readonly onClose?: (
     details: { readonly code: number; readonly reason: string },
@@ -208,22 +227,99 @@ export function createWsRpcProtocolLayer(
         ...protocol,
         run: (clientId, writeResponse) =>
           protocol.run(clientId, (response) => {
-            if (response._tag === "Chunk" || response._tag === "Exit") {
-              acknowledgeRpcRequest(response.requestId);
-            } else if (response._tag === "ClientProtocolError" || response._tag === "Defect") {
+            if (response._tag === "ClientProtocolError" || response._tag === "Defect") {
               clearAllTrackedRpcRequests();
             }
             return writeResponse(response);
           }),
-        send: (clientId, request, transferables) => {
-          if (request._tag === "Request") {
-            trackRpcRequestSent(request.id, request.tag);
-          }
-          return protocol.send(clientId, request, transferables);
-        },
       }),
     ),
   );
+  const requestHooksLayer = Layer.succeed(
+    RpcClient.RequestHooks,
+    RpcClient.RequestHooks.of({
+      onRequestStart: (info) =>
+        Effect.sync(() => {
+          if (!lifecycle.isActive()) {
+            return;
+          }
+          handlers?.onRequestStart?.({
+            id: String(info.id),
+            tag: info.tag,
+            stream: info.stream,
+          });
+          trackRpcRequestSent(String(info.id), info.tag);
+        }),
+      onRequestChunk: (info) =>
+        Effect.sync(() => {
+          if (!lifecycle.isActive()) {
+            return;
+          }
+          handlers?.onRequestChunk?.({
+            id: String(info.id),
+            tag: info.tag,
+            chunkCount: info.chunkCount,
+          });
+          acknowledgeRpcRequest(String(info.id));
+        }),
+      onRequestExit: (info) =>
+        Effect.sync(() => {
+          if (!lifecycle.isActive()) {
+            return;
+          }
+          handlers?.onRequestExit?.({
+            id: String(info.id),
+            tag: info.tag,
+            stream: info.stream,
+          });
+          acknowledgeRpcRequest(String(info.id));
+        }),
+      onRequestInterrupt: (info) =>
+        Effect.sync(() => {
+          if (!lifecycle.isActive()) {
+            return;
+          }
+          handlers?.onRequestInterrupt?.({
+            id: String(info.id),
+            ...(info.tag === undefined ? {} : { tag: info.tag }),
+          });
+          acknowledgeRpcRequest(String(info.id));
+        }),
+    }),
+  );
+  const connectionHooksLayer = Layer.succeed(
+    RpcClient.ConnectionHooks,
+    RpcClient.ConnectionHooks.of({
+      onConnect: Effect.void,
+      onDisconnect: Effect.void,
+      onPing: Effect.sync(() => {
+        if (lifecycle.isActive()) {
+          handlers?.onHeartbeatPing?.();
+        }
+      }),
+      onPong: Effect.sync(() => {
+        if (lifecycle.isActive()) {
+          handlers?.onHeartbeatPong?.();
+        }
+      }),
+      onPingTimeout: Effect.sync(() => {
+        if (lifecycle.isActive()) {
+          clearAllTrackedRpcRequests();
+          recordWsConnectionErrored(
+            "WebSocket heartbeat timed out.",
+            resolveConnectionMetadata(handlers),
+          );
+          handlers?.onHeartbeatTimeout?.();
+        }
+      }),
+    }),
+  );
 
-  return protocolLayer.pipe(Layer.provide(Layer.mergeAll(socketLayer, RpcSerialization.layerJson)));
+  return Layer.mergeAll(
+    protocolLayer.pipe(
+      Layer.provide(Layer.mergeAll(socketLayer, RpcSerialization.layerJson, connectionHooksLayer)),
+    ),
+    requestHooksLayer,
+    connectionHooksLayer,
+  );
 }

@@ -3695,12 +3695,8 @@ export default function ChatView(props: ChatViewProps) {
                 {...(canCheckoutPullRequestIntoThread
                   ? { onCheckoutPullRequestRequest: openPullRequestDialog }
                   : {})}
-                {...(hasMultipleEnvironments
-                  ? {
-                      availableEnvironments: logicalProjectEnvironments,
-                      onEnvironmentChange,
-                    }
-                  : {})}
+                {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
+                availableEnvironments={logicalProjectEnvironments}
               />
             )}
           </div>
