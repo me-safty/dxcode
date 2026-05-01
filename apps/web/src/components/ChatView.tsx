@@ -3204,6 +3204,7 @@ export default function ChatView(props: ChatViewProps) {
       !isServerThread ||
       isSendBusy ||
       isConnecting ||
+      activeEnvironmentUnavailable ||
       sendInFlightRef.current
     ) {
       return;
@@ -3318,6 +3319,7 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadBranch,
     activeThread,
     beginLocalDispatch,
+    activeEnvironmentUnavailable,
     isConnecting,
     isSendBusy,
     isServerThread,

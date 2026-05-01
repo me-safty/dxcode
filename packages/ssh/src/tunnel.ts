@@ -439,7 +439,7 @@ fi
 `;
 
 export function buildRemoteT3RunnerScript(input?: RemoteT3RunnerOptions): string {
-  const packageSpec = input?.packageSpec?.trim() || "t3@latest";
+  const packageSpec = shellSingleQuote(input?.packageSpec?.trim() || "t3@latest");
   const nodeScriptPath = input?.nodeScriptPath?.trim() || "";
   return stripTrailingNewlines(
     applyScriptPlaceholders(REMOTE_RUNNER_SCRIPT, {

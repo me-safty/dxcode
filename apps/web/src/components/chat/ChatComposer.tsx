@@ -1989,7 +1989,9 @@ export const ChatComposer = memo(
                             : "Ask anything, @tag files/folders, or use / to show available commands"
                 }
                 disabled={
-                  isConnecting || isComposerApprovalState || environmentUnavailable !== null
+                  isConnecting ||
+                  isComposerApprovalState ||
+                  (environmentUnavailable !== null && activePendingProgress === null)
                 }
               />
             </div>

@@ -190,11 +190,26 @@ function AnimatedHeight({ children }: { readonly children: ReactNode }) {
       const nextHeight = Math.ceil(element.scrollHeight || element.getBoundingClientRect().height);
       setHeight((currentHeight) => (currentHeight === nextHeight ? currentHeight : nextHeight));
     };
+    const cancelPendingFrames = () => {
+      if (firstFrameId !== null) {
+        window.cancelAnimationFrame(firstFrameId);
+        firstFrameId = null;
+      }
+      if (secondFrameId !== null) {
+        window.cancelAnimationFrame(secondFrameId);
+        secondFrameId = null;
+      }
+    };
     const updateHeightAfterPaint = () => {
+      cancelPendingFrames();
       updateHeight();
       firstFrameId = window.requestAnimationFrame(() => {
+        firstFrameId = null;
         updateHeight();
-        secondFrameId = window.requestAnimationFrame(updateHeight);
+        secondFrameId = window.requestAnimationFrame(() => {
+          secondFrameId = null;
+          updateHeight();
+        });
       });
     };
 
@@ -203,12 +218,7 @@ function AnimatedHeight({ children }: { readonly children: ReactNode }) {
     resizeObserver.observe(element);
     return () => {
       resizeObserver.disconnect();
-      if (firstFrameId !== null) {
-        window.cancelAnimationFrame(firstFrameId);
-      }
-      if (secondFrameId !== null) {
-        window.cancelAnimationFrame(secondFrameId);
-      }
+      cancelPendingFrames();
     };
   }, []);
 

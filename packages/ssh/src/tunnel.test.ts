@@ -84,9 +84,19 @@ describe("ssh tunnel scripts", () => {
 
     assert.include(script, "T3_NODE_SCRIPT_PATH=''");
     assert.include(script, 'exec t3 "$@"');
-    assert.include(script, 'exec npx --yes t3@latest "$@"');
-    assert.include(script, 'exec npm exec --yes t3@latest -- "$@"');
-    assert.include(script, "could not install t3@latest");
+    assert.include(script, "exec npx --yes 't3@latest' \"$@\"");
+    assert.include(script, "exec npm exec --yes 't3@latest' -- \"$@\"");
+    assert.include(script, "could not install 't3@latest'");
+  });
+
+  it("shell-quotes package specs in the remote t3 runner", () => {
+    const script = buildRemoteT3RunnerScript({
+      packageSpec: "t3@nightly; touch /tmp/t3-owned",
+    });
+
+    assert.include(script, "exec npx --yes 't3@nightly; touch /tmp/t3-owned' \"$@\"");
+    assert.include(script, "exec npm exec --yes 't3@nightly; touch /tmp/t3-owned' -- \"$@\"");
+    assert.notInclude(script, "exec npx --yes t3@nightly; touch /tmp/t3-owned");
   });
 
   it("builds the remote t3 runner with a node script override", () => {
