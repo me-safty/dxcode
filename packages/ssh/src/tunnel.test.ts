@@ -127,6 +127,8 @@ describe("ssh tunnel scripts", () => {
     assert.include(buildRemoteLaunchScript(), 'kill "$REMOTE_PID" 2>/dev/null || true');
     assert.include(buildRemoteLaunchScript(), "wait_ready");
     assert.include(buildRemoteLaunchScript(), '"$RUNNER_FILE" serve --host 127.0.0.1');
+    assert.include(buildRemoteLaunchScript(), '--base-dir "$DEFAULT_SERVER_HOME"');
+    assert.notInclude(buildRemoteLaunchScript(), "server-home");
     assert.include(buildRemoteLaunchScript(), "Remote T3 server did not become ready");
     assert.include(buildRemoteLaunchScript({ packageSpec: "t3@nightly" }), "t3@nightly");
     assert.include(
@@ -135,20 +137,15 @@ describe("ssh tunnel scripts", () => {
     );
     assert.include(buildRemotePairingScript(target), "diagnostics");
     assert.include(buildRemotePairingScript(target), "VITE_DEV_SERVER_URL");
-    assert.include(buildRemotePairingScript(target), 'BASE_DIR_FILE="$STATE_DIR/base-dir"');
-    assert.include(buildRemotePairingScript(target), 'MANAGED_FILE="$STATE_DIR/managed"');
-    assert.include(buildRemotePairingScript(target), 'PAIRING_MANAGED="$(cat "$MANAGED_FILE"');
     assert.include(buildRemotePairingScript(target), 'PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"');
+    assert.notInclude(buildRemotePairingScript(target), "server-home");
     assert.include(buildRemotePairingScript(target, { packageSpec: "t3@nightly" }), "t3@nightly");
     assert.include(
       buildRemoteStopScript(target),
       'if [ "$REMOTE_MANAGED" != "external" ] && [ -n "$REMOTE_PID" ]',
     );
     assert.include(buildRemoteStopScript(target), 'kill "$REMOTE_PID" 2>/dev/null || true');
-    assert.include(
-      buildRemoteStopScript(target),
-      'rm -f "$PID_FILE" "$PORT_FILE" "$BASE_DIR_FILE" "$MANAGED_FILE"',
-    );
+    assert.include(buildRemoteStopScript(target), 'rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE"');
     assert.include(
       buildRemoteLaunchScript(),
       'DEFAULT_RUNTIME_FILE="$DEFAULT_SERVER_HOME/userdata/server-runtime.json"',
