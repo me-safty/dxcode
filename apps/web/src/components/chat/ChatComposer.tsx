@@ -93,6 +93,7 @@ import {
   LockIcon,
   LockOpenIcon,
   PenLineIcon,
+  ShieldCheckIcon,
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
@@ -128,6 +129,11 @@ const runtimeModeConfig: Record<
     description: "Auto-approve edits, ask before other actions.",
     icon: PenLineIcon,
   },
+  auto: {
+    label: "Auto mode",
+    description: "Everything, with background safety checks.",
+    icon: ShieldCheckIcon,
+  },
   "full-access": {
     label: "Full access",
     description: "Allow commands and edits without prompts.",
@@ -136,6 +142,8 @@ const runtimeModeConfig: Record<
 };
 
 const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
+const CLAUDE_RUNTIME_MODE_OPTIONS = runtimeModeOptions;
+const DEFAULT_RUNTIME_MODE_OPTIONS = runtimeModeOptions.filter((mode) => mode !== "auto");
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 
@@ -171,6 +179,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
+  runtimeModeOptions: ReadonlyArray<RuntimeMode>;
   showPlanToggle: boolean;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
@@ -224,7 +233,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
           <SelectValue>{runtimeModeOption.label}</SelectValue>
         </SelectTrigger>
         <SelectPopup alignItemWithTrigger={false}>
-          {runtimeModeOptions.map((mode) => {
+          {props.runtimeModeOptions.map((mode) => {
             const option = runtimeModeConfig[mode];
             const OptionIcon = option.icon;
             return (
@@ -592,6 +601,17 @@ export const ChatComposer = memo(
         explicitSelectedInstanceId,
       ) ?? ProviderDriverKind.make("codex");
     const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
+    const selectedProviderSupportsAutoMode =
+      selectedProvider === ProviderDriverKind.make("claudeAgent");
+    const availableRuntimeModeOptions = selectedProviderSupportsAutoMode
+      ? CLAUDE_RUNTIME_MODE_OPTIONS
+      : DEFAULT_RUNTIME_MODE_OPTIONS;
+
+    useEffect(() => {
+      if (selectedProviderSupportsAutoMode || runtimeMode !== "auto") return;
+      handleRuntimeModeChange("auto-accept-edits");
+    }, [handleRuntimeModeChange, runtimeMode, selectedProviderSupportsAutoMode]);
+
     const lockedContinuationGroupKey = useMemo((): string | null => {
       if (!lockedProvider || !activeThread) return null;
       const lockedInstanceId =
@@ -2027,6 +2047,7 @@ export const ChatComposer = memo(
                       planSidebarLabel={planSidebarLabel}
                       planSidebarOpen={planSidebarOpen}
                       runtimeMode={runtimeMode}
+                      runtimeModeOptions={availableRuntimeModeOptions}
                       showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                       traitsMenuContent={providerTraitsMenuContent}
                       onToggleInteractionMode={toggleInteractionMode}
@@ -2050,6 +2071,7 @@ export const ChatComposer = memo(
                         }
                         interactionMode={interactionMode}
                         runtimeMode={runtimeMode}
+                        runtimeModeOptions={availableRuntimeModeOptions}
                         showPlanToggle={showPlanSidebarToggle}
                         planSidebarLabel={planSidebarLabel}
                         planSidebarOpen={planSidebarOpen}

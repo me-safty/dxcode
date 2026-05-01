@@ -2862,6 +2862,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const effectiveEffort = getEffectiveClaudeAgentEffort(effort);
       const runtimeModeToPermission: Record<string, PermissionMode> = {
         "auto-accept-edits": "acceptEdits",
+        auto: "auto" as PermissionMode,
         "full-access": "bypassPermissions",
       };
       const permissionMode = runtimeModeToPermission[input.runtimeMode];

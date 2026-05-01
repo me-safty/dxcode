@@ -20,6 +20,11 @@ import { TraitsMenuContent } from "./TraitsPicker";
 import { useComposerDraftStore } from "../../composerDraftStore";
 
 const LOCAL_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
+const DEFAULT_RUNTIME_MODE_OPTIONS = [
+  "approval-required",
+  "auto-accept-edits",
+  "full-access",
+] as const;
 
 function selectDescriptor(
   id: string,
@@ -140,6 +145,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
       planSidebarLabel="Plan"
       planSidebarOpen={false}
       runtimeMode="approval-required"
+      runtimeModeOptions={DEFAULT_RUNTIME_MODE_OPTIONS}
       showInteractionModeToggle
       traitsMenuContent={
         <TraitsMenuContent
@@ -302,6 +308,7 @@ describe("CompactComposerControlsMenu", () => {
         planSidebarLabel="Plan"
         planSidebarOpen={false}
         runtimeMode="approval-required"
+        runtimeModeOptions={DEFAULT_RUNTIME_MODE_OPTIONS}
         showInteractionModeToggle={false}
         onToggleInteractionMode={vi.fn()}
         onTogglePlanSidebar={vi.fn()}

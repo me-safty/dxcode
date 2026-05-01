@@ -122,6 +122,21 @@ describe("buildTurnStartParams", () => {
     });
   });
 
+  it("maps Claude auto runtime mode to workspace-write for Codex turns", () => {
+    const params = Effect.runSync(
+      buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "auto",
+        prompt: "Implement it",
+        model: "gpt-5.3-codex",
+        interactionMode: "default",
+      }),
+    );
+
+    assert.equal(params.approvalPolicy, "on-request");
+    assert.deepStrictEqual(params.sandboxPolicy, { type: "workspaceWrite" });
+  });
+
   it("omits collaboration mode when interaction mode is absent", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
