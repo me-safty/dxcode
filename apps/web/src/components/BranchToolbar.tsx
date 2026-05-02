@@ -8,7 +8,7 @@ import {
   FolderIcon,
   MonitorIcon,
 } from "lucide-react";
-import { memo, useMemo } from "react";
+import { Children, memo, useMemo, type ReactNode } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { useIsMobile } from "../hooks/useMediaQuery";
@@ -20,6 +20,7 @@ import {
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
   resolveEffectiveEnvMode,
+  resolveLockedWorkspaceLabel,
 } from "./BranchToolbar.logic";
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
@@ -64,6 +65,28 @@ interface MobileRunContextSelectorProps {
   onEnvModeChange: (mode: EnvMode) => void;
 }
 
+function SplitIcon({
+  children,
+  className,
+}: {
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  const [left, right] = Children.toArray(children);
+
+  return (
+    <span className={className} aria-hidden="true">
+      <span className="absolute inset-0 overflow-hidden [clip-path:polygon(0_0,70%_0,30%_100%,0_100%)] [&>svg]:size-full">
+        {left}
+      </span>
+      <span className="absolute inset-0 overflow-hidden [clip-path:polygon(70%_0,100%_0,100%_100%,30%_100%)] [&>svg]:size-full">
+        {right}
+      </span>
+      <span className="absolute left-1/2 top-1/2 h-[145%] w-0.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-full bg-current" />
+    </span>
+  );
+}
+
 const MobileRunContextSelector = memo(function MobileRunContextSelector({
   envLocked,
   envModeLocked,
@@ -85,17 +108,27 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
       : activeWorktreePath
         ? FolderGitIcon
         : FolderIcon;
+  const workspaceLabel = envModeLocked
+    ? resolveLockedWorkspaceLabel(activeWorktreePath)
+    : effectiveEnvMode === "worktree"
+      ? resolveEnvModeLabel("worktree")
+      : resolveCurrentWorkspaceLabel(activeWorktreePath);
   const isLocked = envLocked || envModeLocked;
-  const icon = (
-    <span className="relative size-3 shrink-0" aria-hidden="true">
-      <CloudIcon className="absolute inset-0 size-3" style={{ clipPath: "inset(0 50% 0 0)" }} />
-      <WorkspaceIcon className="absolute inset-0 size-3" style={{ clipPath: "inset(0 0 0 50%)" }} />
-    </span>
+  const EnvironmentIcon = activeEnvironment?.isPrimary ? MonitorIcon : CloudIcon;
+  const icon = showEnvironmentPicker ? (
+    <SplitIcon className="relative size-3.5 shrink-0">
+      <EnvironmentIcon />
+      <WorkspaceIcon />
+    </SplitIcon>
+  ) : (
+    <WorkspaceIcon className="size-3 shrink-0" />
   );
   const triggerContent = (
     <>
       {icon}
-      <span className="min-w-0 truncate">{activeEnvironment?.label ?? "Run on"}</span>
+      <span className="min-w-0 truncate">
+        {showEnvironmentPicker ? (activeEnvironment?.label ?? "Run on") : workspaceLabel}
+      </span>
     </>
   );
 
