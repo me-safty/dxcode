@@ -793,6 +793,60 @@ describe("ProviderRuntimeIngestion", () => {
     ).toBe("# Streamed fallback plan\n\n- one");
   });
 
+  it("projects a proposed plan from assistant message text tagged with proposed_plan on turn completion", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-plan-turn-complete-1"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-assistant-plan-turn-complete"),
+      itemId: asItemId("item-assistant-plan-turn-complete"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "<proposed_plan>\n# Turn completion fallback plan\n\n- one\n</proposed_plan>",
+      },
+    });
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-plan-turn-complete"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-assistant-plan-turn-complete"),
+      payload: {
+        summary: "done",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.proposedPlans.some(
+        (proposedPlan: ProviderRuntimeTestProposedPlan) =>
+          proposedPlan.id === "plan:thread-1:turn:turn-assistant-plan-turn-complete",
+      ),
+    );
+
+    expect(
+      thread.messages.find(
+        (entry: ProviderRuntimeTestMessage) =>
+          entry.id === "assistant:item-assistant-plan-turn-complete",
+      ),
+    ).toMatchObject({
+      text: "",
+      streaming: false,
+      turnId: "turn-assistant-plan-turn-complete",
+    });
+    expect(
+      thread.proposedPlans.find(
+        (entry: ProviderRuntimeTestProposedPlan) =>
+          entry.id === "plan:thread-1:turn:turn-assistant-plan-turn-complete",
+      )?.planMarkdown,
+    ).toBe("# Turn completion fallback plan\n\n- one");
+  });
+
   it("preserves completed tool metadata on projected tool activities", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

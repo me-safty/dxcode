@@ -1435,17 +1435,33 @@ const make = Effect.gen(function* () {
           yield* Effect.forEach(
             assistantMessageIds,
             (assistantMessageId) =>
-              finalizeAssistantMessage({
-                event,
-                threadId: thread.id,
-                messageId: assistantMessageId,
-                turnId,
-                createdAt: now,
-                commandTag: "assistant-complete-finalize",
-                finalDeltaCommandTag: "assistant-delta-finalize-fallback",
-                hasProjectedMessage: thread.messages.some(
-                  (entry) => entry.id === assistantMessageId,
-                ),
+              Effect.gen(function* () {
+                const completedAssistantText = yield* finalizeAssistantMessage({
+                  event,
+                  threadId: thread.id,
+                  messageId: assistantMessageId,
+                  turnId,
+                  createdAt: now,
+                  commandTag: "assistant-complete-finalize",
+                  finalDeltaCommandTag: "assistant-delta-finalize-fallback",
+                  hasProjectedMessage: thread.messages.some(
+                    (entry) => entry.id === assistantMessageId,
+                  ),
+                });
+
+                const proposedPlanFromAssistantMessage =
+                  extractProposedPlanMarkdown(completedAssistantText);
+                if (proposedPlanFromAssistantMessage) {
+                  yield* finalizeBufferedProposedPlan({
+                    event,
+                    threadId: thread.id,
+                    threadProposedPlans: thread.proposedPlans,
+                    planId: proposedPlanIdForTurn(thread.id, turnId),
+                    turnId,
+                    fallbackMarkdown: proposedPlanFromAssistantMessage,
+                    updatedAt: now,
+                  });
+                }
               }),
             { concurrency: 1 },
           ).pipe(Effect.asVoid);
