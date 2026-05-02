@@ -372,21 +372,23 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                       {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
                     </TooltipPopup>
                   </Tooltip>
-                  {displayedUserMessage.copyText && (
-                    <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
-                  )}
-                  {canRevertAgentWork && (
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="ghost"
-                      disabled={ctx.isRevertingCheckpoint || ctx.isWorking}
-                      onClick={() => ctx.onRevertUserMessage(row.message.id)}
-                      title="Revert to this message"
-                    >
-                      <Undo2Icon className="size-3" />
-                    </Button>
-                  )}
+                  <div className="flex items-center gap-0.5">
+                    {displayedUserMessage.copyText && (
+                      <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
+                    )}
+                    {canRevertAgentWork && (
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="ghost"
+                        disabled={ctx.isRevertingCheckpoint || ctx.isWorking}
+                        onClick={() => ctx.onRevertUserMessage(row.message.id)}
+                        title="Revert to this message"
+                      >
+                        <Undo2Icon className="size-3" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -964,15 +966,18 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
   const showFailedIndicator = workEntryIndicatesToolFailure(workEntry);
+  const showDestructiveRowStyle =
+    showFailedIndicator &&
+    (workEntry.sourceActivityKind === "runtime.error" || !workLogEntryIsToolLike(workEntry));
   const iconWrapperClass = cn(
     "flex size-5 shrink-0 items-center justify-center",
-    showFailedIndicator
+    showDestructiveRowStyle
       ? "text-destructive"
-      : workEntry.tone === "tool"
+      : workEntry.tone === "tool" || showFailedIndicator
         ? "text-muted-foreground"
         : iconConfig.className,
   );
-  const headingClass = showFailedIndicator
+  const headingClass = showDestructiveRowStyle
     ? "font-medium text-destructive"
     : "font-medium text-foreground";
   const turnSettled = !ctx.activeTurnInProgress;
