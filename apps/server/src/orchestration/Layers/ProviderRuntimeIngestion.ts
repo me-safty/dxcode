@@ -834,7 +834,8 @@ const make = Effect.gen(function* () {
           : (input.fallbackText?.trim().length ?? 0) > 0
             ? input.fallbackText!
             : "";
-      const text = rawText.replace(PROPOSED_PLAN_BLOCK_REGEX, "").trim();
+      const hasProposedPlanBlock = PROPOSED_PLAN_CAPTURE_REGEX.test(rawText);
+      const text = hasProposedPlanBlock ? rawText.replace(PROPOSED_PLAN_BLOCK_REGEX, "") : rawText;
       const hasRenderableText = hasRenderableAssistantText(text);
 
       if (hasRenderableText) {
