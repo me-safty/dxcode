@@ -96,12 +96,34 @@ const makeBinaryPathSetting = (fallback: string) =>
     Schema.withDecodingDefault(Effect.succeed(fallback)),
   );
 
+export type ProviderSettingsFormControl = "text" | "password" | "textarea" | "switch";
+
+export interface ProviderSettingsFormAnnotation {
+  readonly control?: ProviderSettingsFormControl | undefined;
+  readonly placeholder?: string | undefined;
+  readonly hidden?: boolean | undefined;
+  readonly clearWhenEmpty?: "omit" | "persist" | undefined;
+  readonly order?: number | undefined;
+}
+
+declare module "effect/Schema" {
+  namespace Annotations {
+    interface Annotations {
+      readonly providerSettingsForm?: ProviderSettingsFormAnnotation | undefined;
+    }
+  }
+}
+
 export const CodexSettings = Schema.Struct({
-  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  enabled: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+    Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+  ),
   binaryPath: makeBinaryPathSetting("codex").pipe(
     Schema.annotateKey({
       title: "Binary path",
       description: "Path to the Codex binary used by this instance.",
+      providerSettingsForm: { placeholder: "codex", clearWhenEmpty: "omit", order: 10 },
     }),
   ),
   homePath: TrimmedString.pipe(
@@ -109,6 +131,7 @@ export const CodexSettings = Schema.Struct({
     Schema.annotateKey({
       title: "CODEX_HOME path",
       description: "Custom Codex home and config directory.",
+      providerSettingsForm: { placeholder: "~/.codex", clearWhenEmpty: "omit", order: 20 },
     }),
   ),
   shadowHomePath: TrimmedString.pipe(
@@ -117,18 +140,30 @@ export const CodexSettings = Schema.Struct({
       title: "Shadow home path",
       description:
         "Account-specific Codex home. Keeps auth.json separate while sharing state from CODEX_HOME.",
+      providerSettingsForm: {
+        placeholder: "~/.codex-t3/personal",
+        clearWhenEmpty: "omit",
+        order: 30,
+      },
     }),
   ),
-  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  customModels: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+    Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+  ),
 });
 export type CodexSettings = typeof CodexSettings.Type;
 
 export const ClaudeSettings = Schema.Struct({
-  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  enabled: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+    Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+  ),
   binaryPath: makeBinaryPathSetting("claude").pipe(
     Schema.annotateKey({
       title: "Binary path",
       description: "Path to the Claude binary used by this instance.",
+      providerSettingsForm: { placeholder: "claude", clearWhenEmpty: "omit", order: 10 },
     }),
   ),
   homePath: TrimmedString.pipe(
@@ -137,25 +172,34 @@ export const ClaudeSettings = Schema.Struct({
       title: "Claude HOME path",
       description:
         "Custom HOME used when running this Claude instance. Keeps .claude.json and .claude separate.",
+      providerSettingsForm: { placeholder: "~", clearWhenEmpty: "omit", order: 20 },
     }),
   ),
-  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  customModels: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+    Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+  ),
   launchArgs: Schema.String.pipe(
     Schema.withDecodingDefault(Effect.succeed("")),
     Schema.annotateKey({
       title: "Launch arguments",
       description: "Additional CLI arguments passed on session start.",
+      providerSettingsForm: { placeholder: "e.g. --chrome", clearWhenEmpty: "omit", order: 30 },
     }),
   ),
 });
 export type ClaudeSettings = typeof ClaudeSettings.Type;
 
 export const CursorSettings = Schema.Struct({
-  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  enabled: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+    Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+  ),
   binaryPath: makeBinaryPathSetting("agent").pipe(
     Schema.annotateKey({
       title: "Binary path",
       description: "Path to the Cursor agent binary.",
+      providerSettingsForm: { placeholder: "agent", clearWhenEmpty: "omit", order: 10 },
     }),
   ),
   apiEndpoint: TrimmedString.pipe(
@@ -163,17 +207,25 @@ export const CursorSettings = Schema.Struct({
     Schema.annotateKey({
       title: "API endpoint",
       description: "Override the Cursor API endpoint for this instance.",
+      providerSettingsForm: { placeholder: "https://...", clearWhenEmpty: "omit", order: 20 },
     }),
   ),
-  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  customModels: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+    Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+  ),
 });
 export type CursorSettings = typeof CursorSettings.Type;
 export const OpenCodeSettings = Schema.Struct({
-  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  enabled: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+    Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+  ),
   binaryPath: makeBinaryPathSetting("opencode").pipe(
     Schema.annotateKey({
       title: "Binary path",
       description: "Path to the OpenCode binary.",
+      providerSettingsForm: { placeholder: "opencode", clearWhenEmpty: "omit", order: 10 },
     }),
   ),
   serverUrl: TrimmedString.pipe(
@@ -181,6 +233,11 @@ export const OpenCodeSettings = Schema.Struct({
     Schema.annotateKey({
       title: "Server URL",
       description: "Leave blank to let T3 Code spawn the server when needed.",
+      providerSettingsForm: {
+        placeholder: "http://127.0.0.1:4096",
+        clearWhenEmpty: "omit",
+        order: 20,
+      },
     }),
   ),
   serverPassword: TrimmedString.pipe(
@@ -188,9 +245,18 @@ export const OpenCodeSettings = Schema.Struct({
     Schema.annotateKey({
       title: "Server password",
       description: "Stored in plain text on disk.",
+      providerSettingsForm: {
+        control: "password",
+        placeholder: "Optional",
+        clearWhenEmpty: "omit",
+        order: 30,
+      },
     }),
   ),
-  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  customModels: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+    Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+  ),
 });
 export type OpenCodeSettings = typeof OpenCodeSettings.Type;
 

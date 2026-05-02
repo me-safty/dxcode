@@ -2,21 +2,21 @@
 
 import { useMemo, type ReactNode } from "react";
 import { Schema } from "effect";
+import type {
+  ProviderSettingsFormAnnotation,
+  ProviderSettingsFormControl,
+} from "@t3tools/contracts";
 
 import { cn } from "../../lib/utils";
 import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
-import type {
-  ProviderClientDefinition,
-  ProviderSettingsControl,
-  ProviderSettingsFieldUi,
-} from "./providerDriverMeta";
+import type { ProviderClientDefinition } from "./providerDriverMeta";
 
 export interface ProviderSettingsFieldModel {
   readonly key: string;
-  readonly control: ProviderSettingsControl;
+  readonly control: ProviderSettingsFormControl;
   readonly label: string;
   readonly description?: string | undefined;
   readonly placeholder?: string | undefined;
@@ -30,51 +30,62 @@ function titleizeFieldKey(key: string): string {
     .replace(/^./, (char) => char.toUpperCase());
 }
 
-function fieldControlFromUi(ui: ProviderSettingsFieldUi | undefined): ProviderSettingsControl {
-  return ui?.control ?? "text";
+function readFieldAnnotations(
+  fieldSchema: ProviderClientDefinition["settingsSchema"]["fields"][string],
+) {
+  return Schema.resolveAnnotationsKey(fieldSchema) ?? Schema.resolveAnnotations(fieldSchema);
 }
 
 function readFieldAnnotationString(
   fieldSchema: ProviderClientDefinition["settingsSchema"]["fields"][string],
   key: "title" | "description",
 ): string | undefined {
-  const annotations =
-    Schema.resolveAnnotationsKey(fieldSchema) ?? Schema.resolveAnnotations(fieldSchema);
+  const annotations = readFieldAnnotations(fieldSchema);
   const value = annotations?.[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function readProviderSettingsFormAnnotation(
+  fieldSchema: ProviderClientDefinition["settingsSchema"]["fields"][string],
+): ProviderSettingsFormAnnotation {
+  const annotation = readFieldAnnotations(fieldSchema)?.providerSettingsForm;
+  return annotation ?? {};
 }
 
 export function deriveProviderSettingsFields(
   definition: ProviderClientDefinition,
 ): ReadonlyArray<ProviderSettingsFieldModel> {
-  const schemaKeys = Object.keys(definition.settingsSchema.fields);
-  const schemaKeySet = new Set(schemaKeys);
-  const orderedKeys = [
-    ...(definition.settingsUi.order ?? []).filter((key) => schemaKeySet.has(key)),
-    ...schemaKeys.filter((key) => !(definition.settingsUi.order ?? []).includes(key)),
-  ];
+  return Object.keys(definition.settingsSchema.fields)
+    .map((key, index) => ({ key, index }))
+    .toSorted((left, right) => {
+      const leftAnnotation = readProviderSettingsFormAnnotation(
+        definition.settingsSchema.fields[left.key]!,
+      );
+      const rightAnnotation = readProviderSettingsFormAnnotation(
+        definition.settingsSchema.fields[right.key]!,
+      );
+      return (leftAnnotation.order ?? left.index) - (rightAnnotation.order ?? right.index);
+    })
+    .flatMap(({ key }) => {
+      const fieldSchema = definition.settingsSchema.fields[key]!;
+      const formAnnotation = readProviderSettingsFormAnnotation(fieldSchema);
+      if (formAnnotation.hidden) return [];
 
-  return orderedKeys.flatMap((key) => {
-    const ui = definition.settingsUi.fields?.[key];
-    if (ui?.hidden) return [];
-    const fieldSchema = definition.settingsSchema.fields[key]!;
-    const annotatedTitle = readFieldAnnotationString(fieldSchema, "title");
-    const annotatedDescription = readFieldAnnotationString(fieldSchema, "description");
-    return [
-      {
-        key,
-        control: fieldControlFromUi(ui),
-        label: ui?.label ?? annotatedTitle ?? titleizeFieldKey(key),
-        ...(ui?.description !== undefined
-          ? { description: ui.description }
-          : annotatedDescription !== undefined
-            ? { description: annotatedDescription }
+      const annotatedTitle = readFieldAnnotationString(fieldSchema, "title");
+      const annotatedDescription = readFieldAnnotationString(fieldSchema, "description");
+      return [
+        {
+          key,
+          control: formAnnotation.control ?? "text",
+          label: annotatedTitle ?? titleizeFieldKey(key),
+          ...(annotatedDescription !== undefined ? { description: annotatedDescription } : {}),
+          ...(formAnnotation.placeholder !== undefined
+            ? { placeholder: formAnnotation.placeholder }
             : {}),
-        ...(ui?.placeholder !== undefined ? { placeholder: ui.placeholder } : {}),
-        clearWhenEmpty: ui?.clearWhenEmpty ?? "omit",
-      } satisfies ProviderSettingsFieldModel,
-    ];
-  });
+          clearWhenEmpty: formAnnotation.clearWhenEmpty ?? "omit",
+        } satisfies ProviderSettingsFieldModel,
+      ];
+    });
 }
 
 export function readProviderConfigString(config: unknown, key: string): string {

@@ -12,33 +12,17 @@ type ProviderSettingsSchema = {
   readonly fields: Readonly<Record<string, Schema.Top>>;
 };
 
-export type ProviderSettingsControl = "text" | "password" | "textarea" | "switch";
-
-export interface ProviderSettingsFieldUi {
-  readonly control?: ProviderSettingsControl;
-  readonly label?: string;
-  readonly placeholder?: string;
-  readonly description?: string;
-  readonly hidden?: boolean;
-  readonly clearWhenEmpty?: "omit" | "persist";
-}
-
-export interface ProviderSettingsUi {
-  readonly order?: readonly string[];
-  readonly fields?: Readonly<Record<string, ProviderSettingsFieldUi>>;
-}
-
 /**
  * Browser-safe provider definition. This is deliberately shaped like the
- * future provider package client export: the core web app gets a schema,
- * presentation metadata, and a small UI hint layer, then renders generically.
+ * future provider package client export: the core web app gets a schema with
+ * field annotations plus provider-level presentation metadata, then renders
+ * settings generically.
  */
 export interface ProviderClientDefinition {
   readonly value: ProviderDriverKind;
   readonly label: string;
   readonly icon: Icon;
   readonly settingsSchema: ProviderSettingsSchema;
-  readonly settingsUi: ProviderSettingsUi;
   /**
    * Optional short label rendered as a `variant="warning"` badge next to
    * the instance title. Used to flag drivers that still ship under an
@@ -55,50 +39,12 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     label: "Codex",
     icon: OpenAI,
     settingsSchema: CodexSettings,
-    settingsUi: {
-      order: ["binaryPath", "homePath", "shadowHomePath"],
-      fields: {
-        enabled: { hidden: true },
-        customModels: { hidden: true },
-        binaryPath: {
-          placeholder: "codex",
-          clearWhenEmpty: "omit",
-        },
-        homePath: {
-          placeholder: "~/.codex",
-          clearWhenEmpty: "omit",
-        },
-        shadowHomePath: {
-          placeholder: "~/.codex-t3/personal",
-          clearWhenEmpty: "omit",
-        },
-      },
-    },
   },
   {
     value: ProviderDriverKind.make("claudeAgent"),
     label: "Claude",
     icon: ClaudeAI,
     settingsSchema: ClaudeSettings,
-    settingsUi: {
-      order: ["binaryPath", "homePath", "launchArgs"],
-      fields: {
-        enabled: { hidden: true },
-        customModels: { hidden: true },
-        binaryPath: {
-          placeholder: "claude",
-          clearWhenEmpty: "omit",
-        },
-        homePath: {
-          placeholder: "~",
-          clearWhenEmpty: "omit",
-        },
-        launchArgs: {
-          placeholder: "e.g. --chrome",
-          clearWhenEmpty: "omit",
-        },
-      },
-    },
   },
   {
     value: ProviderDriverKind.make("cursor"),
@@ -106,47 +52,12 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     icon: CursorIcon,
     badgeLabel: "Early Access",
     settingsSchema: CursorSettings,
-    settingsUi: {
-      order: ["binaryPath", "apiEndpoint"],
-      fields: {
-        enabled: { hidden: true },
-        customModels: { hidden: true },
-        binaryPath: {
-          placeholder: "agent",
-          clearWhenEmpty: "omit",
-        },
-        apiEndpoint: {
-          placeholder: "https://...",
-          clearWhenEmpty: "omit",
-        },
-      },
-    },
   },
   {
     value: ProviderDriverKind.make("opencode"),
     label: "OpenCode",
     icon: OpenCodeIcon,
     settingsSchema: OpenCodeSettings,
-    settingsUi: {
-      order: ["binaryPath", "serverUrl", "serverPassword"],
-      fields: {
-        enabled: { hidden: true },
-        customModels: { hidden: true },
-        binaryPath: {
-          placeholder: "opencode",
-          clearWhenEmpty: "omit",
-        },
-        serverUrl: {
-          placeholder: "http://127.0.0.1:4096",
-          clearWhenEmpty: "omit",
-        },
-        serverPassword: {
-          control: "password",
-          placeholder: "Optional",
-          clearWhenEmpty: "omit",
-        },
-      },
-    },
   },
 ];
 
