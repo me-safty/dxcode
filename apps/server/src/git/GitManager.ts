@@ -1663,7 +1663,10 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         const currentBranch = branchStep.name ?? initialStatus.branch;
         const commitAction = isCommitAction(input.action) ? input.action : null;
         const changeRequestTerms = wantsPr
-          ? getChangeRequestTerminologyForKind((yield* sourceControlProvider(input.cwd)).kind)
+          ? yield* sourceControlProvider(input.cwd).pipe(
+              Effect.map((provider) => getChangeRequestTerminologyForKind(provider.kind)),
+              Effect.catch(() => Effect.succeed(getChangeRequestTerminologyForKind("unknown"))),
+            )
           : null;
 
         const commit = commitAction
