@@ -16,10 +16,7 @@ export function shouldShowNewVersionToast(
   if (!currentVersion) return false;
 
   const lastAcknowledged = readLastAcknowledgedVersion();
-  if (lastAcknowledged === null) {
-    persistLastAcknowledgedVersion(currentVersion);
-    return false;
-  }
+  if (lastAcknowledged === null) return false;
   return currentVersion !== lastAcknowledged;
 }
 

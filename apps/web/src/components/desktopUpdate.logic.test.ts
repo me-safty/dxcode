@@ -331,10 +331,10 @@ describe("new version toast", () => {
     expect(shouldShowNewVersionToast({ ...baseState, enabled: false })).toBe(false);
   });
 
-  it("does not show toast on first launch (no acknowledged version stored)", () => {
+  it("does not show toast when no acknowledged version is stored and has no side effects", () => {
     expect(readLastAcknowledgedVersion()).toBeNull();
     expect(shouldShowNewVersionToast(baseState)).toBe(false);
-    expect(readLastAcknowledgedVersion()).toBe("1.0.0");
+    expect(readLastAcknowledgedVersion()).toBeNull();
   });
 
   it("shows toast when version changes from acknowledged version", () => {
@@ -362,6 +362,7 @@ describe("new version toast", () => {
   });
 
   it("does not show toast when acknowledged version matches after first launch", () => {
+    acknowledgeCurrentVersion(baseState);
     expect(shouldShowNewVersionToast(baseState)).toBe(false);
     expect(shouldShowNewVersionToast(baseState)).toBe(false);
   });

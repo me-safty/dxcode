@@ -6,6 +6,7 @@ import { toastManager } from "./ui/toast";
 import {
   acknowledgeCurrentVersion,
   getNewVersionReleaseNotesUrl,
+  readLastAcknowledgedVersion,
   shouldShowNewVersionToast,
 } from "./desktopUpdate.logic";
 
@@ -14,9 +15,17 @@ export function NewVersionToastCoordinator() {
   const toastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
 
   useEffect(() => {
+    if (!updateState?.enabled) return;
+    const currentVersion = updateState.currentVersion;
+    if (!currentVersion) return;
+
+    if (readLastAcknowledgedVersion() === null) {
+      acknowledgeCurrentVersion(updateState);
+      return;
+    }
+
     if (!shouldShowNewVersionToast(updateState)) return;
 
-    const version = updateState!.currentVersion;
     acknowledgeCurrentVersion(updateState);
 
     if (toastIdRef.current) {
@@ -25,14 +34,14 @@ export function NewVersionToastCoordinator() {
 
     toastIdRef.current = toastManager.add({
       type: "success",
-      title: `Updated to v${version}`,
+      title: `Updated to v${currentVersion}`,
       description: "View what's new in this release",
       timeout: 0,
       actionProps: {
         children: "View release notes",
         onClick: async () => {
           const bridge = window.desktopBridge;
-          const url = getNewVersionReleaseNotesUrl(version);
+          const url = getNewVersionReleaseNotesUrl(currentVersion);
           if (bridge?.openExternal) {
             await bridge.openExternal(url);
           } else {
