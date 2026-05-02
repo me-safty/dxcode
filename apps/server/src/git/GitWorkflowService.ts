@@ -91,6 +91,31 @@ const unsupportedGitCommand = (operation: string, cwd: string, detail: string) =
     detail,
   });
 
+function nonRepositoryLocalStatus(): VcsStatusLocalResult {
+  return {
+    isRepo: false,
+    hasPrimaryRemote: false,
+    isDefaultRef: false,
+    refName: null,
+    hasWorkingTreeChanges: false,
+    workingTree: {
+      files: [],
+      insertions: 0,
+      deletions: 0,
+    },
+  };
+}
+
+function nonRepositoryStatus(): VcsStatusResult {
+  return {
+    ...nonRepositoryLocalStatus(),
+    hasUpstream: false,
+    aheadCount: 0,
+    behindCount: 0,
+    pr: null,
+  };
+}
+
 export const make = Effect.fn("makeGitWorkflowService")(function* () {
   const registry = yield* VcsDriverRegistry;
   const git = yield* GitVcsDriver;
@@ -144,6 +169,33 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
     }
   });
 
+  const detectGitRepositoryForStatus = Effect.fn("GitWorkflowService.detectGitRepositoryForStatus")(
+    function* (operation: string, cwd: string) {
+      const handle = yield* registry
+        .detect({ cwd })
+        .pipe(
+          Effect.mapError((error) =>
+            unsupportedGitWorkflow(
+              operation,
+              cwd,
+              error instanceof Error ? error.message : String(error),
+            ),
+          ),
+        );
+      if (!handle) {
+        return false;
+      }
+      if (handle.kind !== "git") {
+        return yield* unsupportedGitWorkflow(
+          operation,
+          cwd,
+          `The ${operation} workflow currently supports Git repositories only; detected ${handle.kind}.`,
+        );
+      }
+      return true;
+    },
+  );
+
   const routeGitManager =
     <Input extends { readonly cwd: string }, Output>(
       operation: string,
@@ -153,9 +205,26 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
       ensureGit(operation, input.cwd).pipe(Effect.andThen(run(input)));
 
   return GitWorkflowService.of({
-    status: routeGitManager("GitWorkflowService.status", gitManager.status),
-    localStatus: routeGitManager("GitWorkflowService.localStatus", gitManager.localStatus),
-    remoteStatus: routeGitManager("GitWorkflowService.remoteStatus", gitManager.remoteStatus),
+    status: (input) =>
+      detectGitRepositoryForStatus("GitWorkflowService.status", input.cwd).pipe(
+        Effect.flatMap((isGitRepository) =>
+          isGitRepository ? gitManager.status(input) : Effect.succeed(nonRepositoryStatus()),
+        ),
+      ),
+    localStatus: (input) =>
+      detectGitRepositoryForStatus("GitWorkflowService.localStatus", input.cwd).pipe(
+        Effect.flatMap((isGitRepository) =>
+          isGitRepository
+            ? gitManager.localStatus(input)
+            : Effect.succeed(nonRepositoryLocalStatus()),
+        ),
+      ),
+    remoteStatus: (input) =>
+      detectGitRepositoryForStatus("GitWorkflowService.remoteStatus", input.cwd).pipe(
+        Effect.flatMap((isGitRepository) =>
+          isGitRepository ? gitManager.remoteStatus(input) : Effect.succeed(null),
+        ),
+      ),
     invalidateLocalStatus: gitManager.invalidateLocalStatus,
     invalidateRemoteStatus: gitManager.invalidateRemoteStatus,
     invalidateStatus: gitManager.invalidateStatus,
