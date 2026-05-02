@@ -62,6 +62,7 @@ function deriveInstanceId(driver: ProviderDriverKind, label: string): string {
 const INSTANCE_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 const DEFAULT_DRIVER_OPTION = DRIVER_OPTIONS[0]!;
+const EMPTY_CONFIG_DRAFT: Record<string, unknown> = {};
 interface ComingSoonDriverOption {
   readonly value: ProviderDriverKind;
   readonly label: string;
@@ -165,7 +166,7 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
   const wizardSteps = ["Driver", "Identity", "Config"] as const;
   const wizardStepSummaries = [driverOption.label, previewLabel, null] as const;
 
-  const configDraft = configByDriver[driver] ?? {};
+  const configDraft = configByDriver[driver] ?? EMPTY_CONFIG_DRAFT;
   const setConfigDraft = useCallback(
     (config: Record<string, unknown> | undefined) => {
       setConfigByDriver((existing) => {

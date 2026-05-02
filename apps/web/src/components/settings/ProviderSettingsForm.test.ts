@@ -20,6 +20,21 @@ describe("ProviderSettingsForm helpers", () => {
     ]);
   });
 
+  it("sources labels and descriptions from schema annotations", () => {
+    const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
+    expect(opencode).toBeDefined();
+
+    const serverPassword = deriveProviderSettingsFields(opencode!).find(
+      (field) => field.key === "serverPassword",
+    );
+
+    expect(serverPassword).toMatchObject({
+      label: "Server password",
+      description: "Stored in plain text on disk.",
+      control: "password",
+    });
+  });
+
   it("preserves unknown config keys while omitting empty configurable fields", () => {
     const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
     expect(opencode).toBeDefined();

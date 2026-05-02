@@ -5,10 +5,11 @@ import {
   OpenCodeSettings,
   ProviderDriverKind,
 } from "@t3tools/contracts";
+import type { Schema } from "effect";
 import { ClaudeAI, CursorIcon, type Icon, OpenAI, OpenCodeIcon } from "../Icons";
 
 type ProviderSettingsSchema = {
-  readonly fields: Readonly<Record<string, unknown>>;
+  readonly fields: Readonly<Record<string, Schema.Top>>;
 };
 
 export type ProviderSettingsControl = "text" | "password" | "textarea" | "switch";
@@ -60,22 +61,15 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
         enabled: { hidden: true },
         customModels: { hidden: true },
         binaryPath: {
-          label: "Binary path",
           placeholder: "codex",
-          description: "Path to the Codex binary used by this instance.",
           clearWhenEmpty: "omit",
         },
         homePath: {
-          label: "CODEX_HOME path",
           placeholder: "~/.codex",
-          description: "Custom Codex home and config directory.",
           clearWhenEmpty: "omit",
         },
         shadowHomePath: {
-          label: "Shadow home path",
           placeholder: "~/.codex-t3/personal",
-          description:
-            "Account-specific Codex home. Keeps auth.json separate while sharing state from CODEX_HOME.",
           clearWhenEmpty: "omit",
         },
       },
@@ -92,22 +86,15 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
         enabled: { hidden: true },
         customModels: { hidden: true },
         binaryPath: {
-          label: "Binary path",
           placeholder: "claude",
-          description: "Path to the Claude binary used by this instance.",
           clearWhenEmpty: "omit",
         },
         homePath: {
-          label: "Claude HOME path",
           placeholder: "~",
-          description:
-            "Custom HOME used when running this Claude instance. Keeps .claude.json and .claude separate.",
           clearWhenEmpty: "omit",
         },
         launchArgs: {
-          label: "Launch arguments",
           placeholder: "e.g. --chrome",
-          description: "Additional CLI arguments passed on session start.",
           clearWhenEmpty: "omit",
         },
       },
@@ -125,15 +112,11 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
         enabled: { hidden: true },
         customModels: { hidden: true },
         binaryPath: {
-          label: "Binary path",
           placeholder: "agent",
-          description: "Path to the Cursor agent binary.",
           clearWhenEmpty: "omit",
         },
         apiEndpoint: {
-          label: "API endpoint",
           placeholder: "https://...",
-          description: "Override the Cursor API endpoint for this instance.",
           clearWhenEmpty: "omit",
         },
       },
@@ -150,22 +133,16 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
         enabled: { hidden: true },
         customModels: { hidden: true },
         binaryPath: {
-          label: "Binary path",
           placeholder: "opencode",
-          description: "Path to the OpenCode binary.",
           clearWhenEmpty: "omit",
         },
         serverUrl: {
-          label: "Server URL",
           placeholder: "http://127.0.0.1:4096",
-          description: "Leave blank to let T3 Code spawn the server when needed.",
           clearWhenEmpty: "omit",
         },
         serverPassword: {
           control: "password",
-          label: "Server password",
           placeholder: "Optional",
-          description: "Stored in plain text on disk.",
           clearWhenEmpty: "omit",
         },
       },

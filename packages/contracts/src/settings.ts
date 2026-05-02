@@ -98,34 +98,98 @@ const makeBinaryPathSetting = (fallback: string) =>
 
 export const CodexSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  binaryPath: makeBinaryPathSetting("codex"),
-  homePath: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
-  shadowHomePath: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  binaryPath: makeBinaryPathSetting("codex").pipe(
+    Schema.annotateKey({
+      title: "Binary path",
+      description: "Path to the Codex binary used by this instance.",
+    }),
+  ),
+  homePath: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    Schema.annotateKey({
+      title: "CODEX_HOME path",
+      description: "Custom Codex home and config directory.",
+    }),
+  ),
+  shadowHomePath: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    Schema.annotateKey({
+      title: "Shadow home path",
+      description:
+        "Account-specific Codex home. Keeps auth.json separate while sharing state from CODEX_HOME.",
+    }),
+  ),
   customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type CodexSettings = typeof CodexSettings.Type;
 
 export const ClaudeSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  binaryPath: makeBinaryPathSetting("claude"),
-  homePath: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  binaryPath: makeBinaryPathSetting("claude").pipe(
+    Schema.annotateKey({
+      title: "Binary path",
+      description: "Path to the Claude binary used by this instance.",
+    }),
+  ),
+  homePath: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    Schema.annotateKey({
+      title: "Claude HOME path",
+      description:
+        "Custom HOME used when running this Claude instance. Keeps .claude.json and .claude separate.",
+    }),
+  ),
   customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
-  launchArgs: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  launchArgs: Schema.String.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    Schema.annotateKey({
+      title: "Launch arguments",
+      description: "Additional CLI arguments passed on session start.",
+    }),
+  ),
 });
 export type ClaudeSettings = typeof ClaudeSettings.Type;
 
 export const CursorSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  binaryPath: makeBinaryPathSetting("agent"),
-  apiEndpoint: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  binaryPath: makeBinaryPathSetting("agent").pipe(
+    Schema.annotateKey({
+      title: "Binary path",
+      description: "Path to the Cursor agent binary.",
+    }),
+  ),
+  apiEndpoint: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    Schema.annotateKey({
+      title: "API endpoint",
+      description: "Override the Cursor API endpoint for this instance.",
+    }),
+  ),
   customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type CursorSettings = typeof CursorSettings.Type;
 export const OpenCodeSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  binaryPath: makeBinaryPathSetting("opencode"),
-  serverUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
-  serverPassword: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  binaryPath: makeBinaryPathSetting("opencode").pipe(
+    Schema.annotateKey({
+      title: "Binary path",
+      description: "Path to the OpenCode binary.",
+    }),
+  ),
+  serverUrl: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    Schema.annotateKey({
+      title: "Server URL",
+      description: "Leave blank to let T3 Code spawn the server when needed.",
+    }),
+  ),
+  serverPassword: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+    Schema.annotateKey({
+      title: "Server password",
+      description: "Stored in plain text on disk.",
+    }),
+  ),
   customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type OpenCodeSettings = typeof OpenCodeSettings.Type;
