@@ -4,37 +4,49 @@ import {
   type OrchestrationSessionStatus,
   type ServerLifecycleWelcomePayload,
 } from "@t3tools/contracts";
+import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
 import {
   Outlet,
   createRootRouteWithContext,
   type ErrorComponentProps,
-  useNavigate,
   useLocation,
+  useNavigate,
 } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
-import { Throttler } from "@tanstack/react-pacer";
 
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
+import { CommandPalette } from "../components/CommandPalette";
+import {
+  SlowRpcAckToastCoordinator,
+  WebSocketConnectionCoordinator,
+  WebSocketConnectionSurface,
+} from "../components/WebSocketConnectionSurface";
 import { Button } from "../components/ui/button";
-import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
+import {
+  AnchoredToastProvider,
+  stackedThreadToast,
+  ToastProvider,
+  toastManager,
+} from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { readNativeApi } from "../nativeApi";
 import { NotificationLevel } from "@t3tools/contracts/settings";
 import { useSettings } from "../hooks/useSettings";
+import { readLocalApi } from "../localApi";
 import {
-  type ServerConfigUpdateSource,
+  deriveLogicalProjectKeyFromSettings,
+  derivePhysicalProjectKeyFromPath,
+} from "../logicalProject";
+import {
+  getServerConfigUpdatedNotification,
+  ServerConfigUpdatedNotification,
+  startServerStateSync,
   useServerConfig,
   useServerConfigUpdatedSubscription,
   useServerWelcomeSubscription,
 } from "../rpc/serverState";
-import { ServerStateBootstrap } from "../rpc/serverStateBootstrap";
-import {
-  clearPromotedDraftThread,
-  clearPromotedDraftThreads,
-  useComposerDraftStore,
-} from "../composerDraftStore";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { useTerminalStateStore } from "../terminalStateStore";
@@ -52,10 +64,31 @@ import {
   showNativeNotification,
   type NotifiableThread,
 } from "../lib/nativeNotifications";
+import { syncBrowserChromeTheme } from "../hooks/useTheme";
+import {
+  ensureEnvironmentConnectionBootstrapped,
+  getPrimaryEnvironmentConnection,
+  startEnvironmentConnectionService,
+} from "../environments/runtime";
+import { configureClientTracing } from "../observability/clientTracing";
+import {
+  ensurePrimaryEnvironmentReady,
+  resolveInitialServerAuthGateState,
+  updatePrimaryEnvironmentDescriptor,
+} from "../environments/primary";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
+  beforeLoad: async () => {
+    const [, authGateState] = await Promise.all([
+      ensurePrimaryEnvironmentReady(),
+      resolveInitialServerAuthGateState(),
+    ]);
+    return {
+      authGateState,
+    };
+  },
   component: RootRouteView,
   errorComponent: RootRouteErrorView,
   head: () => ({
@@ -64,31 +97,43 @@ export const Route = createRootRouteWithContext<{
 });
 
 function RootRouteView() {
-  if (!readNativeApi()) {
-    return (
-      <div className="flex h-screen flex-col bg-background text-foreground">
-        <div className="flex flex-1 items-center justify-center">
-          <p className="text-sm text-muted-foreground">
-            Connecting to {APP_DISPLAY_NAME} server...
-          </p>
-        </div>
-      </div>
-    );
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const { authGateState } = Route.useRouteContext();
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      syncBrowserChromeTheme();
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [pathname]);
+
+  if (pathname === "/pair") {
+    return <Outlet />;
   }
 
+  if (authGateState.status !== "authenticated") {
+    return <Outlet />;
+  }
   return (
-    <>
-      <ServerStateBootstrap />
-      <ToastProvider>
-        <AnchoredToastProvider>
-          <EventRouter />
-          <DesktopProjectBootstrap />
-          <AppSidebarLayout>
-            <Outlet />
-          </AppSidebarLayout>
-        </AnchoredToastProvider>
-      </ToastProvider>
-    </>
+    <ToastProvider>
+      <AnchoredToastProvider>
+        <AuthenticatedTracingBootstrap />
+        <ServerStateBootstrap />
+        <EnvironmentConnectionManagerBootstrap />
+        <EventRouter />
+        <WebSocketConnectionCoordinator />
+        <SlowRpcAckToastCoordinator />
+        <WebSocketConnectionSurface>
+          <CommandPalette>
+            <AppSidebarLayout>
+              <Outlet />
+            </AppSidebarLayout>
+          </CommandPalette>
+        </WebSocketConnectionSurface>
+      </AnchoredToastProvider>
+    </ToastProvider>
   );
 }
 
@@ -163,41 +208,28 @@ function errorDetails(error: unknown): string {
   }
 }
 
-function coalesceOrchestrationUiEvents(
-  events: ReadonlyArray<OrchestrationEvent>,
-): OrchestrationEvent[] {
-  if (events.length < 2) {
-    return [...events];
-  }
+function ServerStateBootstrap() {
+  useEffect(() => startServerStateSync(getPrimaryEnvironmentConnection().client.server), []);
 
-  const coalesced: OrchestrationEvent[] = [];
-  for (const event of events) {
-    const previous = coalesced.at(-1);
-    if (
-      previous?.type === "thread.message-sent" &&
-      event.type === "thread.message-sent" &&
-      previous.payload.threadId === event.payload.threadId &&
-      previous.payload.messageId === event.payload.messageId
-    ) {
-      coalesced[coalesced.length - 1] = {
-        ...event,
-        payload: {
-          ...event.payload,
-          attachments: event.payload.attachments ?? previous.payload.attachments,
-          createdAt: previous.payload.createdAt,
-          text:
-            !event.payload.streaming && event.payload.text.length > 0
-              ? event.payload.text
-              : previous.payload.text + event.payload.text,
-        },
-      };
-      continue;
-    }
+  return null;
+}
 
-    coalesced.push(event);
-  }
+function AuthenticatedTracingBootstrap() {
+  useEffect(() => {
+    void configureClientTracing();
+  }, []);
 
-  return coalesced;
+  return null;
+}
+
+function EnvironmentConnectionManagerBootstrap() {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    return startEnvironmentConnectionService(queryClient);
+  }, [queryClient]);
+
+  return null;
 }
 
 function EventRouter() {
@@ -212,14 +244,17 @@ function EventRouter() {
     (store) => store.removeOrphanedTerminalStates,
   );
   const notificationLevel = useSettings((state) => state.notificationLevel);
-  const queryClient = useQueryClient();
+  const setActiveEnvironmentId = useStore((store) => store.setActiveEnvironmentId);
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
-  const pathnameRef = useRef(pathname);
+  const projectGroupingSettings = useSettings((settings) => ({
+    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
+    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
+  }));
+  const readPathname = useEffectEvent(() => pathname);
   const handledBootstrapThreadIdRef = useRef<string | null>(null);
-  const handledConfigReplayRef = useRef(false);
+  const seenServerConfigUpdateIdRef = useRef(getServerConfigUpdatedNotification()?.id ?? 0);
   const disposedRef = useRef(false);
-  const bootstrapFromSnapshotRef = useRef<() => Promise<void>>(async () => undefined);
   const serverConfig = useServerConfig();
   const lastSessionByThreadRef = useRef(
     new Map<string, { status: OrchestrationSessionStatus; activeTurnId: string | null }>(),
@@ -227,7 +262,8 @@ function EventRouter() {
   const lastNotifiedTurnByThreadRef = useRef(new Map<string, string>());
   const lastNotifiedActivityByThreadRef = useRef(new Map<string, string>());
 
-  pathnameRef.current = pathname;
+  const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
+    if (!payload) return;
 
   const maybeNotifyForThreads = useEffectEvent((threads: ReadonlyArray<NotifiableThread>) => {
     // Only notify when the app is backgrounded and notifications are enabled.
@@ -292,25 +328,44 @@ function EventRouter() {
 
   const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload) => {
     migrateLocalSettingsToServer();
+    updatePrimaryEnvironmentDescriptor(payload.environment);
+    setActiveEnvironmentId(payload.environment.environmentId);
     void (async () => {
-      await bootstrapFromSnapshotRef.current();
+      await ensureEnvironmentConnectionBootstrapped(payload.environment.environmentId);
       if (disposedRef.current) {
         return;
       }
       if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
         return;
       }
-      setProjectExpanded(payload.bootstrapProjectId, true);
+      const bootstrapEnvironmentState =
+        useStore.getState().environmentStateById[payload.environment.environmentId];
+      const bootstrapProject =
+        bootstrapEnvironmentState?.projectById[payload.bootstrapProjectId] ?? null;
+      const bootstrapProjectKey =
+        (bootstrapProject
+          ? deriveLogicalProjectKeyFromSettings(bootstrapProject, projectGroupingSettings)
+          : null) ??
+        (serverConfig?.cwd
+          ? derivePhysicalProjectKeyFromPath(payload.environment.environmentId, serverConfig.cwd)
+          : null) ??
+        scopedProjectKey(
+          scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
+        );
+      useUiStateStore.getState().setProjectExpanded(bootstrapProjectKey, true);
 
-      if (pathnameRef.current !== "/") {
+      if (readPathname() !== "/") {
         return;
       }
       if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
         return;
       }
       await navigate({
-        to: "/$threadId",
-        params: { threadId: payload.bootstrapThreadId },
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId: payload.environment.environmentId,
+          threadId: payload.bootstrapThreadId,
+        },
         replace: true,
       });
       handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
@@ -318,16 +373,15 @@ function EventRouter() {
   });
 
   const handleServerConfigUpdated = useEffectEvent(
-    ({
-      payload,
-      source,
-    }: {
-      readonly payload: import("@t3tools/contracts").ServerConfigUpdatedPayload;
-      readonly source: ServerConfigUpdateSource;
-    }) => {
-      const isReplay = !handledConfigReplayRef.current;
-      handledConfigReplayRef.current = true;
-      if (isReplay || source !== "keybindingsUpdated") {
+    (notification: ServerConfigUpdatedNotification | null) => {
+      if (!notification) return;
+
+      const { id, payload, source } = notification;
+      if (id <= seenServerConfigUpdateIdRef.current) {
+        return;
+      }
+      seenServerConfigUpdateIdRef.current = id;
+      if (source !== "keybindingsUpdated") {
         return;
       }
 
@@ -341,37 +395,42 @@ function EventRouter() {
         return;
       }
 
-      toastManager.add({
-        type: "warning",
-        title: "Invalid keybindings configuration",
-        description: issue.message,
-        actionProps: {
-          children: "Open keybindings.json",
-          onClick: () => {
-            const api = readNativeApi();
-            if (!api) {
-              return;
-            }
+      toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: "Invalid keybindings configuration",
+          description: issue.message,
+          actionVariant: "outline",
+          actionProps: {
+            children: "Open keybindings.json",
+            onClick: () => {
+              const api = readLocalApi();
+              if (!api) {
+                return;
+              }
 
-            void Promise.resolve(serverConfig ?? api.server.getConfig())
-              .then((config) => {
-                const editor = resolveAndPersistPreferredEditor(config.availableEditors);
-                if (!editor) {
-                  throw new Error("No available editors found.");
-                }
-                return api.shell.openInEditor(config.keybindingsConfigPath, editor);
-              })
-              .catch((error) => {
-                toastManager.add({
-                  type: "error",
-                  title: "Unable to open keybindings file",
-                  description:
-                    error instanceof Error ? error.message : "Unknown error opening file.",
+              void Promise.resolve(serverConfig ?? api.server.getConfig())
+                .then((config) => {
+                  const editor = resolveAndPersistPreferredEditor(config.availableEditors);
+                  if (!editor) {
+                    throw new Error("No available editors found.");
+                  }
+                  return api.shell.openInEditor(config.keybindingsConfigPath, editor);
+                })
+                .catch((error) => {
+                  toastManager.add(
+                    stackedThreadToast({
+                      type: "error",
+                      title: "Unable to open keybindings file",
+                      description:
+                        error instanceof Error ? error.message : "Unknown error opening file.",
+                    }),
+                  );
                 });
-              });
+            },
           },
-        },
-      });
+        }),
+      );
     },
   );
 
@@ -533,70 +592,23 @@ function EventRouter() {
         recovery.failSnapshotRecovery();
       }
     };
+    if (!serverConfig) {
+      return;
+    }
 
-    const bootstrapFromSnapshot = async (): Promise<void> => {
-      await runSnapshotRecovery("bootstrap");
-    };
-    bootstrapFromSnapshotRef.current = bootstrapFromSnapshot;
+    updatePrimaryEnvironmentDescriptor(serverConfig.environment);
+    setActiveEnvironmentId(serverConfig.environment.environmentId);
+  }, [serverConfig, setActiveEnvironmentId]);
 
-    const fallbackToSnapshotRecovery = async (): Promise<void> => {
-      await runSnapshotRecovery("replay-failed");
-    };
-    const unsubDomainEvent = api.orchestration.onDomainEvent((event) => {
-      const action = recovery.classifyDomainEvent(event.sequence);
-      if (action === "apply") {
-        pendingDomainEvents.push(event);
-        schedulePendingDomainEventFlush();
-        return;
-      }
-      if (action === "recover") {
-        flushPendingDomainEvents();
-        void recoverFromSequenceGap();
-      }
-    });
-    const unsubTerminalEvent = api.terminal.onEvent((event) => {
-      const hasRunningSubprocess = terminalRunningSubprocessFromEvent(event);
-      if (hasRunningSubprocess === null) {
-        return;
-      }
-      useTerminalStateStore
-        .getState()
-        .setTerminalActivity(
-          ThreadId.makeUnsafe(event.threadId),
-          event.terminalId,
-          hasRunningSubprocess,
-        );
-    });
+  useEffect(() => {
+    disposedRef.current = false;
     return () => {
-      disposed = true;
       disposedRef.current = true;
-      needsProviderInvalidation = false;
-      flushPendingDomainEventsScheduled = false;
-      pendingDomainEvents.length = 0;
-      queryInvalidationThrottler.cancel();
-      unsubDomainEvent();
-      unsubTerminalEvent();
     };
-  }, [
-    applyOrchestrationEvents,
-    navigate,
-    queryClient,
-    removeTerminalState,
-    removeOrphanedTerminalStates,
-    clearThreadUi,
-    setProjectExpanded,
-    syncProjects,
-    syncServerReadModel,
-    syncThreads,
-  ]);
+  }, []);
 
   useServerWelcomeSubscription(handleWelcome);
   useServerConfigUpdatedSubscription(handleServerConfigUpdated);
 
-  return null;
-}
-
-function DesktopProjectBootstrap() {
-  // Desktop hydration runs through EventRouter project + orchestration sync.
   return null;
 }

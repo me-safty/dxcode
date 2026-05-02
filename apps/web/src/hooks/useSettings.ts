@@ -9,16 +9,11 @@
  * write. The hook transparently routes reads/writes to the correct backing
  * store.
  */
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { ServerSettings, type ServerSettingsPatch } from "@t3tools/contracts";
 import {
-  ServerSettings,
-  ServerSettingsPatch,
-  ModelSelection,
-  ThreadEnvMode,
-} from "@t3tools/contracts";
-import {
+  type ClientSettingsPatch,
   type ClientSettings,
-  ClientSettingsSchema,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
   NotificationLevel,
@@ -28,16 +23,80 @@ import {
   TimestampFormat,
   UnifiedSettings,
 } from "@t3tools/contracts/settings";
-import { ensureNativeApi } from "~/nativeApi";
-import { useLocalStorage } from "./useLocalStorage";
-import { normalizeCustomModelSlugs } from "~/modelSelection";
-import { Predicate, Schema, Struct } from "effect";
-import { DeepMutable } from "effect/Types";
-import { deepMerge } from "@t3tools/shared/Struct";
+import { ensureLocalApi } from "~/localApi";
+import { Struct } from "effect";
+import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import { applySettingsUpdated, getServerConfig, useServerSettings } from "~/rpc/serverState";
 
-const CLIENT_SETTINGS_STORAGE_KEY = "t3code:client-settings:v1";
-const OLD_SETTINGS_KEY = "t3code:app-settings:v1";
+const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
+
+const clientSettingsListeners = new Set<() => void>();
+let clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
+let clientSettingsHydrated = false;
+let clientSettingsHydrationPromise: Promise<void> | null = null;
+
+function emitClientSettingsChange() {
+  for (const listener of clientSettingsListeners) {
+    listener();
+  }
+}
+
+function getClientSettingsSnapshot(): ClientSettings {
+  return clientSettingsSnapshot;
+}
+
+function replaceClientSettingsSnapshot(settings: ClientSettings): void {
+  clientSettingsSnapshot = settings;
+  emitClientSettingsChange();
+}
+
+function subscribeClientSettings(listener: () => void): () => void {
+  clientSettingsListeners.add(listener);
+  void hydrateClientSettings();
+  return () => {
+    clientSettingsListeners.delete(listener);
+  };
+}
+
+async function hydrateClientSettings(): Promise<void> {
+  if (clientSettingsHydrated) {
+    return;
+  }
+  if (clientSettingsHydrationPromise) {
+    return clientSettingsHydrationPromise;
+  }
+
+  const nextHydration = (async () => {
+    try {
+      const persistedSettings = await ensureLocalApi().persistence.getClientSettings();
+      if (persistedSettings) {
+        replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
+      }
+    } catch (error) {
+      console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} hydrate failed`, error);
+    } finally {
+      clientSettingsHydrated = true;
+    }
+  })();
+
+  const hydrationPromise = nextHydration.finally(() => {
+    if (clientSettingsHydrationPromise === hydrationPromise) {
+      clientSettingsHydrationPromise = null;
+    }
+  });
+  clientSettingsHydrationPromise = hydrationPromise;
+
+  return clientSettingsHydrationPromise;
+}
+
+function persistClientSettings(settings: ClientSettings): void {
+  replaceClientSettingsSnapshot(settings);
+  void ensureLocalApi()
+    .persistence.setClientSettings(settings)
+    .catch((error) => {
+      console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} persist failed`, error);
+    });
+}
 
 // ── Key sets for routing patches ─────────────────────────────────────
 
@@ -45,7 +104,7 @@ const SERVER_SETTINGS_KEYS = new Set<string>(Struct.keys(ServerSettings.fields))
 
 function splitPatch(patch: Partial<UnifiedSettings>): {
   serverPatch: ServerSettingsPatch;
-  clientPatch: Partial<ClientSettings>;
+  clientPatch: ClientSettingsPatch;
 } {
   const serverPatch: Record<string, unknown> = {};
   const clientPatch: Record<string, unknown> = {};
@@ -58,7 +117,7 @@ function splitPatch(patch: Partial<UnifiedSettings>): {
   }
   return {
     serverPatch: serverPatch as ServerSettingsPatch,
-    clientPatch: clientPatch as Partial<ClientSettings>,
+    clientPatch: clientPatch as ClientSettingsPatch,
   };
 }
 
@@ -69,12 +128,21 @@ function splitPatch(patch: Partial<UnifiedSettings>): {
  * only re-render when the slice they care about changes.
  */
 
+/**
+ * Non-hook accessor for the current merged client settings snapshot.
+ * Used by non-React code paths (e.g. runtime services) that need the latest
+ * settings without subscribing.
+ */
+export function getClientSettings(): ClientSettings {
+  return getClientSettingsSnapshot();
+}
+
 export function useSettings<T = UnifiedSettings>(selector?: (s: UnifiedSettings) => T): T {
   const serverSettings = useServerSettings();
-  const [clientSettings] = useLocalStorage(
-    CLIENT_SETTINGS_STORAGE_KEY,
-    DEFAULT_CLIENT_SETTINGS,
-    ClientSettingsSchema,
+  const clientSettings = useSyncExternalStore(
+    subscribeClientSettings,
+    getClientSettingsSnapshot,
+    () => DEFAULT_CLIENT_SETTINGS,
   );
 
   const merged = useMemo<UnifiedSettings>(
@@ -92,34 +160,28 @@ export function useSettings<T = UnifiedSettings>(selector?: (s: UnifiedSettings)
  * Returns an updater that routes each key to the correct backing store.
  *
  * Server keys are optimistically patched in atom-backed server state, then
- * persisted via RPC. Client keys go straight to localStorage.
+ * persisted via RPC. Client keys go through client persistence.
  */
 export function useUpdateSettings() {
-  const [, setClientSettings] = useLocalStorage(
-    CLIENT_SETTINGS_STORAGE_KEY,
-    DEFAULT_CLIENT_SETTINGS,
-    ClientSettingsSchema,
-  );
+  const updateSettings = useCallback((patch: Partial<UnifiedSettings>) => {
+    const { serverPatch, clientPatch } = splitPatch(patch);
 
-  const updateSettings = useCallback(
-    (patch: Partial<UnifiedSettings>) => {
-      const { serverPatch, clientPatch } = splitPatch(patch);
-
-      if (Object.keys(serverPatch).length > 0) {
-        const currentServerConfig = getServerConfig();
-        if (currentServerConfig) {
-          applySettingsUpdated(deepMerge(currentServerConfig.settings, serverPatch));
-        }
-        // Fire-and-forget RPC — push will reconcile on success
-        void ensureNativeApi().server.updateSettings(serverPatch);
+    if (Object.keys(serverPatch).length > 0) {
+      const currentServerConfig = getServerConfig();
+      if (currentServerConfig) {
+        applySettingsUpdated(applyServerSettingsPatch(currentServerConfig.settings, serverPatch));
       }
+      // Fire-and-forget RPC — push will reconcile on success
+      void ensureLocalApi().server.updateSettings(serverPatch);
+    }
 
-      if (Object.keys(clientPatch).length > 0) {
-        setClientSettings((prev) => ({ ...prev, ...clientPatch }));
-      }
-    },
-    [setClientSettings],
-  );
+    if (Object.keys(clientPatch).length > 0) {
+      persistClientSettings({
+        ...getClientSettingsSnapshot(),
+        ...clientPatch,
+      });
+    }
+  }, []);
 
   const resetSettings = useCallback(() => {
     updateSettings(DEFAULT_UNIFIED_SETTINGS);
@@ -263,4 +325,9 @@ export function migrateLocalSettingsToServer(): void {
     // Remove the legacy key regardless to keep migration one-shot behavior.
     localStorage.removeItem(OLD_SETTINGS_KEY);
   }
+export function __resetClientSettingsPersistenceForTests(): void {
+  clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
+  clientSettingsHydrated = false;
+  clientSettingsHydrationPromise = null;
+  clientSettingsListeners.clear();
 }
