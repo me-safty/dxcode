@@ -38,6 +38,17 @@ function copyWorkspaceManifestFixture(targetRoot: string): void {
     mkdirSync(dirname(destinationPath), { recursive: true });
     cpSync(sourcePath, destinationPath);
   }
+
+  const packageJson = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8")) as {
+    readonly patchedDependencies?: Record<string, string>;
+  };
+
+  for (const relativePath of Object.values(packageJson.patchedDependencies ?? {})) {
+    const sourcePath = resolve(repoRoot, relativePath);
+    const destinationPath = resolve(targetRoot, relativePath);
+    mkdirSync(dirname(destinationPath), { recursive: true });
+    cpSync(sourcePath, destinationPath);
+  }
 }
 
 function writeMacManifestFixtures(targetRoot: string): { arm64Path: string; x64Path: string } {
