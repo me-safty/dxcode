@@ -10,7 +10,7 @@ import { ClaudeAI, CursorIcon, type Icon, OpenAI, OpenCodeIcon } from "../Icons"
 
 type ProviderSettingsSchema = {
   readonly fields: Readonly<Record<string, Schema.Top>>;
-};
+} & Schema.Top;
 
 /**
  * Browser-safe provider definition. This is deliberately shaped like the

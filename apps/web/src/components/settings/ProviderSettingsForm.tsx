@@ -5,6 +5,7 @@ import { Schema } from "effect";
 import type {
   ProviderSettingsFormAnnotation,
   ProviderSettingsFormControl,
+  ProviderSettingsFormSchemaAnnotation,
 } from "@t3tools/contracts";
 
 import { cn } from "../../lib/utils";
@@ -52,19 +53,28 @@ function readProviderSettingsFormAnnotation(
   return annotation ?? {};
 }
 
+function readProviderSettingsFormSchemaAnnotation(
+  definition: ProviderClientDefinition,
+): ProviderSettingsFormSchemaAnnotation {
+  return Schema.resolveAnnotations(definition.settingsSchema)?.providerSettingsFormSchema ?? {};
+}
+
 export function deriveProviderSettingsFields(
   definition: ProviderClientDefinition,
 ): ReadonlyArray<ProviderSettingsFieldModel> {
+  const schemaAnnotation = readProviderSettingsFormSchemaAnnotation(definition);
+  const orderedKeys = new Map(
+    (schemaAnnotation.order ?? []).map((key, index) => [key, index] as const),
+  );
+  const orderFallbackOffset = orderedKeys.size;
+
   return Object.keys(definition.settingsSchema.fields)
     .map((key, index) => ({ key, index }))
     .toSorted((left, right) => {
-      const leftAnnotation = readProviderSettingsFormAnnotation(
-        definition.settingsSchema.fields[left.key]!,
+      return (
+        (orderedKeys.get(left.key) ?? orderFallbackOffset + left.index) -
+        (orderedKeys.get(right.key) ?? orderFallbackOffset + right.index)
       );
-      const rightAnnotation = readProviderSettingsFormAnnotation(
-        definition.settingsSchema.fields[right.key]!,
-      );
-      return (leftAnnotation.order ?? left.index) - (rightAnnotation.order ?? right.index);
     })
     .flatMap(({ key }) => {
       const fieldSchema = definition.settingsSchema.fields[key]!;
