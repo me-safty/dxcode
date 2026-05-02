@@ -51,7 +51,9 @@ function makeRegistry(input: {
   });
 
   return SourceControlProviderRegistry.make().pipe(
-    Effect.provide(Layer.mergeAll(registryLayer, Layer.mock(GitHubCli)({}), Layer.mock(GitLabCli)({}))),
+    Effect.provide(
+      Layer.mergeAll(registryLayer, Layer.mock(GitHubCli)({}), Layer.mock(GitLabCli)({})),
+    ),
   );
 }
 

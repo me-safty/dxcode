@@ -8,6 +8,7 @@ import {
   formatGitLabJsonDecodeError,
 } from "../git/gitlabMergeRequests.ts";
 import { VcsProcess, type VcsProcessOutput } from "../vcs/VcsProcess.ts";
+import type { SourceControlRefSelector } from "./SourceControlProvider.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -40,6 +41,7 @@ export interface GitLabCliShape {
   readonly listMergeRequests: (input: {
     readonly cwd: string;
     readonly headSelector: string;
+    readonly source?: SourceControlRefSelector;
     readonly state: "open" | "closed" | "merged" | "all";
     readonly limit?: number;
   }) => Effect.Effect<ReadonlyArray<GitLabMergeRequestSummary>, GitLabCliError>;
@@ -58,6 +60,8 @@ export interface GitLabCliShape {
     readonly cwd: string;
     readonly baseBranch: string;
     readonly headSelector: string;
+    readonly source?: SourceControlRefSelector;
+    readonly target?: SourceControlRefSelector;
     readonly title: string;
     readonly bodyFile: string;
   }) => Effect.Effect<void, GitLabCliError>;
@@ -194,6 +198,17 @@ function normalizeHeadSelector(headSelector: string): string {
   return ownerBranch?.[1]?.trim() || trimmed;
 }
 
+function sourceRefName(input: {
+  readonly headSelector: string;
+  readonly source?: SourceControlRefSelector;
+}): string {
+  return input.source?.refName ?? normalizeHeadSelector(input.headSelector);
+}
+
+function sourceProjectIdentifier(source: SourceControlRefSelector | undefined): string | null {
+  return source?.repository ?? source?.owner ?? null;
+}
+
 function toSummaryWithOptionalUpdatedAt(
   record: GitLabMergeRequestSummary & {
     readonly updatedAt: Option.Option<DateTime.Utc>;
@@ -226,7 +241,7 @@ export const make = Effect.fn("makeGitLabCli")(function* () {
           "mr",
           "list",
           "--source-branch",
-          normalizeHeadSelector(input.headSelector),
+          sourceRefName(input),
           ...stateArgs(input.state),
           "--per-page",
           String(input.limit ?? 20),
@@ -295,8 +310,9 @@ export const make = Effect.fn("makeGitLabCli")(function* () {
         ),
         Effect.map(normalizeRepositoryCloneUrls),
       ),
-    createMergeRequest: (input) =>
-      execute({
+    createMergeRequest: (input) => {
+      const sourceProject = sourceProjectIdentifier(input.source);
+      return execute({
         cwd: input.cwd,
         args: [
           "api",
@@ -304,15 +320,17 @@ export const make = Effect.fn("makeGitLabCli")(function* () {
           "POST",
           "projects/:fullpath/merge_requests",
           "--raw-field",
-          `source_branch=${normalizeHeadSelector(input.headSelector)}`,
+          `source_branch=${sourceRefName(input)}`,
           "--raw-field",
-          `target_branch=${input.baseBranch}`,
+          `target_branch=${input.target?.refName ?? input.baseBranch}`,
+          ...(sourceProject ? ["--raw-field", `source_project_id=${sourceProject}`] : []),
           "--raw-field",
           `title=${input.title}`,
           "--field",
           `description=@${input.bodyFile}`,
         ],
-      }).pipe(Effect.asVoid),
+      }).pipe(Effect.asVoid);
+    },
     getDefaultBranch: (input) =>
       execute({
         cwd: input.cwd,
