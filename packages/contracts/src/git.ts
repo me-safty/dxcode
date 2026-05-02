@@ -338,6 +338,16 @@ export class GitHubCliError extends Schema.TaggedErrorClass<GitHubCliError>()("G
   }
 }
 
+export class GitLabCliError extends Schema.TaggedErrorClass<GitLabCliError>()("GitLabCliError", {
+  operation: Schema.String,
+  detail: Schema.String,
+  cause: Schema.optional(Schema.Defect),
+}) {
+  override get message(): string {
+    return `GitLab CLI failed in ${this.operation}: ${this.detail}`;
+  }
+}
+
 export class TextGenerationError extends Schema.TaggedErrorClass<TextGenerationError>()(
   "TextGenerationError",
   {
@@ -365,6 +375,7 @@ export const GitManagerServiceError = Schema.Union([
   GitManagerError,
   GitCommandError,
   GitHubCliError,
+  GitLabCliError,
   SourceControlProviderError,
   TextGenerationError,
 ]);
