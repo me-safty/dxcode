@@ -180,7 +180,7 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
             current = applyGitStatusStreamEvent(current, event);
             listener(current);
           },
-          { ...options, tag: WS_METHODS.subscribeGitStatus },
+          { ...options, tag: WS_METHODS.subscribeVcsStatus },
         );
       },
       listRefs: (input) => transport.request((client) => client[WS_METHODS.vcsListRefs](input)),
