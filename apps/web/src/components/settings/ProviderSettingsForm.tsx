@@ -22,6 +22,7 @@ export interface ProviderSettingsFieldModel {
   readonly description?: string | undefined;
   readonly placeholder?: string | undefined;
   readonly clearWhenEmpty: "omit" | "persist";
+  readonly defaultBooleanValue?: boolean | undefined;
 }
 
 function titleizeFieldKey(key: string): string {
@@ -59,6 +60,17 @@ function readProviderSettingsFormSchemaAnnotation(
   return Schema.resolveAnnotations(definition.settingsSchema)?.providerSettingsFormSchema ?? {};
 }
 
+function readFieldBooleanDefault(
+  fieldSchema: ProviderClientDefinition["settingsSchema"]["fields"][string],
+): boolean | undefined {
+  try {
+    const decoded = Schema.decodeUnknownSync(fieldSchema as Schema.Decoder<unknown>)(undefined);
+    return typeof decoded === "boolean" ? decoded : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function deriveProviderSettingsFields(
   definition: ProviderClientDefinition,
 ): ReadonlyArray<ProviderSettingsFieldModel> {
@@ -93,6 +105,9 @@ export function deriveProviderSettingsFields(
             ? { placeholder: formAnnotation.placeholder }
             : {}),
           clearWhenEmpty: formAnnotation.clearWhenEmpty ?? "omit",
+          ...(formAnnotation.control === "switch"
+            ? { defaultBooleanValue: readFieldBooleanDefault(fieldSchema) }
+            : {}),
         } satisfies ProviderSettingsFieldModel,
       ];
     });
@@ -104,10 +119,14 @@ export function readProviderConfigString(config: unknown, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
-export function readProviderConfigBoolean(config: unknown, key: string): boolean {
-  if (config === null || typeof config !== "object") return false;
+export function readProviderConfigBoolean(
+  config: unknown,
+  key: string,
+  defaultValue = false,
+): boolean {
+  if (config === null || typeof config !== "object") return defaultValue;
   const value = (config as Record<string, unknown>)[key];
-  return typeof value === "boolean" ? value : false;
+  return typeof value === "boolean" ? value : defaultValue;
 }
 
 export function nextProviderConfigWithFieldValue(
@@ -119,7 +138,8 @@ export function nextProviderConfigWithFieldValue(
     config !== null && typeof config === "object" ? { ...(config as Record<string, unknown>) } : {};
 
   if (typeof value === "boolean") {
-    if (field.clearWhenEmpty === "omit" && value === false) {
+    const emptyBooleanValue = field.defaultBooleanValue ?? false;
+    if (field.clearWhenEmpty === "omit" && value === emptyBooleanValue) {
       delete base[field.key];
     } else {
       base[field.key] = value;
@@ -188,7 +208,7 @@ function ProviderSettingsFieldRow({
             {description}
           </div>
           <Switch
-            checked={readProviderConfigBoolean(value, field.key)}
+            checked={readProviderConfigBoolean(value, field.key, field.defaultBooleanValue)}
             onCheckedChange={(checked) =>
               onChange(nextProviderConfigWithFieldValue(value, field, Boolean(checked)))
             }

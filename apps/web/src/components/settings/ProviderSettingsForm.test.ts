@@ -66,11 +66,44 @@ describe("ProviderSettingsForm helpers", () => {
         control: "switch",
         label: "Experimental",
         clearWhenEmpty: "omit",
+        defaultBooleanValue: false,
       },
       false,
     );
 
     expect(next).toEqual({ forkOwned: 1 });
+  });
+
+  it("omits true boolean fields when true is the default", () => {
+    const next = nextProviderConfigWithFieldValue(
+      { forkOwned: 1, experimental: false },
+      {
+        key: "experimental",
+        control: "switch",
+        label: "Experimental",
+        clearWhenEmpty: "omit",
+        defaultBooleanValue: true,
+      },
+      true,
+    );
+
+    expect(next).toEqual({ forkOwned: 1 });
+  });
+
+  it("stores false boolean fields when true is the default", () => {
+    const next = nextProviderConfigWithFieldValue(
+      undefined,
+      {
+        key: "experimental",
+        control: "switch",
+        label: "Experimental",
+        clearWhenEmpty: "omit",
+        defaultBooleanValue: true,
+      },
+      false,
+    );
+
+    expect(next).toEqual({ experimental: false });
   });
 
   it("preserves false boolean fields when clearWhenEmpty is persist", () => {
@@ -90,5 +123,9 @@ describe("ProviderSettingsForm helpers", () => {
 
   it("reads non-boolean config values as false booleans", () => {
     expect(readProviderConfigBoolean({ experimental: "true" }, "experimental")).toBe(false);
+  });
+
+  it("reads missing boolean config values from the supplied default", () => {
+    expect(readProviderConfigBoolean({}, "experimental", true)).toBe(true);
   });
 });
