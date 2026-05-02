@@ -21,6 +21,7 @@ import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import { DraftInput } from "../ui/draft-input";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Switch } from "../ui/switch";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import type { DriverOption } from "./providerDriverMeta";
 import { ProviderModelsSection } from "./ProviderModelsSection";
@@ -317,62 +318,82 @@ function ProviderEnvironmentSection(props: {
         </p>
       ) : (
         <div className="overflow-hidden rounded-md border border-border/70">
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_5rem_2rem] items-center gap-3 border-b border-border/70 bg-muted/25 px-3 py-2 text-[11px] font-medium text-muted-foreground">
-            <span>Variable</span>
-            <span>Value</span>
-            <span>Sensitive</span>
-            <span aria-hidden />
-          </div>
-          {rows.map((variable, index) => (
-            <div
-              key={variable.id}
-              className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_5rem_2rem] items-center gap-3 border-b border-border/60 px-3 py-2 last:border-b-0 odd:bg-muted/20 even:bg-background/20"
-            >
-              <DraftInput
-                value={variable.name}
-                onCommit={(name) => updateVariable(variable.id, { name: name.trim() })}
-                placeholder="VARIABLE_NAME"
-                spellCheck={false}
-                aria-label={`Environment variable name ${index + 1}`}
-              />
-              <DraftInput
-                value={variable.valueRedacted ? "" : variable.value}
-                onCommit={(value) => updateVariable(variable.id, { value })}
-                type={variable.sensitive ? "password" : undefined}
-                autoComplete="off"
-                placeholder={
-                  variable.valueRedacted ? "Stored secret - enter a new value to replace" : "Value"
-                }
-                spellCheck={false}
-                aria-label={`Environment variable value ${index + 1}`}
-              />
-              <div className="flex h-8 items-center justify-start">
-                <Checkbox
-                  checked={variable.sensitive}
-                  onCheckedChange={(checked) => {
-                    const sensitive = Boolean(checked);
-                    updateVariable(variable.id, {
-                      sensitive,
-                      ...(sensitive && variable.valueRedacted === undefined
-                        ? {}
-                        : { valueRedacted: sensitive ? variable.valueRedacted : false }),
-                    });
-                  }}
-                  aria-label={`Mark environment variable ${variable.name || index + 1} as sensitive`}
-                />
-              </div>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                className="size-8 justify-self-end text-muted-foreground hover:text-destructive"
-                onClick={() => removeVariable(variable.id)}
-                aria-label={`Remove environment variable ${variable.name || index + 1}`}
-              >
-                <XIcon className="size-3.5" />
-              </Button>
-            </div>
-          ))}
+          <Table>
+            <TableHeader className="bg-muted/25 text-[11px] text-muted-foreground">
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Variable</TableHead>
+                <TableHead>Value</TableHead>
+                <TableHead className="w-20">Sensitive</TableHead>
+                <TableHead className="w-12 text-right">
+                  <span className="sr-only">Options</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((variable, index) => (
+                <TableRow
+                  key={variable.id}
+                  className="border-border/60 odd:bg-muted/20 even:bg-background/20"
+                >
+                  <TableCell>
+                    <DraftInput
+                      value={variable.name}
+                      onCommit={(name) => updateVariable(variable.id, { name: name.trim() })}
+                      placeholder="VARIABLE_NAME"
+                      spellCheck={false}
+                      aria-label={`Environment variable name ${index + 1}`}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <DraftInput
+                      value={variable.valueRedacted ? "" : variable.value}
+                      onCommit={(value) => updateVariable(variable.id, { value })}
+                      type={variable.sensitive ? "password" : undefined}
+                      autoComplete="off"
+                      placeholder={
+                        variable.valueRedacted
+                          ? "Stored secret - enter a new value to replace"
+                          : "Value"
+                      }
+                      spellCheck={false}
+                      aria-label={`Environment variable value ${index + 1}`}
+                    />
+                  </TableCell>
+                  <TableCell className="w-20">
+                    <div className="flex h-8 items-center justify-center">
+                      <Checkbox
+                        checked={variable.sensitive}
+                        onCheckedChange={(checked) => {
+                          const sensitive = Boolean(checked);
+                          updateVariable(variable.id, {
+                            sensitive,
+                            ...(sensitive && variable.valueRedacted === undefined
+                              ? {}
+                              : { valueRedacted: sensitive ? variable.valueRedacted : false }),
+                          });
+                        }}
+                        aria-label={`Mark environment variable ${variable.name || index + 1} as sensitive`}
+                      />
+                    </div>
+                  </TableCell>
+                  <TableCell className="w-12">
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        className="size-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => removeVariable(variable.id)}
+                        aria-label={`Remove environment variable ${variable.name || index + 1}`}
+                      >
+                        <XIcon className="size-3.5" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
       <span className="text-xs text-muted-foreground">
@@ -560,12 +581,11 @@ export function ProviderInstanceCard({
                             displayName={displayName}
                             accentColor={accentColor}
                             showBadge={Boolean(accentColor)}
-                            badgeContent="none"
                             statusDotClassName={statusStyle.dot}
                             indicatorBackground="var(--card)"
                             className="size-5"
                             iconClassName="size-4 text-foreground/80"
-                            badgeClassName="right-[-0.125rem] bottom-[-0.125rem] size-3 min-w-3 px-0"
+                            badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-[7px]"
                           />
                         </span>
                       }
@@ -737,6 +757,7 @@ export function ProviderInstanceCard({
                 displayName={displayName}
                 value={accentColor}
                 onCommit={updateAccentColor}
+                commitDelayMs={120}
                 description="Used to distinguish this instance in picker rails and model lists."
               />
             </div>

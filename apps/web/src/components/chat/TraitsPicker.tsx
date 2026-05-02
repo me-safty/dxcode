@@ -13,7 +13,7 @@ import {
   getProviderOptionDescriptors,
   isClaudeUltrathinkPrompt,
 } from "@t3tools/shared/model";
-import { memo, useCallback } from "react";
+import { memo, useCallback, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { BookOpenIcon, BrainIcon, ChevronDownIcon, ZapIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -214,6 +214,7 @@ export interface TraitsMenuContentProps {
   showTriggerSeparators?: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
+  onRequestClose?: () => void;
 }
 
 export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
@@ -225,6 +226,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   modelOptions,
   allowPromptInjectedEffort = true,
   hiddenDescriptorIds,
+  onRequestClose,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
@@ -293,7 +295,8 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       const stripped = prompt.replace(/^Ultrathink:\s*/i, "");
       onPromptChange(stripped);
     }
-    updateDescriptors(replaceDescriptorCurrentValue(visibleDescriptors, descriptor.id, value));
+    updateDescriptors(replaceDescriptorCurrentValue(descriptors, descriptor.id, value));
+    onRequestClose?.();
   };
 
   if (!hasAnyControls || visibleDescriptors.length === 0) {
@@ -361,12 +364,9 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
                   value={selectedValue}
                   onValueChange={(value) => {
                     updateDescriptors(
-                      replaceDescriptorCurrentValue(
-                        visibleDescriptors,
-                        descriptor.id,
-                        value === "on",
-                      ),
+                      replaceDescriptorCurrentValue(descriptors, descriptor.id, value === "on"),
                     );
+                    onRequestClose?.();
                   }}
                 >
                   {(["on", "off"] as const).map((value) => (
@@ -429,6 +429,7 @@ export const TraitsPicker = memo(function TraitsPicker({
   }
 
   const isCodexStyle = provider === "codex";
+  const [openDescriptorId, setOpenDescriptorId] = useState<string | null>(null);
 
   return (
     <>
@@ -480,7 +481,10 @@ export const TraitsPicker = memo(function TraitsPicker({
             {showTriggerSeparators && descriptorIndex > 0 ? (
               <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
             ) : null}
-            <Menu>
+            <Menu
+              open={openDescriptorId === descriptor.id}
+              onOpenChange={(open) => setOpenDescriptorId(open ? descriptor.id : null)}
+            >
               <MenuTrigger
                 render={
                   <Button
@@ -515,6 +519,7 @@ export const TraitsPicker = memo(function TraitsPicker({
                   modelOptions={modelOptions}
                   allowPromptInjectedEffort={allowPromptInjectedEffort}
                   hiddenDescriptorIds={popupHiddenDescriptorIds}
+                  onRequestClose={() => setOpenDescriptorId(null)}
                   {...persistence}
                 />
               </MenuPopup>

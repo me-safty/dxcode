@@ -48,18 +48,6 @@
       background-position: -200% 0;
     }
   }
-  @keyframes blur-reveal {
-    from {
-      opacity: 0;
-      filter: blur(8px);
-      transform: translateY(2px);
-    }
-    to {
-      opacity: 1;
-      filter: blur(0);
-      transform: translateY(0);
-    }
-  }
 }
 
 @layer base {
@@ -499,7 +487,7 @@ label:has(> select#reasoning-effort) select {
 
 .chat-markdown th,
 .chat-markdown td {
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--foreground) 8%, var(--background));
   padding: 0.35rem 0.45rem;
   text-align: left;
 }
@@ -547,6 +535,7 @@ label:has(> select#reasoning-effort) select {
   );
   background-image: var(--ultrathink-spectrum);
   background-size: 220% 220%;
+  filter: saturate(0.82) brightness(0.92);
   animation: ultrathink-rainbow 10s linear infinite;
 }
 

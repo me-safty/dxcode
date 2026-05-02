@@ -234,6 +234,9 @@ export function workEntryIndicatesToolSuccess(entry: WorkLogEntry): boolean {
   if (ls === "inProgress") {
     return false;
   }
+  if (ls === "stopped") {
+    return false;
+  }
   return true;
 }
 

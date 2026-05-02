@@ -84,6 +84,7 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
+import { withCustomUserInputOption } from "../userInputOptions.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = ProviderDriverKind.make("claudeAgent");
@@ -2573,12 +2574,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             id: typeof q.question === "string" && q.question.length > 0 ? q.question : `q-${idx}`,
             header: typeof q.header === "string" ? q.header : `Question ${idx + 1}`,
             question: typeof q.question === "string" ? q.question : "",
-            options: Array.isArray(q.options)
-              ? q.options.map((opt: Record<string, unknown>) => ({
-                  label: typeof opt.label === "string" ? opt.label : "",
-                  description: typeof opt.description === "string" ? opt.description : "",
-                }))
-              : [],
+            options: withCustomUserInputOption(
+              Array.isArray(q.options)
+                ? q.options.map((opt: Record<string, unknown>) => ({
+                    label: typeof opt.label === "string" ? opt.label : "",
+                    description: typeof opt.description === "string" ? opt.description : "",
+                  }))
+                : [],
+            ),
             multiSelect: typeof q.multiSelect === "boolean" ? q.multiSelect : false,
           }),
         );

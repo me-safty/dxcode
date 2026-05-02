@@ -21,7 +21,6 @@ import {
   workLogEntryIsToolLike,
 } from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
-import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
@@ -45,8 +44,7 @@ import {
 import { Button } from "../ui/button";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
-import { ChangedFilesTree } from "./ChangedFilesTree";
-import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
+import { ChangedFilesCard } from "./ChangedFilesTree";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
   computeStableMessagesTimelineRows,
@@ -75,7 +73,6 @@ import {
 } from "./userMessageTerminalContexts";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { useToolWorkLogFriendlyLine } from "../../hooks/useToolWorkLogFriendlyLine";
-import { BlurReveal } from "../ui/blur-reveal";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via useContext.
@@ -321,7 +318,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const canRevertAgentWork = typeof row.revertTurnCount === "number";
           return (
             <div className="group flex flex-col items-end gap-1">
-              <div className="relative max-w-[80%] rounded-2xl border border-border bg-secondary px-4 py-3">
+              <div className="relative max-w-[80%] rounded-2xl border border-border bg-secondary p-3">
                 {userImages.length > 0 && (
                   <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                     {userImages.map(
@@ -365,32 +362,32 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   />
                 )}
               </div>
-              <div className="flex items-center gap-1.5 pe-1 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
-                {canRevertAgentWork && (
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="ghost"
-                    disabled={ctx.isRevertingCheckpoint || ctx.isWorking}
-                    onClick={() => ctx.onRevertUserMessage(row.message.id)}
-                    title="Revert to this message"
-                  >
-                    <Undo2Icon className="size-3" />
-                  </Button>
-                )}
-                <Tooltip>
-                  <TooltipTrigger
-                    render={<p className="text-right text-muted-foreground text-sm" />}
-                  >
-                    {formatChatTimestamp(row.message.createdAt)}
-                  </TooltipTrigger>
-                  <TooltipPopup>
-                    {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
-                  </TooltipPopup>
-                </Tooltip>
-                {displayedUserMessage.copyText && (
-                  <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
-                )}
+              <div className="flex w-full max-w-[80%] items-center justify-end pe-1 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+                <div className="flex shrink-0 items-center gap-2">
+                  <Tooltip>
+                    <TooltipTrigger render={<p className="text-muted-foreground text-sm" />}>
+                      {formatChatTimestamp(row.message.createdAt)}
+                    </TooltipTrigger>
+                    <TooltipPopup>
+                      {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
+                    </TooltipPopup>
+                  </Tooltip>
+                  {displayedUserMessage.copyText && (
+                    <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
+                  )}
+                  {canRevertAgentWork && (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      disabled={ctx.isRevertingCheckpoint || ctx.isWorking}
+                      onClick={() => ctx.onRevertUserMessage(row.message.id)}
+                      title="Revert to this message"
+                    >
+                      <Undo2Icon className="size-3" />
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           );
@@ -415,8 +412,10 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
               {row.showCompletionDivider && (
                 <div className="my-3 flex items-center gap-3">
                   <span className="h-px flex-1 bg-border" />
-                  <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
-                    {ctx.completionSummary ? `Response • ${ctx.completionSummary}` : "Response"}
+                  <span className="text-xs text-muted-foreground">
+                    {row.completionDividerDuration
+                      ? `Worked for ${row.completionDividerDuration}`
+                      : "Worked for 0s"}
                   </span>
                   <span className="h-px flex-1 bg-border" />
                 </div>
@@ -433,7 +432,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   resolvedTheme={ctx.resolvedTheme}
                   onOpenTurnDiff={ctx.onOpenTurnDiff}
                 />
-                <div className="mt-1.5 flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+                <div className="mt-1.5 flex items-center gap-2 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
                   {assistantCopyState.visible ? (
                     <MessageCopyButton
                       text={assistantCopyState.text ?? ""}
@@ -443,19 +442,10 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   ) : null}
                   <Tooltip>
                     <TooltipTrigger render={<p className="text-muted-foreground text-sm" />}>
-                      {row.message.streaming ? (
-                        <LiveMessageMeta
-                          createdAt={row.message.createdAt}
-                          durationStart={row.durationStart}
-                          timestampFormat={ctx.timestampFormat}
-                        />
-                      ) : (
-                        formatMessageMeta(
-                          row.message.createdAt,
-                          formatElapsed(row.durationStart, row.message.completedAt),
-                          ctx.timestampFormat,
-                        )
-                      )}
+                      <LiveMessageMeta
+                        createdAt={row.message.createdAt}
+                        durationStart={row.message.streaming ? row.durationStart : null}
+                      />
                     </TooltipTrigger>
                     <TooltipPopup>
                       {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
@@ -518,25 +508,23 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
   return <>{formatWorkingTimer(createdAt, new Date(nowMs).toISOString()) ?? "0s"}</>;
 }
 
-/** Live timestamp + elapsed duration for a streaming assistant message. */
+/** Live timestamp + elapsed duration that stays fresh via interval. */
 function LiveMessageMeta({
   createdAt,
   durationStart,
-  timestampFormat,
 }: {
   createdAt: string;
   durationStart: string | null | undefined;
-  timestampFormat: TimestampFormat;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [durationStart]);
+  }, []);
   const elapsed = durationStart
     ? formatElapsed(durationStart, new Date(nowMs).toISOString())
     : null;
-  return <>{formatMessageMeta(createdAt, elapsed, timestampFormat)}</>;
+  return <>{formatMessageMeta(createdAt, elapsed)}</>;
 }
 
 // ---------------------------------------------------------------------------
@@ -552,51 +540,45 @@ const WorkGroupSection = memo(function WorkGroupSection({
 }) {
   const { workspaceRoot } = use(TimelineRowCtx);
   const [isExpanded, setIsExpanded] = useState(false);
-  const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
+  const nonEmptyEntries = useMemo(
+    () => groupedEntries.filter((entry) => !workEntryIndicatesToolNeutralStatus(entry)),
+    [groupedEntries],
+  );
+  const hasOverflow = nonEmptyEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
   const visibleEntries =
     hasOverflow && !isExpanded
-      ? groupedEntries.slice(0, MAX_VISIBLE_WORK_LOG_ENTRIES)
-      : groupedEntries;
-  const hiddenCount = groupedEntries.length - visibleEntries.length;
-  const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
-  const showHeader = hasOverflow || !onlyToolEntries;
-  const headerTitle = onlyToolEntries
-    ? `${groupedEntries.length} tool calls`
-    : `${groupedEntries.length} work log entries`;
+      ? nonEmptyEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
+      : nonEmptyEntries;
+  const hiddenCount = nonEmptyEntries.length - visibleEntries.length;
+  const headerTitle =
+    nonEmptyEntries.length === 1 ? "1 tool call" : `${nonEmptyEntries.length} tool calls`;
+
+  if (nonEmptyEntries.length === 0) return null;
 
   return (
-    <div className="rounded-2xl border border-input bg-background px-2 py-4 shadow-xs/5 not-dark:bg-clip-padding dark:bg-input/32">
-      {showHeader && (
-        <div className="mb-2 flex items-center justify-between gap-2 px-2">
-          <p
-            className={cn(
-              "text-xs",
-              onlyToolEntries ? "font-medium text-foreground" : "text-muted-foreground",
-            )}
+    <div className="rounded-2xl border border-input bg-background p-2 pt-3 shadow-xs/5 not-dark:bg-clip-padding dark:bg-input/32">
+      <div className="mb-2 flex items-center justify-between gap-2 px-2">
+        <p className="font-medium text-foreground text-xs">{headerTitle}</p>
+        {hasOverflow && (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 text-muted-foreground text-xs transition-colors duration-150 hover:text-foreground/80"
+            onClick={() => setIsExpanded((v) => !v)}
           >
-            {headerTitle}
-          </p>
-          {hasOverflow && (
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 text-muted-foreground text-xs transition-colors duration-150 hover:text-foreground/80"
-              onClick={() => setIsExpanded((v) => !v)}
-            >
-              {isExpanded ? (
-                <>
-                  Show less
-                  <ChevronUpIcon className="size-3.5 shrink-0 opacity-80" />
-                </>
-              ) : (
-                <>
-                  Show {hiddenCount} more
-                  <ChevronDownIcon className="size-3.5 shrink-0 opacity-80" />
-                </>
-              )}
-            </button>
-          )}
-        </div>
-      )}
+            {isExpanded ? (
+              <>
+                Show less
+                <ChevronUpIcon className="size-3.5 shrink-0 opacity-80" />
+              </>
+            ) : (
+              <>
+                Show {hiddenCount} more
+                <ChevronDownIcon className="size-3.5 shrink-0 opacity-80" />
+              </>
+            )}
+          </button>
+        )}
+      </div>
       <div className="space-y-0.5">
         {visibleEntries.map((workEntry) => (
           <SimpleWorkEntryRow
@@ -657,50 +639,18 @@ function AssistantChangedFilesSectionInner({
     (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.turnId] ?? true,
   );
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
-  const summaryStat = summarizeTurnDiffStats(checkpointFiles);
-  const changedFileCountLabel = String(checkpointFiles.length);
 
   return (
-    <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
-          <span>Changed files ({changedFileCountLabel})</span>
-          {hasNonZeroStat(summaryStat) && (
-            <>
-              <span className="mx-1">•</span>
-              <DiffStatLabel additions={summaryStat.additions} deletions={summaryStat.deletions} />
-            </>
-          )}
-        </p>
-        <div className="flex items-center gap-1.5">
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            data-scroll-anchor-ignore
-            onClick={() => setExpanded(routeThreadKey, turnSummary.turnId, !allDirectoriesExpanded)}
-          >
-            {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
-          </Button>
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            onClick={() => onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)}
-          >
-            View diff
-          </Button>
-        </div>
-      </div>
-      <ChangedFilesTree
-        key={`changed-files-tree:${turnSummary.turnId}`}
-        turnId={turnSummary.turnId}
-        files={checkpointFiles}
-        allDirectoriesExpanded={allDirectoriesExpanded}
-        resolvedTheme={resolvedTheme}
-        onOpenTurnDiff={onOpenTurnDiff}
-      />
-    </div>
+    <ChangedFilesCard
+      turnId={turnSummary.turnId}
+      files={checkpointFiles}
+      allDirectoriesExpanded={allDirectoriesExpanded}
+      resolvedTheme={resolvedTheme}
+      onToggleAllDirectories={() =>
+        setExpanded(routeThreadKey, turnSummary.turnId, !allDirectoriesExpanded)
+      }
+      onOpenTurnDiff={onOpenTurnDiff}
+    />
   );
 }
 
@@ -859,13 +809,9 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-function formatMessageMeta(
-  createdAt: string,
-  duration: string | null,
-  timestampFormat: TimestampFormat,
-): string {
+function formatMessageMeta(createdAt: string, duration: string | null): string {
   if (!duration) return formatChatTimestamp(createdAt);
-  return `${formatChatTimestamp(createdAt)} • worked for ${duration}`;
+  return formatChatTimestamp(createdAt);
 }
 
 function workToneIcon(tone: TimelineWorkEntry["tone"]): {
@@ -1017,17 +963,23 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const canExpand = expandedBody !== null;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
+  const showFailedIndicator = workEntryIndicatesToolFailure(workEntry);
   const iconWrapperClass = cn(
     "flex size-5 shrink-0 items-center justify-center",
-    workEntry.tone === "tool" ? "text-muted-foreground" : iconConfig.className,
+    showFailedIndicator
+      ? "text-destructive"
+      : workEntry.tone === "tool"
+        ? "text-muted-foreground"
+        : iconConfig.className,
   );
-  const headingClass =
-    workEntry.tone === "error"
-      ? "font-medium text-rose-300 dark:text-rose-300"
-      : "font-medium text-foreground";
-  const showFailedIndicator = workEntryIndicatesToolFailure(workEntry);
-  const showSuccessIndicator = workEntryIndicatesToolSuccess(workEntry);
-  const showNeutralIndicator = workEntryIndicatesToolNeutralStatus(workEntry);
+  const headingClass = showFailedIndicator
+    ? "font-medium text-destructive"
+    : "font-medium text-foreground";
+  const turnSettled = !ctx.activeTurnInProgress;
+  const showNeutralIndicator = !turnSettled && workEntryIndicatesToolNeutralStatus(workEntry);
+  const showSuccessIndicator =
+    workEntryIndicatesToolSuccess(workEntry) ||
+    (turnSettled && workEntryIndicatesToolNeutralStatus(workEntry));
   const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
   const rowToggleProps = canExpand
@@ -1047,7 +999,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   return (
     <div
       className={cn(
-        "flex flex-col rounded-md border border-transparent px-2 py-2 transition-colors",
+        "flex flex-col rounded-xl border border-transparent px-2 py-2 transition-colors",
         canExpand &&
           "cursor-pointer hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
       )}
@@ -1064,13 +1016,12 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                 className="min-w-0 w-full truncate text-xs leading-5"
                 title={friendlyDisplay ?? undefined}
               >
-                <BlurReveal
+                <span
                   key={`${workEntry.id}:${friendlyDisplay}`}
                   className={cn("min-w-0 max-w-full", headingClass)}
-                  speedReveal={0.2}
                 >
                   {friendlyDisplay}
-                </BlurReveal>
+                </span>
               </p>
             ) : showToolSummaryPending ? (
               <p
@@ -1154,31 +1105,37 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                 />
               ) : null}
             </span>
-            <span
-              className="flex size-5 shrink-0 items-center justify-center"
-              {...(showFailedIndicator
-                ? { "aria-label": "Tool call failed" as const }
-                : showSuccessIndicator
-                  ? { "aria-label": "Tool call succeeded" as const }
-                  : showNeutralIndicator
-                    ? { "aria-label": "No tool result or incomplete" as const }
-                    : { "aria-hidden": true as const })}
-            >
+            <span className="flex size-5 shrink-0 items-center justify-center">
               {showFailedIndicator ? (
-                <XIcon className="size-3.5 shrink-0 text-destructive" aria-hidden />
+                <Tooltip>
+                  <TooltipTrigger render={<span className="flex" />}>
+                    <XIcon className="size-3.5 shrink-0 text-destructive" aria-hidden />
+                  </TooltipTrigger>
+                  <TooltipPopup>Failed</TooltipPopup>
+                </Tooltip>
               ) : showSuccessIndicator ? (
-                <span className="inline-flex text-primary">
-                  <CheckIcon
-                    className="size-3.5 shrink-0 stroke-current"
-                    stroke="currentColor"
-                    aria-hidden
-                  />
-                </span>
+                <Tooltip>
+                  <TooltipTrigger render={<span className="flex" />}>
+                    <span className="inline-flex text-primary">
+                      <CheckIcon
+                        className="size-3.5 shrink-0 stroke-current"
+                        stroke="currentColor"
+                        aria-hidden
+                      />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipPopup>Completed</TooltipPopup>
+                </Tooltip>
               ) : showNeutralIndicator ? (
-                <MinusIcon
-                  className="size-3.5 shrink-0 text-muted-foreground opacity-80"
-                  aria-hidden
-                />
+                <Tooltip>
+                  <TooltipTrigger render={<span className="flex" />}>
+                    <MinusIcon
+                      className="size-3.5 shrink-0 text-muted-foreground opacity-80"
+                      aria-hidden
+                    />
+                  </TooltipTrigger>
+                  <TooltipPopup>Empty</TooltipPopup>
+                </Tooltip>
               ) : null}
             </span>
           </div>

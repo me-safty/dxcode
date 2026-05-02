@@ -1,8 +1,15 @@
-import { type TimelineEntry, type WorkLogEntry } from "../../session-logic";
+import { formatDuration, type TimelineEntry, type WorkLogEntry } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { type MessageId } from "@t3tools/contracts";
 
-export const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
+export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
+
+function computeElapsedMs(startIso: string, endIso: string): number | null {
+  const start = Date.parse(startIso);
+  const end = Date.parse(endIso);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return Math.max(0, end - start);
+}
 
 export interface TimelineDurationMessage {
   id: string;
@@ -25,6 +32,7 @@ export type MessagesTimelineRow =
       message: ChatMessage;
       durationStart: string;
       showCompletionDivider: boolean;
+      completionDividerDuration?: string | null;
       showAssistantCopyButton: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
       revertTurnCount?: number | undefined;
@@ -120,6 +128,8 @@ export function deriveMessagesTimelineRows(input: {
     input.timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(input.timelineEntries);
+  let lastAssistantDurationStart: string | null = null;
+  let lastAssistantMessage: ChatMessage | null = null;
 
   for (let index = 0; index < input.timelineEntries.length; index += 1) {
     const timelineEntry = input.timelineEntries[index];
@@ -156,6 +166,20 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    const showCompletionDivider =
+      timelineEntry.message.role === "assistant" &&
+      input.completionDividerBeforeEntryId === timelineEntry.id;
+
+    let completionDividerDuration: string | null = null;
+    if (showCompletionDivider && lastAssistantMessage && lastAssistantDurationStart) {
+      const start = lastAssistantDurationStart;
+      const end = lastAssistantMessage.completedAt ?? lastAssistantMessage.createdAt;
+      const elapsed = computeElapsedMs(start, end);
+      if (elapsed !== null) {
+        completionDividerDuration = formatDuration(elapsed);
+      }
+    }
+
     nextRows.push({
       kind: "message",
       id: timelineEntry.id,
@@ -163,9 +187,7 @@ export function deriveMessagesTimelineRows(input: {
       message: timelineEntry.message,
       durationStart:
         durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt,
-      showCompletionDivider:
-        timelineEntry.message.role === "assistant" &&
-        input.completionDividerBeforeEntryId === timelineEntry.id,
+      showCompletionDivider,
       showAssistantCopyButton:
         timelineEntry.message.role === "assistant" &&
         terminalAssistantMessageIds.has(timelineEntry.message.id),
@@ -177,7 +199,14 @@ export function deriveMessagesTimelineRows(input: {
         timelineEntry.message.role === "user"
           ? input.revertTurnCountByUserMessageId.get(timelineEntry.message.id)
           : undefined,
+      completionDividerDuration,
     });
+
+    if (timelineEntry.message.role === "assistant") {
+      lastAssistantDurationStart =
+        durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt;
+      lastAssistantMessage = timelineEntry.message;
+    }
   }
 
   if (input.isWorking) {
@@ -231,6 +260,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.message === bm.message &&
         a.durationStart === bm.durationStart &&
         a.showCompletionDivider === bm.showCompletionDivider &&
+        a.completionDividerDuration === bm.completionDividerDuration &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
         a.revertTurnCount === bm.revertTurnCount

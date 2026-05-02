@@ -218,12 +218,33 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const isLocked = props.lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
-  const lockedInstanceEntries = useMemo(
-    () =>
-      props.lockedProvider ? instanceEntries.filter((entry) => matchesLockedProvider(entry)) : [],
-    [instanceEntries, matchesLockedProvider, props.lockedProvider],
-  );
-  const sidebarInstanceEntries = isLocked ? lockedInstanceEntries : instanceEntries;
+  const lockedDisabledInstanceIds = useMemo(() => {
+    if (!isLocked) {
+      return undefined;
+    }
+    const disabled = new Set<ProviderInstanceId>();
+    for (const entry of instanceEntries) {
+      if (!matchesLockedProvider(entry)) {
+        disabled.add(entry.instanceId);
+      }
+    }
+    return disabled;
+  }, [instanceEntries, isLocked, matchesLockedProvider]);
+  const sidebarInstanceEntries = useMemo(() => {
+    if (!isLocked) {
+      return instanceEntries;
+    }
+    const available: ProviderInstanceEntry[] = [];
+    const disabled: ProviderInstanceEntry[] = [];
+    for (const entry of instanceEntries) {
+      if (matchesLockedProvider(entry)) {
+        available.push(entry);
+      } else {
+        disabled.push(entry);
+      }
+    }
+    return [...available, ...disabled];
+  }, [instanceEntries, isLocked, matchesLockedProvider]);
   const showSidebar = !isSearching && sidebarInstanceEntries.length > 0;
   const openCodeContextInstanceId =
     props.lockedProvider === OPENCODE_DRIVER_KIND
@@ -316,9 +337,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       // When searching, we only respect locked provider (by driver kind),
       // ignoring sidebar selection so account-scoped searches can find a
       // model before the user chooses a specific instance rail item.
-      const openCodeScopedMatches = showOpenCodeTabs
-        ? rankedMatches.filter((rankedModel) => matchesOpenCodeLane(rankedModel.model))
-        : rankedMatches;
+      const openCodeScopedMatches =
+        showOpenCodeTabs && !searchQuery.trim()
+          ? rankedMatches.filter((rankedModel) => matchesOpenCodeLane(rankedModel.model))
+          : rankedMatches;
 
       if (props.lockedProvider !== null) {
         return openCodeScopedMatches
@@ -352,7 +374,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
     if (props.lockedProvider !== null) {
       result = result.filter((m) => matchesLockedProvider(m));
-      result = result.filter((m) => m.instanceId === selectedInstanceId);
+      if (selectedInstanceId === "favorites") {
+        result = result.filter((m) => favoritesSet.has(providerModelKey(m.instanceId, m.slug)));
+      } else {
+        result = result.filter((m) => m.instanceId === selectedInstanceId);
+      }
     } else if (selectedInstanceId === "favorites") {
       result = result.filter((m) => favoritesSet.has(providerModelKey(m.instanceId, m.slug)));
     } else {
@@ -560,8 +586,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             selectedInstanceId={selectedInstanceId}
             onSelectInstance={handleSelectInstance}
             instanceEntries={sidebarInstanceEntries}
-            showFavorites={!isLocked}
-            showComingSoon={!isLocked}
+            showFavorites
+            showComingSoon
+            {...(lockedDisabledInstanceIds
+              ? {
+                  disabledInstanceIds: lockedDisabledInstanceIds,
+                  getDisabledInstanceTooltip: (entry: ProviderInstanceEntry) =>
+                    `${entry.displayName} is unavailable in this thread. Start a new thread to switch providers.`,
+                }
+              : {})}
           />
         )}
 

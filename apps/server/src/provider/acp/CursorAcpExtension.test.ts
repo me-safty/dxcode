@@ -33,6 +33,7 @@ describe("CursorAcpExtension", () => {
         options: [
           { label: "TypeScript", description: "TypeScript" },
           { label: "Rust", description: "Rust" },
+          { label: "Other", description: "Type your own answer" },
         ],
       },
     ]);
@@ -62,6 +63,7 @@ describe("CursorAcpExtension", () => {
         options: [
           { label: "Agent", description: "Agent" },
           { label: "Plan", description: "Plan" },
+          { label: "Other", description: "Type your own answer" },
         ],
       },
     ]);

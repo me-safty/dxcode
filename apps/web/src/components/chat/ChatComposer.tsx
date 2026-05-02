@@ -205,7 +205,11 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                 : "Default mode — click to enter plan mode"
             }
           >
-            {props.interactionMode === "plan" ? <PencilRulerIcon /> : <BotIcon />}
+            {props.interactionMode === "plan" ? (
+              <PencilRulerIcon className="text-current opacity-100" />
+            ) : (
+              <BotIcon />
+            )}
             <span className="sr-only sm:not-sr-only">
               {props.interactionMode === "plan" ? "Plan" : "Build"}
             </span>
@@ -1131,51 +1135,6 @@ export const ChatComposer = memo(
       composerMenuSearchKey,
     ]);
 
-    const lastSyncedPendingInputRef = useRef<{
-      requestId: string | null;
-      questionId: string | null;
-    } | null>(null);
-
-    useEffect(() => {
-      const nextCustomAnswer = activePendingProgress?.customAnswer;
-      if (typeof nextCustomAnswer !== "string") {
-        lastSyncedPendingInputRef.current = null;
-        return;
-      }
-
-      const nextRequestId = activePendingUserInput?.requestId ?? null;
-      const nextQuestionId = activePendingProgress?.activeQuestion?.id ?? null;
-      const questionChanged =
-        lastSyncedPendingInputRef.current?.requestId !== nextRequestId ||
-        lastSyncedPendingInputRef.current?.questionId !== nextQuestionId;
-      const textChangedExternally = promptRef.current !== nextCustomAnswer;
-
-      lastSyncedPendingInputRef.current = {
-        requestId: nextRequestId,
-        questionId: nextQuestionId,
-      };
-
-      if (!questionChanged && !textChangedExternally) {
-        return;
-      }
-
-      promptRef.current = nextCustomAnswer;
-      const nextCursor = collapseExpandedComposerCursor(nextCustomAnswer, nextCustomAnswer.length);
-      setComposerCursor(nextCursor);
-      setComposerTrigger(
-        detectComposerTrigger(
-          nextCustomAnswer,
-          expandCollapsedComposerCursor(nextCustomAnswer, nextCursor),
-        ),
-      );
-      setComposerHighlightedItemId(null);
-    }, [
-      activePendingProgress?.customAnswer,
-      activePendingProgress?.activeQuestion?.id,
-      activePendingUserInput?.requestId,
-      promptRef,
-    ]);
-
     // ------------------------------------------------------------------
     // Reset compositor state on thread/draft change
     // ------------------------------------------------------------------
@@ -1829,7 +1788,7 @@ export const ChatComposer = memo(
         >
           <div
             className={cn(
-              "rounded-[20px] border bg-card ring-foreground/12 transition-[box-shadow,border-color,background-color] duration-200 has-focus-visible:border-foreground/40 has-focus-visible:ring-[3px]",
+              "rounded-[20px] border bg-card ring-foreground/5 transition-[box-shadow,border-color,background-color] duration-200 has-focus-visible:border-foreground/25 has-focus-visible:ring-[2px]",
               isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border",
               composerProviderState.composerSurfaceClassName,
             )}
@@ -1862,34 +1821,33 @@ export const ChatComposer = memo(
               </div>
             ) : null}
 
-            <div
-              className={cn(
-                "relative px-3 pb-2 sm:px-4",
-                hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
-              )}
-            >
-              {composerMenuOpen && !isComposerApprovalState && (
-                <div className="absolute inset-x-0 bottom-full z-20 mb-2">
-                  <ComposerCommandMenu
-                    items={composerMenuItems}
-                    resolvedTheme={resolvedTheme}
-                    isLoading={isComposerMenuLoading}
-                    triggerKind={composerTriggerKind}
-                    groupSlashCommandSections={
-                      composerTrigger?.kind === "slash-command" &&
-                      composerTrigger.query.trim().length === 0
-                    }
-                    emptyStateText={composerMenuEmptyState}
-                    activeItemId={activeComposerMenuItem?.id ?? null}
-                    onHighlightedItemChange={onComposerMenuItemHighlighted}
-                    onSelect={onSelectComposerItem}
-                  />
-                </div>
-              )}
+            {pendingUserInputs.length === 0 ? (
+              <div
+                className={cn(
+                  "relative px-3 pb-2 sm:px-4",
+                  hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
+                )}
+              >
+                {composerMenuOpen && !isComposerApprovalState && (
+                  <div className="absolute inset-x-0 bottom-full z-20 mb-2">
+                    <ComposerCommandMenu
+                      items={composerMenuItems}
+                      resolvedTheme={resolvedTheme}
+                      isLoading={isComposerMenuLoading}
+                      triggerKind={composerTriggerKind}
+                      groupSlashCommandSections={
+                        composerTrigger?.kind === "slash-command" &&
+                        composerTrigger.query.trim().length === 0
+                      }
+                      emptyStateText={composerMenuEmptyState}
+                      activeItemId={activeComposerMenuItem?.id ?? null}
+                      onHighlightedItemChange={onComposerMenuItemHighlighted}
+                      onSelect={onSelectComposerItem}
+                    />
+                  </div>
+                )}
 
-              {!isComposerApprovalState &&
-                pendingUserInputs.length === 0 &&
-                composerImages.length > 0 && (
+                {!isComposerApprovalState && composerImages.length > 0 && (
                   <div className="mb-3 flex flex-wrap gap-2">
                     {composerImages.map((image) => (
                       <div
@@ -1954,40 +1912,30 @@ export const ChatComposer = memo(
                   </div>
                 )}
 
-              <ComposerPromptEditor
-                ref={composerEditorRef}
-                value={
-                  isComposerApprovalState
-                    ? ""
-                    : activePendingProgress
-                      ? activePendingProgress.customAnswer
-                      : prompt
-                }
-                cursor={composerCursor}
-                terminalContexts={
-                  !isComposerApprovalState && pendingUserInputs.length === 0
-                    ? composerTerminalContexts
-                    : []
-                }
-                skills={selectedProviderStatus?.skills ?? []}
-                onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
-                onChange={onPromptChange}
-                onCommandKeyDown={onComposerCommandKey}
-                onPaste={onComposerPaste}
-                placeholder={
-                  isComposerApprovalState
-                    ? (activePendingApproval?.detail ?? "Resolve this approval request to continue")
-                    : activePendingProgress
-                      ? "Type your own answer, or leave this blank to use the selected option"
+                <ComposerPromptEditor
+                  ref={composerEditorRef}
+                  value={isComposerApprovalState ? "" : prompt}
+                  cursor={composerCursor}
+                  terminalContexts={!isComposerApprovalState ? composerTerminalContexts : []}
+                  skills={selectedProviderStatus?.skills ?? []}
+                  onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
+                  onChange={onPromptChange}
+                  onCommandKeyDown={onComposerCommandKey}
+                  onPaste={onComposerPaste}
+                  placeholder={
+                    isComposerApprovalState
+                      ? (activePendingApproval?.detail ??
+                        "Resolve this approval request to continue")
                       : showPlanFollowUpPrompt && activeProposedPlan
                         ? "Add feedback to refine the plan, or leave this blank to implement it"
                         : phase === "disconnected"
                           ? "Ask for follow-up changes or attach images"
                           : "Ask anything, @tag files/folders, or use / to show available commands"
-                }
-                disabled={isConnecting || isComposerApprovalState}
-              />
-            </div>
+                  }
+                  disabled={isConnecting || isComposerApprovalState}
+                />
+              </div>
+            ) : null}
 
             {/* Bottom toolbar */}
             {activePendingApproval ? (
@@ -2004,6 +1952,7 @@ export const ChatComposer = memo(
                 data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
                 className={cn(
                   "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-2.5 pb-2.5 sm:px-3 sm:pb-3",
+                  pendingUserInputs.length > 0 && "pt-2",
                   isComposerFooterCompact ? "gap-1.5" : "gap-2 sm:gap-0",
                 )}
               >

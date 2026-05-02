@@ -1279,9 +1279,12 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             claudeCapabilities(),
           );
           assert.strictEqual(status.status, "ready");
-          assert.deepStrictEqual(
-            recorded.commands.map((command) => command.env?.HOME),
-            [claudeHome],
+          const recordedHomes = recorded.commands.map((command) => command.env?.HOME);
+          assert.strictEqual(recordedHomes.length, 2);
+          assert.ok(
+            recordedHomes.every((homePath) =>
+              homePath?.replaceAll("\\", "/").endsWith("/tmp/t3code-claude-home"),
+            ),
           );
         }).pipe(Effect.provide(recorded.layer));
       });
@@ -1436,18 +1439,18 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         ),
       );
 
-      it.effect("returns warning when the Claude initialization result is unavailable", () =>
+      it.effect("returns unauthenticated when Claude auth status reports logged out", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(
             defaultClaudeSettings,
             noClaudeCapabilities,
           );
-          assert.strictEqual(status.status, "warning");
+          assert.strictEqual(status.status, "error");
           assert.strictEqual(status.installed, true);
-          assert.strictEqual(status.auth.status, "unknown");
+          assert.strictEqual(status.auth.status, "unauthenticated");
           assert.strictEqual(
             status.message,
-            "Could not verify Claude authentication status from initialization result.",
+            "Claude CLI is not authenticated. Run `claude login` and try again.",
           );
         }).pipe(
           Effect.provide(

@@ -1,7 +1,7 @@
 "use client";
 
 import { PipetteIcon, XIcon } from "lucide-react";
-import { useCallback, useMemo, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 
 import { ColorSelector } from "../color-selector";
 import { Button } from "../ui/button";
@@ -227,8 +227,67 @@ export function ProviderAccentColorPicker(props: {
   readonly value: string | undefined;
   readonly onCommit: (value: string) => void;
   readonly description?: string;
+  readonly commitDelayMs?: number;
 }) {
-  const normalized = normalizeProviderAccentColor(props.value);
+  const { commitDelayMs = 0, description, displayName, onCommit, value } = props;
+  const [optimisticValue, setOptimisticValue] = useState(() => value ?? "");
+  const commitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingCommitRef = useRef<string | null>(null);
+  const onCommitRef = useRef(onCommit);
+
+  useEffect(() => {
+    onCommitRef.current = onCommit;
+  }, [onCommit]);
+
+  useEffect(() => {
+    if (pendingCommitRef.current !== null) return;
+    setOptimisticValue(value ?? "");
+  }, [value]);
+
+  useEffect(() => {
+    return () => {
+      if (commitTimeoutRef.current !== null) {
+        clearTimeout(commitTimeoutRef.current);
+      }
+      const pendingCommit = pendingCommitRef.current;
+      if (pendingCommit !== null) {
+        onCommitRef.current(pendingCommit);
+      }
+    };
+  }, []);
+
+  const commitAccentColor = useCallback(
+    (value: string) => {
+      const normalizedValue = normalizeProviderAccentColor(value) ?? "";
+      setOptimisticValue(normalizedValue);
+
+      if (commitDelayMs <= 0) {
+        pendingCommitRef.current = null;
+        if (commitTimeoutRef.current !== null) {
+          clearTimeout(commitTimeoutRef.current);
+          commitTimeoutRef.current = null;
+        }
+        onCommit(normalizedValue);
+        return;
+      }
+
+      pendingCommitRef.current = normalizedValue;
+      if (commitTimeoutRef.current !== null) {
+        clearTimeout(commitTimeoutRef.current);
+      }
+      commitTimeoutRef.current = setTimeout(() => {
+        commitTimeoutRef.current = null;
+        const pendingCommit = pendingCommitRef.current;
+        pendingCommitRef.current = null;
+        if (pendingCommit !== null) {
+          onCommitRef.current(pendingCommit);
+        }
+      }, commitDelayMs);
+    },
+    [commitDelayMs, onCommit],
+  );
+
+  const normalized = normalizeProviderAccentColor(optimisticValue);
   const selectedValue =
     normalized &&
     PROVIDER_ACCENT_SWATCHES.includes(normalized as (typeof PROVIDER_ACCENT_SWATCHES)[number])
@@ -241,17 +300,17 @@ export function ProviderAccentColorPicker(props: {
       <span className="text-xs font-medium text-foreground">Accent color</span>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <ProviderCustomColorPicker
-          displayName={props.displayName}
+          displayName={displayName}
           value={normalized}
           selected={customSelected}
-          onCommit={props.onCommit}
+          onCommit={commitAccentColor}
         />
         <ColorSelector
           key={selectedValue}
           colors={[...PROVIDER_ACCENT_SWATCHES]}
           defaultValue={selectedValue}
           size="lg"
-          onColorSelect={props.onCommit}
+          onColorSelect={commitAccentColor}
           className="flex-wrap gap-1.5"
         />
         <Button
@@ -262,17 +321,15 @@ export function ProviderAccentColorPicker(props: {
             "size-7 shrink-0 text-muted-foreground transition-opacity",
             normalized ? "opacity-100" : "pointer-events-none opacity-0",
           )}
-          onClick={() => props.onCommit("")}
-          aria-label={`Clear accent color for ${props.displayName}`}
+          onClick={() => commitAccentColor("")}
+          aria-label={`Clear accent color for ${displayName}`}
           aria-hidden={!normalized}
           tabIndex={normalized ? 0 : -1}
         >
           <XIcon className="size-3.5" aria-hidden />
         </Button>
       </div>
-      {props.description ? (
-        <span className="text-xs text-muted-foreground">{props.description}</span>
-      ) : null}
+      {description ? <span className="text-xs text-muted-foreground">{description}</span> : null}
     </div>
   );
 }

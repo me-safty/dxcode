@@ -40,6 +40,7 @@ const SOON_BADGE_CLASS = `${BADGE_BASE_CLASS} text-muted-foreground `;
 
 /** Opens toward the rail so the list stays readable (not over the model names). */
 const PICKER_TOOLTIP_SIDE = "left" as const;
+const PICKER_TOOLTIP_SIDE_OFFSET = 8;
 const PICKER_TOOLTIP_CLASS = "max-w-64 text-balance font-normal leading-snug";
 
 export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
@@ -56,6 +57,9 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   showFavorites?: boolean;
   /** Render non-configured coming-soon provider entries. Hidden in scoped rails. */
   showComingSoon?: boolean;
+  /** Instance ids shown in the rail but unavailable for the current picker context. */
+  disabledInstanceIds?: ReadonlySet<ProviderInstanceId>;
+  getDisabledInstanceTooltip?: (entry: ProviderInstanceEntry) => string;
   /**
    * Instance id values that should render the "new" sparkle badge. Callers
    * pass the subset of default built-in ids they want flagged (custom
@@ -83,12 +87,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
       data-model-picker-sidebar="true"
     >
       <div className="h-full overflow-y-auto overscroll-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div
-          className={cn(
-            "flex min-h-full flex-col gap-1 px-1 pb-1",
-            showFavorites ? "pt-0" : "pt-1",
-          )}
-        >
+        <div className="flex min-h-full flex-col gap-1 px-1 pb-1 pt-0.5">
           {/* Favorites section */}
           {showFavorites ? (
             <div className="flex h-10.5 items-center">
@@ -115,6 +114,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   />
                   <TooltipPopup
                     side={PICKER_TOOLTIP_SIDE}
+                    sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
                     align="center"
                     className={PICKER_TOOLTIP_CLASS}
                   >
@@ -127,18 +127,22 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
 
           {/* Instance buttons (one per configured instance — built-in + custom) */}
           {props.instanceEntries.map((entry) => {
-            const isDisabled = !entry.isAvailable || entry.status !== "ready";
+            const isUnavailable = !entry.isAvailable || entry.status !== "ready";
+            const isContextDisabled = props.disabledInstanceIds?.has(entry.instanceId) ?? false;
+            const isDisabled = isUnavailable || isContextDisabled;
             const isSelected = props.selectedInstanceId === entry.instanceId;
             const isHovered = hoveredInstanceId === entry.instanceId;
             const showNewBadge = props.newBadgeInstanceIds?.has(entry.instanceId) ?? false;
             const showInstanceBadge =
               Boolean(entry.accentColor) || (duplicateDriverCounts.get(entry.driverKind) ?? 0) > 1;
 
-            const tooltip = isDisabled
+            const tooltip = isUnavailable
               ? describeUnavailableInstance(entry)
-              : showNewBadge
-                ? `${entry.displayName} — New`
-                : entry.displayName;
+              : isContextDisabled
+                ? (props.getDisabledInstanceTooltip?.(entry) ?? entry.displayName)
+                : showNewBadge
+                  ? `${entry.displayName} — New`
+                  : entry.displayName;
 
             const button = (
               <button
@@ -173,7 +177,6 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   displayName={entry.displayName}
                   accentColor={entry.accentColor}
                   showBadge={showInstanceBadge}
-                  badgeContent={entry.accentColor ? "none" : "initials"}
                   className="size-6"
                   iconClassName="size-5"
                   indicatorBackground={
@@ -183,7 +186,9 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                         ? "var(--background)"
                         : "color-mix(in oklab, var(--muted) 30%, transparent)"
                   }
-                  {...(entry.accentColor ? { badgeClassName: "size-3 min-w-3 px-0" } : {})}
+                  {...(entry.accentColor
+                    ? { badgeClassName: "h-3 min-w-3 px-0.5 text-[7px]" }
+                    : {})}
                 />
                 {showNewBadge ? (
                   <span className={NEW_BADGE_CLASS} aria-hidden>
@@ -206,6 +211,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   <TooltipTrigger render={trigger} />
                   <TooltipPopup
                     side={PICKER_TOOLTIP_SIDE}
+                    sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
                     align="center"
                     className={PICKER_TOOLTIP_CLASS}
                   >
@@ -242,6 +248,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 />
                 <TooltipPopup
                   side={PICKER_TOOLTIP_SIDE}
+                  sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
                   align="center"
                   className={PICKER_TOOLTIP_CLASS}
                 >
@@ -275,6 +282,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 />
                 <TooltipPopup
                   side={PICKER_TOOLTIP_SIDE}
+                  sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
                   align="center"
                   className={PICKER_TOOLTIP_CLASS}
                 >

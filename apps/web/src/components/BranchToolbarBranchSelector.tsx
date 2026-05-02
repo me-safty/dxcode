@@ -659,9 +659,9 @@ export function BranchToolbarBranchSelector({
         className={cn("min-w-0 text-muted-foreground/70 hover:text-foreground/80", className)}
         disabled={(isBranchesSearchPending && branches.length === 0) || isBranchActionPending}
       >
-        <GitBranchIcon className="size-3 shrink-0" />
+        <GitBranchIcon className="size-3 shrink-0 opacity-70" />
         <span className="min-w-0 max-w-[240px] truncate">{triggerLabel}</span>
-        <ChevronDownIcon className="shrink-0" />
+        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </ComboboxTrigger>
       <ComboboxPopup align="end" side="top" className="flex w-80 flex-col">
         <div className="shrink-0 p-1">

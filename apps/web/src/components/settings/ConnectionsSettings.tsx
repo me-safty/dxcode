@@ -1171,7 +1171,7 @@ export function ConnectionsSettings() {
                       }}
                       aria-label="Enable network access"
                     />
-                    <AlertDialogPopup>
+                    <AlertDialogPopup centered>
                       <AlertDialogHeader>
                         <AlertDialogTitle>
                           {pendingDesktopServerExposureMode === "network-accessible"
@@ -1305,7 +1305,7 @@ export function ConnectionsSettings() {
                 </Button>
               }
             />
-            <DialogPopup>
+            <DialogPopup centered>
               <DialogHeader>
                 <DialogTitle>Add Environment</DialogTitle>
                 <DialogDescription>Pair another environment to this client.</DialogDescription>

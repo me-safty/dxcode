@@ -156,7 +156,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           const shortcutKey = index < 9 ? index + 1 : null;
           const className = cn(
             "group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-all duration-150",
-            isSelected
+            isSelected && !isOther
               ? "bg-blue-500/10 text-foreground"
               : "bg-background dark:bg-input/32 text-foreground/85 hover:bg-muted/60 dark:hover:bg-input/45",
             isResponding && "opacity-50 cursor-not-allowed",
@@ -193,7 +193,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   <span className="text-xs text-muted-foreground/50">{option.description}</span>
                 ) : null}
               </div>
-              {isSelected ? (
+              {isSelected && !isOther ? (
                 <CheckIcon className="size-3.5 shrink-0 text-blue-400" />
               ) : shortcutKey !== null ? (
                 <kbd

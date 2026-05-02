@@ -85,9 +85,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
         )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-1.5 self-center">
+      <div className="flex shrink-0 items-center gap-1.5">
         {props.jumpLabel ? (
-          <Shortcut className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
+          <Shortcut className="h-4 min-w-0 rounded-sm px-1.5 text-[10px] leading-none">
             {props.jumpLabel}
           </Shortcut>
         ) : null}
@@ -96,7 +96,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
             render={
               <button
                 className={cn(
-                  "-mr-1 flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 opacity-64 transition-[background-color,color,opacity] hover:bg-background/70 hover:text-foreground hover:opacity-100 group-hover:opacity-100",
+                  "relative -mr-1 flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 opacity-64 transition-[background-color,color,opacity] hover:bg-background/70 hover:text-foreground hover:opacity-100 group-hover:opacity-100 pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 pointer-coarse:after:min-w-11",
                   props.isFavorite && "text-foreground opacity-100",
                 )}
                 onClick={(event) => {
@@ -110,7 +110,10 @@ export const ModelListRow = memo(function ModelListRow(props: {
                 aria-label={props.isFavorite ? "Remove from favorites" : "Add to favorites"}
               >
                 <StarIcon
-                  className={cn("size-4", props.isFavorite && "fill-current text-yellow-500")}
+                  className={cn(
+                    "size-3.5 sm:size-3",
+                    props.isFavorite && "fill-current text-yellow-500",
+                  )}
                 />
               </button>
             }
