@@ -13,5 +13,5 @@ export function withCustomUserInputOption(
     options.find((option) => option.label.trim().toLowerCase() === "other") ??
     CUSTOM_USER_INPUT_OPTION;
 
-  return [...presetOptions.slice(0, 3), customOption];
+  return [...presetOptions, customOption];
 }

@@ -510,7 +510,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
                       inferredCheckpointTurnCountByTurnId[summary.turnId] ??
                       "?"}
                   </span>
-                  <span className="text-[9px] leading-tight opacity-70">
+                  <span className="text-[9px] leading-tight opacity-70 tabular-nums">
                     {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
                   </span>
                 </div>

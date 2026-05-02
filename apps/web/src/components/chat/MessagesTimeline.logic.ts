@@ -128,8 +128,6 @@ export function deriveMessagesTimelineRows(input: {
     input.timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(input.timelineEntries);
-  let lastAssistantDurationStart: string | null = null;
-  let lastAssistantMessage: ChatMessage | null = null;
 
   for (let index = 0; index < input.timelineEntries.length; index += 1) {
     const timelineEntry = input.timelineEntries[index];
@@ -169,11 +167,13 @@ export function deriveMessagesTimelineRows(input: {
     const showCompletionDivider =
       timelineEntry.message.role === "assistant" &&
       input.completionDividerBeforeEntryId === timelineEntry.id;
+    const durationStart =
+      durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt;
 
     let completionDividerDuration: string | null = null;
-    if (showCompletionDivider && lastAssistantMessage && lastAssistantDurationStart) {
-      const start = lastAssistantDurationStart;
-      const end = lastAssistantMessage.completedAt ?? lastAssistantMessage.createdAt;
+    if (showCompletionDivider) {
+      const start = durationStart;
+      const end = timelineEntry.message.completedAt ?? timelineEntry.message.createdAt;
       const elapsed = computeElapsedMs(start, end);
       if (elapsed !== null) {
         completionDividerDuration = formatDuration(elapsed);
@@ -185,8 +185,7 @@ export function deriveMessagesTimelineRows(input: {
       id: timelineEntry.id,
       createdAt: timelineEntry.createdAt,
       message: timelineEntry.message,
-      durationStart:
-        durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt,
+      durationStart,
       showCompletionDivider,
       showAssistantCopyButton:
         timelineEntry.message.role === "assistant" &&
@@ -201,12 +200,6 @@ export function deriveMessagesTimelineRows(input: {
           : undefined,
       completionDividerDuration,
     });
-
-    if (timelineEntry.message.role === "assistant") {
-      lastAssistantDurationStart =
-        durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt;
-      lastAssistantMessage = timelineEntry.message;
-    }
   }
 
   if (input.isWorking) {

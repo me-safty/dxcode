@@ -263,7 +263,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             className={cn(
               "shrink-0 whitespace-nowrap px-2 sm:px-3",
               props.planSidebarOpen
-                ? "text-blue-400 hover:text-blue-300"
+                ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300"
                 : "text-muted-foreground/70 hover:text-foreground/80",
             )}
             size="sm"
@@ -275,7 +275,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                 : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`
             }
           >
-            <ListTodoIcon />
+            <ListTodoIcon
+              className={props.planSidebarOpen ? "text-current opacity-100" : undefined}
+            />
             <span className="sr-only sm:not-sr-only">{props.planSidebarLabel}</span>
           </Button>
         </>

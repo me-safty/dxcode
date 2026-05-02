@@ -29,6 +29,7 @@ import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "../markdown-links";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -171,15 +172,17 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
 
   return (
     <div className="chat-markdown-codeblock leading-snug">
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-xs"
         className="chat-markdown-copy-button"
         onClick={handleCopy}
         title={copied ? "Copied" : "Copy code"}
         aria-label={copied ? "Copied" : "Copy code"}
       >
         {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
-      </button>
+      </Button>
       {children}
     </div>
   );

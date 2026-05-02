@@ -33,7 +33,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
 
   return (
-    <div className="mt-2 rounded-2xl border border-input bg-background p-2 pt-2 shadow-xs/5 not-dark:bg-clip-padding dark:bg-input/32">
+    <div className="mt-4 rounded-2xl border border-input bg-background p-2 pt-4 shadow-xs/5 not-dark:bg-clip-padding dark:bg-input/32">
       <div className="mb-3 flex items-center justify-between gap-2 px-2">
         <p className="flex self-start items-center gap-1 font-medium text-foreground text-xs">
           <span>{files.length} changed files</span>
@@ -92,6 +92,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
     () => collectDirectoryPaths(treeNodes).join("\u0000"),
     [treeNodes],
   );
+  const hasDirectoryNodes = directoryPathsKey.length > 0;
   const expansionStateKey = `${allDirectoriesExpanded ? "expanded" : "collapsed"}\u0000${directoryPathsKey}`;
   const [directoryExpansionState, setDirectoryExpansionState] = useState<{
     key: string;
@@ -172,7 +173,9 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
         style={{ paddingLeft: `${leftPadding}px` }}
         onClick={() => onOpenTurnDiff(turnId, node.path)}
       >
-        <span aria-hidden="true" className="size-3.5 shrink-0" />
+        {hasDirectoryNodes || depth > 0 ? (
+          <span aria-hidden="true" className="size-3.5 shrink-0" />
+        ) : null}
         <VscodeEntryIcon
           pathValue={node.path}
           kind="file"

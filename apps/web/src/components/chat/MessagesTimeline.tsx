@@ -362,10 +362,12 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   />
                 )}
               </div>
-              <div className="flex w-full max-w-[80%] items-center justify-end pe-1 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+              <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
                 <div className="flex shrink-0 items-center gap-2">
                   <Tooltip>
-                    <TooltipTrigger render={<p className="text-muted-foreground text-sm" />}>
+                    <TooltipTrigger
+                      render={<p className="text-muted-foreground text-xs tabular-nums" />}
+                    >
                       {formatChatTimestamp(row.message.createdAt)}
                     </TooltipTrigger>
                     <TooltipPopup>
@@ -373,9 +375,6 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                     </TooltipPopup>
                   </Tooltip>
                   <div className="flex items-center gap-0.5">
-                    {displayedUserMessage.copyText && (
-                      <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
-                    )}
                     {canRevertAgentWork && (
                       <Button
                         type="button"
@@ -387,6 +386,9 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                       >
                         <Undo2Icon className="size-3" />
                       </Button>
+                    )}
+                    {displayedUserMessage.copyText && (
+                      <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
                     )}
                   </div>
                 </div>
@@ -414,7 +416,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
               {row.showCompletionDivider && (
                 <div className="my-3 flex items-center gap-3">
                   <span className="h-px flex-1 bg-border" />
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-muted-foreground tabular-nums">
                     {row.completionDividerDuration
                       ? `Worked for ${row.completionDividerDuration}`
                       : "Worked for 0s"}
@@ -422,7 +424,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   <span className="h-px flex-1 bg-border" />
                 </div>
               )}
-              <div className="min-w-0 px-1 py-0.5">
+              <div className="relative min-w-0 px-1 py-0.5">
                 <ChatMarkdown
                   text={messageText}
                   cwd={ctx.markdownCwd}
@@ -434,16 +436,14 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   resolvedTheme={ctx.resolvedTheme}
                   onOpenTurnDiff={ctx.onOpenTurnDiff}
                 />
-                <div className="mt-1.5 flex items-center gap-2 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+                <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
                   {assistantCopyState.visible ? (
-                    <MessageCopyButton
-                      text={assistantCopyState.text ?? ""}
-                      size="icon-xs"
-                      variant="ghost"
-                    />
+                    <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />
                   ) : null}
                   <Tooltip>
-                    <TooltipTrigger render={<p className="text-muted-foreground text-sm" />}>
+                    <TooltipTrigger
+                      render={<p className="text-muted-foreground text-xs tabular-nums" />}
+                    >
                       <LiveMessageMeta
                         createdAt={row.message.createdAt}
                         durationStart={row.message.streaming ? row.durationStart : null}
@@ -472,7 +472,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
 
       {row.kind === "working" && (
         <div className="py-0.5 pl-1.5">
-          <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
+          <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70 tabular-nums">
             <span className="inline-flex items-center gap-[3px]">
               <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
               <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
@@ -507,7 +507,11 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, [createdAt]);
-  return <>{formatWorkingTimer(createdAt, new Date(nowMs).toISOString()) ?? "0s"}</>;
+  return (
+    <span className="tabular-nums">
+      {formatWorkingTimer(createdAt, new Date(nowMs).toISOString()) ?? "0s"}
+    </span>
+  );
 }
 
 /** Live timestamp + elapsed duration that stays fresh via interval. */
@@ -526,7 +530,7 @@ function LiveMessageMeta({
   const elapsed = durationStart
     ? formatElapsed(durationStart, new Date(nowMs).toISOString())
     : null;
-  return <>{formatMessageMeta(createdAt, elapsed)}</>;
+  return <span className="tabular-nums">{formatMessageMeta(createdAt, elapsed)}</span>;
 }
 
 // ---------------------------------------------------------------------------
@@ -564,7 +568,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
         {hasOverflow && (
           <button
             type="button"
-            className="inline-flex items-center gap-1 text-muted-foreground text-xs transition-colors duration-150 hover:text-foreground/80"
+            className="inline-flex cursor-pointer items-center gap-1 text-muted-foreground text-xs transition-colors duration-150 hover:text-foreground/80"
             onClick={() => setIsExpanded((v) => !v)}
           >
             {isExpanded ? (

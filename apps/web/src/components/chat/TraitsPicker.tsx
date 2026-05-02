@@ -414,6 +414,9 @@ export const TraitsPicker = memo(function TraitsPicker({
   const visibleDescriptors = descriptors.filter(
     (descriptor) => !hiddenDescriptorIdSet.has(descriptor.id),
   );
+  const isCodexStyle = provider === "codex";
+  const [openDescriptorId, setOpenDescriptorId] = useState<string | null>(null);
+
   if (
     !shouldRenderTraitsControls({
       provider,
@@ -427,9 +430,6 @@ export const TraitsPicker = memo(function TraitsPicker({
   ) {
     return null;
   }
-
-  const isCodexStyle = provider === "codex";
-  const [openDescriptorId, setOpenDescriptorId] = useState<string | null>(null);
 
   return (
     <>
