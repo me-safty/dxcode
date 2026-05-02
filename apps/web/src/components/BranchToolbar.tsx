@@ -94,9 +94,11 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   const isLocked = envLocked || envModeLocked;
   const EnvironmentIcon = activeEnvironment?.isPrimary ? MonitorIcon : CloudIcon;
   const icon = showEnvironmentPicker ? (
+    // Button's base styles apply `-mx-0.5` to descendant SVGs, which eats 4px
+    // out of whatever gap we set. mx-0! cancels that so gap-0.5 reads as 2px.
     <span className="inline-flex shrink-0 items-center gap-0.5">
-      <EnvironmentIcon className="size-3 shrink-0" />
-      <WorkspaceIcon className="size-3 shrink-0" />
+      <EnvironmentIcon className="size-3 shrink-0 mx-0!" />
+      <WorkspaceIcon className="size-3 shrink-0 mx-0!" />
     </span>
   ) : (
     <WorkspaceIcon className="size-3 shrink-0" />
