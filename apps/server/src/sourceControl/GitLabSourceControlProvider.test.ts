@@ -94,6 +94,10 @@ it.effect("creates GitLab MRs through provider-neutral input names", () =>
       cwd: "/repo",
       baseBranch: "main",
       headSelector: "owner:feature/provider",
+      source: {
+        owner: "owner",
+        refName: "feature/provider",
+      },
       title: "Provider MR",
       bodyFile: "/tmp/body.md",
     });
