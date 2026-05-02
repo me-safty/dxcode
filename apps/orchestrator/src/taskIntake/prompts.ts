@@ -61,3 +61,26 @@ export function buildTaskIntakeInitialPrompt(message: TaskIntakeMessage): string
     "- Leave a concise final summary in the T3 thread; intake sources receive only coarse lifecycle replies.",
   ].join("\n");
 }
+
+export function buildTaskIntakeFollowUpPrompt(message: TaskIntakeMessage): string {
+  const actorLabel =
+    message.actor?.displayName?.trim() ||
+    message.actor?.email?.trim() ||
+    message.actor?.externalId?.trim() ||
+    "Unknown actor";
+  const conversationUrl = message.url ?? message.conversation.url;
+  const text = message.text.trim();
+
+  return [
+    `A ${sourceLabel(message.source)} follow-up was added to this Task's intake conversation.`,
+    "",
+    `Source: ${message.source}`,
+    `Conversation external id: ${message.conversation.externalId}`,
+    `Message id: ${message.messageId}`,
+    `Actor: ${actorLabel}`,
+    ...(conversationUrl !== undefined ? [`Message URL: ${conversationUrl}`] : []),
+    "",
+    "Follow-up message:",
+    text.length > 0 ? text : "(empty message body)",
+  ].join("\n");
+}

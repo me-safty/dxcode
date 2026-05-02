@@ -54,7 +54,7 @@ export function buildTaskIntakeFollowUpReply(input: {
     message: input.message,
     suffix: "follow-up",
     body: [
-      `Got it. I routed this follow-up to Task ${input.taskId}.`,
+      `Got it. I queued this follow-up on Task ${input.taskId}.`,
       ...(input.t3ThreadId !== undefined ? [`Primary T3 thread: \`${input.t3ThreadId}\``] : []),
     ].join("\n"),
   });

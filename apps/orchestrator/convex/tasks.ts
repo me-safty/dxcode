@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import { isValidTaskStatusTransition } from "../src/domain/taskStatus.ts";
 import type { TaskStatus } from "../src/domain/taskStatus.ts";
+import type { Id } from "./_generated/dataModel.js";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server.js";
 
 const taskStatus = v.union(
@@ -223,14 +224,62 @@ export const resolveTaskIntakeMessage = internalMutation({
       taskId: v.id("tasks"),
       projectId: v.id("projects"),
       t3ThreadId: v.optional(v.string()),
+      workSessionId: v.optional(v.id("workSessions")),
     }),
   ),
   handler: async (ctx, args) => {
+    const routedExistingTask = async (taskId: Id<"tasks">) => {
+      const task = await ctx.db.get(taskId);
+      if (task === null) {
+        throw new Error(`Linked Task ${String(taskId)} does not exist`);
+      }
+
+      const primaryThread =
+        task.currentPrimaryTaskThreadId === undefined
+          ? null
+          : await ctx.db.get(task.currentPrimaryTaskThreadId);
+      const currentWorkSession =
+        primaryThread === null
+          ? null
+          : ((
+              await ctx.db
+                .query("workSessions")
+                .withIndex("by_task_updated", (q: any) => q.eq("taskId", task._id))
+                .order("desc")
+                .take(20)
+            ).find(
+              (workSession) => String(workSession.taskThreadId) === String(primaryThread._id),
+            ) ?? null);
+
+      return {
+        status: "routed_existing" as const,
+        taskId: task._id,
+        projectId: task.projectId,
+        ...(primaryThread?.t3ThreadId !== undefined &&
+        !primaryThread.t3ThreadId.startsWith("pending:")
+          ? { t3ThreadId: primaryThread.t3ThreadId }
+          : {}),
+        ...(currentWorkSession !== null ? { workSessionId: currentWorkSession._id } : {}),
+      };
+    };
+
     const existingEvent = await ctx.db
       .query("taskEvents")
       .withIndex("by_event_key", (q: any) => q.eq("eventKey", args.eventId))
       .unique();
     if (existingEvent !== null) {
+      if (existingEvent.kind === "task-intake.follow-up") {
+        const continuationEvent = await ctx.db
+          .query("taskEvents")
+          .withIndex("by_event_key", (q: any) =>
+            q.eq("eventKey", `${args.eventId}:runtime-continuation`),
+          )
+          .unique();
+        if (continuationEvent === null) {
+          return routedExistingTask(existingEvent.taskId);
+        }
+      }
+
       return {
         status: "duplicate" as const,
         taskId: existingEvent.taskId,
@@ -249,10 +298,6 @@ export const resolveTaskIntakeMessage = internalMutation({
         throw new Error(`Linked Task ${existingLink.taskId} does not exist`);
       }
 
-      const primaryThread =
-        task.currentPrimaryTaskThreadId === undefined
-          ? null
-          : await ctx.db.get(task.currentPrimaryTaskThreadId);
       const now = Date.now();
       await ctx.db.insert("taskEvents", {
         taskId: task._id,
@@ -266,14 +311,7 @@ export const resolveTaskIntakeMessage = internalMutation({
         updatedAt: now,
       });
 
-      return {
-        status: "routed_existing" as const,
-        taskId: task._id,
-        projectId: task.projectId,
-        ...(primaryThread?.t3ThreadId !== undefined
-          ? { t3ThreadId: primaryThread.t3ThreadId }
-          : {}),
-      };
+      return routedExistingTask(task._id);
     }
 
     const project = await resolveProjectForTaskIntake(ctx, args.source, args.teamId);

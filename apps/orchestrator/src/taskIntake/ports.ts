@@ -9,6 +9,7 @@ export interface TaskIntakeExistingTask {
   readonly taskId: string;
   readonly projectId?: string;
   readonly t3ThreadId?: string;
+  readonly workSessionId?: string;
 }
 
 export type TaskIntakeStoredEvent =
@@ -26,6 +27,7 @@ export type TaskIntakeStoredEvent =
       readonly taskId: string;
       readonly projectId?: string;
       readonly t3ThreadId?: string;
+      readonly workSessionId?: string;
     };
 
 export interface TaskIntakeStore {
@@ -61,6 +63,19 @@ export interface TaskIntakeRuntime {
     readonly initialPrompt: string;
     readonly startCodingAgent: boolean;
   }) => Promise<TaskIntakeRuntimeMaterialization>;
+
+  readonly continueTaskRuntime: (input: {
+    readonly eventId: string;
+    readonly taskId: string;
+    readonly workSessionId: string;
+    readonly t3ThreadId: string;
+    readonly prompt: string;
+  }) => Promise<{
+    readonly taskId: string;
+    readonly workSessionId: string;
+    readonly t3ThreadId: string;
+    readonly acceptedAt: string;
+  }>;
 }
 
 export interface TaskIntakeReplyTransport {

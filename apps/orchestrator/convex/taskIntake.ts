@@ -76,6 +76,15 @@ export const handleChatSdkWebhook = internalAction({
                 startCodingAgent: input.startCodingAgent,
               });
             },
+            async continueTaskRuntime(input) {
+              return ctx.runAction(api.t3Runtime.continueTaskRuntime, {
+                eventId: input.eventId,
+                taskId: input.taskId as Id<"tasks">,
+                workSessionId: input.workSessionId as Id<"workSessions">,
+                t3ThreadId: input.t3ThreadId,
+                prompt: input.prompt,
+              });
+            },
           },
           replies: {
             async postReply(reply) {

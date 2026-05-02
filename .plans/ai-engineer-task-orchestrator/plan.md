@@ -287,8 +287,8 @@ Wire the shared Task Intake module into real Slack and Linear webhook paths and 
 - [x] Linear comments can create a Task and receive a simple acknowledgement.
 - [x] Linear follow-up comments route to the same Task.
 - [x] Slack mentions can create a Task and receive a simple acknowledgement.
-- [ ] Slack thread replies route to the same Task.
-- [ ] Duplicate webhooks do not duplicate Tasks or acknowledgements.
+- [x] Slack thread replies route to the same Task.
+- [x] Duplicate webhooks do not duplicate Tasks or acknowledgements.
 - [ ] T3 runtime completion posts one simple completion comment/message.
 - [ ] T3 runtime failure posts one simple failure comment/message.
 - [x] No Coding Agent stream/activity is posted to Slack or Linear.
@@ -306,6 +306,10 @@ Wire the shared Task Intake module into real Slack and Linear webhook paths and 
 - Slack live E2E required seeding a `t3code` Project in Convex dev because the deployment initially had zero Projects and could not route Slack team `T079X906D6U`.
 - A stale T3 bridge URL first produced a failed Slack Task and a failure reply, which confirmed failure replies work for materialization failures. A fresh local T3 server plus ngrok tunnel then confirmed successful Task runtime materialization.
 - Slack completion replies were not observed in the live test because the test Task remained `working` after runtime materialization; completion/failure reply idempotency still needs focused hardening.
+- Added follow-up continuation for existing Task Intake conversations. When an existing Task has a materialized primary T3 Thread and Work Session, Slack/Linear follow-up messages now call the T3 bridge continue endpoint with a concise follow-up prompt instead of only recording the intake event.
+- Follow-up continuation records an idempotency key after the bridge accepts the continuation. If a follow-up event is recorded but the bridge continuation fails before acceptance, a platform retry can route the same event back into the existing Task instead of being permanently swallowed by intake dedupe.
+- Slack live E2E on `scrupulous-fly-947`: a mention in `#testing` created Task `kn78v559yg2hpz14wf8p8pp6xs85yfn1`, T3 Thread `ee3d4e05-06d0-4eb8-a138-0119d2ab8de3`, branch `task/u0b0t56ay7r-live-mvp-follow-up-retry-safe-test-f-8pp6xs85yfn1`, and worktree `/Users/vivek/.t3code-slack-e2e/worktrees/t3code/task-u0b0t56ay7r-live-mvp-follow-up-retry-safe-test-f-8pp6xs85yfn1`. A Slack thread reply queued onto the same Task/T3 Thread and the worktree file `tmp/slack-intake-e2e-followup.md` contained both the initial requested line and the follow-up line.
+- The temporary live bridge used for the follow-up E2E was stopped after testing, and `T3_EXECUTION_BRIDGE_BASE_URL` was unset so the dev deployment is not left pointing at a stale ngrok URL.
 
 **Implementation Footprint**:
 
@@ -315,6 +319,12 @@ Wire the shared Task Intake module into real Slack and Linear webhook paths and 
 - Updated `apps/orchestrator/src/taskIntake/chatSdk.ts`
 - Added `apps/orchestrator/src/taskIntake/chatSdkAdapters.ts`
 - Updated `apps/orchestrator/src/taskIntake/ports.ts`
+- Updated `apps/orchestrator/src/taskIntake/ingress.ts`
+- Updated `apps/orchestrator/src/taskIntake/ingress.test.ts`
+- Updated `apps/orchestrator/src/taskIntake/prompts.ts`
+- Updated `apps/orchestrator/src/taskIntake/replies.ts`
+- Updated `apps/orchestrator/convex/linear.ts`
+- Updated `apps/orchestrator/convex/t3Runtime.ts`
 - Deleted `apps/orchestrator/src/taskIntake/sourceAdapters.ts`
 
 ## Verification

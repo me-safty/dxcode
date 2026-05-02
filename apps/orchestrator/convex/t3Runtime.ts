@@ -1,8 +1,10 @@
 import { v } from "convex/values";
+import { Schema } from "effect";
+import { ThreadId } from "@t3tools/contracts";
 
 import { createT3ExecutionBridgeClient } from "../src/t3/client.ts";
 import { internal, api } from "./_generated/api.js";
-import { action, internalMutation } from "./_generated/server.js";
+import { action, internalMutation, internalQuery } from "./_generated/server.js";
 
 export const materializeTaskRuntime = action({
   args: {
@@ -68,6 +70,113 @@ export const materializeTaskRuntime = action({
       worktreePath: response.worktreePath ?? null,
       acceptedAt: response.acceptedAt,
     };
+  },
+});
+
+export const continueTaskRuntime = action({
+  args: {
+    eventId: v.string(),
+    taskId: v.id("tasks"),
+    workSessionId: v.id("workSessions"),
+    t3ThreadId: v.string(),
+    prompt: v.string(),
+  },
+  returns: v.object({
+    taskId: v.string(),
+    workSessionId: v.string(),
+    t3ThreadId: v.string(),
+    acceptedAt: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    await ctx.runQuery(internal.t3Runtime.validateTaskRuntimeContinuation, {
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      t3ThreadId: args.t3ThreadId,
+    });
+
+    const client = createT3ExecutionBridgeClient();
+    const t3ThreadId = Schema.decodeUnknownSync(ThreadId)(args.t3ThreadId);
+    const response = await client.continueExecutionRun({
+      controlThreadId: String(args.taskId),
+      executionRunId: String(args.workSessionId),
+      t3ThreadId,
+      prompt: args.prompt,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+    });
+
+    await ctx.runMutation(internal.t3Runtime.recordTaskRuntimeContinuationAccepted, {
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      t3ThreadId: String(response.t3ThreadId),
+      eventKey: `${args.eventId}:runtime-continuation`,
+      acceptedAt: Date.parse(response.acceptedAt),
+    });
+
+    return {
+      taskId: String(args.taskId),
+      workSessionId: String(response.executionRunId),
+      t3ThreadId: String(response.t3ThreadId),
+      acceptedAt: response.acceptedAt,
+    };
+  },
+});
+
+export const validateTaskRuntimeContinuation = internalQuery({
+  args: {
+    taskId: v.id("tasks"),
+    workSessionId: v.id("workSessions"),
+    t3ThreadId: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const workSession = await ctx.db.get(args.workSessionId);
+    if (workSession === null) {
+      throw new Error(`Work Session ${args.workSessionId} does not exist`);
+    }
+    if (String(workSession.taskId) !== String(args.taskId)) {
+      throw new Error(`Work Session ${args.workSessionId} does not belong to Task ${args.taskId}`);
+    }
+    if (workSession.t3ThreadId !== args.t3ThreadId) {
+      throw new Error(
+        `Work Session ${args.workSessionId} is attached to T3 Thread ${workSession.t3ThreadId}, not ${args.t3ThreadId}`,
+      );
+    }
+    return null;
+  },
+});
+
+export const recordTaskRuntimeContinuationAccepted = internalMutation({
+  args: {
+    taskId: v.id("tasks"),
+    workSessionId: v.id("workSessions"),
+    t3ThreadId: v.string(),
+    eventKey: v.string(),
+    acceptedAt: v.number(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.workSessionId, {
+      t3ThreadId: args.t3ThreadId,
+      status: "accepted",
+      updatedAt: args.acceptedAt,
+    });
+    await ctx.db.patch(args.taskId, {
+      status: "working",
+      updatedAt: args.acceptedAt,
+    });
+    await ctx.db.insert("taskEvents", {
+      taskId: args.taskId,
+      eventKey: args.eventKey,
+      kind: "runtime.continuation-accepted",
+      summary: "T3 runtime continuation was accepted for the Task.",
+      payloadJson: JSON.stringify({
+        workSessionId: args.workSessionId,
+        t3ThreadId: args.t3ThreadId,
+      }),
+      createdAt: args.acceptedAt,
+    });
+    return null;
   },
 });
 

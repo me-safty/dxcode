@@ -2,7 +2,11 @@ import type { TaskIntakeMessage, TaskIntakeResolution } from "./contracts.ts";
 import { decodeTaskIntakeMessage } from "./contracts.ts";
 import type { TaskIntakeReplyTransport, TaskIntakeRuntime, TaskIntakeStore } from "./ports.ts";
 import { toTaskIntakeExternalLinkIdentity } from "../domain/taskIntakeExternalLink.ts";
-import { buildTaskIntakeInitialPrompt, buildTaskIntakeTitle } from "./prompts.ts";
+import {
+  buildTaskIntakeFollowUpPrompt,
+  buildTaskIntakeInitialPrompt,
+  buildTaskIntakeTitle,
+} from "./prompts.ts";
 import {
   buildTaskIntakeAcceptedReply,
   buildTaskIntakeFollowUpReply,
@@ -106,6 +110,16 @@ export async function handleTaskIntakeMessage(
   }
 
   if (stored.status === "routed_existing") {
+    if (stored.t3ThreadId !== undefined && stored.workSessionId !== undefined) {
+      await dependencies.runtime.continueTaskRuntime({
+        eventId: message.eventId,
+        taskId: stored.taskId,
+        workSessionId: stored.workSessionId,
+        t3ThreadId: stored.t3ThreadId,
+        prompt: buildTaskIntakeFollowUpPrompt(message),
+      });
+    }
+
     const reply = buildTaskIntakeFollowUpReply({
       message,
       taskId: stored.taskId,

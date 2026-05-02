@@ -58,6 +58,20 @@ function dependencies(options?: {
           acceptedAt: "2026-04-12T12:00:01.000Z",
         };
       },
+      async continueTaskRuntime(input: {
+        readonly eventId: string;
+        readonly taskId: string;
+        readonly workSessionId: string;
+        readonly t3ThreadId: string;
+        readonly prompt: string;
+      }) {
+        return {
+          taskId: input.taskId,
+          workSessionId: input.workSessionId,
+          t3ThreadId: input.t3ThreadId,
+          acceptedAt: "2026-04-12T12:00:02.000Z",
+        };
+      },
       ...options?.runtime,
     },
     replies: {
@@ -88,8 +102,17 @@ describe("handleTaskIntakeMessage", () => {
     expect(postedReplies[0]?.body).toContain("`thread-456`");
   });
 
-  it("routes follow-up messages to an existing task without starting a new runtime", async () => {
+  it("continues the existing T3 thread for materialized follow-up messages", async () => {
     let materializeCalls = 0;
+    let continued:
+      | {
+          readonly eventId: string;
+          readonly taskId: string;
+          readonly workSessionId: string;
+          readonly t3ThreadId: string;
+          readonly prompt: string;
+        }
+      | undefined;
     const postedReplies: TaskIntakeReply[] = [];
     const deps = dependencies({
       replies: postedReplies,
@@ -100,6 +123,7 @@ describe("handleTaskIntakeMessage", () => {
             taskId: "task-existing",
             projectId: "project-123",
             t3ThreadId: "thread-existing",
+            workSessionId: "work-session-existing",
           };
         },
       },
@@ -108,18 +132,72 @@ describe("handleTaskIntakeMessage", () => {
           materializeCalls += 1;
           throw new Error("should not materialize");
         },
+        async continueTaskRuntime(input) {
+          continued = input;
+          return {
+            taskId: input.taskId,
+            workSessionId: input.workSessionId,
+            t3ThreadId: input.t3ThreadId,
+            acceptedAt: "2026-04-12T12:00:02.000Z",
+          };
+        },
       },
     });
 
     const result = await handleTaskIntakeMessage(
-      baseMessage({ eventId: "linear:event-2", messageId: "comment-2" }),
+      baseMessage({
+        eventId: "linear:event-2",
+        messageId: "comment-2",
+        text: "Actually also update the failing cart test.",
+      }),
       deps,
     );
 
     expect(materializeCalls).toBe(0);
+    expect(continued).toMatchObject({
+      eventId: "linear:event-2",
+      taskId: "task-existing",
+      workSessionId: "work-session-existing",
+      t3ThreadId: "thread-existing",
+    });
+    expect(continued?.prompt).toContain("Follow-up message:");
+    expect(continued?.prompt).toContain("Actually also update the failing cart test.");
     expect(result.resolution.type).toBe("route_existing_task");
     expect(result.taskId).toBe("task-existing");
-    expect(postedReplies[0]?.body).toContain("routed this follow-up");
+    expect(postedReplies[0]?.body).toContain("queued this follow-up");
+  });
+
+  it("routes follow-ups without continuing when runtime references are not available", async () => {
+    let continueCalls = 0;
+    const postedReplies: TaskIntakeReply[] = [];
+    const deps = dependencies({
+      replies: postedReplies,
+      store: {
+        async resolveMessage() {
+          return {
+            status: "routed_existing",
+            taskId: "task-existing",
+            projectId: "project-123",
+          };
+        },
+      },
+      runtime: {
+        async continueTaskRuntime() {
+          continueCalls += 1;
+          throw new Error("should not continue");
+        },
+      },
+    });
+
+    const result = await handleTaskIntakeMessage(
+      baseMessage({ eventId: "linear:event-3", messageId: "comment-3" }),
+      deps,
+    );
+
+    expect(continueCalls).toBe(0);
+    expect(result.resolution.type).toBe("route_existing_task");
+    expect(result.taskId).toBe("task-existing");
+    expect(postedReplies[0]?.body).toContain("queued this follow-up");
   });
 
   it("skips duplicate events without posting another reply", async () => {
