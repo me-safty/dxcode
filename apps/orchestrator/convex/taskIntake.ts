@@ -96,20 +96,13 @@ export const handleChatSdkWebhook = internalAction({
       body: args.body,
     });
 
-    if (args.source === "slack") {
-      return {
-        status: 503,
-        body: JSON.stringify({ error: "Slack Chat SDK adapter is not configured yet." }),
-        contentType: "application/json",
-      };
-    }
-
-    if (bot.webhooks.linear === undefined) {
-      throw new Error("Linear Chat SDK webhook handler is not configured.");
+    const webhook = args.source === "linear" ? bot.webhooks.linear : bot.webhooks.slack;
+    if (webhook === undefined) {
+      throw new Error(`${args.source} Chat SDK webhook handler is not configured.`);
     }
 
     const pendingTasks: Promise<unknown>[] = [];
-    const response = await bot.webhooks.linear(request, {
+    const response = await webhook(request, {
       waitUntil(task) {
         pendingTasks.push(task);
       },

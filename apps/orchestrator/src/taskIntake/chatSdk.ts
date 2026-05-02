@@ -1,10 +1,10 @@
-import { Chat, type Message, type Thread } from "chat";
+import { Chat, type Adapter, type Message, type Thread } from "chat";
 import {
   createLinearAdapter,
   type LinearAdapterConfig,
   type LinearRawMessage,
 } from "@chat-adapter/linear";
-import type { SlackEvent } from "@chat-adapter/slack";
+import { createSlackAdapter, type SlackAdapterConfig, type SlackEvent } from "@chat-adapter/slack";
 import { createMemoryState } from "@chat-adapter/state-memory";
 
 import type { TaskIntakeMessage } from "./contracts.ts";
@@ -57,6 +57,33 @@ function linearAdapterConfig(): LinearAdapterConfig {
     ...(webhookSecret !== undefined ? { webhookSecret } : {}),
     ...(userName !== undefined ? { userName } : {}),
   };
+}
+
+function slackAdapterConfig(): SlackAdapterConfig {
+  const botToken = process.env.SLACK_BOT_TOKEN?.trim();
+  const signingSecret = process.env.SLACK_SIGNING_SECRET?.trim();
+  const botUserId = process.env.SLACK_BOT_USER_ID?.trim();
+  const userName = process.env.SLACK_BOT_USERNAME?.trim();
+
+  return {
+    ...(botToken !== undefined ? { botToken } : {}),
+    ...(signingSecret !== undefined ? { signingSecret } : {}),
+    ...(botUserId !== undefined ? { botUserId } : {}),
+    ...(userName !== undefined ? { userName } : {}),
+  };
+}
+
+function createCompatibleSlackAdapter(config: SlackAdapterConfig): Adapter {
+  const adapter = createSlackAdapter(config);
+  return new Proxy(adapter, {
+    get(target, property, receiver) {
+      if (property === "botUserId") {
+        return target.botUserId ?? "";
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as Adapter;
 }
 
 export function linearChatMessageToTaskIntakeMessage(input: {
@@ -148,6 +175,7 @@ export function createTaskIntakeChatSdkBot(options: TaskIntakeChatSdkOptions) {
     userName: chatUserName(),
     adapters: {
       linear: createLinearAdapter(linearAdapterConfig()),
+      slack: createCompatibleSlackAdapter(slackAdapterConfig()),
     },
     state: taskIntakeChatSdkState,
     dedupeTtlMs: 10 * 60 * 1000,
