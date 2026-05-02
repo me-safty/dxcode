@@ -1,16 +1,26 @@
 import { Context, Effect, Layer, Option, Result, Schema, SchemaIssue, type DateTime } from "effect";
 
-import { GitLabCliError, TrimmedNonEmptyString } from "@t3tools/contracts";
+import { TrimmedNonEmptyString } from "@t3tools/contracts";
 
 import {
   decodeGitLabMergeRequestJson,
   decodeGitLabMergeRequestListJson,
   formatGitLabJsonDecodeError,
-} from "../git/gitlabMergeRequests.ts";
+} from "./gitLabMergeRequests.ts";
 import { VcsProcess, type VcsProcessOutput } from "../vcs/VcsProcess.ts";
 import type { SourceControlRefSelector } from "./SourceControlProvider.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+export class GitLabCliError extends Schema.TaggedErrorClass<GitLabCliError>()("GitLabCliError", {
+  operation: Schema.String,
+  detail: Schema.String,
+  cause: Schema.optional(Schema.Defect),
+}) {
+  override get message(): string {
+    return `GitLab CLI failed in ${this.operation}: ${this.detail}`;
+  }
+}
 
 export interface GitLabMergeRequestSummary {
   readonly number: number;

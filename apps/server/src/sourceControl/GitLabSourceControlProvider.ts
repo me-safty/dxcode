@@ -1,11 +1,7 @@
 import { Effect, Layer, Option } from "effect";
-import {
-  SourceControlProviderError,
-  type ChangeRequest,
-  type GitLabCliError,
-} from "@t3tools/contracts";
+import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
 
-import { GitLabCli, type GitLabMergeRequestSummary } from "./GitLabCli.ts";
+import { GitLabCli, type GitLabCliError, type GitLabMergeRequestSummary } from "./GitLabCli.ts";
 import { SourceControlProvider, type SourceControlRefSelector } from "./SourceControlProvider.ts";
 
 function providerError(operation: string, cause: GitLabCliError): SourceControlProviderError {
