@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { chatSdkSourceFromThreadId } from "./chatSdk.ts";
 import { linearIngressToTaskIntakeMessage } from "./linear.ts";
 import { slackEnvelopeToTaskIntakeMessage } from "./slack.ts";
 
@@ -43,5 +44,11 @@ describe("task intake source normalization", () => {
     expect(message.conversation.externalLinkKind).toBe("slack_thread");
     expect(message.conversation.externalId).toBe("T1:C1:1712923200.000100");
     expect(message.actor?.externalId).toBe("U1");
+  });
+
+  it("resolves Chat SDK thread ids to Task Intake sources", () => {
+    expect(chatSdkSourceFromThreadId("linear:issue:comment")).toBe("linear");
+    expect(chatSdkSourceFromThreadId("slack:C123:1777707885.990889")).toBe("slack");
+    expect(chatSdkSourceFromThreadId("github:issue:1")).toBeNull();
   });
 });

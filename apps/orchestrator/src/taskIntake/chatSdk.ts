@@ -1,12 +1,9 @@
-import { Chat, type Adapter, type Message, type Thread } from "chat";
-import {
-  createLinearAdapter,
-  type LinearAdapterConfig,
-  type LinearRawMessage,
-} from "@chat-adapter/linear";
-import { createSlackAdapter, type SlackAdapterConfig, type SlackEvent } from "@chat-adapter/slack";
+import { Chat, type Message, type Thread } from "chat";
+import type { LinearRawMessage } from "@chat-adapter/linear";
+import type { SlackEvent } from "@chat-adapter/slack";
 import { createMemoryState } from "@chat-adapter/state-memory";
 
+import { chatUserName, createTaskIntakeChatSdkAdapters } from "./chatSdkAdapters.ts";
 import type { TaskIntakeMessage } from "./contracts.ts";
 
 const taskIntakeChatSdkState = createMemoryState();
@@ -22,68 +19,6 @@ export interface TaskIntakeChatSdkOptions {
 
 function messageReceivedAt(message: Message) {
   return message.metadata.dateSent.toISOString();
-}
-
-function chatUserName() {
-  return (
-    process.env.LINEAR_BOT_USERNAME?.trim() ??
-    process.env.SLACK_BOT_USERNAME?.trim() ??
-    "engineering"
-  );
-}
-
-function linearAdapterConfig(): LinearAdapterConfig {
-  const clientId =
-    process.env.LINEAR_CLIENT_CREDENTIALS_CLIENT_ID?.trim() ?? process.env.LINEAR_CLIENT_ID?.trim();
-  const clientSecret =
-    process.env.LINEAR_CLIENT_CREDENTIALS_CLIENT_SECRET?.trim() ??
-    process.env.LINEAR_CLIENT_SECRET?.trim();
-  const webhookSecret = process.env.LINEAR_WEBHOOK_SECRET?.trim();
-  const userName = process.env.LINEAR_BOT_USERNAME?.trim();
-
-  if (clientId !== undefined && clientSecret !== undefined) {
-    return {
-      clientCredentials: {
-        clientId,
-        clientSecret,
-        scopes: ["read", "write", "comments:create", "app:mentionable"],
-      },
-      ...(webhookSecret !== undefined ? { webhookSecret } : {}),
-      ...(userName !== undefined ? { userName } : {}),
-    };
-  }
-
-  return {
-    ...(webhookSecret !== undefined ? { webhookSecret } : {}),
-    ...(userName !== undefined ? { userName } : {}),
-  };
-}
-
-function slackAdapterConfig(): SlackAdapterConfig {
-  const botToken = process.env.SLACK_BOT_TOKEN?.trim();
-  const signingSecret = process.env.SLACK_SIGNING_SECRET?.trim();
-  const botUserId = process.env.SLACK_BOT_USER_ID?.trim();
-  const userName = process.env.SLACK_BOT_USERNAME?.trim();
-
-  return {
-    ...(botToken !== undefined ? { botToken } : {}),
-    ...(signingSecret !== undefined ? { signingSecret } : {}),
-    ...(botUserId !== undefined ? { botUserId } : {}),
-    ...(userName !== undefined ? { userName } : {}),
-  };
-}
-
-function createCompatibleSlackAdapter(config: SlackAdapterConfig): Adapter {
-  const adapter = createSlackAdapter(config);
-  return new Proxy(adapter, {
-    get(target, property, receiver) {
-      if (property === "botUserId") {
-        return target.botUserId ?? "";
-      }
-      const value = Reflect.get(target, property, receiver);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  }) as Adapter;
 }
 
 export function linearChatMessageToTaskIntakeMessage(input: {
@@ -170,13 +105,16 @@ async function handleChatSdkMessage(
   });
 }
 
+export function chatSdkSourceFromThreadId(threadId: string): "linear" | "slack" | null {
+  if (threadId.startsWith("linear:")) return "linear";
+  if (threadId.startsWith("slack:")) return "slack";
+  return null;
+}
+
 export function createTaskIntakeChatSdkBot(options: TaskIntakeChatSdkOptions) {
   const bot = new Chat({
     userName: chatUserName(),
-    adapters: {
-      linear: createLinearAdapter(linearAdapterConfig()),
-      slack: createCompatibleSlackAdapter(slackAdapterConfig()),
-    },
+    adapters: createTaskIntakeChatSdkAdapters(),
     state: taskIntakeChatSdkState,
     dedupeTtlMs: 10 * 60 * 1000,
     logger: "info",
@@ -184,22 +122,16 @@ export function createTaskIntakeChatSdkBot(options: TaskIntakeChatSdkOptions) {
 
   bot.onNewMention(async (thread, message) => {
     await thread.subscribe();
-    if (message.threadId.startsWith("linear:")) {
-      await handleChatSdkMessage("linear", thread, message, options);
-      return;
-    }
-    if (message.threadId.startsWith("slack:")) {
-      await handleChatSdkMessage("slack", thread, message, options);
+    const source = chatSdkSourceFromThreadId(message.threadId);
+    if (source !== null) {
+      await handleChatSdkMessage(source, thread, message, options);
     }
   });
 
   bot.onSubscribedMessage(async (thread, message) => {
-    if (message.threadId.startsWith("linear:")) {
-      await handleChatSdkMessage("linear", thread, message, options);
-      return;
-    }
-    if (message.threadId.startsWith("slack:")) {
-      await handleChatSdkMessage("slack", thread, message, options);
+    const source = chatSdkSourceFromThreadId(message.threadId);
+    if (source !== null) {
+      await handleChatSdkMessage(source, thread, message, options);
     }
   });
 
