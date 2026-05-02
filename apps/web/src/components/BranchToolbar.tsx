@@ -8,7 +8,7 @@ import {
   FolderIcon,
   MonitorIcon,
 } from "lucide-react";
-import { Children, memo, useMemo, type ReactNode } from "react";
+import { memo, useMemo } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { useIsMobile } from "../hooks/useMediaQuery";
@@ -65,28 +65,6 @@ interface MobileRunContextSelectorProps {
   onEnvModeChange: (mode: EnvMode) => void;
 }
 
-function SplitIcon({
-  children,
-  className,
-}: {
-  readonly children: ReactNode;
-  readonly className?: string;
-}) {
-  const [left, right] = Children.toArray(children);
-
-  return (
-    <span className={className} aria-hidden="true">
-      <span className="absolute inset-0 overflow-hidden [clip-path:polygon(0_0,70%_0,30%_100%,0_100%)] [&>svg]:size-full">
-        {left}
-      </span>
-      <span className="absolute inset-0 overflow-hidden [clip-path:polygon(70%_0,100%_0,100%_100%,30%_100%)] [&>svg]:size-full">
-        {right}
-      </span>
-      <span className="absolute left-1/2 top-1/2 h-[145%] w-0.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-full bg-current" />
-    </span>
-  );
-}
-
 const MobileRunContextSelector = memo(function MobileRunContextSelector({
   envLocked,
   envModeLocked,
@@ -116,10 +94,10 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   const isLocked = envLocked || envModeLocked;
   const EnvironmentIcon = activeEnvironment?.isPrimary ? MonitorIcon : CloudIcon;
   const icon = showEnvironmentPicker ? (
-    <SplitIcon className="relative size-3.5 shrink-0">
-      <EnvironmentIcon />
-      <WorkspaceIcon />
-    </SplitIcon>
+    <span className="inline-flex shrink-0 items-center gap-0.5">
+      <EnvironmentIcon className="size-3 shrink-0" />
+      <WorkspaceIcon className="size-3 shrink-0" />
+    </span>
   ) : (
     <WorkspaceIcon className="size-3 shrink-0" />
   );
