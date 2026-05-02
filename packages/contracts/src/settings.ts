@@ -155,7 +155,10 @@ export const CodexSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "CODEX_HOME path",
         description: "Custom Codex home and config directory.",
-        providerSettingsForm: { placeholder: "~/.codex", clearWhenEmpty: "omit" },
+        providerSettingsForm: {
+          placeholder: "~/.codex",
+          clearWhenEmpty: "omit",
+        },
       }),
     ),
     shadowHomePath: TrimmedString.pipe(
@@ -164,7 +167,10 @@ export const CodexSettings = makeProviderSettingsSchema(
         title: "Shadow home path",
         description:
           "Account-specific Codex home. Keeps auth.json separate while sharing state from CODEX_HOME.",
-        providerSettingsForm: { placeholder: "~/.codex-t3/personal", clearWhenEmpty: "omit" },
+        providerSettingsForm: {
+          placeholder: "~/.codex-t3/personal",
+          clearWhenEmpty: "omit",
+        },
       }),
     ),
     customModels: Schema.Array(Schema.String).pipe(
@@ -209,7 +215,10 @@ export const ClaudeSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Launch arguments",
         description: "Additional CLI arguments passed on session start.",
-        providerSettingsForm: { placeholder: "e.g. --chrome", clearWhenEmpty: "omit" },
+        providerSettingsForm: {
+          placeholder: "e.g. --chrome",
+          clearWhenEmpty: "omit",
+        },
       }),
     ),
   },
@@ -237,7 +246,10 @@ export const CursorSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "API endpoint",
         description: "Override the Cursor API endpoint for this instance.",
-        providerSettingsForm: { placeholder: "https://...", clearWhenEmpty: "omit" },
+        providerSettingsForm: {
+          placeholder: "https://...",
+          clearWhenEmpty: "omit",
+        },
       }),
     ),
     customModels: Schema.Array(Schema.String).pipe(
@@ -260,7 +272,10 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Binary path",
         description: "Path to the OpenCode binary.",
-        providerSettingsForm: { placeholder: "opencode", clearWhenEmpty: "omit" },
+        providerSettingsForm: {
+          placeholder: "opencode",
+          clearWhenEmpty: "omit",
+        },
       }),
     ),
     serverUrl: TrimmedString.pipe(
@@ -268,7 +283,10 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Server URL",
         description: "Leave blank to let T3 Code spawn the server when needed.",
-        providerSettingsForm: { placeholder: "http://127.0.0.1:4096", clearWhenEmpty: "omit" },
+        providerSettingsForm: {
+          placeholder: "http://127.0.0.1:4096",
+          clearWhenEmpty: "omit",
+        },
       }),
     ),
     serverPassword: TrimmedString.pipe(

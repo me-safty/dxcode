@@ -5,6 +5,7 @@ import { DRIVER_OPTION_BY_VALUE } from "./providerDriverMeta";
 import {
   deriveProviderSettingsFields,
   nextProviderConfigWithFieldValue,
+  readProviderConfigBoolean,
   readProviderConfigString,
 } from "./ProviderSettingsForm";
 
@@ -55,5 +56,39 @@ describe("ProviderSettingsForm helpers", () => {
 
   it("reads non-string config values as blank strings", () => {
     expect(readProviderConfigString({ binaryPath: 123 }, "binaryPath")).toBe("");
+  });
+
+  it("omits false boolean fields when clearWhenEmpty is omit", () => {
+    const next = nextProviderConfigWithFieldValue(
+      { forkOwned: 1, experimental: true },
+      {
+        key: "experimental",
+        control: "switch",
+        label: "Experimental",
+        clearWhenEmpty: "omit",
+      },
+      false,
+    );
+
+    expect(next).toEqual({ forkOwned: 1 });
+  });
+
+  it("preserves false boolean fields when clearWhenEmpty is persist", () => {
+    const next = nextProviderConfigWithFieldValue(
+      undefined,
+      {
+        key: "experimental",
+        control: "switch",
+        label: "Experimental",
+        clearWhenEmpty: "persist",
+      },
+      false,
+    );
+
+    expect(next).toEqual({ experimental: false });
+  });
+
+  it("reads non-boolean config values as false booleans", () => {
+    expect(readProviderConfigBoolean({ experimental: "true" }, "experimental")).toBe(false);
   });
 });

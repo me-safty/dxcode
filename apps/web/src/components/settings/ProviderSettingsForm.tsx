@@ -119,7 +119,11 @@ export function nextProviderConfigWithFieldValue(
     config !== null && typeof config === "object" ? { ...(config as Record<string, unknown>) } : {};
 
   if (typeof value === "boolean") {
-    base[field.key] = value;
+    if (field.clearWhenEmpty === "omit" && value === false) {
+      delete base[field.key];
+    } else {
+      base[field.key] = value;
+    }
     return Object.keys(base).length > 0 ? base : undefined;
   }
 
