@@ -262,9 +262,6 @@ function EventRouter() {
   const lastNotifiedTurnByThreadRef = useRef(new Map<string, string>());
   const lastNotifiedActivityByThreadRef = useRef(new Map<string, string>());
 
-  const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
-    if (!payload) return;
-
   const maybeNotifyForThreads = useEffectEvent((threads: ReadonlyArray<NotifiableThread>) => {
     // Only notify when the app is backgrounded and notifications are enabled.
     const shouldNotify = isAppBackgrounded() && notificationLevel !== NotificationLevel.Off;

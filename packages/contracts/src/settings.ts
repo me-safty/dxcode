@@ -87,9 +87,8 @@ export const ClientSettingsSchema = Schema.Struct({
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
   ),
-  timestampFormat: TimestampFormat.pipe(Schema.withDecodingDefault(() => DEFAULT_TIMESTAMP_FORMAT)),
   notificationLevel: NotificationLevelSchema.pipe(
-    Schema.withDecodingDefault(() => NotificationLevel.Normal),
+    Schema.withDecodingDefault(Effect.succeed(NotificationLevel.Normal)),
   ),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;

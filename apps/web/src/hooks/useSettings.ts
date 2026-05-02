@@ -325,6 +325,8 @@ export function migrateLocalSettingsToServer(): void {
     // Remove the legacy key regardless to keep migration one-shot behavior.
     localStorage.removeItem(OLD_SETTINGS_KEY);
   }
+}
+
 export function __resetClientSettingsPersistenceForTests(): void {
   clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
   clientSettingsHydrated = false;

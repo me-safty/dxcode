@@ -121,7 +121,7 @@ const NOTIFICATION_LEVELS = [
     description: "Normal plus task activity updates.",
   },
 ] as const;
-  
+
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 
 function withoutProviderInstanceKey<V>(
@@ -522,8 +522,6 @@ export function GeneralSettingsPanel() {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const { permission: notificationPermission, requestPermission } = useNotification();
-  const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
-  const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
   const [openProviderDetails, setOpenProviderDetails] = useState<Record<ProviderKind, boolean>>({
     codex: Boolean(
       settings.providers.codex.binaryPath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.binaryPath ||
@@ -541,6 +539,7 @@ export function GeneralSettingsPanel() {
   >({
     codex: "",
     claudeAgent: "",
+  });
   const [openingPathByTarget, setOpeningPathByTarget] = useState({
     keybindings: false,
     logsDirectory: false,
@@ -1120,7 +1119,7 @@ export function GeneralSettingsPanel() {
             </div>
           </div>
         </SettingsRow>
-  
+
         <SettingsRow
           title="Auto-open task panel"
           description="Open the right-side plan and task panel automatically when steps appear."
@@ -1137,7 +1136,7 @@ export function GeneralSettingsPanel() {
             ) : null
           }
           control={
-           <Switch
+            <Switch
               checked={settings.autoOpenPlanSidebar}
               onCheckedChange={(checked) =>
                 updateSettings({ autoOpenPlanSidebar: Boolean(checked) })
