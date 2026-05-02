@@ -1,7 +1,6 @@
 import {
   OrchestrationEvent,
   ThreadId,
-  type OrchestrationReadModel,
   type OrchestrationSessionStatus,
   type ServerLifecycleWelcomePayload,
 } from "@t3tools/contracts";
@@ -51,6 +50,7 @@ import {
   resolveAttentionNotification,
   resolveTurnCompletionNotification,
   showNativeNotification,
+  type NotifiableThread,
 } from "../lib/nativeNotifications";
 
 export const Route = createRootRouteWithContext<{
@@ -229,66 +229,66 @@ function EventRouter() {
 
   pathnameRef.current = pathname;
 
-  const maybeNotifyForThreads = useEffectEvent(
-    (threads: ReadonlyArray<OrchestrationReadModel["threads"][number]>) => {
-      // Only notify when the app is backgrounded and notifications are enabled.
-      const shouldNotify = isAppBackgrounded() && notificationLevel !== NotificationLevel.Off;
-      const seenThreadIds = new Set<string>();
-      for (const thread of threads) {
-        seenThreadIds.add(thread.id);
-        const session = thread.session;
-        const previous = lastSessionByThreadRef.current.get(thread.id);
+  const maybeNotifyForThreads = useEffectEvent((threads: ReadonlyArray<NotifiableThread>) => {
+    // Only notify when the app is backgrounded and notifications are enabled.
+    const shouldNotify = isAppBackgrounded() && notificationLevel !== NotificationLevel.Off;
+    const seenThreadIds = new Set<string>();
+    for (const thread of threads) {
+      seenThreadIds.add(thread.id);
+      const session = thread.session;
+      const previous = lastSessionByThreadRef.current.get(thread.id);
 
-        const completionNotification = resolveTurnCompletionNotification({
-          shouldNotify,
-          level: notificationLevel,
-          thread,
-          previous,
-          lastNotifiedTurnId: lastNotifiedTurnByThreadRef.current.get(thread.id),
-        });
+      const completionNotification = resolveTurnCompletionNotification({
+        shouldNotify,
+        level: notificationLevel,
+        thread,
+        previous,
+        lastNotifiedTurnId: lastNotifiedTurnByThreadRef.current.get(thread.id),
+      });
 
-        if (completionNotification) {
-          const { title, body, tag, turnId } = completionNotification;
-          if (showNativeNotification({ title, body, tag })) {
-            lastNotifiedTurnByThreadRef.current.set(thread.id, turnId);
-          }
-        }
-
-        const attentionNotification = resolveAttentionNotification({
-          shouldNotify,
-          level: notificationLevel,
-          thread,
-          lastNotifiedActivityId: lastNotifiedActivityByThreadRef.current.get(thread.id),
-        });
-
-        if (attentionNotification) {
-          const { title, body, tag, activityId } = attentionNotification;
-          if (showNativeNotification({ title, body, tag })) {
-            lastNotifiedActivityByThreadRef.current.set(thread.id, activityId);
-          }
-        }
-
-        if (session) {
-          // Persist latest session state so we can detect transitions next time.
-          lastSessionByThreadRef.current.set(thread.id, {
-            status: session.status,
-            activeTurnId: session.activeTurnId ?? null,
-          });
-        } else {
-          lastSessionByThreadRef.current.delete(thread.id);
+      if (completionNotification) {
+        const { title, body, tag, turnId } = completionNotification;
+        if (showNativeNotification({ title, body, tag })) {
+          lastNotifiedTurnByThreadRef.current.set(thread.id, turnId);
         }
       }
 
-      // Drop state for threads that no longer exist in the snapshot.
-      for (const threadId of lastSessionByThreadRef.current.keys()) {
-        if (!seenThreadIds.has(threadId)) {
-          lastSessionByThreadRef.current.delete(threadId);
-          lastNotifiedTurnByThreadRef.current.delete(threadId);
-          lastNotifiedActivityByThreadRef.current.delete(threadId);
+      const attentionNotification = resolveAttentionNotification({
+        shouldNotify,
+        level: notificationLevel,
+        thread,
+        lastNotifiedActivityId: lastNotifiedActivityByThreadRef.current.get(thread.id),
+      });
+
+      if (attentionNotification) {
+        const { title, body, tag, activityId } = attentionNotification;
+        if (showNativeNotification({ title, body, tag })) {
+          lastNotifiedActivityByThreadRef.current.set(thread.id, activityId);
         }
       }
-    },
-  );
+
+      if (session) {
+        // Persist latest session state so we can detect transitions next time.
+        const status =
+          "orchestrationStatus" in session ? session.orchestrationStatus : session.status;
+        lastSessionByThreadRef.current.set(thread.id, {
+          status,
+          activeTurnId: session.activeTurnId ?? null,
+        });
+      } else {
+        lastSessionByThreadRef.current.delete(thread.id);
+      }
+    }
+
+    // Drop state for threads that no longer exist in the snapshot.
+    for (const threadId of lastSessionByThreadRef.current.keys()) {
+      if (!seenThreadIds.has(threadId)) {
+        lastSessionByThreadRef.current.delete(threadId);
+        lastNotifiedTurnByThreadRef.current.delete(threadId);
+        lastNotifiedActivityByThreadRef.current.delete(threadId);
+      }
+    }
+  });
 
   const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload) => {
     migrateLocalSettingsToServer();

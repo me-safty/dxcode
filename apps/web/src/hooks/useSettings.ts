@@ -22,6 +22,7 @@ import {
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
   NotificationLevel,
+  NotificationLevelSchema,
   SidebarProjectSortOrder,
   SidebarThreadSortOrder,
   TimestampFormat,
@@ -68,9 +69,7 @@ function splitPatch(patch: Partial<UnifiedSettings>): {
  * only re-render when the slice they care about changes.
  */
 
-export function useSettings<T extends UnifiedSettings = UnifiedSettings>(
-  selector?: (s: UnifiedSettings) => T,
-): T {
+export function useSettings<T = UnifiedSettings>(selector?: (s: UnifiedSettings) => T): T {
   const serverSettings = useServerSettings();
   const [clientSettings] = useLocalStorage(
     CLIENT_SETTINGS_STORAGE_KEY,
@@ -219,8 +218,8 @@ export function buildLegacyClientSettingsMigrationPatch(
     patch.timestampFormat = legacySettings.timestampFormat;
   }
 
-  if (Schema.is(NotificationLevel)(legacySettings.notificationLevel)) {
-    patch.notificationLevel = legacySettings.notificationLevel;
+  if (Schema.is(NotificationLevelSchema)(legacySettings.notificationLevel)) {
+    patch.notificationLevel = legacySettings.notificationLevel as NotificationLevel;
   }
 
   return patch;

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { OrchestrationThread, OrchestrationThreadActivity } from "@t3tools/contracts";
+import type { OrchestrationThreadActivity } from "@t3tools/contracts";
 
 import { NotificationLevel } from "@t3tools/contracts/settings";
 
@@ -11,6 +11,7 @@ import {
   resolveAttentionNotification,
   resolveTurnCompletionNotification,
   showNativeNotification,
+  type NotifiableThread,
 } from "./nativeNotifications";
 
 type TestWindow = Window & typeof globalThis & { desktopBridge?: unknown; nativeApi?: unknown };
@@ -49,10 +50,10 @@ const SESSION_DEFAULTS = {
 } as const;
 
 function fakeThread(
-  overrides: Omit<Partial<OrchestrationThread>, "session"> & {
+  overrides: Omit<Partial<NotifiableThread>, "session"> & {
     session?: Record<string, unknown> | null;
   },
-): OrchestrationThread {
+): NotifiableThread {
   const { session: sessionOverrides, ...rest } = overrides;
   return {
     id: "thread-1",
@@ -60,9 +61,9 @@ function fakeThread(
     activities: [],
     ...rest,
     session: sessionOverrides
-      ? (Object.assign({}, SESSION_DEFAULTS, sessionOverrides) as OrchestrationThread["session"])
+      ? (Object.assign({}, SESSION_DEFAULTS, sessionOverrides) as NotifiableThread["session"])
       : null,
-  } as OrchestrationThread;
+  } as NotifiableThread;
 }
 
 function fakeActivity(

@@ -1,8 +1,4 @@
-import {
-  OrchestrationSessionStatus,
-  OrchestrationThread,
-  OrchestrationThreadActivity,
-} from "@t3tools/contracts";
+import { OrchestrationSessionStatus, OrchestrationThreadActivity } from "@t3tools/contracts";
 import { NotificationLevel } from "@t3tools/contracts/settings";
 
 const IMPORTANT_ACTIVITY_KINDS = new Set(["approval.requested", "user-input.requested"]);
@@ -11,6 +7,24 @@ const VERBOSE_ACTIVITY_KINDS = new Set([
   "task.started",
   "task.progress",
 ]);
+
+export type NotifiableThread = {
+  id: string;
+  title: string;
+  activities: ReadonlyArray<OrchestrationThreadActivity>;
+  session:
+    | {
+        status: OrchestrationSessionStatus;
+        activeTurnId?: string | null | undefined;
+        lastError?: string | null | undefined;
+      }
+    | {
+        orchestrationStatus: OrchestrationSessionStatus;
+        activeTurnId?: string | null | undefined;
+        lastError?: string | null | undefined;
+      }
+    | null;
+};
 
 export function isAppBackgrounded(): boolean {
   if (typeof document === "undefined") return false;
@@ -73,7 +87,7 @@ export function showNativeNotification(input: {
 export function resolveTurnCompletionNotification(input: {
   shouldNotify: boolean;
   level: NotificationLevel;
-  thread: OrchestrationThread;
+  thread: NotifiableThread;
   previous:
     | {
         status: OrchestrationSessionStatus;
@@ -84,6 +98,9 @@ export function resolveTurnCompletionNotification(input: {
 }): { title: string; body: string; tag: string; turnId: string } | null {
   const { shouldNotify, level, thread, previous, lastNotifiedTurnId } = input;
   const session = thread.session;
+  const sessionStatus =
+    session && "orchestrationStatus" in session ? session.orchestrationStatus : session?.status;
+  const activeTurnId = session?.activeTurnId ?? null;
 
   if (
     !shouldNotify ||
@@ -91,8 +108,8 @@ export function resolveTurnCompletionNotification(input: {
     !previous ||
     previous.status !== "running" ||
     !previous.activeTurnId ||
-    session.activeTurnId !== null ||
-    (session.status !== "ready" && session.status !== "error")
+    activeTurnId !== null ||
+    (sessionStatus !== "ready" && sessionStatus !== "error")
   ) {
     return null;
   }
@@ -101,7 +118,7 @@ export function resolveTurnCompletionNotification(input: {
     return null;
   }
 
-  if (session.status === "ready" && level === NotificationLevel.Important) {
+  if (sessionStatus === "ready" && level === NotificationLevel.Important) {
     return null;
   }
 
@@ -109,17 +126,18 @@ export function resolveTurnCompletionNotification(input: {
     return null;
   }
 
-  const title = session.status === "error" ? "Task failed" : "Task completed";
-  const detail = session.status === "error" && session.lastError ? session.lastError : thread.title;
+  const title = sessionStatus === "error" ? "Task failed" : "Task completed";
+  const lastError = "lastError" in session ? session.lastError : null;
+  const detail = sessionStatus === "error" && lastError ? lastError : thread.title;
   const body = detail.length > 180 ? `${detail.slice(0, 177)}...` : detail;
-  const tag = `t3code:${thread.id}:${previous.activeTurnId}:${session.status}`;
+  const tag = `t3code:${thread.id}:${previous.activeTurnId}:${sessionStatus}`;
   return { title, body, tag, turnId: previous.activeTurnId };
 }
 
 export function resolveAttentionNotification(input: {
   shouldNotify: boolean;
   level: NotificationLevel;
-  thread: OrchestrationThread;
+  thread: NotifiableThread;
   lastNotifiedActivityId: string | undefined;
 }): { title: string; body: string; tag: string; activityId: string } | null {
   const { shouldNotify, level, thread, lastNotifiedActivityId } = input;
