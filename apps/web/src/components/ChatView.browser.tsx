@@ -2442,6 +2442,78 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("blurs and collapses the composer after sending on mobile", async () => {
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mobile-composer-blur-target" as MessageId,
+        targetText: "mobile composer blur thread",
+      }),
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const collapsedSurface = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-mobile-collapsed="true"]'),
+        "Mobile composer should start collapsed.",
+      );
+      expect(collapsedSurface).toBeTruthy();
+      const expandButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Expand composer"]'),
+        "Unable to find collapsed composer expand button.",
+      );
+      expandButton.click();
+
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-mobile-collapsed="false"]'),
+        "Mobile composer should expand when tapped.",
+      );
+      const composerEditor = await waitForComposerEditor();
+      await page.getByTestId("composer-editor").fill("send and blur");
+
+      await vi.waitFor(
+        () => {
+          expect(document.activeElement).toBe(composerEditor);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const sendButton = await waitForSendButton();
+      sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const dispatchRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.turn.start",
+          );
+          expect(dispatchRequest).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(
+            document.querySelector('[data-chat-composer-mobile-collapsed="true"]'),
+          ).toBeTruthy();
+          expect(document.activeElement).not.toBe(composerEditor);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps custom provider instance ids when bootstrapping a local draft thread", async () => {
     setDraftThreadWithoutWorktree();
     const openRouterInstanceId = ProviderInstanceId.make("claude_openrouter");

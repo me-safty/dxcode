@@ -1556,6 +1556,49 @@ export const ChatComposer = memo(
       [composerHighlightedItemId, composerMenuItems],
     );
 
+    const blurMobileComposerAfterSend = useCallback(() => {
+      if (!isMobileViewport) return;
+      if (composerBlurFrameRef.current !== null) {
+        window.cancelAnimationFrame(composerBlurFrameRef.current);
+        composerBlurFrameRef.current = null;
+      }
+      const activeElement = document.activeElement;
+      if (activeElement instanceof HTMLElement) {
+        activeElement.blur();
+      }
+      setIsComposerFocused(false);
+    }, [isMobileViewport]);
+
+    const shouldBlurMobileComposerOnSubmit = useCallback(() => {
+      if (!isMobileViewport) return false;
+      if (activePendingProgress) {
+        return activePendingProgress.isLastQuestion && Boolean(activePendingResolvedAnswers);
+      }
+      return showPlanFollowUpPrompt || composerSendState.hasSendableContent;
+    }, [
+      activePendingProgress,
+      activePendingResolvedAnswers,
+      composerSendState.hasSendableContent,
+      isMobileViewport,
+      showPlanFollowUpPrompt,
+    ]);
+
+    const submitComposer = useCallback(
+      (event?: { preventDefault: () => void }) => {
+        onSend(event);
+        if (shouldBlurMobileComposerOnSubmit()) {
+          blurMobileComposerAfterSend();
+        }
+      },
+      [blurMobileComposerAfterSend, onSend, shouldBlurMobileComposerOnSubmit],
+    );
+    const expandMobileComposer = useCallback(() => {
+      setIsComposerFocused(true);
+      window.requestAnimationFrame(() => {
+        composerEditorRef.current?.focusAtEnd();
+      });
+    }, []);
+
     // ------------------------------------------------------------------
     // Callbacks: command key
     // ------------------------------------------------------------------
@@ -1586,7 +1629,7 @@ export const ChatComposer = memo(
         }
       }
       if (key === "Enter" && !event.shiftKey) {
-        void onSend();
+        submitComposer();
         return true;
       }
       return false;
@@ -1835,7 +1878,7 @@ export const ChatComposer = memo(
     return (
       <form
         ref={composerFormRef}
-        onSubmit={onSend}
+        onSubmit={submitComposer}
         className="mx-auto w-full min-w-0 max-w-208"
         data-chat-composer-form="true"
       >
@@ -1851,6 +1894,7 @@ export const ChatComposer = memo(
         >
           <div
             ref={composerSurfaceRef}
+            data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
             className={cn(
               "rounded-[20px] border bg-card transition-colors duration-200 has-focus-visible:border-ring/45",
               isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border",
@@ -1865,14 +1909,6 @@ export const ChatComposer = memo(
             }}
             onBlurCapture={() => {
               scheduleComposerCollapseCheck();
-            }}
-            onClick={() => {
-              if (isComposerCollapsedMobile) {
-                setIsComposerFocused(true);
-                window.requestAnimationFrame(() => {
-                  composerEditorRef.current?.focusAtEnd();
-                });
-              }
             }}
           >
             {!isComposerCollapsedMobile &&
@@ -1905,19 +1941,22 @@ export const ChatComposer = memo(
 
             {isComposerCollapsedMobile ? (
               <div className="flex items-center justify-between gap-2 px-3 py-2">
-                <span
+                <button
+                  type="button"
                   className={cn(
-                    "min-w-0 truncate text-[14px]",
+                    "min-w-0 flex-1 truncate bg-transparent p-0 text-left text-[14px] focus:outline-none",
                     (activePendingProgress ? activePendingProgress.customAnswer : prompt.trim())
                       ? "text-foreground"
                       : "text-muted-foreground/35",
                   )}
+                  onClick={expandMobileComposer}
+                  aria-label="Expand composer"
                 >
                   {activePendingProgress
                     ? activePendingProgress.customAnswer ||
                       "Type your own answer, or leave this blank to use the selected option"
                     : prompt.trim() || "Ask anything..."}
-                </span>
+                </button>
                 <button
                   type="button"
                   className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/90 text-primary-foreground disabled:opacity-30"
@@ -1926,7 +1965,7 @@ export const ChatComposer = memo(
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={(event) => {
                     event.stopPropagation();
-                    onSend();
+                    submitComposer();
                   }}
                 >
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
