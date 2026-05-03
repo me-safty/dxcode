@@ -822,7 +822,9 @@ function createSnapshotWithSecondaryProject(options?: {
   };
 }
 
-function createSnapshotWithPendingUserInput(): OrchestrationReadModel {
+function createSnapshotWithPendingUserInput(options?: {
+  firstQuestionMultiSelect?: boolean;
+}): OrchestrationReadModel {
   const snapshot = createSnapshotForTargetUser({
     targetMessageId: "msg-user-pending-input-target" as MessageId,
     targetText: "question thread",
@@ -847,6 +849,7 @@ function createSnapshotWithPendingUserInput(): OrchestrationReadModel {
                       id: "scope",
                       header: "Scope",
                       question: "What should this change cover?",
+                      multiSelect: options?.firstQuestionMultiSelect,
                       options: [
                         {
                           label: "Tight",
@@ -2589,6 +2592,52 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps mobile pending submit actions inside the custom answer composer", async () => {
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot: createSnapshotWithPendingUserInput({ firstQuestionMultiSelect: true }),
+    });
+
+    try {
+      const compactPendingComposer = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>('[data-chat-composer-mobile-pending-compact="true"]'),
+        "Unable to find collapsed pending custom answer composer.",
+      );
+      expect(compactPendingComposer.textContent).toContain("Next");
+
+      const customAnswerButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Write custom answer"]'),
+        "Unable to find collapsed pending custom answer button.",
+      );
+      customAnswerButton.click();
+
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-mobile-collapsed="false"]'),
+        "Mobile composer should expand for a custom pending answer.",
+      );
+      const mobilePendingActions = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>('[data-chat-composer-mobile-pending-actions="true"]'),
+        "Unable to find mobile pending answer actions.",
+      );
+      const editor = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="composer-editor"]'),
+        "Unable to find composer editor.",
+      );
+      const footer = document.querySelector<HTMLElement>('[data-chat-composer-footer="true"]');
+      const actionsBounds = mobilePendingActions.getBoundingClientRect();
+      const editorBounds = editor.getBoundingClientRect();
+
+      expect(getComputedStyle(footer!).display).toBe("none");
+      expect(actionsBounds.top).toBeGreaterThan(editorBounds.top);
+      expect(actionsBounds.bottom).toBeLessThanOrEqual(editorBounds.bottom + 1);
+      expect(actionsBounds.right).toBeLessThanOrEqual(editorBounds.right + 1);
     } finally {
       await mounted.cleanup();
     }
