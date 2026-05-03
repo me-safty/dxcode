@@ -1022,7 +1022,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
     >
       <div className="flex items-center gap-2 transition-[opacity,translate] duration-200">
         <span className={iconWrapperClass}>
-          <EntryIcon className="size-3" />
+          <EntryIcon className="block size-3.5 shrink-0" aria-hidden />
         </span>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <div className="min-w-0 flex-1 overflow-hidden">
@@ -1123,24 +1123,33 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             <span className="flex size-5 shrink-0 items-center justify-center">
               {showWarningIndicator ? (
                 <Tooltip>
-                  <TooltipTrigger render={<span className="flex" />}>
-                    <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" aria-hidden />
+                  <TooltipTrigger
+                    render={<span className="flex size-5 items-center justify-center" />}
+                  >
+                    <TriangleAlertIcon
+                      className="block size-3.5 shrink-0 text-warning"
+                      aria-hidden
+                    />
                   </TooltipTrigger>
                   <TooltipPopup>Warning</TooltipPopup>
                 </Tooltip>
               ) : showFailedIndicator ? (
                 <Tooltip>
-                  <TooltipTrigger render={<span className="flex" />}>
-                    <XIcon className="size-3.5 shrink-0 text-destructive" aria-hidden />
+                  <TooltipTrigger
+                    render={<span className="flex size-5 items-center justify-center" />}
+                  >
+                    <XIcon className="block size-3.5 shrink-0 text-destructive" aria-hidden />
                   </TooltipTrigger>
                   <TooltipPopup>Failed</TooltipPopup>
                 </Tooltip>
               ) : showSuccessIndicator ? (
                 <Tooltip>
-                  <TooltipTrigger render={<span className="flex" />}>
-                    <span className="inline-flex text-primary">
+                  <TooltipTrigger
+                    render={<span className="flex size-5 items-center justify-center" />}
+                  >
+                    <span className="inline-flex size-5 items-center justify-center text-primary">
                       <CheckIcon
-                        className="size-3.5 shrink-0 stroke-current"
+                        className="block size-3.5 shrink-0 stroke-current"
                         stroke="currentColor"
                         aria-hidden
                       />
@@ -1150,9 +1159,11 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                 </Tooltip>
               ) : showNeutralIndicator ? (
                 <Tooltip>
-                  <TooltipTrigger render={<span className="flex" />}>
+                  <TooltipTrigger
+                    render={<span className="flex size-5 items-center justify-center" />}
+                  >
                     <MinusIcon
-                      className="size-3.5 shrink-0 text-muted-foreground opacity-80"
+                      className="block size-3.5 shrink-0 text-muted-foreground opacity-80"
                       aria-hidden
                     />
                   </TooltipTrigger>
