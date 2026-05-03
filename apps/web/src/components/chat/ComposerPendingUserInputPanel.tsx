@@ -1,5 +1,5 @@
 import { type ApprovalRequestId } from "@t3tools/contracts";
-import { memo, useEffect, useEffectEvent, useRef } from "react";
+import { memo, useEffect, useEffectEvent, useRef, useState } from "react";
 import { type PendingUserInput } from "../../session-logic";
 import {
   derivePendingUserInputProgress,
@@ -67,10 +67,35 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   const otherInputRef = useRef<HTMLInputElement | null>(null);
   const autoAdvanceTimerRef = useRef<number | null>(null);
   const onAdvanceRef = useRef(onAdvance);
+  const [optimisticSingleSelect, setOptimisticSingleSelect] = useState<{
+    questionId: string;
+    optionLabel: string;
+  } | null>(null);
 
   useEffect(() => {
     onAdvanceRef.current = onAdvance;
   }, [onAdvance]);
+
+  useEffect(() => {
+    if (!activeQuestion || activeQuestion.multiSelect || !optimisticSingleSelect) {
+      return;
+    }
+    if (optimisticSingleSelect.questionId !== activeQuestion.id) {
+      setOptimisticSingleSelect(null);
+      return;
+    }
+    if (
+      progress.customAnswer.trim().length === 0 &&
+      progress.selectedOptionLabels.includes(optimisticSingleSelect.optionLabel)
+    ) {
+      setOptimisticSingleSelect(null);
+    }
+  }, [
+    activeQuestion,
+    optimisticSingleSelect,
+    progress.customAnswer,
+    progress.selectedOptionLabels,
+  ]);
 
   // Clear auto-advance timer on unmount
   useEffect(() => {
@@ -82,10 +107,12 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   }, []);
 
   const handleOptionSelection = useEffectEvent((questionId: string, optionLabel: string) => {
-    onToggleOption(questionId, optionLabel);
     if (activeQuestion?.multiSelect) {
+      onToggleOption(questionId, optionLabel);
       return;
     }
+    setOptimisticSingleSelect({ questionId, optionLabel });
+    onToggleOption(questionId, optionLabel);
     if (autoAdvanceTimerRef.current !== null) {
       window.clearTimeout(autoAdvanceTimerRef.current);
     }
@@ -150,9 +177,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         {activeQuestion.options.map((option, index) => {
           const isOther = option.label === "Other";
           const customAnswerActive = progress.customAnswer.trim().length > 0;
+          const isOptimisticallySelected =
+            optimisticSingleSelect?.questionId === activeQuestion.id &&
+            optimisticSingleSelect.optionLabel === option.label;
           const isSelected = isOther
-            ? customAnswerActive
-            : !customAnswerActive && progress.selectedOptionLabels.includes(option.label);
+            ? customAnswerActive && optimisticSingleSelect?.questionId !== activeQuestion.id
+            : isOptimisticallySelected ||
+              (!customAnswerActive && progress.selectedOptionLabels.includes(option.label));
           const shortcutKey = index < 9 ? index + 1 : null;
           const className = cn(
             "group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-all duration-150",

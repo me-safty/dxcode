@@ -1287,20 +1287,6 @@ export const ChatComposer = memo(
         cursorAdjacentToMention: boolean,
         terminalContextIds: string[],
       ) => {
-        if (activePendingProgress?.activeQuestion && pendingUserInputs.length > 0) {
-          setComposerCursor(nextCursor);
-          setComposerTrigger(
-            cursorAdjacentToMention ? null : detectComposerTrigger(nextPrompt, expandedCursor),
-          );
-          onChangeActivePendingUserInputCustomAnswer(
-            activePendingProgress.activeQuestion.id,
-            nextPrompt,
-            nextCursor,
-            expandedCursor,
-            cursorAdjacentToMention,
-          );
-          return;
-        }
         promptRef.current = nextPrompt;
         setPrompt(nextPrompt);
         if (!terminalContextIdListsEqual(composerTerminalContexts, terminalContextIds)) {
@@ -1315,9 +1301,6 @@ export const ChatComposer = memo(
         );
       },
       [
-        activePendingProgress?.activeQuestion,
-        pendingUserInputs.length,
-        onChangeActivePendingUserInputCustomAnswer,
         promptRef,
         setPrompt,
         composerDraftTarget,
