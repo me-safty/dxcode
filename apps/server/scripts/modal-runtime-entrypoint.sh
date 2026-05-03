@@ -53,6 +53,8 @@ if [ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]; then
 fi
 
 git config --global --add safe.directory "$T3_RUNTIME_WORKSPACE" || true
+git config --global user.name "${T3_GIT_AUTHOR_NAME:-T3 Code Agent}" || true
+git config --global user.email "${T3_GIT_AUTHOR_EMAIL:-t3-code-agent@users.noreply.github.com}" || true
 
 if [ -n "${T3_TASK_BRANCH:-}" ] && [ -d "$T3_RUNTIME_WORKSPACE/.git" ]; then
   (

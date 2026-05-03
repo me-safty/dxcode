@@ -16,6 +16,7 @@ Optional keys:
 
 - `T3_CODEX_CONFIG_TOML_B64`: writes `$CODEX_HOME/config.toml`.
 - `T3_GH_HOSTS_YML_B64`: writes GitHub CLI `hosts.yml`.
+- `T3_GIT_AUTHOR_NAME`, `T3_GIT_AUTHOR_EMAIL`: commit author identity for sandbox-created PRs.
 - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`: use these instead of
   `AWS_BEARER_TOKEN_BEDROCK` only when using standard AWS credentials.
 - `AWS_DEFAULT_REGION`: accepted by AWS SDK tooling when `AWS_REGION` is not used.
