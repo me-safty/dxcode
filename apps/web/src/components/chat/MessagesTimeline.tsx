@@ -36,6 +36,7 @@ import {
   MinusIcon,
   SquarePenIcon,
   TerminalIcon,
+  TriangleAlertIcon,
   Undo2Icon,
   WrenchIcon,
   XIcon,
@@ -969,21 +970,26 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const canExpand = expandedBody !== null;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
+  const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
   const showFailedIndicator = workEntryIndicatesToolFailure(workEntry);
   const showDestructiveRowStyle =
     showFailedIndicator &&
     (workEntry.sourceActivityKind === "runtime.error" || !workLogEntryIsToolLike(workEntry));
   const iconWrapperClass = cn(
     "flex size-5 shrink-0 items-center justify-center",
-    showDestructiveRowStyle
-      ? "text-destructive"
-      : workEntry.tone === "tool" || showFailedIndicator
-        ? "text-muted-foreground"
-        : iconConfig.className,
+    showWarningIndicator
+      ? "text-warning"
+      : showDestructiveRowStyle
+        ? "text-destructive"
+        : workEntry.tone === "tool" || showFailedIndicator
+          ? "text-muted-foreground"
+          : iconConfig.className,
   );
-  const headingClass = showDestructiveRowStyle
-    ? "font-medium text-destructive"
-    : "font-medium text-foreground";
+  const headingClass = showWarningIndicator
+    ? "font-medium text-warning"
+    : showDestructiveRowStyle
+      ? "font-medium text-destructive"
+      : "font-medium text-foreground";
   const turnSettled = !ctx.activeTurnInProgress;
   const showNeutralIndicator = !turnSettled && workEntryIndicatesToolNeutralStatus(workEntry);
   const showSuccessIndicator =
@@ -1115,7 +1121,14 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
               ) : null}
             </span>
             <span className="flex size-5 shrink-0 items-center justify-center">
-              {showFailedIndicator ? (
+              {showWarningIndicator ? (
+                <Tooltip>
+                  <TooltipTrigger render={<span className="flex" />}>
+                    <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" aria-hidden />
+                  </TooltipTrigger>
+                  <TooltipPopup>Warning</TooltipPopup>
+                </Tooltip>
+              ) : showFailedIndicator ? (
                 <Tooltip>
                   <TooltipTrigger render={<span className="flex" />}>
                     <XIcon className="size-3.5 shrink-0 text-destructive" aria-hidden />
