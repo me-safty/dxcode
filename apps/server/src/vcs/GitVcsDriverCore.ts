@@ -1252,10 +1252,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
     }
 
-    if (!upstreamRef && refName) {
-      aheadCount = yield* computeAheadCountAgainstBase(cwd, refName).pipe(
-        Effect.catch(() => Effect.succeed(0)),
-      );
+    const fallbackAheadCount =
+      !upstreamRef && refName
+        ? yield* computeAheadCountAgainstBase(cwd, refName).pipe(
+            Effect.catch(() => Effect.succeed(0)),
+          )
+        : null;
+
+    if (fallbackAheadCount !== null) {
+      aheadCount = fallbackAheadCount;
       behindCount = 0;
     }
 
@@ -1264,9 +1269,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       (refName === defaultBranch ||
         (defaultBranch === null && (refName === "main" || refName === "master")));
     if (refName && !isDefaultBranch) {
-      aheadOfDefaultCount = yield* computeAheadCountAgainstBase(cwd, refName).pipe(
-        Effect.catch(() => Effect.succeed(0)),
-      );
+      aheadOfDefaultCount =
+        fallbackAheadCount !== null
+          ? fallbackAheadCount
+          : yield* computeAheadCountAgainstBase(cwd, refName).pipe(
+              Effect.catch(() => Effect.succeed(0)),
+            );
     }
 
     const stagedEntries = parseNumstatEntries(stagedNumstatStdout);

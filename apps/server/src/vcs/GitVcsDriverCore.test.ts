@@ -125,6 +125,28 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(status.aheadOfDefaultCount, 1);
       }),
     );
+
+    it.effect("reuses the no-upstream fallback ahead count for default-branch delta", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const remote = yield* makeTmpDir("git-vcs-driver-remote-");
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        yield* git(remote, ["init", "--bare"]);
+        yield* git(cwd, ["remote", "add", "origin", remote]);
+        yield* git(cwd, ["push", "-u", "origin", initialBranch]);
+        yield* git(cwd, ["checkout", "-b", "feature/no-upstream"]);
+        yield* writeTextFile(cwd, "feature.txt", "feature\n");
+        yield* git(cwd, ["add", "feature.txt"]);
+        yield* git(cwd, ["commit", "-m", "feature commit"]);
+
+        const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
+
+        assert.equal(status.hasUpstream, false);
+        assert.equal(status.aheadCount, 1);
+        assert.equal(status.behindCount, 0);
+        assert.equal(status.aheadOfDefaultCount, 1);
+      }),
+    );
   });
 
   describe("refName operations", () => {
