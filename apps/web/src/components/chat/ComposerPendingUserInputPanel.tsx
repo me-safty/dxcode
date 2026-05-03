@@ -191,6 +191,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               ? "bg-blue-500/10 text-foreground"
               : "bg-background dark:bg-input/32 text-foreground/85 hover:bg-muted/60 dark:hover:bg-input/45",
             isResponding && "opacity-50 cursor-not-allowed",
+            !isOther && !isResponding && "cursor-pointer",
             isOther && !isResponding && "cursor-text",
           );
           const content = (

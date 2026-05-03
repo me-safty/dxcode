@@ -33,6 +33,7 @@ export type MessagesTimelineRow =
       durationStart: string;
       showCompletionDivider: boolean;
       completionDividerDuration?: string | null;
+      showAssistantMeta: boolean;
       showAssistantCopyButton: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
       revertTurnCount?: number | undefined;
@@ -118,6 +119,7 @@ function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<Timeli
 export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   completionDividerBeforeEntryId: string | null;
+  completionDividerDuration: string | null;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
@@ -172,13 +174,21 @@ export function deriveMessagesTimelineRows(input: {
 
     let completionDividerDuration: string | null = null;
     if (showCompletionDivider) {
-      const start = durationStart;
-      const end = timelineEntry.message.completedAt ?? timelineEntry.message.createdAt;
-      const elapsed = computeElapsedMs(start, end);
-      if (elapsed !== null) {
-        completionDividerDuration = formatDuration(elapsed);
+      if (input.completionDividerDuration) {
+        completionDividerDuration = input.completionDividerDuration;
+      } else {
+        const start = durationStart;
+        const end = timelineEntry.message.completedAt ?? timelineEntry.message.createdAt;
+        const elapsed = computeElapsedMs(start, end);
+        if (elapsed !== null) {
+          completionDividerDuration = formatDuration(elapsed);
+        }
       }
     }
+
+    const showAssistantMeta =
+      timelineEntry.message.role === "assistant" &&
+      terminalAssistantMessageIds.has(timelineEntry.message.id);
 
     nextRows.push({
       kind: "message",
@@ -187,9 +197,8 @@ export function deriveMessagesTimelineRows(input: {
       message: timelineEntry.message,
       durationStart,
       showCompletionDivider,
-      showAssistantCopyButton:
-        timelineEntry.message.role === "assistant" &&
-        terminalAssistantMessageIds.has(timelineEntry.message.id),
+      showAssistantMeta,
+      showAssistantCopyButton: showAssistantMeta,
       assistantTurnDiffSummary:
         timelineEntry.message.role === "assistant"
           ? input.turnDiffSummaryByAssistantMessageId.get(timelineEntry.message.id)
@@ -254,6 +263,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.durationStart === bm.durationStart &&
         a.showCompletionDivider === bm.showCompletionDivider &&
         a.completionDividerDuration === bm.completionDividerDuration &&
+        a.showAssistantMeta === bm.showAssistantMeta &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
         a.revertTurnCount === bm.revertTurnCount

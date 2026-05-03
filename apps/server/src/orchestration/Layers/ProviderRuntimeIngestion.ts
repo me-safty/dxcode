@@ -1124,16 +1124,18 @@ const make = Effect.gen(function* () {
             if (conflictsWithActiveTurn || missingTurnForActiveTurn) {
               return false;
             }
-            // Only the active turn may close the lifecycle state.
             if (activeTurnId !== null && eventTurnId !== undefined) {
               return sameId(activeTurnId, eventTurnId);
             }
-            // If no active turn is tracked, accept completion scoped to this thread.
             return true;
           default:
             return true;
         }
       })();
+
+      const shouldForceClearActiveTurn = shouldApplyThreadLifecycle
+        ? false
+        : event.type === "turn.completed" && activeTurnId !== null;
       const acceptedTurnStartedSourcePlan =
         event.type === "turn.started" && shouldApplyThreadLifecycle
           ? yield* getSourceProposedPlanReferenceForAcceptedTurnStart(thread.id, eventTurnId)
@@ -1216,6 +1218,35 @@ const make = Effect.gen(function* () {
                 : {}),
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: nextActiveTurnId,
+              lastError,
+              updatedAt: now,
+            },
+            createdAt: now,
+          });
+        } else if (shouldForceClearActiveTurn) {
+          yield* Effect.logWarning(
+            "provider runtime ingestion: lifecycle guard blocked turn completed but active turn is stuck — force-clearing",
+            {
+              eventId: event.eventId,
+              eventType: event.type,
+              threadId: thread.id,
+              activeTurnId: activeTurnId ?? undefined,
+              eventTurnId: eventTurnId ?? undefined,
+            },
+          );
+          yield* orchestrationEngine.dispatch({
+            type: "thread.session.set",
+            commandId: providerCommandId(event, "thread-session-set-force-clear"),
+            threadId: thread.id,
+            session: {
+              threadId: thread.id,
+              status,
+              providerName: event.provider,
+              ...(event.providerInstanceId !== undefined
+                ? { providerInstanceId: event.providerInstanceId }
+                : {}),
+              runtimeMode: thread.session?.runtimeMode ?? "full-access",
+              activeTurnId: null,
               lastError,
               updatedAt: now,
             },
@@ -1463,7 +1494,36 @@ const make = Effect.gen(function* () {
                 ? { providerInstanceId: event.providerInstanceId }
                 : {}),
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
-              activeTurnId: eventTurnId ?? null,
+              activeTurnId: null,
+              lastError: runtimeErrorMessage,
+              updatedAt: now,
+            },
+            createdAt: now,
+          });
+        } else if (activeTurnId !== null) {
+          yield* Effect.logWarning(
+            "provider runtime ingestion: lifecycle guard blocked runtime.error but active turn is stuck — force-clearing",
+            {
+              eventId: event.eventId,
+              eventType: event.type,
+              threadId: thread.id,
+              activeTurnId: activeTurnId ?? undefined,
+              eventTurnId: eventTurnId ?? undefined,
+            },
+          );
+          yield* orchestrationEngine.dispatch({
+            type: "thread.session.set",
+            commandId: providerCommandId(event, "runtime-error-session-set-force-clear"),
+            threadId: thread.id,
+            session: {
+              threadId: thread.id,
+              status: "error",
+              providerName: event.provider,
+              ...(event.providerInstanceId !== undefined
+                ? { providerInstanceId: event.providerInstanceId }
+                : {}),
+              runtimeMode: thread.session?.runtimeMode ?? "full-access",
+              activeTurnId: null,
               lastError: runtimeErrorMessage,
               updatedAt: now,
             },

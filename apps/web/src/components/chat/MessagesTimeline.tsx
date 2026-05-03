@@ -14,7 +14,6 @@ import {
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import {
   deriveTimelineEntries,
-  formatElapsed,
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
@@ -161,6 +160,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       deriveMessagesTimelineRows({
         timelineEntries,
         completionDividerBeforeEntryId,
+        completionDividerDuration: completionSummary?.replace(/^Worked for\s+/u, "") ?? null,
         isWorking,
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
@@ -169,6 +169,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [
       timelineEntries,
       completionDividerBeforeEntryId,
+      completionSummary,
       isWorking,
       activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
@@ -437,24 +438,28 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   resolvedTheme={ctx.resolvedTheme}
                   onOpenTurnDiff={ctx.onOpenTurnDiff}
                 />
-                <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
-                  {assistantCopyState.visible ? (
-                    <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />
-                  ) : null}
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={<p className="text-muted-foreground text-xs tabular-nums" />}
-                    >
-                      <LiveMessageMeta
-                        createdAt={row.message.createdAt}
-                        durationStart={row.message.streaming ? row.durationStart : null}
-                      />
-                    </TooltipTrigger>
-                    <TooltipPopup>
-                      {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
-                    </TooltipPopup>
-                  </Tooltip>
-                </div>
+                {row.showAssistantMeta ? (
+                  <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+                    {assistantCopyState.visible ? (
+                      <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />
+                    ) : null}
+                    {!row.message.streaming && (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={<p className="text-muted-foreground text-xs tabular-nums" />}
+                        >
+                          {formatChatTimestamp(row.message.completedAt ?? row.message.createdAt)}
+                        </TooltipTrigger>
+                        <TooltipPopup>
+                          {formatChatTimestampTooltip(
+                            row.message.completedAt ?? row.message.createdAt,
+                            ctx.timestampFormat,
+                          )}
+                        </TooltipPopup>
+                      </Tooltip>
+                    )}
+                  </div>
+                ) : null}
               </div>
             </>
           );
@@ -513,25 +518,6 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
       {formatWorkingTimer(createdAt, new Date(nowMs).toISOString()) ?? "0s"}
     </span>
   );
-}
-
-/** Live timestamp + elapsed duration that stays fresh via interval. */
-function LiveMessageMeta({
-  createdAt,
-  durationStart,
-}: {
-  createdAt: string;
-  durationStart: string | null | undefined;
-}) {
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  const elapsed = durationStart
-    ? formatElapsed(durationStart, new Date(nowMs).toISOString())
-    : null;
-  return <span className="tabular-nums">{formatMessageMeta(createdAt, elapsed)}</span>;
 }
 
 // ---------------------------------------------------------------------------
@@ -814,11 +800,6 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
   }
 
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-}
-
-function formatMessageMeta(createdAt: string, duration: string | null): string {
-  if (!duration) return formatChatTimestamp(createdAt);
-  return formatChatTimestamp(createdAt);
 }
 
 function workToneIcon(tone: TimelineWorkEntry["tone"]): {
