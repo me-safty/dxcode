@@ -57,6 +57,11 @@ import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import * as SourceControlDiscoveryLayer from "./sourceControl/SourceControlDiscovery.ts";
 import { SourceControlRepositoryService } from "./sourceControl/SourceControlRepositoryService.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
+import * as GitHubCli from "./sourceControl/GitHubCli.ts";
+import * as GitLabCli from "./sourceControl/GitLabCli.ts";
+import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
+import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
+import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as VcsProcess from "./vcs/VcsProcess.ts";
 import {
   BootstrapCredentialService,
@@ -1132,7 +1137,16 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(
                 SourceControlDiscoveryLayer.layer.pipe(
-                  Layer.provideMerge(BitbucketApi.layer),
+                  Layer.provide(
+                    SourceControlProviderRegistry.layer.pipe(
+                      Layer.provide(
+                        Layer.mergeAll(BitbucketApi.layer, GitHubCli.layer, GitLabCli.layer),
+                      ),
+                      Layer.provide(
+                        VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer)),
+                      ),
+                    ),
+                  ),
                   Layer.provide(VcsProcess.layer),
                 ),
               ),
