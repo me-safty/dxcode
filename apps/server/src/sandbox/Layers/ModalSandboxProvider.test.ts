@@ -79,4 +79,43 @@ describe("ModalSandboxProvider", () => {
     expect(result.services[0]?.endpointUrl).toBe("https://runtime.modal.run");
     expect(result.services[0]?.endpoints?.[0]?.auth?.kind).toBe("bridge-shared-secret");
   });
+
+  it("prefers a prepared Modal image id when one is configured", async () => {
+    const createOrReconnectSandbox = vi.fn<ModalSandboxClient["createOrReconnectSandbox"]>(
+      async () => ({
+        sandboxId: "sb-prepared",
+        runtimeEndpointUrl: "https://runtime.modal.run",
+      }),
+    );
+    const provider = makeModalSandboxProvider({ createOrReconnectSandbox });
+
+    await Effect.runPromise(
+      provider.materializeTaskRuntime({
+        taskId: "task-2",
+        workSessionId: "work-session-2",
+        title: "Prepared runtime",
+        initialPrompt: "Use the prepared runtime",
+        idempotencyKey: "sandbox:modal:task-2:work-session-2",
+        startCodingAgent: false,
+        project: {
+          repoName: "t3code",
+          workspaceRoot: "/workspace/t3code",
+          defaultBranch: "main",
+        },
+        providerConfig: {
+          appName: "t3-task-runtime",
+          imageId: "im-prepared-runtime",
+          imageTag: "node:24-bookworm-slim",
+          imageDockerfileCommands: ["RUN echo should-not-build-during-task"],
+        },
+      }),
+    );
+
+    expect(createOrReconnectSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        imageId: "im-prepared-runtime",
+        imageDockerfileCommands: ["RUN echo should-not-build-during-task"],
+      }),
+    );
+  });
 });

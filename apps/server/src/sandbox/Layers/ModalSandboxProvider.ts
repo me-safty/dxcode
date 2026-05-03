@@ -29,6 +29,7 @@ import {
 
 export interface ModalSandboxRuntimeConfig {
   readonly appName: string;
+  readonly imageId?: string | undefined;
   readonly imageTag: string;
   readonly runtimePort: number;
   readonly command: ReadonlyArray<string>;
@@ -41,6 +42,7 @@ export interface ModalSandboxRuntimeConfig {
 export interface ModalSandboxClient {
   readonly createOrReconnectSandbox: (input: {
     readonly appName: string;
+    readonly imageId?: string | undefined;
     readonly imageTag: string;
     readonly sandboxName: string;
     readonly environment?: string | undefined;
@@ -96,6 +98,7 @@ function resolveRuntimeConfig(input: {
   return {
     appName:
       input.providerConfig?.appName ?? process.env.T3_MODAL_APP_NAME ?? DEFAULT_MODAL_APP_NAME,
+    imageId: input.providerConfig?.imageId ?? process.env.T3_MODAL_IMAGE_ID,
     imageTag:
       input.providerConfig?.imageTag ?? process.env.T3_MODAL_IMAGE_TAG ?? DEFAULT_MODAL_IMAGE_TAG,
     runtimePort: positiveOrDefault(input.providerConfig?.runtimePort, DEFAULT_RUNTIME_PORT),
@@ -212,6 +215,7 @@ function buildServiceDescriptors(input: {
 export class ModalSdkSandboxClient implements ModalSandboxClient {
   async createOrReconnectSandbox(input: {
     readonly appName: string;
+    readonly imageId?: string | undefined;
     readonly imageTag: string;
     readonly sandboxName: string;
     readonly environment?: string | undefined;
@@ -239,12 +243,18 @@ export class ModalSdkSandboxClient implements ModalSandboxClient {
         createIfMissing: true,
         ...(input.environment !== undefined ? { environment: input.environment } : {}),
       });
-      const baseImage: Image = modal.images.fromRegistry(input.imageTag);
-      const buildCommands =
-        input.imageDockerfileCommands ??
-        parseDockerfileCommands(process.env.T3_MODAL_IMAGE_DOCKERFILE_COMMANDS_JSON);
-      const image =
-        buildCommands !== undefined ? baseImage.dockerfileCommands([...buildCommands]) : baseImage;
+      const image: Image =
+        input.imageId !== undefined
+          ? await modal.images.fromId(input.imageId)
+          : (() => {
+              const baseImage = modal.images.fromRegistry(input.imageTag);
+              const buildCommands =
+                input.imageDockerfileCommands ??
+                parseDockerfileCommands(process.env.T3_MODAL_IMAGE_DOCKERFILE_COMMANDS_JSON);
+              return buildCommands !== undefined
+                ? baseImage.dockerfileCommands([...buildCommands])
+                : baseImage;
+            })();
       const secrets =
         input.secretNames !== undefined
           ? await Promise.all(input.secretNames.map((name) => modal.secrets.fromName(name)))
@@ -312,6 +322,7 @@ export function makeModalSandboxProvider(
           });
           const created = await client.createOrReconnectSandbox({
             appName: config.appName,
+            ...(config.imageId !== undefined ? { imageId: config.imageId } : {}),
             imageTag: config.imageTag,
             sandboxName,
             ...(config.environment !== undefined ? { environment: config.environment } : {}),

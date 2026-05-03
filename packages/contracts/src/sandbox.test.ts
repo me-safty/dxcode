@@ -119,6 +119,7 @@ it.effect("decodes Modal runtime provider config", () =>
       environment: "prod",
       providerConfig: {
         appName: "t3-task-runtime",
+        imageId: "im-prepared-runtime",
         imageTag: "2026-05-03",
         runtimePort: 8787,
         allowedSecretNames: ["T3_EXECUTION_BRIDGE_SHARED_SECRET"],
@@ -127,6 +128,7 @@ it.effect("decodes Modal runtime provider config", () =>
     });
 
     assert.strictEqual(selection.providerKind, "modal");
+    assert.strictEqual(selection.providerConfig?.imageId, "im-prepared-runtime");
     assert.strictEqual(selection.providerConfig?.runtimePort, 8787);
   }),
 );

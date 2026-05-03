@@ -765,7 +765,25 @@ After the Modal tracer bullet works, expand the Sandbox platform: Snapshots, tas
 
 **Implementation Notes**
 
+- MVP Ramp-style acceleration is handled by an explicit Modal runtime prewarm command instead of
+  hiding image/snapshot creation inside task materialization. The prewarm flow eagerly builds the
+  configured Modal image, starts a preparation Sandbox, validates the repo/runtime bundle, runs the
+  workspace install command, snapshots the prepared filesystem, then smoke-tests the T3 runtime from
+  that prepared image.
+- Task materialization can consume a prepared Modal image via `T3_MODAL_IMAGE_ID` (or provider config
+  `imageId`). When present, the Modal adapter uses `modal.images.fromId(...)` and skips
+  Dockerfile/image building on the Slack task fast path.
+- This is the MVP equivalent of Ramp Inspect's fresh filesystem snapshots: build/install/setup runs
+  before user tasks, and each task gets its own Sandbox from the prepared filesystem image.
+
 **Implementation Footprint**
+
+- `apps/server/scripts/modal-prewarm-runtime.ts`
+- `apps/server/package.json`
+- `apps/server/src/sandbox/Layers/ModalSandboxProvider.ts`
+- `apps/server/src/sandbox/Layers/ModalSandboxProvider.test.ts`
+- `packages/contracts/src/sandbox.ts`
+- `packages/contracts/src/sandbox.test.ts`
 
 ## Phase 8: Workspace Sandbox Visibility
 

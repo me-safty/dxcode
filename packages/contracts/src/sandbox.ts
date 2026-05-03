@@ -248,6 +248,7 @@ export type SandboxDescriptor = typeof SandboxDescriptor.Type;
 
 export const SandboxRuntimeProviderConfig = Schema.Struct({
   appName: Schema.optional(TrimmedNonEmptyString),
+  imageId: Schema.optional(TrimmedNonEmptyString),
   imageTag: Schema.optional(TrimmedNonEmptyString),
   runtimePort: Schema.optional(PositiveInt),
   bootstrapCommandRef: Schema.optional(TrimmedNonEmptyString),

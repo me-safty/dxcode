@@ -42,6 +42,20 @@ The runtime entrypoint decodes file-backed secrets before starting T3, configure
 `gh`, configures Git credentials for HTTPS pushes, and preserves `OPENCODE_CONFIG_CONTENT` for
 OpenCode Bedrock provider configuration.
 
+## Runtime Prewarm
+
+Build and validate the prepared Modal filesystem image before Slack tasks materialize:
+
+```sh
+cd apps/server
+bun run modal:prewarm-runtime -- --expected-commit "$(git rev-parse HEAD)"
+```
+
+The command eagerly builds the configured image, validates `/app` and `/workspace/t3code`, runs the
+workspace install command (`bun install --frozen-lockfile` by default), snapshots the filesystem, and
+prints `T3_MODAL_IMAGE_ID=...`. Set that value on the machine so task materialization starts from
+the prepared image instead of rebuilding Dockerfile layers inside the request path.
+
 When `T3_OPENCODE_MODEL` is present, the entrypoint also bootstraps T3 server settings so OpenCode is
 the default provider for coding turns and PR text generation. For the current MVP E2E this is:
 
