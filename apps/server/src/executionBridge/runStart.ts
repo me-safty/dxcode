@@ -367,19 +367,19 @@ export const materializeTaskRuntime = (request: TaskRuntimeMaterializeRequest) =
 
 function parseGitHubPullRequestUrl(
   url: string | undefined,
-): { owner: string; repo: string; number: number } | null {
-  const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/.*)?$/i.exec(
-    url?.trim() ?? "",
+): { owner: string; repo: string; number: number; url: string } | null {
+  const match = /https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)(?:\/[^\s]*)?/i.exec(
+    url ?? "",
   );
   if (!match) {
     return null;
   }
-  const [, owner, repo, numberText] = match;
+  const [matchedUrl, owner, repo, numberText] = match;
   const number = Number(numberText);
   if (!owner || !repo || !Number.isSafeInteger(number) || number <= 0) {
     return null;
   }
-  return { owner, repo, number };
+  return { owner, repo, number, url: matchedUrl };
 }
 
 const readAheadCount = Effect.fn("executionBridge.readAheadCount")(function* (
@@ -495,7 +495,8 @@ export const ensureTaskPullRequest = (request: TaskPullRequestEnsureRequest) =>
     }
 
     const parsed = parseGitHubPullRequestUrl(result.pr.url);
-    if (!parsed || !result.pr.url || result.pr.number === undefined) {
+    const pullRequestNumber = result.pr.number ?? parsed?.number;
+    if (!parsed || pullRequestNumber === undefined) {
       return {
         taskId: request.taskId,
         workSessionId: request.workSessionId,
@@ -513,8 +514,8 @@ export const ensureTaskPullRequest = (request: TaskPullRequestEnsureRequest) =>
       pullRequest: {
         owner: parsed.owner,
         repo: parsed.repo,
-        number: result.pr.number,
-        url: result.pr.url,
+        number: pullRequestNumber,
+        url: parsed.url,
         headBranch: result.pr.headBranch ?? request.branch,
         baseBranch: result.pr.baseBranch ?? request.project.defaultBranch,
         title: result.pr.title ?? request.title,

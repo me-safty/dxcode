@@ -287,4 +287,38 @@ describe("ensureTaskPullRequest", () => {
       expect.objectContaining({ draftPullRequest: true }),
     );
   });
+
+  it("extracts a PR URL from noisy source control output", async () => {
+    const runStackedAction = vi.fn(() =>
+      Effect.succeed({
+        action: "create_pr" as const,
+        branch: { status: "skipped_not_requested" as const },
+        commit: { status: "skipped_not_requested" as const },
+        push: { status: "skipped_not_requested" as const },
+        pr: {
+          status: "created" as const,
+          url: "Pull request created: https://github.com/affil-ai/t3code/pull/456",
+          baseBranch: "affil/mvp-deployment",
+          headBranch: "task/fix-login-task-1",
+          title: "Fix login",
+        },
+        toast: {
+          title: "Pull request created",
+          cta: { kind: "none" as const },
+        },
+      }),
+    );
+    const { layer } = makeTaskPrTestLayer({ revListCount: 1, runStackedAction });
+
+    const result = await Effect.runPromise(
+      ensureTaskPullRequest(taskPullRequestEnsureRequest).pipe(Effect.provide(layer)),
+    );
+
+    expect(result.status).toBe("created");
+    if (result.status !== "created" && result.status !== "existing") {
+      throw new Error("Expected a pull request result.");
+    }
+    expect(result.pullRequest?.number).toBe(456);
+    expect(result.pullRequest?.url).toBe("https://github.com/affil-ai/t3code/pull/456");
+  });
 });
