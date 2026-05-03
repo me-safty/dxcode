@@ -11,6 +11,7 @@ export interface TaskLifecycleReplyInput {
   readonly workSessionId: string;
   readonly t3ThreadId?: string;
   readonly failureSummary?: string;
+  readonly pullRequestUrl?: string;
 }
 
 export function taskLifecycleReplyEventKey(input: {
@@ -26,6 +27,7 @@ export function buildTaskLifecycleReplyBody(input: TaskLifecycleReplyInput) {
     return [
       `Task ${input.taskId} completed.`,
       ...(input.t3ThreadId !== undefined ? [`Primary T3 thread: \`${input.t3ThreadId}\``] : []),
+      ...(input.pullRequestUrl !== undefined ? [`Pull request: ${input.pullRequestUrl}`] : []),
       "Detailed output lives in T3 for this MVP.",
     ].join("\n");
   }
@@ -33,6 +35,7 @@ export function buildTaskLifecycleReplyBody(input: TaskLifecycleReplyInput) {
   return [
     `Task ${input.taskId} failed.`,
     ...(input.t3ThreadId !== undefined ? [`Primary T3 thread: \`${input.t3ThreadId}\``] : []),
+    ...(input.pullRequestUrl !== undefined ? [`Pull request: ${input.pullRequestUrl}`] : []),
     `Failure summary: ${input.failureSummary?.trim() || "Unknown error"}`,
   ].join("\n");
 }
@@ -122,12 +125,14 @@ export const claimTaskLifecycleReplies = internalMutation({
       .query("taskExternalLinks")
       .withIndex("by_task", (q: any) => q.eq("taskId", args.taskId))
       .collect();
+    const pullRequestLink = links.find((candidate) => candidate.kind === "github_pr");
     const replyBody = buildTaskLifecycleReplyBody({
       taskId: String(args.taskId),
       workSessionId: String(args.workSessionId),
       status: args.status,
       ...(args.t3ThreadId !== undefined ? { t3ThreadId: args.t3ThreadId } : {}),
       ...(args.failureSummary !== undefined ? { failureSummary: args.failureSummary } : {}),
+      ...(pullRequestLink?.url !== undefined ? { pullRequestUrl: pullRequestLink.url } : {}),
     });
     const now = Date.now();
     const claimed = [];

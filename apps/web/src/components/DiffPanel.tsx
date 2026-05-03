@@ -218,14 +218,18 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       }),
     [inferredCheckpointTurnCountByTurnId, turnDiffSummaries],
   );
+  const changedTurnDiffSummaries = useMemo(
+    () => orderedTurnDiffSummaries.filter((summary) => summary.files.length > 0),
+    [orderedTurnDiffSummaries],
+  );
 
   const selectedTurnId = diffSearch.diffTurnId ?? null;
   const selectedFilePath = selectedTurnId !== null ? (diffSearch.diffFilePath ?? null) : null;
   const selectedTurn =
     selectedTurnId === null
       ? undefined
-      : (orderedTurnDiffSummaries.find((summary) => summary.turnId === selectedTurnId) ??
-        orderedTurnDiffSummaries[0]);
+      : (changedTurnDiffSummaries.find((summary) => summary.turnId === selectedTurnId) ??
+        changedTurnDiffSummaries[0]);
   const selectedCheckpointTurnCount =
     selectedTurn &&
     (selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId]);
@@ -416,7 +420,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [orderedTurnDiffSummaries, selectedTurnId, updateTurnStripScrollState]);
+  }, [changedTurnDiffSummaries, selectedTurnId, updateTurnStripScrollState]);
 
   useEffect(() => {
     const element = turnStripRef.current;
@@ -486,7 +490,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
               <div className="text-[10px] leading-tight font-medium">All turns</div>
             </div>
           </button>
-          {orderedTurnDiffSummaries.map((summary) => (
+          {changedTurnDiffSummaries.map((summary) => (
             <button
               key={summary.turnId}
               type="button"

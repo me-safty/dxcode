@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { buildTaskLifecycleReplyBody } from "../../convex/taskEvents.ts";
 import { chatSdkThreadIdForLifecycleReply } from "./lifecycleReplies.ts";
 
 describe("chatSdkThreadIdForLifecycleReply", () => {
@@ -28,5 +29,17 @@ describe("chatSdkThreadIdForLifecycleReply", () => {
         externalId: "C1:1777709239.758019",
       }),
     ).toBe("slack:C1:1777709239.758019");
+  });
+
+  it("includes the pull request URL in completion replies when available", () => {
+    expect(
+      buildTaskLifecycleReplyBody({
+        taskId: "task-123",
+        workSessionId: "work-session-123",
+        status: "completed",
+        t3ThreadId: "thread-123",
+        pullRequestUrl: "https://github.com/acme/app/pull/42",
+      }),
+    ).toContain("Pull request: https://github.com/acme/app/pull/42");
   });
 });

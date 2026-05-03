@@ -120,6 +120,7 @@ import { layer as VcsProvisioningServiceLayer } from "./vcs/VcsProvisioningServi
 import { layer as GitWorkflowServiceLayer } from "./git/GitWorkflowService.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
+import { SandboxRuntime, type SandboxRuntimeShape } from "./sandbox/Services/SandboxRuntime.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -342,6 +343,7 @@ const buildAppUnderTest = (options?: {
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
     serverEnvironment?: Partial<ServerEnvironmentShape>;
     repositoryIdentityResolver?: Partial<RepositoryIdentityResolverShape>;
+    sandboxRuntime?: Partial<SandboxRuntimeShape>;
   };
 }) =>
   Effect.gen(function* () {
@@ -609,8 +611,22 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.mock(ExecutionBridgeRunRegistry)({
           trackAcceptedRun: () => Effect.void,
+          trackAcceptedTaskRuntime: () => Effect.void,
           getTrackedRun: () => Effect.succeed(null),
           markLifecycleDelivered: () => Effect.void,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(SandboxRuntime)({
+          materializeTaskRuntime: () =>
+            Effect.die("materializeTaskRuntime should not be called in this test"),
+          reconnectTaskRuntime: () =>
+            Effect.die("reconnectTaskRuntime should not be called in this test"),
+          archiveTaskRuntime: () =>
+            Effect.die("archiveTaskRuntime should not be called in this test"),
+          getTaskRuntimeStatus: () =>
+            Effect.die("getTaskRuntimeStatus should not be called in this test"),
+          ...options?.layers?.sandboxRuntime,
         }),
       ),
     );

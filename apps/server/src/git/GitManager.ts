@@ -61,6 +61,7 @@ export interface GitActionProgressReporter {
 export interface GitRunStackedActionOptions {
   readonly actionId?: string;
   readonly progressReporter?: GitActionProgressReporter;
+  readonly draftPullRequest?: boolean;
 }
 
 export interface GitManagerShape {
@@ -148,6 +149,19 @@ interface BranchHeadContext {
   headRepositoryNameWithOwner: string | null;
   headRepositoryOwnerLogin: string | null;
   isCrossRepository: boolean;
+}
+
+function parseRepositorySelector(
+  repositoryNameWithOwner: string | null | undefined,
+  refName = "",
+): { refName: string; owner: string; repository: string } | undefined {
+  const trimmed = repositoryNameWithOwner?.trim() ?? "";
+  const [owner, repository] = trimmed.split("/");
+  const normalizedOwner = owner?.trim() ?? "";
+  const normalizedRepository = repository?.trim() ?? "";
+  return normalizedOwner.length > 0 && normalizedRepository.length > 0
+    ? { refName, owner: normalizedOwner, repository: normalizedRepository }
+    : undefined;
 }
 
 function parseRepositoryNameFromPullRequestUrl(url: string): string | null {
@@ -901,10 +915,13 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       | "headRepositoryOwnerLogin"
       | "isCrossRepository"
     >,
+    repositoryNameWithOwner?: string,
   ) {
+    const source = parseRepositorySelector(repositoryNameWithOwner, headContext.headBranch);
     for (const headSelector of headContext.headSelectors) {
       const pullRequests = yield* (yield* sourceControlProvider(cwd)).listChangeRequests({
         cwd,
+        ...(source !== undefined ? { source } : {}),
         headSelector,
         state: "open",
         limit: 1,
@@ -1250,6 +1267,8 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     cwd: string,
     fallbackBranch: string | null,
     emit: GitActionProgressEmitter,
+    draft = false,
+    repositoryNameWithOwner?: string,
   ) {
     const provider = yield* sourceControlProvider(cwd);
     const terms = getChangeRequestTerminologyForKind(provider.kind);
@@ -1273,7 +1292,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       upstreamRef: details.upstreamRef,
     });
 
-    const existing = yield* findOpenPr(cwd, headContext);
+    const existing = yield* findOpenPr(cwd, headContext, repositoryNameWithOwner);
     if (existing) {
       return {
         status: "opened_existing" as const,
@@ -1316,17 +1335,20 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       phase: "pr",
       label: `Creating ${terms.singular}...`,
     });
+    const target = parseRepositorySelector(repositoryNameWithOwner, baseBranch);
     yield* provider
       .createChangeRequest({
         cwd,
+        ...(target !== undefined ? { target } : {}),
         baseRefName: baseBranch,
         headSelector: headContext.preferredHeadSelector,
         title: generated.title,
         bodyFile,
+        draft,
       })
       .pipe(Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void))));
 
-    const created = yield* findOpenPr(cwd, headContext);
+    const created = yield* findOpenPr(cwd, headContext, repositoryNameWithOwner);
     if (!created) {
       return {
         status: "created" as const,
@@ -1727,7 +1749,14 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
               .pipe(
                 Effect.tap(() => Ref.set(currentPhase, Option.some("pr"))),
                 Effect.flatMap(() =>
-                  runPrStep(modelSelection, input.cwd, currentBranch, progress.emit),
+                  runPrStep(
+                    modelSelection,
+                    input.cwd,
+                    currentBranch,
+                    progress.emit,
+                    options?.draftPullRequest ?? false,
+                    input.sourceControlRepository,
+                  ),
                 ),
               )
           : { status: "skipped_not_requested" as const };

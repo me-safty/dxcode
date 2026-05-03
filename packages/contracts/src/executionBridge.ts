@@ -231,3 +231,41 @@ export const TaskRuntimeLifecycleEvent = Schema.Struct({
   failureSummary: Schema.optional(TrimmedNonEmptyString),
 });
 export type TaskRuntimeLifecycleEvent = typeof TaskRuntimeLifecycleEvent.Type;
+
+export const TaskPullRequestEnsureRequest = Schema.Struct({
+  taskId: TrimmedNonEmptyString,
+  workSessionId: TaskRuntimeMaterializationId,
+  branch: TrimmedNonEmptyString,
+  worktreePath: TrimmedNonEmptyString,
+  project: Schema.Struct({
+    githubOwner: TrimmedNonEmptyString,
+    githubRepo: TrimmedNonEmptyString,
+    defaultBranch: TrimmedNonEmptyString,
+  }),
+  title: TrimmedNonEmptyString,
+  body: Schema.optional(Schema.String),
+  idempotencyKey: TrimmedNonEmptyString,
+});
+export type TaskPullRequestEnsureRequest = typeof TaskPullRequestEnsureRequest.Type;
+
+export const TaskPullRequestMetadata = Schema.Struct({
+  owner: TrimmedNonEmptyString,
+  repo: TrimmedNonEmptyString,
+  number: Schema.Number,
+  url: Schema.String,
+  headBranch: TrimmedNonEmptyString,
+  baseBranch: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  draft: Schema.Boolean,
+});
+export type TaskPullRequestMetadata = typeof TaskPullRequestMetadata.Type;
+
+export const TaskPullRequestEnsureResponse = Schema.Struct({
+  taskId: TrimmedNonEmptyString,
+  workSessionId: TaskRuntimeMaterializationId,
+  status: Schema.Literals(["waiting_for_changes", "created", "existing", "failed"]),
+  checkedAt: IsoDateTime,
+  pullRequest: Schema.optional(TaskPullRequestMetadata),
+  summary: Schema.optional(TrimmedNonEmptyString),
+});
+export type TaskPullRequestEnsureResponse = typeof TaskPullRequestEnsureResponse.Type;

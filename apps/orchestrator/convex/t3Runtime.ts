@@ -43,6 +43,16 @@ export const materializeTaskRuntime = action({
       runtimeMode: "full-access",
       interactionMode: "default",
       startCodingAgent: args.startCodingAgent ?? true,
+      sandbox: {
+        providerKind: "local",
+      },
+      services: [
+        {
+          kind: "t3-runtime",
+          required: true,
+        },
+      ],
+      idempotencyKey: `sandbox:local:${String(args.taskId)}:${String(workSessionSeed.workSessionId)}`,
       project: {
         repoName: tree.project.repoName,
         workspaceRoot: tree.project.sandboxWorkspaceRoot,
@@ -59,6 +69,12 @@ export const materializeTaskRuntime = action({
       acceptedAt: Date.parse(response.acceptedAt),
       ...(response.branch !== null ? { branch: response.branch } : {}),
       ...(response.worktreePath !== null ? { worktreePath: response.worktreePath } : {}),
+    });
+
+    await ctx.scheduler.runAfter(0, api.t3Runtime.ensureTaskPullRequest, {
+      taskId: args.taskId,
+      workSessionId: workSessionSeed.workSessionId,
+      reason: "runtime-materialized",
     });
 
     return {
@@ -113,12 +129,277 @@ export const continueTaskRuntime = action({
       acceptedAt: Date.parse(response.acceptedAt),
     });
 
+    await ctx.scheduler.runAfter(0, api.t3Runtime.ensureTaskPullRequest, {
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      reason: "runtime-continuation",
+    });
+
     return {
       taskId: String(args.taskId),
       workSessionId: String(response.executionRunId),
       t3ThreadId: String(response.t3ThreadId),
       acceptedAt: response.acceptedAt,
     };
+  },
+});
+
+export const ensureTaskPullRequest = action({
+  args: {
+    taskId: v.id("tasks"),
+    workSessionId: v.id("workSessions"),
+    reason: v.optional(v.string()),
+  },
+  returns: v.object({
+    status: v.union(
+      v.literal("waiting_for_changes"),
+      v.literal("created"),
+      v.literal("existing"),
+      v.literal("failed"),
+      v.literal("skipped"),
+    ),
+    url: v.optional(v.string()),
+    summary: v.optional(v.string()),
+  }),
+  handler: async (ctx, args) => {
+    const seed = await ctx.runQuery(internal.t3Runtime.getTaskPullRequestSeed, {
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+    });
+    if (seed === null) {
+      return { status: "skipped" as const, summary: "Task runtime is not materialized yet." };
+    }
+
+    const idempotencyKey = `task-pr:${String(args.taskId)}:${String(args.workSessionId)}:${seed.branch}`;
+    await ctx.runMutation(internal.t3Runtime.recordTaskPullRequestRequested, {
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      eventKey: `${idempotencyKey}:requested`,
+      reason: args.reason ?? "unspecified",
+    });
+
+    const client = createT3ExecutionBridgeClient();
+    const response = await client.ensureTaskPullRequest({
+      taskId: String(args.taskId),
+      workSessionId: String(args.workSessionId),
+      branch: seed.branch,
+      worktreePath: seed.worktreePath,
+      title: seed.title,
+      idempotencyKey,
+      project: {
+        githubOwner: seed.project.githubOwner,
+        githubRepo: seed.project.githubRepo,
+        defaultBranch: seed.project.defaultBranch,
+      },
+    });
+
+    await ctx.runMutation(internal.t3Runtime.recordTaskPullRequestEnsureResult, {
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      eventKey: `${idempotencyKey}:${response.status}`,
+      status: response.status,
+      checkedAt: Date.parse(response.checkedAt),
+      ...(response.summary !== undefined ? { summary: response.summary } : {}),
+      ...(response.pullRequest !== undefined
+        ? {
+            owner: response.pullRequest.owner,
+            repo: response.pullRequest.repo,
+            number: response.pullRequest.number,
+            url: response.pullRequest.url,
+            headBranch: response.pullRequest.headBranch,
+            baseBranch: response.pullRequest.baseBranch,
+            title: response.pullRequest.title,
+            draft: response.pullRequest.draft,
+          }
+        : {}),
+    });
+
+    return {
+      status: response.status,
+      ...(response.pullRequest !== undefined ? { url: response.pullRequest.url } : {}),
+      ...(response.summary !== undefined ? { summary: response.summary } : {}),
+    };
+  },
+});
+
+export const getTaskPullRequestSeed = internalQuery({
+  args: {
+    taskId: v.id("tasks"),
+    workSessionId: v.id("workSessions"),
+  },
+  returns: v.union(
+    v.null(),
+    v.object({
+      title: v.string(),
+      branch: v.string(),
+      worktreePath: v.string(),
+      project: v.object({
+        githubOwner: v.string(),
+        githubRepo: v.string(),
+        defaultBranch: v.string(),
+      }),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const task = await ctx.db.get(args.taskId);
+    if (task === null) {
+      return null;
+    }
+    const workSession = await ctx.db.get(args.workSessionId);
+    if (workSession === null || String(workSession.taskId) !== String(args.taskId)) {
+      return null;
+    }
+    const taskThread = await ctx.db.get(workSession.taskThreadId);
+    const project = await ctx.db.get(task.projectId);
+    if (
+      taskThread?.branch === undefined ||
+      taskThread.worktreePath === undefined ||
+      project === null
+    ) {
+      return null;
+    }
+
+    return {
+      title: task.title,
+      branch: taskThread.branch,
+      worktreePath: taskThread.worktreePath,
+      project: {
+        githubOwner: project.githubOwner,
+        githubRepo: project.githubRepo,
+        defaultBranch: project.defaultBranch,
+      },
+    };
+  },
+});
+
+export const recordTaskPullRequestRequested = internalMutation({
+  args: {
+    taskId: v.id("tasks"),
+    workSessionId: v.id("workSessions"),
+    eventKey: v.string(),
+    reason: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const existingEvent = await ctx.db
+      .query("taskEvents")
+      .withIndex("by_event_key", (q: any) => q.eq("eventKey", args.eventKey))
+      .unique();
+    if (existingEvent !== null) {
+      return null;
+    }
+
+    await ctx.db.insert("taskEvents", {
+      taskId: args.taskId,
+      eventKey: args.eventKey,
+      kind: "task-pr.requested",
+      summary: "Task pull request ensure was requested.",
+      payloadJson: JSON.stringify({
+        workSessionId: args.workSessionId,
+        reason: args.reason,
+      }),
+      createdAt: Date.now(),
+    });
+    return null;
+  },
+});
+
+export const recordTaskPullRequestEnsureResult = internalMutation({
+  args: {
+    taskId: v.id("tasks"),
+    workSessionId: v.id("workSessions"),
+    eventKey: v.string(),
+    status: v.union(
+      v.literal("waiting_for_changes"),
+      v.literal("created"),
+      v.literal("existing"),
+      v.literal("failed"),
+    ),
+    checkedAt: v.number(),
+    summary: v.optional(v.string()),
+    owner: v.optional(v.string()),
+    repo: v.optional(v.string()),
+    number: v.optional(v.number()),
+    url: v.optional(v.string()),
+    headBranch: v.optional(v.string()),
+    baseBranch: v.optional(v.string()),
+    title: v.optional(v.string()),
+    draft: v.optional(v.boolean()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const existingEvent = await ctx.db
+      .query("taskEvents")
+      .withIndex("by_event_key", (q: any) => q.eq("eventKey", args.eventKey))
+      .unique();
+    if (existingEvent !== null) {
+      return null;
+    }
+
+    if (
+      (args.status === "created" || args.status === "existing") &&
+      args.owner !== undefined &&
+      args.repo !== undefined &&
+      args.number !== undefined &&
+      args.url !== undefined
+    ) {
+      const externalId = `${args.owner}/${args.repo}#${args.number}`;
+      const existingLink = await ctx.db
+        .query("taskExternalLinks")
+        .withIndex("by_kind_external_id", (q: any) =>
+          q.eq("kind", "github_pr").eq("externalId", externalId),
+        )
+        .unique();
+      if (existingLink !== null) {
+        await ctx.db.patch(existingLink._id, {
+          taskId: args.taskId,
+          url: args.url,
+          updatedAt: args.checkedAt,
+        });
+      } else {
+        await ctx.db.insert("taskExternalLinks", {
+          taskId: args.taskId,
+          kind: "github_pr",
+          externalId,
+          url: args.url,
+          muted: false,
+          createdAt: args.checkedAt,
+          updatedAt: args.checkedAt,
+        });
+      }
+    }
+
+    const eventKind =
+      args.status === "waiting_for_changes"
+        ? "task-pr.waiting-for-changes"
+        : args.status === "failed"
+          ? "task-pr.failed"
+          : "task-pr.created";
+    await ctx.db.insert("taskEvents", {
+      taskId: args.taskId,
+      eventKey: args.eventKey,
+      kind: eventKind,
+      summary:
+        args.summary ??
+        (args.status === "waiting_for_changes"
+          ? "Task pull request is waiting for changes."
+          : args.status === "failed"
+            ? "Task pull request ensure failed."
+            : "Task pull request is available."),
+      payloadJson: JSON.stringify({
+        workSessionId: args.workSessionId,
+        status: args.status,
+        ...(args.url !== undefined ? { url: args.url } : {}),
+        ...(args.number !== undefined ? { number: args.number } : {}),
+        ...(args.headBranch !== undefined ? { headBranch: args.headBranch } : {}),
+        ...(args.baseBranch !== undefined ? { baseBranch: args.baseBranch } : {}),
+        ...(args.title !== undefined ? { title: args.title } : {}),
+        ...(args.draft !== undefined ? { draft: args.draft } : {}),
+      }),
+      createdAt: args.checkedAt,
+    });
+
+    return null;
   },
 });
 

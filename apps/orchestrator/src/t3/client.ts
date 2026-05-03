@@ -14,6 +14,9 @@ import {
   type TaskRuntimeMaterializeRequest,
   TaskRuntimeMaterializeResponse,
   type TaskRuntimeMaterializeResponse as TaskRuntimeMaterializeResponseType,
+  type TaskPullRequestEnsureRequest,
+  TaskPullRequestEnsureResponse,
+  type TaskPullRequestEnsureResponse as TaskPullRequestEnsureResponseType,
 } from "@t3tools/contracts";
 import { Schema } from "effect";
 
@@ -24,6 +27,7 @@ const decodeExecutionRunStatusResponse = Schema.decodeUnknownSync(ExecutionRunSt
 const decodeTaskRuntimeMaterializeResponse = Schema.decodeUnknownSync(
   TaskRuntimeMaterializeResponse,
 );
+const decodeTaskPullRequestEnsureResponse = Schema.decodeUnknownSync(TaskPullRequestEnsureResponse);
 
 function requiredEnv(name: "T3_EXECUTION_BRIDGE_BASE_URL" | "T3_EXECUTION_BRIDGE_SHARED_SECRET") {
   const value = process.env[name]?.trim();
@@ -49,6 +53,9 @@ export interface T3ExecutionBridgeClient {
   readonly materializeTaskRuntime: (
     request: TaskRuntimeMaterializeRequest,
   ) => Promise<TaskRuntimeMaterializeResponseType>;
+  readonly ensureTaskPullRequest: (
+    request: TaskPullRequestEnsureRequest,
+  ) => Promise<TaskPullRequestEnsureResponseType>;
 }
 
 export function createT3ExecutionBridgeClient(): T3ExecutionBridgeClient {
@@ -131,6 +138,19 @@ export function createT3ExecutionBridgeClient(): T3ExecutionBridgeClient {
       }
 
       return decodeTaskRuntimeMaterializeResponse(await response.json());
+    },
+
+    async ensureTaskPullRequest(request) {
+      const response = await authedPost("/api/tasks/pull-request/ensure", request);
+
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(
+          `T3 task runtime bridge rejected pull request ensure (${response.status}): ${detail || "Unknown error"}`,
+        );
+      }
+
+      return decodeTaskPullRequestEnsureResponse(await response.json());
     },
   };
 }

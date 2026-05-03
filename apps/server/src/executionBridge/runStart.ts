@@ -9,20 +9,23 @@ import {
   type ExecutionRunInterruptResponse,
   type ExecutionRunLifecycleEvent,
   MessageId,
-  type ModelSelection,
   ProjectId,
   type TaskRuntimeMaterializeRequest,
   type TaskRuntimeMaterializeResponse,
   type TaskRuntimeLifecycleEvent,
+  type TaskPullRequestEnsureRequest,
+  type TaskPullRequestEnsureResponse,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
 import { Context, Effect, Layer, Option, Ref, Schema } from "effect";
 
-import { getAutoBootstrapDefaultModelSelection } from "../serverRuntimeStartup.ts";
-import { GitCore } from "../git/Services/GitCore.ts";
+import { GitManager } from "../git/GitManager.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { resolveExecutionBridgeModelSelection } from "./requestDefaults.ts";
+import { SandboxRuntime } from "../sandbox/Services/SandboxRuntime.ts";
+import { GitVcsDriver, type GitVcsDriverShape } from "../vcs/GitVcsDriver.ts";
 
 export type ExecutionLifecycleCheckpoint = "started" | "completed" | "failed" | "interrupted";
 
@@ -75,31 +78,6 @@ function deriveThreadTitle(input: ExecutionRunCreateRequest) {
     return trimmedTitle;
   }
   return `Run ${input.controlThreadId}`;
-}
-
-function buildTaskBranchName(input: { readonly taskId: string; readonly title: string }) {
-  const titleFragment = input.title
-    .trim()
-    .toLowerCase()
-    .replace(/^refs\/heads\//, "")
-    .replace(/['"`]/g, "")
-    .replace(/[^a-z0-9/_-]+/g, "-")
-    .replace(/\/+/g, "/")
-    .replace(/-+/g, "-")
-    .replace(/^[./_-]+|[./_-]+$/g, "")
-    .slice(0, 48)
-    .replace(/[./_-]+$/g, "");
-  const idFragment = input.taskId.replace(/[^a-zA-Z0-9]+/g, "-").slice(-12) || "task";
-  return `task/${titleFragment || "update"}-${idFragment}`;
-}
-
-function resolveModelSelection(
-  request: ExecutionRunCreateRequest,
-  existingProjectDefault: ModelSelection | null,
-) {
-  return (
-    request.modelSelection ?? existingProjectDefault ?? getAutoBootstrapDefaultModelSelection()
-  );
 }
 
 const makeExecutionBridgeRunRegistry = Effect.gen(function* () {
@@ -205,7 +183,7 @@ export const startExecutionRun = (request: ExecutionRunCreateRequest) =>
     const projectId = Option.isSome(existingProject)
       ? existingProject.value.id
       : ProjectId.make(crypto.randomUUID());
-    const modelSelection = resolveModelSelection(
+    const modelSelection = resolveExecutionBridgeModelSelection(
       request,
       Option.isSome(existingProject) ? existingProject.value.defaultModelSelection : null,
     );
@@ -364,101 +342,18 @@ export const interruptExecutionRun = (request: ExecutionRunInterruptRequest) =>
 
 export const materializeTaskRuntime = (request: TaskRuntimeMaterializeRequest) =>
   Effect.gen(function* () {
-    const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
-    const orchestrationEngine = yield* OrchestrationEngineService;
+    const sandboxRuntime = yield* SandboxRuntime;
     const runRegistry = yield* ExecutionBridgeRunRegistry;
-    const git = yield* GitCore;
-    const now = new Date().toISOString();
-
-    const existingProject = yield* projectionSnapshotQuery.getActiveProjectByWorkspaceRoot(
-      request.project.workspaceRoot,
-    );
-
-    const projectId = Option.isSome(existingProject)
-      ? existingProject.value.id
-      : ProjectId.make(crypto.randomUUID());
-    const modelSelection = resolveModelSelection(
-      {
-        initialPrompt: request.initialPrompt,
-        workspaceRoot: request.project.workspaceRoot,
-        title: request.title,
-        runtimeMode: request.runtimeMode,
-        interactionMode: request.interactionMode,
-        controlThreadId: request.taskId,
-        executionRunId: request.workSessionId,
-        ...(request.modelSelection !== undefined ? { modelSelection: request.modelSelection } : {}),
-      },
-      Option.isSome(existingProject) ? existingProject.value.defaultModelSelection : null,
-    );
-
-    if (Option.isNone(existingProject)) {
-      yield* orchestrationEngine.dispatch({
-        type: "project.create",
-        commandId: CommandId.make(`task-runtime:project:create:${request.taskId}`),
-        projectId,
-        title: request.project.repoName,
-        workspaceRoot: request.project.workspaceRoot,
-        defaultModelSelection: modelSelection,
-        createdAt: now,
-      });
-    }
-
-    const branch = buildTaskBranchName({ taskId: request.taskId, title: request.title });
-    const worktree = yield* git.createWorktree({
-      cwd: request.project.workspaceRoot,
-      branch: request.project.defaultBranch,
-      newBranch: branch,
-      path: null,
-    });
-
-    const threadId = ThreadId.make(crypto.randomUUID());
-    yield* orchestrationEngine.dispatch({
-      type: "thread.create",
-      commandId: CommandId.make(`task-runtime:thread:create:${request.workSessionId}`),
-      threadId,
-      projectId,
-      title: request.title,
-      modelSelection,
-      runtimeMode: request.runtimeMode,
-      interactionMode: request.interactionMode,
-      branch: worktree.worktree.branch,
-      worktreePath: worktree.worktree.path,
-      createdAt: now,
-    });
-
+    const result = yield* sandboxRuntime.materializeTaskRuntime(request);
     if (request.startCodingAgent) {
-      yield* orchestrationEngine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make(`task-runtime:turn:start:${request.workSessionId}`),
-        threadId,
-        message: {
-          messageId: MessageId.make(`task-runtime:${request.workSessionId}`),
-          role: "user",
-          text: request.initialPrompt,
-          attachments: [],
-        },
-        modelSelection,
-        runtimeMode: request.runtimeMode,
-        interactionMode: request.interactionMode,
-        createdAt: now,
-      });
-
       yield* runRegistry.trackAcceptedTaskRuntime({
         taskId: request.taskId,
         workSessionId: request.workSessionId,
-        threadId,
+        threadId: result.t3ThreadId,
       });
     }
 
-    return {
-      taskId: request.taskId,
-      workSessionId: request.workSessionId,
-      t3ProjectId: projectId,
-      t3ThreadId: threadId,
-      branch: worktree.worktree.branch,
-      worktreePath: worktree.worktree.path,
-      acceptedAt: now,
-    } satisfies TaskRuntimeMaterializeResponse;
+    return result satisfies TaskRuntimeMaterializeResponse;
   }).pipe(
     Effect.mapError(
       (cause) =>
@@ -467,6 +362,174 @@ export const materializeTaskRuntime = (request: TaskRuntimeMaterializeRequest) =
             cause instanceof Error ? cause.message : "Failed to materialize Task runtime in T3.",
           status: 400,
         }),
+    ),
+  );
+
+function parseGitHubPullRequestUrl(
+  url: string | undefined,
+): { owner: string; repo: string; number: number } | null {
+  const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/.*)?$/i.exec(
+    url?.trim() ?? "",
+  );
+  if (!match) {
+    return null;
+  }
+  const [, owner, repo, numberText] = match;
+  const number = Number(numberText);
+  if (!owner || !repo || !Number.isSafeInteger(number) || number <= 0) {
+    return null;
+  }
+  return { owner, repo, number };
+}
+
+const readAheadCount = Effect.fn("executionBridge.readAheadCount")(function* (
+  git: GitVcsDriverShape,
+  cwd: string,
+  baseRef: string,
+) {
+  const result = yield* git.execute({
+    operation: "ExecutionBridge.ensureTaskPullRequest.readAheadCount",
+    cwd,
+    args: ["rev-list", "--count", `${baseRef}..HEAD`],
+  });
+  const count = Number(result.stdout.trim());
+  return Number.isFinite(count) && count > 0 ? count : 0;
+});
+
+const hasCommittedChangesAgainstBase = Effect.fn("executionBridge.hasCommittedChangesAgainstBase")(
+  function* (git: GitVcsDriverShape, cwd: string, baseBranch: string) {
+    const localCount = yield* readAheadCount(git, cwd, baseBranch).pipe(
+      Effect.catch(() => Effect.succeed(null)),
+    );
+    if (localCount !== null) {
+      return localCount > 0;
+    }
+
+    const remoteCount = yield* readAheadCount(git, cwd, `origin/${baseBranch}`).pipe(
+      Effect.catch(() => Effect.succeed(null)),
+    );
+    return remoteCount !== null && remoteCount > 0;
+  },
+);
+
+const configureTaskPullRequestBaseBranch = Effect.fn(
+  "executionBridge.configureTaskPullRequestBaseBranch",
+)(function* (git: GitVcsDriverShape, cwd: string, branch: string, baseBranch: string) {
+  yield* git
+    .execute({
+      operation: "ExecutionBridge.ensureTaskPullRequest.configureBaseBranch",
+      cwd,
+      args: ["config", `branch.${branch}.gh-merge-base`, baseBranch],
+    })
+    .pipe(Effect.catch(() => Effect.void));
+});
+
+export const ensureTaskPullRequest = (request: TaskPullRequestEnsureRequest) =>
+  Effect.gen(function* () {
+    const git = yield* GitVcsDriver;
+    const gitManager = yield* GitManager;
+    const checkedAt = new Date().toISOString();
+    const details = yield* git.statusDetails(request.worktreePath);
+    const branch = details.branch ?? request.branch;
+
+    if (branch !== request.branch) {
+      return {
+        taskId: request.taskId,
+        workSessionId: request.workSessionId,
+        status: "failed",
+        checkedAt,
+        summary: `Worktree is on branch ${branch}, expected ${request.branch}.`,
+      } satisfies TaskPullRequestEnsureResponse;
+    }
+
+    if (!details.hasWorkingTreeChanges && !details.hasUpstream && details.aheadCount === 0) {
+      return {
+        taskId: request.taskId,
+        workSessionId: request.workSessionId,
+        status: "waiting_for_changes",
+        checkedAt,
+        summary: "No task changes have been committed or staged yet.",
+      } satisfies TaskPullRequestEnsureResponse;
+    }
+
+    const baseBranch = request.project.defaultBranch;
+    yield* configureTaskPullRequestBaseBranch(git, request.worktreePath, branch, baseBranch);
+
+    if (!details.hasWorkingTreeChanges) {
+      const hasCommittedChanges = yield* hasCommittedChangesAgainstBase(
+        git,
+        request.worktreePath,
+        baseBranch,
+      );
+      if (!hasCommittedChanges) {
+        return {
+          taskId: request.taskId,
+          workSessionId: request.workSessionId,
+          status: "waiting_for_changes",
+          checkedAt,
+          summary: "No task changes have been committed or staged yet.",
+        } satisfies TaskPullRequestEnsureResponse;
+      }
+    }
+
+    const action = details.hasWorkingTreeChanges ? "commit_push_pr" : "create_pr";
+    const result = yield* gitManager.runStackedAction(
+      {
+        actionId: request.idempotencyKey,
+        cwd: request.worktreePath,
+        action,
+        commitMessage: request.title,
+        sourceControlRepository: `${request.project.githubOwner}/${request.project.githubRepo}`,
+      },
+      { draftPullRequest: true },
+    );
+
+    if (result.pr.status !== "created" && result.pr.status !== "opened_existing") {
+      return {
+        taskId: request.taskId,
+        workSessionId: request.workSessionId,
+        status: "waiting_for_changes",
+        checkedAt,
+        summary: "No pull request was created because there are no publishable changes yet.",
+      } satisfies TaskPullRequestEnsureResponse;
+    }
+
+    const parsed = parseGitHubPullRequestUrl(result.pr.url);
+    if (!parsed || !result.pr.url || result.pr.number === undefined) {
+      return {
+        taskId: request.taskId,
+        workSessionId: request.workSessionId,
+        status: "failed",
+        checkedAt,
+        summary: "GitHub pull request was created, but T3 could not parse its URL.",
+      } satisfies TaskPullRequestEnsureResponse;
+    }
+
+    return {
+      taskId: request.taskId,
+      workSessionId: request.workSessionId,
+      status: result.pr.status === "opened_existing" ? "existing" : "created",
+      checkedAt,
+      pullRequest: {
+        owner: parsed.owner,
+        repo: parsed.repo,
+        number: result.pr.number,
+        url: result.pr.url,
+        headBranch: result.pr.headBranch ?? request.branch,
+        baseBranch: result.pr.baseBranch ?? request.project.defaultBranch,
+        title: result.pr.title ?? request.title,
+        draft: result.pr.status === "created",
+      },
+    } satisfies TaskPullRequestEnsureResponse;
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.succeed({
+        taskId: request.taskId,
+        workSessionId: request.workSessionId,
+        status: "failed",
+        checkedAt: new Date().toISOString(),
+        summary: cause instanceof Error ? cause.message : "Failed to ensure a GitHub pull request.",
+      } satisfies TaskPullRequestEnsureResponse),
     ),
   );
 

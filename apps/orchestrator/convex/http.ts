@@ -8,7 +8,7 @@ import {
   exchangeLinearOAuthCode,
   renderLinearOAuthPage,
 } from "../src/linear/oauth.ts";
-import { internal } from "./_generated/api.js";
+import { api, internal } from "./_generated/api.js";
 import type { Id } from "./_generated/dataModel.js";
 import { httpAction } from "./_generated/server.js";
 
@@ -147,7 +147,27 @@ http.route({
           readonly externalMessageId?: string;
         }
       | undefined;
+    let pullRequest:
+      | {
+          readonly status: "waiting_for_changes" | "created" | "existing" | "failed" | "skipped";
+          readonly url?: string;
+          readonly summary?: string;
+        }
+      | undefined;
     if (payload.type === "completed" || payload.type === "failed") {
+      try {
+        pullRequest = await ctx.runAction(api.t3Runtime.ensureTaskPullRequest, {
+          taskId: payload.taskId as Id<"tasks">,
+          workSessionId: payload.workSessionId as Id<"workSessions">,
+          reason: `runtime-${payload.type}`,
+        });
+      } catch (error) {
+        pullRequest = {
+          status: "failed",
+          summary: error instanceof Error ? error.message : String(error),
+        };
+      }
+
       try {
         intakeReply = await ctx.runAction(internal.taskIntake.postTaskRuntimeLifecycleReply, {
           taskId: payload.taskId as Id<"tasks">,
@@ -170,6 +190,7 @@ http.route({
     return Response.json({
       accepted: true,
       ...result,
+      ...(pullRequest !== undefined ? { pullRequest } : {}),
       ...(intakeReply !== undefined ? { intakeReply } : {}),
     });
   }),

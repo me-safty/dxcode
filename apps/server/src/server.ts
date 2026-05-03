@@ -57,6 +57,8 @@ import * as SourceControlProviderRegistry from "./sourceControl/SourceControlPro
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment.ts";
+import { SandboxProviderRegistryLive } from "./sandbox/Layers/SandboxProviderRegistryLive.ts";
+import { SandboxRuntimeLive } from "./sandbox/Layers/SandboxRuntimeLive.ts";
 import {
   authBearerBootstrapRouteLayer,
   authBootstrapRouteLayer,
@@ -88,6 +90,7 @@ import {
   executionBridgeContinueRouteLayer,
   executionBridgeInterruptRouteLayer,
   taskRuntimeMaterializeRouteLayer,
+  taskPullRequestEnsureRouteLayer,
 } from "./executionBridge/http.ts";
 import { ExecutionBridgeRunRegistryLive } from "./executionBridge/runStart.ts";
 import { NetService } from "@t3tools/shared/Net";
@@ -223,6 +226,20 @@ const WorkspaceLayerLive = Layer.mergeAll(
   WorkspaceFileSystemLayerLive,
 );
 
+const SandboxProviderLayerLive = SandboxProviderRegistryLive.pipe(
+  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(ServerEnvironmentLive),
+);
+
+const SandboxOrchestrationLayerLive = OrchestrationLayerLive.pipe(
+  Layer.provideMerge(RepositoryIdentityResolverLive),
+);
+
+const SandboxLayerLive = SandboxRuntimeLive.pipe(
+  Layer.provideMerge(SandboxProviderLayerLive),
+  Layer.provideMerge(SandboxOrchestrationLayerLive),
+);
+
 const AuthLayerLive = ServerAuthLive.pipe(
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provide(ServerSecretStoreLive),
@@ -231,6 +248,13 @@ const AuthLayerLive = ServerAuthLive.pipe(
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(ProviderLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
+);
+
+const MiscRuntimeLayerLive = Layer.mergeAll(
+  AnalyticsServiceLayerLive,
+  OpenLive,
+  ServerLifecycleEventsLive,
+  NetService.layer,
 );
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
@@ -266,22 +290,20 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ProjectFaviconResolverLive),
   Layer.provideMerge(RepositoryIdentityResolverLive),
   Layer.provideMerge(ServerEnvironmentLive),
+  Layer.provideMerge(SandboxLayerLive),
   Layer.provideMerge(AuthLayerLive),
 );
 
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   // Misc.
-  Layer.provideMerge(AnalyticsServiceLayerLive),
-  Layer.provideMerge(OpenLive),
-  Layer.provideMerge(ServerLifecycleEventsLive),
-  Layer.provide(NetService.layer),
+  Layer.provideMerge(MiscRuntimeLayerLive),
 );
 
 const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
 );
 
-export const makeRoutesLayer = Layer.mergeAll(
+const authRoutesLayer = Layer.mergeAll(
   authBearerBootstrapRouteLayer,
   authBootstrapRouteLayer,
   authClientsRevokeOthersRouteLayer,
@@ -292,12 +314,16 @@ export const makeRoutesLayer = Layer.mergeAll(
   authPairingCredentialRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
+);
+
+const apiRoutesLayer = Layer.mergeAll(
   attachmentsRouteLayer,
   executionBridgeRunCreateRouteLayer,
   executionBridgeStatusQueryRouteLayer,
   executionBridgeContinueRouteLayer,
   executionBridgeInterruptRouteLayer,
   taskRuntimeMaterializeRouteLayer,
+  taskPullRequestEnsureRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
   otlpTracesProxyRouteLayer,
@@ -305,7 +331,11 @@ export const makeRoutesLayer = Layer.mergeAll(
   serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
-).pipe(Layer.provide(browserApiCorsLayer));
+);
+
+export const makeRoutesLayer = Layer.mergeAll(authRoutesLayer, apiRoutesLayer).pipe(
+  Layer.provide(browserApiCorsLayer),
+);
 
 export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {

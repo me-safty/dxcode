@@ -552,6 +552,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
             input.title,
             "--body-file",
             input.bodyFile,
+            ...(input.draft ? ["--draft"] : []),
           ],
         }).pipe(Effect.asVoid),
       getDefaultBranch: (input) =>
@@ -1765,7 +1766,6 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       yield* runGit(repoDir, ["commit", "-m", "Provider fallback"]);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
-
       const { manager, ghCalls } = yield* makeManager({
         ghScenario: {
           prListSequence: [
@@ -1795,6 +1795,51 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           call.includes("pr create --base main --head feature/provider-fallback"),
         ),
       ).toBe(true);
+    }),
+  );
+
+  it.effect("passes draft mode through PR creation when requested by an internal caller", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/draft-pr"]);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      fs.writeFileSync(path.join(repoDir, "draft-pr.txt"), "draft pr\n");
+      yield* runGit(repoDir, ["add", "draft-pr.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Draft PR branch"]);
+
+      const { manager, ghCalls } = yield* makeManager({
+        ghScenario: {
+          prListSequence: [
+            "[]",
+            JSON.stringify([
+              {
+                number: 304,
+                title: "Draft PR branch",
+                url: "https://github.com/pingdotgg/codething-mvp/pull/304",
+                baseRefName: "main",
+                headRefName: "feature/draft-pr",
+              },
+            ]),
+          ],
+        },
+      });
+
+      const result = yield* runStackedAction(
+        manager,
+        {
+          cwd: repoDir,
+          action: "create_pr",
+        },
+        { draftPullRequest: true },
+      );
+
+      expect(result.pr.status).toBe("created");
+      expect(
+        ghCalls.some((call) => call.includes("pr create --base main --head feature/draft-pr")),
+      ).toBe(true);
+      expect(ghCalls.some((call) => call.includes(" --draft"))).toBe(true);
     }),
   );
 

@@ -49,12 +49,14 @@ export interface GitHubCliShape {
   readonly listOpenPullRequests: (input: {
     readonly cwd: string;
     readonly headSelector: string;
+    readonly repository?: string;
     readonly limit?: number;
   }) => Effect.Effect<ReadonlyArray<GitHubPullRequestSummary>, GitHubCliError>;
 
   readonly getPullRequest: (input: {
     readonly cwd: string;
     readonly reference: string;
+    readonly repository?: string;
   }) => Effect.Effect<GitHubPullRequestSummary, GitHubCliError>;
 
   readonly getRepositoryCloneUrls: (input: {
@@ -64,19 +66,23 @@ export interface GitHubCliShape {
 
   readonly createPullRequest: (input: {
     readonly cwd: string;
+    readonly repository?: string;
     readonly baseBranch: string;
     readonly headSelector: string;
     readonly title: string;
     readonly bodyFile: string;
+    readonly draft?: boolean;
   }) => Effect.Effect<void, GitHubCliError>;
 
   readonly getDefaultBranch: (input: {
     readonly cwd: string;
+    readonly repository?: string;
   }) => Effect.Effect<string | null, GitHubCliError>;
 
   readonly checkoutPullRequest: (input: {
     readonly cwd: string;
     readonly reference: string;
+    readonly repository?: string;
     readonly force?: boolean;
   }) => Effect.Effect<void, GitHubCliError>;
 }
@@ -160,6 +166,11 @@ function normalizeRepositoryCloneUrls(
   };
 }
 
+function repoArgs(repository: string | undefined): ReadonlyArray<string> {
+  const trimmed = repository?.trim() ?? "";
+  return trimmed.length > 0 ? ["--repo", trimmed] : [];
+}
+
 function decodeGitHubJson<S extends Schema.Top>(
   raw: string,
   schema: S,
@@ -200,6 +211,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         args: [
           "pr",
           "list",
+          ...repoArgs(input.repository),
           "--head",
           input.headSelector,
           "--state",
@@ -240,6 +252,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           "pr",
           "view",
           input.reference,
+          ...repoArgs(input.repository),
           "--json",
           "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
         ],
@@ -287,6 +300,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         args: [
           "pr",
           "create",
+          ...repoArgs(input.repository),
           "--base",
           input.baseBranch,
           "--head",
@@ -295,12 +309,21 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           input.title,
           "--body-file",
           input.bodyFile,
+          ...(input.draft ? ["--draft"] : []),
         ],
       }).pipe(Effect.asVoid),
     getDefaultBranch: (input) =>
       execute({
         cwd: input.cwd,
-        args: ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+        args: [
+          "repo",
+          "view",
+          ...(input.repository ? [input.repository] : []),
+          "--json",
+          "defaultBranchRef",
+          "--jq",
+          ".defaultBranchRef.name",
+        ],
       }).pipe(
         Effect.map((value) => {
           const trimmed = value.stdout.trim();
@@ -310,7 +333,13 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
     checkoutPullRequest: (input) =>
       execute({
         cwd: input.cwd,
-        args: ["pr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
+        args: [
+          "pr",
+          "checkout",
+          input.reference,
+          ...repoArgs(input.repository),
+          ...(input.force ? ["--force"] : []),
+        ],
       }).pipe(Effect.asVoid),
   });
 });

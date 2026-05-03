@@ -5,6 +5,7 @@ import {
   ExecutionRunContinueRequest,
   ExecutionRunInterruptRequest,
   ExecutionRunStatusQuery,
+  TaskPullRequestEnsureRequest,
   TaskRuntimeMaterializeRequest,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
@@ -22,6 +23,7 @@ import {
   continueExecutionRun,
   interruptExecutionRun,
   materializeTaskRuntime,
+  ensureTaskPullRequest,
   type TrackedExecutionRun,
 } from "./runStart.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -185,6 +187,21 @@ export const taskRuntimeMaterializeRouteLayer = HttpRouter.add(
       Effect.succeed(respondToExecutionBridgeError(error)),
     ),
     Effect.catchTag("ExecutionBridgeRunStartError", (error) =>
+      Effect.succeed(respondToExecutionBridgeError(error)),
+    ),
+  ),
+);
+
+export const taskPullRequestEnsureRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/tasks/pull-request/ensure",
+  Effect.gen(function* () {
+    yield* authenticateExecutionBridgeRequest;
+    const request = yield* HttpServerRequest.schemaBodyJson(TaskPullRequestEnsureRequest);
+    const result = yield* ensureTaskPullRequest(request);
+    return HttpServerResponse.jsonUnsafe(result, { status: 202 });
+  }).pipe(
+    Effect.catchTag("ExecutionBridgeAuthError", (error) =>
       Effect.succeed(respondToExecutionBridgeError(error)),
     ),
   ),

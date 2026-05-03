@@ -1,162 +1,99 @@
-import assert from "node:assert/strict";
-import { it } from "@effect/vitest";
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
+import { describe, expect, it } from "vitest";
 
-import {
-  TaskRuntimeArchiveRequest,
-  TaskRuntimeMaterializeRequest,
-  TaskRuntimeMaterializeResponse,
-  TaskRuntimeReconnectRequest,
-  TaskRuntimeSandboxStatusQuery,
-} from "./executionBridge.ts";
+import { TaskPullRequestEnsureRequest, TaskPullRequestEnsureResponse } from "./executionBridge.ts";
 
-const decodeArchiveRequest = Schema.decodeUnknownEffect(TaskRuntimeArchiveRequest);
-const decodeMaterializeRequest = Schema.decodeUnknownEffect(TaskRuntimeMaterializeRequest);
-const decodeMaterializeResponse = Schema.decodeUnknownEffect(TaskRuntimeMaterializeResponse);
-const decodeReconnectRequest = Schema.decodeUnknownEffect(TaskRuntimeReconnectRequest);
-const decodeStatusQuery = Schema.decodeUnknownEffect(TaskRuntimeSandboxStatusQuery);
+const decodeTaskPullRequestEnsureRequest = Schema.decodeUnknownSync(TaskPullRequestEnsureRequest);
+const decodeTaskPullRequestEnsureResponse = Schema.decodeUnknownSync(TaskPullRequestEnsureResponse);
 
-it.effect("decodes historical Task runtime materialize responses without Sandbox fields", () =>
-  Effect.gen(function* () {
-    const parsed = yield* decodeMaterializeResponse({
-      taskId: "task-1",
-      workSessionId: "work-session-1",
-      t3ProjectId: "project-1",
-      t3ThreadId: "thread-1",
-      branch: "task/demo",
-      worktreePath: "/repo/.worktrees/task-demo",
-      acceptedAt: "2026-01-01T00:00:00.000Z",
-    });
-
-    assert.strictEqual(parsed.taskId, "task-1");
-    assert.strictEqual(parsed.t3ProjectId, "project-1");
-    assert.strictEqual(parsed.sandbox, undefined);
-  }),
-);
-
-it.effect("decodes Task runtime materialize requests with Sandbox selection and services", () =>
-  Effect.gen(function* () {
-    const parsed = yield* decodeMaterializeRequest({
-      taskId: "task-1",
-      workSessionId: "work-session-1",
-      initialPrompt: "Investigate the report",
+describe("execution bridge PR contracts", () => {
+  it("decodes a task pull request ensure request", () => {
+    const request = decodeTaskPullRequestEnsureRequest({
+      taskId: "task-123",
+      workSessionId: "work-session-123",
+      branch: "task/fix-checkout",
+      worktreePath: "/tmp/worktrees/task-fix-checkout",
       project: {
-        repoName: "t3code",
-        workspaceRoot: "/repo/t3code",
+        githubOwner: "acme",
+        githubRepo: "app",
         defaultBranch: "main",
-        projectKey: "github:Affil/t3code",
       },
-      title: "Investigate bug",
-      sandbox: {
-        providerKind: "modal",
-        resources: {
-          memoryMiB: 2048,
-        },
-      },
-      services: [
-        {
-          kind: "t3-runtime",
-        },
-        {
-          kind: "browser",
-          required: false,
-        },
-      ],
-      idempotencyKey: "sandbox:modal:task-1:work-session-1",
+      title: "Fix checkout regression",
+      body: "Created by the AI Engineer task intake flow.",
+      idempotencyKey: "task-123:work-session-123:task/fix-checkout",
     });
 
-    assert.strictEqual(parsed.sandbox?.providerKind, "modal");
-    assert.strictEqual(parsed.project.projectKey, "github:Affil/t3code");
-    assert.strictEqual(parsed.services?.[0]?.required, true);
-    assert.strictEqual(parsed.services?.[1]?.required, false);
-  }),
-);
+    expect(request.project.githubOwner).toBe("acme");
+    expect(request.branch).toBe("task/fix-checkout");
+  });
 
-it.effect("decodes follow-up Task runtime requests with branded Sandbox ids", () =>
-  Effect.gen(function* () {
-    const reconnect = yield* decodeReconnectRequest({
-      taskId: "task-1",
-      workSessionId: "work-session-1",
-      sandboxId: "sandbox-1",
-    });
-    const archive = yield* decodeArchiveRequest({
-      taskId: "task-1",
-      workSessionId: "work-session-1",
-      sandboxId: "sandbox-1",
-    });
-    const status = yield* decodeStatusQuery({
-      taskId: "task-1",
-      workSessionId: "work-session-1",
-      sandboxId: "sandbox-1",
-    });
+  it("decodes waiting, created, existing, and failed responses", () => {
+    expect(
+      decodeTaskPullRequestEnsureResponse({
+        taskId: "task-123",
+        workSessionId: "work-session-123",
+        status: "waiting_for_changes",
+        checkedAt: "2026-05-02T16:00:00.000Z",
+        summary: "No changes to publish yet.",
+      }).status,
+    ).toBe("waiting_for_changes");
 
-    assert.strictEqual(reconnect.sandboxId, "sandbox-1");
-    assert.strictEqual(archive.sandboxId, "sandbox-1");
-    assert.strictEqual(status.sandboxId, "sandbox-1");
-  }),
-);
-
-it.effect("decodes Task runtime materialize responses with Sandbox descriptors", () =>
-  Effect.gen(function* () {
-    const parsed = yield* decodeMaterializeResponse({
-      taskId: "task-1",
-      workSessionId: "work-session-1",
-      t3ProjectId: "project-1",
-      t3ThreadId: "thread-1",
-      branch: "task/demo",
-      worktreePath: "/repo/.worktrees/task-demo",
-      acceptedAt: "2026-01-01T00:00:00.000Z",
-      sandbox: {
-        sandboxId: "sandbox-1",
-        providerKind: "local",
-        providerRef: {
-          providerKind: "local",
-          externalId: "sandbox-1",
+    for (const status of ["created", "existing"] as const) {
+      const response = decodeTaskPullRequestEnsureResponse({
+        taskId: "task-123",
+        workSessionId: "work-session-123",
+        status,
+        checkedAt: "2026-05-02T16:01:00.000Z",
+        pullRequest: {
+          owner: "acme",
+          repo: "app",
+          number: 42,
+          url: "https://github.com/acme/app/pull/42",
+          headBranch: "task/fix-checkout",
+          baseBranch: "main",
+          title: "Fix checkout regression",
+          draft: true,
         },
-        status: "ready",
-        taskId: "task-1",
-        workSessionId: "work-session-1",
+      });
+
+      expect(response.pullRequest?.number).toBe(42);
+    }
+
+    expect(
+      decodeTaskPullRequestEnsureResponse({
+        taskId: "task-123",
+        workSessionId: "work-session-123",
+        status: "failed",
+        checkedAt: "2026-05-02T16:02:00.000Z",
+        summary: "GitHub CLI is unavailable.",
+      }).status,
+    ).toBe("failed");
+  });
+
+  it("rejects empty branch and unknown response statuses", () => {
+    expect(() =>
+      decodeTaskPullRequestEnsureRequest({
+        taskId: "task-123",
+        workSessionId: "work-session-123",
+        branch: " ",
+        worktreePath: "/tmp/worktrees/task-fix-checkout",
         project: {
-          repoName: "t3code",
-          workspaceRoot: "/repo/t3code",
+          githubOwner: "acme",
+          githubRepo: "app",
           defaultBranch: "main",
         },
-        resources: {},
-        services: [
-          {
-            serviceId: "svc-runtime",
-            kind: "t3-runtime",
-            status: "ready",
-          },
-        ],
-        artifacts: [],
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      },
-      environment: {
-        environmentId: "env-1",
-        label: "Fake Sandbox",
-        platform: {
-          os: "linux",
-          arch: "x64",
-        },
-        serverVersion: "fake",
-        capabilities: {
-          repositoryIdentity: true,
-        },
-      },
-      services: [
-        {
-          serviceId: "svc-runtime",
-          kind: "t3-runtime",
-          status: "ready",
-        },
-      ],
-    });
+        title: "Fix checkout regression",
+        idempotencyKey: "task-123:work-session-123",
+      }),
+    ).toThrow();
 
-    assert.strictEqual(parsed.t3ThreadId, "thread-1");
-    assert.strictEqual(parsed.sandbox?.sandboxId, "sandbox-1");
-    assert.strictEqual(parsed.environment?.environmentId, "env-1");
-    assert.strictEqual(parsed.services?.[0]?.kind, "t3-runtime");
-  }),
-);
+    expect(() =>
+      decodeTaskPullRequestEnsureResponse({
+        taskId: "task-123",
+        workSessionId: "work-session-123",
+        status: "done",
+        checkedAt: "2026-05-02T16:03:00.000Z",
+      }),
+    ).toThrow();
+  });
+});

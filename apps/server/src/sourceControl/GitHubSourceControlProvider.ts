@@ -40,15 +40,25 @@ function toChangeRequest(summary: GitHubPullRequestSummary): ChangeRequest {
   };
 }
 
+function selectorRepositoryNameWithOwner(
+  selector: { readonly owner?: string; readonly repository?: string } | undefined,
+): string | undefined {
+  const owner = selector?.owner?.trim() ?? "";
+  const repository = selector?.repository?.trim() ?? "";
+  return owner.length > 0 && repository.length > 0 ? `${owner}/${repository}` : undefined;
+}
+
 export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
   const github = yield* GitHubCli;
 
   const listChangeRequests: SourceControlProviderShape["listChangeRequests"] = (input) => {
+    const repository = selectorRepositoryNameWithOwner(input.source);
     if (input.state === "open") {
       return github
         .listOpenPullRequests({
           cwd: input.cwd,
           headSelector: input.headSelector,
+          ...(repository !== undefined ? { repository } : {}),
           ...(input.limit !== undefined ? { limit: input.limit } : {}),
         })
         .pipe(
@@ -64,6 +74,7 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
         args: [
           "pr",
           "list",
+          ...(repository !== undefined ? ["--repo", repository] : []),
           "--head",
           input.headSelector,
           "--state",
@@ -120,10 +131,15 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
       github
         .createPullRequest({
           cwd: input.cwd,
+          ...(() => {
+            const repository = selectorRepositoryNameWithOwner(input.target ?? input.source);
+            return repository !== undefined ? { repository } : {};
+          })(),
           baseBranch: input.baseRefName,
           headSelector: input.headSelector,
           title: input.title,
           bodyFile: input.bodyFile,
+          ...(input.draft !== undefined ? { draft: input.draft } : {}),
         })
         .pipe(Effect.mapError((error) => providerError("createChangeRequest", error))),
     getRepositoryCloneUrls: (input) =>
