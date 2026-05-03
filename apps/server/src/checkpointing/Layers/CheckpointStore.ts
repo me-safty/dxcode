@@ -269,6 +269,7 @@ const makeCheckpointStore = Effect.gen(function* () {
         toCommitOid,
       ];
 
+      const result = yield* vcs.execute({
         operation,
         cwd: input.cwd,
         args: diffArgs,
