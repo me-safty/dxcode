@@ -59,11 +59,7 @@ const DEFAULT_RUNTIME_PORT = 8787;
 const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_WORKDIR = "/workspace/t3code";
-const DEFAULT_COMMAND = [
-  "sh",
-  "-lc",
-  "node /app/apps/server/dist/bin.mjs serve --host 0.0.0.0 --port ${T3_RUNTIME_PORT:-8787} --base-dir ${T3CODE_HOME:-/var/lib/t3code} --no-browser ${T3_RUNTIME_WORKSPACE:-/workspace/t3code}",
-] as const;
+const DEFAULT_COMMAND = ["/app/apps/server/scripts/modal-runtime-entrypoint.sh"] as const;
 
 function splitCommand(value: string | undefined): ReadonlyArray<string> | undefined {
   if (value === undefined || value.trim() === "") {

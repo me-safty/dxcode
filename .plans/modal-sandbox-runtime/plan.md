@@ -875,6 +875,46 @@ Run these before considering the plan complete:
 - Focused tests for touched packages/modules with `bun run test`, never `bun test`.
 - Opt-in Modal live smoke only when credentials are intentionally provided.
 
+## MVP Modal Secrets Checkpoint
+
+Task sandboxes use named Modal Secrets only; Convex Project configuration stores secret names in
+`modalAllowedSecretNamesJson`, not raw credential values. The runtime expects these secret-backed
+environment variables:
+
+- Git/GitHub auth: `GH_TOKEN` or `GITHUB_TOKEN`; optional `T3_GH_HOSTS_YML_B64`.
+- Codex subscription auth: `T3_CODEX_AUTH_JSON_B64`; optional `T3_CODEX_CONFIG_TOML_B64`.
+- OpenCode Bedrock auth/config: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`
+  when needed, `AWS_REGION` or `AWS_DEFAULT_REGION`, and optional `T3_OPENCODE_CONFIG_JSON_B64`.
+- Execution bridge auth: `T3_EXECUTION_BRIDGE_SHARED_SECRET`.
+
+The Modal runtime entrypoint decodes the base64 file-backed values into `$CODEX_HOME`, GitHub CLI
+config, and `OPENCODE_CONFIG_CONTENT` before starting the T3 server. `GH_TOKEN` is also wired into a
+Git credential helper so `git push` and `gh pr create` both use the same secret.
+
+Recommended MVP secret names:
+
+```json
+[
+  "t3-git-auth",
+  "t3-codex-subscription",
+  "t3-opencode-bedrock",
+  "t3-execution-bridge"
+]
+```
+
+Project setup should set:
+
+```json
+{
+  "sandboxProvider": "modal",
+  "modalAllowedSecretNamesJson": "[\"t3-git-auth\",\"t3-codex-subscription\",\"t3-opencode-bedrock\",\"t3-execution-bridge\"]"
+}
+```
+
+The Modal TypeScript SDK can reference named secrets and create ephemeral secrets, but it does not
+expose a named-secret update API in `modal@0.7.4`. Create/update the named Modal Secrets out of band
+with the Modal CLI or dashboard, then let T3 attach them by name during Sandbox creation.
+
 ## MVP Credential-Free Test Gate
 
 Before requesting Modal environment variables, the implementation should pass this focused set:

@@ -337,7 +337,8 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
             shell: process.platform === "win32",
             env: {
               ...(input.environment ?? process.env),
-              OPENCODE_CONFIG_CONTENT: JSON.stringify({}),
+              OPENCODE_CONFIG_CONTENT:
+                (input.environment ?? process.env).OPENCODE_CONFIG_CONTENT ?? JSON.stringify({}),
             },
           }),
         )

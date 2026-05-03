@@ -2,11 +2,14 @@ FROM node:24-bookworm-slim AS build
 
 ENV BUN_INSTALL=/root/.bun
 ENV PATH="${BUN_INSTALL}/bin:${PATH}"
+ARG CODEX_CLI_VERSION=0.128.0
+ARG OPENCODE_CLI_VERSION=1.14.33
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl g++ git make openssh-client python3 unzip \
   && rm -rf /var/lib/apt/lists/* \
-  && curl -fsSL https://bun.sh/install | bash -s -- bun-v1.3.10
+  && curl -fsSL https://bun.sh/install | bash -s -- bun-v1.3.10 \
+  && npm install -g "@openai/codex@${CODEX_CLI_VERSION}" "opencode-ai@${OPENCODE_CLI_VERSION}"
 
 WORKDIR /app
 COPY . .
@@ -24,14 +27,19 @@ ENV T3CODE_HOME=/var/lib/t3code
 ENV T3_RUNTIME_WORKSPACE=/workspace/t3code
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates git openssh-client \
+  && apt-get install -y --no-install-recommends ca-certificates gh git openssh-client \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /var/lib/t3code /workspace
 
 WORKDIR /app
 COPY --from=build /app /app
+COPY --from=build /usr/local/bin/codex /usr/local/bin/codex
+COPY --from=build /usr/local/bin/opencode /usr/local/bin/opencode
+COPY --from=build /usr/local/lib/node_modules/@openai/codex /usr/local/lib/node_modules/@openai/codex
+COPY --from=build /usr/local/lib/node_modules/opencode-ai /usr/local/lib/node_modules/opencode-ai
 RUN cp -R /app /workspace/t3code
+RUN chmod +x /app/apps/server/scripts/modal-runtime-entrypoint.sh
 
 EXPOSE 8787
 
-CMD ["sh", "-lc", "node /app/apps/server/dist/bin.mjs serve --host 0.0.0.0 --port ${T3_RUNTIME_PORT:-8787} --base-dir ${T3CODE_HOME:-/var/lib/t3code} --no-browser ${T3_RUNTIME_WORKSPACE:-/workspace/t3code}"]
+CMD ["/app/apps/server/scripts/modal-runtime-entrypoint.sh"]
