@@ -36,6 +36,45 @@
 - Project configuration selects Sandbox Provider, Modal app/environment, image, resources, Snapshot policy, setup scripts, required Sandbox Services, and allowed secrets.
 - Modal provider details stay behind an adapter. Human-facing language remains Sandbox, Cloud Sandbox, Worktree, Sandbox Service, and Sandbox Snapshot.
 
+## MVP Scope Reset: Modal Task Execution Tracer Bullet
+
+As of the Task Intake and PR orchestration MVP, the system can create a Task from a Slack thread, materialize a local T3 runtime, execute the Coding Agent, create a branch/worktree, open a draft PR, store the `github_pr` link, and reply to Slack with the PR URL. The next MVP is not the full Sandbox platform. The next MVP is to move that proven path into a per-Task Modal Sandbox.
+
+The target proof is:
+
+1. A Slack thread creates one Convex Task and one Work Session.
+2. The Work Session selects `sandboxProvider: "modal"` from Project configuration.
+3. T3 allocates or reconnects one named Modal Sandbox for that Task/Work Session.
+4. The Modal Sandbox runs a T3 Code server/runtime inside the Sandbox.
+5. The Primary Thread and Coding Agent execute inside the Modal Sandbox, not on the Operator machine.
+6. PR ensure calls the Task runtime endpoint for that Work Session, so git status, commit, push, and PR creation run against the Cloud Worktree.
+7. Convex stores the Sandbox reference and `github_pr` link.
+8. Slack receives the completion reply with the PR URL.
+
+For this MVP, defer:
+
+- Sandbox Snapshots and image acceleration.
+- Task-scoped Convex deployments as a Sandbox Service.
+- Browser, VNC, desktop streaming, and dev-server tunnels beyond the T3 runtime endpoint.
+- Workspace UI polish beyond persisting enough descriptors for inspection.
+- Full archival/artifact capture beyond safe Modal timeout/idle-timeout defaults.
+- Email intake and Linear live E2E unless needed to validate shared routing.
+- Sophisticated concurrency controls beyond a conservative per-project/provider guard if implementation needs one.
+
+The critical reconciliation is runtime routing. The Orchestrator cannot keep using one global `T3_EXECUTION_BRIDGE_BASE_URL` for all Task operations once Tasks run in Modal. Materialization may still enter through a control bridge, but follow-up turns, lifecycle callbacks, PR ensure, reconnect/status, and archive must resolve the Work Session's active T3 runtime endpoint from persisted Sandbox/Service state.
+
+## Revised MVP Phase Map
+
+Use this phase map for the next implementation slice. The older, broader phases below remain useful as backlog context, but the MVP should optimize for this tracer bullet first.
+
+1. **Persist Sandbox State And Runtime Endpoint**: store provider, sandbox id/ref, status, environment id, `t3-runtime` endpoint, branch, and worktree path on Work Sessions/Task Threads. Add Task Events for provisioning/ready/failed.
+2. **Project Sandbox Provider Selection**: add Project config for `sandboxProvider`, minimal Modal app/environment/image/resources, and pass it into materialization. Keep local as the default and test adapter.
+3. **Runtime Routing Registry**: teach Orchestrator T3 client calls to target the Work Session runtime endpoint for continue/PR ensure after materialization. Keep the control bridge only for initial allocation until Modal can allocate itself from a durable service.
+4. **Modal Provider Minimal Adapter**: create/reconnect a named Modal Sandbox, start T3 runtime in it, wait for readiness, return a `SandboxDescriptor` and `t3-runtime` service endpoint. Use fake Modal client tests first.
+5. **Remote T3 Handshake**: the Modal T3 runtime creates the Cloud Worktree/Thread and starts the Coding Agent inside the Sandbox. The Operator machine should not create the task worktree for Modal tasks.
+6. **Slack Modal E2E**: run a tiny Slack task through Modal and verify one draft PR plus one Slack completion reply.
+7. **Cleanup Guardrails**: add idle timeout, basic status/reconnect, and a manual terminate/archive path. Do not block the MVP on full artifact archival.
+
 ## Contract Shape
 
 The contract is split intentionally:
@@ -465,7 +504,7 @@ Refactor existing Task runtime materialization through the Sandbox runtime using
 - Modified `apps/server/src/server.ts`.
 - Modified `apps/server/src/server.test.ts`.
 
-## Phase 3: Orchestrator Sandbox State
+## Phase 3: Persist Sandbox State And Runtime Endpoint
 
 **Blocked by**: Phase 1
 
@@ -473,14 +512,19 @@ Refactor existing Task runtime materialization through the Sandbox runtime using
 
 **What to build**
 
-Extend Orchestrator schema and mutations so Task materialization stores Sandbox identity/status, Sandbox Provider kind, provider refs, Environment refs, service descriptors, and failure summaries. This is a vertical slice for state visibility before Modal is introduced.
+Extend Orchestrator schema and mutations so Task materialization stores the minimum Sandbox identity/status needed to route later operations to the correct Task runtime. This phase is now the required bridge between the local MVP and the Modal MVP.
+
+The Orchestrator must persist enough of the returned `SandboxDescriptor` and `t3-runtime` service descriptor to answer: "for this Work Session, where is its T3 runtime right now?" That endpoint becomes the target for continuation, PR ensure, status, reconnect, and archive calls after materialization.
 
 **Acceptance criteria**
 
 - [ ] Project configuration can select `sandboxProvider`.
+- [ ] Project configuration can store minimal Modal config: app name, environment, image tag, resource defaults, timeout defaults, and allowed secret names.
 - [ ] Work Sessions can store Sandbox identity, provider refs, lifecycle status, Environment refs, and failure summaries.
+- [ ] Work Sessions or related records can store the active `t3-runtime` service endpoint for runtime routing.
 - [ ] Task events record materialization requested/provisioning/ready/failed/archived milestones.
 - [ ] Orchestrator materialization action records the Sandbox descriptor returned by T3.
+- [ ] Follow-up turn and PR ensure calls can resolve the active runtime endpoint from Work Session state instead of assuming global `T3_EXECUTION_BRIDGE_BASE_URL`.
 - [ ] Lifecycle callback handling updates Work Session and Task state with Sandbox references.
 - [ ] Repeated callbacks/materialization responses are idempotent.
 - [ ] `bun fmt`, `bun lint`, `bun typecheck`, and focused Orchestrator tests pass.
@@ -496,9 +540,13 @@ Extend Orchestrator schema and mutations so Task materialization stores Sandbox 
 
 **Implementation Notes**
 
+- Keep the persisted shape lean. Full Modal state stays behind the T3 Sandbox adapter; Convex only needs operational identity, status, failure summary, Worktree metadata, and connection endpoint descriptors.
+- The existing global bridge URL is still acceptable for the initial allocation/control bridge. It is not acceptable for Work Session-specific follow-up and PR operations once Modal tasks exist.
+- Treat missing runtime endpoint as a blocked/provisioning failure for Modal tasks, not as a fallback to local execution.
+
 **Implementation Footprint**
 
-## Phase 4: Modal Adapter Minimal Sandbox
+## Phase 4: Modal Adapter Minimal Runtime
 
 **Blocked by**: Phase 1, Phase 2
 
@@ -506,7 +554,9 @@ Extend Orchestrator schema and mutations so Task materialization stores Sandbox 
 
 **What to build**
 
-Implement the first Modal Cloud Sandbox adapter. It should create or reconnect a named Modal Sandbox, run the T3 runtime bootstrap command inside it, expose the T3 runtime port, wait for readiness, create connection credentials, and return a Cloud Sandbox descriptor. This phase does not need Snapshot acceleration or Convex service provisioning yet.
+Implement the first Modal Cloud Sandbox adapter. It should create or reconnect a named Modal Sandbox, run the T3 runtime bootstrap command inside it, expose the T3 runtime port, wait for readiness, and return a Cloud Sandbox descriptor with a `t3-runtime` service endpoint. This phase does not need Snapshot acceleration, browser support, or Convex service provisioning.
+
+This adapter should be tested with a fake Modal client first. The live Modal smoke is intentionally blocked on operator-provided environment variables and should not be attempted until requested.
 
 **Acceptance criteria**
 
@@ -517,6 +567,7 @@ Implement the first Modal Cloud Sandbox adapter. It should create or reconnect a
 - [ ] Adapter can reconnect with `modal.sandboxes.fromId` or `modal.sandboxes.fromName`.
 - [ ] Adapter tags Sandboxes with Project, Task, Work Session, provider, and environment metadata.
 - [ ] Adapter returns `SandboxDescriptor`, `ExecutionEnvironmentDescriptor`, service descriptor for `t3-runtime`, and connection metadata.
+- [ ] Adapter does not create the Task worktree on the Operator machine for Modal tasks.
 - [ ] Modal errors are normalized into stable Sandbox errors.
 - [ ] Unit tests use a fake Modal client and do not require Modal credentials.
 - [ ] Live Modal test is opt-in behind explicit environment flags.
@@ -534,9 +585,13 @@ Implement the first Modal Cloud Sandbox adapter. It should create or reconnect a
 
 **Implementation Notes**
 
+- Minimum server-side env/config needed for the live smoke should be documented before asking the operator for values. Expected values likely include Modal token id/secret, Modal environment, app name, image tag, repo clone auth/secret names, T3 runtime port, and allowed resource defaults.
+- Prefer one explicit bootstrap script/command for the Modal T3 runtime so local tests can assert command construction without requiring Modal.
+- The first version can use clean clone/setup on every task. Snapshot acceleration is deferred.
+
 **Implementation Footprint**
 
-## Phase 5: Cloud Worktree and T3 Runtime Handshake
+## Phase 5: Remote T3 Handshake And PR Routing
 
 **Blocked by**: Phase 4
 
@@ -544,18 +599,23 @@ Implement the first Modal Cloud Sandbox adapter. It should create or reconnect a
 
 **What to build**
 
-Make the Modal Sandbox do real Task work: clone or prepare the Project repo inside the Cloud Sandbox, create the Task Worktree Branch, start the T3 runtime from the Cloud Worktree, and allow the Workspace/Orchestrator to route the Primary Thread to that remote Environment.
+Make the Modal Sandbox do real Task work. The control bridge should allocate/reconnect the Modal Sandbox, but the T3 runtime inside Modal should create the Task Worktree Branch, create the Primary Thread, start the Coding Agent, and run PR orchestration against the Cloud Worktree.
+
+This phase is the heart of the MVP. It reconciles the current local behavior with the desired product behavior: the Operator machine may coordinate, but it must not be the machine doing the task execution for Modal tasks.
 
 **Acceptance criteria**
 
 - [ ] Modal materialization prepares a Cloud Worktree inside the Sandbox.
 - [ ] Branch naming uses the shared Sandbox naming helper.
 - [ ] T3 runtime inside Modal reports a stable Environment descriptor.
-- [ ] Workspace can connect to the Cloud Sandbox Environment through existing Environment APIs or a documented remote-environment extension.
+- [ ] Materialization can call into the Modal T3 runtime and receive the remote `t3ProjectId`, `t3ThreadId`, branch, worktree path, Sandbox descriptor, and services.
 - [ ] Primary Thread creation and first turn start inside the Cloud Sandbox, not the Operator machine.
+- [ ] Follow-up messages use the Work Session runtime endpoint and continue the same Modal T3 Thread.
+- [ ] PR ensure uses the Work Session runtime endpoint and creates the draft PR from the Cloud Worktree.
 - [ ] Validation commands/project scripts run inside the Cloud Sandbox.
 - [ ] Restart can reconnect to an existing healthy Cloud Sandbox.
-- [ ] Unhealthy Sandbox replacement preserves Task/Work Session history.
+- [ ] Slack completion reply includes the PR created from the Modal task branch.
+- [ ] Unhealthy Sandbox replacement is documented as follow-up unless needed for the live MVP smoke.
 - [ ] `bun fmt`, `bun lint`, `bun typecheck`, and focused remote Environment/materialization tests pass.
 
 **References**
@@ -569,52 +629,70 @@ Make the Modal Sandbox do real Task work: clone or prepare the Project repo insi
 
 **Implementation Notes**
 
+- The simplest shape is a control-plane T3 endpoint that asks Modal for a running Sandbox, then forwards an internal materialization request to the T3 server inside Modal. Avoid duplicating Thread/worktree creation logic in the Modal adapter if the remote T3 runtime can perform it through the same existing bridge contract.
+- PR routing must be tested explicitly. A passing Coding Agent completion is not enough if PR ensure still calls the local bridge.
+- The Slack E2E from the previous MVP is the regression template: tiny file change, draft PR, Convex `github_pr` link, Slack completion reply with PR URL.
+
 **Implementation Footprint**
 
-## Phase 6: Sandbox Snapshots
+## Phase 6: Slack Modal E2E And Cleanup Guardrails
 
-**Blocked by**: Phase 4
+**Blocked by**: Phase 5
 
-**User stories**: 21, 22, 23, 24, 25, 26, 27, 48, 49, 73, 88, 89, 92, 93, 94
+**User stories**: 1, 2, 15, 39, 41, 43, 50, 51, 57, 69, 72, 73, 83, 86, 87, 95
 
 **What to build**
 
-Add Sandbox Snapshot creation and selection. A Project should be able to build a prepared Modal image/Snapshot from default branch and setup scripts, store Snapshot metadata, and materialize Tasks from the latest healthy Snapshot with fallback to clean setup.
+Run the first live Slack-to-Modal-to-PR tracer bullet and add only the cleanup guardrails required to keep the MVP safe. This phase is where implementation should pause and ask the operator for Modal environment variables and credentials before attempting the live Modal smoke.
+
+**Acceptance criteria**
+
+- [ ] Required Modal env vars and secret names are documented before live testing.
+- [ ] Live test only runs after the operator provides/approves Modal env vars.
+- [ ] Slack `#testing` task creates a Modal-backed Work Session.
+- [ ] Modal dashboard/provider state shows exactly one named Sandbox for the test Work Session.
+- [ ] The requested file change is made inside the Modal Cloud Worktree.
+- [ ] Draft PR is created from the Modal task branch.
+- [ ] Convex stores the `github_pr` link and Sandbox references.
+- [ ] Slack receives one completion reply with the PR URL.
+- [ ] Modal Sandbox has conservative timeout/idle timeout configured.
+- [ ] A manual terminate/archive path exists or is documented with exact command/operator steps for the MVP.
+- [ ] `bun fmt`, `bun lint`, `bun typecheck`, and focused tests pass after live validation notes are recorded.
+
+**References**
+
+- Slack `#testing`
+- `apps/orchestrator/convex/t3Runtime.ts`
+- `apps/orchestrator/convex/taskEvents.ts`
+- `apps/orchestrator/convex/taskExternalLinks.ts`
+- `apps/server/src/sandbox/modal/*`
+- `apps/server/src/executionBridge/runStart.ts`
+- `apps/server/src/sourceControl/GitHubCli.ts`
+
+**Implementation Notes**
+
+- Do not leave Convex pointing at a local tunnel or stale Modal runtime endpoint after testing.
+- Keep the first live Modal task tiny and deterministic, matching the prior Slack PR orchestration E2E pattern.
+- Stop before the live Modal smoke and ask the operator for Modal credentials/config values. Do not invent placeholder credentials or run cloud allocation without explicit values.
+
+**Implementation Footprint**
+
+## Phase 7: Deferred Sandbox Platform Backlog
+
+**Blocked by**: Phase 6
+
+**User stories**: 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 40, 48, 49, 63, 64, 65, 73, 83, 85, 88, 89, 92, 93, 94, 95
+
+**What to build**
+
+After the Modal tracer bullet works, expand the Sandbox platform: Snapshots, task-scoped Convex deployment, browser/dev-server services, artifact archival, metrics, cleanup jobs, and richer Workspace visibility. These are important, but they should not block the first Modal-backed Slack Task MVP.
 
 **Acceptance criteria**
 
 - [ ] Project config can declare Snapshot policy and setup commands.
 - [ ] Snapshot creation records source branch, commit, created time, setup outcome, image id, and failure details.
 - [ ] Modal adapter can use `sandbox.snapshotFilesystem`, `sandbox.snapshotDirectory`, `sandbox.mountImage`, `Image#dockerfileCommands`, and `Image#build` where appropriate.
-- [ ] Materialization selects the latest healthy non-stale Snapshot.
-- [ ] Materialization falls back to clean setup when no usable Snapshot exists.
-- [ ] Snapshot failures are visible in Task events or Project diagnostics.
-- [ ] Snapshot age and startup latency metrics are emitted.
-- [ ] `bun fmt`, `bun lint`, `bun typecheck`, and focused Snapshot tests pass.
-
-**References**
-
-- [Modal Snapshot docs](https://modal.com/docs/guide/sandbox-memory-snapshots)
-- `modal@0.7.4` TypeScript exports: `Sandbox#snapshotFilesystem`, `Sandbox#snapshotDirectory`, `Sandbox#mountImage`, `Image`, `ImageDockerfileCommandsParams`
-- `apps/server/src/project/Layers/ProjectSetupScriptRunner.ts`
-- `apps/orchestrator/convex/projects.ts`
-
-**Implementation Notes**
-
-**Implementation Footprint**
-
-## Phase 7: Sandbox Services and Convex Deployment
-
-**Blocked by**: Phase 5
-
-**User stories**: 28, 29, 30, 31, 32, 33, 34, 35, 40, 63, 64, 65, 83, 85, 95
-
-**What to build**
-
-Add Sandbox Service provisioning with a first concrete service: Task-scoped Convex deployment. Keep browser service as a descriptor-only deferred service. Service failures should be distinct from Coding Agent failures.
-
-**Acceptance criteria**
-
+- [ ] Materialization selects the latest healthy non-stale Snapshot with clean setup fallback.
 - [ ] Sandbox Service request/descriptor flow supports `convex`, `dev-server`, `browser`, `terminal`, and `custom`.
 - [ ] Project config can request Convex as a required Sandbox Service.
 - [ ] Modal adapter provisions Convex inside the Cloud Sandbox with Project-approved secrets.
@@ -622,12 +700,15 @@ Add Sandbox Service provisioning with a first concrete service: Task-scoped Conv
 - [ ] Browser service can appear as `requested` or `deferred` descriptor without functional browser support.
 - [ ] Primary Thread starts after required services are ready.
 - [ ] Optional service failures do not block safe investigation work.
-- [ ] `bun fmt`, `bun lint`, `bun typecheck`, and focused Sandbox Service tests pass.
+- [ ] Snapshot age, startup latency, active sandbox count, and cleanup metrics are emitted.
+- [ ] `bun fmt`, `bun lint`, `bun typecheck`, and focused Snapshot/Sandbox Service tests pass.
 
 **References**
 
 - `apps/orchestrator/convex/projects.ts`
 - `apps/server/src/project/Layers/ProjectSetupScriptRunner.ts`
+- [Modal Snapshot docs](https://modal.com/docs/guide/sandbox-memory-snapshots)
+- `modal@0.7.4` TypeScript exports: `Sandbox#snapshotFilesystem`, `Sandbox#snapshotDirectory`, `Sandbox#mountImage`, `Image`, `ImageDockerfileCommandsParams`
 - `modal@0.7.4` TypeScript exports: `Secret`, `SecretService`, `SandboxExecParams`, `ContainerProcess`
 - Convex CLI/project docs as needed during implementation.
 
@@ -742,6 +823,31 @@ Run these before considering the plan complete:
 - `bun typecheck`
 - Focused tests for touched packages/modules with `bun run test`, never `bun test`.
 - Opt-in Modal live smoke only when credentials are intentionally provided.
+
+## MVP Credential-Free Test Gate
+
+Before requesting Modal environment variables, the implementation should pass this focused set:
+
+```sh
+cd /Users/vivek/Affil/t3code/packages/sandbox
+bun run test
+
+cd /Users/vivek/Affil/t3code/packages/contracts
+bun run test -- src/sandbox.test.ts src/executionBridge.test.ts
+
+cd /Users/vivek/Affil/t3code/apps/server
+bun run test -- src/executionBridge/runStart.materialize.test.ts src/executionBridge/http.test.ts
+
+cd /Users/vivek/Affil/t3code/apps/orchestrator
+bun run test -- src/executionLifecycle.test.ts src/domain/taskStatus.test.ts
+```
+
+Add these before the live Modal smoke:
+
+- Modal provider unit tests using a fake Modal client for create/reconnect/error mapping.
+- Server registry tests proving `providerKind: "modal"` resolves to the Modal adapter when configured.
+- Runtime routing tests proving follow-up turns and PR ensure use the Work Session `t3-runtime` endpoint for Modal tasks.
+- A materialization test proving Modal allocation does not create a local task worktree or local task turn.
 
 ## Done Criteria
 
