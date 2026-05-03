@@ -390,7 +390,7 @@ export interface ChatComposerProps {
     isLastQuestion: boolean;
     canAdvance: boolean;
     customAnswer: string;
-    activeQuestion: { id: string } | null;
+    activeQuestion: { id: string; multiSelect?: boolean | undefined } | null;
   } | null;
   activePendingResolvedAnswers: Record<string, unknown> | null;
   activePendingIsResponding: boolean;
@@ -1942,7 +1942,15 @@ export const ChatComposer = memo(
               isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border",
               composerProviderState.composerSurfaceClassName,
             )}
-            onFocusCapture={() => {
+            onFocusCapture={(event) => {
+              const activeElement = event.target;
+              if (
+                isComposerCollapsedMobile &&
+                activeElement instanceof HTMLElement &&
+                activeElement.closest('[data-chat-composer-collapsed-controls="true"]')
+              ) {
+                return;
+              }
               if (composerBlurFrameRef.current !== null) {
                 window.cancelAnimationFrame(composerBlurFrameRef.current);
                 composerBlurFrameRef.current = null;
@@ -1982,7 +1990,10 @@ export const ChatComposer = memo(
               ) : null)}
 
             {isComposerCollapsedMobile && activePendingApproval ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+              <div
+                className="rounded-t-[19px] border-b border-border/65 bg-muted/20"
+                data-chat-composer-collapsed-controls="true"
+              >
                 <ComposerPendingApprovalPanel
                   approval={activePendingApproval}
                   pendingCount={pendingApprovals.length}
@@ -1996,7 +2007,10 @@ export const ChatComposer = memo(
                 </div>
               </div>
             ) : isComposerCollapsedMobile && pendingUserInputs.length > 0 ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+              <div
+                className="rounded-t-[19px] border-b border-border/65 bg-muted/20"
+                data-chat-composer-collapsed-controls="true"
+              >
                 <ComposerPendingUserInputPanel
                   pendingUserInputs={pendingUserInputs}
                   respondingRequestIds={respondingRequestIds}
@@ -2005,22 +2019,24 @@ export const ChatComposer = memo(
                   onToggleOption={onSelectActivePendingUserInputOption}
                   onAdvance={onAdvanceActivePendingUserInput}
                 />
-                <div className="flex items-center justify-end px-3 pb-3 sm:px-4">
-                  <ComposerPrimaryActions
-                    compact
-                    pendingAction={pendingPrimaryAction}
-                    isRunning={false}
-                    showPlanFollowUpPrompt={false}
-                    promptHasText={false}
-                    isSendBusy={isSendBusy}
-                    isConnecting={isConnecting}
-                    isPreparingWorktree={false}
-                    hasSendableContent={false}
-                    onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
-                    onInterrupt={handleInterruptPrimaryAction}
-                    onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
-                  />
-                </div>
+                {activePendingProgress?.activeQuestion?.multiSelect ? (
+                  <div className="flex items-center justify-end px-3 pb-3 sm:px-4">
+                    <ComposerPrimaryActions
+                      compact
+                      pendingAction={pendingPrimaryAction}
+                      isRunning={false}
+                      showPlanFollowUpPrompt={false}
+                      promptHasText={false}
+                      isSendBusy={isSendBusy}
+                      isConnecting={isConnecting}
+                      isPreparingWorktree={false}
+                      hasSendableContent={false}
+                      onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
+                      onInterrupt={handleInterruptPrimaryAction}
+                      onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
+                    />
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
