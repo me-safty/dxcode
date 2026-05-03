@@ -1348,7 +1348,16 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       })
       .pipe(Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void))));
 
-    const created = yield* findOpenPr(cwd, headContext, repositoryNameWithOwner);
+    const created = yield* Effect.gen(function* () {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const pullRequest = yield* findOpenPr(cwd, headContext, repositoryNameWithOwner);
+        if (pullRequest !== null) {
+          return pullRequest;
+        }
+        yield* Effect.sleep(Duration.millis(500));
+      }
+      return null;
+    });
     if (!created) {
       return {
         status: "created" as const,
