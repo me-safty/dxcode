@@ -444,6 +444,48 @@ describe("when: working tree has local changes", () => {
       },
     ]);
   });
+
+  it("buildMenuItems enables push for ahead commits while local changes remain uncommitted", () => {
+    const items = buildMenuItems(
+      status({
+        refName: "feature/test",
+        hasWorkingTreeChanges: true,
+        aheadCount: 1,
+        workingTree: {
+          files: [{ path: ".vercel/project.json", insertions: 1, deletions: 0 }],
+          insertions: 1,
+          deletions: 0,
+        },
+      }),
+      false,
+    );
+    assert.deepEqual(items, [
+      {
+        id: "commit",
+        label: "Commit",
+        disabled: false,
+        icon: "commit",
+        kind: "open_dialog",
+        dialogAction: "commit",
+      },
+      {
+        id: "push",
+        label: "Push",
+        disabled: false,
+        icon: "push",
+        kind: "open_dialog",
+        dialogAction: "push",
+      },
+      {
+        id: "pr",
+        label: "Create PR",
+        disabled: true,
+        icon: "pr",
+        kind: "open_dialog",
+        dialogAction: "create_pr",
+      },
+    ]);
+  });
 });
 
 describe("when: on default ref without open PR", () => {
