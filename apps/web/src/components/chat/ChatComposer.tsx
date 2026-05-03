@@ -1030,6 +1030,17 @@ export const ChatComposer = memo(
           : null,
       [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
     );
+    const collapsedComposerPrimaryActionDisabled = activePendingProgress
+      ? activePendingIsResponding ||
+        (activePendingProgress.isLastQuestion
+          ? !activePendingResolvedAnswers
+          : !activePendingProgress.canAdvance)
+      : isSendBusy || isConnecting || !composerSendState.hasSendableContent;
+    const collapsedComposerPrimaryActionLabel = activePendingProgress
+      ? activePendingProgress.isLastQuestion
+        ? "Submit answer"
+        : "Next question"
+      : "Send message";
 
     // ------------------------------------------------------------------
     // Prompt helpers
@@ -1970,7 +1981,50 @@ export const ChatComposer = memo(
                 </div>
               ) : null)}
 
-            {isComposerCollapsedMobile ? (
+            {isComposerCollapsedMobile && activePendingApproval ? (
+              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+                <ComposerPendingApprovalPanel
+                  approval={activePendingApproval}
+                  pendingCount={pendingApprovals.length}
+                />
+                <div className="flex flex-wrap items-center justify-end gap-2 px-3 pb-3 sm:px-4">
+                  <ComposerPendingApprovalActions
+                    requestId={activePendingApproval.requestId}
+                    isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
+                    onRespondToApproval={onRespondToApproval}
+                  />
+                </div>
+              </div>
+            ) : isComposerCollapsedMobile && pendingUserInputs.length > 0 ? (
+              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+                <ComposerPendingUserInputPanel
+                  pendingUserInputs={pendingUserInputs}
+                  respondingRequestIds={respondingRequestIds}
+                  answers={activePendingDraftAnswers}
+                  questionIndex={activePendingQuestionIndex}
+                  onToggleOption={onSelectActivePendingUserInputOption}
+                  onAdvance={onAdvanceActivePendingUserInput}
+                />
+                <div className="flex items-center justify-end px-3 pb-3 sm:px-4">
+                  <ComposerPrimaryActions
+                    compact
+                    pendingAction={pendingPrimaryAction}
+                    isRunning={false}
+                    showPlanFollowUpPrompt={false}
+                    promptHasText={false}
+                    isSendBusy={isSendBusy}
+                    isConnecting={isConnecting}
+                    isPreparingWorktree={false}
+                    hasSendableContent={false}
+                    onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
+                    onInterrupt={handleInterruptPrimaryAction}
+                    onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {isComposerCollapsedMobile && !activePendingApproval ? (
               <div className="flex items-center justify-between gap-2 px-3 py-2">
                 <button
                   type="button"
@@ -1992,8 +2046,8 @@ export const ChatComposer = memo(
                 <button
                   type="button"
                   className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/90 text-primary-foreground disabled:opacity-30"
-                  disabled={isSendBusy || isConnecting || !composerSendState.hasSendableContent}
-                  aria-label="Send message"
+                  disabled={collapsedComposerPrimaryActionDisabled}
+                  aria-label={collapsedComposerPrimaryActionLabel}
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={(event) => {
                     event.stopPropagation();

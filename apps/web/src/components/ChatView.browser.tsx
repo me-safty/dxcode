@@ -2520,6 +2520,77 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("shows pending user input choices while the mobile composer stays collapsed", async () => {
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot: createSnapshotWithPendingUserInput(),
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-mobile-collapsed="true"]'),
+        "Mobile composer should stay collapsed for pending user input.",
+      );
+      expect(document.body.textContent).toContain("What should this change cover?");
+
+      const firstOption = await waitForButtonContainingText("Tight");
+      firstOption.click();
+
+      await vi.waitFor(
+        () => {
+          expect(
+            document.querySelector('[data-chat-composer-mobile-collapsed="true"]'),
+          ).toBeTruthy();
+          expect(document.body.textContent).toContain(
+            "How aggressive should the imaginary plan be?",
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const finalOption = await waitForButtonContainingText("Conservative");
+      finalOption.click();
+
+      await vi.waitFor(
+        () => {
+          const dispatchRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.user-input.respond",
+          ) as
+            | {
+                _tag: string;
+                type?: string;
+                requestId?: string;
+                answers?: Record<string, unknown>;
+              }
+            | undefined;
+
+          expect(dispatchRequest).toMatchObject({
+            _tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+            type: "thread.user-input.respond",
+            requestId: "req-browser-user-input",
+            answers: {
+              scope: "Tight",
+              risk: "Conservative",
+            },
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps custom provider instance ids when bootstrapping a local draft thread", async () => {
     setDraftThreadWithoutWorktree();
     const openRouterInstanceId = ProviderInstanceId.make("claude_openrouter");
