@@ -10,6 +10,8 @@ const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_WORKDIR = "/workspace/t3code";
 const DEFAULT_COMMAND = ["/app/apps/server/scripts/modal-runtime-entrypoint.sh"] as const;
 const DEFAULT_INSTALL_COMMAND = "bun install --frozen-lockfile";
+const SANDBOX_EXEC_PATH =
+  "/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 type Args = {
   readonly expectedCommit?: string | undefined;
@@ -135,6 +137,9 @@ async function runSandboxCommand(input: {
     stdout: "pipe",
     stderr: "pipe",
     workdir: input.workdir,
+    env: {
+      PATH: SANDBOX_EXEC_PATH,
+    },
     timeoutMs: input.timeoutMs,
   });
   const [stdout, stderr, exitCode] = await Promise.all([
