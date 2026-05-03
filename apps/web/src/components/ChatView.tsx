@@ -2801,8 +2801,6 @@ export default function ChatView(props: ChatViewProps) {
           },
         };
       });
-      promptRef.current = "";
-      composerRef.current?.resetCursorState({ cursor: 0 });
     },
     [activePendingProgress?.activeQuestion, activePendingUserInput],
   );
