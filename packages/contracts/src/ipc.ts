@@ -162,6 +162,7 @@ export interface DesktopBridge {
   removeSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<void>;
   getServerExposureState: () => Promise<DesktopServerExposureState>;
   setServerExposureMode: (mode: DesktopServerExposureMode) => Promise<DesktopServerExposureState>;
+  getPathForFile: (file: File) => string | null;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
@@ -197,6 +198,7 @@ export interface LocalApi {
   shell: {
     openInEditor: (cwd: string, editor: EditorId) => Promise<void>;
     openExternal: (url: string) => Promise<void>;
+    getPathForFile: (file: File) => Promise<string | null>;
   };
   contextMenu: {
     show: <T extends string>(

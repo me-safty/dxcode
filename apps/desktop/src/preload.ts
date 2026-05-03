@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { DesktopBridge } from "@t3tools/contracts";
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.invoke(REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL, environmentId),
   getServerExposureState: () => ipcRenderer.invoke(GET_SERVER_EXPOSURE_STATE_CHANNEL),
   setServerExposureMode: (mode) => ipcRenderer.invoke(SET_SERVER_EXPOSURE_MODE_CHANNEL, mode),
+  getPathForFile: (file) => webUtils.getPathForFile(file),
   pickFolder: (options) => ipcRenderer.invoke(PICK_FOLDER_CHANNEL, options),
   confirm: (message) => ipcRenderer.invoke(CONFIRM_CHANNEL, message),
   setTheme: (theme) => ipcRenderer.invoke(SET_THEME_CHANNEL, theme),

@@ -54,6 +54,10 @@ export function createLocalApi(rpcClient: WsRpcClient): LocalApi {
 
         window.open(url, "_blank", "noopener,noreferrer");
       },
+      getPathForFile: async (file) => {
+        const resolvedPath = window.desktopBridge?.getPathForFile(file);
+        return resolvedPath || null;
+      },
     },
     contextMenu: {
       show: async <T extends string>(
