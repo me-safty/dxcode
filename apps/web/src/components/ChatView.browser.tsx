@@ -2476,6 +2476,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
         "Mobile composer should expand when tapped.",
       );
       const composerEditor = await waitForComposerEditor();
+      await vi.waitFor(
+        () => {
+          expect(document.activeElement).toBe(composerEditor);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
       await page.getByTestId("composer-editor").fill("send and blur");
 
       await vi.waitFor(

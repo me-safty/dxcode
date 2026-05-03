@@ -791,6 +791,9 @@ export const ChatComposer = memo(
     const composerMenuItemsRef = useRef<ComposerCommandItem[]>([]);
     const activeComposerMenuItemRef = useRef<ComposerCommandItem | null>(null);
     const composerBlurFrameRef = useRef<number | null>(null);
+    const mobileComposerExpandFrameRef = useRef<number | null>(null);
+    const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
+    const mobileComposerExpandInFlightRef = useRef(false);
     const dragDepthRef = useRef(0);
 
     // ------------------------------------------------------------------
@@ -1593,9 +1596,25 @@ export const ChatComposer = memo(
       [blurMobileComposerAfterSend, onSend, shouldBlurMobileComposerOnSubmit],
     );
     const expandMobileComposer = useCallback(() => {
+      if (composerBlurFrameRef.current !== null) {
+        window.cancelAnimationFrame(composerBlurFrameRef.current);
+        composerBlurFrameRef.current = null;
+      }
+      if (mobileComposerExpandFrameRef.current !== null) {
+        window.cancelAnimationFrame(mobileComposerExpandFrameRef.current);
+      }
+      if (mobileComposerExpandReleaseFrameRef.current !== null) {
+        window.cancelAnimationFrame(mobileComposerExpandReleaseFrameRef.current);
+      }
+      mobileComposerExpandInFlightRef.current = true;
       setIsComposerFocused(true);
-      window.requestAnimationFrame(() => {
+      mobileComposerExpandFrameRef.current = window.requestAnimationFrame(() => {
+        mobileComposerExpandFrameRef.current = null;
         composerEditorRef.current?.focusAtEnd();
+        mobileComposerExpandReleaseFrameRef.current = window.requestAnimationFrame(() => {
+          mobileComposerExpandReleaseFrameRef.current = null;
+          mobileComposerExpandInFlightRef.current = false;
+        });
       });
     }, []);
 
@@ -1740,11 +1759,17 @@ export const ChatComposer = memo(
       void onImplementPlanInNewThread();
     }, [onImplementPlanInNewThread]);
     const scheduleComposerCollapseCheck = useCallback(() => {
+      if (mobileComposerExpandInFlightRef.current) {
+        return;
+      }
       if (composerBlurFrameRef.current !== null) {
         window.cancelAnimationFrame(composerBlurFrameRef.current);
       }
       composerBlurFrameRef.current = window.requestAnimationFrame(() => {
         composerBlurFrameRef.current = null;
+        if (mobileComposerExpandInFlightRef.current) {
+          return;
+        }
         const composerSurface = composerSurfaceRef.current;
         const activeElement = document.activeElement;
         if (
@@ -1762,6 +1787,12 @@ export const ChatComposer = memo(
       return () => {
         if (composerBlurFrameRef.current !== null) {
           window.cancelAnimationFrame(composerBlurFrameRef.current);
+        }
+        if (mobileComposerExpandFrameRef.current !== null) {
+          window.cancelAnimationFrame(mobileComposerExpandFrameRef.current);
+        }
+        if (mobileComposerExpandReleaseFrameRef.current !== null) {
+          window.cancelAnimationFrame(mobileComposerExpandReleaseFrameRef.current);
         }
       };
     }, []);
@@ -1949,6 +1980,7 @@ export const ChatComposer = memo(
                       ? "text-foreground"
                       : "text-muted-foreground/35",
                   )}
+                  onPointerDown={(event) => event.preventDefault()}
                   onClick={expandMobileComposer}
                   aria-label="Expand composer"
                 >
