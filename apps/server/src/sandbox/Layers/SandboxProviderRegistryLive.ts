@@ -6,11 +6,15 @@ import {
   SandboxProviderRegistry,
 } from "../Services/SandboxProviderRegistry.ts";
 import { makeLocalSandboxProvider } from "./LocalSandboxProvider.ts";
+import { makeModalSandboxProvider } from "./ModalSandboxProvider.ts";
 
 export const SandboxProviderRegistryLive = Layer.effect(
   SandboxProviderRegistry,
   Effect.gen(function* () {
     const localProvider = yield* makeLocalSandboxProvider;
-    return fromBaseSandboxProviderRegistry(makeSandboxProviderRegistry([localProvider]));
+    const modalProvider = makeModalSandboxProvider();
+    return fromBaseSandboxProviderRegistry(
+      makeSandboxProviderRegistry([localProvider, modalProvider]),
+    );
   }),
 );

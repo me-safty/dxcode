@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect";
 
-import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 export const SandboxId = TrimmedNonEmptyString.pipe(Schema.brand("SandboxId"));
 export type SandboxId = typeof SandboxId.Type;
@@ -83,14 +83,16 @@ export const SandboxFailureDescriptor = Schema.Struct({
 });
 export type SandboxFailureDescriptor = typeof SandboxFailureDescriptor.Type;
 
+const PositiveNumber = Schema.Number.check(Schema.isGreaterThan(0));
+
 export const SandboxResourceSpec = Schema.Struct({
-  cpu: Schema.optional(Schema.Number),
-  cpuLimit: Schema.optional(Schema.Number),
-  memoryMiB: Schema.optional(NonNegativeInt),
-  memoryLimitMiB: Schema.optional(NonNegativeInt),
+  cpu: Schema.optional(PositiveNumber),
+  cpuLimit: Schema.optional(PositiveNumber),
+  memoryMiB: Schema.optional(PositiveInt),
+  memoryLimitMiB: Schema.optional(PositiveInt),
   gpu: Schema.optional(TrimmedNonEmptyString),
-  timeoutMs: Schema.optional(NonNegativeInt),
-  idleTimeoutMs: Schema.optional(NonNegativeInt),
+  timeoutMs: Schema.optional(PositiveInt),
+  idleTimeoutMs: Schema.optional(PositiveInt),
   regions: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type SandboxResourceSpec = typeof SandboxResourceSpec.Type;
@@ -132,6 +134,42 @@ export type SandboxServiceKind = typeof SandboxServiceKind.Type;
 const SandboxMetadata = Schema.Record(Schema.String, Schema.Unknown);
 export type SandboxMetadata = typeof SandboxMetadata.Type;
 
+export const SandboxServiceEndpointProtocol = Schema.Literals([
+  "http",
+  "https",
+  "ws",
+  "wss",
+  "tcp",
+]);
+export type SandboxServiceEndpointProtocol = typeof SandboxServiceEndpointProtocol.Type;
+
+export const SandboxServiceEndpointAccessMode = Schema.Literals(["server", "browser", "private"]);
+export type SandboxServiceEndpointAccessMode = typeof SandboxServiceEndpointAccessMode.Type;
+
+export const SandboxServiceEndpointAuthKind = Schema.Literals([
+  "none",
+  "bridge-shared-secret",
+  "provider-token",
+  "credential-ref",
+]);
+export type SandboxServiceEndpointAuthKind = typeof SandboxServiceEndpointAuthKind.Type;
+
+export const SandboxServiceEndpointAuth = Schema.Struct({
+  kind: SandboxServiceEndpointAuthKind,
+  credentialRef: Schema.optional(TrimmedNonEmptyString),
+  expiresAt: Schema.optional(IsoDateTime),
+});
+export type SandboxServiceEndpointAuth = typeof SandboxServiceEndpointAuth.Type;
+
+export const SandboxServiceEndpointDescriptor = Schema.Struct({
+  url: TrimmedNonEmptyString,
+  protocol: SandboxServiceEndpointProtocol,
+  accessMode: SandboxServiceEndpointAccessMode,
+  label: Schema.optional(TrimmedNonEmptyString),
+  auth: Schema.optional(SandboxServiceEndpointAuth),
+});
+export type SandboxServiceEndpointDescriptor = typeof SandboxServiceEndpointDescriptor.Type;
+
 export const SandboxServiceDescriptor = Schema.Struct({
   serviceId: SandboxServiceId,
   kind: SandboxServiceKind,
@@ -139,6 +177,7 @@ export const SandboxServiceDescriptor = Schema.Struct({
   label: Schema.optional(TrimmedNonEmptyString),
   endpointUrl: Schema.optional(TrimmedNonEmptyString),
   healthCheckUrl: Schema.optional(TrimmedNonEmptyString),
+  endpoints: Schema.optional(Schema.Array(SandboxServiceEndpointDescriptor)),
   metadata: Schema.optional(SandboxMetadata),
   failure: Schema.optional(SandboxFailureDescriptor),
 });
@@ -201,14 +240,26 @@ export const SandboxDescriptor = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   failure: Schema.optional(SandboxFailureDescriptor),
+  idempotencyKey: Schema.optional(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
 export type SandboxDescriptor = typeof SandboxDescriptor.Type;
 
+export const SandboxRuntimeProviderConfig = Schema.Struct({
+  appName: Schema.optional(TrimmedNonEmptyString),
+  imageTag: Schema.optional(TrimmedNonEmptyString),
+  runtimePort: Schema.optional(PositiveInt),
+  bootstrapCommandRef: Schema.optional(TrimmedNonEmptyString),
+  configVersion: Schema.optional(TrimmedNonEmptyString),
+  allowedSecretNames: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+});
+export type SandboxRuntimeProviderConfig = typeof SandboxRuntimeProviderConfig.Type;
+
 export const SandboxRuntimeSelection = Schema.Struct({
   providerKind: SandboxProviderKind.pipe(Schema.withDecodingDefault(Effect.succeed("local"))),
   resources: Schema.optional(SandboxResourceSpec),
   environment: Schema.optional(TrimmedNonEmptyString),
+  providerConfig: Schema.optional(SandboxRuntimeProviderConfig),
 });
 export type SandboxRuntimeSelection = typeof SandboxRuntimeSelection.Type;

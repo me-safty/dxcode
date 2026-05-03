@@ -142,6 +142,12 @@ export const makeSandboxRuntime = Effect.gen(function* () {
         ...(request.sandbox?.resources !== undefined
           ? { resources: request.sandbox.resources }
           : {}),
+        ...(request.sandbox?.environment !== undefined
+          ? { environment: request.sandbox.environment }
+          : {}),
+        ...(request.sandbox?.providerConfig !== undefined
+          ? { providerConfig: request.sandbox.providerConfig }
+          : {}),
         services: defaultSandboxServices(request),
         idempotencyKey,
         startCodingAgent: request.startCodingAgent,

@@ -4,6 +4,7 @@ import type {
   SandboxId,
   SandboxProviderKind,
   SandboxResourceSpec,
+  SandboxRuntimeProviderConfig,
   SandboxServiceDescriptor,
   SandboxServiceRequest,
   SandboxSnapshotDescriptor,
@@ -26,6 +27,8 @@ export interface SandboxMaterializeTaskRuntimeInput {
     readonly projectKey?: string;
   };
   readonly resources?: SandboxResourceSpec;
+  readonly environment?: string;
+  readonly providerConfig?: SandboxRuntimeProviderConfig;
   readonly services?: ReadonlyArray<SandboxServiceRequest>;
   readonly idempotencyKey: string;
   readonly snapshot?: SandboxSnapshotDescriptor;

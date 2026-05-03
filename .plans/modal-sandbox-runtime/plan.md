@@ -146,6 +146,7 @@ Descriptors:
   - optional `label`
   - optional `endpointUrl`
   - optional `healthCheckUrl`
+  - optional `endpoints`: typed endpoint descriptors with `url`, `protocol`, `accessMode`, and auth metadata.
   - optional `metadata`
   - optional `failure`
 - `SandboxArtifactDescriptor`
@@ -170,8 +171,17 @@ Descriptors:
   - `services`
   - `artifacts`
   - optional `failure`
+  - optional `idempotencyKey`
   - `createdAt`
   - `updatedAt`
+
+Runtime selection:
+
+- `SandboxRuntimeSelection`
+  - `providerKind`
+  - optional `resources`
+  - optional `environment`
+  - optional `providerConfig`: Modal-oriented non-secret config such as app name, image tag, runtime port, bootstrap command reference, config version, and allowed secret names.
 
 Execution bridge request/response changes:
 
@@ -187,6 +197,8 @@ Execution bridge request/response changes:
 - Add `TaskRuntimeReconnectRequest/Response` for reconnecting to an existing Cloud Sandbox Environment.
 - Add `TaskRuntimeArchiveRequest/Response` for artifact capture and Sandbox teardown.
 - Add `TaskRuntimeSandboxStatusQuery/Response` for Workspace and Orchestrator status refresh.
+- Add `TaskRuntimeSandboxLifecycleEvent` so Sandbox lifecycle/status updates are separate from Coding Agent run lifecycle updates.
+- Include optional provider refs on reconnect/archive/status requests and optional Sandbox/Environment refs on PR ensure requests.
 
 ### Package Interface
 
@@ -518,16 +530,16 @@ The Orchestrator must persist enough of the returned `SandboxDescriptor` and `t3
 
 **Acceptance criteria**
 
-- [ ] Project configuration can select `sandboxProvider`.
-- [ ] Project configuration can store minimal Modal config: app name, environment, image tag, resource defaults, timeout defaults, and allowed secret names.
-- [ ] Work Sessions can store Sandbox identity, provider refs, lifecycle status, Environment refs, and failure summaries.
-- [ ] Work Sessions or related records can store the active `t3-runtime` service endpoint for runtime routing.
+- [x] Project configuration can select `sandboxProvider`.
+- [x] Project configuration can store minimal Modal config: app name, environment, image tag, resource defaults, timeout defaults, and allowed secret names.
+- [x] Work Sessions can store Sandbox identity, provider refs, lifecycle status, Environment refs, and failure summaries.
+- [x] Work Sessions or related records can store the active `t3-runtime` service endpoint for runtime routing.
 - [ ] Task events record materialization requested/provisioning/ready/failed/archived milestones.
-- [ ] Orchestrator materialization action records the Sandbox descriptor returned by T3.
-- [ ] Follow-up turn and PR ensure calls can resolve the active runtime endpoint from Work Session state instead of assuming global `T3_EXECUTION_BRIDGE_BASE_URL`.
+- [x] Orchestrator materialization action records the Sandbox descriptor returned by T3.
+- [x] Follow-up turn and PR ensure calls can resolve the active runtime endpoint from Work Session state instead of assuming global `T3_EXECUTION_BRIDGE_BASE_URL`.
 - [ ] Lifecycle callback handling updates Work Session and Task state with Sandbox references.
-- [ ] Repeated callbacks/materialization responses are idempotent.
-- [ ] `bun fmt`, `bun lint`, `bun typecheck`, and focused Orchestrator tests pass.
+- [x] Repeated materialization responses are idempotent.
+- [x] `bun fmt`, `bun lint`, `bun typecheck`, and focused Orchestrator tests pass.
 
 **References**
 
@@ -543,8 +555,27 @@ The Orchestrator must persist enough of the returned `SandboxDescriptor` and `t3
 - Keep the persisted shape lean. Full Modal state stays behind the T3 Sandbox adapter; Convex only needs operational identity, status, failure summary, Worktree metadata, and connection endpoint descriptors.
 - The existing global bridge URL is still acceptable for the initial allocation/control bridge. It is not acceptable for Work Session-specific follow-up and PR operations once Modal tasks exist.
 - Treat missing runtime endpoint as a blocked/provisioning failure for Modal tasks, not as a fallback to local execution.
+- Review tightened the Sandbox Service schema: `endpointUrl` remains for compatibility, but new code should prefer typed `endpoints[]` with explicit protocol, access mode, and auth metadata. Secret values are not stored in descriptors.
+- Review tightened Sandbox resources to positive finite values and added provider config to runtime selection so Modal app/image/runtime/secret-name choices are first-class rather than hidden in metadata.
+- Phase 3 implementation stores project-level Modal config and Work Session-level Sandbox identity/status/provider refs/service JSON/runtime endpoint. The denormalized `sandboxRuntimeEndpointUrl` is the routing source for follow-up turns and PR ensure.
+- Runtime routing now fails for Modal sessions with no persisted endpoint. Only local/legacy sessions can fall back to the global control bridge.
+- Materialization failures mark the Work Session and Task failed so a prepared Work Session does not remain stuck in `requested`.
 
 **Implementation Footprint**
+
+- Modified `packages/contracts/src/sandbox.ts`.
+- Modified `packages/contracts/src/sandbox.test.ts`.
+- Modified `packages/contracts/src/executionBridge.ts`.
+- Modified `packages/contracts/src/executionBridge.test.ts`.
+- Modified `apps/orchestrator/convex/schema.ts`.
+- Modified `apps/orchestrator/convex/projects.ts`.
+- Modified `apps/orchestrator/convex/workSessions.ts`.
+- Modified `apps/orchestrator/convex/tasks.ts`.
+- Modified `apps/orchestrator/convex/t3Runtime.ts`.
+- Modified `apps/orchestrator/src/t3/client.ts`.
+- Added `apps/orchestrator/src/t3/runtimeRouting.ts`.
+- Added `apps/orchestrator/src/t3/runtimeRouting.test.ts`.
+- Added `apps/orchestrator/src/t3/client.test.ts`.
 
 ## Phase 4: Modal Adapter Minimal Runtime
 
@@ -560,18 +591,18 @@ This adapter should be tested with a fake Modal client first. The live Modal smo
 
 **Acceptance criteria**
 
-- [ ] Modal SDK dependency is added only where the server adapter needs it.
-- [ ] `ModalClient` is constructed from server-side config and never from browser code.
-- [ ] Adapter uses `modal.apps.fromName`, `modal.images.fromRegistry`, and `modal.sandboxes.create`.
-- [ ] Adapter uses `SandboxCreateParams` for name, command, workdir, env, secrets, resources, ports, timeouts, and readiness probe.
-- [ ] Adapter can reconnect with `modal.sandboxes.fromId` or `modal.sandboxes.fromName`.
-- [ ] Adapter tags Sandboxes with Project, Task, Work Session, provider, and environment metadata.
-- [ ] Adapter returns `SandboxDescriptor`, `ExecutionEnvironmentDescriptor`, service descriptor for `t3-runtime`, and connection metadata.
-- [ ] Adapter does not create the Task worktree on the Operator machine for Modal tasks.
-- [ ] Modal errors are normalized into stable Sandbox errors.
-- [ ] Unit tests use a fake Modal client and do not require Modal credentials.
-- [ ] Live Modal test is opt-in behind explicit environment flags.
-- [ ] `bun fmt`, `bun lint`, `bun typecheck`, and focused Modal adapter tests pass.
+- [x] Modal SDK dependency is added only where the server adapter needs it.
+- [x] `ModalClient` is constructed from server-side config and never from browser code.
+- [x] Adapter uses `modal.apps.fromName`, `modal.images.fromRegistry`, and `modal.sandboxes.create`.
+- [x] Adapter uses `SandboxCreateParams` for name, command, workdir, env, secrets, resources, ports, timeouts, and readiness probe.
+- [x] Adapter can reconnect with `modal.sandboxes.fromName`.
+- [x] Adapter tags Sandboxes with Project, Task, Work Session, provider, and environment metadata.
+- [x] Adapter returns `SandboxDescriptor`, `ExecutionEnvironmentDescriptor`, service descriptor for `t3-runtime`, and connection metadata.
+- [x] Adapter does not create the Task worktree on the Operator machine for Modal tasks.
+- [x] Modal errors are normalized into stable Sandbox errors.
+- [x] Unit tests use a fake Modal client and do not require Modal credentials.
+- [x] Live Modal test is opt-in behind operator-provided Modal credentials and runtime config.
+- [x] `bun fmt`, `bun lint`, `bun typecheck`, and focused Modal adapter tests pass.
 
 **References**
 
@@ -588,8 +619,20 @@ This adapter should be tested with a fake Modal client first. The live Modal smo
 - Minimum server-side env/config needed for the live smoke should be documented before asking the operator for values. Expected values likely include Modal token id/secret, Modal environment, app name, image tag, repo clone auth/secret names, T3 runtime port, and allowed resource defaults.
 - Prefer one explicit bootstrap script/command for the Modal T3 runtime so local tests can assert command construction without requiring Modal.
 - The first version can use clean clone/setup on every task. Snapshot acceleration is deferred.
+- Added the `modal` JavaScript SDK only to `apps/server`; no browser package imports it.
+- The live adapter uses `ModalClient`, `modal.apps.fromName({ createIfMissing: true })`, `modal.images.fromRegistry`, `modal.sandboxes.create`, `Probe.withTcp`, encrypted ports, Modal Secrets by configured names, tags, `waitUntilReady`, tunnels, and `detach`.
+- The adapter uses a small `ModalSandboxClient` interface so unit tests exercise descriptor/endpoint/tag construction without Modal credentials.
+- This reaches the live Modal Sandbox creation checkpoint. The next test requires operator-provided credentials and a runtime image/command that actually starts a T3 execution bridge in the Sandbox.
 
 **Implementation Footprint**
+
+- Modified `bun.lock`.
+- Modified `apps/server/package.json`.
+- Modified `packages/sandbox/src/Provider.ts`.
+- Modified `apps/server/src/sandbox/Layers/SandboxRuntimeLive.ts`.
+- Modified `apps/server/src/sandbox/Layers/SandboxProviderRegistryLive.ts`.
+- Added `apps/server/src/sandbox/Layers/ModalSandboxProvider.ts`.
+- Added `apps/server/src/sandbox/Layers/ModalSandboxProvider.test.ts`.
 
 ## Phase 5: Remote T3 Handshake And PR Routing
 

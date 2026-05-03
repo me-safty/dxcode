@@ -685,6 +685,17 @@ export const getTaskRuntimeSeed = query({
         repoName: v.string(),
         sandboxWorkspaceRoot: v.string(),
         defaultBranch: v.string(),
+        sandboxProvider: v.optional(v.union(v.literal("local"), v.literal("modal"))),
+        modalAppName: v.optional(v.string()),
+        modalEnvironment: v.optional(v.string()),
+        modalImageTag: v.optional(v.string()),
+        modalCpu: v.optional(v.number()),
+        modalCpuLimit: v.optional(v.number()),
+        modalMemoryMiB: v.optional(v.number()),
+        modalMemoryLimitMiB: v.optional(v.number()),
+        modalTimeoutMs: v.optional(v.number()),
+        modalIdleTimeoutMs: v.optional(v.number()),
+        modalAllowedSecretNamesJson: v.optional(v.string()),
       }),
     }),
   ),
@@ -709,6 +720,27 @@ export const getTaskRuntimeSeed = query({
         repoName: project.repoName,
         sandboxWorkspaceRoot: project.sandboxWorkspaceRoot,
         defaultBranch: project.defaultBranch,
+        ...(project.sandboxProvider !== undefined
+          ? { sandboxProvider: project.sandboxProvider }
+          : {}),
+        ...(project.modalAppName !== undefined ? { modalAppName: project.modalAppName } : {}),
+        ...(project.modalEnvironment !== undefined
+          ? { modalEnvironment: project.modalEnvironment }
+          : {}),
+        ...(project.modalImageTag !== undefined ? { modalImageTag: project.modalImageTag } : {}),
+        ...(project.modalCpu !== undefined ? { modalCpu: project.modalCpu } : {}),
+        ...(project.modalCpuLimit !== undefined ? { modalCpuLimit: project.modalCpuLimit } : {}),
+        ...(project.modalMemoryMiB !== undefined ? { modalMemoryMiB: project.modalMemoryMiB } : {}),
+        ...(project.modalMemoryLimitMiB !== undefined
+          ? { modalMemoryLimitMiB: project.modalMemoryLimitMiB }
+          : {}),
+        ...(project.modalTimeoutMs !== undefined ? { modalTimeoutMs: project.modalTimeoutMs } : {}),
+        ...(project.modalIdleTimeoutMs !== undefined
+          ? { modalIdleTimeoutMs: project.modalIdleTimeoutMs }
+          : {}),
+        ...(project.modalAllowedSecretNamesJson !== undefined
+          ? { modalAllowedSecretNamesJson: project.modalAllowedSecretNamesJson }
+          : {}),
       },
     };
   },

@@ -58,8 +58,17 @@ export interface T3ExecutionBridgeClient {
   ) => Promise<TaskPullRequestEnsureResponseType>;
 }
 
-export function createT3ExecutionBridgeClient(): T3ExecutionBridgeClient {
-  const baseUrl = requiredEnv("T3_EXECUTION_BRIDGE_BASE_URL").replace(/\/$/, "");
+export interface T3ExecutionBridgeClientOptions {
+  readonly baseUrl?: string | undefined;
+}
+
+export function createT3ExecutionBridgeClient(
+  options: T3ExecutionBridgeClientOptions = {},
+): T3ExecutionBridgeClient {
+  const baseUrl = (options.baseUrl ?? requiredEnv("T3_EXECUTION_BRIDGE_BASE_URL")).replace(
+    /\/$/,
+    "",
+  );
   const sharedSecret = requiredEnv("T3_EXECUTION_BRIDGE_SHARED_SECRET");
 
   async function authedPost(path: string, body: unknown) {

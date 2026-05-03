@@ -39,6 +39,20 @@ const workSessionStatus = v.union(
   v.literal("interrupted"),
   v.literal("superseded"),
 );
+const sandboxProviderKind = v.union(v.literal("local"), v.literal("modal"));
+const sandboxLifecycleStatus = v.union(
+  v.literal("requested"),
+  v.literal("queued"),
+  v.literal("provisioning"),
+  v.literal("starting"),
+  v.literal("ready"),
+  v.literal("running"),
+  v.literal("idle"),
+  v.literal("archiving"),
+  v.literal("archived"),
+  v.literal("failed"),
+  v.literal("terminated"),
+);
 
 export default defineSchema({
   projects: defineTable({
@@ -47,6 +61,17 @@ export default defineSchema({
     defaultBranch: v.string(),
     githubOwner: v.string(),
     githubRepo: v.string(),
+    sandboxProvider: v.optional(sandboxProviderKind),
+    modalAppName: v.optional(v.string()),
+    modalEnvironment: v.optional(v.string()),
+    modalImageTag: v.optional(v.string()),
+    modalCpu: v.optional(v.number()),
+    modalCpuLimit: v.optional(v.number()),
+    modalMemoryMiB: v.optional(v.number()),
+    modalMemoryLimitMiB: v.optional(v.number()),
+    modalTimeoutMs: v.optional(v.number()),
+    modalIdleTimeoutMs: v.optional(v.number()),
+    modalAllowedSecretNamesJson: v.optional(v.string()),
     linearTeamId: v.optional(v.string()),
     linearProjectId: v.optional(v.string()),
     t3ProjectId: v.optional(v.string()),
@@ -105,10 +130,21 @@ export default defineSchema({
     t3TurnId: v.optional(v.string()),
     failureSummary: v.optional(v.string()),
     bridgeRunId: v.optional(v.string()),
+    sandboxId: v.optional(v.string()),
+    sandboxProviderKind: v.optional(sandboxProviderKind),
+    sandboxExternalId: v.optional(v.string()),
+    sandboxStatus: v.optional(sandboxLifecycleStatus),
+    sandboxEnvironmentId: v.optional(v.string()),
+    sandboxRuntimeEndpointUrl: v.optional(v.string()),
+    sandboxProviderRefJson: v.optional(v.string()),
+    sandboxServicesJson: v.optional(v.string()),
+    sandboxFailureSummary: v.optional(v.string()),
+    sandboxUpdatedAt: v.optional(v.number()),
   })
     .index("by_task_updated", ["taskId", "updatedAt"])
     .index("by_t3_thread", ["t3ThreadId"])
-    .index("by_bridge_run", ["bridgeRunId"]),
+    .index("by_bridge_run", ["bridgeRunId"])
+    .index("by_sandbox_id", ["sandboxId"]),
   taskEvents: defineTable({
     taskId: v.id("tasks"),
     eventKey: v.optional(v.string()),

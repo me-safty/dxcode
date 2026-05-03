@@ -11,6 +11,20 @@ const workSessionStatus = v.union(
   v.literal("interrupted"),
   v.literal("superseded"),
 );
+const sandboxProviderKind = v.union(v.literal("local"), v.literal("modal"));
+const sandboxLifecycleStatus = v.union(
+  v.literal("requested"),
+  v.literal("queued"),
+  v.literal("provisioning"),
+  v.literal("starting"),
+  v.literal("ready"),
+  v.literal("running"),
+  v.literal("idle"),
+  v.literal("archiving"),
+  v.literal("archived"),
+  v.literal("failed"),
+  v.literal("terminated"),
+);
 
 function workSessionReturn() {
   return v.object({
@@ -25,6 +39,16 @@ function workSessionReturn() {
     t3TurnId: v.optional(v.string()),
     failureSummary: v.optional(v.string()),
     bridgeRunId: v.optional(v.string()),
+    sandboxId: v.optional(v.string()),
+    sandboxProviderKind: v.optional(sandboxProviderKind),
+    sandboxExternalId: v.optional(v.string()),
+    sandboxStatus: v.optional(sandboxLifecycleStatus),
+    sandboxEnvironmentId: v.optional(v.string()),
+    sandboxRuntimeEndpointUrl: v.optional(v.string()),
+    sandboxProviderRefJson: v.optional(v.string()),
+    sandboxServicesJson: v.optional(v.string()),
+    sandboxFailureSummary: v.optional(v.string()),
+    sandboxUpdatedAt: v.optional(v.number()),
   });
 }
 
@@ -41,6 +65,28 @@ function toWorkSession(row: any) {
     ...(row.t3TurnId !== undefined ? { t3TurnId: row.t3TurnId } : {}),
     ...(row.failureSummary !== undefined ? { failureSummary: row.failureSummary } : {}),
     ...(row.bridgeRunId !== undefined ? { bridgeRunId: row.bridgeRunId } : {}),
+    ...(row.sandboxId !== undefined ? { sandboxId: row.sandboxId } : {}),
+    ...(row.sandboxProviderKind !== undefined
+      ? { sandboxProviderKind: row.sandboxProviderKind }
+      : {}),
+    ...(row.sandboxExternalId !== undefined ? { sandboxExternalId: row.sandboxExternalId } : {}),
+    ...(row.sandboxStatus !== undefined ? { sandboxStatus: row.sandboxStatus } : {}),
+    ...(row.sandboxEnvironmentId !== undefined
+      ? { sandboxEnvironmentId: row.sandboxEnvironmentId }
+      : {}),
+    ...(row.sandboxRuntimeEndpointUrl !== undefined
+      ? { sandboxRuntimeEndpointUrl: row.sandboxRuntimeEndpointUrl }
+      : {}),
+    ...(row.sandboxProviderRefJson !== undefined
+      ? { sandboxProviderRefJson: row.sandboxProviderRefJson }
+      : {}),
+    ...(row.sandboxServicesJson !== undefined
+      ? { sandboxServicesJson: row.sandboxServicesJson }
+      : {}),
+    ...(row.sandboxFailureSummary !== undefined
+      ? { sandboxFailureSummary: row.sandboxFailureSummary }
+      : {}),
+    ...(row.sandboxUpdatedAt !== undefined ? { sandboxUpdatedAt: row.sandboxUpdatedAt } : {}),
   };
 }
 

@@ -7,12 +7,14 @@ import {
   SandboxFailureDescriptor,
   SandboxProviderRef,
   SandboxRuntimeSelection,
+  SandboxServiceDescriptor,
 } from "./sandbox.ts";
 
 const decodeSandboxDescriptor = Schema.decodeUnknownEffect(SandboxDescriptor);
 const decodeSandboxProviderRef = Schema.decodeUnknownEffect(SandboxProviderRef);
 const decodeSandboxFailure = Schema.decodeUnknownEffect(SandboxFailureDescriptor);
 const decodeSandboxRuntimeSelection = Schema.decodeUnknownEffect(SandboxRuntimeSelection);
+const decodeSandboxServiceDescriptor = Schema.decodeUnknownEffect(SandboxServiceDescriptor);
 
 it.effect("decodes Sandbox descriptors with empty service and artifact defaults", () =>
   Effect.gen(function* () {
@@ -65,5 +67,65 @@ it.effect("decodes retryable failure defaults and runtime selection defaults", (
 
     assert.strictEqual(failure.retryable, false);
     assert.strictEqual(selection.providerKind, "local");
+  }),
+);
+
+it.effect("decodes typed service endpoints without embedding secret values", () =>
+  Effect.gen(function* () {
+    const service = yield* decodeSandboxServiceDescriptor({
+      serviceId: "t3-runtime",
+      kind: "t3-runtime",
+      status: "ready",
+      endpoints: [
+        {
+          url: "https://runtime.example.com",
+          protocol: "https",
+          accessMode: "server",
+          auth: {
+            kind: "bridge-shared-secret",
+            credentialRef: "T3_EXECUTION_BRIDGE_SHARED_SECRET",
+          },
+        },
+      ],
+    });
+
+    assert.strictEqual(service.endpoints?.[0]?.auth?.kind, "bridge-shared-secret");
+    assert.strictEqual(
+      service.endpoints?.[0]?.auth?.credentialRef,
+      "T3_EXECUTION_BRIDGE_SHARED_SECRET",
+    );
+  }),
+);
+
+it.effect("rejects zero sandbox resources", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeSandboxRuntimeSelection({
+        providerKind: "modal",
+        resources: {
+          memoryMiB: 0,
+        },
+      }),
+    );
+
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("decodes Modal runtime provider config", () =>
+  Effect.gen(function* () {
+    const selection = yield* decodeSandboxRuntimeSelection({
+      providerKind: "modal",
+      environment: "prod",
+      providerConfig: {
+        appName: "t3-task-runtime",
+        imageTag: "2026-05-03",
+        runtimePort: 8787,
+        allowedSecretNames: ["T3_EXECUTION_BRIDGE_SHARED_SECRET"],
+      },
+    });
+
+    assert.strictEqual(selection.providerKind, "modal");
+    assert.strictEqual(selection.providerConfig?.runtimePort, 8787);
   }),
 );

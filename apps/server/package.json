@@ -33,6 +33,7 @@
     "@pierre/diffs": "^1.1.0-beta.16",
     "@t3tools/sandbox": "workspace:*",
     "effect": "catalog:",
+    "modal": "^0.7.4",
     "node-pty": "^1.1.0",
     "open": "^10.1.0"
   },
