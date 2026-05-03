@@ -280,6 +280,26 @@ describe("when: source control provider uses merge requests", () => {
 });
 
 describe("when: ref is clean, up to date, and has no open PR", () => {
+  it("enables create PR when synced with upstream but ahead of default", () => {
+    const syncedFeature = status({
+      aheadCount: 0,
+      behindCount: 0,
+      aheadOfDefaultCount: 1,
+      pr: null,
+    });
+
+    const quick = resolveQuickAction(syncedFeature, false);
+    assert.deepInclude(quick, {
+      label: "Create PR",
+      disabled: false,
+      kind: "run_action",
+      action: "create_pr",
+    });
+
+    const items = buildMenuItems(syncedFeature, false);
+    assert.equal(items.find((item) => item.id === "pr")?.disabled, false);
+  });
+
   it("resolveQuickAction returns disabled no-action state", () => {
     const quick = resolveQuickAction(
       status({ aheadCount: 0, behindCount: 0, hasWorkingTreeChanges: false, pr: null }),

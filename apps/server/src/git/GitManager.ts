@@ -690,6 +690,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     hasUpstream: false,
     aheadCount: 0,
     behindCount: 0,
+    aheadOfDefaultCount: 0,
   } satisfies GitStatusDetails;
   const readLocalStatus = Effect.fn("readLocalStatus")(function* (cwd: string) {
     const details = yield* gitCore
@@ -748,6 +749,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       hasUpstream: details.hasUpstream,
       aheadCount: details.aheadCount,
       behindCount: details.behindCount,
+      aheadOfDefaultCount: details.aheadOfDefaultCount,
       pr,
     } satisfies VcsStatusRemoteResult;
   });
@@ -1591,12 +1593,6 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
           return yield* gitManagerError(
             "runStackedAction",
             "Feature-branch checkout is only supported for commit actions.",
-          );
-        }
-        if (input.action === "push" && initialStatus.hasWorkingTreeChanges) {
-          return yield* gitManagerError(
-            "runStackedAction",
-            "Commit or stash local changes before pushing.",
           );
         }
         if (input.action === "create_pr" && initialStatus.hasWorkingTreeChanges) {

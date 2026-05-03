@@ -55,6 +55,7 @@ export interface GitStatusDetails {
   hasUpstream: boolean;
   aheadCount: number;
   behindCount: number;
+  aheadOfDefaultCount: number;
 }
 
 export interface GitPreparedCommitContext {

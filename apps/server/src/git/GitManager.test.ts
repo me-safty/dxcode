@@ -880,6 +880,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         hasUpstream: false,
         aheadCount: 0,
         behindCount: 0,
+        aheadOfDefaultCount: 0,
         pr: null,
       });
     }),
@@ -909,6 +910,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         hasUpstream: false,
         aheadCount: 0,
         behindCount: 0,
+        aheadOfDefaultCount: 0,
         pr: null,
       });
     }),
@@ -1668,6 +1670,41 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           Effect.map((output) => output.stdout.trim()),
         ),
       ).toBe("origin/feature/push-only");
+    }),
+  );
+
+  it.effect("pushes existing commits without committing dirty worktree changes", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/push-dirty"]);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      fs.writeFileSync(path.join(repoDir, "push-dirty.txt"), "push dirty\n");
+      yield* runGit(repoDir, ["add", "push-dirty.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Push dirty branch"]);
+      fs.mkdirSync(path.join(repoDir, ".vercel"));
+      fs.writeFileSync(path.join(repoDir, ".vercel", "project.json"), "{}\n");
+
+      const { manager } = yield* makeManager();
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "push",
+      });
+
+      expect(result.commit.status).toBe("skipped_not_requested");
+      expect(result.push.status).toBe("pushed");
+      expect(result.pr.status).toBe("skipped_not_requested");
+      expect(
+        yield* runGit(repoDir, ["status", "--porcelain"]).pipe(
+          Effect.map((output) => output.stdout.trim()),
+        ),
+      ).toContain("?? .vercel/");
+      expect(
+        yield* runGit(remoteDir, ["log", "-1", "--pretty=%s", "feature/push-dirty"]).pipe(
+          Effect.map((output) => output.stdout.trim()),
+        ),
+      ).toBe("Push dirty branch");
     }),
   );
 

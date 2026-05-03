@@ -62,6 +62,7 @@ const NON_REPOSITORY_STATUS_DETAILS = Object.freeze<GitStatusDetails>({
   hasUpstream: false,
   aheadCount: 0,
   behindCount: 0,
+  aheadOfDefaultCount: 0,
 });
 
 type TraceTailState = {
@@ -1222,6 +1223,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     let upstreamRef: string | null = null;
     let aheadCount = 0;
     let behindCount = 0;
+    let aheadOfDefaultCount = 0;
     let hasWorkingTreeChanges = false;
     const changedFilesWithoutNumstat = new Set<string>();
 
@@ -1257,6 +1259,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       behindCount = 0;
     }
 
+    const isDefaultBranch =
+      refName !== null &&
+      (refName === defaultBranch ||
+        (defaultBranch === null && (refName === "main" || refName === "master")));
+    if (refName && !isDefaultBranch) {
+      aheadOfDefaultCount = yield* computeAheadCountAgainstBase(cwd, refName).pipe(
+        Effect.catch(() => Effect.succeed(0)),
+      );
+    }
+
     const stagedEntries = parseNumstatEntries(stagedNumstatStdout);
     const unstagedEntries = parseNumstatEntries(unstagedNumstatStdout);
     const fileStatMap = new Map<string, { insertions: number; deletions: number }>();
@@ -1286,10 +1298,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return {
       isRepo: true,
       hasOriginRemote: hasPrimaryRemote,
-      isDefaultBranch:
-        refName !== null &&
-        (refName === defaultBranch ||
-          (defaultBranch === null && (refName === "main" || refName === "master"))),
+      isDefaultBranch,
       branch: refName,
       upstreamRef,
       hasWorkingTreeChanges,
@@ -1301,6 +1310,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       hasUpstream: upstreamRef !== null,
       aheadCount,
       behindCount,
+      aheadOfDefaultCount,
     };
   });
 
@@ -1332,6 +1342,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         hasUpstream: details.hasUpstream,
         aheadCount: details.aheadCount,
         behindCount: details.behindCount,
+        aheadOfDefaultCount: details.aheadOfDefaultCount,
         pr: null,
       })),
     );
