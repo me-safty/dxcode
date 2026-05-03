@@ -949,6 +949,8 @@ export const ChatComposer = memo(
       isComposerApprovalState ||
       pendingUserInputs.length > 0 ||
       (showPlanFollowUpPrompt && activeProposedPlan !== null);
+    const showCollapsedMobilePromptRow =
+      isComposerCollapsedMobile && !isComposerApprovalState && pendingUserInputs.length === 0;
 
     const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
     const showPlanSidebarToggle = Boolean(activePlan || sidebarProposedPlan || planSidebarOpen);
@@ -1781,6 +1783,9 @@ export const ChatComposer = memo(
       void onImplementPlanInNewThread();
     }, [onImplementPlanInNewThread]);
     const scheduleComposerCollapseCheck = useCallback(() => {
+      if (!isMobileViewport) {
+        return;
+      }
       if (mobileComposerExpandInFlightRef.current) {
         return;
       }
@@ -1806,7 +1811,7 @@ export const ChatComposer = memo(
         }
         setIsComposerFocused(false);
       });
-    }, []);
+    }, [isMobileViewport]);
 
     useEffect(() => {
       return () => {
@@ -2033,6 +2038,22 @@ export const ChatComposer = memo(
                   onToggleOption={onSelectActivePendingUserInputOption}
                   onAdvance={onAdvanceActivePendingUserInput}
                 />
+                <div className="px-3 pb-3 sm:px-4">
+                  <button
+                    type="button"
+                    className={cn(
+                      "w-full truncate rounded-lg border border-border/55 bg-background/55 px-3 py-2 text-left text-sm transition-colors hover:bg-background/80",
+                      activePendingProgress?.customAnswer
+                        ? "text-foreground"
+                        : "text-muted-foreground/60",
+                    )}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={expandMobileComposer}
+                    aria-label="Write custom answer"
+                  >
+                    {activePendingProgress?.customAnswer || "Write custom answer"}
+                  </button>
+                </div>
                 {activePendingProgress?.activeQuestion?.multiSelect ? (
                   <div className="flex items-center justify-end px-3 pb-3 sm:px-4">
                     <ComposerPrimaryActions
@@ -2054,7 +2075,7 @@ export const ChatComposer = memo(
               </div>
             ) : null}
 
-            {isComposerCollapsedMobile && !activePendingApproval ? (
+            {showCollapsedMobilePromptRow ? (
               <div className="flex items-center justify-between gap-2 px-3 py-2">
                 <button
                   type="button"

@@ -2540,6 +2540,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
         "Mobile composer should stay collapsed for pending user input.",
       );
       expect(document.body.textContent).toContain("What should this change cover?");
+      expect(document.querySelector('button[aria-label="Write custom answer"]')).toBeTruthy();
+      expect(document.querySelector('button[aria-label="Expand composer"]')).toBeNull();
+      expect(document.querySelector('button[aria-label="Send message"]')).toBeNull();
 
       const firstOption = await waitForButtonContainingText("Tight");
       firstOption.click();
