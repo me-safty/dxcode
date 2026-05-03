@@ -1915,6 +1915,18 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   );
 
+  const fetchRemoteTrackingBranch: GitVcsDriverShape["fetchRemoteTrackingBranch"] = Effect.fn(
+    "fetchRemoteTrackingBranch",
+  )(function* (input) {
+    yield* runGit("GitVcsDriver.fetchRemoteTrackingBranch", input.cwd, [
+      "fetch",
+      "--quiet",
+      "--no-tags",
+      input.remoteName,
+      `+refs/heads/${input.remoteBranch}:refs/remotes/${input.remoteName}/${input.remoteBranch}`,
+    ]);
+  });
+
   const setBranchUpstream: GitVcsDriverShape["setBranchUpstream"] = (input) =>
     runGit("GitVcsDriver.setBranchUpstream", input.cwd, [
       "branch",
@@ -2096,7 +2108,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     createWorktree,
     fetchPullRequestBranch,
     ensureRemote,
+    resolvePrimaryRemoteName,
     fetchRemoteBranch,
+    fetchRemoteTrackingBranch,
     setBranchUpstream,
     removeWorktree,
     renameBranch,

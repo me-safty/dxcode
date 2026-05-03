@@ -217,7 +217,7 @@ layer("GitLabCli.layer", (it) => {
     }),
   );
 
-  it.effect("passes --force when checking out merge requests with force enabled", () =>
+  it.effect("does not pass unsupported force flags when checking out merge requests", () =>
     Effect.gen(function* () {
       mockedRun.mockReturnValueOnce(Effect.succeed(processOutput("")));
 
@@ -232,7 +232,7 @@ layer("GitLabCli.layer", (it) => {
         expect.objectContaining({
           command: "glab",
           cwd: "/repo",
-          args: ["mr", "checkout", "42", "--force"],
+          args: ["mr", "checkout", "42"],
         }),
       );
     }),

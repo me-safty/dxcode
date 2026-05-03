@@ -568,6 +568,22 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       localBranch = pullRequest.headBranch,
     ) {
       const repositoryNameWithOwner = resolveHeadRepositoryNameWithOwner(pullRequest) ?? "";
+      if (repositoryNameWithOwner.length === 0 && pullRequest.isCrossRepository !== true) {
+        const remoteName = yield* gitCore.resolvePrimaryRemoteName(cwd);
+        yield* gitCore.fetchRemoteTrackingBranch({
+          cwd,
+          remoteName,
+          remoteBranch: pullRequest.headBranch,
+        });
+        yield* gitCore.setBranchUpstream({
+          cwd,
+          branch: localBranch,
+          remoteName,
+          remoteBranch: pullRequest.headBranch,
+        });
+        return;
+      }
+
       if (repositoryNameWithOwner.length === 0) {
         return;
       }
@@ -588,6 +604,11 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         url: remoteUrl,
       });
 
+      yield* gitCore.fetchRemoteTrackingBranch({
+        cwd,
+        remoteName,
+        remoteBranch: pullRequest.headBranch,
+      });
       yield* gitCore.setBranchUpstream({
         cwd,
         branch: localBranch,

@@ -360,7 +360,7 @@ export const make = Effect.fn("makeGitLabCli")(function* () {
     checkoutMergeRequest: (input) =>
       execute({
         cwd: input.cwd,
-        args: ["mr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
+        args: ["mr", "checkout", input.reference],
       }).pipe(Effect.asVoid),
   });
 });

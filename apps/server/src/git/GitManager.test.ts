@@ -2454,6 +2454,113 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect(
+    "restores same-repository upstream tracking after local PR checkout without a remote ref",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        const remoteDir = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+        yield* runGit(repoDir, ["checkout", "-b", "feature/pr-local-upstream"]);
+        fs.writeFileSync(path.join(repoDir, "upstream.txt"), "upstream\n");
+        yield* runGit(repoDir, ["add", "upstream.txt"]);
+        yield* runGit(repoDir, ["commit", "-m", "Local upstream PR branch"]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "feature/pr-local-upstream"]);
+        yield* runGit(repoDir, ["checkout", "main"]);
+        yield* runGit(repoDir, ["branch", "-D", "feature/pr-local-upstream"]);
+        yield* runGit(repoDir, [
+          "update-ref",
+          "-d",
+          "refs/remotes/origin/feature/pr-local-upstream",
+        ]);
+
+        const { manager } = yield* makeManager({
+          ghScenario: {
+            pullRequest: {
+              number: 65,
+              title: "Local upstream PR",
+              url: "https://github.com/pingdotgg/codething-mvp/pull/65",
+              baseRefName: "main",
+              headRefName: "feature/pr-local-upstream",
+              state: "open",
+              isCrossRepository: false,
+              headRepositoryNameWithOwner: "pingdotgg/codething-mvp",
+              headRepositoryOwnerLogin: "pingdotgg",
+            },
+            repositoryCloneUrls: {
+              "pingdotgg/codething-mvp": {
+                url: remoteDir,
+                sshUrl: remoteDir,
+              },
+            },
+          },
+        });
+
+        const result = yield* preparePullRequestThread(manager, {
+          cwd: repoDir,
+          reference: "65",
+          mode: "local",
+        });
+
+        expect(result.worktreePath).toBeNull();
+        expect(result.branch).toBe("feature/pr-local-upstream");
+        expect(
+          (yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "@{upstream}"])).stdout.trim(),
+        ).toBe("origin/feature/pr-local-upstream");
+      }),
+  );
+
+  it.effect(
+    "restores same-repository upstream tracking when provider omits head repository metadata",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        const remoteDir = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+        yield* runGit(repoDir, ["checkout", "-b", "feature/pr-local-no-head-repo"]);
+        fs.writeFileSync(path.join(repoDir, "no-head-repo.txt"), "upstream\n");
+        yield* runGit(repoDir, ["add", "no-head-repo.txt"]);
+        yield* runGit(repoDir, ["commit", "-m", "Local PR branch without repo metadata"]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "feature/pr-local-no-head-repo"]);
+        yield* runGit(repoDir, ["checkout", "main"]);
+        yield* runGit(repoDir, ["branch", "-D", "feature/pr-local-no-head-repo"]);
+        yield* runGit(repoDir, [
+          "update-ref",
+          "-d",
+          "refs/remotes/origin/feature/pr-local-no-head-repo",
+        ]);
+
+        const { manager } = yield* makeManager({
+          ghScenario: {
+            pullRequest: {
+              number: 66,
+              title: "Local upstream PR without repo metadata",
+              url: "https://github.com/pingdotgg/codething-mvp/pull/66",
+              baseRefName: "main",
+              headRefName: "feature/pr-local-no-head-repo",
+              state: "open",
+            },
+          },
+        });
+
+        const result = yield* preparePullRequestThread(manager, {
+          cwd: repoDir,
+          reference: "66",
+          mode: "local",
+        });
+
+        expect(result.worktreePath).toBeNull();
+        expect(result.branch).toBe("feature/pr-local-no-head-repo");
+        expect(
+          (yield* runGit(repoDir, ["rev-parse", "--abbrev-ref", "@{upstream}"])).stdout.trim(),
+        ).toBe("origin/feature/pr-local-no-head-repo");
+      }),
+  );
+
   it.effect("prepares pull request threads in worktree mode on the PR head branch", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
