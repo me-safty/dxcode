@@ -9,7 +9,8 @@ const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_WORKDIR = "/workspace/t3code";
 const DEFAULT_COMMAND = ["/app/apps/server/scripts/modal-runtime-entrypoint.sh"] as const;
-const DEFAULT_INSTALL_COMMAND = "bun install --frozen-lockfile";
+const BUN_BIN = "/root/.bun/bin/bun";
+const DEFAULT_INSTALL_COMMAND = `${BUN_BIN} install --frozen-lockfile`;
 const SANDBOX_EXEC_PATH =
   "/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
@@ -233,7 +234,7 @@ async function main() {
           "test -s /app/apps/server/dist/bin.mjs",
           "test -x /app/apps/server/scripts/modal-runtime-entrypoint.sh",
           "node --version",
-          "bun --version",
+          `${shellQuote(BUN_BIN)} --version`,
           "git -C /app rev-parse HEAD",
           `git -C ${shellQuote(workdir)} rev-parse HEAD`,
         ].join(" && "),
