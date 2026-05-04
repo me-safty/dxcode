@@ -674,16 +674,19 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
     getDefaultBranch: (input) =>
       resolveRepository(input).pipe(
         Effect.flatMap((locator) =>
-          Effect.all({
-            repository: getRepositoryFromLocator(locator),
-            branchingModel: getBranchingModelFromLocator(locator).pipe(
-              Effect.catch(() =>
-                Effect.succeed<Schema.Schema.Type<typeof RawBitbucketBranchingModelSchema> | null>(
-                  null,
+          Effect.all(
+            {
+              repository: getRepositoryFromLocator(locator),
+              branchingModel: getBranchingModelFromLocator(locator).pipe(
+                Effect.catch(() =>
+                  Effect.succeed<Schema.Schema.Type<
+                    typeof RawBitbucketBranchingModelSchema
+                  > | null>(null),
                 ),
               ),
-            ),
-          }),
+            },
+            { concurrency: "unbounded" },
+          ),
         ),
         Effect.map(defaultChangeRequestTargetBranch),
       ),
