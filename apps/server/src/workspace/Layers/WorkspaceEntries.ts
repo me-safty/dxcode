@@ -75,6 +75,9 @@ const parseWorkspaceIndexCacheKey = (key: string): WorkspaceIndexOptions => ({
 const workspaceIndexEntryLimit = (fullIndexing: boolean): number | null =>
   fullIndexing ? null : WORKSPACE_INDEX_MAX_ENTRIES;
 
+const workspaceIndexScanLimit = (entryLimit: number | null): number | null =>
+  entryLimit === null ? null : entryLimit + 1;
+
 function toPosixPath(input: string): string {
   return input.replaceAll("\\", "/");
 }
@@ -330,6 +333,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     const { cwd, fullIndexing } = input;
     const shouldFilterWithGitIgnore = yield* isInsideVcsWorkTree(cwd);
     const entryLimit = workspaceIndexEntryLimit(fullIndexing);
+    const scanLimit = workspaceIndexScanLimit(entryLimit);
 
     let pendingDirectories: string[] = [""];
     const entries: SearchableWorkspaceEntry[] = [];
@@ -397,7 +401,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
             pendingDirectories.push(candidate.relativePath);
           }
 
-          if (entryLimit !== null && entries.length >= entryLimit) {
+          if (scanLimit !== null && entries.length >= scanLimit) {
             truncated = true;
             break;
           }
@@ -412,7 +416,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     const now = yield* DateTime.now;
     return {
       scannedAt: now.epochMilliseconds,
-      entries,
+      entries: entryLimit === null ? entries : entries.slice(0, entryLimit),
       truncated,
       source: "filesystem" as const,
       fullIndexing,

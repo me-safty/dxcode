@@ -161,6 +161,35 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
       }),
     );
 
+    it.effect("does not mark filesystem index truncated at exactly the entry cap", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-exact-cap-" });
+        const originalReaddir = fsPromises.readdir.bind(fsPromises);
+        vi.spyOn(fsPromises, "readdir").mockImplementation((async (
+          ...args: Parameters<typeof fsPromises.readdir>
+        ) => {
+          if (args[0] !== cwd) {
+            return originalReaddir(...args);
+          }
+          return Array.from({ length: 25_000 }, (_, index) => ({
+            name: `entry-${index}.ts`,
+            isDirectory: () => false,
+            isFile: () => true,
+          }));
+        }) as typeof fsPromises.readdir);
+
+        const result = yield* searchWorkspaceEntries({ cwd, query: "", limit: 25_000 });
+
+        expect(result.entries).toHaveLength(25_000);
+        expect(result.truncated).toBe(false);
+        expect(result.index).toMatchObject({
+          indexedEntryCount: 25_000,
+          indexTruncated: false,
+          source: "filesystem",
+        });
+      }),
+    );
+
     it.effect("excludes gitignored paths for git repositories", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTempDir({ prefix: "t3code-workspace-gitignore-", git: true });
