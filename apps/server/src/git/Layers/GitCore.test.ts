@@ -297,7 +297,7 @@ it.layer(TestLayer)("git integration", (it) => {
           });
         });
 
-        const result = yield* core.listWorkspaceFiles("/virtual/repo");
+        const result = yield* core.listWorkspaceFiles("/virtual/repo", {});
         expect(result.paths).toEqual(["src/index.ts", "README.md"]);
         expect(result.truncated).toBe(false);
       }),

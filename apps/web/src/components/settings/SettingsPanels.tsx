@@ -439,6 +439,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
+      ...(settings.fullProjectIndexing !== DEFAULT_UNIFIED_SETTINGS.fullProjectIndexing
+        ? ["Full project indexing"]
+        : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
         : []),
@@ -464,6 +467,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.fullProjectIndexing,
       settings.timestampFormat,
       theme,
     ],
@@ -959,6 +963,32 @@ export function GeneralSettingsPanel() {
                 updateSettings({ enableAssistantStreaming: Boolean(checked) })
               }
               aria-label="Stream assistant messages"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Full project indexing"
+          description="Index all files in each project. Large repositories may search slower and use more memory."
+          resetAction={
+            settings.fullProjectIndexing !== DEFAULT_UNIFIED_SETTINGS.fullProjectIndexing ? (
+              <SettingResetButton
+                label="full project indexing"
+                onClick={() =>
+                  updateSettings({
+                    fullProjectIndexing: DEFAULT_UNIFIED_SETTINGS.fullProjectIndexing,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.fullProjectIndexing}
+              onCheckedChange={(checked) =>
+                updateSettings({ fullProjectIndexing: Boolean(checked) })
+              }
+              aria-label="Enable full project indexing"
             />
           }
         />

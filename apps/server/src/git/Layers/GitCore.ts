@@ -1641,8 +1641,9 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       maxOutputBytes: 4_096,
     }).pipe(Effect.map((result) => result.code === 0 && result.stdout.trim() === "true"));
 
-  const listWorkspaceFiles: GitCoreShape["listWorkspaceFiles"] = (cwd) =>
-    executeGit(
+  const listWorkspaceFiles: GitCoreShape["listWorkspaceFiles"] = (cwd, options) => {
+    const maxOutputBytes = options?.maxOutputBytes ?? WORKSPACE_FILES_MAX_OUTPUT_BYTES;
+    return executeGit(
       "GitCore.listWorkspaceFiles",
       cwd,
       [
@@ -1656,7 +1657,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       {
         allowNonZeroExit: true,
         timeoutMs: 20_000,
-        maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+        maxOutputBytes,
         truncateOutputAtMaxBytes: true,
       },
     ).pipe(
@@ -1683,6 +1684,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
             ),
       ),
     );
+  };
 
   const filterIgnoredPaths: GitCoreShape["filterIgnoredPaths"] = (cwd, relativePaths) =>
     Effect.gen(function* () {
