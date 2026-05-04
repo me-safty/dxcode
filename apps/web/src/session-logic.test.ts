@@ -115,6 +115,32 @@ describe("derivePendingApprovals", () => {
     ]);
   });
 
+  it("keeps unknown approval requests visible as generic approvals", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "approval-open-unknown",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "approval.requested",
+        summary: "Approval requested",
+        tone: "approval",
+        payload: {
+          requestId: "req-unknown",
+          requestType: "unknown",
+          detail: "Requesting plan approval for: /tmp/plan.md",
+        },
+      }),
+    ];
+
+    expect(derivePendingApprovals(activities)).toEqual([
+      {
+        requestId: "req-unknown",
+        requestKind: "generic",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        detail: "Requesting plan approval for: /tmp/plan.md",
+      },
+    ]);
+  });
+
   it("clears stale pending approvals when provider reports unknown pending request", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
