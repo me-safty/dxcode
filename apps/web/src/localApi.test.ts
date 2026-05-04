@@ -56,6 +56,11 @@ const rpcClientMock = {
   filesystem: {
     browse: vi.fn(),
   },
+  sourceControl: {
+    lookupRepository: vi.fn(),
+    cloneRepository: vi.fn(),
+    publishRepository: vi.fn(),
+  },
   shell: {
     openInEditor: vi.fn(),
   },
@@ -537,6 +542,7 @@ describe("wsApi", () => {
       autoOpenPlanSidebar: false,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
+      diffIgnoreWhitespace: true,
       diffWordWrap: true,
       favorites: [],
       providerModelPreferences: {},
@@ -597,6 +603,7 @@ describe("wsApi", () => {
       autoOpenPlanSidebar: false,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
+      diffIgnoreWhitespace: true,
       diffWordWrap: true,
       favorites: [],
       providerModelPreferences: {},
