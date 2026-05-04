@@ -114,42 +114,19 @@ function makeRegistry(
     );
     const updateStatesRef = yield* Ref.make<ReadonlyArray<ServerProviderUpdateState>>([]);
 
-    const setProviderUpdateState = (
-      provider: ProviderDriverKind,
-      updateState: ServerProviderUpdateState | null,
-    ) =>
+    const setProviderMaintenanceActionState = (input: {
+      readonly instanceId: ProviderInstanceId;
+      readonly action: "update";
+      readonly state: ServerProviderUpdateState | null;
+    }) =>
       Effect.gen(function* () {
+        const updateState = input.state;
         if (updateState) {
           yield* Ref.update(updateStatesRef, (states) => [...states, updateState]);
         }
         return yield* Ref.updateAndGet(providersRef, (providers) =>
           providers.map((candidate) => {
-            if (candidate.driver !== provider) {
-              return candidate;
-            }
-            if (!updateState) {
-              const { updateState: _updateState, ...providerWithoutUpdateState } = candidate;
-              return providerWithoutUpdateState;
-            }
-            return {
-              ...candidate,
-              updateState,
-            };
-          }),
-        );
-      });
-
-    const setProviderInstanceUpdateState = (
-      instanceId: ProviderInstanceId,
-      updateState: ServerProviderUpdateState | null,
-    ) =>
-      Effect.gen(function* () {
-        if (updateState) {
-          yield* Ref.update(updateStatesRef, (states) => [...states, updateState]);
-        }
-        return yield* Ref.updateAndGet(providersRef, (providers) =>
-          providers.map((candidate) => {
-            if (candidate.instanceId !== instanceId) {
+            if (candidate.instanceId !== input.instanceId) {
               return candidate;
             }
             if (!updateState) {
@@ -168,11 +145,9 @@ function makeRegistry(
       getProviders: Ref.get(providersRef),
       refresh: () => Ref.get(providersRef),
       refreshInstance: () => Ref.get(providersRef),
-      getProviderMaintenanceCapabilities: (provider) => Effect.succeed(lifecycleFor(provider)),
       getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
         Effect.succeed(lifecycleFor(provider)),
-      setProviderUpdateState,
-      setProviderInstanceUpdateState,
+      setProviderMaintenanceActionState,
       streamChanges: Stream.empty,
     };
 
@@ -229,7 +204,7 @@ describe("providerUpdater", () => {
       const updater = yield* makeProviderUpdater({
         providerRegistry: {
           ...registry,
-          getProviderMaintenanceCapabilities: () =>
+          getProviderMaintenanceCapabilitiesForInstance: () =>
             Effect.succeed(
               makeProviderMaintenanceCapabilities({
                 provider: CODEX_DRIVER,
@@ -417,7 +392,7 @@ describe("providerUpdater", () => {
       const updater = yield* makeProviderUpdater({
         providerRegistry: {
           ...registry,
-          getProviderMaintenanceCapabilities: (provider) =>
+          getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
             Effect.succeed(
               makeProviderMaintenanceCapabilities({
                 provider,
@@ -465,7 +440,7 @@ describe("providerUpdater", () => {
       const updater = yield* makeProviderUpdater({
         providerRegistry: {
           ...registry,
-          getProviderMaintenanceCapabilities: (provider) =>
+          getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
             Effect.succeed(
               makeProviderMaintenanceCapabilities({
                 provider,
@@ -514,10 +489,10 @@ describe("providerUpdater", () => {
         const updater = yield* makeProviderUpdater({
           providerRegistry: {
             ...registry,
-            setProviderUpdateState: (provider, updateState) =>
+            setProviderMaintenanceActionState: (input) =>
               Effect.gen(function* () {
-                const providers = yield* registry.setProviderUpdateState(provider, updateState);
-                if (updateState?.status === "queued" && blockQueuedState) {
+                const providers = yield* registry.setProviderMaintenanceActionState(input);
+                if (input.state?.status === "queued" && blockQueuedState) {
                   queuedStateWrittenLatch.resolve();
                   yield* Effect.promise(() => releaseQueuedState);
                 }

@@ -44,11 +44,7 @@ import {
   writeProviderStatusCache,
 } from "../providerStatusCache.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
-import {
-  disableProviderMaintenanceUpdates,
-  haveProviderMaintenanceCapabilitiesEqual,
-  makeManualOnlyProviderMaintenanceCapabilities,
-} from "../providerMaintenance.ts";
+import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
 
 const loadProviders = (
@@ -263,11 +259,8 @@ export const ProviderRegistryLive = Layer.effect(
       ),
     );
     const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(cachedProviders);
-    const updateStatesRef = yield* Ref.make<
-      ReadonlyMap<ProviderDriverKind, ServerProviderUpdateState>
-    >(new Map());
-    const instanceUpdateStatesRef = yield* Ref.make<
-      ReadonlyMap<ProviderInstanceId, ServerProviderUpdateState>
+    const maintenanceActionStatesRef = yield* Ref.make<
+      ReadonlyMap<ProviderInstanceId, { readonly update?: ServerProviderUpdateState | undefined }>
     >(new Map());
 
     // Live-source registry — the dynamic counterpart to the boot-time
@@ -309,17 +302,8 @@ export const ProviderRegistryLive = Layer.effect(
     const applyProviderUpdateState = Effect.fn("applyProviderUpdateState")(function* (
       provider: ServerProvider,
     ) {
-      const instanceUpdateStates = yield* Ref.get(instanceUpdateStatesRef);
-      const instanceUpdateState = instanceUpdateStates.get(provider.instanceId);
-      if (instanceUpdateState) {
-        return {
-          ...provider,
-          updateState: instanceUpdateState,
-        };
-      }
-
-      const updateStates = yield* Ref.get(updateStatesRef);
-      const updateState = updateStates.get(provider.driver);
+      const maintenanceActionStates = yield* Ref.get(maintenanceActionStatesRef);
+      const updateState = maintenanceActionStates.get(provider.instanceId)?.update;
       if (!updateState) {
         const { updateState: _updateState, ...providerWithoutUpdateState } = provider;
         return providerWithoutUpdateState;
@@ -391,63 +375,44 @@ export const ProviderRegistryLive = Layer.effect(
       return yield* upsertProviders([provider], options);
     });
 
-    const setProviderUpdateState = Effect.fn("setProviderUpdateState")(function* (
-      provider: ProviderDriverKind,
-      state: ServerProviderUpdateState | null,
-    ) {
-      yield* Ref.update(updateStatesRef, (previous) => {
-        const next = new Map(previous);
-        if (state === null || state.status === "idle") {
-          next.delete(provider);
-        } else {
-          next.set(provider, state);
+    const setProviderMaintenanceActionState = Effect.fn("setProviderMaintenanceActionState")(
+      function* (input: {
+        readonly instanceId: ProviderInstanceId;
+        readonly action: "update";
+        readonly state: ServerProviderUpdateState | null;
+      }) {
+        yield* Ref.update(maintenanceActionStatesRef, (previous) => {
+          const previousActions = previous.get(input.instanceId);
+          const nextActions = { ...previousActions };
+          if (input.state === null || input.state.status === "idle") {
+            delete nextActions[input.action];
+          } else {
+            nextActions[input.action] = input.state;
+          }
+
+          const next = new Map(previous);
+          if (Object.keys(nextActions).length === 0) {
+            next.delete(input.instanceId);
+          } else {
+            next.set(input.instanceId, nextActions);
+          }
+          return next;
+        });
+
+        const existingProviders = yield* Ref.get(providersRef);
+        const matchingProvider = existingProviders.find(
+          (candidate) => candidate.instanceId === input.instanceId,
+        );
+        if (!matchingProvider) {
+          return existingProviders;
         }
-        return next;
-      });
 
-      const existingProviders = yield* Ref.get(providersRef);
-      const matchingProviders = existingProviders.filter(
-        (candidate) => candidate.driver === provider,
-      );
-      if (matchingProviders.length === 0) {
-        return existingProviders;
-      }
-
-      const nextProviders = yield* Effect.forEach(matchingProviders, applyProviderUpdateState, {
-        concurrency: "unbounded",
-      });
-      return yield* upsertProviders(nextProviders, {
-        persist: false,
-      });
-    });
-
-    const setProviderInstanceUpdateState = Effect.fn("setProviderInstanceUpdateState")(function* (
-      instanceId: ProviderInstanceId,
-      state: ServerProviderUpdateState | null,
-    ) {
-      yield* Ref.update(instanceUpdateStatesRef, (previous) => {
-        const next = new Map(previous);
-        if (state === null || state.status === "idle") {
-          next.delete(instanceId);
-        } else {
-          next.set(instanceId, state);
-        }
-        return next;
-      });
-
-      const existingProviders = yield* Ref.get(providersRef);
-      const matchingProvider = existingProviders.find(
-        (candidate) => candidate.instanceId === instanceId,
-      );
-      if (!matchingProvider) {
-        return existingProviders;
-      }
-
-      const nextProvider = yield* applyProviderUpdateState(matchingProvider);
-      return yield* upsertProviders([nextProvider], {
-        persist: false,
-      });
-    });
+        const nextProvider = yield* applyProviderUpdateState(matchingProvider);
+        return yield* upsertProviders([nextProvider], {
+          persist: false,
+        });
+      },
+    );
 
     const refreshOneSource = Effect.fn("refreshOneSource")(function* (
       providerSource: ProviderSnapshotSource,
@@ -496,34 +461,6 @@ export const ProviderRegistryLive = Layer.effect(
       return yield* refreshOneSource(providerSource);
     });
 
-    const getProviderMaintenanceCapabilities = Effect.fn("getProviderMaintenanceCapabilities")(
-      function* (provider: ProviderDriverKind) {
-        const instances = Array.from((yield* Ref.get(liveSubsRef)).values()).filter(
-          (instance) => instance.driverKind === provider,
-        );
-        if (instances.length === 0) {
-          return makeManualProviderMaintenanceCapabilities(provider);
-        }
-
-        const [firstInstance, ...restInstances] = instances;
-        const firstCapabilities = firstInstance?.snapshot.maintenanceCapabilities;
-        if (!firstCapabilities) {
-          return makeManualProviderMaintenanceCapabilities(provider);
-        }
-
-        const hasMixedCapabilities = restInstances.some(
-          (instance) =>
-            !haveProviderMaintenanceCapabilitiesEqual(
-              firstCapabilities,
-              instance.snapshot.maintenanceCapabilities,
-            ),
-        );
-        return hasMixedCapabilities
-          ? disableProviderMaintenanceUpdates(firstCapabilities)
-          : firstCapabilities;
-      },
-    );
-
     const getProviderMaintenanceCapabilitiesForInstance = Effect.fn(
       "getProviderMaintenanceCapabilitiesForInstance",
     )(function* (instanceId: ProviderInstanceId, provider: ProviderDriverKind) {
@@ -532,7 +469,7 @@ export const ProviderRegistryLive = Layer.effect(
       );
       return (
         instance?.snapshot.maintenanceCapabilities ??
-        (yield* getProviderMaintenanceCapabilities(provider))
+        makeManualProviderMaintenanceCapabilities(provider)
       );
     });
 
@@ -643,6 +580,15 @@ export const ProviderRegistryLive = Layer.effect(
         if (haveProvidersChanged(previousProviders, providers)) {
           yield* PubSub.publish(changesPubSub, providers);
         }
+        yield* Ref.update(maintenanceActionStatesRef, (previous) => {
+          const next = new Map(previous);
+          for (const instanceId of previous.keys()) {
+            if (!knownInstanceIds.has(instanceId)) {
+              next.delete(instanceId);
+            }
+          }
+          return next;
+        });
       }),
     );
     const syncLiveSourcesAndContinue = syncLiveSources.pipe(
@@ -726,10 +672,8 @@ export const ProviderRegistryLive = Layer.effect(
         refresh(provider).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshInstance: (instanceId: ProviderInstanceId) =>
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
-      getProviderMaintenanceCapabilities,
       getProviderMaintenanceCapabilitiesForInstance,
-      setProviderUpdateState,
-      setProviderInstanceUpdateState,
+      setProviderMaintenanceActionState,
       get streamChanges() {
         return Stream.fromPubSub(changesPubSub);
       },

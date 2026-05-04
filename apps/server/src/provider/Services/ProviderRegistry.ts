@@ -16,6 +16,8 @@ import { Context } from "effect";
 import type { Effect, Stream } from "effect";
 import type { ProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 
+export type ProviderMaintenanceActionKind = "update";
+
 export interface ProviderRegistryShape {
   /**
    * Read the latest provider snapshots for every configured instance.
@@ -46,17 +48,8 @@ export interface ProviderRegistryShape {
   ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**
-   * Resolve the currently active maintenance capabilities for a provider
-   * driver across its live instances. Mixed or unsafe instance strategies
-   * are downgraded to manual-only capabilities.
-   */
-  readonly getProviderMaintenanceCapabilities: (
-    provider: ProviderDriverKind,
-  ) => Effect.Effect<ProviderMaintenanceCapabilities>;
-
-  /**
    * Resolve the maintenance capabilities owned by one live provider instance.
-   * Falls back to the driver-scoped resolver when the instance is not live.
+   * Falls back to manual-only capabilities when the instance is not live.
    */
   readonly getProviderMaintenanceCapabilitiesForInstance: (
     instanceId: ProviderInstanceId,
@@ -64,22 +57,16 @@ export interface ProviderRegistryShape {
   ) => Effect.Effect<ProviderMaintenanceCapabilities>;
 
   /**
-   * Apply volatile provider-update state to every live snapshot for the
-   * specified driver. Used for one-click update progress and results; this
-   * state is never persisted to disk.
+   * Apply volatile maintenance-action state to one configured instance.
+   * This state is never persisted to disk. Today only update actions are
+   * projected onto `ServerProvider.updateState`; install/auth actions can
+   * extend this action map without adding driver-scoped APIs.
    */
-  readonly setProviderUpdateState: (
-    provider: ProviderDriverKind,
-    state: ServerProviderUpdateState | null,
-  ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
-
-  /**
-   * Apply volatile provider-update state to one configured instance.
-   */
-  readonly setProviderInstanceUpdateState: (
-    instanceId: ProviderInstanceId,
-    state: ServerProviderUpdateState | null,
-  ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+  readonly setProviderMaintenanceActionState: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly action: ProviderMaintenanceActionKind;
+    readonly state: ServerProviderUpdateState | null;
+  }) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**
    * Stream of provider snapshot updates — one emission per aggregated

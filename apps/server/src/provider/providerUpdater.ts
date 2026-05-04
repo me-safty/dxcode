@@ -1,4 +1,5 @@
 import {
+  defaultInstanceIdForDriver,
   ProviderDriverKind,
   ServerProviderUpdateError,
   type ProviderInstanceId,
@@ -129,23 +130,19 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
   const verifyRefreshedProvider = (
     provider: ProviderDriverKind,
     maintenanceCapabilities: ProviderMaintenanceCapabilities,
-    instanceId?: ProviderInstanceId,
+    instanceId: ProviderInstanceId,
   ): Effect.Effect<VerifiedProviderRefresh> =>
     input.providerRegistry.getProviders.pipe(
       Effect.map((providers) =>
-        instanceId
-          ? providers
-              .filter(
-                (candidate) => candidate.driver === provider && candidate.instanceId === instanceId,
-              )
-              .map((candidate) => candidate.instanceId)
-          : providers
-              .filter((candidate) => candidate.driver === provider)
-              .map((candidate) => candidate.instanceId),
+        providers
+          .filter(
+            (candidate) => candidate.driver === provider && candidate.instanceId === instanceId,
+          )
+          .map((candidate) => candidate.instanceId),
       ),
       Effect.flatMap((instanceIds) =>
         instanceIds.length === 0
-          ? input.providerRegistry.refresh(provider)
+          ? input.providerRegistry.refreshInstance(instanceId)
           : Effect.forEach(
               instanceIds,
               (instanceId) => input.providerRegistry.refreshInstance(instanceId),
@@ -157,8 +154,7 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
       ),
       Effect.flatMap((providers) => {
         const refreshedProviders = providers.filter(
-          (candidate) =>
-            candidate.driver === provider && (!instanceId || candidate.instanceId === instanceId),
+          (candidate) => candidate.driver === provider && candidate.instanceId === instanceId,
         );
         if (refreshedProviders.length === 0) {
           return Effect.succeed<VerifiedProviderRefresh>({
@@ -198,11 +194,16 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
   const updateProvider: ProviderUpdaterShape["updateProvider"] = (target) =>
     Effect.gen(function* () {
       const provider = typeof target === "string" ? target : target.provider;
-      const instanceId = typeof target === "string" ? undefined : target.instanceId;
-      const targetKey = instanceId ? `instance:${instanceId}` : `provider:${provider}`;
-      const capabilities = yield* instanceId
-        ? input.providerRegistry.getProviderMaintenanceCapabilitiesForInstance(instanceId, provider)
-        : input.providerRegistry.getProviderMaintenanceCapabilities(provider);
+      const instanceId =
+        typeof target === "string"
+          ? defaultInstanceIdForDriver(provider)
+          : (target.instanceId ?? defaultInstanceIdForDriver(provider));
+      const targetKey = `instance:${instanceId}`;
+      const capabilities =
+        yield* input.providerRegistry.getProviderMaintenanceCapabilitiesForInstance(
+          instanceId,
+          provider,
+        );
       const update = capabilities.update;
       if (!update) {
         return yield* new ServerProviderUpdateError({
@@ -217,9 +218,11 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
           lockKey: update.lockKey,
           run: Effect.gen(function* () {
             const setUpdateState = (state: ServerProviderUpdateState | null) =>
-              instanceId
-                ? input.providerRegistry.setProviderInstanceUpdateState(instanceId, state)
-                : input.providerRegistry.setProviderUpdateState(provider, state);
+              input.providerRegistry.setProviderMaintenanceActionState({
+                instanceId,
+                action: "update",
+                state,
+              });
 
             yield* setUpdateState(
               makeUpdateState({
