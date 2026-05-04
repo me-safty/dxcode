@@ -20,7 +20,7 @@ export const ProjectEntry = Schema.Struct({
 });
 export type ProjectEntry = typeof ProjectEntry.Type;
 
-export const ProjectSearchIndexSource = Schema.Literals(["git", "filesystem"]);
+export const ProjectSearchIndexSource = Schema.Literals(["filesystem", "git", "jj", "unknown"]);
 export type ProjectSearchIndexSource = typeof ProjectSearchIndexSource.Type;
 
 export const ProjectSearchIndexStats = Schema.Struct({

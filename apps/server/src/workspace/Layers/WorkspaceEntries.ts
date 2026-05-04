@@ -2,9 +2,13 @@ import * as OS from "node:os";
 import fsPromises from "node:fs/promises";
 import type { Dirent } from "node:fs";
 
-import { Cache, Duration, Effect, Exit, Layer, Option, Path } from "effect";
+import { Cache, DateTime, Duration, Effect, Exit, Layer, Option, Path } from "effect";
 
-import { type FilesystemBrowseInput, type ProjectEntry } from "@t3tools/contracts";
+import {
+  type FilesystemBrowseInput,
+  type ProjectEntry,
+  type ProjectSearchIndexSource,
+} from "@t3tools/contracts";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
 import {
   insertRankedSearchResult,
@@ -13,8 +17,8 @@ import {
   type RankedSearchResult,
 } from "@t3tools/shared/searchRanking";
 
-import { GitCore } from "../../git/Services/GitCore.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { VcsDriverRegistry } from "../../vcs/VcsDriverRegistry.ts";
 import {
   WorkspaceEntries,
   WorkspaceEntriesBrowseError,
@@ -44,7 +48,7 @@ interface WorkspaceIndex {
   scannedAt: number;
   entries: SearchableWorkspaceEntry[];
   truncated: boolean;
-  source: "git" | "filesystem";
+  source: ProjectSearchIndexSource;
   fullIndexing: boolean;
 }
 
@@ -194,40 +198,41 @@ const resolveBrowseTarget = (
 
 export const makeWorkspaceEntries = Effect.gen(function* () {
   const path = yield* Path.Path;
-  const gitOption = yield* Effect.serviceOption(GitCore);
   const serverSettingsOption = yield* Effect.serviceOption(ServerSettingsService);
+  const vcsRegistry = yield* VcsDriverRegistry;
   const workspacePaths = yield* WorkspacePaths;
 
-  const isInsideGitWorkTree = (cwd: string): Effect.Effect<boolean> =>
-    Option.match(gitOption, {
-      onSome: (git) => git.isInsideWorkTree(cwd).pipe(Effect.catch(() => Effect.succeed(false))),
-      onNone: () => Effect.succeed(false),
-    });
+  const isInsideVcsWorkTree = (cwd: string): Effect.Effect<boolean> =>
+    vcsRegistry.detect({ cwd }).pipe(
+      Effect.map((handle) => handle !== null),
+      Effect.catch(() => Effect.succeed(false)),
+    );
 
-  const filterGitIgnoredPaths = (
+  const filterVcsIgnoredPaths = (
     cwd: string,
     relativePaths: string[],
   ): Effect.Effect<string[], never> =>
-    Option.match(gitOption, {
-      onSome: (git) =>
-        git.filterIgnoredPaths(cwd, relativePaths).pipe(
-          Effect.map((paths) => [...paths]),
-          Effect.catch(() => Effect.succeed(relativePaths)),
-        ),
-      onNone: () => Effect.succeed(relativePaths),
-    });
+    vcsRegistry.detect({ cwd }).pipe(
+      Effect.flatMap((handle) =>
+        handle
+          ? handle.driver.filterIgnoredPaths(cwd, relativePaths).pipe(
+              Effect.map((paths) => [...paths]),
+              Effect.catch(() => Effect.succeed(relativePaths)),
+            )
+          : Effect.succeed(relativePaths),
+      ),
+      Effect.catch(() => Effect.succeed(relativePaths)),
+    );
 
-  const buildWorkspaceIndexFromGit = Effect.fn("WorkspaceEntries.buildWorkspaceIndexFromGit")(
+  const buildWorkspaceIndexFromVcs = Effect.fn("WorkspaceEntries.buildWorkspaceIndexFromVcs")(
     function* (input: WorkspaceIndexOptions) {
       const { cwd, fullIndexing } = input;
-      if (Option.isNone(gitOption)) {
-        return null;
-      }
-      if (!(yield* isInsideGitWorkTree(cwd))) {
+      const vcs = yield* vcsRegistry.detect({ cwd }).pipe(Effect.catch(() => Effect.succeed(null)));
+      if (!vcs) {
         return null;
       }
 
-      const listedFiles = yield* gitOption.value
+      const listedFiles = yield* vcs.driver
         .listWorkspaceFiles(
           cwd,
           fullIndexing ? { maxOutputBytes: WORKSPACE_FULL_GIT_OUTPUT_MAX_BYTES } : {},
@@ -241,7 +246,10 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       const listedPaths = [...listedFiles.paths]
         .map((entry) => toPosixPath(entry))
         .filter((entry) => entry.length > 0 && !isPathInIgnoredDirectory(entry));
-      const filePaths = yield* filterGitIgnoredPaths(cwd, listedPaths);
+      const filePaths = yield* vcs.driver.filterIgnoredPaths(cwd, listedPaths).pipe(
+        Effect.map((paths) => [...paths]),
+        Effect.catch(() => filterVcsIgnoredPaths(cwd, listedPaths)),
+      );
 
       const directorySet = new Set<string>();
       for (const filePath of filePaths) {
@@ -273,13 +281,14 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
         )
         .map(toSearchableWorkspaceEntry);
 
+      const now = yield* DateTime.now;
       const entries = [...directoryEntries, ...fileEntries];
       const entryLimit = workspaceIndexEntryLimit(fullIndexing);
       return {
-        scannedAt: Date.now(),
+        scannedAt: now.epochMilliseconds,
         entries: entryLimit === null ? entries : entries.slice(0, entryLimit),
         truncated: listedFiles.truncated || (entryLimit !== null && entries.length > entryLimit),
-        source: "git" as const,
+        source: vcs.driver.capabilities.kind,
         fullIndexing,
       };
     },
@@ -319,7 +328,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     input: WorkspaceIndexOptions,
   ): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
     const { cwd, fullIndexing } = input;
-    const shouldFilterWithGitIgnore = yield* isInsideGitWorkTree(cwd);
+    const shouldFilterWithGitIgnore = yield* isInsideVcsWorkTree(cwd);
     const entryLimit = workspaceIndexEntryLimit(fullIndexing);
 
     let pendingDirectories: string[] = [""];
@@ -368,7 +377,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
         candidateEntries.map((entry) => entry.relativePath),
       );
       const allowedPathSet = shouldFilterWithGitIgnore
-        ? new Set(yield* filterGitIgnoredPaths(cwd, candidatePaths))
+        ? new Set(yield* filterVcsIgnoredPaths(cwd, candidatePaths))
         : null;
 
       for (const candidateEntries of candidateEntriesByDirectory) {
@@ -400,8 +409,9 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       }
     }
 
+    const now = yield* DateTime.now;
     return {
-      scannedAt: Date.now(),
+      scannedAt: now.epochMilliseconds,
       entries,
       truncated,
       source: "filesystem" as const,
@@ -413,9 +423,9 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     cacheKey: string,
   ): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
     const options = parseWorkspaceIndexCacheKey(cacheKey);
-    const gitIndexed = yield* buildWorkspaceIndexFromGit(options);
-    if (gitIndexed) {
-      return gitIndexed;
+    const vcsIndexed = yield* buildWorkspaceIndexFromVcs(options);
+    if (vcsIndexed) {
+      return vcsIndexed;
     }
     return yield* buildWorkspaceIndexFromFilesystem(options);
   });
