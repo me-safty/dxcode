@@ -36,8 +36,8 @@ import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
-  isClaudeNativeCommandPath,
   makePackageManagedProviderVersionLifecycleResolver,
+  normalizeCommandPath,
   resolveProviderVersionLifecycleEffect,
 } from "../providerVersionLifecycle.ts";
 import { makeClaudeCapabilitiesCacheKey, makeClaudeContinuationGroupKey } from "./ClaudeHome.ts";
@@ -45,6 +45,16 @@ import { makeClaudeCapabilitiesCacheKey, makeClaudeContinuationGroupKey } from "
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
+
+function isClaudeNativeCommandPath(commandPath: string): boolean {
+  const normalized = normalizeCommandPath(commandPath);
+  return (
+    normalized.endsWith("/.local/bin/claude") ||
+    normalized.endsWith("/.local/bin/claude.exe") ||
+    normalized.includes("/.local/share/claude/")
+  );
+}
+
 const UPDATE = makePackageManagedProviderVersionLifecycleResolver({
   provider: DRIVER_KIND,
   npmPackageName: "@anthropic-ai/claude-code",
@@ -86,7 +96,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
     displayName: "Claude",
     supportsMultipleInstances: true,
   },
-  update: UPDATE,
   configSchema: ClaudeSettings,
   defaultConfig: (): ClaudeSettings => Schema.decodeSync(ClaudeSettings)({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>

@@ -227,23 +227,6 @@ function isHomebrewCommandPath(commandPath: string): boolean {
   );
 }
 
-export function isClaudeNativeCommandPath(commandPath: string): boolean {
-  const normalized = normalizeCommandPath(commandPath);
-  return (
-    normalized.endsWith("/.local/bin/claude") ||
-    normalized.endsWith("/.local/bin/claude.exe") ||
-    normalized.includes("/.local/share/claude/")
-  );
-}
-
-export function isOpenCodeNativeCommandPath(commandPath: string): boolean {
-  const normalized = normalizeCommandPath(commandPath);
-  return (
-    normalized.endsWith("/.opencode/bin/opencode") ||
-    normalized.endsWith("/.opencode/bin/opencode.exe")
-  );
-}
-
 export function resolvePackageManagedProviderVersionLifecycle(
   definition: PackageManagedProviderVersionLifecycleDefinition,
   options?: ProviderVersionLifecycleResolutionOptions,
@@ -342,7 +325,7 @@ export function disableProviderVersionLifecycleUpdates(
   });
 }
 
-export function getProviderVersionLifecycle(
+function makeManualProviderVersionLifecycle(
   provider: ProviderDriverKind,
 ): ProviderVersionLifecycle {
   return makeManualOnlyProviderVersionLifecycle({
@@ -407,7 +390,7 @@ export function createProviderVersionAdvisory(input: {
   readonly checkedAt?: string | null;
   readonly versionLifecycle?: ProviderVersionLifecycle;
 }): ServerProviderVersionAdvisory {
-  const lifecycle = input.versionLifecycle ?? getProviderVersionLifecycle(input.driver);
+  const lifecycle = input.versionLifecycle ?? makeManualProviderVersionLifecycle(input.driver);
   const latestVersion = input.latestVersion ?? null;
   const advisory = deriveVersionAdvisory({
     currentVersion: input.currentVersion,
@@ -455,11 +438,9 @@ function fetchNpmLatestVersion(packageName: string): Effect.Effect<string | null
 }
 
 export function resolveLatestProviderVersion(
-  provider: ProviderDriverKind,
-  versionLifecycle?: ProviderVersionLifecycle,
+  versionLifecycle: ProviderVersionLifecycle,
 ): Effect.Effect<string | null> {
-  const lifecycle = versionLifecycle ?? getProviderVersionLifecycle(provider);
-  const packageName = lifecycle.packageName;
+  const packageName = versionLifecycle.packageName;
   if (!packageName) {
     return Effect.succeed(null);
   }
@@ -487,7 +468,7 @@ export function enrichProviderSnapshotWithVersionAdvisory(
   versionLifecycle?: ProviderVersionLifecycle,
 ): Effect.Effect<ServerProvider> {
   return Effect.gen(function* () {
-    const lifecycle = versionLifecycle ?? getProviderVersionLifecycle(snapshot.driver);
+    const lifecycle = versionLifecycle ?? makeManualProviderVersionLifecycle(snapshot.driver);
     if (!snapshot.enabled || !snapshot.installed || !snapshot.version) {
       return {
         ...snapshot,
@@ -500,7 +481,7 @@ export function enrichProviderSnapshotWithVersionAdvisory(
       };
     }
 
-    const latestVersion = yield* resolveLatestProviderVersion(snapshot.driver, lifecycle);
+    const latestVersion = yield* resolveLatestProviderVersion(lifecycle);
     return {
       ...snapshot,
       versionAdvisory: createProviderVersionAdvisory({

@@ -35,7 +35,7 @@ import { ServerSettingsService, type ServerSettingsShape } from "../../serverSet
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
-import { getProviderVersionLifecycle } from "../providerVersionLifecycle.ts";
+import { makeManualOnlyProviderVersionLifecycle } from "../providerVersionLifecycle.ts";
 
 const defaultClaudeSettings: ClaudeSettings = Schema.decodeSync(ClaudeSettings)({});
 const defaultCodexSettings: CodexSettings = Schema.decodeSync(CodexSettings)({});
@@ -594,7 +594,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             displayName: undefined,
             enabled: true,
             snapshot: {
-              versionLifecycle: getProviderVersionLifecycle(codexDriver),
+              versionLifecycle: makeManualOnlyProviderVersionLifecycle({
+                provider: codexDriver,
+                packageName: null,
+              }),
               getSnapshot: Effect.succeed(cachedProvider),
               refresh: Effect.die(new Error("simulated refresh failure")),
               streamChanges: Stream.empty,
@@ -680,7 +683,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             displayName: undefined,
             enabled: true,
             snapshot: {
-              versionLifecycle: getProviderVersionLifecycle(provider.driver),
+              versionLifecycle: makeManualOnlyProviderVersionLifecycle({
+                provider: provider.driver,
+                packageName: null,
+              }),
               getSnapshot: Effect.succeed(provider),
               refresh: Effect.succeed(provider),
               streamChanges: Stream.empty,

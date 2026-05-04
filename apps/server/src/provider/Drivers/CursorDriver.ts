@@ -81,7 +81,6 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
     displayName: "Cursor",
     supportsMultipleInstances: true,
   },
-  update: UPDATE,
   configSchema: CursorSettings,
   defaultConfig: (): CursorSettings => Schema.decodeSync(CursorSettings)({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>

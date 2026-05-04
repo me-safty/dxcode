@@ -80,7 +80,7 @@ import {
   ProviderRegistry,
   type ProviderRegistryShape,
 } from "./provider/Services/ProviderRegistry.ts";
-import { getProviderVersionLifecycle } from "./provider/providerVersionLifecycle.ts";
+import { makeManualOnlyProviderVersionLifecycle } from "./provider/providerVersionLifecycle.ts";
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
@@ -520,9 +520,9 @@ const buildAppUnderTest = (options?: {
           refresh: () => Effect.succeed([]),
           refreshInstance: () => Effect.succeed([]),
           getProviderVersionLifecycle: (provider) =>
-            Effect.succeed(getProviderVersionLifecycle(provider)),
+            Effect.succeed(makeManualOnlyProviderVersionLifecycle({ provider, packageName: null })),
           getProviderVersionLifecycleForInstance: (_instanceId, provider) =>
-            Effect.succeed(getProviderVersionLifecycle(provider)),
+            Effect.succeed(makeManualOnlyProviderVersionLifecycle({ provider, packageName: null })),
           setProviderUpdateState: () => Effect.succeed([]),
           setProviderInstanceUpdateState: () => Effect.succeed([]),
           streamChanges: Stream.empty,

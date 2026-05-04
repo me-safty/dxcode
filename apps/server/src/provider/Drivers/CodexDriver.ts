@@ -95,7 +95,6 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
     displayName: "Codex",
     supportsMultipleInstances: true,
   },
-  update: UPDATE,
   configSchema: CodexSettings,
   defaultConfig: (): CodexSettings => Schema.decodeSync(CodexSettings)({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>

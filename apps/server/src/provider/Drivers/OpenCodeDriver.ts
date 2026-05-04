@@ -36,13 +36,22 @@ import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
-  isOpenCodeNativeCommandPath,
   makePackageManagedProviderVersionLifecycleResolver,
+  normalizeCommandPath,
   resolveProviderVersionLifecycleEffect,
 } from "../providerVersionLifecycle.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("opencode");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
+
+function isOpenCodeNativeCommandPath(commandPath: string): boolean {
+  const normalized = normalizeCommandPath(commandPath);
+  return (
+    normalized.endsWith("/.opencode/bin/opencode") ||
+    normalized.endsWith("/.opencode/bin/opencode.exe")
+  );
+}
+
 const UPDATE = makePackageManagedProviderVersionLifecycleResolver({
   provider: DRIVER_KIND,
   npmPackageName: "opencode-ai",
@@ -85,7 +94,6 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
     displayName: "OpenCode",
     supportsMultipleInstances: true,
   },
-  update: UPDATE,
   configSchema: OpenCodeSettings,
   defaultConfig: (): OpenCodeSettings => Schema.decodeSync(OpenCodeSettings)({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>

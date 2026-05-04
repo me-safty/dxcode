@@ -7,15 +7,18 @@ import { ProviderDriverKind } from "@t3tools/contracts";
 import { Effect } from "effect";
 import {
   createProviderVersionAdvisory,
-  isClaudeNativeCommandPath,
-  isOpenCodeNativeCommandPath,
   makePackageManagedProviderVersionLifecycleResolver,
   makeProviderVersionLifecycle,
   makeStaticProviderVersionLifecycleResolver,
+  normalizeCommandPath,
   resolveProviderVersionLifecycleEffect,
 } from "./providerVersionLifecycle.ts";
 
 const driver = (value: string) => ProviderDriverKind.make(value);
+const isNativeTestCommandPath =
+  (expectedPathSegment: string) =>
+  (commandPath: string): boolean =>
+    normalizeCommandPath(commandPath).includes(expectedPathSegment);
 const codexUpdate = makePackageManagedProviderVersionLifecycleResolver({
   provider: driver("codex"),
   npmPackageName: "@openai/codex",
@@ -30,7 +33,7 @@ const claudeUpdate = makePackageManagedProviderVersionLifecycleResolver({
     executable: "claude",
     args: ["update"],
     lockKey: "claude-native",
-    isCommandPath: isClaudeNativeCommandPath,
+    isCommandPath: isNativeTestCommandPath("/.local/bin/claude"),
   },
 });
 const opencodeUpdate = makePackageManagedProviderVersionLifecycleResolver({
@@ -41,7 +44,7 @@ const opencodeUpdate = makePackageManagedProviderVersionLifecycleResolver({
     executable: "opencode",
     args: ["upgrade"],
     lockKey: "opencode-native",
-    isCommandPath: isOpenCodeNativeCommandPath,
+    isCommandPath: isNativeTestCommandPath("/.opencode/bin/opencode"),
   },
 });
 const cursorUpdate = makeStaticProviderVersionLifecycleResolver(

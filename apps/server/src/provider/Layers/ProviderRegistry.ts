@@ -46,8 +46,8 @@ import {
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import {
   disableProviderVersionLifecycleUpdates,
-  getProviderVersionLifecycle as getDefaultProviderVersionLifecycle,
   haveProviderVersionLifecyclesEqual,
+  makeManualOnlyProviderVersionLifecycle,
 } from "../providerVersionLifecycle.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
 
@@ -64,6 +64,12 @@ const loadProviders = (
       concurrency: "unbounded",
     },
   );
+
+const makeManualProviderVersionLifecycle = (provider: ProviderDriverKind) =>
+  makeManualOnlyProviderVersionLifecycle({
+    provider,
+    packageName: null,
+  });
 
 const hasModelCapabilities = (model: ServerProvider["models"][number]): boolean =>
   (model.capabilities?.optionDescriptors?.length ?? 0) > 0;
@@ -497,13 +503,13 @@ export const ProviderRegistryLive = Layer.effect(
         (instance) => instance.driverKind === provider,
       );
       if (instances.length === 0) {
-        return getDefaultProviderVersionLifecycle(provider);
+        return makeManualProviderVersionLifecycle(provider);
       }
 
       const [firstInstance, ...restInstances] = instances;
       const firstLifecycle = firstInstance?.snapshot.versionLifecycle;
       if (!firstLifecycle) {
-        return getDefaultProviderVersionLifecycle(provider);
+        return makeManualProviderVersionLifecycle(provider);
       }
 
       const hasMixedLifecycles = restInstances.some(
