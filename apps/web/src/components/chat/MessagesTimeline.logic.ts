@@ -211,6 +211,57 @@ export function computeStableMessagesTimelineRows(
   return anyChanged ? { byId: next, result } : previous;
 }
 
+export type UserMessageRowDirection = "previous" | "next";
+
+export function findUserMessageRowIndex(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+  anchorIndex: number,
+  direction: UserMessageRowDirection,
+): number | null {
+  const matches = (row: MessagesTimelineRow, i: number) =>
+    (direction === "next" ? i > anchorIndex : i < anchorIndex) &&
+    row.kind === "message" &&
+    row.message.role === "user";
+
+  const target = direction === "next" ? rows.findIndex(matches) : rows.findLastIndex(matches);
+  return target === -1 ? null : target;
+}
+
+export interface LegendListVisibleRangeState {
+  start: number;
+  end: number;
+  scrollLength: number;
+}
+
+export function resolveNavigationAnchorIndex({
+  rows,
+  state,
+  pendingIndex,
+  direction,
+}: {
+  rows: ReadonlyArray<MessagesTimelineRow>;
+  state: LegendListVisibleRangeState | null;
+  pendingIndex: number | null;
+  direction: UserMessageRowDirection;
+}): number {
+  if (pendingIndex !== null) return pendingIndex;
+  if (!state || state.scrollLength === 0) {
+    return direction === "previous" ? rows.length : -1;
+  }
+
+  const rangeStart = Math.max(0, state.start);
+  const rangeEnd = Math.min(rows.length - 1, state.end);
+  const visible = (row: MessagesTimelineRow, i: number) =>
+    i >= rangeStart &&
+    i <= rangeEnd &&
+    row.kind === "message" &&
+    row.message.role === "user";
+
+  const found = direction === "previous" ? rows.findIndex(visible) : rows.findLastIndex(visible);
+  if (found !== -1) return found;
+  return direction === "previous" ? rows.length : -1;
+}
+
 /** Shallow field comparison per row variant — avoids deep equality cost. */
 function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean {
   if (a.kind !== b.kind || a.id !== b.id) return false;

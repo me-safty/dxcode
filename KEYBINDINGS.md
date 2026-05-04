@@ -54,6 +54,8 @@ Invalid rules are ignored. Invalid config files are ignored. Warnings are logged
 - `commandPalette.toggle`: open or close the global command palette
 - `chat.new`: create a new chat thread preserving the active thread's branch/worktree state
 - `chat.newLocal`: create a new chat thread for the active project in a new environment (local/worktree determined by app settings (default `local`))
+- `chat.previousUserMessage`: scroll to the previous user message in the active chat
+- `chat.nextUserMessage`: scroll to the next user message in the active chat
 - `editor.openFavorite`: open current project/worktree in the last-used editor
 - `script.{id}.run`: run a project script by id (for example `script.test.run`)
 

@@ -5,6 +5,7 @@ import {
   use,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -39,10 +40,13 @@ import {
   computeStableMessagesTimelineRows,
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
+  findUserMessageRowIndex,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveNavigationAnchorIndex,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
+  type UserMessageRowDirection,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -92,12 +96,17 @@ const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 // Props (public API)
 // ---------------------------------------------------------------------------
 
+export interface MessagesTimelineHandle {
+  scrollToAdjacentUserMessage(direction: UserMessageRowDirection): void;
+}
+
 interface MessagesTimelineProps {
   isWorking: boolean;
   activeTurnInProgress: boolean;
   activeTurnId?: TurnId | null;
   activeTurnStartedAt: string | null;
   listRef: React.RefObject<LegendListRef | null>;
+  handleRef?: React.RefObject<MessagesTimelineHandle | null>;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
@@ -126,6 +135,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   activeTurnId,
   activeTurnStartedAt,
   listRef,
+  handleRef,
   timelineEntries,
   completionDividerBeforeEntryId,
   completionSummary,
@@ -163,6 +173,43 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+
+  const pendingNavigationIndexRef = useRef<number | null>(null);
+
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      scrollToAdjacentUserMessage(direction) {
+        const list = listRef.current;
+        if (!list) return;
+
+        const anchorRowIndex = resolveNavigationAnchorIndex({
+          rows,
+          state: list.getState?.() ?? null,
+          pendingIndex: pendingNavigationIndexRef.current,
+          direction,
+        });
+        const targetRowIndex = findUserMessageRowIndex(rows, anchorRowIndex, direction);
+        if (targetRowIndex === null) return;
+
+        pendingNavigationIndexRef.current = targetRowIndex;
+
+        const isFirstUserMessage =
+          findUserMessageRowIndex(rows, targetRowIndex, "previous") === null;
+
+        if (isFirstUserMessage) {
+          void list.scrollToOffset?.({ offset: 0, animated: false });
+        } else {
+          void list.scrollToIndex?.({
+            index: targetRowIndex,
+            animated: false,
+            viewPosition: 0.5,
+          });
+        }
+      },
+    }),
+    [handleRef, listRef, rows],
+  );
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();

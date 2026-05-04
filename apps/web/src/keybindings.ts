@@ -274,6 +274,14 @@ export function threadTraversalDirectionFromCommand(
   return null;
 }
 
+export function chatUserMessageDirectionFromCommand(
+  command: string | null,
+): "previous" | "next" | null {
+  if (command === "chat.previousUserMessage") return "previous";
+  if (command === "chat.nextUserMessage") return "next";
+  return null;
+}
+
 export function shouldShowThreadJumpHints(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,
