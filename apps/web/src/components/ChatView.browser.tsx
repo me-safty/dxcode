@@ -2523,6 +2523,53 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("keeps the mobile composer expanded when Enter is pressed while send is busy", async () => {
+    const mounted = await mountChatView({
+      viewport: COMPACT_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mobile-composer-busy-enter-target" as MessageId,
+        targetText: "mobile composer busy enter thread",
+        sessionStatus: "running",
+      }),
+    });
+
+    try {
+      const expandButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Expand composer"]'),
+        "Unable to find collapsed composer expand button.",
+      );
+      expandButton.click();
+
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-mobile-collapsed="false"]'),
+        "Mobile composer should expand when tapped.",
+      );
+      const composerEditor = await waitForComposerEditor();
+      await page.getByTestId("composer-editor").fill("busy enter should not blur");
+
+      await pressComposerKey("Enter");
+
+      await vi.waitFor(
+        () => {
+          expect(
+            document.querySelector('[data-chat-composer-mobile-collapsed="false"]'),
+          ).toBeTruthy();
+          expect(document.activeElement).toBe(composerEditor);
+          expect(
+            wsRequests.some(
+              (request) =>
+                request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+                request.type === "thread.turn.start",
+            ),
+          ).toBe(false);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("shows pending user input choices while the mobile composer stays collapsed", async () => {
     const mounted = await mountChatView({
       viewport: COMPACT_FOOTER_VIEWPORT,

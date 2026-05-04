@@ -1043,17 +1043,9 @@ export const ChatComposer = memo(
           : null,
       [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
     );
-    const collapsedComposerPrimaryActionDisabled = activePendingProgress
-      ? activePendingIsResponding ||
-        (activePendingProgress.isLastQuestion
-          ? !activePendingResolvedAnswers
-          : !activePendingProgress.canAdvance)
-      : isSendBusy || isConnecting || !composerSendState.hasSendableContent;
-    const collapsedComposerPrimaryActionLabel = activePendingProgress
-      ? activePendingProgress.isLastQuestion
-        ? "Submit answer"
-        : "Next question"
-      : "Send message";
+    const collapsedComposerPrimaryActionDisabled =
+      isSendBusy || isConnecting || !composerSendState.hasSendableContent;
+    const collapsedComposerPrimaryActionLabel = "Send message";
     const showMobilePendingAnswerActions =
       isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
 
@@ -1600,6 +1592,7 @@ export const ChatComposer = memo(
 
     const shouldBlurMobileComposerOnSubmit = useCallback(() => {
       if (!isMobileViewport) return false;
+      if (isSendBusy || isConnecting || phase === "running") return false;
       if (activePendingProgress) {
         return activePendingProgress.isLastQuestion && Boolean(activePendingResolvedAnswers);
       }
@@ -1608,7 +1601,10 @@ export const ChatComposer = memo(
       activePendingProgress,
       activePendingResolvedAnswers,
       composerSendState.hasSendableContent,
+      isConnecting,
       isMobileViewport,
+      isSendBusy,
+      phase,
       showPlanFollowUpPrompt,
     ]);
 
