@@ -7,7 +7,7 @@ import {
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as AzureDevOpsPullRequests from "./azureDevOpsPullRequests.ts";
-import type * as SourceControlProvider from "./SourceControlProvider.ts";
+import * as SourceControlProvider from "./SourceControlProvider.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -158,9 +158,9 @@ function normalizeChangeRequestId(reference: string): string {
 }
 
 function normalizeSourceBranch(headSelector: string): string {
-  const trimmed = headSelector.trim();
-  const ownerSelector = /^([^:/\s]+):(.+)$/u.exec(trimmed);
-  return ownerSelector?.[2]?.trim() ?? trimmed;
+  return (
+    SourceControlProvider.parseSourceControlOwnerRef(headSelector)?.refName ?? headSelector.trim()
+  );
 }
 
 function sourceBranch(input: {
