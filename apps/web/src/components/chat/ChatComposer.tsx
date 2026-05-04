@@ -1044,7 +1044,7 @@ export const ChatComposer = memo(
       [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
     );
     const collapsedComposerPrimaryActionDisabled =
-      isSendBusy || isConnecting || !composerSendState.hasSendableContent;
+      phase === "running" || isSendBusy || isConnecting || !composerSendState.hasSendableContent;
     const collapsedComposerPrimaryActionLabel = "Send message";
     const showMobilePendingAnswerActions =
       isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
