@@ -175,6 +175,12 @@ const REMOTE_PROJECT_SOURCES: ReadonlyArray<AddProjectRemoteSource> = [
   "bitbucket",
   "azure-devops",
 ];
+const REMOTE_PROJECT_PROVIDER_SOURCES: ReadonlyArray<AddProjectRemoteProviderKind> = [
+  "github",
+  "gitlab",
+  "bitbucket",
+  "azure-devops",
+];
 
 function remoteProjectSourceLabel(source: AddProjectRemoteSource): string {
   switch (source) {
@@ -238,6 +244,19 @@ function remoteProjectInputPlaceholder(flow: AddProjectCloneFlow | null): string
 
 function sourceProviderKind(source: AddProjectRemoteSource): AddProjectRemoteProviderKind | null {
   return source === "url" ? null : source;
+}
+
+function sortAddProjectProviderSources(
+  readinessBySource: AddProjectRemoteSourceReadiness,
+): ReadonlyArray<AddProjectRemoteProviderKind> {
+  return REMOTE_PROJECT_PROVIDER_SOURCES.toSorted((left, right) => {
+    const leftReady = readinessBySource[left].ready;
+    const rightReady = readinessBySource[right].ready;
+    if (leftReady !== rightReady) {
+      return leftReady ? -1 : 1;
+    }
+    return remoteProjectSourceLabel(left).localeCompare(remoteProjectSourceLabel(right));
+  });
 }
 
 type AddProjectRemoteSourceReadiness = Record<
@@ -779,7 +798,12 @@ function OpenCommandPaletteDialog() {
         },
       ];
 
-      for (const source of REMOTE_PROJECT_SOURCES) {
+      const orderedSources: ReadonlyArray<AddProjectRemoteSource> = [
+        "url",
+        ...sortAddProjectProviderSources(readinessBySource),
+      ];
+
+      for (const source of orderedSources) {
         const label = remoteProjectSourceLabel(source);
         const title = source === "url" ? "Git URL" : `${label} repository`;
         const description =
