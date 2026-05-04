@@ -80,6 +80,12 @@ export function refreshSourceControlDiscovery(
   return sourceControlDiscoveryManager.refresh(sourceControlDiscoveryTarget(input));
 }
 
+export function getSourceControlDiscoverySnapshot(
+  input?: SourceControlDiscoveryTargetInput,
+): SourceControlDiscoveryState {
+  return sourceControlDiscoveryManager.getSnapshot(sourceControlDiscoveryTarget(input));
+}
+
 export function resetSourceControlDiscoveryStateForTests(): void {
   sourceControlDiscoveryManager.reset();
 }

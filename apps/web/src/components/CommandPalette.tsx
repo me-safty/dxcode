@@ -30,6 +30,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -47,7 +48,10 @@ import {
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useSettings } from "../hooks/useSettings";
 import { readLocalApi } from "../localApi";
-import { refreshSourceControlDiscovery } from "../lib/sourceControlDiscoveryState";
+import {
+  getSourceControlDiscoverySnapshot,
+  refreshSourceControlDiscovery,
+} from "../lib/sourceControlDiscoveryState";
 import {
   startNewThreadInProjectFromContext,
   startNewThreadFromContext,
@@ -873,16 +877,40 @@ function OpenCommandPaletteDialog() {
   );
 
   const startAddProjectSourceSelection = useCallback(
-    async (environmentId: EnvironmentId): Promise<void> => {
+    (environmentId: EnvironmentId): void => {
       setAddProjectEnvironmentId(environmentId);
       setAddProjectCloneFlow(null);
-      const discovery = await refreshSourceControlDiscovery({ environmentId });
+      const target = { environmentId };
+      const initialDiscovery = getSourceControlDiscoverySnapshot(target).data;
       pushPaletteView({
         addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
         groups: buildAddProjectSourceGroups(
           environmentId,
-          buildAddProjectRemoteSourceReadiness(discovery),
+          buildAddProjectRemoteSourceReadiness(initialDiscovery),
         ),
+      });
+
+      if (initialDiscovery) {
+        return;
+      }
+
+      void refreshSourceControlDiscovery(target).then((discovery) => {
+        setViewStack((previousViews) => {
+          const currentTopView = previousViews.at(-1);
+          if (currentTopView?.groups[0]?.value !== `sources:${environmentId}`) {
+            return previousViews;
+          }
+          return [
+            ...previousViews.slice(0, -1),
+            {
+              addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
+              groups: buildAddProjectSourceGroups(
+                environmentId,
+                buildAddProjectRemoteSourceReadiness(discovery),
+              ),
+            },
+          ];
+        });
       });
     },
     [buildAddProjectSourceGroups],
@@ -898,7 +926,7 @@ function OpenCommandPaletteDialog() {
       icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
       keepOpen: true,
       run: async () => {
-        await startAddProjectSourceSelection(option.environmentId);
+        startAddProjectSourceSelection(option.environmentId);
       },
     }),
   );
@@ -943,7 +971,7 @@ function OpenCommandPaletteDialog() {
     startAddProjectSourceSelection,
   ]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (openIntent?.kind !== "add-project") {
       return;
     }
