@@ -9,19 +9,10 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 import { sanitizeBranchFragment } from "@t3tools/shared/git";
 import { detectSourceControlProviderFromRemoteUrl } from "@t3tools/shared/sourceControl";
 
-import {
-  BitbucketPullRequestListSchema,
-  BitbucketPullRequestSchema,
-  normalizeBitbucketPullRequestRecord,
-  type NormalizedBitbucketPullRequestRecord,
-} from "./bitbucketPullRequests.ts";
-import type {
-  SourceControlProviderContext,
-  SourceControlRefSelector,
-} from "./SourceControlProvider.ts";
-import { parseSourceControlOwnerRef } from "./SourceControlProvider.ts";
-import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
-import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
+import * as BitbucketPullRequests from "./bitbucketPullRequests.ts";
+import * as SourceControlProvider from "./SourceControlProvider.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
 const DEFAULT_API_BASE_URL = "https://api.bitbucket.org/2.0";
 
@@ -89,20 +80,26 @@ export interface BitbucketApiShape {
   readonly probeAuth: Effect.Effect<SourceControlProviderAuth, never>;
   readonly listPullRequests: (input: {
     readonly cwd: string;
-    readonly context?: SourceControlProviderContext;
+    readonly context?: SourceControlProvider.SourceControlProviderContext;
     readonly headSelector: string;
-    readonly source?: SourceControlRefSelector;
+    readonly source?: SourceControlProvider.SourceControlRefSelector;
     readonly state: "open" | "closed" | "merged" | "all";
     readonly limit?: number;
-  }) => Effect.Effect<ReadonlyArray<NormalizedBitbucketPullRequestRecord>, BitbucketApiError>;
+  }) => Effect.Effect<
+    ReadonlyArray<BitbucketPullRequests.NormalizedBitbucketPullRequestRecord>,
+    BitbucketApiError
+  >;
   readonly getPullRequest: (input: {
     readonly cwd: string;
-    readonly context?: SourceControlProviderContext;
+    readonly context?: SourceControlProvider.SourceControlProviderContext;
     readonly reference: string;
-  }) => Effect.Effect<NormalizedBitbucketPullRequestRecord, BitbucketApiError>;
+  }) => Effect.Effect<
+    BitbucketPullRequests.NormalizedBitbucketPullRequestRecord,
+    BitbucketApiError
+  >;
   readonly getRepositoryCloneUrls: (input: {
     readonly cwd: string;
-    readonly context?: SourceControlProviderContext;
+    readonly context?: SourceControlProvider.SourceControlProviderContext;
     readonly repository: string;
   }) => Effect.Effect<SourceControlRepositoryCloneUrls, BitbucketApiError>;
   readonly createRepository: (input: {
@@ -112,21 +109,21 @@ export interface BitbucketApiShape {
   }) => Effect.Effect<SourceControlRepositoryCloneUrls, BitbucketApiError>;
   readonly createPullRequest: (input: {
     readonly cwd: string;
-    readonly context?: SourceControlProviderContext;
+    readonly context?: SourceControlProvider.SourceControlProviderContext;
     readonly baseBranch: string;
     readonly headSelector: string;
-    readonly source?: SourceControlRefSelector;
-    readonly target?: SourceControlRefSelector;
+    readonly source?: SourceControlProvider.SourceControlRefSelector;
+    readonly target?: SourceControlProvider.SourceControlRefSelector;
     readonly title: string;
     readonly bodyFile: string;
   }) => Effect.Effect<void, BitbucketApiError>;
   readonly getDefaultBranch: (input: {
     readonly cwd: string;
-    readonly context?: SourceControlProviderContext;
+    readonly context?: SourceControlProvider.SourceControlProviderContext;
   }) => Effect.Effect<string | null, BitbucketApiError>;
   readonly checkoutPullRequest: (input: {
     readonly cwd: string;
-    readonly context?: SourceControlProviderContext;
+    readonly context?: SourceControlProvider.SourceControlProviderContext;
     readonly reference: string;
     readonly force?: boolean;
   }) => Effect.Effect<void, BitbucketApiError>;
@@ -150,22 +147,24 @@ function normalizeChangeRequestId(reference: string): string {
 }
 
 function normalizeSourceBranch(headSelector: string): string {
-  return parseSourceControlOwnerRef(headSelector)?.refName ?? headSelector.trim();
+  return (
+    SourceControlProvider.parseSourceControlOwnerRef(headSelector)?.refName ?? headSelector.trim()
+  );
 }
 
 function sourceBranch(input: {
   readonly headSelector: string;
-  readonly source?: SourceControlRefSelector;
+  readonly source?: SourceControlProvider.SourceControlRefSelector;
 }): string {
   return input.source?.refName ?? normalizeSourceBranch(input.headSelector);
 }
 
 function sourceWorkspace(input: {
   readonly headSelector: string;
-  readonly source?: SourceControlRefSelector;
+  readonly source?: SourceControlProvider.SourceControlRefSelector;
 }): string | undefined {
   if (input.source?.owner) return input.source.owner;
-  return parseSourceControlOwnerRef(input.headSelector)?.owner;
+  return SourceControlProvider.parseSourceControlOwnerRef(input.headSelector)?.owner;
 }
 
 function toBitbucketStates(state: "open" | "closed" | "merged" | "all"): ReadonlyArray<string> {
@@ -271,7 +270,9 @@ function checkoutBranchName(input: {
 }
 
 function repositoryNameWithOwner(
-  repository: Schema.Schema.Type<typeof BitbucketPullRequestSchema>["source"]["repository"],
+  repository: Schema.Schema.Type<
+    typeof BitbucketPullRequests.BitbucketPullRequestSchema
+  >["source"]["repository"],
 ): string | null {
   const fullName = repository?.full_name?.trim() ?? "";
   return fullName.length > 0 ? fullName : null;
@@ -349,8 +350,8 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
   const config = yield* BitbucketApiEnvConfig;
   const httpClient = yield* HttpClient.HttpClient;
   const fileSystem = yield* FileSystem.FileSystem;
-  const git = yield* GitVcsDriver;
-  const vcsRegistry = yield* VcsDriverRegistry;
+  const git = yield* GitVcsDriver.GitVcsDriver;
+  const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
 
   const apiUrl = (path: string) => `${config.baseUrl.replace(/\/+$/u, "")}${path}`;
 
@@ -396,7 +397,7 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
 
   const resolveRepository = Effect.fn("BitbucketApi.resolveRepository")(function* (input: {
     readonly cwd: string;
-    readonly context?: SourceControlProviderContext;
+    readonly context?: SourceControlProvider.SourceControlProviderContext;
     readonly repository?: string;
   }) {
     const fromRepository =
@@ -444,7 +445,7 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
 
   const getRepository = (input: {
     readonly cwd: string;
-    readonly context?: SourceControlProviderContext;
+    readonly context?: SourceControlProvider.SourceControlProviderContext;
     readonly repository?: string;
   }) =>
     resolveRepository(input).pipe(
@@ -472,12 +473,12 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
           `/repositories/${encodeURIComponent(repository.workspace)}/${encodeURIComponent(repository.repoSlug)}/pullrequests/${encodeURIComponent(normalizeChangeRequestId(reference))}`,
         ),
       ),
-      BitbucketPullRequestSchema,
+      BitbucketPullRequests.BitbucketPullRequestSchema,
     );
 
   const getRawPullRequest = (input: {
     readonly cwd: string;
-    readonly context?: SourceControlProviderContext;
+    readonly context?: SourceControlProvider.SourceControlProviderContext;
     readonly reference: string;
   }) =>
     resolveRepository(input).pipe(
@@ -489,7 +490,7 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
 
   const resolveCheckoutRemote = Effect.fn("BitbucketApi.resolveCheckoutRemote")(function* (input: {
     readonly cwd: string;
-    readonly context?: SourceControlProviderContext;
+    readonly context?: SourceControlProvider.SourceControlProviderContext;
     readonly destinationRepository: BitbucketRepositoryLocator;
     readonly sourceRepositoryName: string;
     readonly isCrossRepository: boolean;
@@ -560,13 +561,17 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
               ),
               { urlParams: query },
             ),
-            BitbucketPullRequestListSchema,
+            BitbucketPullRequests.BitbucketPullRequestListSchema,
           );
         }),
-        Effect.map((list) => list.values.map(normalizeBitbucketPullRequestRecord)),
+        Effect.map((list) =>
+          list.values.map(BitbucketPullRequests.normalizeBitbucketPullRequestRecord),
+        ),
       ),
     getPullRequest: (input) =>
-      getRawPullRequest(input).pipe(Effect.map(normalizeBitbucketPullRequestRecord)),
+      getRawPullRequest(input).pipe(
+        Effect.map(BitbucketPullRequests.normalizeBitbucketPullRequestRecord),
+      ),
     getRepositoryCloneUrls: (input) =>
       getRepository(input).pipe(Effect.map(normalizeRepositoryCloneUrls)),
     createRepository: (input) =>
@@ -632,7 +637,7 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
               `/repositories/${encodeURIComponent(repository.workspace)}/${encodeURIComponent(repository.repoSlug)}/pullrequests`,
             ),
           ).pipe(HttpClientRequest.bodyJsonUnsafe(body)),
-          BitbucketPullRequestSchema,
+          BitbucketPullRequests.BitbucketPullRequestSchema,
         );
       }),
     getDefaultBranch: (input) =>

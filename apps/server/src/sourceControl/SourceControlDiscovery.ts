@@ -7,8 +7,8 @@ import { Context, Effect, Layer, Option } from "effect";
 
 import { ServerConfig } from "../config.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
-import { SourceControlProviderRegistry } from "./SourceControlProviderRegistry.ts";
-import { detailFromCause, firstNonEmptyLine } from "./SourceControlProviderDiscovery.ts";
+import * as SourceControlProviderDiscovery from "./SourceControlProviderDiscovery.ts";
+import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 
 interface DiscoveryProbe {
   readonly label: string;
@@ -68,7 +68,8 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const config = yield* ServerConfig;
     const process = yield* VcsProcess.VcsProcess;
-    const sourceControlProviders = yield* SourceControlProviderRegistry;
+    const sourceControlProviders =
+      yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
 
     const probe = <Kind extends VcsDriverKind>(
       input: DiscoveryProbe & { readonly kind: Kind },
@@ -107,8 +108,9 @@ export const layer = Layer.effect(
                 executable,
                 implemented: input.implemented,
                 status: "available" as const,
-                version: Option.orElse(firstNonEmptyLine(result.stdout), () =>
-                  firstNonEmptyLine(result.stderr),
+                version: Option.orElse(
+                  SourceControlProviderDiscovery.firstNonEmptyLine(result.stdout),
+                  () => SourceControlProviderDiscovery.firstNonEmptyLine(result.stderr),
                 ),
                 installHint: input.installHint,
                 detail: Option.none<string>(),
@@ -123,7 +125,7 @@ export const layer = Layer.effect(
               status: "missing" as const,
               version: Option.none<string>(),
               installHint: input.installHint,
-              detail: detailFromCause(cause),
+              detail: SourceControlProviderDiscovery.detailFromCause(cause),
             } satisfies DiscoveryProbeResult<Kind>),
           ),
         );

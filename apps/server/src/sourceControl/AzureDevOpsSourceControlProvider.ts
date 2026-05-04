@@ -1,17 +1,14 @@
 import { Effect, Layer } from "effect";
 import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
 
-import { AzureDevOpsCli, type AzureDevOpsCliError } from "./AzureDevOpsCli.ts";
-import { SourceControlProvider, type SourceControlRefSelector } from "./SourceControlProvider.ts";
-import {
-  combinedAuthOutput,
-  firstSafeAuthLine,
-  providerAuth,
-  type SourceControlAuthProbeInput,
-  type SourceControlCliDiscoverySpec,
-} from "./SourceControlProviderDiscovery.ts";
+import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
+import * as SourceControlProvider from "./SourceControlProvider.ts";
+import * as SourceControlProviderDiscovery from "./SourceControlProviderDiscovery.ts";
 
-function providerError(operation: string, cause: AzureDevOpsCliError): SourceControlProviderError {
+function providerError(
+  operation: string,
+  cause: AzureDevOpsCli.AzureDevOpsCliError,
+): SourceControlProviderError {
   return new SourceControlProviderError({
     provider: "azure-devops",
     operation,
@@ -20,22 +17,28 @@ function providerError(operation: string, cause: AzureDevOpsCliError): SourceCon
   });
 }
 
-function parseAzureAuth(input: SourceControlAuthProbeInput) {
+function parseAzureAuth(input: SourceControlProviderDiscovery.SourceControlAuthProbeInput) {
   const account = input.stdout.trim().split(/\r?\n/)[0]?.trim();
 
   if (input.exitCode !== 0) {
-    return providerAuth({
+    return SourceControlProviderDiscovery.providerAuth({
       status: "unauthenticated",
       detail:
-        firstSafeAuthLine(combinedAuthOutput(input)) ?? "Run `az login` to authenticate Azure CLI.",
+        SourceControlProviderDiscovery.firstSafeAuthLine(
+          SourceControlProviderDiscovery.combinedAuthOutput(input),
+        ) ?? "Run `az login` to authenticate Azure CLI.",
     });
   }
 
   if (account && account.length > 0) {
-    return providerAuth({ status: "authenticated", account, host: "dev.azure.com" });
+    return SourceControlProviderDiscovery.providerAuth({
+      status: "authenticated",
+      account,
+      host: "dev.azure.com",
+    });
   }
 
-  return providerAuth({
+  return SourceControlProviderDiscovery.providerAuth({
     status: "unknown",
     host: "dev.azure.com",
     detail: "Azure CLI account status could not be parsed.",
@@ -53,7 +56,7 @@ export const discovery = {
   implemented: true,
   installHint:
     "Install Azure CLI with `brew install azure-cli`, then add Azure DevOps support with `az extension add --name azure-devops`.",
-} satisfies SourceControlCliDiscoverySpec;
+} satisfies SourceControlProviderDiscovery.SourceControlCliDiscoverySpec;
 
 function toChangeRequest(summary: {
   readonly number: number;
@@ -79,8 +82,8 @@ function toChangeRequest(summary: {
 
 function sourceFromInput(input: {
   readonly headSelector: string;
-  readonly source?: SourceControlRefSelector;
-}): SourceControlRefSelector | undefined {
+  readonly source?: SourceControlProvider.SourceControlRefSelector;
+}): SourceControlProvider.SourceControlRefSelector | undefined {
   if (input.source) {
     return input.source;
   }
@@ -92,9 +95,9 @@ function sourceFromInput(input: {
 }
 
 export const make = Effect.fn("makeAzureDevOpsSourceControlProvider")(function* () {
-  const azure = yield* AzureDevOpsCli;
+  const azure = yield* AzureDevOpsCli.AzureDevOpsCli;
 
-  return SourceControlProvider.of({
+  return SourceControlProvider.SourceControlProvider.of({
     kind: "azure-devops",
     listChangeRequests: (input) => {
       const source = sourceFromInput(input);
@@ -153,4 +156,4 @@ export const make = Effect.fn("makeAzureDevOpsSourceControlProvider")(function* 
   });
 });
 
-export const layer = Layer.effect(SourceControlProvider, make());
+export const layer = Layer.effect(SourceControlProvider.SourceControlProvider, make());

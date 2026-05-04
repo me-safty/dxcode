@@ -1,14 +1,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, it } from "@effect/vitest";
+import { assert, it, afterEach, describe, expect, vi } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Option } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { afterEach, describe, expect, vi } from "vitest";
 import type { VcsError } from "@t3tools/contracts";
 
-import { VcsProcess, type VcsProcessInput, type VcsProcessOutput } from "../vcs/VcsProcess.ts";
+import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
 
-const processOutput = (stdout: string): VcsProcessOutput => ({
+const processOutput = (stdout: string): VcsProcess.VcsProcessOutput => ({
   exitCode: ChildProcessSpawner.ExitCode(0),
   stdout,
   stderr: "",
@@ -16,10 +15,10 @@ const processOutput = (stdout: string): VcsProcessOutput => ({
   stderrTruncated: false,
 });
 
-const mockRun = vi.fn<(input: VcsProcessInput) => Effect.Effect<VcsProcessOutput, VcsError>>();
+const mockRun = vi.fn<VcsProcess.VcsProcessShape["run"]>();
 
 const supportLayer = Layer.mergeAll(
-  Layer.mock(VcsProcess)({
+  Layer.mock(VcsProcess.VcsProcess)({
     run: mockRun,
   }),
   NodeServices.layer,

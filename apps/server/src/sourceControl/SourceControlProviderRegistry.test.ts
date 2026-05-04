@@ -2,15 +2,15 @@ import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { DateTime, Effect, Layer, Option } from "effect";
 
-import { AzureDevOpsCli } from "./AzureDevOpsCli.ts";
-import { BitbucketApi } from "./BitbucketApi.ts";
-import { GitHubCli } from "./GitHubCli.ts";
-import { GitLabCli } from "./GitLabCli.ts";
-import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import { ServerConfig } from "../config.ts";
+import type * as VcsDriver from "../vcs/VcsDriver.ts";
+import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
-import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
-import type { VcsDriverShape } from "../vcs/VcsDriver.ts";
+import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
+import * as BitbucketApi from "./BitbucketApi.ts";
+import * as GitHubCli from "./GitHubCli.ts";
+import * as GitLabCli from "./GitLabCli.ts";
+import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
@@ -34,10 +34,10 @@ function makeRegistry(input: {
           expiresAt: Option.none(),
         },
       }),
-  } satisfies Partial<VcsDriverShape>;
+  } satisfies Partial<VcsDriver.VcsDriverShape>;
 
-  const registryLayer = Layer.mock(VcsDriverRegistry)({
-    get: () => Effect.succeed(driver as unknown as VcsDriverShape),
+  const registryLayer = Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
+    get: () => Effect.succeed(driver as unknown as VcsDriver.VcsDriverShape),
     resolve: () =>
       Effect.succeed({
         kind: "git",
@@ -51,7 +51,7 @@ function makeRegistry(input: {
             expiresAt: Option.none(),
           },
         },
-        driver: driver as unknown as VcsDriverShape,
+        driver: driver as unknown as VcsDriver.VcsDriverShape,
       }),
   });
 
@@ -59,10 +59,10 @@ function makeRegistry(input: {
     Effect.provide(
       Layer.mergeAll(
         registryLayer,
-        Layer.mock(AzureDevOpsCli)({}),
-        Layer.mock(BitbucketApi)({}),
-        Layer.mock(GitHubCli)({}),
-        Layer.mock(GitLabCli)({}),
+        Layer.mock(AzureDevOpsCli.AzureDevOpsCli)({}),
+        Layer.mock(BitbucketApi.BitbucketApi)({}),
+        Layer.mock(GitHubCli.GitHubCli)({}),
+        Layer.mock(GitLabCli.GitLabCli)({}),
         Layer.mock(VcsProcess.VcsProcess)({}),
         ServerConfig.layerTest(process.cwd(), { prefix: "t3-source-control-registry-test-" }).pipe(
           Layer.provide(NodeServices.layer),

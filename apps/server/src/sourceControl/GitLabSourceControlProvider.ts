@@ -1,19 +1,14 @@
 import { Effect, Layer, Option } from "effect";
 import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
 
-import { GitLabCli, type GitLabCliError, type GitLabMergeRequestSummary } from "./GitLabCli.ts";
-import { SourceControlProvider, sourceControlRefFromInput } from "./SourceControlProvider.ts";
-import {
-  combinedAuthOutput,
-  firstSafeAuthLine,
-  matchFirst,
-  parseCliHost,
-  providerAuth,
-  type SourceControlAuthProbeInput,
-  type SourceControlCliDiscoverySpec,
-} from "./SourceControlProviderDiscovery.ts";
+import * as GitLabCli from "./GitLabCli.ts";
+import * as SourceControlProvider from "./SourceControlProvider.ts";
+import * as SourceControlProviderDiscovery from "./SourceControlProviderDiscovery.ts";
 
-function providerError(operation: string, cause: GitLabCliError): SourceControlProviderError {
+function providerError(
+  operation: string,
+  cause: GitLabCli.GitLabCliError,
+): SourceControlProviderError {
   return new SourceControlProviderError({
     provider: "gitlab",
     operation,
@@ -22,7 +17,7 @@ function providerError(operation: string, cause: GitLabCliError): SourceControlP
   });
 }
 
-function toChangeRequest(summary: GitLabMergeRequestSummary): ChangeRequest {
+function toChangeRequest(summary: GitLabCli.GitLabMergeRequestSummary): ChangeRequest {
   return {
     provider: "gitlab",
     number: summary.number,
@@ -44,31 +39,35 @@ function toChangeRequest(summary: GitLabMergeRequestSummary): ChangeRequest {
   };
 }
 
-function parseGitLabAuth(input: SourceControlAuthProbeInput) {
-  const output = combinedAuthOutput(input);
-  const account = matchFirst(output, [
+function parseGitLabAuth(input: SourceControlProviderDiscovery.SourceControlAuthProbeInput) {
+  const output = SourceControlProviderDiscovery.combinedAuthOutput(input);
+  const account = SourceControlProviderDiscovery.matchFirst(output, [
     /Logged in to .* as\s+([^\s(]+)/iu,
     /Logged in to .* account\s+([^\s(]+)/iu,
     /account:\s*([^\s(]+)/iu,
   ]);
-  const host = parseCliHost(output);
+  const host = SourceControlProviderDiscovery.parseCliHost(output);
 
   if (input.exitCode !== 0) {
-    return providerAuth({
+    return SourceControlProviderDiscovery.providerAuth({
       status: "unauthenticated",
       host,
-      detail: firstSafeAuthLine(output) ?? "Run `glab auth login` to authenticate GitLab CLI.",
+      detail:
+        SourceControlProviderDiscovery.firstSafeAuthLine(output) ??
+        "Run `glab auth login` to authenticate GitLab CLI.",
     });
   }
 
   if (account) {
-    return providerAuth({ status: "authenticated", account, host });
+    return SourceControlProviderDiscovery.providerAuth({ status: "authenticated", account, host });
   }
 
-  return providerAuth({
+  return SourceControlProviderDiscovery.providerAuth({
     status: "unknown",
     host,
-    detail: firstSafeAuthLine(output) ?? "GitLab CLI auth status could not be parsed.",
+    detail:
+      SourceControlProviderDiscovery.firstSafeAuthLine(output) ??
+      "GitLab CLI auth status could not be parsed.",
   });
 }
 
@@ -83,15 +82,15 @@ export const discovery = {
   implemented: true,
   installHint:
     "Install GitLab CLI with `brew install glab` or from https://gitlab.com/gitlab-org/cli.",
-} satisfies SourceControlCliDiscoverySpec;
+} satisfies SourceControlProviderDiscovery.SourceControlCliDiscoverySpec;
 
 export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
-  const gitlab = yield* GitLabCli;
+  const gitlab = yield* GitLabCli.GitLabCli;
 
-  return SourceControlProvider.of({
+  return SourceControlProvider.SourceControlProvider.of({
     kind: "gitlab",
     listChangeRequests: (input) => {
-      const source = sourceControlRefFromInput(input);
+      const source = SourceControlProvider.sourceControlRefFromInput(input);
       return gitlab
         .listMergeRequests({
           cwd: input.cwd,
@@ -111,7 +110,7 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
         Effect.mapError((error) => providerError("getChangeRequest", error)),
       ),
     createChangeRequest: (input) => {
-      const source = sourceControlRefFromInput(input);
+      const source = SourceControlProvider.sourceControlRefFromInput(input);
       return gitlab
         .createMergeRequest({
           cwd: input.cwd,
@@ -143,4 +142,4 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
   });
 });
 
-export const layer = Layer.effect(SourceControlProvider, make());
+export const layer = Layer.effect(SourceControlProvider.SourceControlProvider, make());

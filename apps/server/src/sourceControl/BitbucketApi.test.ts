@@ -1,13 +1,12 @@
-import { assert, it } from "@effect/vitest";
+import { assert, it, vi } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ConfigProvider, DateTime, Effect, FileSystem, Layer, Option } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
-import { vi } from "vitest";
 
 import * as BitbucketApi from "./BitbucketApi.ts";
-import { GitVcsDriver, type GitVcsDriverShape } from "../vcs/GitVcsDriver.ts";
-import { VcsDriverRegistry } from "../vcs/VcsDriverRegistry.ts";
-import type { VcsDriverShape } from "../vcs/VcsDriver.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
+import type * as VcsDriver from "../vcs/VcsDriver.ts";
 
 const bitbucketPullRequest = {
   id: 42,
@@ -49,35 +48,41 @@ const repositoryJson = {
 
 function makeLayer(input: {
   readonly response: (request: HttpClientRequest.HttpClientRequest) => Response;
-  readonly git?: Partial<GitVcsDriverShape>;
+  readonly git?: Partial<GitVcsDriver.GitVcsDriverShape>;
 }) {
   const execute = vi.fn((request: HttpClientRequest.HttpClientRequest) =>
     Effect.succeed(HttpClientResponse.fromWeb(request, input.response(request))),
   );
   const gitMock = {
-    readConfigValue: vi.fn<GitVcsDriverShape["readConfigValue"]>(() =>
+    readConfigValue: vi.fn<GitVcsDriver.GitVcsDriverShape["readConfigValue"]>(() =>
       Effect.succeed<string | null>("git@bitbucket.org:pingdotgg/t3code.git"),
     ),
-    resolvePrimaryRemoteName: vi.fn<GitVcsDriverShape["resolvePrimaryRemoteName"]>(() =>
-      Effect.succeed("origin"),
+    resolvePrimaryRemoteName: vi.fn<GitVcsDriver.GitVcsDriverShape["resolvePrimaryRemoteName"]>(
+      () => Effect.succeed("origin"),
     ),
-    ensureRemote: vi.fn<GitVcsDriverShape["ensureRemote"]>(() => Effect.succeed("octocat")),
-    fetchRemoteBranch: vi.fn<GitVcsDriverShape["fetchRemoteBranch"]>(() => Effect.void),
-    fetchRemoteTrackingBranch: vi.fn<GitVcsDriverShape["fetchRemoteTrackingBranch"]>(
+    ensureRemote: vi.fn<GitVcsDriver.GitVcsDriverShape["ensureRemote"]>(() =>
+      Effect.succeed("octocat"),
+    ),
+    fetchRemoteBranch: vi.fn<GitVcsDriver.GitVcsDriverShape["fetchRemoteBranch"]>(
       () => Effect.void,
     ),
-    setBranchUpstream: vi.fn<GitVcsDriverShape["setBranchUpstream"]>(() => Effect.void),
-    switchRef: vi.fn<GitVcsDriverShape["switchRef"]>((request) =>
+    fetchRemoteTrackingBranch: vi.fn<GitVcsDriver.GitVcsDriverShape["fetchRemoteTrackingBranch"]>(
+      () => Effect.void,
+    ),
+    setBranchUpstream: vi.fn<GitVcsDriver.GitVcsDriverShape["setBranchUpstream"]>(
+      () => Effect.void,
+    ),
+    switchRef: vi.fn<GitVcsDriver.GitVcsDriverShape["switchRef"]>((request) =>
       Effect.succeed({ refName: request.refName }),
     ),
-    listLocalBranchNames: vi.fn<GitVcsDriverShape["listLocalBranchNames"]>(() =>
+    listLocalBranchNames: vi.fn<GitVcsDriver.GitVcsDriverShape["listLocalBranchNames"]>(() =>
       Effect.succeed([]),
     ),
   };
   const git = {
     ...gitMock,
     ...input.git,
-  } satisfies Partial<GitVcsDriverShape>;
+  } satisfies Partial<GitVcsDriver.GitVcsDriverShape>;
 
   const driver = {
     listRemotes: () =>
@@ -96,7 +101,7 @@ function makeLayer(input: {
           expiresAt: Option.none(),
         },
       }),
-  } satisfies Partial<VcsDriverShape>;
+  } satisfies Partial<VcsDriver.VcsDriverShape>;
 
   const layer = BitbucketApi.layer.pipe(
     Layer.provide(
@@ -106,7 +111,7 @@ function makeLayer(input: {
       ),
     ),
     Layer.provide(
-      Layer.mock(VcsDriverRegistry)({
+      Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
         resolve: () =>
           Effect.succeed({
             kind: "git",
@@ -120,11 +125,11 @@ function makeLayer(input: {
                 expiresAt: Option.none(),
               },
             },
-            driver: driver as unknown as VcsDriverShape,
+            driver: driver as unknown as VcsDriver.VcsDriverShape,
           }),
       }),
     ),
-    Layer.provide(Layer.mock(GitVcsDriver)(git)),
+    Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)(git)),
     Layer.provide(
       ConfigProvider.layer(
         ConfigProvider.fromEnv({
