@@ -4,6 +4,7 @@ import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 
 import { useGitActionState } from "./use-git-action-state";
 import { useGitBranches } from "./use-git-branches";
+import { useSourceControlDiscovery } from "./use-source-control-discovery";
 import { useThreadSelection } from "./use-thread-selection";
 import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
 
@@ -19,6 +20,7 @@ export function useSelectedThreadGitState() {
     [selectedThread?.environmentId, selectedThreadCwd],
   );
   const gitActionState = useGitActionState(selectedThreadGitTarget);
+  const sourceControlDiscovery = useSourceControlDiscovery(selectedThread?.environmentId ?? null);
 
   const selectedThreadBranchTarget = useMemo(
     () => ({
@@ -31,14 +33,15 @@ export function useSelectedThreadGitState() {
   const selectedThreadBranchState = useGitBranches(selectedThreadBranchTarget);
   const selectedThreadBranches = useMemo(
     () =>
-      dedupeRemoteBranchesWithLocalMatches(selectedThreadBranchState.data?.branches ?? []).filter(
+      dedupeRemoteBranchesWithLocalMatches(selectedThreadBranchState.data?.refs ?? []).filter(
         (branch) => !branch.isRemote,
       ),
-    [selectedThreadBranchState.data?.branches],
+    [selectedThreadBranchState.data?.refs],
   );
 
   return {
     gitOperationLabel: gitActionState.currentLabel,
+    sourceControlDiscovery,
     selectedThreadBranches,
     selectedThreadBranchesLoading: selectedThreadBranchState.isPending,
   };

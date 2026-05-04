@@ -14,7 +14,7 @@ import { appAtomRegistry } from "./atom-registry";
 import {
   getEnvironmentClient,
   subscribeEnvironmentConnections,
-} from "./use-remote-environment-registry";
+} from "./environment-session-registry";
 
 /**
  * Singleton git status manager for the mobile app.
@@ -32,7 +32,7 @@ export const gitStatusManager = createGitStatusManager({
   getRegistry: () => appAtomRegistry,
   getClient: (environmentId) => {
     const client = getEnvironmentClient(environmentId);
-    return client ? client.git : null;
+    return client ? client.vcs : null;
   },
   getClientIdentity: (environmentId) => {
     return getEnvironmentClient(environmentId) ? environmentId : null;

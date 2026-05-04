@@ -1,4 +1,10 @@
-import type { GitRunStackedActionResult, GitStatusResult, ProjectScript } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  GitRunStackedActionResult,
+  ProjectScript,
+  ThreadId,
+  VcsStatusResult,
+} from "@t3tools/contracts";
 import {
   type GitActionRequestInput,
   requiresDefaultBranchConfirmation,
@@ -31,7 +37,7 @@ function compactMenuBranchLabel(branch: string): string {
   return truncateMiddle(branch, 24);
 }
 
-function compactMenuStatus(gitStatus: GitStatusResult | null): string {
+function compactMenuStatus(gitStatus: VcsStatusResult | null): string {
   if (!gitStatus) {
     return "Checking status";
   }
@@ -60,7 +66,7 @@ function compactMenuStatus(gitStatus: GitStatusResult | null): string {
 
 export function ThreadGitControls(props: {
   readonly currentBranch: string | null;
-  readonly gitStatus: GitStatusResult | null;
+  readonly gitStatus: VcsStatusResult | null;
   readonly gitOperationLabel: string | null;
   readonly canOpenTerminal: boolean;
   readonly projectScripts: ReadonlyArray<ProjectScript>;
@@ -73,16 +79,16 @@ export function ThreadGitControls(props: {
 }) {
   const router = useRouter();
   const { environmentId, threadId } = useLocalSearchParams<{
-    environmentId: string;
-    threadId: string;
+    environmentId: EnvironmentId;
+    threadId: ThreadId;
   }>();
   const { gitStatus, gitOperationLabel, onPull, onRunAction } = props;
 
-  const currentBranchLabel = gitStatus?.branch ?? props.currentBranch ?? "Detached HEAD";
+  const currentBranchLabel = gitStatus?.refName ?? props.currentBranch ?? "Detached HEAD";
   const busy = gitOperationLabel !== null;
   const isRepo = gitStatus?.isRepo ?? true;
-  const hasOriginRemote = gitStatus?.hasOriginRemote ?? false;
-  const isDefaultBranch = gitStatus?.isDefaultBranch ?? false;
+  const hasOriginRemote = gitStatus?.hasPrimaryRemote ?? false;
+  const isDefaultBranch = gitStatus?.isDefaultRef ?? false;
 
   const quickAction = useMemo(
     () =>
@@ -137,7 +143,7 @@ export function ThreadGitControls(props: {
         input.action === "commit_push_pr"
           ? input.action
           : null;
-      const branchName = gitStatus?.branch;
+      const branchName = gitStatus?.refName;
       if (
         branchName &&
         confirmableAction &&

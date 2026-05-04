@@ -7,6 +7,7 @@ import type {
   ProviderInteractionMode,
   RuntimeMode,
   ServerConfig as T3ServerConfig,
+  ThreadId,
 } from "@t3tools/contracts";
 import { formatElapsed } from "@t3tools/shared/orchestrationTiming";
 import * as Haptics from "expo-haptics";
@@ -77,9 +78,13 @@ export interface ThreadDetailScreenProps {
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
   ) => Promise<void>;
-  readonly onSelectUserInputOption: (requestId: string, questionId: string, label: string) => void;
+  readonly onSelectUserInputOption: (
+    requestId: ApprovalRequestId,
+    questionId: string,
+    label: string,
+  ) => void;
   readonly onChangeUserInputCustomAnswer: (
-    requestId: string,
+    requestId: ApprovalRequestId,
     questionId: string,
     customAnswer: string,
   ) => void;
@@ -107,7 +112,7 @@ function latestStreamingAssistantMessage(
   return null;
 }
 
-function useStreamingHaptics(threadId: string, feed: ReadonlyArray<ThreadFeedEntry>) {
+function useStreamingHaptics(threadId: ThreadId, feed: ReadonlyArray<ThreadFeedEntry>) {
   const lastStreamingAssistantRef = useRef<{
     readonly id: string;
     readonly textLength: number;
@@ -195,7 +200,14 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const { onOpenDrawer, onRefresh } = props;
 
   const insets = useSafeAreaInsets();
-  const agentLabel = `${props.selectedThread.modelSelection.provider} agent`;
+  const selectedProvider = props.serverConfig?.providers.find(
+    (provider) => provider.instanceId === props.selectedThread.modelSelection.instanceId,
+  );
+  const agentName =
+    selectedProvider?.displayName ??
+    selectedProvider?.driver ??
+    props.selectedThread.modelSelection.instanceId;
+  const agentLabel = `${agentName} agent`;
   const composerBottomInset = Math.max(insets.bottom, 12);
   const [composerExpanded, setComposerExpanded] = useState(false);
   const composerChrome = composerExpanded ? COMPOSER_EXPANDED_CHROME : COMPOSER_COLLAPSED_CHROME;
