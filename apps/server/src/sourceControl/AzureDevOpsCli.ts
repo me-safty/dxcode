@@ -1,5 +1,9 @@
 import { Context, Effect, Layer, Result, Schema, SchemaIssue } from "effect";
-import { TrimmedNonEmptyString, type VcsError } from "@t3tools/contracts";
+import {
+  TrimmedNonEmptyString,
+  type SourceControlRepositoryVisibility,
+  type VcsError,
+} from "@t3tools/contracts";
 
 import { VcsProcess, type VcsProcessOutput } from "../vcs/VcsProcess.ts";
 import {
@@ -54,6 +58,12 @@ export interface AzureDevOpsCliShape {
   readonly getRepositoryCloneUrls: (input: {
     readonly cwd: string;
     readonly repository: string;
+  }) => Effect.Effect<AzureDevOpsRepositoryCloneUrls, AzureDevOpsCliError>;
+
+  readonly createRepository: (input: {
+    readonly cwd: string;
+    readonly repository: string;
+    readonly visibility: SourceControlRepositoryVisibility;
   }) => Effect.Effect<AzureDevOpsRepositoryCloneUrls, AzureDevOpsCliError>;
 
   readonly createPullRequest: (input: {
@@ -201,10 +211,24 @@ function normalizeRepositoryCloneUrls(
   };
 }
 
+function parseRepositorySpecifier(repository: string): {
+  readonly project: string | null;
+  readonly name: string;
+} {
+  const parts = repository
+    .split("/")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  return {
+    project: parts.length > 1 ? (parts.at(-2) ?? null) : null,
+    name: parts.at(-1) ?? repository.trim(),
+  };
+}
+
 function decodeAzureDevOpsJson<S extends Schema.Top>(
   raw: string,
   schema: S,
-  operation: "getRepositoryCloneUrls" | "getDefaultBranch",
+  operation: "getRepositoryCloneUrls" | "getDefaultBranch" | "createRepository",
   invalidDetail: string,
 ): Effect.Effect<S["Type"], AzureDevOpsCliError, S["DecodingServices"]> {
   return Schema.decodeEffect(Schema.fromJsonString(schema))(raw).pipe(
@@ -327,6 +351,36 @@ export const make = Effect.fn("makeAzureDevOpsCli")(function* () {
         ),
         Effect.map(normalizeRepositoryCloneUrls),
       ),
+    createRepository: (input) => {
+      const repository = parseRepositorySpecifier(input.repository);
+      // Azure Repos access is governed by project/organization permissions.
+      // `az repos create` does not expose a per-repository visibility flag, so
+      // the generic source-control visibility input is intentionally not
+      // translated into CLI args for this provider.
+      return executeJson({
+        cwd: input.cwd,
+        args: [
+          "repos",
+          "create",
+          "--detect",
+          "true",
+          "--name",
+          repository.name,
+          ...(repository.project ? ["--project", repository.project] : []),
+        ],
+      }).pipe(
+        Effect.map((result) => result.stdout.trim()),
+        Effect.flatMap((raw) =>
+          decodeAzureDevOpsJson(
+            raw,
+            RawAzureDevOpsRepositorySchema,
+            "createRepository",
+            "Azure DevOps CLI returned invalid repository JSON.",
+          ),
+        ),
+        Effect.map(normalizeRepositoryCloneUrls),
+      );
+    },
     createPullRequest: (input) =>
       execute({
         cwd: input.cwd,

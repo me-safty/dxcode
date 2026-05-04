@@ -134,6 +134,10 @@ export const make = Effect.fn("makeAzureDevOpsSourceControlProvider")(function* 
       azure
         .getRepositoryCloneUrls(input)
         .pipe(Effect.mapError((error) => providerError("getRepositoryCloneUrls", error))),
+    createRepository: (input) =>
+      azure
+        .createRepository(input)
+        .pipe(Effect.mapError((error) => providerError("createRepository", error))),
     getDefaultBranch: (input) =>
       azure
         .getDefaultBranch({ cwd: input.cwd })

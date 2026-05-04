@@ -66,7 +66,7 @@ describe("AzureDevOpsCli.layer", () => {
       assert.strictEqual(result.headRefName, "feature/source-control");
       assert.strictEqual(result.state, "open");
       assert.deepStrictEqual(result.updatedAt._tag, Option.some(1)._tag);
-      expect(mockRun).toHaveBeenCalledWith({
+      assert.deepStrictEqual(mockRun.mock.calls.at(-1)?.[0], {
         operation: "AzureDevOpsCli.execute",
         command: "az",
         args: [
@@ -173,6 +173,58 @@ describe("AzureDevOpsCli.layer", () => {
         nameWithOwner: "project/repo",
         url: "https://dev.azure.com/acme/project/_git/repo",
         sshUrl: "git@ssh.dev.azure.com:v3/acme/project/repo",
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("creates repositories through Azure Repos", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(
+        Effect.succeed(
+          processOutput(
+            JSON.stringify({
+              name: "repo",
+              webUrl: "https://dev.azure.com/acme/project/_git/repo",
+              remoteUrl: "https://dev.azure.com/acme/project/_git/repo",
+              sshUrl: "git@ssh.dev.azure.com:v3/acme/project/repo",
+              project: {
+                name: "project",
+              },
+            }),
+          ),
+        ),
+      );
+
+      const az = yield* AzureDevOpsCli.AzureDevOpsCli;
+      const result = yield* az.createRepository({
+        cwd: "/repo",
+        repository: "project/repo",
+        visibility: "private",
+      });
+
+      assert.deepStrictEqual(result, {
+        nameWithOwner: "project/repo",
+        url: "https://dev.azure.com/acme/project/_git/repo",
+        sshUrl: "git@ssh.dev.azure.com:v3/acme/project/repo",
+      });
+      expect(mockRun).toHaveBeenCalledWith({
+        operation: "AzureDevOpsCli.execute",
+        command: "az",
+        args: [
+          "repos",
+          "create",
+          "--detect",
+          "true",
+          "--name",
+          "repo",
+          "--project",
+          "project",
+          "--only-show-errors",
+          "--output",
+          "json",
+        ],
+        cwd: "/repo",
+        timeoutMs: 30_000,
       });
     }).pipe(Effect.provide(layer)),
   );
