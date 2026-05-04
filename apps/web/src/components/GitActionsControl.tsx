@@ -399,6 +399,18 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
     () => PUBLISH_PROVIDER_OPTIONS.some((option) => publishProviderReadiness[option.value].ready),
     [publishProviderReadiness],
   );
+  const sortedPublishProviderOptions = useMemo(
+    () =>
+      PUBLISH_PROVIDER_OPTIONS.toSorted((left, right) => {
+        const leftReady = publishProviderReadiness[left.value].ready;
+        const rightReady = publishProviderReadiness[right.value].ready;
+        if (leftReady !== rightReady) {
+          return leftReady ? -1 : 1;
+        }
+        return left.label.localeCompare(right.label);
+      }),
+    [publishProviderReadiness],
+  );
   const selectedPublishProviderReadiness = publishProviderReadiness[publishProvider];
   const publishRepositoryPrefill = publishAccountByProvider[publishProvider]
     ? `${publishAccountByProvider[publishProvider]}/`
@@ -585,7 +597,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                   aria-labelledby="publish-provider-cards-label"
                   className="grid grid-cols-2 gap-2.5"
                 >
-                  {PUBLISH_PROVIDER_OPTIONS.map((option) => {
+                  {sortedPublishProviderOptions.map((option) => {
                     const readiness = publishProviderReadiness[option.value];
                     const isSelected = publishProvider === option.value && readiness.ready;
                     if (!readiness.ready) {
