@@ -5802,7 +5802,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
                   isCustom: false,
                   capabilities: createModelCapabilities({
                     optionDescriptors: [
-                      { id: "fastMode", label: "Fast Mode", type: "boolean" as const },
+                      { id: "fastMode", label: "Speed", type: "boolean" as const },
                     ],
                   }),
                 },
@@ -5812,7 +5812,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
                   isCustom: false,
                   capabilities: createModelCapabilities({
                     optionDescriptors: [
-                      { id: "fastMode", label: "Fast Mode", type: "boolean" as const },
+                      { id: "fastMode", label: "Speed", type: "boolean" as const },
                     ],
                   }),
                 },
@@ -5822,7 +5822,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
                   isCustom: false,
                   capabilities: createModelCapabilities({
                     optionDescriptors: [
-                      { id: "fastMode", label: "Fast Mode", type: "boolean" as const },
+                      { id: "fastMode", label: "Speed", type: "boolean" as const },
                     ],
                   }),
                 },

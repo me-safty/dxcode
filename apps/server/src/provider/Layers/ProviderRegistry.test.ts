@@ -190,7 +190,7 @@ const codexModelCapabilities = createModelCapabilities({
       { id: "high", label: "High", isDefault: true },
       { id: "low", label: "Low" },
     ]),
-    booleanDescriptor("fastMode", "Fast Mode"),
+    booleanDescriptor("fastMode", "Speed"),
   ],
 }) satisfies NonNullable<ServerProvider["models"][number]["capabilities"]>;
 
@@ -431,7 +431,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
                   selectDescriptor("reasoning", "Reasoning", [
                     { id: "high", label: "High", isDefault: true },
                   ]),
-                  booleanDescriptor("fastMode", "Fast Mode"),
+                  booleanDescriptor("fastMode", "Speed"),
                   booleanDescriptor("thinking", "Thinking"),
                 ],
               }),
@@ -471,7 +471,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
                   selectDescriptor("reasoning", "Reasoning", [
                     { id: "high", label: "High", isDefault: true },
                   ]),
-                  booleanDescriptor("fastMode", "Fast Mode"),
+                  booleanDescriptor("fastMode", "Speed"),
                   booleanDescriptor("thinking", "Thinking"),
                 ],
               }),

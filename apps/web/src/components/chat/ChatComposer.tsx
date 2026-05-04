@@ -98,7 +98,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
-import { getProviderInteractionModeToggle } from "../../providerModels";
+import { getProviderDisplayName, getProviderInteractionModeToggle } from "../../providerModels";
 import {
   deriveProviderInstanceEntries,
   resolveProviderDriverKindForInstanceSelection,
@@ -110,7 +110,10 @@ import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import type { SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
-import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
+import {
+  deriveLatestContextWindowSnapshot,
+  formatProviderDisplayName,
+} from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 
@@ -182,42 +185,41 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
   const RuntimeModeIcon = runtimeModeOption.icon;
 
+  const interactionModeToggle = props.showInteractionModeToggle ? (
+    <>
+      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+      <Button
+        variant="ghost"
+        className={cn(
+          "shrink-0 whitespace-nowrap px-2 sm:px-3",
+          props.interactionMode === "plan"
+            ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300"
+            : "text-muted-foreground/70 hover:text-foreground/80",
+        )}
+        size="sm"
+        type="button"
+        onClick={props.onToggleInteractionMode}
+        title={
+          props.interactionMode === "plan"
+            ? "Plan mode - click to return to normal build mode"
+            : "Default mode - click to enter plan mode"
+        }
+      >
+        {props.interactionMode === "plan" ? (
+          <PencilRulerIcon className="text-current opacity-100" />
+        ) : (
+          <BotIcon />
+        )}
+        <span className="sr-only sm:not-sr-only">
+          {props.interactionMode === "plan" ? "Plan" : "Build"}
+        </span>
+      </Button>
+    </>
+  ) : null;
+
   return (
     <>
       <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-
-      {props.showInteractionModeToggle ? (
-        <>
-          <Button
-            variant="ghost"
-            className={cn(
-              "shrink-0 whitespace-nowrap px-2 sm:px-3",
-              props.interactionMode === "plan"
-                ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300"
-                : "text-muted-foreground/70 hover:text-foreground/80",
-            )}
-            size="sm"
-            type="button"
-            onClick={props.onToggleInteractionMode}
-            title={
-              props.interactionMode === "plan"
-                ? "Plan mode — click to return to normal build mode"
-                : "Default mode — click to enter plan mode"
-            }
-          >
-            {props.interactionMode === "plan" ? (
-              <PencilRulerIcon className="text-current opacity-100" />
-            ) : (
-              <BotIcon />
-            )}
-            <span className="sr-only sm:not-sr-only">
-              {props.interactionMode === "plan" ? "Plan" : "Build"}
-            </span>
-          </Button>
-
-          <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-        </>
-      ) : null}
 
       <Select
         value={props.runtimeMode}
@@ -234,6 +236,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
           <SelectValue>{runtimeModeOption.label}</SelectValue>
         </SelectTrigger>
         <SelectPopup alignItemWithTrigger={false}>
+          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Permissions</div>
           {runtimeModeOptions.map((mode) => {
             const option = runtimeModeConfig[mode];
             const OptionIcon = option.icon;
@@ -254,6 +257,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
           })}
         </SelectPopup>
       </Select>
+
+      {interactionModeToggle}
 
       {props.showPlanToggle ? (
         <>
@@ -289,6 +294,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(props: {
   compact: boolean;
   activeContextWindow: ReturnType<typeof deriveLatestContextWindowSnapshot>;
+  activeThreadProviderDisplayName: string | null;
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -309,7 +315,12 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
 }) {
   return (
     <>
-      {props.activeContextWindow ? <ContextWindowMeter usage={props.activeContextWindow} /> : null}
+      {props.activeContextWindow ? (
+        <ContextWindowMeter
+          usage={props.activeContextWindow}
+          providerDisplayName={props.activeThreadProviderDisplayName}
+        />
+      ) : null}
       {props.isPreparingWorktree ? (
         <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
       ) : null}
@@ -465,7 +476,6 @@ export interface ChatComposerProps {
     expandedCursor: number,
     cursorAdjacentToMention: boolean,
   ) => void;
-  onSetActivePendingUserInputCustomAnswer: (questionId: string, value: string) => void;
 
   onProviderModelSelect: (instanceId: ProviderInstanceId, model: string) => void;
   toggleInteractionMode: () => void;
@@ -540,7 +550,6 @@ export const ChatComposer = memo(
       onAdvanceActivePendingUserInput,
       onPreviousActivePendingUserInputQuestion,
       onChangeActivePendingUserInputCustomAnswer,
-      onSetActivePendingUserInputCustomAnswer,
       onProviderModelSelect,
       toggleInteractionMode,
       handleRuntimeModeChange,
@@ -771,6 +780,16 @@ export const ChatComposer = memo(
       () => deriveLatestContextWindowSnapshot(activeThreadActivities ?? []),
       [activeThreadActivities],
     );
+    const activeThreadProviderDisplayName = useMemo(() => {
+      if (!activeThreadModelSelection) return null;
+      const entry = providerStatuses.find(
+        (p) => p.instanceId === activeThreadModelSelection.instanceId,
+      );
+      if (entry) {
+        return getProviderDisplayName(providerStatuses, entry.driver);
+      }
+      return formatProviderDisplayName(activeThreadModelSelection.instanceId);
+    }, [providerStatuses, activeThreadModelSelection]);
 
     // ------------------------------------------------------------------
     // Composer-local state
@@ -1287,6 +1306,25 @@ export const ChatComposer = memo(
         cursorAdjacentToMention: boolean,
         terminalContextIds: string[],
       ) => {
+        const activePendingQuestion = activePendingProgress?.activeQuestion;
+        if (activePendingQuestion && activePendingUserInput) {
+          // While a pending user input is active the composer doubles as the
+          // "Other"/custom answer field so @ and / mentions keep working.
+          // Route prompt edits to the pending input draft instead of the
+          // regular composer draft.
+          setComposerCursor(nextCursor);
+          setComposerTrigger(
+            cursorAdjacentToMention ? null : detectComposerTrigger(nextPrompt, expandedCursor),
+          );
+          onChangeActivePendingUserInputCustomAnswer(
+            activePendingQuestion.id,
+            nextPrompt,
+            nextCursor,
+            expandedCursor,
+            cursorAdjacentToMention,
+          );
+          return;
+        }
         promptRef.current = nextPrompt;
         setPrompt(nextPrompt);
         if (!terminalContextIdListsEqual(composerTerminalContexts, terminalContextIds)) {
@@ -1301,6 +1339,9 @@ export const ChatComposer = memo(
         );
       },
       [
+        activePendingProgress?.activeQuestion,
+        activePendingUserInput,
+        onChangeActivePendingUserInputCustomAnswer,
         promptRef,
         setPrompt,
         composerDraftTarget,
@@ -1794,7 +1835,6 @@ export const ChatComposer = memo(
                   questionIndex={activePendingQuestionIndex}
                   onToggleOption={onSelectActivePendingUserInputOption}
                   onAdvance={onAdvanceActivePendingUserInput}
-                  onChangeCustomAnswer={onSetActivePendingUserInputCustomAnswer}
                 />
               </div>
             ) : showPlanFollowUpPrompt && activeProposedPlan ? (
@@ -1806,33 +1846,34 @@ export const ChatComposer = memo(
               </div>
             ) : null}
 
-            {pendingUserInputs.length === 0 ? (
-              <div
-                className={cn(
-                  "relative px-3 pb-2 sm:px-4",
-                  hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
-                )}
-              >
-                {composerMenuOpen && !isComposerApprovalState && (
-                  <div className="absolute inset-x-0 bottom-full z-20 mb-2">
-                    <ComposerCommandMenu
-                      items={composerMenuItems}
-                      resolvedTheme={resolvedTheme}
-                      isLoading={isComposerMenuLoading}
-                      triggerKind={composerTriggerKind}
-                      groupSlashCommandSections={
-                        composerTrigger?.kind === "slash-command" &&
-                        composerTrigger.query.trim().length === 0
-                      }
-                      emptyStateText={composerMenuEmptyState}
-                      activeItemId={activeComposerMenuItem?.id ?? null}
-                      onHighlightedItemChange={onComposerMenuItemHighlighted}
-                      onSelect={onSelectComposerItem}
-                    />
-                  </div>
-                )}
+            <div
+              className={cn(
+                "relative px-3 pb-2 sm:px-4",
+                hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
+              )}
+            >
+              {composerMenuOpen && !isComposerApprovalState && (
+                <div className="absolute inset-x-0 bottom-full z-20 mb-2">
+                  <ComposerCommandMenu
+                    items={composerMenuItems}
+                    resolvedTheme={resolvedTheme}
+                    isLoading={isComposerMenuLoading}
+                    triggerKind={composerTriggerKind}
+                    groupSlashCommandSections={
+                      composerTrigger?.kind === "slash-command" &&
+                      composerTrigger.query.trim().length === 0
+                    }
+                    emptyStateText={composerMenuEmptyState}
+                    activeItemId={activeComposerMenuItem?.id ?? null}
+                    onHighlightedItemChange={onComposerMenuItemHighlighted}
+                    onSelect={onSelectComposerItem}
+                  />
+                </div>
+              )}
 
-                {!isComposerApprovalState && composerImages.length > 0 && (
+              {!isComposerApprovalState &&
+                pendingUserInputs.length === 0 &&
+                composerImages.length > 0 && (
                   <div className="mb-3 flex flex-wrap gap-2">
                     {composerImages.map((image) => (
                       <div
@@ -1897,30 +1938,40 @@ export const ChatComposer = memo(
                   </div>
                 )}
 
-                <ComposerPromptEditor
-                  ref={composerEditorRef}
-                  value={isComposerApprovalState ? "" : prompt}
-                  cursor={composerCursor}
-                  terminalContexts={!isComposerApprovalState ? composerTerminalContexts : []}
-                  skills={selectedProviderStatus?.skills ?? []}
-                  onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
-                  onChange={onPromptChange}
-                  onCommandKeyDown={onComposerCommandKey}
-                  onPaste={onComposerPaste}
-                  placeholder={
-                    isComposerApprovalState
-                      ? (activePendingApproval?.detail ??
-                        "Resolve this approval request to continue")
+              <ComposerPromptEditor
+                ref={composerEditorRef}
+                value={
+                  isComposerApprovalState
+                    ? ""
+                    : activePendingProgress
+                      ? (activePendingProgress.customAnswer ?? "")
+                      : prompt
+                }
+                cursor={composerCursor}
+                terminalContexts={
+                  !isComposerApprovalState && pendingUserInputs.length === 0
+                    ? composerTerminalContexts
+                    : []
+                }
+                skills={selectedProviderStatus?.skills ?? []}
+                onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
+                onChange={onPromptChange}
+                onCommandKeyDown={onComposerCommandKey}
+                onPaste={onComposerPaste}
+                placeholder={
+                  isComposerApprovalState
+                    ? (activePendingApproval?.detail ?? "Resolve this approval request to continue")
+                    : activePendingProgress
+                      ? "Type a custom answer, or pick an option above. @ to tag files, / for commands."
                       : showPlanFollowUpPrompt && activeProposedPlan
                         ? "Add feedback to refine the plan, or leave this blank to implement it"
                         : phase === "disconnected"
                           ? "Ask for follow-up changes or attach images"
                           : "Ask anything, @tag files/folders, or use / to show available commands"
-                  }
-                  disabled={isConnecting || isComposerApprovalState}
-                />
-              </div>
-            ) : null}
+                }
+                disabled={isConnecting || isComposerApprovalState || activePendingIsResponding}
+              />
+            </div>
 
             {/* Bottom toolbar */}
             {activePendingApproval ? (
@@ -2017,6 +2068,7 @@ export const ChatComposer = memo(
                   <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}
                     activeContextWindow={activeContextWindow}
+                    activeThreadProviderDisplayName={activeThreadProviderDisplayName}
                     pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}
                     showPlanFollowUpPrompt={

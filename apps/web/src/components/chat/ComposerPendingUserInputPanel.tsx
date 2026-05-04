@@ -15,7 +15,6 @@ interface PendingUserInputPanelProps {
   questionIndex: number;
   onToggleOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
-  onChangeCustomAnswer: (questionId: string, value: string) => void;
 }
 
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
@@ -25,7 +24,6 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
   questionIndex,
   onToggleOption,
   onAdvance,
-  onChangeCustomAnswer,
 }: PendingUserInputPanelProps) {
   if (pendingUserInputs.length === 0) return null;
   const activePrompt = pendingUserInputs[0];
@@ -40,7 +38,6 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       questionIndex={questionIndex}
       onToggleOption={onToggleOption}
       onAdvance={onAdvance}
-      onChangeCustomAnswer={onChangeCustomAnswer}
     />
   );
 });
@@ -52,7 +49,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   questionIndex,
   onToggleOption,
   onAdvance,
-  onChangeCustomAnswer,
 }: {
   prompt: PendingUserInput;
   isResponding: boolean;
@@ -60,11 +56,9 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   questionIndex: number;
   onToggleOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
-  onChangeCustomAnswer: (questionId: string, value: string) => void;
 }) {
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
-  const otherInputRef = useRef<HTMLInputElement | null>(null);
   const autoAdvanceTimerRef = useRef<number | null>(null);
   const onAdvanceRef = useRef(onAdvance);
   const [optimisticSingleSelect, setOptimisticSingleSelect] = useState<{
@@ -146,10 +140,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       const option = activeQuestion.options[optionIndex];
       if (!option) return;
       event.preventDefault();
-      if (option.label === "Other") {
-        otherInputRef.current?.focus();
-        return;
-      }
       handleOptionSelection(activeQuestion.id, option.label);
     };
     document.addEventListener("keydown", handler);
@@ -159,6 +149,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   if (!activeQuestion) {
     return null;
   }
+
+  const customAnswerActive = progress.customAnswer.trim().length > 0;
 
   return (
     <div className="px-4 py-3 sm:px-5">
@@ -175,57 +167,30 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       ) : null}
       <div className="mt-3 space-y-1">
         {activeQuestion.options.map((option, index) => {
-          const isOther = option.label === "Other";
-          const customAnswerActive = progress.customAnswer.trim().length > 0;
           const isOptimisticallySelected =
             optimisticSingleSelect?.questionId === activeQuestion.id &&
             optimisticSingleSelect.optionLabel === option.label;
-          const isSelected = isOther
-            ? customAnswerActive && optimisticSingleSelect?.questionId !== activeQuestion.id
-            : isOptimisticallySelected ||
-              (!customAnswerActive && progress.selectedOptionLabels.includes(option.label));
+          const isSelected =
+            isOptimisticallySelected ||
+            (!customAnswerActive && progress.selectedOptionLabels.includes(option.label));
           const shortcutKey = index < 9 ? index + 1 : null;
           const className = cn(
             "group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-all duration-150",
-            isSelected && !isOther
+            isSelected
               ? "bg-blue-500/10 text-foreground"
               : "bg-background dark:bg-input/32 text-foreground/85 hover:bg-muted/60 dark:hover:bg-input/45",
             isResponding && "opacity-50 cursor-not-allowed",
-            !isOther && !isResponding && "cursor-pointer",
-            isOther && !isResponding && "cursor-text",
+            !isResponding && "cursor-pointer",
           );
           const content = (
             <>
               <div className="min-w-0 flex-1 flex flex-col gap-0.5">
                 <span className="text-sm font-medium">{option.label}</span>
-                {isOther ? (
-                  <input
-                    ref={otherInputRef}
-                    type="text"
-                    placeholder={option.description}
-                    disabled={isResponding}
-                    value={progress.customAnswer}
-                    onChange={(event) =>
-                      onChangeCustomAnswer(activeQuestion.id, event.target.value)
-                    }
-                    onKeyDown={(event) => {
-                      event.stopPropagation();
-                      if (
-                        event.key === "Enter" &&
-                        !event.shiftKey &&
-                        progress.customAnswer.trim().length > 0
-                      ) {
-                        event.preventDefault();
-                        onAdvanceRef.current();
-                      }
-                    }}
-                    className="w-full bg-transparent text-xs text-foreground/80 placeholder:text-muted-foreground/50 outline-none border-0 p-0"
-                  />
-                ) : option.description && option.description !== option.label ? (
+                {option.description && option.description !== option.label ? (
                   <span className="text-xs text-muted-foreground/50">{option.description}</span>
                 ) : null}
               </div>
-              {isSelected && !isOther ? (
+              {isSelected ? (
                 <CheckIcon className="size-3.5 shrink-0 text-blue-400" />
               ) : shortcutKey !== null ? (
                 <kbd
@@ -239,13 +204,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               ) : null}
             </>
           );
-          if (isOther) {
-            return (
-              <label key={`${activeQuestion.id}:${option.label}`} className={className}>
-                {content}
-              </label>
-            );
-          }
           return (
             <div
               key={`${activeQuestion.id}:${option.label}`}

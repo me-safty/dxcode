@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { cn } from "~/lib/utils";
 
 export function hasNonZeroStat(stat: { additions: number; deletions: number }): boolean {
   return stat.additions > 0 || stat.deletions > 0;
@@ -21,19 +22,21 @@ function formatCompactDiffCount(value: number): string {
 export const DiffStatLabel = memo(function DiffStatLabel(props: {
   additions: number;
   deletions: number;
+  className?: string;
   showParentheses?: boolean;
   layout?: "aligned" | "inline";
 }) {
-  const { additions, deletions, showParentheses = false, layout = "aligned" } = props;
+  const { additions, deletions, className, showParentheses = false, layout = "aligned" } = props;
   return (
     <>
       {showParentheses && <span className="text-muted-foreground/70">(</span>}
       <span
-        className={
+        className={cn(
           layout === "inline"
             ? "inline-flex items-center gap-1 tabular-nums align-middle"
-            : "inline-grid grid-cols-[4ch_4ch] gap-2 text-right tabular-nums align-middle"
-        }
+            : "inline-grid grid-cols-[4ch_4ch] gap-2 text-right tabular-nums align-middle",
+          className,
+        )}
       >
         <span className="font-mono text-success">+{formatCompactDiffCount(additions)}</span>
         <span className="font-mono text-destructive">-{formatCompactDiffCount(deletions)}</span>

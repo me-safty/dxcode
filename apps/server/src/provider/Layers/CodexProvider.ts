@@ -115,7 +115,7 @@ function mapCodexModelCapabilities(
         ? [
             {
               id: "fastMode",
-              label: "Fast Mode",
+              label: "Speed",
               type: "boolean" as const,
             },
           ]

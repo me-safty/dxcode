@@ -15,7 +15,14 @@ import {
 } from "@t3tools/shared/model";
 import { memo, useCallback, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { BookOpenIcon, BrainIcon, ChevronDownIcon, ZapIcon } from "lucide-react";
+import {
+  BookOpenIcon,
+  BrainIcon,
+  ChevronDownIcon,
+  RabbitIcon,
+  TurtleIcon,
+  ZapIcon,
+} from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
 import {
   Menu,
@@ -47,6 +54,50 @@ type TraitsPersistence =
     };
 
 const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
+
+function getBooleanDescriptorLabel(
+  descriptor: Extract<ProviderOptionDescriptor, { type: "boolean" }>,
+): string {
+  return descriptor.id === "fastMode" ? "Speed" : descriptor.label;
+}
+
+function getBooleanDescriptorOptionLabel(
+  descriptor: Extract<ProviderOptionDescriptor, { type: "boolean" }>,
+  value: "on" | "off",
+): string {
+  if (descriptor.id === "fastMode") {
+    return value === "on" ? "Fast" : "Normal";
+  }
+  return value === "on" ? "On" : "Off";
+}
+
+function getSpeedOptionDescription(input: {
+  provider: ProviderDriverKind;
+  model: string | null | undefined;
+  value: "on" | "off";
+}): string {
+  if (input.value === "off") {
+    return "Uses standard speed and normal usage.";
+  }
+  if (input.provider === "claudeAgent") {
+    return "Works up to 2.5x faster, but uses 6x more usage than normal.";
+  }
+  if (input.model === "gpt-5.5") {
+    return "Works up to 1.5x faster, but uses 2.5x more usage than normal.";
+  }
+  return "Works up to 1.5x faster, but uses 2x more usage than normal.";
+}
+
+function BooleanDescriptorOptionIcon(props: {
+  descriptor: Extract<ProviderOptionDescriptor, { type: "boolean" }>;
+  value: "on" | "off";
+}) {
+  if (props.descriptor.id !== "fastMode") {
+    return null;
+  }
+  const Icon = props.value === "on" ? RabbitIcon : TurtleIcon;
+  return <Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />;
+}
 
 function replaceDescriptorCurrentValue(
   descriptors: ReadonlyArray<ProviderOptionDescriptor>,
@@ -355,7 +406,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
           {index > 0 || visibleSelectDescriptors.length > 0 ? <MenuDivider /> : null}
           <MenuGroup>
             <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
-              {descriptor.label}
+              {getBooleanDescriptorLabel(descriptor)}
             </div>
             {(() => {
               const selectedValue = descriptor.currentValue === true ? "on" : "off";
@@ -370,10 +421,23 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
                   }}
                 >
                   {(["on", "off"] as const).map((value) => (
-                    <MenuRadioItem key={value} value={value} hideIndicator>
-                      <span className="inline-flex items-center gap-1.5">
-                        {value === "on" ? "On" : "Off"}
-                        {value === selectedValue ? <SelectedModelBadge /> : null}
+                    <MenuRadioItem
+                      key={value}
+                      value={value}
+                      hideIndicator
+                      className={descriptor.id === "fastMode" ? "min-w-72 items-start py-2" : ""}
+                    >
+                      <span className="grid min-w-0 gap-0.5">
+                        <span className="inline-flex items-center gap-1.5">
+                          <BooleanDescriptorOptionIcon descriptor={descriptor} value={value} />
+                          {getBooleanDescriptorOptionLabel(descriptor, value)}
+                          {value === selectedValue ? <SelectedModelBadge /> : null}
+                        </span>
+                        {descriptor.id === "fastMode" ? (
+                          <span className="text-muted-foreground text-xs leading-4">
+                            {getSpeedOptionDescription({ provider, model, value })}
+                          </span>
+                        ) : null}
                       </span>
                     </MenuRadioItem>
                   ))}
@@ -417,6 +481,25 @@ export const TraitsPicker = memo(function TraitsPicker({
   const isCodexStyle = provider === "codex";
   const [openDescriptorId, setOpenDescriptorId] = useState<string | null>(null);
 
+  const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
+  const updateModelOptions = useCallback(
+    (nextOptions: ProviderOptions | undefined) => {
+      if ("onModelOptionsChange" in persistence) {
+        persistence.onModelOptionsChange(nextOptions);
+        return;
+      }
+      const threadTarget = persistence.threadRef ?? persistence.draftId;
+      if (!threadTarget) {
+        return;
+      }
+      setProviderModelOptions(threadTarget, provider, nextOptions, {
+        model,
+        persistSticky: true,
+      });
+    },
+    [model, persistence, provider, setProviderModelOptions],
+  );
+
   if (
     !shouldRenderTraitsControls({
       provider,
@@ -435,18 +518,6 @@ export const TraitsPicker = memo(function TraitsPicker({
     <>
       {visibleDescriptors.map((descriptor, descriptorIndex) => {
         const resolvedSelectLabel = getProviderOptionCurrentLabel(descriptor);
-        const triggerLabel =
-          ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id
-            ? "Ultrathink"
-            : descriptor.type === "boolean"
-              ? descriptor.id === "fastMode"
-                ? descriptor.currentValue === true
-                  ? "Fast"
-                  : "Normal"
-                : `${descriptor.label} ${descriptor.currentValue === true ? "On" : "Off"}`
-              : resolvedSelectLabel && resolvedSelectLabel.length > 0
-                ? resolvedSelectLabel
-                : descriptor.label;
         const descriptorIdLower = descriptor.id.toLowerCase();
         const descriptorLabelLower = descriptor.label.toLowerCase();
         const isThinkingLike =
@@ -456,6 +527,22 @@ export const TraitsPicker = memo(function TraitsPicker({
           descriptorLabelLower === "variant" ||
           descriptorIdLower.includes("thinking") ||
           descriptorLabelLower.includes("thinking");
+        const triggerLabel =
+          ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id
+            ? "Ultrathink"
+            : descriptor.type === "boolean"
+              ? descriptor.id === "fastMode"
+                ? descriptor.currentValue === true
+                  ? "Fast"
+                  : "Normal"
+                : isThinkingLike
+                  ? descriptor.currentValue === true
+                    ? "On"
+                    : "Off"
+                  : `${descriptor.label} ${descriptor.currentValue === true ? "On" : "Off"}`
+              : resolvedSelectLabel && resolvedSelectLabel.length > 0
+                ? resolvedSelectLabel
+                : descriptor.label;
         const isContextWindow =
           descriptorIdLower === "contextwindow" ||
           descriptorIdLower === "context_window" ||
@@ -476,54 +563,95 @@ export const TraitsPicker = memo(function TraitsPicker({
             .map((visibleDescriptor) => visibleDescriptor.id),
         ];
 
+        const isBooleanToggle = descriptor.type === "boolean" && isThinkingLike;
+        const toggleOn = isBooleanToggle && descriptor.currentValue === true;
+        const toggleLabel = toggleOn ? "Thinking" : "Instant";
+
         return (
           <Fragment key={descriptor.id}>
             {showTriggerSeparators && descriptorIndex > 0 ? (
               <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
             ) : null}
-            <Menu
-              open={openDescriptorId === descriptor.id}
-              onOpenChange={(open) => setOpenDescriptorId(open ? descriptor.id : null)}
-            >
-              <MenuTrigger
-                render={
-                  <Button
-                    size="sm"
-                    variant={triggerVariant ?? "ghost"}
-                    className={cn(
-                      isCodexStyle
-                        ? "min-w-0 max-w-40 shrink justify-start whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:max-w-48 sm:px-3"
-                        : "shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3",
-                      triggerClassName,
-                    )}
-                  />
+            {isBooleanToggle ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                aria-pressed={toggleOn}
+                title={
+                  toggleOn
+                    ? "Thinking enabled - click to switch to instant responses"
+                    : "Instant responses - click to enable thinking"
                 }
+                onClick={() => {
+                  updateModelOptions(
+                    buildProviderOptionSelectionsFromDescriptors(
+                      replaceDescriptorCurrentValue(descriptors, descriptor.id, !toggleOn),
+                    ),
+                  );
+                }}
+                className={cn(
+                  "shrink-0 whitespace-nowrap px-2 sm:px-3",
+                  toggleOn
+                    ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300"
+                    : "text-muted-foreground/70 hover:text-foreground/80",
+                  triggerClassName,
+                )}
               >
-                <span className="flex min-w-0 w-full items-center gap-1.5">
-                  {TriggerIcon ? (
-                    <TriggerIcon aria-hidden="true" className="size-3.5 shrink-0 opacity-70" />
-                  ) : null}
-                  <span className="min-w-0 truncate">{triggerLabel}</span>
-                  <span className="-me-1 inline-flex shrink-0 items-center">
-                    <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
-                  </span>
-                </span>
-              </MenuTrigger>
-              <MenuPopup align="start">
-                <TraitsMenuContent
-                  provider={provider}
-                  models={models}
-                  model={model}
-                  prompt={prompt}
-                  onPromptChange={onPromptChange}
-                  modelOptions={modelOptions}
-                  allowPromptInjectedEffort={allowPromptInjectedEffort}
-                  hiddenDescriptorIds={popupHiddenDescriptorIds}
-                  onRequestClose={() => setOpenDescriptorId(null)}
-                  {...persistence}
+                <BrainIcon
+                  aria-hidden="true"
+                  className={cn(
+                    "size-3.5 shrink-0",
+                    toggleOn ? "text-current opacity-100" : "opacity-70",
+                  )}
                 />
-              </MenuPopup>
-            </Menu>
+                <span className="sr-only sm:not-sr-only">{toggleLabel}</span>
+              </Button>
+            ) : (
+              <Menu
+                open={openDescriptorId === descriptor.id}
+                onOpenChange={(open) => setOpenDescriptorId(open ? descriptor.id : null)}
+              >
+                <MenuTrigger
+                  render={
+                    <Button
+                      size="sm"
+                      variant={triggerVariant ?? "ghost"}
+                      className={cn(
+                        isCodexStyle
+                          ? "min-w-0 max-w-40 shrink justify-start whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:max-w-48 sm:px-3"
+                          : "shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3",
+                        triggerClassName,
+                      )}
+                    />
+                  }
+                >
+                  <span className="flex min-w-0 w-full items-center gap-1.5">
+                    {TriggerIcon ? (
+                      <TriggerIcon aria-hidden="true" className="size-3.5 shrink-0 opacity-70" />
+                    ) : null}
+                    <span className="min-w-0 truncate">{triggerLabel}</span>
+                    <span className="-me-1 inline-flex shrink-0 items-center">
+                      <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
+                    </span>
+                  </span>
+                </MenuTrigger>
+                <MenuPopup align="start">
+                  <TraitsMenuContent
+                    provider={provider}
+                    models={models}
+                    model={model}
+                    prompt={prompt}
+                    onPromptChange={onPromptChange}
+                    modelOptions={modelOptions}
+                    allowPromptInjectedEffort={allowPromptInjectedEffort}
+                    hiddenDescriptorIds={popupHiddenDescriptorIds}
+                    onRequestClose={() => setOpenDescriptorId(null)}
+                    {...persistence}
+                  />
+                </MenuPopup>
+              </Menu>
+            )}
           </Fragment>
         );
       })}

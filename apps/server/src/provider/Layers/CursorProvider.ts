@@ -309,12 +309,12 @@ export function buildCursorCapabilitiesFromConfigOptions(
           typeof fastCurrentValue === "boolean"
             ? buildBooleanOptionDescriptor({
                 id: "fastMode",
-                label: fastOption.name?.trim() || "Fast Mode",
+                label: fastOption.name?.trim() || "Speed",
                 currentValue: fastCurrentValue,
               })
             : buildBooleanOptionDescriptor({
                 id: "fastMode",
-                label: fastOption.name?.trim() || "Fast Mode",
+                label: fastOption.name?.trim() || "Speed",
               }),
         ]
       : []),

@@ -35,7 +35,6 @@ import {
   MinusIcon,
   SquarePenIcon,
   TerminalIcon,
-  TriangleAlertIcon,
   Undo2Icon,
   WrenchIcon,
   XIcon,
@@ -918,6 +917,8 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
 }
 
+const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
+
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
@@ -931,7 +932,8 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   );
   const [expanded, setExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
-  const EntryIcon = workEntryIcon(workEntry);
+  const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
+  const EntryIcon = showWarningIndicator ? XIcon : workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
   const rawPreview = workEntryPreview(workEntry, workspaceRoot);
   const preview =
@@ -951,7 +953,6 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const canExpand = expandedBody !== null;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
-  const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
   const showFailedIndicator = workEntryIndicatesToolFailure(workEntry);
   const showDestructiveRowStyle =
     showFailedIndicator &&
@@ -959,7 +960,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const iconWrapperClass = cn(
     "flex size-5 shrink-0 items-center justify-center",
     showWarningIndicator
-      ? "text-warning"
+      ? "text-destructive"
       : showDestructiveRowStyle
         ? "text-destructive"
         : workEntry.tone === "tool" || showFailedIndicator
@@ -976,8 +977,6 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const showSuccessIndicator =
     workEntryIndicatesToolSuccess(workEntry) ||
     (turnSettled && workEntryIndicatesToolNeutralStatus(workEntry));
-  const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
-
   const rowToggleProps = canExpand
     ? {
         role: "button" as const,
@@ -1102,19 +1101,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
               ) : null}
             </span>
             <span className="flex size-5 shrink-0 items-center justify-center">
-              {showWarningIndicator ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={<span className="flex size-5 items-center justify-center" />}
-                  >
-                    <TriangleAlertIcon
-                      className="block size-3.5 shrink-0 text-warning"
-                      aria-hidden
-                    />
-                  </TooltipTrigger>
-                  <TooltipPopup>Warning</TooltipPopup>
-                </Tooltip>
-              ) : showFailedIndicator ? (
+              {showFailedIndicator ? (
                 <Tooltip>
                   <TooltipTrigger
                     render={<span className="flex size-5 items-center justify-center" />}

@@ -35,11 +35,12 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   return (
     <div className="mt-4 rounded-2xl border border-input bg-background p-2 pt-4 shadow-xs/5 not-dark:bg-clip-padding dark:bg-input/32">
       <div className="mb-3 flex items-center justify-between gap-2 px-2">
-        <p className="flex self-start items-center gap-1 font-medium text-foreground text-xs">
+        <p className="flex self-start items-center gap-1 font-medium text-foreground text-xs leading-4">
           <span>{files.length} changed files</span>
           {hasNonZeroStat(summaryStat) && (
             <DiffStatLabel
               additions={summaryStat.additions}
+              className="text-xs leading-4"
               deletions={summaryStat.deletions}
               layout="inline"
             />

@@ -160,9 +160,7 @@ function normalizeCodexTokenUsage(
 
   return {
     usedTokens,
-    ...(totalProcessedTokens !== undefined && totalProcessedTokens > usedTokens
-      ? { totalProcessedTokens }
-      : {}),
+    ...(totalProcessedTokens !== undefined ? { totalProcessedTokens } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     ...(inputTokens !== undefined ? { inputTokens } : {}),
     ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),

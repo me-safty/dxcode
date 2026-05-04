@@ -96,7 +96,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         }),
         buildBooleanOptionDescriptor({
           id: "fastMode",
-          label: "Fast Mode",
+          label: "Speed",
         }),
         buildSelectOptionDescriptor({
           id: "contextWindow",
@@ -127,7 +127,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         }),
         buildBooleanOptionDescriptor({
           id: "fastMode",
-          label: "Fast Mode",
+          label: "Speed",
         }),
       ],
     }),

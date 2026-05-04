@@ -911,10 +911,6 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
               label: "workspace-write",
               description: "Allow workspace writes only",
             },
-            {
-              label: "Other",
-              description: "Type your own answer",
-            },
           ]);
         }
 
