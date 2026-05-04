@@ -50,6 +50,7 @@ function makeSecretStorage(available: boolean): DesktopSecretStorage {
 
 const clientSettings: ClientSettings = {
   autoOpenPlanSidebar: false,
+  codexUsageIndicatorMode: "five-hour",
   confirmThreadArchive: true,
   confirmThreadDelete: false,
   diffIgnoreWhitespace: true,

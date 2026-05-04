@@ -535,6 +535,7 @@ describe("wsApi", () => {
   it("reads and writes persistence through the desktop bridge when available", async () => {
     const clientSettings = {
       autoOpenPlanSidebar: false,
+      codexUsageIndicatorMode: "five-hour" as const,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
       diffIgnoreWhitespace: true,
@@ -596,6 +597,7 @@ describe("wsApi", () => {
     const api = createLocalApi(rpcClientMock as never);
     const clientSettings = {
       autoOpenPlanSidebar: false,
+      codexUsageIndicatorMode: "five-hour" as const,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
       diffIgnoreWhitespace: true,

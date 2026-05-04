@@ -28,8 +28,25 @@ export const SidebarProjectGroupingMode = Schema.Literals([
 export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
 export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
 
+const CodexUsageIndicatorModeInput = Schema.Literals(["five-hour", "weekly", "both", "off"]);
+const CodexUsageIndicatorModeOutput = Schema.Literals(["five-hour", "both", "off"]);
+export const CodexUsageIndicatorMode = CodexUsageIndicatorModeInput.pipe(
+  Schema.decodeTo(
+    CodexUsageIndicatorModeOutput,
+    SchemaTransformation.transformOrFail({
+      decode: (value) => Effect.succeed(value === "weekly" ? "both" : value),
+      encode: (value) => Effect.succeed(value),
+    }),
+  ),
+);
+export type CodexUsageIndicatorMode = typeof CodexUsageIndicatorMode.Type;
+export const DEFAULT_CODEX_USAGE_INDICATOR_MODE: CodexUsageIndicatorMode = "five-hour";
+
 export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  codexUsageIndicatorMode: CodexUsageIndicatorMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_CODEX_USAGE_INDICATOR_MODE)),
+  ),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffIgnoreWhitespace: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
@@ -450,6 +467,7 @@ export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
 export const ClientSettingsPatch = Schema.Struct({
   autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
+  codexUsageIndicatorMode: Schema.optionalKey(CodexUsageIndicatorMode),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),

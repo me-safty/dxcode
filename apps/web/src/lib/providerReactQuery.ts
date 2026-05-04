@@ -1,5 +1,6 @@
 import {
   type EnvironmentId,
+  type ProviderInstanceId,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetTurnDiffInput,
   ThreadId,
@@ -7,6 +8,7 @@ import {
 import { queryOptions } from "@tanstack/react-query";
 import { Option, Schema } from "effect";
 import { ensureEnvironmentApi } from "../environmentApi";
+import { ensureLocalApi } from "../localApi";
 
 interface CheckpointDiffQueryInput {
   environmentId: EnvironmentId | null;
@@ -31,6 +33,8 @@ export const providerQueryKeys = {
       input.ignoreWhitespace,
       input.cacheScope ?? null,
     ] as const,
+  codexUsage: (instanceId: ProviderInstanceId | null) =>
+    ["providers", "codexUsage", instanceId] as const,
 };
 
 function decodeCheckpointDiffRequest(input: CheckpointDiffQueryInput) {
@@ -131,5 +135,22 @@ export function checkpointDiffQueryOptions(input: CheckpointDiffQueryInput) {
       isCheckpointTemporarilyUnavailable(error)
         ? Math.min(5_000, 250 * 2 ** (attempt - 1))
         : Math.min(1_000, 100 * 2 ** (attempt - 1)),
+  });
+}
+
+export function codexUsageQueryOptions(input: {
+  instanceId: ProviderInstanceId | null;
+  enabled?: boolean;
+}) {
+  return queryOptions({
+    queryKey: providerQueryKeys.codexUsage(input.instanceId),
+    queryFn: async () => {
+      if (!input.instanceId) {
+        return null;
+      }
+      return ensureLocalApi().server.getCodexUsage({ instanceId: input.instanceId });
+    },
+    enabled: (input.enabled ?? true) && input.instanceId !== null,
+    refetchInterval: 60_000,
   });
 }

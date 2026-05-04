@@ -40,6 +40,7 @@ import {
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
+import { ProviderService } from "./provider/Services/ProviderService.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
@@ -752,6 +753,24 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcEffect(WS_METHODS.serverGetConfig, loadServerConfig, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverGetCodexUsage]: ({ instanceId }) =>
+          observeRpcEffect(
+            WS_METHODS.serverGetCodexUsage,
+            Effect.serviceOption(ProviderService).pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.succeed(null),
+                  onSome: (providerService) =>
+                    providerService
+                      .getCodexUsage(instanceId)
+                      .pipe(Effect.catch(() => Effect.succeed(null))),
+                }),
+              ),
+            ),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
         [WS_METHODS.serverRefreshProviders]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverRefreshProviders,

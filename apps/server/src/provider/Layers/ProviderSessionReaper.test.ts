@@ -159,6 +159,7 @@ describe("ProviderSessionReaper", () => {
           },
         });
       },
+      getCodexUsage: () => Effect.succeed(null),
       rollbackConversation: () => unsupported(),
       streamEvents: Stream.empty,
     };

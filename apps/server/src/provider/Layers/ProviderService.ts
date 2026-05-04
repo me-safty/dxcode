@@ -20,9 +20,9 @@ import {
   ProviderSessionStartInput,
   ProviderStopSessionInput,
   type ProviderInstanceId,
-  type ProviderDriverKind,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  ProviderDriverKind,
 } from "@t3tools/contracts";
 import { Cause, Effect, Layer, Option, PubSub, Ref, Schema, SchemaIssue, Stream } from "effect";
 
@@ -922,6 +922,24 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const getInstanceInfo: ProviderServiceShape["getInstanceInfo"] = (instanceId) =>
     registry.getInstanceInfo(instanceId);
 
+  const getCodexUsage: ProviderServiceShape["getCodexUsage"] = Effect.fn(
+    "ProviderService.getCodexUsage",
+  )(function* (instanceId) {
+    const info = yield* registry
+      .getInstanceInfo(instanceId)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!info || info.driverKind !== ProviderDriverKind.make("codex")) {
+      return null;
+    }
+    const adapter = yield* registry
+      .getByInstance(instanceId)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!adapter?.readCodexUsage) {
+      return null;
+    }
+    return yield* adapter.readCodexUsage().pipe(Effect.catch(() => Effect.succeed(null)));
+  });
+
   const rollbackConversation: ProviderServiceShape["rollbackConversation"] = Effect.fn(
     "rollbackConversation",
   )(function* (rawInput) {
@@ -1022,6 +1040,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     listSessions,
     getCapabilities,
     getInstanceInfo,
+    getCodexUsage,
     rollbackConversation,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
