@@ -1430,11 +1430,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                 event.payload,
               );
               if (payload) {
-                cachedCodexUsage = normalizeCodexUsageSnapshot({
+                const snapshot = normalizeCodexUsageSnapshot({
                   providerInstanceId: boundInstanceId,
                   payload,
                   source: "notification",
                 });
+                cachedCodexUsage = snapshot ?? cachedCodexUsage;
               }
             }
             const runtimeEvents = mapToRuntimeEvents(event, event.threadId);
