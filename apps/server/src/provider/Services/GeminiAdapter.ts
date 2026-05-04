@@ -9,6 +9,7 @@
  */
 import { Context } from "effect";
 
+import type { ProviderDriverKind } from "@t3tools/contracts";
 import type { ProviderAdapterError } from "../Errors.ts";
 import type { ProviderAdapterShape } from "./ProviderAdapter.ts";
 
@@ -16,7 +17,7 @@ import type { ProviderAdapterShape } from "./ProviderAdapter.ts";
  * GeminiAdapterShape - Service API for the Gemini provider adapter.
  */
 export interface GeminiAdapterShape extends ProviderAdapterShape<ProviderAdapterError> {
-  readonly provider: "gemini";
+  readonly provider: ProviderDriverKind;
 }
 
 /**

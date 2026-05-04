@@ -1,6 +1,6 @@
-import type { GeminiSettings, ServerProvider } from "@t3tools/contracts";
+import { ProviderDriverKind, type GeminiSettings } from "@t3tools/contracts";
 import { formatGeminiModelDisplayName } from "@t3tools/shared/gemini";
-import { Effect, Equal, Layer, Option, Result, Stream } from "effect";
+import { Effect, Option, Result } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -18,46 +18,41 @@ import {
   type GeminiCapabilityProbeResult,
 } from "../geminiAcpProbe.ts";
 import { resolveGeminiBinaryPath } from "../geminiBinaryPath.ts";
-import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
-import { GeminiProvider } from "../Services/GeminiProvider.ts";
 import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
-import { ServerSettingsError } from "@t3tools/contracts";
+import type { ServerProviderDraft } from "../providerSnapshot.ts";
 
-const PROVIDER = "gemini" as const;
+const PROVIDER = ProviderDriverKind.make("gemini");
 const GEMINI_PRESENTATION = {
   displayName: "Gemini",
   showInteractionModeToggle: true,
 } as const;
-const GEMINI_REFRESH_INTERVAL = "1 hour";
 
-const runGeminiCommand = Effect.fn("runGeminiCommand")(function* (args: ReadonlyArray<string>) {
-  const serverSettings = yield* ServerSettingsService;
-  const geminiSettings = yield* serverSettings.getSettings.pipe(
-    Effect.map((settings) => settings.providers.gemini),
-  );
+const runGeminiCommand = Effect.fn("runGeminiCommand")(function* (
+  geminiSettings: GeminiSettings,
+  args: ReadonlyArray<string>,
+  environment?: NodeJS.ProcessEnv,
+) {
   const binaryPath = resolveGeminiBinaryPath(geminiSettings.binaryPath);
   const command = ChildProcess.make(binaryPath, [...args], {
+    ...(environment ? { env: environment } : {}),
     shell: process.platform === "win32",
   });
   return yield* spawnAndCollect(binaryPath, command);
 });
 
 export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(function* (
+  geminiSettings: GeminiSettings,
+  environment?: NodeJS.ProcessEnv,
   resolveCapabilities?: (input: {
     readonly binaryPath: string;
     readonly cwd: string;
   }) => Effect.Effect<GeminiCapabilityProbeResult>,
 ): Effect.fn.Return<
-  ServerProvider,
-  ServerSettingsError,
-  ChildProcessSpawner.ChildProcessSpawner | ServerConfig | ServerSettingsService
+  ServerProviderDraft,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner | ServerConfig
 > {
   const serverConfig = yield* ServerConfig;
-  const serverSettings = yield* ServerSettingsService;
-  const geminiSettings = yield* serverSettings.getSettings.pipe(
-    Effect.map((settings) => settings.providers.gemini),
-  );
   const checkedAt = new Date().toISOString();
   const fallbackModels = providerModelsFromSettings(
     [],
@@ -69,7 +64,6 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
 
   if (!geminiSettings.enabled) {
     return buildServerProvider({
-      provider: PROVIDER,
       presentation: GEMINI_PRESENTATION,
       enabled: false,
       checkedAt,
@@ -85,7 +79,7 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
   }
 
   const binaryPath = resolveGeminiBinaryPath(geminiSettings.binaryPath);
-  const versionProbe = yield* runGeminiCommand(["--version"]).pipe(
+  const versionProbe = yield* runGeminiCommand(geminiSettings, ["--version"], environment).pipe(
     Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
     Effect.result,
   );
@@ -93,7 +87,6 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
   if (Result.isFailure(versionProbe)) {
     const error = versionProbe.failure;
     return buildServerProvider({
-      provider: PROVIDER,
       presentation: GEMINI_PRESENTATION,
       enabled: geminiSettings.enabled,
       checkedAt,
@@ -112,7 +105,6 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
 
   if (Option.isNone(versionProbe.success)) {
     return buildServerProvider({
-      provider: PROVIDER,
       presentation: GEMINI_PRESENTATION,
       enabled: geminiSettings.enabled,
       checkedAt,
@@ -132,7 +124,6 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
   if (version.code !== 0) {
     const detail = detailFromResult(version);
     return buildServerProvider({
-      provider: PROVIDER,
       presentation: GEMINI_PRESENTATION,
       enabled: geminiSettings.enabled,
       checkedAt,
@@ -162,7 +153,6 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
   );
 
   return buildServerProvider({
-    provider: PROVIDER,
     presentation: GEMINI_PRESENTATION,
     enabled: geminiSettings.enabled,
     checkedAt,
@@ -177,7 +167,7 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
   });
 });
 
-const makePendingGeminiProvider = (geminiSettings: GeminiSettings): ServerProvider => {
+export const makePendingGeminiProvider = (geminiSettings: GeminiSettings): ServerProviderDraft => {
   const checkedAt = new Date().toISOString();
   const models = providerModelsFromSettings(
     [],
@@ -189,7 +179,6 @@ const makePendingGeminiProvider = (geminiSettings: GeminiSettings): ServerProvid
 
   if (!geminiSettings.enabled) {
     return buildServerProvider({
-      provider: PROVIDER,
       presentation: GEMINI_PRESENTATION,
       enabled: false,
       checkedAt,
@@ -205,7 +194,6 @@ const makePendingGeminiProvider = (geminiSettings: GeminiSettings): ServerProvid
   }
 
   return buildServerProvider({
-    provider: PROVIDER,
     presentation: GEMINI_PRESENTATION,
     enabled: true,
     checkedAt,
@@ -219,31 +207,3 @@ const makePendingGeminiProvider = (geminiSettings: GeminiSettings): ServerProvid
     },
   });
 };
-
-export const GeminiProviderLive = Layer.effect(
-  GeminiProvider,
-  Effect.gen(function* () {
-    const serverSettings = yield* ServerSettingsService;
-    const serverConfig = yield* ServerConfig;
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const checkProvider = checkGeminiProviderStatus().pipe(
-      Effect.provideService(ServerConfig, serverConfig),
-      Effect.provideService(ServerSettingsService, serverSettings),
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-    );
-
-    return yield* makeManagedServerProvider<GeminiSettings>({
-      getSettings: serverSettings.getSettings.pipe(
-        Effect.map((settings) => settings.providers.gemini),
-        Effect.orDie,
-      ),
-      streamSettings: serverSettings.streamChanges.pipe(
-        Stream.map((settings) => settings.providers.gemini),
-      ),
-      haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
-      initialSnapshot: makePendingGeminiProvider,
-      checkProvider,
-      refreshInterval: GEMINI_REFRESH_INTERVAL,
-    });
-  }),
-);

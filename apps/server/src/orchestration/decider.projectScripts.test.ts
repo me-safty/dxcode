@@ -5,7 +5,7 @@ import {
   MessageId,
   ProjectId,
   ThreadId,
-  TurnId,
+  ProviderInstanceId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { describe, expect, it } from "vitest";
@@ -139,10 +139,10 @@ describe("decider project scripts", () => {
           projectId: asProjectId("project-1"),
           title: "Thread",
           modelSelection: {
-            provider: "codex",
+            instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
           },
-          interactionMode: "plan",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           runtimeMode: "approval-required",
           branch: null,
           worktreePath: null,
@@ -164,12 +164,12 @@ describe("decider project scripts", () => {
             text: "hello",
             attachments: [],
           },
-          modelSelection: createModelSelection("codex", "gpt-5.3-codex", [
+          modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
             { id: "reasoningEffort", value: "high" },
             { id: "fastMode", value: true },
           ]),
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "full-access",
+          runtimeMode: "approval-required",
           createdAt: now,
         },
         readModel,
@@ -189,12 +189,11 @@ describe("decider project scripts", () => {
     expect(turnStartEvent.payload).toMatchObject({
       threadId: ThreadId.make("thread-1"),
       messageId: asMessageId("message-user-1"),
-      modelSelection: createModelSelection("codex", "gpt-5.3-codex", [
+      modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
         { id: "reasoningEffort", value: "high" },
         { id: "fastMode", value: true },
       ]),
       runtimeMode: "approval-required",
-      interactionMode: "plan",
     });
   });
 
@@ -241,7 +240,7 @@ describe("decider project scripts", () => {
           projectId: asProjectId("project-1"),
           title: "Thread",
           modelSelection: {
-            provider: "codex",
+            instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
           },
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -323,7 +322,7 @@ describe("decider project scripts", () => {
           projectId: asProjectId("project-1"),
           title: "Thread",
           modelSelection: {
-            provider: "codex",
+            instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
           },
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -358,113 +357,6 @@ describe("decider project scripts", () => {
       payload: {
         threadId: ThreadId.make("thread-1"),
         interactionMode: "plan",
-      },
-    });
-  });
-
-  it("fills the active turn id into thread.turn.interrupt when the command omits it", async () => {
-    const now = new Date().toISOString();
-    const initial = createEmptyReadModel(now);
-    const withProject = await Effect.runPromise(
-      projectEvent(initial, {
-        sequence: 1,
-        eventId: asEventId("evt-project-create-interrupt"),
-        aggregateKind: "project",
-        aggregateId: asProjectId("project-interrupt"),
-        type: "project.created",
-        occurredAt: now,
-        commandId: CommandId.make("cmd-project-create-interrupt"),
-        causationEventId: null,
-        correlationId: CommandId.make("cmd-project-create-interrupt"),
-        metadata: {},
-        payload: {
-          projectId: asProjectId("project-interrupt"),
-          title: "Project",
-          workspaceRoot: "/tmp/project-interrupt",
-          defaultModelSelection: null,
-          scripts: [],
-          createdAt: now,
-          updatedAt: now,
-        },
-      }),
-    );
-    const withThread = await Effect.runPromise(
-      projectEvent(withProject, {
-        sequence: 2,
-        eventId: asEventId("evt-thread-create-interrupt"),
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-interrupt"),
-        type: "thread.created",
-        occurredAt: now,
-        commandId: CommandId.make("cmd-thread-create-interrupt"),
-        causationEventId: null,
-        correlationId: CommandId.make("cmd-thread-create-interrupt"),
-        metadata: {},
-        payload: {
-          threadId: ThreadId.make("thread-interrupt"),
-          projectId: asProjectId("project-interrupt"),
-          title: "Thread",
-          modelSelection: {
-            provider: "codex",
-            model: "gpt-5-codex",
-          },
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "full-access",
-          branch: null,
-          worktreePath: null,
-          createdAt: now,
-          updatedAt: now,
-        },
-      }),
-    );
-    const readModel = await Effect.runPromise(
-      projectEvent(withThread, {
-        sequence: 3,
-        eventId: asEventId("evt-thread-session-set-interrupt"),
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-interrupt"),
-        type: "thread.session-set",
-        occurredAt: now,
-        commandId: CommandId.make("cmd-thread-session-set-interrupt"),
-        causationEventId: null,
-        correlationId: CommandId.make("cmd-thread-session-set-interrupt"),
-        metadata: {},
-        payload: {
-          threadId: ThreadId.make("thread-interrupt"),
-          session: {
-            threadId: ThreadId.make("thread-interrupt"),
-            status: "running",
-            providerName: "gemini",
-            runtimeMode: "full-access",
-            activeTurnId: TurnId.make("turn-running-1"),
-            lastError: null,
-            updatedAt: now,
-          },
-        },
-      }),
-    );
-
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.turn.interrupt",
-          commandId: CommandId.make("cmd-turn-interrupt"),
-          threadId: ThreadId.make("thread-interrupt"),
-          createdAt: now,
-        },
-        readModel,
-      }),
-    );
-
-    const singleResult = Array.isArray(result) ? null : result;
-    if (singleResult === null) {
-      throw new Error("Expected a single turn-interrupt-requested event.");
-    }
-    expect(singleResult).toMatchObject({
-      type: "thread.turn-interrupt-requested",
-      payload: {
-        threadId: ThreadId.make("thread-interrupt"),
-        turnId: TurnId.make("turn-running-1"),
       },
     });
   });

@@ -331,7 +331,7 @@ export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
 }): ThreadStatusPill | null {
   const { thread } = input;
-  const workingProvider = thread.session?.providerName ?? thread.session?.provider;
+  const workingProvider = thread.session?.provider;
 
   if (thread.hasPendingApprovals) {
     return {

@@ -4,7 +4,12 @@ import os from "node:os";
 import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderRuntimeEvent, ThreadId, type ServerProvider } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  ProviderRuntimeEvent,
+  ThreadId,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import { buildGeminiThinkingModelConfigAliases } from "@t3tools/shared/model";
 import { Effect, Layer, Ref, Stream } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
@@ -20,6 +25,8 @@ import {
   normalizeGeminiPromptUsage,
   resolveRequestedGeminiModeId,
 } from "./GeminiAdapter.ts";
+
+const GEMINI_PROVIDER = ProviderDriverKind.make("gemini");
 
 const tempDirs: Array<string> = [];
 
@@ -182,6 +189,7 @@ function makeProviderRegistryLayer(providers: ReadonlyArray<ServerProvider> = []
   return Layer.succeed(ProviderRegistry, {
     getProviders: Effect.succeed(providers),
     refresh: () => Effect.succeed(providers),
+    refreshInstance: () => Effect.succeed(providers),
     streamChanges: Stream.empty,
   });
 }
@@ -332,12 +340,12 @@ describe("GeminiAdapterLive", () => {
           const threadId = ThreadId.make("thread-gemini-stale-exit");
 
           yield* adapter.startSession({
-            provider: "gemini",
+            provider: GEMINI_PROVIDER,
             threadId,
             runtimeMode: "full-access",
           });
           yield* adapter.startSession({
-            provider: "gemini",
+            provider: GEMINI_PROVIDER,
             threadId,
             runtimeMode: "full-access",
           });
@@ -368,7 +376,7 @@ describe("GeminiAdapterLive", () => {
           const threadId = ThreadId.make("thread-gemini-small-resume-cursor");
 
           const session = yield* adapter.startSession({
-            provider: "gemini",
+            provider: GEMINI_PROVIDER,
             threadId,
             runtimeMode: "full-access",
           });
@@ -408,7 +416,7 @@ describe("GeminiAdapterLive", () => {
 
           const threadId = ThreadId.make("thread-gemini-plan");
           yield* adapter.startSession({
-            provider: "gemini",
+            provider: GEMINI_PROVIDER,
             threadId,
             runtimeMode: "full-access",
           });
@@ -459,7 +467,7 @@ describe("GeminiAdapterLive", () => {
 
           const threadId = ThreadId.make("thread-gemini-unsupported-cancel");
           yield* adapter.startSession({
-            provider: "gemini",
+            provider: GEMINI_PROVIDER,
             threadId,
             runtimeMode: "full-access",
           });
@@ -533,7 +541,7 @@ describe("GeminiAdapterLive", () => {
 
           const threadId = ThreadId.make("thread-gemini-stop-active-turn");
           yield* adapter.startSession({
-            provider: "gemini",
+            provider: GEMINI_PROVIDER,
             threadId,
             runtimeMode: "full-access",
           });

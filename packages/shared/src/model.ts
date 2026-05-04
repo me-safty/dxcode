@@ -1,4 +1,5 @@
 import {
+  DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   GEMINI_THINKING_BUDGET_OPTIONS,
   GEMINI_THINKING_LEVEL_OPTIONS,
@@ -7,10 +8,13 @@ import {
   type GeminiThinkingLevel,
   type ModelCapabilities,
   type ModelSelection,
-  type ProviderKind,
+  ProviderDriverKind,
+  ProviderInstanceId,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
 } from "@t3tools/contracts";
+
+const DEFAULT_PROVIDER_DRIVER_KIND = ProviderDriverKind.make("codex");
 
 export interface SelectableModelOption {
   slug: string;
@@ -34,6 +38,89 @@ const GEMINI_THINKING_BUDGET_MAP = new Map<string, GeminiThinkingBudget>([
   ["512", 512],
 ]);
 
+export function createModelCapabilities(input: {
+  optionDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
+}): ModelCapabilities {
+  return {
+    optionDescriptors: input.optionDescriptors.map(cloneDescriptor),
+  };
+}
+
+function getRawSelectionValueById(
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+  id: string,
+): string | boolean | undefined {
+  const selection = selections?.find((candidate) => candidate.id === id);
+  return selection?.value;
+}
+
+export function getProviderOptionSelectionValue(
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+  id: string,
+): string | boolean | undefined {
+  return getRawSelectionValueById(selections, id);
+}
+
+export function getProviderOptionStringSelectionValue(
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+  id: string,
+): string | undefined {
+  const value = getProviderOptionSelectionValue(selections, id);
+  return typeof value === "string" ? value : undefined;
+}
+
+export function getProviderOptionBooleanSelectionValue(
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+  id: string,
+): boolean | undefined {
+  const value = getProviderOptionSelectionValue(selections, id);
+  return typeof value === "boolean" ? value : undefined;
+}
+
+export function getModelSelectionOptionValue(
+  modelSelection: ModelSelection | null | undefined,
+  id: string,
+): string | boolean | undefined {
+  return getProviderOptionSelectionValue(modelSelection?.options, id);
+}
+
+export function getModelSelectionStringOptionValue(
+  modelSelection: ModelSelection | null | undefined,
+  id: string,
+): string | undefined {
+  return getProviderOptionStringSelectionValue(modelSelection?.options, id);
+}
+
+export function getModelSelectionBooleanOptionValue(
+  modelSelection: ModelSelection | null | undefined,
+  id: string,
+): boolean | undefined {
+  return getProviderOptionBooleanSelectionValue(modelSelection?.options, id);
+}
+
+function resolveDescriptorChoiceValue(
+  descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>,
+  raw: string | null | undefined,
+): string | undefined {
+  const trimmed = trimOrNull(raw);
+  if (!trimmed) {
+    return descriptor.currentValue ?? descriptor.options.find((option) => option.isDefault)?.id;
+  }
+  if (descriptor.options.length === 0) {
+    return trimmed;
+  }
+  if (
+    descriptor.promptInjectedValues?.includes(trimmed) &&
+    descriptor.options.some((option) => option.id === trimmed)
+  ) {
+    return descriptor.options.find((option) => option.isDefault)?.id;
+  }
+  if (descriptor.options.some((option) => option.id === trimmed)) {
+    return trimmed;
+  }
+  return descriptor.currentValue ?? descriptor.options.find((option) => option.isDefault)?.id;
+}
+
 function cloneDescriptor(descriptor: ProviderOptionDescriptor): ProviderOptionDescriptor {
   return descriptor.type === "select"
     ? {
@@ -48,20 +135,6 @@ function cloneDescriptor(descriptor: ProviderOptionDescriptor): ProviderOptionDe
 
 function cloneSelection(selection: ProviderOptionSelection): ProviderOptionSelection {
   return { ...selection };
-}
-
-function cloneSelections(
-  selections: ReadonlyArray<ProviderOptionSelection>,
-): Array<ProviderOptionSelection> {
-  return selections.map(cloneSelection);
-}
-
-export function createModelCapabilities(input: {
-  optionDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
-}): ModelCapabilities {
-  return {
-    optionDescriptors: input.optionDescriptors.map(cloneDescriptor),
-  };
 }
 
 function isGeminiThinkingLevel(value: string): value is GeminiThinkingLevel {
@@ -260,112 +333,46 @@ export function buildGeminiThinkingModelConfigAliases(
     const caps = geminiCapabilitiesForModel(model);
 
     switch (getGeminiThinkingConfigKind(model)) {
-      case "level": {
+      case "level":
         for (const thinkingLevel of GEMINI_THINKING_LEVEL_OPTIONS) {
           if (!hasEffortLevel(caps, thinkingLevel)) {
             continue;
           }
           const alias = getGeminiThinkingModelAlias(model, { thinkingLevel });
-          if (!alias) {
-            continue;
-          }
-          aliases[alias] = {
-            extends: "chat-base-3",
-            modelConfig: {
-              model,
-              generateContentConfig: {
-                thinkingConfig: {
-                  thinkingLevel,
-                },
+          if (alias) {
+            aliases[alias] = {
+              extends: "chat-base-3",
+              modelConfig: {
+                model,
+                generateContentConfig: { thinkingConfig: { thinkingLevel } },
               },
-            },
-          };
+            };
+          }
         }
         break;
-      }
-      case "budget": {
+      case "budget":
         for (const thinkingBudget of GEMINI_THINKING_BUDGET_OPTIONS) {
           if (!hasEffortLevel(caps, String(thinkingBudget))) {
             continue;
           }
           const alias = getGeminiThinkingModelAlias(model, { thinkingBudget });
-          if (!alias) {
-            continue;
-          }
-          aliases[alias] = {
-            extends: "chat-base-2.5",
-            modelConfig: {
-              model,
-              generateContentConfig: {
-                thinkingConfig: {
-                  thinkingBudget,
-                },
+          if (alias) {
+            aliases[alias] = {
+              extends: "chat-base-2.5",
+              modelConfig: {
+                model,
+                generateContentConfig: { thinkingConfig: { thinkingBudget } },
               },
-            },
-          };
+            };
+          }
         }
         break;
-      }
       default:
         break;
     }
   }
 
   return aliases;
-}
-
-function getRawSelectionValueById(
-  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
-  id: string,
-): string | boolean | undefined {
-  const selection = selections?.find((candidate) => candidate.id === id);
-  return selection?.value;
-}
-
-export function getProviderOptionSelectionValue(
-  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
-  id: string,
-): string | boolean | undefined {
-  return getRawSelectionValueById(selections, id);
-}
-
-export function getProviderOptionStringSelectionValue(
-  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
-  id: string,
-): string | undefined {
-  const value = getProviderOptionSelectionValue(selections, id);
-  return typeof value === "string" ? value : undefined;
-}
-
-export function getProviderOptionBooleanSelectionValue(
-  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
-  id: string,
-): boolean | undefined {
-  const value = getProviderOptionSelectionValue(selections, id);
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function resolveDescriptorChoiceValue(
-  descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>,
-  raw: string | null | undefined,
-): string | undefined {
-  const trimmed = trimOrNull(raw);
-  if (!trimmed) {
-    return descriptor.currentValue ?? descriptor.options.find((option) => option.isDefault)?.id;
-  }
-  if (descriptor.options.length === 0) {
-    return trimmed;
-  }
-  if (
-    descriptor.promptInjectedValues?.includes(trimmed) &&
-    descriptor.options.some((option) => option.id === trimmed)
-  ) {
-    return descriptor.options.find((option) => option.isDefault)?.id;
-  }
-  if (descriptor.options.some((option) => option.id === trimmed)) {
-    return trimmed;
-  }
-  return descriptor.currentValue ?? descriptor.options.find((option) => option.isDefault)?.id;
 }
 
 function withDescriptorCurrentValue(
@@ -453,6 +460,7 @@ export function buildProviderOptionSelectionsFromDescriptors(
   }
 
   const nextSelections: Array<ProviderOptionSelection> = [];
+
   for (const descriptor of descriptors) {
     const value = getProviderOptionCurrentValue(descriptor);
     if (typeof value === "string" || typeof value === "boolean") {
@@ -463,32 +471,14 @@ export function buildProviderOptionSelectionsFromDescriptors(
   return nextSelections.length > 0 ? nextSelections : undefined;
 }
 
-export function getModelSelectionOptionValue(
-  modelSelection: ModelSelection | null | undefined,
-  id: string,
-): string | boolean | undefined {
-  return getProviderOptionSelectionValue(modelSelection?.options, id);
-}
-
-export function getModelSelectionStringOptionValue(
-  modelSelection: ModelSelection | null | undefined,
-  id: string,
-): string | undefined {
-  return getProviderOptionStringSelectionValue(modelSelection?.options, id);
-}
-
-export function getModelSelectionBooleanOptionValue(
-  modelSelection: ModelSelection | null | undefined,
-  id: string,
-): boolean | undefined {
-  return getProviderOptionBooleanSelectionValue(modelSelection?.options, id);
-}
-
 export function getModelSelectionOptionDescriptors(
   modelSelection: ModelSelection | null | undefined,
   caps?: ModelCapabilities | null | undefined,
 ): ReadonlyArray<ProviderOptionDescriptor> {
-  if (!modelSelection || !caps) {
+  if (!modelSelection) {
+    return [];
+  }
+  if (!caps) {
     return [];
   }
   return getProviderOptionDescriptors({
@@ -503,7 +493,7 @@ export function isClaudeUltrathinkPrompt(text: string | null | undefined): boole
 
 export function normalizeModelSlug(
   model: string | null | undefined,
-  provider: ProviderKind = "codex",
+  provider: ProviderDriverKind = DEFAULT_PROVIDER_DRIVER_KIND,
 ): string | null {
   if (typeof model !== "string") {
     return null;
@@ -514,7 +504,7 @@ export function normalizeModelSlug(
     return null;
   }
 
-  const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, string>;
+  const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] ?? {};
   const aliased = Object.prototype.hasOwnProperty.call(aliases, trimmed)
     ? aliases[trimmed]
     : undefined;
@@ -522,7 +512,7 @@ export function normalizeModelSlug(
 }
 
 export function resolveSelectableModel(
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
   value: string | null | undefined,
   options: ReadonlyArray<SelectableModelOption>,
 ): string | null {
@@ -554,47 +544,63 @@ export function resolveSelectableModel(
   return resolved ? resolved.slug : null;
 }
 
-function resolveModelSlug(model: string | null | undefined, provider: ProviderKind): string {
+function resolveModelSlug(model: string | null | undefined, provider: ProviderDriverKind): string {
   const normalized = normalizeModelSlug(model, provider);
-  return normalized ?? DEFAULT_MODEL_BY_PROVIDER[provider];
+  if (!normalized) {
+    return DEFAULT_MODEL_BY_PROVIDER[provider] ?? DEFAULT_MODEL;
+  }
+  return normalized;
 }
 
 export function resolveModelSlugForProvider(
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
   model: string | null | undefined,
 ): string {
   return resolveModelSlug(model, provider);
 }
 
+/** Trim a string, returning null for empty/missing values. */
 export function trimOrNull<T extends string>(value: T | null | undefined): T | null {
-  if (typeof value !== "string") {
-    return null;
-  }
+  if (typeof value !== "string") return null;
   const trimmed = value.trim() as T;
   return trimmed || null;
 }
 
+function cloneSelections(
+  selections: ReadonlyArray<ProviderOptionSelection>,
+): Array<ProviderOptionSelection> {
+  return selections.map(cloneSelection);
+}
+
 export function createModelSelection(
-  provider: ProviderKind,
+  instanceId: ProviderInstanceId | string,
   model: string,
   options?: ReadonlyArray<ProviderOptionSelection> | null,
 ): ModelSelection {
   const selections = options ? cloneSelections(options) : [];
-  return {
-    provider,
+  const normalizedInstanceId =
+    typeof instanceId === "string" ? ProviderInstanceId.make(instanceId) : instanceId;
+  const base: ModelSelection = {
+    instanceId: normalizedInstanceId,
     model,
-    ...(selections.length > 0 ? { options: selections } : {}),
-  } as ModelSelection;
+  };
+  return selections.length > 0 ? { ...base, options: selections } : base;
 }
 
+/**
+ * Returns the effort value if it is a prompt-injected value according to
+ * any select descriptor in the given capabilities, or null otherwise.
+ *
+ * Unlike a single `find`, this checks every descriptor so that the
+ * correct descriptor's `promptInjectedValues` list is consulted even when
+ * multiple select descriptors exist.
+ */
 export function resolvePromptInjectedEffort(
   caps: ModelCapabilities,
   rawEffort: string | null | undefined,
 ): string | null {
   const trimmed = trimOrNull(rawEffort);
-  if (!trimmed) {
-    return null;
-  }
+  if (!trimmed) return null;
   const descriptors = getProviderOptionDescriptors({ caps });
   for (const descriptor of descriptors) {
     if (descriptor.type === "select" && descriptor.promptInjectedValues?.includes(trimmed)) {
@@ -605,16 +611,15 @@ export function resolvePromptInjectedEffort(
 }
 
 export function resolveApiModelId(modelSelection: ModelSelection): string {
-  switch (modelSelection.provider) {
-    case "claudeAgent":
-      return getModelSelectionStringOptionValue(modelSelection, "contextWindow") === "1m"
-        ? `${modelSelection.model}[1m]`
-        : modelSelection.model;
-    case "gemini":
-      return resolveGeminiApiModelId(modelSelection.model, modelSelection.options);
-    default:
-      return modelSelection.model;
+  if (modelSelection.instanceId === ProviderInstanceId.make("claudeAgent")) {
+    return getModelSelectionStringOptionValue(modelSelection, "contextWindow") === "1m"
+      ? `${modelSelection.model}[1m]`
+      : modelSelection.model;
   }
+  if (modelSelection.instanceId === ProviderInstanceId.make("gemini")) {
+    return resolveGeminiApiModelId(modelSelection.model, modelSelection.options);
+  }
+  return modelSelection.model;
 }
 
 export function applyClaudePromptEffortPrefix(

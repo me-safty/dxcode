@@ -1,8 +1,11 @@
-import { type ProviderKind } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  type ProviderDriverKind as ProviderDriverKindType,
+} from "@t3tools/contracts";
 import { formatGeminiModelDisplayName } from "@t3tools/shared/gemini";
 
 export function formatAppModelOptionName(
-  provider: ProviderKind,
+  provider: ProviderDriverKindType | string,
   model: string | null | undefined,
 ): string {
   const trimmed = model?.trim();
@@ -10,7 +13,8 @@ export function formatAppModelOptionName(
     return "";
   }
 
-  switch (provider) {
+  const driver = typeof provider === "string" ? ProviderDriverKind.make(provider) : provider;
+  switch (driver) {
     case "gemini":
       return formatGeminiModelDisplayName(trimmed);
     default:

@@ -11,7 +11,6 @@ import {
   parseGeminiAcpProbeError,
   parseGeminiDiscoveredModels,
 } from "../geminiAcpProbe.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
 import { ServerConfig, type ServerConfigShape } from "../../config.ts";
 
 const encoder = new TextEncoder();
@@ -89,6 +88,8 @@ function makeServerConfigLayer(cwd: string) {
     environmentIdPath: "/tmp/t3code-gemini-provider-test/state/environment-id",
     serverRuntimeStatePath: "/tmp/t3code-gemini-provider-test/state/server-runtime.json",
     secretsDir: "/tmp/t3code-gemini-provider-test/state/secrets",
+    tailscaleServeEnabled: false,
+    tailscaleServePort: 0,
   } satisfies ServerConfigShape);
 }
 
@@ -164,18 +165,21 @@ describe("checkGeminiProviderStatus", () => {
     const projectCwd = "/tmp/t3code-gemini-project";
 
     return Effect.gen(function* () {
-      const status = yield* checkGeminiProviderStatus((input) => {
-        probedBinaryPaths.push(input.binaryPath);
-        probedCwds.push(input.cwd);
-        return Effect.succeed({
-          status: "ready" as const,
-          auth: { status: "authenticated" as const },
-          message: "Gemini CLI is installed and authenticated.",
-          models: [],
-        });
-      });
+      const status = yield* checkGeminiProviderStatus(
+        { enabled: true, binaryPath: "", customModels: [] },
+        undefined,
+        (input) => {
+          probedBinaryPaths.push(input.binaryPath);
+          probedCwds.push(input.cwd);
+          return Effect.succeed({
+            status: "ready" as const,
+            auth: { status: "authenticated" as const },
+            message: "Gemini CLI is installed and authenticated.",
+            models: [],
+          });
+        },
+      );
 
-      assert.strictEqual(status.provider, "gemini");
       assert.strictEqual(status.status, "ready");
       assert.deepStrictEqual(commands, ["gemini"]);
       assert.deepStrictEqual(probedBinaryPaths, ["gemini"]);
@@ -184,13 +188,6 @@ describe("checkGeminiProviderStatus", () => {
       Effect.provide(
         Layer.mergeAll(
           makeServerConfigLayer(projectCwd),
-          ServerSettingsService.layerTest({
-            providers: {
-              gemini: {
-                binaryPath: "",
-              },
-            },
-          }),
           mockSpawnerLayer(({ command, args }) => {
             commands.push(command);
             const joined = args.join(" ");
@@ -206,29 +203,35 @@ describe("checkGeminiProviderStatus", () => {
 
   it.effect("publishes Gemini models discovered from ACP and merges custom models", () =>
     Effect.gen(function* () {
-      const status = yield* checkGeminiProviderStatus(() =>
-        Effect.succeed({
-          status: "ready" as const,
-          auth: { status: "authenticated" as const },
-          message: "Gemini CLI is installed and authenticated.",
-          models: [
-            {
-              slug: "auto-gemini-next",
-              name: "Auto (Gemini Next)",
-              isCustom: false,
-              capabilities: DEFAULT_GEMINI_MODEL_CAPABILITIES,
-            },
-            {
-              slug: "gemini-4-pro",
-              name: "Gemini 4 Pro",
-              isCustom: false,
-              capabilities: DEFAULT_GEMINI_MODEL_CAPABILITIES,
-            },
-          ],
-        }),
+      const status = yield* checkGeminiProviderStatus(
+        {
+          enabled: true,
+          binaryPath: "gemini",
+          customModels: ["gemini-custom-preview", "auto-gemini-next"],
+        },
+        undefined,
+        () =>
+          Effect.succeed({
+            status: "ready" as const,
+            auth: { status: "authenticated" as const },
+            message: "Gemini CLI is installed and authenticated.",
+            models: [
+              {
+                slug: "auto-gemini-next",
+                name: "Auto (Gemini Next)",
+                isCustom: false,
+                capabilities: DEFAULT_GEMINI_MODEL_CAPABILITIES,
+              },
+              {
+                slug: "gemini-4-pro",
+                name: "Gemini 4 Pro",
+                isCustom: false,
+                capabilities: DEFAULT_GEMINI_MODEL_CAPABILITIES,
+              },
+            ],
+          }),
       );
 
-      assert.strictEqual(status.provider, "gemini");
       assert.strictEqual(status.status, "ready");
       assert.strictEqual(status.auth.status, "authenticated");
       assert.deepStrictEqual(
@@ -238,13 +241,6 @@ describe("checkGeminiProviderStatus", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          ServerSettingsService.layerTest({
-            providers: {
-              gemini: {
-                customModels: ["gemini-custom-preview", "auto-gemini-next"],
-              },
-            },
-          }),
           makeServerConfigLayer("/tmp/t3code-gemini-models"),
           mockSpawnerLayer(({ args }) => {
             const joined = args.join(" ");
@@ -262,23 +258,24 @@ describe("checkGeminiProviderStatus", () => {
     "does not fall back to a hardcoded Gemini model list when ACP discovery is unavailable",
     () =>
       Effect.gen(function* () {
-        const status = yield* checkGeminiProviderStatus(() =>
-          Effect.succeed({
-            status: "warning" as const,
-            auth: { status: "unknown" as const },
-            message:
-              "Gemini CLI is installed, but T3 Code could not verify authentication or discover models. Timed out while starting Gemini ACP session.",
-            models: [],
-          }),
+        const status = yield* checkGeminiProviderStatus(
+          { enabled: true, binaryPath: "gemini", customModels: [] },
+          undefined,
+          () =>
+            Effect.succeed({
+              status: "warning" as const,
+              auth: { status: "unknown" as const },
+              message:
+                "Gemini CLI is installed, but T3 Code could not verify authentication or discover models. Timed out while starting Gemini ACP session.",
+              models: [],
+            }),
         );
 
-        assert.strictEqual(status.provider, "gemini");
         assert.strictEqual(status.status, "warning");
         assert.strictEqual(status.models.length, 0);
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
-            ServerSettingsService.layerTest(),
             makeServerConfigLayer("/tmp/t3code-gemini-unavailable"),
             mockSpawnerLayer(({ args }) => {
               const joined = args.join(" ");

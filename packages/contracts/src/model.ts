@@ -1,11 +1,12 @@
 import { Effect, Schema, SchemaTransformation } from "effect";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
-import type { ProviderKind } from "./orchestration.ts";
+import { ProviderDriverKind } from "./providerInstance.ts";
 
 export const GEMINI_THINKING_LEVEL_OPTIONS = ["LOW", "HIGH"] as const;
 export type GeminiThinkingLevel = (typeof GEMINI_THINKING_LEVEL_OPTIONS)[number];
 export const GEMINI_THINKING_BUDGET_OPTIONS = [-1, 512, 0] as const;
 export type GeminiThinkingBudget = (typeof GEMINI_THINKING_BUDGET_OPTIONS)[number];
+
 export const ProviderOptionDescriptorType = Schema.Literals(["select", "boolean"]);
 export type ProviderOptionDescriptorType = typeof ProviderOptionDescriptorType.Type;
 
@@ -129,27 +130,38 @@ export const ModelCapabilities = Schema.Struct({
 });
 export type ModelCapabilities = typeof ModelCapabilities.Type;
 
-export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
-  codex: "gpt-5.4",
-  claudeAgent: "claude-sonnet-4-6",
-  cursor: "auto",
-  gemini: "auto-gemini-3",
-  opencode: "openai/gpt-5",
-};
+const CODEX_DRIVER_KIND = ProviderDriverKind.make("codex");
+const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
+const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
+const GEMINI_DRIVER_KIND = ProviderDriverKind.make("gemini");
+const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 
-export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
+export const DEFAULT_MODEL = "gpt-5.4";
+export const DEFAULT_GIT_TEXT_GENERATION_MODEL = "gpt-5.4-mini";
+
+export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
+  [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
+  [CLAUDE_DRIVER_KIND]: "claude-sonnet-4-6",
+  [CURSOR_DRIVER_KIND]: "auto",
+  [GEMINI_DRIVER_KIND]: "auto-gemini-3",
+  [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
+};
 
 /** Per-provider text generation model defaults. */
-export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
-  codex: "gpt-5.4-mini",
-  claudeAgent: "claude-haiku-4-5",
-  cursor: "composer-2",
-  gemini: "gemini-2.5-flash",
-  opencode: "openai/gpt-5",
+export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
+  Record<ProviderDriverKind, string>
+> = {
+  [CODEX_DRIVER_KIND]: DEFAULT_GIT_TEXT_GENERATION_MODEL,
+  [CLAUDE_DRIVER_KIND]: "claude-haiku-4-5",
+  [CURSOR_DRIVER_KIND]: "composer-2",
+  [GEMINI_DRIVER_KIND]: "gemini-2.5-flash",
+  [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
 };
 
-export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string, string>> = {
-  codex: {
+export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
+  Record<ProviderDriverKind, Record<string, string>>
+> = {
+  [CODEX_DRIVER_KIND]: {
     "gpt-5-codex": "gpt-5.4",
     "5.4": "gpt-5.4",
     "5.3": "gpt-5.3-codex",
@@ -157,7 +169,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "5.3-spark": "gpt-5.3-codex-spark",
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
   },
-  claudeAgent: {
+  [CLAUDE_DRIVER_KIND]: {
     opus: "claude-opus-4-7",
     "opus-4.7": "claude-opus-4-7",
     "claude-opus-4.7": "claude-opus-4-7",
@@ -173,7 +185,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "claude-haiku-4.5": "claude-haiku-4-5",
     "claude-haiku-4-5-20251001": "claude-haiku-4-5",
   },
-  cursor: {
+  [CURSOR_DRIVER_KIND]: {
     composer: "composer-2",
     "composer-1.5": "composer-1.5",
     "composer-1": "composer-1.5",
@@ -184,7 +196,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "opus-4.5-thinking": "claude-opus-4-5",
     "opus-4.5": "claude-opus-4-5",
   },
-  gemini: {
+  [GEMINI_DRIVER_KIND]: {
     auto: "auto-gemini-3",
     "auto-gemini-3": "auto-gemini-3",
     "auto-gemini-2.5": "auto-gemini-2.5",
@@ -196,15 +208,15 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "gemini-2.5-flash": "gemini-2.5-flash",
     "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
   },
-  opencode: {},
+  [OPENCODE_DRIVER_KIND]: {},
 };
 
 // ── Provider display names ────────────────────────────────────────────
 
-export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
-  codex: "Codex",
-  claudeAgent: "Claude",
-  cursor: "Cursor",
-  gemini: "Gemini",
-  opencode: "OpenCode",
+export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>> = {
+  [CODEX_DRIVER_KIND]: "Codex",
+  [CLAUDE_DRIVER_KIND]: "Claude",
+  [CURSOR_DRIVER_KIND]: "Cursor",
+  [GEMINI_DRIVER_KIND]: "Gemini",
+  [OPENCODE_DRIVER_KIND]: "OpenCode",
 };

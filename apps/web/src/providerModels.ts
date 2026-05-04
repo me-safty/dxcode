@@ -1,17 +1,25 @@
 import {
+  DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
+  defaultInstanceIdForDriver,
+  ProviderDriverKind,
   type ModelCapabilities,
-  type ProviderKind,
+  type ProviderInstanceId,
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import {
-  EMPTY_MODEL_CAPABILITIES,
+  createModelCapabilities,
   geminiCapabilitiesForModel,
   normalizeModelSlug,
 } from "@t3tools/shared/model";
 
-export function formatProviderKindLabel(provider: ProviderKind): string {
+const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
+  optionDescriptors: [],
+});
+const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
+
+export function formatProviderDriverKindLabel(provider: ProviderDriverKind): string {
   return provider
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/[_-]+/g, " ")
@@ -19,44 +27,39 @@ export function formatProviderKindLabel(provider: ProviderKind): string {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function hasDeclaredCapabilities(capabilities: ModelCapabilities): boolean {
-  return (capabilities.optionDescriptors?.length ?? 0) > 0;
-}
-
-const EMPTY_CAPABILITIES: ModelCapabilities = EMPTY_MODEL_CAPABILITIES;
-
 export function getProviderModels(
   providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
 ): ReadonlyArray<ServerProviderModel> {
-  return providers.find((candidate) => candidate.provider === provider)?.models ?? [];
+  return getProviderSnapshot(providers, provider)?.models ?? [];
 }
 
 export function getProviderSnapshot(
   providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
 ): ServerProvider | undefined {
-  return providers.find((candidate) => candidate.provider === provider);
+  const defaultInstanceId = defaultInstanceIdForDriver(provider);
+  return providers.find((candidate) => candidate.instanceId === defaultInstanceId);
 }
 
 export function getProviderDisplayName(
   providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
 ): string {
   const snapshot = getProviderSnapshot(providers, provider);
-  return snapshot?.displayName?.trim() || formatProviderKindLabel(provider);
+  return snapshot?.displayName?.trim() || formatProviderDriverKindLabel(provider);
 }
 
 export function getProviderInteractionModeToggle(
   providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
 ): boolean {
   return getProviderSnapshot(providers, provider)?.showInteractionModeToggle ?? true;
 }
 
 export function isProviderEnabled(
   providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
 ): boolean {
   if (providers.length === 0) {
     return true;
@@ -64,45 +67,43 @@ export function isProviderEnabled(
   return getProviderSnapshot(providers, provider)?.enabled ?? false;
 }
 
+// Resolve an instance selection to the correlated live driver. If the
+// instance is absent, fall back to a live enabled provider instead of
+// inferring a driver from the missing instance id.
 export function resolveSelectableProvider(
   providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind | null | undefined,
-): ProviderKind {
-  const requested = provider ?? "codex";
-  if (isProviderEnabled(providers, requested)) {
-    return requested;
+  provider: ProviderDriverKind | ProviderInstanceId | null | undefined,
+): ProviderDriverKind {
+  const requestedEntry = providers.find((candidate) => candidate.instanceId === provider);
+  if (requestedEntry?.enabled) {
+    return requestedEntry.driver;
   }
-  return providers.find((candidate) => candidate.enabled)?.provider ?? requested;
+  return providers.find((candidate) => candidate.enabled)?.driver ?? DEFAULT_DRIVER_KIND;
 }
 
 export function getProviderModelCapabilities(
   models: ReadonlyArray<ServerProviderModel>,
   model: string | null | undefined,
-  provider: ProviderKind,
+  provider: ProviderDriverKind | string,
 ): ModelCapabilities {
-  const slug = normalizeModelSlug(model, provider);
-  if (!slug) {
-    return EMPTY_CAPABILITIES;
+  const driver = typeof provider === "string" ? ProviderDriverKind.make(provider) : provider;
+  const slug = normalizeModelSlug(model, driver);
+  const discovered = models.find((candidate) => candidate.slug === slug)?.capabilities;
+  if (driver === ProviderDriverKind.make("gemini")) {
+    return geminiCapabilitiesForModel(slug, discovered ?? EMPTY_CAPABILITIES);
   }
-
-  const capabilities = models.find((candidate) => candidate.slug === slug)?.capabilities;
-  if (provider === "gemini") {
-    return capabilities && hasDeclaredCapabilities(capabilities)
-      ? capabilities
-      : geminiCapabilitiesForModel(slug, capabilities ?? EMPTY_CAPABILITIES);
-  }
-
-  return capabilities ?? EMPTY_CAPABILITIES;
+  return discovered ?? EMPTY_CAPABILITIES;
 }
 
 export function getDefaultServerModel(
   providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
 ): string {
   const models = getProviderModels(providers, provider);
   return (
     models.find((model) => !model.isCustom)?.slug ??
     models[0]?.slug ??
-    DEFAULT_MODEL_BY_PROVIDER[provider]
+    DEFAULT_MODEL_BY_PROVIDER[provider] ??
+    DEFAULT_MODEL
   );
 }

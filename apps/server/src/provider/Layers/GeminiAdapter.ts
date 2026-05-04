@@ -21,8 +21,10 @@ import {
   ThreadId,
   type ThreadTokenUsageSnapshot,
   TurnId,
+  type GeminiSettings,
+  ProviderDriverKind,
 } from "@t3tools/contracts";
-import { resolveApiModelId } from "@t3tools/shared/model";
+import { resolveGeminiApiModelId } from "@t3tools/shared/model";
 import {
   Deferred,
   Effect,
@@ -84,11 +86,10 @@ import {
 } from "../geminiCliFiles.ts";
 import { resolveGeminiBinaryPath } from "../geminiBinaryPath.ts";
 import { GeminiAdapter, type GeminiAdapterShape } from "../Services/GeminiAdapter.ts";
-import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 import { asNumber, asRecord, trimToUndefined } from "../jsonValue.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
-const PROVIDER = "gemini" as const;
+const PROVIDER = ProviderDriverKind.make("gemini");
 
 interface GeminiPendingApproval {
   readonly decision: Deferred.Deferred<ProviderApprovalDecision>;
@@ -138,6 +139,7 @@ interface GeminiSessionContext {
 export interface GeminiAdapterLiveOptions {
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  readonly environment?: NodeJS.ProcessEnv;
 }
 
 export interface GeminiPromptUsageSnapshot {
@@ -477,14 +479,16 @@ function settlePendingApprovalsAsCancelled(
   );
 }
 
-function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
+export function makeGeminiAdapter(
+  geminiSettings: GeminiSettings,
+  options?: GeminiAdapterLiveOptions,
+) {
   return Effect.gen(function* () {
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const fileSystem = yield* FileSystem.FileSystem;
     const serverConfig = yield* ServerConfig;
-    const serverSettings = yield* ServerSettingsService;
-    const providerRegistry = yield* ProviderRegistry;
     const runtimeContext = yield* Effect.context<never>();
+    const launchEnvironment = options?.environment ?? process.env;
     const runFork = Effect.runForkWith(runtimeContext);
     const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const nativeEventLogger =
@@ -536,31 +540,22 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
       Effect.flatMap(getThreadSemaphore(threadId), (semaphore) => semaphore.withPermit(effect));
 
     const getGeminiSettings = Effect.fn("getGeminiSettings")(function* (threadId: ThreadId) {
-      return yield* serverSettings.getSettings.pipe(
-        Effect.map((settings) => settings.providers.gemini),
-        Effect.mapError(
-          (error) =>
-            new ProviderAdapterProcessError({
-              provider: PROVIDER,
-              threadId,
-              detail: error.message,
-              cause: error,
-            }),
-        ),
-      );
+      if (!geminiSettings.enabled) {
+        return yield* new ProviderAdapterProcessError({
+          provider: PROVIDER,
+          threadId,
+          detail: "Gemini is disabled in T3 Code settings.",
+        });
+      }
+      return geminiSettings;
     });
 
     const prepareGeminiLaunchConfig = Effect.fn("prepareGeminiLaunchConfig")(function* (input: {
       readonly threadId: ThreadId;
       readonly selectedModel?: string;
     }) {
-      const providers = yield* providerRegistry.getProviders;
-      const providerModels =
-        providers
-          .find((provider) => provider.provider === PROVIDER)
-          ?.models.map((model) => model.slug) ?? [];
       const candidateModels = [
-        ...providerModels,
+        ...geminiSettings.customModels,
         ...(input.selectedModel ? [input.selectedModel] : []),
       ];
 
@@ -1506,12 +1501,10 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
           const binaryPath = resolveGeminiBinaryPath(geminiSettings.binaryPath);
           const cwd = path.resolve(input.cwd ?? process.cwd());
           const runtimeModeId = runtimeModeToGeminiModeId(input.runtimeMode);
-          const selectedGeminiModel =
-            input.modelSelection?.provider === PROVIDER ? input.modelSelection.model : undefined;
-          const selectedApiModelId =
-            input.modelSelection?.provider === PROVIDER
-              ? resolveApiModelId(input.modelSelection)
-              : undefined;
+          const selectedGeminiModel = input.modelSelection ? input.modelSelection.model : undefined;
+          const selectedApiModelId = input.modelSelection
+            ? resolveGeminiApiModelId(input.modelSelection.model, input.modelSelection.options)
+            : undefined;
           const requestedResumeSessionId = readGeminiResumeSessionId(input.resumeCursor);
           const resumeTurns = readLegacyGeminiResumeTurns(input.resumeCursor);
           const launchConfig = yield* prepareGeminiLaunchConfig({
@@ -1525,7 +1518,7 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
             runtimeModeId,
             cwd,
             binaryPath,
-            ...(launchConfig.env ? { env: launchConfig.env } : {}),
+            env: { ...launchEnvironment, ...(launchConfig.env ?? {}) },
             turns: resumeTurns,
             ...(requestedResumeSessionId ? { resumeSessionId: requestedResumeSessionId } : {}),
             allowResumeFallback: true,
@@ -1580,10 +1573,13 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
             });
           }
 
-          if (input.modelSelection?.provider === PROVIDER) {
+          if (input.modelSelection) {
             yield* setGeminiModel(context, {
               model: input.modelSelection.model,
-              acpModelId: resolveApiModelId(input.modelSelection),
+              acpModelId: resolveGeminiApiModelId(
+                input.modelSelection.model,
+                input.modelSelection.options,
+              ),
             });
           }
 
@@ -1825,7 +1821,7 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
             runtimeModeId: context.runtimeModeId,
             cwd,
             binaryPath,
-            ...(launchConfig.env ? { env: launchConfig.env } : {}),
+            env: { ...launchEnvironment, ...(launchConfig.env ?? {}) },
             turns: nextTurns,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             allowResumeFallback: false,
@@ -1881,8 +1877,13 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
   });
 }
 
-export const GeminiAdapterLive = Layer.effect(GeminiAdapter, makeGeminiAdapter());
-
 export function makeGeminiAdapterLive(options?: GeminiAdapterLiveOptions) {
-  return Layer.effect(GeminiAdapter, makeGeminiAdapter(options));
+  return Layer.effect(
+    GeminiAdapter,
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const settings = yield* serverSettings.getSettings;
+      return yield* makeGeminiAdapter(settings.providers.gemini, options);
+    }),
+  );
 }
