@@ -192,7 +192,7 @@ function applyScriptPlaceholders(
   return result;
 }
 
-function describeReadinessCause(cause: unknown): unknown {
+export function describeReadinessCause(cause: unknown): unknown {
   if (cause instanceof SshReadinessError) {
     return {
       _tag: cause._tag,
@@ -215,9 +215,7 @@ function describeReadinessCause(cause: unknown): unknown {
   return {
     ...(typeof record._tag === "string" ? { _tag: record._tag } : {}),
     ...(typeof record.message === "string" ? { message: record.message } : {}),
-    ...(typeof record.reason === "object" && record.reason !== null
-      ? { reason: describeReadinessCause(record.reason) }
-      : {}),
+    ...(record.reason === undefined ? {} : { reason: describeReadinessCause(record.reason) }),
     ...(record.cause === undefined ? {} : { cause: describeReadinessCause(record.cause) }),
   };
 }

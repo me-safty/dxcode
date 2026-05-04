@@ -327,15 +327,7 @@ describe("WsTransport", () => {
 
     await transport.dispose();
 
-    expect(onClose).toHaveBeenCalledWith(
-      {
-        code: 1000,
-        reason: "",
-      },
-      {
-        intentional: true,
-      },
-    );
+    expect(onClose).not.toHaveBeenCalled();
     expect(getWsConnectionStatus()).toMatchObject({
       connectionLabel: "Remote Mac mini",
       phase: "connected",

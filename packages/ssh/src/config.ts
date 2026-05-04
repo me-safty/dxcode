@@ -13,6 +13,7 @@ function stripInlineComment(line: string): string {
 
 function splitDirectiveArgs(value: string): ReadonlyArray<string> {
   return value
+    .replace(/=(?!=)/gu, " ")
     .trim()
     .split(/\s+/u)
     .map((entry) => entry.trim())

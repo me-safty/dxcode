@@ -12,6 +12,7 @@ import {
   buildRemotePairingScript,
   buildRemoteStopScript,
   buildRemoteT3RunnerScript,
+  describeReadinessCause,
   issueRemotePairingToken,
   REMOTE_PICK_PORT_SCRIPT,
   SshEnvironmentManager,
@@ -191,6 +192,23 @@ describe("ssh tunnel scripts", () => {
       ),
     ),
   );
+
+  it("preserves primitive readiness reason values in diagnostic output", () => {
+    assert.deepEqual(
+      describeReadinessCause({
+        _tag: "HttpClientError",
+        message: "Backend readiness probe failed.",
+        reason: "authentication failed",
+        cause: "upstream closed",
+      }),
+      {
+        _tag: "HttpClientError",
+        message: "Backend readiness probe failed.",
+        reason: "authentication failed",
+        cause: "upstream closed",
+      },
+    );
+  });
 
   it.effect("accepts pretty-printed pairing JSON from the remote CLI", () => {
     const target = {

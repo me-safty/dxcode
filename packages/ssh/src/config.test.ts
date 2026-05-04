@@ -25,7 +25,13 @@ describe("ssh config", () => {
       yield* fs.makeDirectory(path.join(sshDir, "config.d"), { recursive: true });
       yield* fs.writeFileString(
         path.join(sshDir, "config"),
-        ["Host devbox", "  HostName devbox.example.com", "Include config.d/*.conf", ""].join("\n"),
+        [
+          "Host devbox",
+          "  HostName devbox.example.com",
+          "Host=equalsbox",
+          "Include=config.d/*.conf",
+          "",
+        ].join("\n"),
       );
       yield* fs.writeFileString(
         path.join(sshDir, "config.d", "team.conf"),
@@ -59,6 +65,13 @@ describe("ssh config", () => {
         {
           alias: "devbox",
           hostname: "devbox",
+          username: null,
+          port: null,
+          source: "ssh-config",
+        },
+        {
+          alias: "equalsbox",
+          hostname: "equalsbox",
           username: null,
           port: null,
           source: "ssh-config",
