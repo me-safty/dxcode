@@ -13,9 +13,9 @@ import type { ProcessRunResult } from "../processRunner.ts";
 import type { ProviderRegistryShape } from "./Services/ProviderRegistry.ts";
 import { makeProviderUpdater, type ProviderUpdateRunner } from "./providerUpdater.ts";
 import {
-  makeProviderVersionLifecycle,
-  type ProviderVersionLifecycle,
-} from "./providerVersionLifecycle.ts";
+  makeProviderMaintenanceCapabilities,
+  type ProviderMaintenanceCapabilities,
+} from "./providerMaintenance.ts";
 
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const CURSOR_DRIVER = ProviderDriverKind.make("cursor");
@@ -24,9 +24,9 @@ const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
 const CURSOR_INSTANCE_ID = ProviderInstanceId.make("cursor");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
 
-function lifecycleFor(provider: ProviderDriverKind): ProviderVersionLifecycle {
+function lifecycleFor(provider: ProviderDriverKind): ProviderMaintenanceCapabilities {
   if (provider === CURSOR_DRIVER) {
-    return makeProviderVersionLifecycle({
+    return makeProviderMaintenanceCapabilities({
       provider,
       packageName: null,
       updateExecutable: "agent",
@@ -34,7 +34,7 @@ function lifecycleFor(provider: ProviderDriverKind): ProviderVersionLifecycle {
       updateLockKey: "cursor-agent",
     });
   }
-  return makeProviderVersionLifecycle({
+  return makeProviderMaintenanceCapabilities({
     provider,
     packageName: provider === OPENCODE_DRIVER ? "opencode-ai" : "@openai/codex",
     updateExecutable: "npm",
@@ -168,8 +168,8 @@ function makeRegistry(
       getProviders: Ref.get(providersRef),
       refresh: () => Ref.get(providersRef),
       refreshInstance: () => Ref.get(providersRef),
-      getProviderVersionLifecycle: (provider) => Effect.succeed(lifecycleFor(provider)),
-      getProviderVersionLifecycleForInstance: (_instanceId, provider) =>
+      getProviderMaintenanceCapabilities: (provider) => Effect.succeed(lifecycleFor(provider)),
+      getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
         Effect.succeed(lifecycleFor(provider)),
       setProviderUpdateState,
       setProviderInstanceUpdateState,
@@ -211,7 +211,7 @@ describe("providerUpdater", () => {
     }),
   );
 
-  it.effect("uses the resolved provider lifecycle when choosing the update executable", () =>
+  it.effect("uses the resolved provider capabilities when choosing the update executable", () =>
     Effect.gen(function* () {
       const { registry } = yield* makeRegistry({
         ...baseProvider,
@@ -229,15 +229,16 @@ describe("providerUpdater", () => {
       const updater = yield* makeProviderUpdater({
         providerRegistry: {
           ...registry,
-          getProviderVersionLifecycle: () =>
-            Effect.succeed({
-              provider: CODEX_DRIVER,
-              packageName: "@openai/codex",
-              updateCommand: "bun i -g @openai/codex@latest",
-              updateExecutable: "bun",
-              updateArgs: ["i", "-g", "@openai/codex@latest"],
-              updateLockKey: "bun-global",
-            }),
+          getProviderMaintenanceCapabilities: () =>
+            Effect.succeed(
+              makeProviderMaintenanceCapabilities({
+                provider: CODEX_DRIVER,
+                packageName: "@openai/codex",
+                updateExecutable: "bun",
+                updateArgs: ["i", "-g", "@openai/codex@latest"],
+                updateLockKey: "bun-global",
+              }),
+            ),
         },
         runUpdate: async (command, args) => {
           calls.push({ command, args });
@@ -276,9 +277,9 @@ describe("providerUpdater", () => {
       const updater = yield* makeProviderUpdater({
         providerRegistry: {
           ...registry,
-          getProviderVersionLifecycleForInstance: (instanceId, provider) =>
+          getProviderMaintenanceCapabilitiesForInstance: (instanceId, provider) =>
             Effect.succeed(
-              makeProviderVersionLifecycle({
+              makeProviderMaintenanceCapabilities({
                 provider,
                 packageName: "@openai/codex-instance-test",
                 updateExecutable: "vp",
@@ -416,21 +417,19 @@ describe("providerUpdater", () => {
       const updater = yield* makeProviderUpdater({
         providerRegistry: {
           ...registry,
-          getProviderVersionLifecycle: (provider) =>
-            Effect.succeed({
-              provider,
-              packageName: provider === OPENCODE_DRIVER ? "opencode-ai" : "@openai/codex",
-              updateCommand:
-                provider === OPENCODE_DRIVER
-                  ? "npm install -g opencode-ai@latest"
-                  : "npm install -g @openai/codex@latest",
-              updateExecutable: "npm",
-              updateArgs:
-                provider === OPENCODE_DRIVER
-                  ? ["install", "-g", "opencode-ai@latest"]
-                  : ["install", "-g", "@openai/codex@latest"],
-              updateLockKey: "npm-global",
-            }),
+          getProviderMaintenanceCapabilities: (provider) =>
+            Effect.succeed(
+              makeProviderMaintenanceCapabilities({
+                provider,
+                packageName: provider === OPENCODE_DRIVER ? "opencode-ai" : "@openai/codex",
+                updateExecutable: "npm",
+                updateArgs:
+                  provider === OPENCODE_DRIVER
+                    ? ["install", "-g", "opencode-ai@latest"]
+                    : ["install", "-g", "@openai/codex@latest"],
+                updateLockKey: "npm-global",
+              }),
+            ),
         },
         runUpdate: async (_command, args) => {
           calls.push(args.join(" "));
@@ -466,15 +465,16 @@ describe("providerUpdater", () => {
       const updater = yield* makeProviderUpdater({
         providerRegistry: {
           ...registry,
-          getProviderVersionLifecycle: (provider) =>
-            Effect.succeed({
-              provider,
-              packageName: "@openai/codex",
-              updateCommand: "npm install -g @openai/codex@latest",
-              updateExecutable: "npm",
-              updateArgs: ["install", "-g", "@openai/codex@latest"],
-              updateLockKey: "unknown-lock-key",
-            }),
+          getProviderMaintenanceCapabilities: (provider) =>
+            Effect.succeed(
+              makeProviderMaintenanceCapabilities({
+                provider,
+                packageName: "@openai/codex",
+                updateExecutable: "npm",
+                updateArgs: ["install", "-g", "@openai/codex@latest"],
+                updateLockKey: "unknown-lock-key",
+              }),
+            ),
         },
       });
 

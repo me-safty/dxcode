@@ -35,15 +35,15 @@ import {
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
-  makeProviderVersionLifecycle,
-  makeStaticProviderVersionLifecycleResolver,
-  resolveProviderVersionLifecycleEffect,
-} from "../providerVersionLifecycle.ts";
+  makeProviderMaintenanceCapabilities,
+  makeStaticProviderMaintenanceResolver,
+  resolveProviderMaintenanceCapabilitiesEffect,
+} from "../providerMaintenance.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("cursor");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
-const UPDATE = makeStaticProviderVersionLifecycleResolver(
-  makeProviderVersionLifecycle({
+const UPDATE = makeStaticProviderMaintenanceResolver(
+  makeProviderMaintenanceCapabilities({
     provider: DRIVER_KIND,
     packageName: null,
     updateExecutable: "agent",
@@ -101,7 +101,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies CursorSettings;
-      const versionLifecycle = yield* resolveProviderVersionLifecycleEffect(UPDATE, {
+      const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
       });
@@ -121,7 +121,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       );
 
       const snapshot = yield* makeManagedServerProvider<CursorSettings>({
-        versionLifecycle,
+        maintenanceCapabilities,
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,

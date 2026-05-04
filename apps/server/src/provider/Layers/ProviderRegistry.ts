@@ -45,10 +45,10 @@ import {
 } from "../providerStatusCache.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import {
-  disableProviderVersionLifecycleUpdates,
-  haveProviderVersionLifecyclesEqual,
-  makeManualOnlyProviderVersionLifecycle,
-} from "../providerVersionLifecycle.ts";
+  disableProviderMaintenanceUpdates,
+  haveProviderMaintenanceCapabilitiesEqual,
+  makeManualOnlyProviderMaintenanceCapabilities,
+} from "../providerMaintenance.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
 
 const loadProviders = (
@@ -65,8 +65,8 @@ const loadProviders = (
     },
   );
 
-const makeManualProviderVersionLifecycle = (provider: ProviderDriverKind) =>
-  makeManualOnlyProviderVersionLifecycle({
+const makeManualProviderMaintenanceCapabilities = (provider: ProviderDriverKind) =>
+  makeManualOnlyProviderMaintenanceCapabilities({
     provider,
     packageName: null,
   });
@@ -496,38 +496,44 @@ export const ProviderRegistryLive = Layer.effect(
       return yield* refreshOneSource(providerSource);
     });
 
-    const getProviderVersionLifecycle = Effect.fn("getProviderVersionLifecycle")(function* (
-      provider: ProviderDriverKind,
-    ) {
-      const instances = Array.from((yield* Ref.get(liveSubsRef)).values()).filter(
-        (instance) => instance.driverKind === provider,
-      );
-      if (instances.length === 0) {
-        return makeManualProviderVersionLifecycle(provider);
-      }
+    const getProviderMaintenanceCapabilities = Effect.fn("getProviderMaintenanceCapabilities")(
+      function* (provider: ProviderDriverKind) {
+        const instances = Array.from((yield* Ref.get(liveSubsRef)).values()).filter(
+          (instance) => instance.driverKind === provider,
+        );
+        if (instances.length === 0) {
+          return makeManualProviderMaintenanceCapabilities(provider);
+        }
 
-      const [firstInstance, ...restInstances] = instances;
-      const firstLifecycle = firstInstance?.snapshot.versionLifecycle;
-      if (!firstLifecycle) {
-        return makeManualProviderVersionLifecycle(provider);
-      }
+        const [firstInstance, ...restInstances] = instances;
+        const firstCapabilities = firstInstance?.snapshot.maintenanceCapabilities;
+        if (!firstCapabilities) {
+          return makeManualProviderMaintenanceCapabilities(provider);
+        }
 
-      const hasMixedLifecycles = restInstances.some(
-        (instance) =>
-          !haveProviderVersionLifecyclesEqual(firstLifecycle, instance.snapshot.versionLifecycle),
-      );
-      return hasMixedLifecycles
-        ? disableProviderVersionLifecycleUpdates(firstLifecycle)
-        : firstLifecycle;
-    });
+        const hasMixedCapabilities = restInstances.some(
+          (instance) =>
+            !haveProviderMaintenanceCapabilitiesEqual(
+              firstCapabilities,
+              instance.snapshot.maintenanceCapabilities,
+            ),
+        );
+        return hasMixedCapabilities
+          ? disableProviderMaintenanceUpdates(firstCapabilities)
+          : firstCapabilities;
+      },
+    );
 
-    const getProviderVersionLifecycleForInstance = Effect.fn(
-      "getProviderVersionLifecycleForInstance",
+    const getProviderMaintenanceCapabilitiesForInstance = Effect.fn(
+      "getProviderMaintenanceCapabilitiesForInstance",
     )(function* (instanceId: ProviderInstanceId, provider: ProviderDriverKind) {
       const instance = Array.from((yield* Ref.get(liveSubsRef)).values()).find(
         (candidate) => candidate.instanceId === instanceId,
       );
-      return instance?.snapshot.versionLifecycle ?? (yield* getProviderVersionLifecycle(provider));
+      return (
+        instance?.snapshot.maintenanceCapabilities ??
+        (yield* getProviderMaintenanceCapabilities(provider))
+      );
     });
 
     /**
@@ -720,8 +726,8 @@ export const ProviderRegistryLive = Layer.effect(
         refresh(provider).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshInstance: (instanceId: ProviderInstanceId) =>
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
-      getProviderVersionLifecycle,
-      getProviderVersionLifecycleForInstance,
+      getProviderMaintenanceCapabilities,
+      getProviderMaintenanceCapabilitiesForInstance,
       setProviderUpdateState,
       setProviderInstanceUpdateState,
       get streamChanges() {

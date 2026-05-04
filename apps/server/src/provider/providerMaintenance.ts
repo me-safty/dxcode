@@ -13,29 +13,33 @@ const LATEST_VERSION_CACHE_TTL_MS = 60 * 60 * 1_000;
 const LATEST_VERSION_TIMEOUT_MS = 4_000;
 const PROVIDER_UPDATE_ACTION_TOAST_MESSAGE = "Install the update now or review provider settings.";
 
-export interface ProviderVersionLifecycle {
+export interface ProviderMaintenanceCapabilities {
   readonly provider: ProviderDriverKind;
   readonly packageName: string | null;
-  readonly updateCommand: string | null;
-  readonly updateExecutable: string | null;
-  readonly updateArgs: ReadonlyArray<string>;
-  readonly updateLockKey: string | null;
+  readonly update: ProviderMaintenanceCommandAction | null;
 }
 
-export interface ProviderVersionLifecycleResolutionOptions {
+export interface ProviderMaintenanceCommandAction {
+  readonly command: string;
+  readonly executable: string;
+  readonly args: ReadonlyArray<string>;
+  readonly lockKey: string;
+}
+
+export interface ProviderMaintenanceCapabilityResolutionOptions {
   readonly binaryPath?: string | null;
   readonly env?: NodeJS.ProcessEnv;
   readonly platform?: NodeJS.Platform;
   readonly realCommandPath?: string | null;
 }
 
-export interface ProviderVersionLifecycleResolver {
+export interface ProviderMaintenanceCapabilitiesResolver {
   readonly resolve: (
-    options?: ProviderVersionLifecycleResolutionOptions,
-  ) => ProviderVersionLifecycle;
+    options?: ProviderMaintenanceCapabilityResolutionOptions,
+  ) => ProviderMaintenanceCapabilities;
 }
 
-export interface PackageManagedProviderVersionLifecycleDefinition {
+export interface PackageManagedProviderMaintenanceDefinition {
   readonly provider: ProviderDriverKind;
   readonly npmPackageName: string;
   readonly homebrewFormula: string | null;
@@ -61,31 +65,34 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-export function makeProviderVersionLifecycle(input: {
+export function makeProviderMaintenanceCapabilities(input: {
   readonly provider: ProviderDriverKind;
   readonly packageName: string | null;
   readonly updateExecutable: string | null;
   readonly updateArgs: ReadonlyArray<string>;
   readonly updateLockKey: string | null;
-}): ProviderVersionLifecycle {
+}): ProviderMaintenanceCapabilities {
+  const update =
+    input.updateExecutable === null || input.updateLockKey === null
+      ? null
+      : {
+          command: [input.updateExecutable, ...input.updateArgs].join(" "),
+          executable: input.updateExecutable,
+          args: input.updateArgs,
+          lockKey: input.updateLockKey,
+        };
   return {
     provider: input.provider,
     packageName: input.packageName,
-    updateCommand:
-      input.updateExecutable === null
-        ? null
-        : [input.updateExecutable, ...input.updateArgs].join(" "),
-    updateExecutable: input.updateExecutable,
-    updateArgs: input.updateArgs,
-    updateLockKey: input.updateLockKey,
+    update,
   };
 }
 
-export function makeManualOnlyProviderVersionLifecycle(input: {
+export function makeManualOnlyProviderMaintenanceCapabilities(input: {
   readonly provider: ProviderDriverKind;
   readonly packageName: string | null;
-}): ProviderVersionLifecycle {
-  return makeProviderVersionLifecycle({
+}): ProviderMaintenanceCapabilities {
+  return makeProviderMaintenanceCapabilities({
     provider: input.provider,
     packageName: input.packageName,
     updateExecutable: null,
@@ -94,10 +101,10 @@ export function makeManualOnlyProviderVersionLifecycle(input: {
   });
 }
 
-function makeNpmGlobalProviderVersionLifecycle(
-  definition: PackageManagedProviderVersionLifecycleDefinition,
-): ProviderVersionLifecycle {
-  return makeProviderVersionLifecycle({
+function makeNpmGlobalProviderMaintenanceCapabilities(
+  definition: PackageManagedProviderMaintenanceDefinition,
+): ProviderMaintenanceCapabilities {
+  return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
     updateExecutable: "npm",
@@ -106,10 +113,10 @@ function makeNpmGlobalProviderVersionLifecycle(
   });
 }
 
-function makeBunGlobalProviderVersionLifecycle(
-  definition: PackageManagedProviderVersionLifecycleDefinition,
-): ProviderVersionLifecycle {
-  return makeProviderVersionLifecycle({
+function makeBunGlobalProviderMaintenanceCapabilities(
+  definition: PackageManagedProviderMaintenanceDefinition,
+): ProviderMaintenanceCapabilities {
+  return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
     updateExecutable: "bun",
@@ -118,10 +125,10 @@ function makeBunGlobalProviderVersionLifecycle(
   });
 }
 
-function makePnpmGlobalProviderVersionLifecycle(
-  definition: PackageManagedProviderVersionLifecycleDefinition,
-): ProviderVersionLifecycle {
-  return makeProviderVersionLifecycle({
+function makePnpmGlobalProviderMaintenanceCapabilities(
+  definition: PackageManagedProviderMaintenanceDefinition,
+): ProviderMaintenanceCapabilities {
+  return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
     updateExecutable: "pnpm",
@@ -130,10 +137,10 @@ function makePnpmGlobalProviderVersionLifecycle(
   });
 }
 
-function makeVitePlusGlobalProviderVersionLifecycle(
-  definition: PackageManagedProviderVersionLifecycleDefinition,
-): ProviderVersionLifecycle {
-  return makeProviderVersionLifecycle({
+function makeVitePlusGlobalProviderMaintenanceCapabilities(
+  definition: PackageManagedProviderMaintenanceDefinition,
+): ProviderMaintenanceCapabilities {
+  return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
     updateExecutable: "vp",
@@ -142,17 +149,17 @@ function makeVitePlusGlobalProviderVersionLifecycle(
   });
 }
 
-function makeHomebrewProviderVersionLifecycle(
-  definition: PackageManagedProviderVersionLifecycleDefinition,
-): ProviderVersionLifecycle {
+function makeHomebrewProviderMaintenanceCapabilities(
+  definition: PackageManagedProviderMaintenanceDefinition,
+): ProviderMaintenanceCapabilities {
   if (!definition.homebrewFormula) {
-    return makeManualOnlyProviderVersionLifecycle({
+    return makeManualOnlyProviderMaintenanceCapabilities({
       provider: definition.provider,
       packageName: definition.npmPackageName,
     });
   }
 
-  return makeProviderVersionLifecycle({
+  return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
     updateExecutable: "brew",
@@ -161,14 +168,14 @@ function makeHomebrewProviderVersionLifecycle(
   });
 }
 
-function makeNativeProviderVersionLifecycle(
-  definition: PackageManagedProviderVersionLifecycleDefinition,
-): ProviderVersionLifecycle | null {
+function makeNativeProviderMaintenanceCapabilities(
+  definition: PackageManagedProviderMaintenanceDefinition,
+): ProviderMaintenanceCapabilities | null {
   if (!definition.nativeUpdate) {
     return null;
   }
 
-  return makeProviderVersionLifecycle({
+  return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
     updateExecutable: definition.nativeUpdate.executable,
@@ -227,13 +234,13 @@ function isHomebrewCommandPath(commandPath: string): boolean {
   );
 }
 
-export function resolvePackageManagedProviderVersionLifecycle(
-  definition: PackageManagedProviderVersionLifecycleDefinition,
-  options?: ProviderVersionLifecycleResolutionOptions,
-): ProviderVersionLifecycle {
+export function resolvePackageManagedProviderMaintenance(
+  definition: PackageManagedProviderMaintenanceDefinition,
+  options?: ProviderMaintenanceCapabilityResolutionOptions,
+): ProviderMaintenanceCapabilities {
   const binaryPath = nonEmptyString(options?.binaryPath);
   if (!binaryPath) {
-    return makeNpmGlobalProviderVersionLifecycle(definition);
+    return makeNpmGlobalProviderMaintenanceCapabilities(definition);
   }
 
   const resolvedCommandPath =
@@ -254,90 +261,90 @@ export function resolvePackageManagedProviderVersionLifecycle(
       commandPaths.some((commandPath) => nativeUpdate.isCommandPath(commandPath))
     ) {
       return (
-        makeNativeProviderVersionLifecycle(definition) ??
-        makeNpmGlobalProviderVersionLifecycle(definition)
+        makeNativeProviderMaintenanceCapabilities(definition) ??
+        makeNpmGlobalProviderMaintenanceCapabilities(definition)
       );
     }
     if (commandPaths.some(isVitePlusGlobalCommandPath)) {
-      return makeVitePlusGlobalProviderVersionLifecycle(definition);
+      return makeVitePlusGlobalProviderMaintenanceCapabilities(definition);
     }
     if (commandPaths.some(isBunGlobalCommandPath)) {
-      return makeBunGlobalProviderVersionLifecycle(definition);
+      return makeBunGlobalProviderMaintenanceCapabilities(definition);
     }
     if (commandPaths.some(isPnpmGlobalCommandPath)) {
-      return makePnpmGlobalProviderVersionLifecycle(definition);
+      return makePnpmGlobalProviderMaintenanceCapabilities(definition);
     }
     if (commandPaths.some(isNpmGlobalCommandPath)) {
-      return makeNpmGlobalProviderVersionLifecycle(definition);
+      return makeNpmGlobalProviderMaintenanceCapabilities(definition);
     }
     if (commandPaths.some(isHomebrewCommandPath)) {
-      return makeHomebrewProviderVersionLifecycle(definition);
+      return makeHomebrewProviderMaintenanceCapabilities(definition);
     }
   }
 
   if (!hasPathSeparator(binaryPath)) {
-    return makeNpmGlobalProviderVersionLifecycle(definition);
+    return makeNpmGlobalProviderMaintenanceCapabilities(definition);
   }
 
-  return makeManualOnlyProviderVersionLifecycle({
+  return makeManualOnlyProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
   });
 }
 
-export function makePackageManagedProviderVersionLifecycleResolver(
-  definition: PackageManagedProviderVersionLifecycleDefinition,
-): ProviderVersionLifecycleResolver {
+export function makePackageManagedProviderMaintenanceResolver(
+  definition: PackageManagedProviderMaintenanceDefinition,
+): ProviderMaintenanceCapabilitiesResolver {
   return {
-    resolve: (options) => resolvePackageManagedProviderVersionLifecycle(definition, options),
+    resolve: (options) => resolvePackageManagedProviderMaintenance(definition, options),
   };
 }
 
-export function makeStaticProviderVersionLifecycleResolver(
-  lifecycle: ProviderVersionLifecycle,
-): ProviderVersionLifecycleResolver {
+export function makeStaticProviderMaintenanceResolver(
+  capabilities: ProviderMaintenanceCapabilities,
+): ProviderMaintenanceCapabilitiesResolver {
   return {
-    resolve: () => lifecycle,
+    resolve: () => capabilities,
   };
 }
 
-export function haveProviderVersionLifecyclesEqual(
-  left: ProviderVersionLifecycle,
-  right: ProviderVersionLifecycle,
+export function haveProviderMaintenanceCapabilitiesEqual(
+  left: ProviderMaintenanceCapabilities,
+  right: ProviderMaintenanceCapabilities,
 ): boolean {
   return (
     left.provider === right.provider &&
     left.packageName === right.packageName &&
-    left.updateCommand === right.updateCommand &&
-    left.updateExecutable === right.updateExecutable &&
-    left.updateLockKey === right.updateLockKey &&
-    left.updateArgs.length === right.updateArgs.length &&
-    left.updateArgs.every((value, index) => value === right.updateArgs[index])
+    left.update?.command === right.update?.command &&
+    left.update?.executable === right.update?.executable &&
+    left.update?.lockKey === right.update?.lockKey &&
+    (left.update?.args.length ?? 0) === (right.update?.args.length ?? 0) &&
+    (left.update?.args.every((value, index) => value === right.update?.args[index]) ?? true)
   );
 }
 
-export function disableProviderVersionLifecycleUpdates(
-  lifecycle: ProviderVersionLifecycle,
-): ProviderVersionLifecycle {
-  return makeManualOnlyProviderVersionLifecycle({
-    provider: lifecycle.provider,
-    packageName: lifecycle.packageName,
+export function disableProviderMaintenanceUpdates(
+  capabilities: ProviderMaintenanceCapabilities,
+): ProviderMaintenanceCapabilities {
+  return makeManualOnlyProviderMaintenanceCapabilities({
+    provider: capabilities.provider,
+    packageName: capabilities.packageName,
   });
 }
 
-function makeManualProviderVersionLifecycle(
+function makeManualProviderMaintenanceCapabilities(
   provider: ProviderDriverKind,
-): ProviderVersionLifecycle {
-  return makeManualOnlyProviderVersionLifecycle({
+): ProviderMaintenanceCapabilities {
+  return makeManualOnlyProviderMaintenanceCapabilities({
     provider,
     packageName: null,
   });
 }
 
-export function resolveProviderVersionLifecycleEffect(
-  resolver: ProviderVersionLifecycleResolver,
-  options?: Omit<ProviderVersionLifecycleResolutionOptions, "realCommandPath">,
-): Effect.Effect<ProviderVersionLifecycle, never, FileSystem.FileSystem> {
+export function resolveProviderMaintenanceCapabilitiesEffect(
+  resolver: ProviderMaintenanceCapabilitiesResolver,
+  options?: Omit<ProviderMaintenanceCapabilityResolutionOptions, "realCommandPath">,
+): Effect.Effect<ProviderMaintenanceCapabilities, never, FileSystem.FileSystem> {
   const binaryPath = nonEmptyString(options?.binaryPath);
   if (!binaryPath) {
     return Effect.succeed(resolver.resolve(options));
@@ -388,9 +395,10 @@ export function createProviderVersionAdvisory(input: {
   readonly currentVersion: string | null;
   readonly latestVersion?: string | null;
   readonly checkedAt?: string | null;
-  readonly versionLifecycle?: ProviderVersionLifecycle;
+  readonly maintenanceCapabilities?: ProviderMaintenanceCapabilities;
 }): ServerProviderVersionAdvisory {
-  const lifecycle = input.versionLifecycle ?? makeManualProviderVersionLifecycle(input.driver);
+  const capabilities =
+    input.maintenanceCapabilities ?? makeManualProviderMaintenanceCapabilities(input.driver);
   const latestVersion = input.latestVersion ?? null;
   const advisory = deriveVersionAdvisory({
     currentVersion: input.currentVersion,
@@ -401,8 +409,8 @@ export function createProviderVersionAdvisory(input: {
     status: advisory.status,
     currentVersion: input.currentVersion,
     latestVersion,
-    updateCommand: lifecycle.updateCommand,
-    canUpdate: lifecycle.updateExecutable !== null,
+    updateCommand: capabilities.update?.command ?? null,
+    canUpdate: capabilities.update !== null,
     checkedAt: input.checkedAt ?? null,
     message: advisory.message,
   };
@@ -438,9 +446,9 @@ function fetchNpmLatestVersion(packageName: string): Effect.Effect<string | null
 }
 
 export function resolveLatestProviderVersion(
-  versionLifecycle: ProviderVersionLifecycle,
+  maintenanceCapabilities: ProviderMaintenanceCapabilities,
 ): Effect.Effect<string | null> {
-  const packageName = versionLifecycle.packageName;
+  const packageName = maintenanceCapabilities.packageName;
   if (!packageName) {
     return Effect.succeed(null);
   }
@@ -465,10 +473,11 @@ export function resolveLatestProviderVersion(
 
 export function enrichProviderSnapshotWithVersionAdvisory(
   snapshot: ServerProvider,
-  versionLifecycle?: ProviderVersionLifecycle,
+  maintenanceCapabilities?: ProviderMaintenanceCapabilities,
 ): Effect.Effect<ServerProvider> {
   return Effect.gen(function* () {
-    const lifecycle = versionLifecycle ?? makeManualProviderVersionLifecycle(snapshot.driver);
+    const capabilities =
+      maintenanceCapabilities ?? makeManualProviderMaintenanceCapabilities(snapshot.driver);
     if (!snapshot.enabled || !snapshot.installed || !snapshot.version) {
       return {
         ...snapshot,
@@ -476,12 +485,12 @@ export function enrichProviderSnapshotWithVersionAdvisory(
           driver: snapshot.driver,
           currentVersion: snapshot.version,
           checkedAt: snapshot.checkedAt,
-          versionLifecycle: lifecycle,
+          maintenanceCapabilities: capabilities,
         }),
       };
     }
 
-    const latestVersion = yield* resolveLatestProviderVersion(lifecycle);
+    const latestVersion = yield* resolveLatestProviderVersion(capabilities);
     return {
       ...snapshot,
       versionAdvisory: createProviderVersionAdvisory({
@@ -489,7 +498,7 @@ export function enrichProviderSnapshotWithVersionAdvisory(
         currentVersion: snapshot.version,
         latestVersion,
         checkedAt: new Date().toISOString(),
-        versionLifecycle: lifecycle,
+        maintenanceCapabilities: capabilities,
       }),
     };
   });

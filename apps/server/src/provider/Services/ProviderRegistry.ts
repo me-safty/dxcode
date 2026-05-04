@@ -14,7 +14,7 @@ import type {
 } from "@t3tools/contracts";
 import { Context } from "effect";
 import type { Effect, Stream } from "effect";
-import type { ProviderVersionLifecycle } from "../providerVersionLifecycle.ts";
+import type { ProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 
 export interface ProviderRegistryShape {
   /**
@@ -46,22 +46,22 @@ export interface ProviderRegistryShape {
   ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**
-   * Resolve the currently active update lifecycle for a provider driver
-   * across its live instances. Mixed or unsafe instance strategies are
-   * downgraded to a manual-only lifecycle.
+   * Resolve the currently active maintenance capabilities for a provider
+   * driver across its live instances. Mixed or unsafe instance strategies
+   * are downgraded to manual-only capabilities.
    */
-  readonly getProviderVersionLifecycle: (
+  readonly getProviderMaintenanceCapabilities: (
     provider: ProviderDriverKind,
-  ) => Effect.Effect<ProviderVersionLifecycle>;
+  ) => Effect.Effect<ProviderMaintenanceCapabilities>;
 
   /**
-   * Resolve the update lifecycle owned by one live provider instance.
+   * Resolve the maintenance capabilities owned by one live provider instance.
    * Falls back to the driver-scoped resolver when the instance is not live.
    */
-  readonly getProviderVersionLifecycleForInstance: (
+  readonly getProviderMaintenanceCapabilitiesForInstance: (
     instanceId: ProviderInstanceId,
     provider: ProviderDriverKind,
-  ) => Effect.Effect<ProviderVersionLifecycle>;
+  ) => Effect.Effect<ProviderMaintenanceCapabilities>;
 
   /**
    * Apply volatile provider-update state to every live snapshot for the

@@ -29,7 +29,7 @@ import {
   type CommandResult,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
-import { enrichProviderSnapshotWithVersionAdvisory } from "../providerVersionLifecycle.ts";
+import { enrichProviderSnapshotWithVersionAdvisory } from "../providerMaintenance.ts";
 import { AcpSessionRuntime } from "../acp/AcpSessionRuntime.ts";
 
 const PROVIDER = ProviderDriverKind.make("cursor");

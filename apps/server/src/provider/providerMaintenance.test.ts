@@ -7,25 +7,25 @@ import { ProviderDriverKind } from "@t3tools/contracts";
 import { Effect } from "effect";
 import {
   createProviderVersionAdvisory,
-  makePackageManagedProviderVersionLifecycleResolver,
-  makeProviderVersionLifecycle,
-  makeStaticProviderVersionLifecycleResolver,
+  makePackageManagedProviderMaintenanceResolver,
+  makeProviderMaintenanceCapabilities,
+  makeStaticProviderMaintenanceResolver,
   normalizeCommandPath,
-  resolveProviderVersionLifecycleEffect,
-} from "./providerVersionLifecycle.ts";
+  resolveProviderMaintenanceCapabilitiesEffect,
+} from "./providerMaintenance.ts";
 
 const driver = (value: string) => ProviderDriverKind.make(value);
 const isNativeTestCommandPath =
   (expectedPathSegment: string) =>
   (commandPath: string): boolean =>
     normalizeCommandPath(commandPath).includes(expectedPathSegment);
-const packageToolUpdate = makePackageManagedProviderVersionLifecycleResolver({
+const packageToolUpdate = makePackageManagedProviderMaintenanceResolver({
   provider: driver("packageTool"),
   npmPackageName: "@example/package-tool",
   homebrewFormula: "package-tool",
   nativeUpdate: null,
 });
-const nativePackageToolUpdate = makePackageManagedProviderVersionLifecycleResolver({
+const nativePackageToolUpdate = makePackageManagedProviderMaintenanceResolver({
   provider: driver("nativePackageTool"),
   npmPackageName: "@example/native-package-tool",
   homebrewFormula: "native-package-tool",
@@ -36,7 +36,7 @@ const nativePackageToolUpdate = makePackageManagedProviderVersionLifecycleResolv
     isCommandPath: isNativeTestCommandPath("/.local/bin/native-package-tool"),
   },
 });
-const scopedPackageToolUpdate = makePackageManagedProviderVersionLifecycleResolver({
+const scopedPackageToolUpdate = makePackageManagedProviderMaintenanceResolver({
   provider: driver("scopedPackageTool"),
   npmPackageName: "@example/scoped-package-tool",
   homebrewFormula: "example/tap/scoped-package-tool",
@@ -47,8 +47,8 @@ const scopedPackageToolUpdate = makePackageManagedProviderVersionLifecycleResolv
     isCommandPath: isNativeTestCommandPath("/.scoped-package-tool/bin/scoped-package-tool"),
   },
 });
-const staticToolUpdate = makeStaticProviderVersionLifecycleResolver(
-  makeProviderVersionLifecycle({
+const staticToolUpdate = makeStaticProviderMaintenanceResolver(
+  makeProviderMaintenanceCapabilities({
     provider: driver("staticTool"),
     packageName: null,
     updateExecutable: "static-tool",
@@ -57,7 +57,7 @@ const staticToolUpdate = makeStaticProviderVersionLifecycleResolver(
   }),
 );
 
-describe("providerVersionLifecycle", () => {
+describe("providerMaintenance", () => {
   it("marks providers with unknown current versions as unknown", () => {
     expect(
       createProviderVersionAdvisory({
@@ -93,7 +93,7 @@ describe("providerVersionLifecycle", () => {
         driver: driver("nativePackageTool"),
         currentVersion: "2.1.110",
         latestVersion: "2.1.117",
-        versionLifecycle: nativePackageToolUpdate.resolve(),
+        maintenanceCapabilities: nativePackageToolUpdate.resolve(),
       }),
     ).toMatchObject({
       status: "behind_latest",
@@ -105,19 +105,24 @@ describe("providerVersionLifecycle", () => {
     });
   });
 
-  it("keeps update commands owned by provider lifecycle metadata", () => {
+  it("keeps update commands owned by provider maintenance capabilities", () => {
     expect(staticToolUpdate.resolve()).toEqual({
       provider: driver("staticTool"),
       packageName: null,
-      updateCommand: "static-tool update",
-      updateExecutable: "static-tool",
-      updateArgs: ["update"],
-      updateLockKey: "static-tool",
+      update: {
+        command: "static-tool update",
+
+        executable: "static-tool",
+
+        args: ["update"],
+
+        lockKey: "static-tool",
+      },
     });
   });
 
   it("switches package-managed providers to vite-plus updates when the resolved binary lives in vite-plus global bin", () => {
-    const tempDir = path.join(os.tmpdir(), `t3-vite-plus-lifecycle-${Date.now()}`);
+    const tempDir = path.join(os.tmpdir(), `t3-vite-plus-capabilities-${Date.now()}`);
     const vitePlusBinDir = path.join(tempDir, ".vite-plus", "bin");
     mkdirSync(vitePlusBinDir, { recursive: true });
     const packageToolPath = path.join(vitePlusBinDir, "package-tool");
@@ -135,15 +140,20 @@ describe("providerVersionLifecycle", () => {
     ).toEqual({
       provider: driver("packageTool"),
       packageName: "@example/package-tool",
-      updateCommand: "vp i -g @example/package-tool",
-      updateExecutable: "vp",
-      updateArgs: ["i", "-g", "@example/package-tool"],
-      updateLockKey: "vite-plus-global",
+      update: {
+        command: "vp i -g @example/package-tool",
+
+        executable: "vp",
+
+        args: ["i", "-g", "@example/package-tool"],
+
+        lockKey: "vite-plus-global",
+      },
     });
   });
 
   it("switches package-managed providers to bun updates when the resolved binary lives in bun's global bin", () => {
-    const tempDir = path.join(os.tmpdir(), `t3-bun-lifecycle-${Date.now()}`);
+    const tempDir = path.join(os.tmpdir(), `t3-bun-capabilities-${Date.now()}`);
     const bunBinDir = path.join(tempDir, ".bun", "bin");
     mkdirSync(bunBinDir, { recursive: true });
     writeFileSync(path.join(bunBinDir, "native-package-tool.exe"), "MZ");
@@ -160,15 +170,20 @@ describe("providerVersionLifecycle", () => {
     ).toEqual({
       provider: driver("nativePackageTool"),
       packageName: "@example/native-package-tool",
-      updateCommand: "bun i -g @example/native-package-tool@latest",
-      updateExecutable: "bun",
-      updateArgs: ["i", "-g", "@example/native-package-tool@latest"],
-      updateLockKey: "bun-global",
+      update: {
+        command: "bun i -g @example/native-package-tool@latest",
+
+        executable: "bun",
+
+        args: ["i", "-g", "@example/native-package-tool@latest"],
+
+        lockKey: "bun-global",
+      },
     });
   });
 
   it("switches package-managed providers to pnpm updates when the resolved binary lives in pnpm's global bin", () => {
-    const tempDir = path.join(os.tmpdir(), `t3-pnpm-lifecycle-${Date.now()}`);
+    const tempDir = path.join(os.tmpdir(), `t3-pnpm-capabilities-${Date.now()}`);
     const pnpmHomeDir = path.join(tempDir, ".local", "share", "pnpm");
     mkdirSync(pnpmHomeDir, { recursive: true });
     const scopedPackageToolPath = path.join(pnpmHomeDir, "scoped-package-tool");
@@ -186,10 +201,15 @@ describe("providerVersionLifecycle", () => {
     ).toEqual({
       provider: driver("scopedPackageTool"),
       packageName: "@example/scoped-package-tool",
-      updateCommand: "pnpm add -g @example/scoped-package-tool@latest",
-      updateExecutable: "pnpm",
-      updateArgs: ["add", "-g", "@example/scoped-package-tool@latest"],
-      updateLockKey: "pnpm-global",
+      update: {
+        command: "pnpm add -g @example/scoped-package-tool@latest",
+
+        executable: "pnpm",
+
+        args: ["add", "-g", "@example/scoped-package-tool@latest"],
+
+        lockKey: "pnpm-global",
+      },
     });
   });
 
@@ -205,15 +225,23 @@ describe("providerVersionLifecycle", () => {
     ).toEqual({
       provider: driver("packageTool"),
       packageName: "@example/package-tool",
-      updateCommand: "brew upgrade package-tool",
-      updateExecutable: "brew",
-      updateArgs: ["upgrade", "package-tool"],
-      updateLockKey: "homebrew",
+      update: {
+        command: "brew upgrade package-tool",
+
+        executable: "brew",
+
+        args: ["upgrade", "package-tool"],
+
+        lockKey: "homebrew",
+      },
     });
   });
 
   it("switches native-package-tool to native updates when the binary resolves through the native installer", () => {
-    const tempDir = path.join(os.tmpdir(), `t3-native-package-tool-native-lifecycle-${Date.now()}`);
+    const tempDir = path.join(
+      os.tmpdir(),
+      `t3-native-package-tool-native-capabilities-${Date.now()}`,
+    );
     const nativeBinDir = path.join(tempDir, ".local", "bin");
     mkdirSync(nativeBinDir, { recursive: true });
     const nativePackageToolPath = path.join(nativeBinDir, "native-package-tool");
@@ -231,15 +259,23 @@ describe("providerVersionLifecycle", () => {
     ).toEqual({
       provider: driver("nativePackageTool"),
       packageName: "@example/native-package-tool",
-      updateCommand: "native-package-tool update",
-      updateExecutable: "native-package-tool",
-      updateArgs: ["update"],
-      updateLockKey: "native-package-tool-native",
+      update: {
+        command: "native-package-tool update",
+
+        executable: "native-package-tool",
+
+        args: ["update"],
+
+        lockKey: "native-package-tool-native",
+      },
     });
   });
 
   it("switches scoped-package-tool to native upgrades when the binary resolves through the standalone installer", () => {
-    const tempDir = path.join(os.tmpdir(), `t3-scoped-package-tool-native-lifecycle-${Date.now()}`);
+    const tempDir = path.join(
+      os.tmpdir(),
+      `t3-scoped-package-tool-native-capabilities-${Date.now()}`,
+    );
     const nativeBinDir = path.join(tempDir, ".scoped-package-tool", "bin");
     mkdirSync(nativeBinDir, { recursive: true });
     const scopedPackageToolPath = path.join(nativeBinDir, "scoped-package-tool");
@@ -257,10 +293,15 @@ describe("providerVersionLifecycle", () => {
     ).toEqual({
       provider: driver("scopedPackageTool"),
       packageName: "@example/scoped-package-tool",
-      updateCommand: "scoped-package-tool upgrade",
-      updateExecutable: "scoped-package-tool",
-      updateArgs: ["upgrade"],
-      updateLockKey: "scoped-package-tool-native",
+      update: {
+        command: "scoped-package-tool upgrade",
+
+        executable: "scoped-package-tool",
+
+        args: ["upgrade"],
+
+        lockKey: "scoped-package-tool-native",
+      },
     });
   });
 
@@ -276,10 +317,15 @@ describe("providerVersionLifecycle", () => {
     ).toEqual({
       provider: driver("nativePackageTool"),
       packageName: "@example/native-package-tool",
-      updateCommand: "brew upgrade native-package-tool",
-      updateExecutable: "brew",
-      updateArgs: ["upgrade", "native-package-tool"],
-      updateLockKey: "homebrew",
+      update: {
+        command: "brew upgrade native-package-tool",
+
+        executable: "brew",
+
+        args: ["upgrade", "native-package-tool"],
+
+        lockKey: "homebrew",
+      },
     });
   });
 
@@ -295,15 +341,20 @@ describe("providerVersionLifecycle", () => {
     ).toEqual({
       provider: driver("scopedPackageTool"),
       packageName: "@example/scoped-package-tool",
-      updateCommand: "brew upgrade example/tap/scoped-package-tool",
-      updateExecutable: "brew",
-      updateArgs: ["upgrade", "example/tap/scoped-package-tool"],
-      updateLockKey: "homebrew",
+      update: {
+        command: "brew upgrade example/tap/scoped-package-tool",
+
+        executable: "brew",
+
+        args: ["upgrade", "example/tap/scoped-package-tool"],
+
+        lockKey: "homebrew",
+      },
     });
   });
 
   it("keeps npm updates for binaries symlinked into npm's global node_modules tree", async () => {
-    const tempDir = path.join(os.tmpdir(), `t3-npm-lifecycle-${Date.now()}`);
+    const tempDir = path.join(os.tmpdir(), `t3-npm-capabilities-${Date.now()}`);
     const binDir = path.join(tempDir, "bin");
     const packageBinDir = path.join(
       tempDir,
@@ -323,7 +374,7 @@ describe("providerVersionLifecycle", () => {
 
     await expect(
       Effect.runPromise(
-        resolveProviderVersionLifecycleEffect(packageToolUpdate, {
+        resolveProviderMaintenanceCapabilitiesEffect(packageToolUpdate, {
           binaryPath: symlinkPath,
           platform: "darwin",
           env: {
@@ -334,15 +385,20 @@ describe("providerVersionLifecycle", () => {
     ).resolves.toEqual({
       provider: driver("packageTool"),
       packageName: "@example/package-tool",
-      updateCommand: "npm install -g @example/package-tool@latest",
-      updateExecutable: "npm",
-      updateArgs: ["install", "-g", "@example/package-tool@latest"],
-      updateLockKey: "npm-global",
+      update: {
+        command: "npm install -g @example/package-tool@latest",
+
+        executable: "npm",
+
+        args: ["install", "-g", "@example/package-tool@latest"],
+
+        lockKey: "npm-global",
+      },
     });
   });
 
   it("uses Effect FileSystem realPath when detecting pnpm global symlinks", async () => {
-    const tempDir = path.join(os.tmpdir(), `t3-pnpm-realpath-lifecycle-${Date.now()}`);
+    const tempDir = path.join(os.tmpdir(), `t3-pnpm-realpath-capabilities-${Date.now()}`);
     const binDir = path.join(tempDir, "bin");
     const packageBinDir = path.join(
       tempDir,
@@ -366,7 +422,7 @@ describe("providerVersionLifecycle", () => {
 
     await expect(
       Effect.runPromise(
-        resolveProviderVersionLifecycleEffect(packageToolUpdate, {
+        resolveProviderMaintenanceCapabilitiesEffect(packageToolUpdate, {
           binaryPath: symlinkPath,
           platform: "darwin",
           env: {
@@ -377,10 +433,15 @@ describe("providerVersionLifecycle", () => {
     ).resolves.toEqual({
       provider: driver("packageTool"),
       packageName: "@example/package-tool",
-      updateCommand: "pnpm add -g @example/package-tool@latest",
-      updateExecutable: "pnpm",
-      updateArgs: ["add", "-g", "@example/package-tool@latest"],
-      updateLockKey: "pnpm-global",
+      update: {
+        command: "pnpm add -g @example/package-tool@latest",
+
+        executable: "pnpm",
+
+        args: ["add", "-g", "@example/package-tool@latest"],
+
+        lockKey: "pnpm-global",
+      },
     });
   });
 
@@ -397,10 +458,7 @@ describe("providerVersionLifecycle", () => {
     ).toEqual({
       provider: driver("packageTool"),
       packageName: "@example/package-tool",
-      updateCommand: null,
-      updateExecutable: null,
-      updateArgs: [],
-      updateLockKey: null,
+      update: null,
     });
   });
 });

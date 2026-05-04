@@ -35,7 +35,7 @@ import { ServerSettingsService, type ServerSettingsShape } from "../../serverSet
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
-import { makeManualOnlyProviderVersionLifecycle } from "../providerVersionLifecycle.ts";
+import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 
 const defaultClaudeSettings: ClaudeSettings = Schema.decodeSync(ClaudeSettings)({});
 const defaultCodexSettings: CodexSettings = Schema.decodeSync(CodexSettings)({});
@@ -594,7 +594,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             displayName: undefined,
             enabled: true,
             snapshot: {
-              versionLifecycle: makeManualOnlyProviderVersionLifecycle({
+              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
                 provider: codexDriver,
                 packageName: null,
               }),
@@ -683,7 +683,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             displayName: undefined,
             enabled: true,
             snapshot: {
-              versionLifecycle: makeManualOnlyProviderVersionLifecycle({
+              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
                 provider: provider.driver,
                 packageName: null,
               }),
