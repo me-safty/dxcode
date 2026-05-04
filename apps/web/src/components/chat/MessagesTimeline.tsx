@@ -203,7 +203,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           void list.scrollToIndex?.({
             index: targetRowIndex,
             animated: false,
-            viewPosition: 0.5,
+            viewPosition: 0,
           });
         }
       },
