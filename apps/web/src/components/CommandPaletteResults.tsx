@@ -67,12 +67,24 @@ function DisabledCommandPaletteResultRow(props: {
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
 }) {
   return (
-    <div className="flex min-h-8 select-none items-center gap-2 rounded-sm px-2 py-1 text-base opacity-64 sm:min-h-7 sm:text-sm">
+    <div className="flex min-h-8 select-none items-center gap-2 rounded-sm px-2 py-1.5 text-base opacity-64 sm:min-h-7 sm:text-sm">
       {props.item.icon}
-      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
-        {props.item.titleLeadingContent}
-        <span className="truncate">{props.item.title}</span>
-      </span>
+      {props.item.description ? (
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
+            {props.item.titleLeadingContent}
+            <span className="truncate">{props.item.title}</span>
+          </span>
+          <span className="truncate text-muted-foreground/70 text-xs">
+            {props.item.description}
+          </span>
+        </span>
+      ) : (
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
+          {props.item.titleLeadingContent}
+          <span className="truncate">{props.item.title}</span>
+        </span>
+      )}
       {props.item.titleTrailingContent}
     </div>
   );
