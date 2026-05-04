@@ -36,6 +36,7 @@ import {
   resolveBranchToolbarValue,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
+  resolveLocalCheckoutBranchMismatch,
   shouldIncludeBranchPickerItem,
 } from "./BranchToolbar.logic";
 import {
@@ -215,6 +216,7 @@ export function BranchToolbarBranchSelector({
   // Git ref queries
   // ---------------------------------------------------------------------------
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
+  const [isMismatchPopoverOpen, setIsMismatchPopoverOpen] = useState(false);
   const [branchQuery, setBranchQuery] = useState("");
   const deferredBranchQuery = useDeferredValue(branchQuery);
 
@@ -251,6 +253,12 @@ export function BranchToolbarBranchSelector({
   const SourceControlIcon = sourceControlPresentation.Icon;
   const canonicalActiveBranch = resolveBranchToolbarValue({
     envMode: effectiveEnvMode,
+    activeWorktreePath,
+    activeThreadBranch,
+    currentGitBranch,
+  });
+  const localCheckoutBranchMismatch = resolveLocalCheckoutBranchMismatch({
+    effectiveEnvMode,
     activeWorktreePath,
     activeThreadBranch,
     currentGitBranch,
@@ -422,6 +430,51 @@ export function BranchToolbarBranchSelector({
     });
   };
 
+  const switchCheckoutToThreadBranch = () => {
+    if (!activeProjectCwd || !localCheckoutBranchMismatch || isBranchActionPending) {
+      return;
+    }
+
+    runBranchAction(async () => {
+      const previousBranch = resolvedActiveBranch;
+      setOptimisticBranch(localCheckoutBranchMismatch.threadBranch);
+      const checkoutResult = await switchRef({
+        environmentId,
+        input: {
+          cwd: activeProjectCwd,
+          refName: localCheckoutBranchMismatch.threadBranch,
+        },
+      });
+      if (checkoutResult._tag === "Success") {
+        setOptimisticBranch(
+          checkoutResult.value.refName ?? localCheckoutBranchMismatch.threadBranch,
+        );
+        setIsMismatchPopoverOpen(false);
+        onComposerFocusRequest?.();
+        return;
+      }
+      setOptimisticBranch(previousBranch);
+      if (!isAtomCommandInterrupted(checkoutResult)) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to switch checkout.",
+            description: toBranchActionErrorMessage(squashAtomCommandFailure(checkoutResult)),
+          }),
+        );
+      }
+    });
+  };
+
+  const useCurrentCheckoutForThread = () => {
+    if (!localCheckoutBranchMismatch || isBranchActionPending) {
+      return;
+    }
+
+    setThreadBranch(localCheckoutBranchMismatch.currentBranch, null);
+    setIsMismatchPopoverOpen(false);
+    onComposerFocusRequest?.();
+  };
   useEffect(() => {
     if (
       effectiveEnvMode !== "worktree" ||
