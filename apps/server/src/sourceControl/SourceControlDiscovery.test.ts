@@ -6,6 +6,7 @@ import { VcsProcessSpawnError } from "@t3tools/contracts";
 
 import { ServerConfig } from "../config.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import { AzureDevOpsCli } from "./AzureDevOpsCli.ts";
 import { BitbucketApi, type BitbucketApiShape } from "./BitbucketApi.ts";
 import { GitHubCli } from "./GitHubCli.ts";
 import { GitLabCli } from "./GitLabCli.ts";
@@ -23,6 +24,7 @@ const sourceControlProviderRegistryTestLayer = (input: {
         ServerConfig.layerTest(process.cwd(), { prefix: "t3-source-control-registry-test-" }).pipe(
           Layer.provide(NodeServices.layer),
         ),
+        Layer.mock(AzureDevOpsCli)({}),
         Layer.mock(BitbucketApi)(input.bitbucket),
         Layer.mock(GitHubCli)({}),
         Layer.mock(GitLabCli)({}),
@@ -139,7 +141,7 @@ Logged in to github.com account juliusmarminge (keyring)
         },
         {
           kind: "azure-devops",
-          implemented: false,
+          implemented: true,
           status: "missing",
           auth: "unknown",
           account: Option.none(),
