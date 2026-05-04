@@ -119,7 +119,11 @@ import { getProviderModelCapabilities, resolveSelectableProvider } from "../prov
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
+import {
+  buildLogicalProjectKeyMap,
+  deriveLogicalProjectKeyFromSettings,
+  derivePhysicalProjectKey,
+} from "../logicalProject";
 import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
@@ -859,11 +863,19 @@ export default function ChatView(props: ChatViewProps) {
     sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
     sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
   }));
+  const logicalProjectKeyByPhysicalKey = useMemo(
+    () => buildLogicalProjectKeyMap(allProjects, projectGroupingSettings),
+    [allProjects, projectGroupingSettings],
+  );
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
-    const logicalKey = deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
+    const logicalKey =
+      logicalProjectKeyByPhysicalKey.get(derivePhysicalProjectKey(activeProject)) ??
+      deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
     const memberProjects = allProjects.filter(
-      (p) => deriveLogicalProjectKeyFromSettings(p, projectGroupingSettings) === logicalKey,
+      (p) =>
+        (logicalProjectKeyByPhysicalKey.get(derivePhysicalProjectKey(p)) ??
+          deriveLogicalProjectKeyFromSettings(p, projectGroupingSettings)) === logicalKey,
     );
     const seen = new Set<string>();
     const envs: Array<{
@@ -900,6 +912,7 @@ export default function ChatView(props: ChatViewProps) {
   }, [
     activeProject,
     allProjects,
+    logicalProjectKeyByPhysicalKey,
     projectGroupingSettings,
     primaryEnvironmentId,
     savedEnvironmentRegistry,
@@ -930,10 +943,9 @@ export default function ChatView(props: ChatViewProps) {
         throw new Error("No active project is available for this pull request.");
       }
       const activeProjectRef = scopeProjectRef(activeProject.environmentId, activeProject.id);
-      const logicalProjectKey = deriveLogicalProjectKeyFromSettings(
-        activeProject,
-        projectGroupingSettings,
-      );
+      const logicalProjectKey =
+        logicalProjectKeyByPhysicalKey.get(derivePhysicalProjectKey(activeProject)) ??
+        deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
       const storedDraftSession = getDraftSessionByLogicalProjectKey(logicalProjectKey);
       if (storedDraftSession) {
         setDraftThreadContext(storedDraftSession.draftId, input);
@@ -994,6 +1006,7 @@ export default function ChatView(props: ChatViewProps) {
       getDraftSessionByLogicalProjectKey,
       isServerThread,
       navigate,
+      logicalProjectKeyByPhysicalKey,
       projectGroupingSettings,
       routeKind,
       setDraftThreadContext,

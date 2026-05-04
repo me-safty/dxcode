@@ -217,6 +217,17 @@ function formatProjectMemberActionLabel(
   return member.environmentLabel ? `${member.environmentLabel} — ${member.cwd}` : member.cwd;
 }
 
+function hasDuplicateMemberEnvironment(members: readonly SidebarProjectGroupMember[]): boolean {
+  const seen = new Set<string>();
+  for (const member of members) {
+    if (seen.has(member.environmentId)) {
+      return true;
+    }
+    seen.add(member.environmentId);
+  }
+  return false;
+}
+
 function projectGroupingModeDescription(mode: SidebarProjectGroupingMode): string {
   switch (mode) {
     case "repository":
@@ -1697,8 +1708,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       event.preventDefault();
       event.stopPropagation();
 
-      if (project.memberProjects.length === 1) {
-        createThreadForProjectMember(project.memberProjects[0]!);
+      if (
+        project.memberProjects.length === 1 ||
+        !hasDuplicateMemberEnvironment(project.memberProjects)
+      ) {
+        const representative =
+          project.memberProjects.find(
+            (member) => member.environmentId === project.environmentId && member.id === project.id,
+          ) ?? project.memberProjects[0]!;
+        createThreadForProjectMember(representative);
         return;
       }
 
@@ -1729,7 +1747,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         createThreadForProjectMember(targetMember);
       })();
     },
-    [createThreadForProjectMember, project.groupedProjectCount, project.memberProjects],
+    [
+      createThreadForProjectMember,
+      project.environmentId,
+      project.groupedProjectCount,
+      project.id,
+      project.memberProjects,
+    ],
   );
 
   const attemptArchiveThread = useCallback(
@@ -2763,9 +2787,8 @@ export default function Sidebar() {
     });
   }, [projectOrder, projects]);
 
-  // Build a mapping from physical project key → logical project key for
-  // cross-environment grouping.  Projects that share a repositoryIdentity
-  // canonicalKey are treated as one logical project in the sidebar.
+  // Build a mapping from physical project key -> logical project key so the
+  // sidebar, active route, and thread buckets all use the same grouping mode.
   const physicalToLogicalKey = useMemo(() => {
     return buildPhysicalToLogicalProjectKeyMap({
       projects: orderedProjects,

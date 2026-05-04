@@ -132,6 +132,20 @@ export function deriveLogicalProjectKeyFromSettings(
   });
 }
 
+export function buildLogicalProjectKeyMap(
+  projects: ReadonlyArray<Pick<Project, "environmentId" | "id" | "cwd" | "repositoryIdentity">>,
+  settings: ProjectGroupingSettings,
+): Map<string, string> {
+  const result = new Map<string, string>();
+
+  for (const project of projects) {
+    const physicalKey = derivePhysicalProjectKey(project);
+    result.set(physicalKey, deriveLogicalProjectKeyFromSettings(project, settings));
+  }
+
+  return result;
+}
+
 export function deriveLogicalProjectKeyFromRef(
   projectRef: ScopedProjectRef,
   project: Pick<Project, "environmentId" | "id" | "cwd" | "repositoryIdentity"> | null | undefined,
