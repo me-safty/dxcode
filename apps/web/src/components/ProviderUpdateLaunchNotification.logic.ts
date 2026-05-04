@@ -136,6 +136,9 @@ export function hasOneClickUpdateProviderCandidate(
 
   const updateCommands = new Set<string>();
   for (const provider of driverProviders) {
+    if (!isProviderUpdateCandidate(provider)) {
+      continue;
+    }
     const advisory = provider.versionAdvisory;
     if (!advisory || advisory.canUpdate !== true || advisory.updateCommand === null) {
       return false;

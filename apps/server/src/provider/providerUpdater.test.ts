@@ -371,4 +371,50 @@ describe("providerUpdater", () => {
       }
     }),
   );
+
+  it.effect(
+    "releases the running-provider marker when interrupted after queuing but before the lock run starts",
+    () =>
+      Effect.gen(function* () {
+        const { registry } = yield* makeRegistry(baseProvider);
+        let blockQueuedState = true;
+        const queuedStateWrittenLatch: { resolve: () => void } = { resolve: () => {} };
+        const releaseQueuedStateLatch: { resolve: () => void } = { resolve: () => {} };
+        const queuedStateWritten = new Promise<void>((resolve) => {
+          queuedStateWrittenLatch.resolve = resolve;
+        });
+        const releaseQueuedState = new Promise<void>((resolve) => {
+          releaseQueuedStateLatch.resolve = resolve;
+        });
+
+        const updater = yield* makeProviderUpdater({
+          providerRegistry: {
+            ...registry,
+            setProviderUpdateState: (provider, updateState) =>
+              Effect.gen(function* () {
+                const providers = yield* registry.setProviderUpdateState(provider, updateState);
+                if (updateState?.status === "queued" && blockQueuedState) {
+                  queuedStateWrittenLatch.resolve();
+                  yield* Effect.promise(() => releaseQueuedState);
+                }
+                return providers;
+              }),
+          },
+          runUpdate: async () => okResult(),
+        });
+
+        const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
+        yield* Effect.promise(() => queuedStateWritten);
+        blockQueuedState = false;
+
+        yield* Fiber.interrupt(first);
+        releaseQueuedStateLatch.resolve();
+
+        const second = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.exit);
+        assert.strictEqual(Exit.isSuccess(second), true);
+        if (Exit.isSuccess(second)) {
+          assert.strictEqual(second.value.providers[0]?.updateState?.status, "succeeded");
+        }
+      }),
+  );
 });

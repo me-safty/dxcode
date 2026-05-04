@@ -124,6 +124,44 @@ describe("provider update launch notification logic", () => {
     ).toBe(false);
   });
 
+  it("keeps one-click updates enabled when sibling instances are already current", () => {
+    const candidate = updateCandidate({
+      driver: driver("claudeAgent"),
+      instanceId: instanceId("claude_personal"),
+      latestVersion: "2.1.123",
+      updateCommand: "npm install -g @anthropic-ai/claude-code@latest",
+    });
+
+    expect(
+      hasOneClickUpdateProviderCandidate(candidate, [
+        candidate,
+        provider({
+          driver: driver("claudeAgent"),
+          instanceId: instanceId("claude_work"),
+          version: "2.1.123",
+          latestVersion: "2.1.123",
+          advisoryStatus: "current",
+          canUpdate: false,
+          updateCommand: null,
+        }),
+      ]),
+    ).toBe(true);
+    expect(
+      canOneClickUpdateProviderCandidate(candidate, [
+        candidate,
+        provider({
+          driver: driver("claudeAgent"),
+          instanceId: instanceId("claude_work"),
+          version: "2.1.123",
+          latestVersion: "2.1.123",
+          advisoryStatus: "current",
+          canUpdate: false,
+          updateCommand: null,
+        }),
+      ]),
+    ).toBe(true);
+  });
+
   it("keeps the inline update action available while a provider update is already running", () => {
     const candidate = updateCandidate({
       driver: driver("codex"),

@@ -203,100 +203,100 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
         });
       }
 
-      const lock = updateLocks.get(updateLockKey);
-      if (!lock) {
-        yield* releaseProvider(provider);
-        return yield* new ServerProviderUpdateError({
-          provider,
-          reason: `Unsupported provider update lock key: ${updateLockKey}`,
-        });
-      }
+      return yield* Effect.gen(function* () {
+        const lock = updateLocks.get(updateLockKey);
+        if (!lock) {
+          return yield* new ServerProviderUpdateError({
+            provider,
+            reason: `Unsupported provider update lock key: ${updateLockKey}`,
+          });
+        }
 
-      yield* input.providerRegistry.setProviderUpdateState(
-        provider,
-        makeUpdateState({
-          status: "queued",
-          startedAt: null,
-          finishedAt: null,
-          message: "Waiting for another provider update to finish.",
-        }),
-      );
-
-      const finish = (state: ServerProviderUpdateState) =>
-        input.providerRegistry
-          .setProviderUpdateState(provider, state)
-          .pipe(Effect.map((providers) => ({ providers })));
-      const startedAtRef = yield* Ref.make<string | null>(null);
-
-      const run = Effect.gen(function* () {
-        const startedAt = new Date().toISOString();
-        yield* Ref.set(startedAtRef, startedAt);
         yield* input.providerRegistry.setProviderUpdateState(
           provider,
           makeUpdateState({
-            status: "running",
-            startedAt,
+            status: "queued",
+            startedAt: null,
             finishedAt: null,
-            message: "Updating provider.",
+            message: "Waiting for another provider update to finish.",
           }),
         );
 
-        const result = yield* Effect.promise<ProcessRunResult>(() =>
-          runUpdate(updateExecutable, lifecycle.updateArgs),
-        );
-        const finishedAt = new Date().toISOString();
-        if (result.timedOut || result.code !== 0) {
+        const finish = (state: ServerProviderUpdateState) =>
+          input.providerRegistry
+            .setProviderUpdateState(provider, state)
+            .pipe(Effect.map((providers) => ({ providers })));
+        const startedAtRef = yield* Ref.make<string | null>(null);
+
+        const run = Effect.gen(function* () {
+          const startedAt = new Date().toISOString();
+          yield* Ref.set(startedAtRef, startedAt);
+          yield* input.providerRegistry.setProviderUpdateState(
+            provider,
+            makeUpdateState({
+              status: "running",
+              startedAt,
+              finishedAt: null,
+              message: "Updating provider.",
+            }),
+          );
+
+          const result = yield* Effect.promise<ProcessRunResult>(() =>
+            runUpdate(updateExecutable, lifecycle.updateArgs),
+          );
+          const finishedAt = new Date().toISOString();
+          if (result.timedOut || result.code !== 0) {
+            return yield* finish(
+              makeUpdateState({
+                status: "failed",
+                startedAt,
+                finishedAt,
+                message: failureMessage(result),
+                output: commandOutput(result),
+              }),
+            );
+          }
+
+          const { verifiedProviders } = yield* verifyRefreshedProvider(provider, lifecycle);
+          const couldNotVerify = verifiedProviders.length === 0;
+          const stillOutdated =
+            couldNotVerify ||
+            verifiedProviders.some((verifiedProvider) => isOutdatedProvider(verifiedProvider));
           return yield* finish(
             makeUpdateState({
-              status: "failed",
+              status: stillOutdated ? "unchanged" : "succeeded",
               startedAt,
               finishedAt,
-              message: failureMessage(result),
+              message: couldNotVerify
+                ? "Update command completed, but T3 Code could not verify the provider version."
+                : stillOutdated
+                  ? "Update command completed, but T3 Code still detects an outdated provider version."
+                  : "Provider updated.",
               output: commandOutput(result),
             }),
           );
-        }
+        });
 
-        const { verifiedProviders } = yield* verifyRefreshedProvider(provider, lifecycle);
-        const couldNotVerify = verifiedProviders.length === 0;
-        const stillOutdated =
-          couldNotVerify ||
-          verifiedProviders.some((verifiedProvider) => isOutdatedProvider(verifiedProvider));
-        return yield* finish(
-          makeUpdateState({
-            status: stillOutdated ? "unchanged" : "succeeded",
-            startedAt,
-            finishedAt,
-            message: couldNotVerify
-              ? "Update command completed, but T3 Code could not verify the provider version."
-              : stillOutdated
-                ? "Update command completed, but T3 Code still detects an outdated provider version."
-                : "Provider updated.",
-            output: commandOutput(result),
-          }),
-        );
-      });
-
-      return yield* lock
-        .withPermits(1)(run)
-        .pipe(
-          Effect.catchCause((cause) =>
-            Effect.gen(function* () {
-              const failure = Cause.squash(cause);
-              const startedAt = yield* Ref.get(startedAtRef);
-              return yield* finish(
-                makeUpdateState({
-                  status: "failed",
-                  startedAt,
-                  finishedAt: new Date().toISOString(),
-                  message: failure instanceof Error ? failure.message : "Update command failed.",
-                  output: null,
-                }),
-              );
-            }),
-          ),
-          Effect.ensuring(releaseProvider(provider)),
-        );
+        return yield* lock
+          .withPermits(1)(run)
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.gen(function* () {
+                const failure = Cause.squash(cause);
+                const startedAt = yield* Ref.get(startedAtRef);
+                return yield* finish(
+                  makeUpdateState({
+                    status: "failed",
+                    startedAt,
+                    finishedAt: new Date().toISOString(),
+                    message: failure instanceof Error ? failure.message : "Update command failed.",
+                    output: null,
+                  }),
+                );
+              }),
+            ),
+          );
+      }).pipe(Effect.ensuring(releaseProvider(provider)));
     });
 
   return {
