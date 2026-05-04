@@ -3,9 +3,13 @@ import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
+  findUserMessageRowIndex,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveNavigationAnchorIndex,
+  type MessagesTimelineRow,
 } from "./MessagesTimeline.logic";
+import { MessageId } from "@t3tools/contracts";
 
 describe("computeMessageDurationStart", () => {
   it("returns message createdAt when there is no preceding user message", () => {
@@ -431,5 +435,128 @@ describe("computeStableMessagesTimelineRows", () => {
 
     expect(reordered).not.toBe(initial);
     expect(reordered.result).toEqual([initial.result[1], initial.result[0]]);
+  });
+});
+
+function userRow(id: string): MessagesTimelineRow {
+  return {
+    kind: "message",
+    id,
+    createdAt: "2026-01-01T00:00:00Z",
+    message: {
+      id: MessageId.make(id),
+      role: "user",
+      text: id,
+      turnId: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      streaming: false,
+    },
+    durationStart: "2026-01-01T00:00:00Z",
+    showCompletionDivider: false,
+    showAssistantCopyButton: false,
+  };
+}
+
+function gap(id: string): MessagesTimelineRow {
+  return { kind: "working", id, createdAt: null };
+}
+
+describe("findUserMessageRowIndex", () => {
+  // u0  g1  u2  g3  u4
+  const sample: MessagesTimelineRow[] = [
+    userRow("u0"),
+    gap("g1"),
+    userRow("u2"),
+    gap("g3"),
+    userRow("u4"),
+  ];
+
+  it("walks past the anchor to the adjacent user message in either direction", () => {
+    // Forward: skips non-user rows, returns first user past anchor.
+    expect(findUserMessageRowIndex(sample, 0, "next")).toBe(2);
+    expect(findUserMessageRowIndex(sample, 2, "next")).toBe(4);
+    // Backward: symmetric.
+    expect(findUserMessageRowIndex(sample, 4, "previous")).toBe(2);
+    expect(findUserMessageRowIndex(sample, 2, "previous")).toBe(0);
+  });
+
+  it("returns null when nothing is left in the requested direction", () => {
+    expect(findUserMessageRowIndex(sample, 4, "next")).toBeNull();
+    expect(findUserMessageRowIndex(sample, 0, "previous")).toBeNull();
+    expect(findUserMessageRowIndex([], 0, "next")).toBeNull();
+    expect(findUserMessageRowIndex([gap("g0")], 0, "previous")).toBeNull();
+  });
+});
+
+describe("resolveNavigationAnchorIndex", () => {
+  // u0  g1  u2  g3  u4  g5  u6
+  const rows: MessagesTimelineRow[] = [
+    userRow("u0"),
+    gap("g1"),
+    userRow("u2"),
+    gap("g3"),
+    userRow("u4"),
+    gap("g5"),
+    userRow("u6"),
+  ];
+
+  it("honors a pending index that is still inside the visible range", () => {
+    expect(
+      resolveNavigationAnchorIndex({
+        rows,
+        state: { start: 1, end: 5, scrollLength: 600 },
+        pendingIndex: 4,
+        direction: "previous",
+      }),
+    ).toBe(4);
+  });
+
+  it("ignores a stale pending index outside the visible range and re-derives from the viewport", () => {
+    // Manual scroll moved the viewport away from the previously navigated row.
+    // The visible range only contains user messages at 2 and 4, so PREV picks
+    // the topmost (2) instead of the stale pending=0 from a prior keybind.
+    expect(
+      resolveNavigationAnchorIndex({
+        rows,
+        state: { start: 1, end: 5, scrollLength: 600 },
+        pendingIndex: 0,
+        direction: "previous",
+      }),
+    ).toBe(2);
+  });
+
+  it("picks the topmost user msg for previous and bottommost for next within the visible range", () => {
+    // Visible rows 1..5 → user messages at 2 and 4.
+    const state = { start: 1, end: 5, scrollLength: 600 };
+    expect(
+      resolveNavigationAnchorIndex({ rows, state, pendingIndex: null, direction: "previous" }),
+    ).toBe(2);
+    expect(
+      resolveNavigationAnchorIndex({ rows, state, pendingIndex: null, direction: "next" }),
+    ).toBe(4);
+  });
+
+  it("uses the rows.length sentinel when state is unmeasured (mount race)", () => {
+    expect(
+      resolveNavigationAnchorIndex({
+        rows,
+        state: { start: 0, end: 6, scrollLength: 0 },
+        pendingIndex: null,
+        direction: "previous",
+      }),
+    ).toBe(rows.length);
+  });
+
+  it("walks outward from the viewport when the visible range has no user messages", () => {
+    // Visible range covers only assistant a3. PREV should look ABOVE the
+    // viewport (anchor = rangeStart=3 → walk back to find u2). NEXT should
+    // look BELOW (anchor = rangeEnd=3 → walk forward to find u4).
+    const state = { start: 3, end: 3, scrollLength: 600 };
+    expect(
+      resolveNavigationAnchorIndex({ rows, state, pendingIndex: null, direction: "previous" }),
+    ).toBe(3);
+    expect(
+      resolveNavigationAnchorIndex({ rows, state, pendingIndex: null, direction: "next" }),
+    ).toBe(3);
   });
 });
