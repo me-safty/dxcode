@@ -102,6 +102,24 @@ describe("normalizeCodexUsageSnapshot", () => {
     ]);
   });
 
+  it("carries rate limit reached type from limit-id fallback buckets", () => {
+    const snapshot = normalizeCodexUsageSnapshot({
+      providerInstanceId: instanceId,
+      source: "read",
+      payload: {
+        rateLimits: {},
+        rateLimitsByLimitId: {
+          FiveHourLimit: {
+            primary: { usedPercent: 100 },
+            rateLimitReachedType: "primary",
+          },
+        },
+      },
+    });
+
+    expect(snapshot?.rateLimitReachedType).toBe("primary");
+  });
+
   it("uses Codex primary and secondary semantics when durations are unknown", () => {
     const snapshot = normalizeCodexUsageSnapshot({
       providerInstanceId: instanceId,

@@ -126,6 +126,20 @@ function windowsFromLimitIdBuckets(
   return windows;
 }
 
+function rateLimitReachedTypeFromLimitIdBuckets(
+  buckets: Record<string, RateLimitBucket> | null | undefined,
+): string | null {
+  if (!buckets) {
+    return null;
+  }
+  for (const [limitId, bucket] of Object.entries(buckets)) {
+    if (windowKindForLimitId(limitId) && bucket.rateLimitReachedType) {
+      return bucket.rateLimitReachedType;
+    }
+  }
+  return null;
+}
+
 export function normalizeCodexUsageSnapshot(input: {
   readonly providerInstanceId: ProviderInstanceId;
   readonly payload: RateLimitPayload;
@@ -151,7 +165,9 @@ export function normalizeCodexUsageSnapshot(input: {
     providerInstanceId: input.providerInstanceId,
     checkedAt: input.checkedAt ?? DateTime.formatIso(DateTime.nowUnsafe()),
     windows,
-    rateLimitReachedType: bucket?.rateLimitReachedType ?? null,
+    rateLimitReachedType:
+      bucket?.rateLimitReachedType ??
+      rateLimitReachedTypeFromLimitIdBuckets(input.payload.rateLimitsByLimitId),
     source: input.source,
   };
 }
