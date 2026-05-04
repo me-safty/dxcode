@@ -41,6 +41,7 @@ export type ThreadToastData = {
   threadId?: ThreadId | null;
   leadingIcon?: ReactNode;
   tooltipStyle?: boolean;
+  onClose?: (() => void) | undefined;
   dismissAfterVisibleMs?: number;
   hideCopyButton?: boolean;
   secondaryActionProps?: ComponentPropsWithoutRef<"button">;
@@ -100,6 +101,15 @@ const toastCornerOrbClass = cn(
   "transition-[color,background-color,box-shadow] hover:bg-popover hover:text-foreground",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
 );
+
+function handleToastDismissClick(
+  manager: typeof toastManager | typeof anchoredToastManager,
+  toastId: ToastId,
+  onClose: (() => void) | undefined,
+) {
+  onClose?.();
+  manager.close(toastId);
+}
 
 function CopyErrorButton({ text }: { text: string }) {
   const { copyToClipboard, isCopied } = useCopyToClipboard();
@@ -619,7 +629,9 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                   aria-label="Dismiss notification"
                   className={toastCornerOrbClass}
                   data-slot="toast-close"
-                  onClick={() => toastManager.close(toast.id)}
+                  onClick={() =>
+                    handleToastDismissClick(toastManager, toast.id, toast.data?.onClose)
+                  }
                   type="button"
                 >
                   <XIcon className="size-3" strokeWidth={2.25} />
@@ -710,7 +722,13 @@ function AnchoredToasts() {
                           aria-label="Dismiss notification"
                           className={toastCornerOrbClass}
                           data-slot="toast-close"
-                          onClick={() => anchoredToastManager.close(toast.id)}
+                          onClick={() =>
+                            handleToastDismissClick(
+                              anchoredToastManager,
+                              toast.id,
+                              toast.data?.onClose,
+                            )
+                          }
                           type="button"
                         >
                           <XIcon className="size-3" strokeWidth={2.25} />

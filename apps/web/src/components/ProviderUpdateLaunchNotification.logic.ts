@@ -118,15 +118,13 @@ export function collectProviderUpdateCandidates(
   return dedupeProvidersByDriver(providers.filter(isProviderUpdateCandidate));
 }
 
-export function canOneClickUpdateProviderCandidate(
+export function hasOneClickUpdateProviderCandidate(
   candidate: ProviderUpdateCandidate,
   providers: ReadonlyArray<ServerProvider>,
 ): boolean {
   if (
     candidate.versionAdvisory.canUpdate !== true ||
-    candidate.versionAdvisory.updateCommand === null ||
-    candidate.updateState?.status === "queued" ||
-    candidate.updateState?.status === "running"
+    candidate.versionAdvisory.updateCommand === null
   ) {
     return false;
   }
@@ -146,6 +144,15 @@ export function canOneClickUpdateProviderCandidate(
   }
 
   return updateCommands.size === 1;
+}
+
+export function canOneClickUpdateProviderCandidate(
+  candidate: ProviderUpdateCandidate,
+  providers: ReadonlyArray<ServerProvider>,
+): boolean {
+  return (
+    !isProviderUpdateActive(candidate) && hasOneClickUpdateProviderCandidate(candidate, providers)
+  );
 }
 
 export function providerUpdateNotificationKey(

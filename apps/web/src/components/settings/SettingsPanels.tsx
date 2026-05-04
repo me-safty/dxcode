@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   defaultInstanceIdForDriver,
   type DesktopUpdateChannel,
+  PROVIDER_DISPLAY_NAMES,
   ProviderDriverKind,
   type ProviderInstanceConfig,
   type ProviderInstanceId,
@@ -56,6 +57,13 @@ import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
+import {
+  canOneClickUpdateProviderCandidate,
+  collectProviderUpdateCandidates,
+  hasOneClickUpdateProviderCandidate,
+  isProviderUpdateActive,
+  type ProviderUpdateCandidate,
+} from "../ProviderUpdateLaunchNotification.logic";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
 import { buildProviderInstanceUpdatePatch } from "./SettingsPanels.logic";
@@ -464,6 +472,9 @@ export function GeneralSettingsPanel({
   >({});
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
   const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false);
+  const [updatingProviderDrivers, setUpdatingProviderDrivers] = useState<
+    ReadonlySet<ProviderDriverKind>
+  >(() => new Set());
   // Collapsible state per provider-instance card, keyed by the instance id.
   // `Record<string, boolean>` so we don't need to preseed an entry for every
   // configured instance — an absent key reads as collapsed. Default-slot
@@ -504,6 +515,14 @@ export function GeneralSettingsPanel({
   const availableEditors = useServerAvailableEditors();
   const observability = useServerObservability();
   const serverProviders = useServerProviders();
+  const providerUpdateCandidates = useMemo(
+    () => collectProviderUpdateCandidates(serverProviders),
+    [serverProviders],
+  );
+  const providerUpdateCandidateByInstanceId = useMemo(
+    () => new Map(providerUpdateCandidates.map((candidate) => [candidate.instanceId, candidate])),
+    [providerUpdateCandidates],
+  );
   const visibleProviderSettings = PROVIDER_SETTINGS.filter(
     (providerSettings) =>
       providerSettings.provider !== "cursor" ||
@@ -547,6 +566,46 @@ export function GeneralSettingsPanel({
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
+
+  const runProviderUpdate = useCallback(async (candidate: ProviderUpdateCandidate) => {
+    let started = false;
+    setUpdatingProviderDrivers((previous) => {
+      if (previous.has(candidate.driver)) {
+        return previous;
+      }
+      started = true;
+      const next = new Set(previous);
+      next.add(candidate.driver);
+      return next;
+    });
+    if (!started) {
+      return;
+    }
+
+    try {
+      await ensureLocalApi().server.updateProvider({ provider: candidate.driver });
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: `Could not update ${PROVIDER_DISPLAY_NAMES[candidate.driver] ?? candidate.driver}`,
+          description:
+            error instanceof Error
+              ? error.message
+              : "The provider update command could not be started.",
+        }),
+      );
+    } finally {
+      setUpdatingProviderDrivers((previous) => {
+        if (!previous.has(candidate.driver)) {
+          return previous;
+        }
+        const next = new Set(previous);
+        next.delete(candidate.driver);
+        return next;
+      });
+    }
+  }, []);
 
   const openInPreferredEditor = useCallback(
     (target: "keybindings" | "logsDirectory", path: string | null, failureMessage: string) => {
@@ -1236,6 +1295,23 @@ export function GeneralSettingsPanel({
           const liveProvider = serverProviders.find(
             (candidate) => candidate.instanceId === row.instanceId,
           );
+          const updateCandidate = liveProvider
+            ? providerUpdateCandidateByInstanceId.get(liveProvider.instanceId)
+            : undefined;
+          const isDriverUpdateRunning =
+            updateCandidate !== undefined &&
+            (updatingProviderDrivers.has(updateCandidate.driver) ||
+              serverProviders.some(
+                (provider) =>
+                  provider.driver === updateCandidate.driver && isProviderUpdateActive(provider),
+              ));
+          const showInlineUpdateButton =
+            updateCandidate !== undefined &&
+            hasOneClickUpdateProviderCandidate(updateCandidate, serverProviders);
+          const canRunInlineUpdate =
+            updateCandidate !== undefined &&
+            canOneClickUpdateProviderCandidate(updateCandidate, serverProviders) &&
+            !updatingProviderDrivers.has(updateCandidate.driver);
           const modelPreferences = settings.providerModelPreferences?.[row.instanceId] ?? {
             hiddenModels: [],
             modelOrder: [],
@@ -1305,6 +1381,17 @@ export function GeneralSettingsPanel({
                   modelOrder,
                 })
               }
+              onRunUpdate={
+                showInlineUpdateButton && updateCandidate
+                  ? () => {
+                      if (!canRunInlineUpdate) {
+                        return;
+                      }
+                      void runProviderUpdate(updateCandidate);
+                    }
+                  : undefined
+              }
+              isUpdating={showInlineUpdateButton ? isDriverUpdateRunning : undefined}
             />
           );
         })}

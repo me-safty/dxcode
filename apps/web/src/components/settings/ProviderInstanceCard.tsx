@@ -1,6 +1,14 @@
 "use client";
 
-import { ChevronDownIcon, CopyIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  CopyIcon,
+  DownloadIcon,
+  LoaderIcon,
+  PlusIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   isProviderDriverKind,
@@ -408,6 +416,8 @@ interface ProviderInstanceCardProps {
   readonly onHiddenModelsChange: (next: ReadonlyArray<string>) => void;
   readonly onFavoriteModelsChange: (next: ReadonlyArray<string>) => void;
   readonly onModelOrderChange: (next: ReadonlyArray<string>) => void;
+  readonly onRunUpdate?: (() => void) | undefined;
+  readonly isUpdating?: boolean | undefined;
 }
 
 /**
@@ -450,6 +460,8 @@ export function ProviderInstanceCard({
   onHiddenModelsChange,
   onFavoriteModelsChange,
   onModelOrderChange,
+  onRunUpdate,
+  isUpdating = false,
 }: ProviderInstanceCardProps) {
   const enabled = instance.enabled ?? true;
   // The server-reported status wins when present; otherwise fall back to
@@ -660,6 +672,23 @@ export function ProviderInstanceCard({
                 >
                   {versionAdvisory.detail}
                 </span>
+                {onRunUpdate ? (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    className="h-5 gap-1 px-1.5 text-[11px]"
+                    disabled={isUpdating}
+                    onClick={onRunUpdate}
+                  >
+                    {isUpdating ? (
+                      <LoaderIcon className="size-3 animate-spin" />
+                    ) : (
+                      <DownloadIcon className="size-3" />
+                    )}
+                    {isUpdating ? "Updating" : "Update"}
+                  </Button>
+                ) : null}
                 {updateCommand ? (
                   <Tooltip>
                     <TooltipTrigger

@@ -11,6 +11,7 @@ import {
   getProviderUpdateRejectedToastView,
   getProviderUpdateSidebarPillView,
   getSingleProviderUpdateProgressToastView,
+  hasOneClickUpdateProviderCandidate,
   isProviderUpdateCandidate,
   providerUpdateNotificationKey,
   type ProviderUpdateCandidate,
@@ -121,6 +122,22 @@ describe("provider update launch notification logic", () => {
         }),
       ]),
     ).toBe(false);
+  });
+
+  it("keeps the inline update action available while a provider update is already running", () => {
+    const candidate = updateCandidate({
+      driver: driver("codex"),
+      updateState: {
+        status: "running",
+        startedAt: checkedAt,
+        finishedAt: null,
+        message: "Updating provider.",
+        output: null,
+      },
+    });
+
+    expect(hasOneClickUpdateProviderCandidate(candidate, [candidate])).toBe(true);
+    expect(canOneClickUpdateProviderCandidate(candidate, [candidate])).toBe(false);
   });
 
   it("builds a notification key from the update advisory fields", () => {

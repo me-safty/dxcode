@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { type ProviderDriverKind } from "@t3tools/contracts";
 
 import { ensureLocalApi } from "../localApi";
+import { useDismissedProviderUpdateNotificationKeys } from "../providerUpdateDismissal";
 import { useServerProviders } from "../rpc/serverState";
 import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import {
@@ -102,6 +103,8 @@ export function ProviderUpdateLaunchNotification() {
   const navigate = useNavigate();
   const providers = useServerProviders();
   const activeToastRef = useRef<ActiveProviderUpdateToast | null>(null);
+  const { clientSettingsHydrated, dismissedNotificationKeys, dismissNotificationKey } =
+    useDismissedProviderUpdateNotificationKeys();
 
   const updateProviders = useMemo(() => collectProviderUpdateCandidates(providers), [providers]);
   const notificationKey = useMemo(
@@ -162,7 +165,9 @@ export function ProviderUpdateLaunchNotification() {
     }
 
     if (
+      !clientSettingsHydrated ||
       !notificationKey ||
+      dismissedNotificationKeys.has(notificationKey) ||
       seenProviderUpdateNotificationKeys.has(notificationKey) ||
       activeToastRef.current
     ) {
@@ -176,6 +181,9 @@ export function ProviderUpdateLaunchNotification() {
     let toastId!: ProviderUpdateToastId;
     let updateStarted = false;
     const openSettings = () => openProviderSettings(toastId);
+    const dismissPrompt = () => {
+      dismissNotificationKey(notificationKey);
+    };
 
     const runUpdates = () => {
       if (updateStarted || oneClickProviders.length === 0) {
@@ -263,6 +271,7 @@ export function ProviderUpdateLaunchNotification() {
               <ProviderUpdateToastIcon provider={updateProviders[0]!.driver} />
             ) : undefined,
           hideCopyButton: true,
+          onClose: dismissPrompt,
           ...(oneClickProviders.length > 0
             ? {
                 secondaryActionProps: {
@@ -276,7 +285,15 @@ export function ProviderUpdateLaunchNotification() {
       }),
     );
     activeToastRef.current = { kind: "prompt", key: notificationKey, toastId };
-  }, [notificationKey, oneClickProviders, openProviderSettings, updateProviders]);
+  }, [
+    clientSettingsHydrated,
+    dismissNotificationKey,
+    dismissedNotificationKeys,
+    notificationKey,
+    oneClickProviders,
+    openProviderSettings,
+    updateProviders,
+  ]);
 
   return null;
 }
