@@ -9,6 +9,7 @@ const mockWaitForSavedEnvironmentRegistryHydration = vi.fn();
 const mockListSavedEnvironmentRecords = vi.fn();
 const mockSavedEnvironmentRegistrySubscribe = vi.fn();
 const mockReadSavedEnvironmentBearerToken = vi.fn();
+const mockGetSavedEnvironmentRecord = vi.fn();
 
 function MockWsTransport() {
   return undefined;
@@ -35,7 +36,7 @@ vi.mock("../remote/api", () => ({
 }));
 
 vi.mock("./catalog", () => ({
-  getSavedEnvironmentRecord: vi.fn(),
+  getSavedEnvironmentRecord: mockGetSavedEnvironmentRecord,
   hasSavedEnvironmentRegistryHydrated: vi.fn(() => true),
   listSavedEnvironmentRecords: mockListSavedEnvironmentRecords,
   persistSavedEnvironmentRecord: vi.fn(),
@@ -47,6 +48,7 @@ vi.mock("./catalog", () => ({
       upsert: vi.fn(),
       remove: vi.fn(),
       markConnected: vi.fn(),
+      rename: vi.fn(),
     }),
   },
   useSavedEnvironmentRuntimeStore: {
@@ -226,6 +228,9 @@ describe("saved environment startup", () => {
       authenticated: true,
       role: "owner",
     });
+    mockGetSavedEnvironmentRecord.mockImplementation((environmentId: EnvironmentId) =>
+      environmentId === savedRecord.environmentId ? savedRecord : null,
+    );
     mockListSavedEnvironmentRecords.mockReturnValue([savedRecord]);
     mockSavedEnvironmentRegistrySubscribe.mockReturnValue(() => undefined);
     mockWaitForSavedEnvironmentRegistryHydration.mockResolvedValue(undefined);
@@ -302,9 +307,9 @@ describe("saved environment startup", () => {
 
     registryListener?.();
     finishHydration();
-    await Promise.resolve();
-
-    expect(mockReadSavedEnvironmentBearerToken).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(mockReadSavedEnvironmentBearerToken).toHaveBeenCalledTimes(1);
+    });
 
     finishTokenRead("saved-bearer-token");
     await vi.runAllTimersAsync();
