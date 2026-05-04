@@ -244,13 +244,18 @@ export function resolveNavigationAnchorIndex({
   pendingIndex: number | null;
   direction: UserMessageRowDirection;
 }): number {
-  if (pendingIndex !== null) return pendingIndex;
   if (!state || state.scrollLength === 0) {
+    if (pendingIndex !== null) return pendingIndex;
     return direction === "previous" ? rows.length : -1;
   }
 
   const rangeStart = Math.max(0, state.start);
   const rangeEnd = Math.min(rows.length - 1, state.end);
+
+  if (pendingIndex !== null && pendingIndex >= rangeStart && pendingIndex <= rangeEnd) {
+    return pendingIndex;
+  }
+
   const visible = (row: MessagesTimelineRow, i: number) =>
     i >= rangeStart &&
     i <= rangeEnd &&
@@ -259,7 +264,8 @@ export function resolveNavigationAnchorIndex({
 
   const found = direction === "previous" ? rows.findIndex(visible) : rows.findLastIndex(visible);
   if (found !== -1) return found;
-  return direction === "previous" ? rows.length : -1;
+
+  return direction === "previous" ? rangeStart : rangeEnd;
 }
 
 /** Shallow field comparison per row variant — avoids deep equality cost. */

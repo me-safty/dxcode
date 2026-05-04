@@ -500,7 +500,7 @@ describe("resolveNavigationAnchorIndex", () => {
     userRow("u6"),
   ];
 
-  it("returns the pending index first so chained presses keep advancing during scroll animation", () => {
+  it("honors a pending index that is still inside the visible range", () => {
     expect(
       resolveNavigationAnchorIndex({
         rows,
@@ -509,6 +509,20 @@ describe("resolveNavigationAnchorIndex", () => {
         direction: "previous",
       }),
     ).toBe(4);
+  });
+
+  it("ignores a stale pending index outside the visible range and re-derives from the viewport", () => {
+    // Manual scroll moved the viewport away from the previously navigated row.
+    // The visible range only contains user messages at 2 and 4, so PREV picks
+    // the topmost (2) instead of the stale pending=0 from a prior keybind.
+    expect(
+      resolveNavigationAnchorIndex({
+        rows,
+        state: { start: 1, end: 5, scrollLength: 600 },
+        pendingIndex: 0,
+        direction: "previous",
+      }),
+    ).toBe(2);
   });
 
   it("picks the topmost user msg for previous and bottommost for next within the visible range", () => {
@@ -522,8 +536,7 @@ describe("resolveNavigationAnchorIndex", () => {
     ).toBe(4);
   });
 
-  it("falls back to a direction-specific sentinel when no usable visible user message exists", () => {
-    // State unmeasured (mount race) → sentinel covers fresh-mount fallback.
+  it("uses the rows.length sentinel when state is unmeasured (mount race)", () => {
     expect(
       resolveNavigationAnchorIndex({
         rows,
@@ -532,14 +545,18 @@ describe("resolveNavigationAnchorIndex", () => {
         direction: "previous",
       }),
     ).toBe(rows.length);
-    // Visible range covers only assistants → same fallback.
+  });
+
+  it("walks outward from the viewport when the visible range has no user messages", () => {
+    // Visible range covers only assistant a3. PREV should look ABOVE the
+    // viewport (anchor = rangeStart=3 → walk back to find u2). NEXT should
+    // look BELOW (anchor = rangeEnd=3 → walk forward to find u4).
+    const state = { start: 3, end: 3, scrollLength: 600 };
     expect(
-      resolveNavigationAnchorIndex({
-        rows,
-        state: { start: 3, end: 3, scrollLength: 600 },
-        pendingIndex: null,
-        direction: "next",
-      }),
-    ).toBe(-1);
+      resolveNavigationAnchorIndex({ rows, state, pendingIndex: null, direction: "previous" }),
+    ).toBe(3);
+    expect(
+      resolveNavigationAnchorIndex({ rows, state, pendingIndex: null, direction: "next" }),
+    ).toBe(3);
   });
 });
