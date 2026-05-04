@@ -8,6 +8,7 @@ import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Scope from "effect/Scope";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -2271,7 +2272,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
             baseRefName: "main",
             headRefName: "statemachine",
             state: "open",
-            updatedAt: null,
+            updatedAt: Option.none(),
             isCrossRepository: false,
             headRepositoryNameWithOwner: "pingdotgg/codething-mvp",
             headRepositoryOwnerLogin: "pingdotgg",
@@ -2289,7 +2290,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
             baseRefName: "main",
             headRefName: "statemachine",
             state: "open",
-            updatedAt: null,
+            updatedAt: Option.none(),
             isCrossRepository: true,
             headRepositoryNameWithOwner: "pingdotgg/codething-mvp",
             headRepositoryOwnerLogin: "pingdotgg",
@@ -2318,7 +2319,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
             baseRefName: "main",
             headRefName: "t3code/git-audit-stability",
             state: "open",
-            updatedAt: null,
+            updatedAt: Option.none(),
             isCrossRepository: true,
             headRepositoryNameWithOwner: "justsomelegs/t3code",
             headRepositoryOwnerLogin: "justsomelegs",
