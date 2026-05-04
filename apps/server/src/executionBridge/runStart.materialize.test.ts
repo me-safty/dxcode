@@ -168,8 +168,13 @@ function makeTaskPrTestLayer(input: {
   readonly revListCount: number;
   readonly hasWorkingTreeChanges?: boolean;
   readonly runStackedAction?: GitManagerShape["runStackedAction"];
+  readonly initialBranch?: string;
 }) {
+  let currentBranch = input.initialBranch ?? "task/fix-login-task-1";
   const execute = vi.fn((request: { readonly args: ReadonlyArray<string> }) => {
+    if (request.args[0] === "checkout" && request.args[1] === "-B") {
+      currentBranch = String(request.args[2]);
+    }
     if (request.args[0] === "rev-list") {
       return Effect.succeed({
         exitCode: 0,
@@ -192,8 +197,8 @@ function makeTaskPrTestLayer(input: {
       isRepo: true,
       hasOriginRemote: true,
       isDefaultBranch: false,
-      branch: "task/fix-login-task-1",
-      upstreamRef: "origin/task/fix-login-task-1",
+      branch: currentBranch,
+      upstreamRef: `origin/${currentBranch}`,
       hasWorkingTreeChanges: input.hasWorkingTreeChanges ?? false,
       workingTree: {
         changedFiles: [],
@@ -285,6 +290,50 @@ describe("ensureTaskPullRequest", () => {
         cwd: taskPullRequestEnsureRequest.worktreePath,
       }),
       expect.objectContaining({ draftPullRequest: true }),
+    );
+  });
+
+  it("reattaches agent-created branches to the orchestrator branch before opening a PR", async () => {
+    const runStackedAction = vi.fn(() =>
+      Effect.succeed({
+        action: "create_pr" as const,
+        branch: { status: "skipped_not_requested" as const },
+        commit: { status: "skipped_not_requested" as const },
+        push: { status: "skipped_not_requested" as const },
+        pr: {
+          status: "created" as const,
+          url: "https://github.com/affil-ai/t3code/pull/124",
+          number: 124,
+          baseBranch: "affil/mvp-deployment",
+          headBranch: "task/fix-login-task-1",
+          title: "Fix login",
+        },
+        toast: {
+          title: "Pull request created",
+          cta: { kind: "none" as const },
+        },
+      }),
+    );
+    const { layer, execute } = makeTaskPrTestLayer({
+      revListCount: 1,
+      initialBranch: "task/agent-created-branch",
+      runStackedAction,
+    });
+
+    const result = await Effect.runPromise(
+      ensureTaskPullRequest(taskPullRequestEnsureRequest).pipe(Effect.provide(layer)),
+    );
+
+    expect(result.status).toBe("created");
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: ["checkout", "-B", "task/fix-login-task-1"],
+      }),
+    );
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: ["config", "branch.task/fix-login-task-1.gh-merge-base", "affil/mvp-deployment"],
+      }),
     );
   });
 

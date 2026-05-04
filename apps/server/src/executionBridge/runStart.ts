@@ -432,22 +432,38 @@ const configureTaskPullRequestBaseBranch = Effect.fn(
     .pipe(Effect.catch(() => Effect.void));
 });
 
+const recoverTaskPullRequestBranch = Effect.fn("executionBridge.recoverTaskPullRequestBranch")(
+  function* (git: GitVcsDriverShape, cwd: string, expectedBranch: string) {
+    yield* git.execute({
+      operation: "ExecutionBridge.ensureTaskPullRequest.recoverBranch",
+      cwd,
+      args: ["checkout", "-B", expectedBranch],
+    });
+    return yield* git.statusDetails(cwd);
+  },
+);
+
 export const ensureTaskPullRequest = (request: TaskPullRequestEnsureRequest) =>
   Effect.gen(function* () {
     const git = yield* GitVcsDriver;
     const gitManager = yield* GitManager;
     const checkedAt = new Date().toISOString();
-    const details = yield* git.statusDetails(request.worktreePath);
-    const branch = details.branch ?? request.branch;
+    let details = yield* git.statusDetails(request.worktreePath);
+    let branch = details.branch ?? request.branch;
 
     if (branch !== request.branch) {
-      return {
-        taskId: request.taskId,
-        workSessionId: request.workSessionId,
-        status: "failed",
-        checkedAt,
-        summary: `Worktree is on branch ${branch}, expected ${request.branch}.`,
-      } satisfies TaskPullRequestEnsureResponse;
+      details = yield* recoverTaskPullRequestBranch(git, request.worktreePath, request.branch);
+      branch = details.branch ?? request.branch;
+
+      if (branch !== request.branch) {
+        return {
+          taskId: request.taskId,
+          workSessionId: request.workSessionId,
+          status: "failed",
+          checkedAt,
+          summary: `Worktree is on branch ${branch}, expected ${request.branch}.`,
+        } satisfies TaskPullRequestEnsureResponse;
+      }
     }
 
     if (!details.hasWorkingTreeChanges && !details.hasUpstream && details.aheadCount === 0) {
