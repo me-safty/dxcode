@@ -905,6 +905,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       const session = yield* provider.startSession(asThreadId("thread-rollback-persist"), {
         provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-rollback-persist"),
         cwd: "/tmp/project",
         runtimeMode: "full-access",

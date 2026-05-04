@@ -951,10 +951,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const activeSessions = yield* routed.adapter.listSessions();
       const updatedSession = activeSessions.find((session) => session.threadId === routed.threadId);
       if (updatedSession) {
-        yield* upsertSessionBinding(updatedSession, input.threadId, {
-          lastRuntimeEvent: "provider.rollbackConversation",
-          lastRuntimeEventAt: new Date().toISOString(),
-        });
+        yield* upsertSessionBinding(
+          { ...updatedSession, providerInstanceId: routed.instanceId },
+          input.threadId,
+          {
+            lastRuntimeEvent: "provider.rollbackConversation",
+            lastRuntimeEventAt: new Date().toISOString(),
+          },
+        );
       }
       yield* analytics.record("provider.conversation.rolled_back", {
         provider: routed.adapter.provider,
