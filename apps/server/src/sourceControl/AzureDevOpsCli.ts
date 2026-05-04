@@ -157,19 +157,6 @@ function normalizeChangeRequestId(reference: string): string {
   return urlMatch?.[1] ?? trimmed;
 }
 
-function normalizeSourceBranch(headSelector: string): string {
-  return (
-    SourceControlProvider.parseSourceControlOwnerRef(headSelector)?.refName ?? headSelector.trim()
-  );
-}
-
-function sourceBranch(input: {
-  readonly headSelector: string;
-  readonly source?: SourceControlProvider.SourceControlRefSelector;
-}): string {
-  return input.source?.refName ?? normalizeSourceBranch(input.headSelector);
-}
-
 function toAzureStatus(state: "open" | "closed" | "merged" | "all"): string {
   switch (state) {
     case "open":
@@ -276,7 +263,7 @@ export const make = Effect.fn("makeAzureDevOpsCli")(function* () {
           "--detect",
           "true",
           "--source-branch",
-          sourceBranch(input),
+          SourceControlProvider.sourceBranch(input),
           "--status",
           toAzureStatus(input.state),
           "--top",
@@ -397,7 +384,7 @@ export const make = Effect.fn("makeAzureDevOpsCli")(function* () {
           "--target-branch",
           input.target?.refName ?? input.baseBranch,
           "--source-branch",
-          sourceBranch(input),
+          SourceControlProvider.sourceBranch(input),
           "--title",
           input.title,
           "--description",

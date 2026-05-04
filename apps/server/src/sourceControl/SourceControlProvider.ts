@@ -30,6 +30,17 @@ export function parseSourceControlOwnerRef(
   return owner && refName ? { owner, refName } : undefined;
 }
 
+export function normalizeSourceBranch(headSelector: string): string {
+  return parseSourceControlOwnerRef(headSelector)?.refName ?? headSelector.trim();
+}
+
+export function sourceBranch(input: {
+  readonly headSelector: string;
+  readonly source?: SourceControlRefSelector;
+}): string {
+  return input.source?.refName ?? normalizeSourceBranch(input.headSelector);
+}
+
 export function sourceControlRefFromInput(input: {
   readonly headSelector: string;
   readonly source?: SourceControlRefSelector;

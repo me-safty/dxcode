@@ -146,19 +146,6 @@ function normalizeChangeRequestId(reference: string): string {
   return urlMatch?.[1] ?? trimmed;
 }
 
-function normalizeSourceBranch(headSelector: string): string {
-  return (
-    SourceControlProvider.parseSourceControlOwnerRef(headSelector)?.refName ?? headSelector.trim()
-  );
-}
-
-function sourceBranch(input: {
-  readonly headSelector: string;
-  readonly source?: SourceControlProvider.SourceControlRefSelector;
-}): string {
-  return input.source?.refName ?? normalizeSourceBranch(input.headSelector);
-}
-
 function sourceWorkspace(input: {
   readonly headSelector: string;
   readonly source?: SourceControlProvider.SourceControlRefSelector;
@@ -547,7 +534,7 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
             pagelen: String(Math.max(1, Math.min(input.limit ?? 20, 50))),
             sort: "-updated_on",
             q: bitbucketQueryString([
-              `source.branch.name = "${sourceBranch(input).replaceAll('"', '\\"')}"`,
+              `source.branch.name = "${SourceControlProvider.sourceBranch(input).replaceAll('"', '\\"')}"`,
               bitbucketStateFilter(states),
             ]),
             state: states,
@@ -613,7 +600,7 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
           description,
           source: {
             branch: {
-              name: sourceBranch(input),
+              name: SourceControlProvider.sourceBranch(input),
             },
             ...(sourceOwner
               ? {
