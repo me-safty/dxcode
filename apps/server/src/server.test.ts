@@ -521,7 +521,10 @@ const buildAppUnderTest = (options?: {
           refreshInstance: () => Effect.succeed([]),
           getProviderVersionLifecycle: (provider) =>
             Effect.succeed(getProviderVersionLifecycle(provider)),
+          getProviderVersionLifecycleForInstance: (_instanceId, provider) =>
+            Effect.succeed(getProviderVersionLifecycle(provider)),
           setProviderUpdateState: () => Effect.succeed([]),
+          setProviderInstanceUpdateState: () => Effect.succeed([]),
           streamChanges: Stream.empty,
           ...options?.layers?.providerRegistry,
         }),

@@ -13,13 +13,6 @@ const LATEST_VERSION_CACHE_TTL_MS = 60 * 60 * 1_000;
 const LATEST_VERSION_TIMEOUT_MS = 4_000;
 const PROVIDER_UPDATE_ACTION_TOAST_MESSAGE = "Install the update now or review provider settings.";
 
-type VersionLifecycleProvider = "codex" | "claudeAgent" | "cursor" | "opencode";
-
-const CODEX_DRIVER = ProviderDriverKind.make("codex");
-const CLAUDE_AGENT_DRIVER = ProviderDriverKind.make("claudeAgent");
-const CURSOR_DRIVER = ProviderDriverKind.make("cursor");
-const OPENCODE_DRIVER = ProviderDriverKind.make("opencode");
-
 export interface ProviderVersionLifecycle {
   readonly provider: ProviderDriverKind;
   readonly packageName: string | null;
@@ -29,14 +22,20 @@ export interface ProviderVersionLifecycle {
   readonly updateLockKey: string | null;
 }
 
-interface ProviderVersionLifecycleResolutionOptions {
+export interface ProviderVersionLifecycleResolutionOptions {
   readonly binaryPath?: string | null;
   readonly env?: NodeJS.ProcessEnv;
   readonly platform?: NodeJS.Platform;
   readonly realCommandPath?: string | null;
 }
 
-interface PackageManagedProviderVersionLifecycleDefinition {
+export interface ProviderVersionLifecycleResolver {
+  readonly resolve: (
+    options?: ProviderVersionLifecycleResolutionOptions,
+  ) => ProviderVersionLifecycle;
+}
+
+export interface PackageManagedProviderVersionLifecycleDefinition {
   readonly provider: ProviderDriverKind;
   readonly npmPackageName: string;
   readonly homebrewFormula: string | null;
@@ -47,50 +46,6 @@ interface PackageManagedProviderVersionLifecycleDefinition {
     readonly isCommandPath: (commandPath: string) => boolean;
   } | null;
 }
-
-const PROVIDER_VERSION_LIFECYCLES = {
-  codex: {
-    provider: CODEX_DRIVER,
-    npmPackageName: "@openai/codex",
-    homebrewFormula: "codex",
-    nativeUpdate: null,
-  },
-  claudeAgent: {
-    provider: CLAUDE_AGENT_DRIVER,
-    npmPackageName: "@anthropic-ai/claude-code",
-    homebrewFormula: "claude-code",
-    nativeUpdate: {
-      executable: "claude",
-      args: ["update"],
-      lockKey: "claude-native",
-      isCommandPath: isClaudeNativeCommandPath,
-    },
-  },
-  cursor: {
-    provider: CURSOR_DRIVER,
-    packageName: null,
-    updateCommand: "agent update",
-    updateExecutable: "agent",
-    updateArgs: ["update"],
-    updateLockKey: "cursor-agent",
-  },
-  opencode: {
-    provider: OPENCODE_DRIVER,
-    npmPackageName: "opencode-ai",
-    homebrewFormula: "anomalyco/tap/opencode",
-    nativeUpdate: {
-      executable: "opencode",
-      args: ["upgrade"],
-      lockKey: "opencode-native",
-      isCommandPath: isOpenCodeNativeCommandPath,
-    },
-  },
-} as const satisfies Record<
-  Exclude<VersionLifecycleProvider, "cursor">,
-  PackageManagedProviderVersionLifecycleDefinition
-> & {
-  readonly cursor: ProviderVersionLifecycle;
-};
 
 interface LatestVersionCacheEntry {
   readonly expiresAt: number;
@@ -106,11 +61,7 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function isVersionLifecycleProvider(provider: string): provider is VersionLifecycleProvider {
-  return provider in PROVIDER_VERSION_LIFECYCLES;
-}
-
-function makeProviderVersionLifecycle(input: {
+export function makeProviderVersionLifecycle(input: {
   readonly provider: ProviderDriverKind;
   readonly packageName: string | null;
   readonly updateExecutable: string | null;
@@ -130,7 +81,7 @@ function makeProviderVersionLifecycle(input: {
   };
 }
 
-function makeManualOnlyProviderVersionLifecycle(input: {
+export function makeManualOnlyProviderVersionLifecycle(input: {
   readonly provider: ProviderDriverKind;
   readonly packageName: string | null;
 }): ProviderVersionLifecycle {
@@ -226,11 +177,11 @@ function makeNativeProviderVersionLifecycle(
   });
 }
 
-function hasPathSeparator(value: string): boolean {
+export function hasPathSeparator(value: string): boolean {
   return value.includes("/") || value.includes("\\");
 }
 
-function normalizeCommandPath(commandPath: string): string {
+export function normalizeCommandPath(commandPath: string): string {
   return commandPath.replaceAll("\\", "/").toLowerCase();
 }
 
@@ -276,7 +227,7 @@ function isHomebrewCommandPath(commandPath: string): boolean {
   );
 }
 
-function isClaudeNativeCommandPath(commandPath: string): boolean {
+export function isClaudeNativeCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
   return (
     normalized.endsWith("/.local/bin/claude") ||
@@ -285,7 +236,7 @@ function isClaudeNativeCommandPath(commandPath: string): boolean {
   );
 }
 
-function isOpenCodeNativeCommandPath(commandPath: string): boolean {
+export function isOpenCodeNativeCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
   return (
     normalized.endsWith("/.opencode/bin/opencode") ||
@@ -293,7 +244,7 @@ function isOpenCodeNativeCommandPath(commandPath: string): boolean {
   );
 }
 
-function resolvePackageManagedProviderVersionLifecycle(
+export function resolvePackageManagedProviderVersionLifecycle(
   definition: PackageManagedProviderVersionLifecycleDefinition,
   options?: ProviderVersionLifecycleResolutionOptions,
 ): ProviderVersionLifecycle {
@@ -351,6 +302,22 @@ function resolvePackageManagedProviderVersionLifecycle(
   });
 }
 
+export function makePackageManagedProviderVersionLifecycleResolver(
+  definition: PackageManagedProviderVersionLifecycleDefinition,
+): ProviderVersionLifecycleResolver {
+  return {
+    resolve: (options) => resolvePackageManagedProviderVersionLifecycle(definition, options),
+  };
+}
+
+export function makeStaticProviderVersionLifecycleResolver(
+  lifecycle: ProviderVersionLifecycle,
+): ProviderVersionLifecycleResolver {
+  return {
+    resolve: () => lifecycle,
+  };
+}
+
 export function haveProviderVersionLifecyclesEqual(
   left: ProviderVersionLifecycle,
   right: ProviderVersionLifecycle,
@@ -377,31 +344,20 @@ export function disableProviderVersionLifecycleUpdates(
 
 export function getProviderVersionLifecycle(
   provider: ProviderDriverKind,
-  options?: ProviderVersionLifecycleResolutionOptions,
 ): ProviderVersionLifecycle {
-  const providerKey = String(provider);
-  if (isVersionLifecycleProvider(providerKey)) {
-    if (providerKey === "cursor") {
-      return PROVIDER_VERSION_LIFECYCLES.cursor;
-    }
-    return resolvePackageManagedProviderVersionLifecycle(
-      PROVIDER_VERSION_LIFECYCLES[providerKey],
-      options,
-    );
-  }
   return makeManualOnlyProviderVersionLifecycle({
     provider,
     packageName: null,
   });
 }
 
-export function getProviderVersionLifecycleEffect(
-  provider: ProviderDriverKind,
+export function resolveProviderVersionLifecycleEffect(
+  resolver: ProviderVersionLifecycleResolver,
   options?: Omit<ProviderVersionLifecycleResolutionOptions, "realCommandPath">,
 ): Effect.Effect<ProviderVersionLifecycle, never, FileSystem.FileSystem> {
   const binaryPath = nonEmptyString(options?.binaryPath);
   if (!binaryPath) {
-    return Effect.succeed(getProviderVersionLifecycle(provider, options));
+    return Effect.succeed(resolver.resolve(options));
   }
 
   const resolvedCommandPath =
@@ -410,7 +366,7 @@ export function getProviderVersionLifecycleEffect(
       ...(options?.env ? { env: options.env } : {}),
     }) ?? (hasPathSeparator(binaryPath) ? binaryPath : null);
   if (!resolvedCommandPath) {
-    return Effect.succeed(getProviderVersionLifecycle(provider, options));
+    return Effect.succeed(resolver.resolve(options));
   }
 
   return Effect.gen(function* () {
@@ -418,7 +374,7 @@ export function getProviderVersionLifecycleEffect(
     const realCommandPath = yield* fileSystem
       .realPath(resolvedCommandPath)
       .pipe(Effect.catch(() => Effect.succeed(resolvedCommandPath)));
-    return getProviderVersionLifecycle(provider, {
+    return resolver.resolve({
       ...options,
       realCommandPath,
     });
@@ -500,8 +456,9 @@ function fetchNpmLatestVersion(packageName: string): Effect.Effect<string | null
 
 export function resolveLatestProviderVersion(
   provider: ProviderDriverKind,
+  versionLifecycle?: ProviderVersionLifecycle,
 ): Effect.Effect<string | null> {
-  const lifecycle = getProviderVersionLifecycle(provider);
+  const lifecycle = versionLifecycle ?? getProviderVersionLifecycle(provider);
   const packageName = lifecycle.packageName;
   if (!packageName) {
     return Effect.succeed(null);
@@ -543,7 +500,7 @@ export function enrichProviderSnapshotWithVersionAdvisory(
       };
     }
 
-    const latestVersion = yield* resolveLatestProviderVersion(snapshot.driver);
+    const latestVersion = yield* resolveLatestProviderVersion(snapshot.driver, lifecycle);
     return {
       ...snapshot,
       versionAdvisory: createProviderVersionAdvisory({

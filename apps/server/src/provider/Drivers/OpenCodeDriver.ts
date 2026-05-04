@@ -36,11 +36,24 @@ import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
-  getProviderVersionLifecycleEffect,
+  isOpenCodeNativeCommandPath,
+  makePackageManagedProviderVersionLifecycleResolver,
+  resolveProviderVersionLifecycleEffect,
 } from "../providerVersionLifecycle.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("opencode");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
+const UPDATE = makePackageManagedProviderVersionLifecycleResolver({
+  provider: DRIVER_KIND,
+  npmPackageName: "opencode-ai",
+  homebrewFormula: "anomalyco/tap/opencode",
+  nativeUpdate: {
+    executable: "opencode",
+    args: ["upgrade"],
+    lockKey: "opencode-native",
+    isCommandPath: isOpenCodeNativeCommandPath,
+  },
+});
 
 export type OpenCodeDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -72,6 +85,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
     displayName: "OpenCode",
     supportsMultipleInstances: true,
   },
+  update: UPDATE,
   configSchema: OpenCodeSettings,
   defaultConfig: (): OpenCodeSettings => Schema.decodeSync(OpenCodeSettings)({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
@@ -91,7 +105,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies OpenCodeSettings;
-      const versionLifecycle = yield* getProviderVersionLifecycleEffect(DRIVER_KIND, {
+      const versionLifecycle = yield* resolveProviderVersionLifecycleEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
       });

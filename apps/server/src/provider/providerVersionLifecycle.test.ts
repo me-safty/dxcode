@@ -7,11 +7,52 @@ import { ProviderDriverKind } from "@t3tools/contracts";
 import { Effect } from "effect";
 import {
   createProviderVersionAdvisory,
-  getProviderVersionLifecycle,
-  getProviderVersionLifecycleEffect,
+  isClaudeNativeCommandPath,
+  isOpenCodeNativeCommandPath,
+  makePackageManagedProviderVersionLifecycleResolver,
+  makeProviderVersionLifecycle,
+  makeStaticProviderVersionLifecycleResolver,
+  resolveProviderVersionLifecycleEffect,
 } from "./providerVersionLifecycle.ts";
 
 const driver = (value: string) => ProviderDriverKind.make(value);
+const codexUpdate = makePackageManagedProviderVersionLifecycleResolver({
+  provider: driver("codex"),
+  npmPackageName: "@openai/codex",
+  homebrewFormula: "codex",
+  nativeUpdate: null,
+});
+const claudeUpdate = makePackageManagedProviderVersionLifecycleResolver({
+  provider: driver("claudeAgent"),
+  npmPackageName: "@anthropic-ai/claude-code",
+  homebrewFormula: "claude-code",
+  nativeUpdate: {
+    executable: "claude",
+    args: ["update"],
+    lockKey: "claude-native",
+    isCommandPath: isClaudeNativeCommandPath,
+  },
+});
+const opencodeUpdate = makePackageManagedProviderVersionLifecycleResolver({
+  provider: driver("opencode"),
+  npmPackageName: "opencode-ai",
+  homebrewFormula: "anomalyco/tap/opencode",
+  nativeUpdate: {
+    executable: "opencode",
+    args: ["upgrade"],
+    lockKey: "opencode-native",
+    isCommandPath: isOpenCodeNativeCommandPath,
+  },
+});
+const cursorUpdate = makeStaticProviderVersionLifecycleResolver(
+  makeProviderVersionLifecycle({
+    provider: driver("cursor"),
+    packageName: null,
+    updateExecutable: "agent",
+    updateArgs: ["update"],
+    updateLockKey: "cursor-agent",
+  }),
+);
 
 describe("providerVersionLifecycle", () => {
   it("marks providers with unknown current versions as unknown", () => {
@@ -49,6 +90,7 @@ describe("providerVersionLifecycle", () => {
         driver: driver("claudeAgent"),
         currentVersion: "2.1.110",
         latestVersion: "2.1.117",
+        versionLifecycle: claudeUpdate.resolve(),
       }),
     ).toMatchObject({
       status: "behind_latest",
@@ -61,7 +103,7 @@ describe("providerVersionLifecycle", () => {
   });
 
   it("keeps update commands owned by provider lifecycle metadata", () => {
-    expect(getProviderVersionLifecycle(driver("cursor"))).toEqual({
+    expect(cursorUpdate.resolve()).toEqual({
       provider: driver("cursor"),
       packageName: null,
       updateCommand: "agent update",
@@ -80,7 +122,7 @@ describe("providerVersionLifecycle", () => {
     chmodSync(codexPath, 0o755);
 
     expect(
-      getProviderVersionLifecycle(driver("codex"), {
+      codexUpdate.resolve({
         binaryPath: "codex",
         platform: "darwin",
         env: {
@@ -104,7 +146,7 @@ describe("providerVersionLifecycle", () => {
     writeFileSync(path.join(bunBinDir, "claude.exe"), "MZ");
 
     expect(
-      getProviderVersionLifecycle(driver("claudeAgent"), {
+      claudeUpdate.resolve({
         binaryPath: "claude",
         platform: "win32",
         env: {
@@ -131,7 +173,7 @@ describe("providerVersionLifecycle", () => {
     chmodSync(opencodePath, 0o755);
 
     expect(
-      getProviderVersionLifecycle(driver("opencode"), {
+      opencodeUpdate.resolve({
         binaryPath: "opencode",
         platform: "darwin",
         env: {
@@ -150,7 +192,7 @@ describe("providerVersionLifecycle", () => {
 
   it("switches codex to Homebrew updates when the binary resolves through Homebrew", () => {
     expect(
-      getProviderVersionLifecycle(driver("codex"), {
+      codexUpdate.resolve({
         binaryPath: "/opt/homebrew/bin/codex",
         platform: "darwin",
         env: {
@@ -176,7 +218,7 @@ describe("providerVersionLifecycle", () => {
     chmodSync(claudePath, 0o755);
 
     expect(
-      getProviderVersionLifecycle(driver("claudeAgent"), {
+      claudeUpdate.resolve({
         binaryPath: "claude",
         platform: "darwin",
         env: {
@@ -202,7 +244,7 @@ describe("providerVersionLifecycle", () => {
     chmodSync(opencodePath, 0o755);
 
     expect(
-      getProviderVersionLifecycle(driver("opencode"), {
+      opencodeUpdate.resolve({
         binaryPath: "opencode",
         platform: "darwin",
         env: {
@@ -221,7 +263,7 @@ describe("providerVersionLifecycle", () => {
 
   it("switches claude to Homebrew updates when the binary resolves through Homebrew", () => {
     expect(
-      getProviderVersionLifecycle(driver("claudeAgent"), {
+      claudeUpdate.resolve({
         binaryPath: "/opt/homebrew/bin/claude",
         platform: "darwin",
         env: {
@@ -240,7 +282,7 @@ describe("providerVersionLifecycle", () => {
 
   it("switches opencode to Homebrew updates when the binary resolves through Homebrew", () => {
     expect(
-      getProviderVersionLifecycle(driver("opencode"), {
+      opencodeUpdate.resolve({
         binaryPath: "/opt/homebrew/bin/opencode",
         platform: "darwin",
         env: {
@@ -271,7 +313,7 @@ describe("providerVersionLifecycle", () => {
 
     await expect(
       Effect.runPromise(
-        getProviderVersionLifecycleEffect(driver("codex"), {
+        resolveProviderVersionLifecycleEffect(codexUpdate, {
           binaryPath: symlinkPath,
           platform: "darwin",
           env: {
@@ -314,7 +356,7 @@ describe("providerVersionLifecycle", () => {
 
     await expect(
       Effect.runPromise(
-        getProviderVersionLifecycleEffect(driver("codex"), {
+        resolveProviderVersionLifecycleEffect(codexUpdate, {
           binaryPath: symlinkPath,
           platform: "darwin",
           env: {
@@ -334,7 +376,7 @@ describe("providerVersionLifecycle", () => {
 
   it("disables one-click updates for explicit custom binary paths it cannot safely map", () => {
     expect(
-      getProviderVersionLifecycle(driver("codex"), {
+      codexUpdate.resolve({
         binaryPath: "C:\\Tools\\codex\\codex.exe",
         platform: "win32",
         env: {

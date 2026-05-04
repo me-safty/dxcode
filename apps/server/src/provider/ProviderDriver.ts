@@ -32,6 +32,7 @@ import type { TextGenerationShape } from "../textGeneration/TextGeneration.ts";
 import type { ProviderAdapterError, ProviderDriverError } from "./Errors.ts";
 import type { ProviderAdapterShape } from "./Services/ProviderAdapter.ts";
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
+import type { ProviderVersionLifecycleResolver } from "./providerVersionLifecycle.ts";
 
 /**
  * Static metadata advertised by a driver. Used for default presentation
@@ -117,6 +118,11 @@ export interface ProviderDriverCreateInput<Config> {
 export interface ProviderDriver<Config, R = never> {
   readonly driverKind: ProviderDriverKind;
   readonly metadata: ProviderDriverMetadata;
+  /**
+   * Optional driver-owned provider update recipe. Unknown/custom drivers
+   * simply omit this and remain manual-only until they advertise one.
+   */
+  readonly update?: ProviderVersionLifecycleResolver | undefined;
   /**
    * Decoder for the opaque `ProviderInstanceConfig.config` envelope. The
    * registry runs this exactly once per (re)load of an instance; a decode

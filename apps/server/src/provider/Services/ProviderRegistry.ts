@@ -55,12 +55,29 @@ export interface ProviderRegistryShape {
   ) => Effect.Effect<ProviderVersionLifecycle>;
 
   /**
+   * Resolve the update lifecycle owned by one live provider instance.
+   * Falls back to the driver-scoped resolver when the instance is not live.
+   */
+  readonly getProviderVersionLifecycleForInstance: (
+    instanceId: ProviderInstanceId,
+    provider: ProviderDriverKind,
+  ) => Effect.Effect<ProviderVersionLifecycle>;
+
+  /**
    * Apply volatile provider-update state to every live snapshot for the
    * specified driver. Used for one-click update progress and results; this
    * state is never persisted to disk.
    */
   readonly setProviderUpdateState: (
     provider: ProviderDriverKind,
+    state: ServerProviderUpdateState | null,
+  ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+
+  /**
+   * Apply volatile provider-update state to one configured instance.
+   */
+  readonly setProviderInstanceUpdateState: (
+    instanceId: ProviderInstanceId,
     state: ServerProviderUpdateState | null,
   ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 

@@ -583,7 +583,10 @@ export function GeneralSettingsPanel({
     }
 
     try {
-      await ensureLocalApi().server.updateProvider({ provider: candidate.driver });
+      await ensureLocalApi().server.updateProvider({
+        provider: candidate.driver,
+        instanceId: candidate.instanceId,
+      });
     } catch (error) {
       toastManager.add(
         stackedThreadToast({

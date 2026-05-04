@@ -788,11 +788,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverUpdateProvider]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.serverUpdateProvider,
-            providerUpdater.updateProvider(input.provider),
-            { "rpc.aggregate": "server" },
-          ),
+          observeRpcEffect(WS_METHODS.serverUpdateProvider, providerUpdater.updateProvider(input), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverUpsertKeybinding]: (rule) =>
           observeRpcEffect(
             WS_METHODS.serverUpsertKeybinding,

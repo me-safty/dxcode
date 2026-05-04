@@ -208,7 +208,10 @@ export function ProviderUpdateLaunchNotification() {
 
       void Promise.allSettled(
         oneClickProviders.map(async (provider) =>
-          ensureLocalApi().server.updateProvider({ provider: provider.driver }),
+          ensureLocalApi().server.updateProvider({
+            provider: provider.driver,
+            instanceId: provider.instanceId,
+          }),
         ),
       ).then((results) => {
         const activeUpdateToast = activeToastRef.current;

@@ -34,10 +34,23 @@ import {
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
-import { getProviderVersionLifecycleEffect } from "../providerVersionLifecycle.ts";
+import {
+  makeProviderVersionLifecycle,
+  makeStaticProviderVersionLifecycleResolver,
+  resolveProviderVersionLifecycleEffect,
+} from "../providerVersionLifecycle.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("cursor");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
+const UPDATE = makeStaticProviderVersionLifecycleResolver(
+  makeProviderVersionLifecycle({
+    provider: DRIVER_KIND,
+    packageName: null,
+    updateExecutable: "agent",
+    updateArgs: ["update"],
+    updateLockKey: "cursor-agent",
+  }),
+);
 
 export type CursorDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -68,6 +81,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
     displayName: "Cursor",
     supportsMultipleInstances: true,
   },
+  update: UPDATE,
   configSchema: CursorSettings,
   defaultConfig: (): CursorSettings => Schema.decodeSync(CursorSettings)({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
@@ -88,7 +102,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies CursorSettings;
-      const versionLifecycle = yield* getProviderVersionLifecycleEffect(DRIVER_KIND, {
+      const versionLifecycle = yield* resolveProviderVersionLifecycleEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
       });

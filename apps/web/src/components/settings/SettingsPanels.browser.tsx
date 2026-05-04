@@ -1092,6 +1092,7 @@ describe("GeneralSettingsPanel observability", () => {
 
     expect(updateProvider).toHaveBeenCalledWith({
       provider: ProviderDriverKind.make("codex"),
+      instanceId: ProviderInstanceId.make("codex"),
     });
   });
 });

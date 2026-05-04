@@ -36,13 +36,26 @@ import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
-  getProviderVersionLifecycleEffect,
+  isClaudeNativeCommandPath,
+  makePackageManagedProviderVersionLifecycleResolver,
+  resolveProviderVersionLifecycleEffect,
 } from "../providerVersionLifecycle.ts";
 import { makeClaudeCapabilitiesCacheKey, makeClaudeContinuationGroupKey } from "./ClaudeHome.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
+const UPDATE = makePackageManagedProviderVersionLifecycleResolver({
+  provider: DRIVER_KIND,
+  npmPackageName: "@anthropic-ai/claude-code",
+  homebrewFormula: "claude-code",
+  nativeUpdate: {
+    executable: "claude",
+    args: ["update"],
+    lockKey: "claude-native",
+    isCommandPath: isClaudeNativeCommandPath,
+  },
+});
 
 export type ClaudeDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -73,6 +86,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
     displayName: "Claude",
     supportsMultipleInstances: true,
   },
+  update: UPDATE,
   configSchema: ClaudeSettings,
   defaultConfig: (): ClaudeSettings => Schema.decodeSync(ClaudeSettings)({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
@@ -86,7 +100,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         instanceId,
       });
       const effectiveConfig = { ...config, enabled } satisfies ClaudeSettings;
-      const versionLifecycle = yield* getProviderVersionLifecycleEffect(DRIVER_KIND, {
+      const versionLifecycle = yield* resolveProviderVersionLifecycleEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
       });

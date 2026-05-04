@@ -260,6 +260,9 @@ export const ProviderRegistryLive = Layer.effect(
     const updateStatesRef = yield* Ref.make<
       ReadonlyMap<ProviderDriverKind, ServerProviderUpdateState>
     >(new Map());
+    const instanceUpdateStatesRef = yield* Ref.make<
+      ReadonlyMap<ProviderInstanceId, ServerProviderUpdateState>
+    >(new Map());
 
     // Live-source registry — the dynamic counterpart to the boot-time
     // `bootSources`. Keyed by `instanceId`; the stored `ProviderInstance`
@@ -300,6 +303,15 @@ export const ProviderRegistryLive = Layer.effect(
     const applyProviderUpdateState = Effect.fn("applyProviderUpdateState")(function* (
       provider: ServerProvider,
     ) {
+      const instanceUpdateStates = yield* Ref.get(instanceUpdateStatesRef);
+      const instanceUpdateState = instanceUpdateStates.get(provider.instanceId);
+      if (instanceUpdateState) {
+        return {
+          ...provider,
+          updateState: instanceUpdateState,
+        };
+      }
+
       const updateStates = yield* Ref.get(updateStatesRef);
       const updateState = updateStates.get(provider.driver);
       if (!updateState) {
@@ -403,6 +415,34 @@ export const ProviderRegistryLive = Layer.effect(
       });
     });
 
+    const setProviderInstanceUpdateState = Effect.fn("setProviderInstanceUpdateState")(function* (
+      instanceId: ProviderInstanceId,
+      state: ServerProviderUpdateState | null,
+    ) {
+      yield* Ref.update(instanceUpdateStatesRef, (previous) => {
+        const next = new Map(previous);
+        if (state === null || state.status === "idle") {
+          next.delete(instanceId);
+        } else {
+          next.set(instanceId, state);
+        }
+        return next;
+      });
+
+      const existingProviders = yield* Ref.get(providersRef);
+      const matchingProvider = existingProviders.find(
+        (candidate) => candidate.instanceId === instanceId,
+      );
+      if (!matchingProvider) {
+        return existingProviders;
+      }
+
+      const nextProvider = yield* applyProviderUpdateState(matchingProvider);
+      return yield* upsertProviders([nextProvider], {
+        persist: false,
+      });
+    });
+
     const refreshOneSource = Effect.fn("refreshOneSource")(function* (
       providerSource: ProviderSnapshotSource,
     ) {
@@ -473,6 +513,15 @@ export const ProviderRegistryLive = Layer.effect(
       return hasMixedLifecycles
         ? disableProviderVersionLifecycleUpdates(firstLifecycle)
         : firstLifecycle;
+    });
+
+    const getProviderVersionLifecycleForInstance = Effect.fn(
+      "getProviderVersionLifecycleForInstance",
+    )(function* (instanceId: ProviderInstanceId, provider: ProviderDriverKind) {
+      const instance = Array.from((yield* Ref.get(liveSubsRef)).values()).find(
+        (candidate) => candidate.instanceId === instanceId,
+      );
+      return instance?.snapshot.versionLifecycle ?? (yield* getProviderVersionLifecycle(provider));
     });
 
     /**
@@ -666,7 +715,9 @@ export const ProviderRegistryLive = Layer.effect(
       refreshInstance: (instanceId: ProviderInstanceId) =>
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
       getProviderVersionLifecycle,
+      getProviderVersionLifecycleForInstance,
       setProviderUpdateState,
+      setProviderInstanceUpdateState,
       get streamChanges() {
         return Stream.fromPubSub(changesPubSub);
       },

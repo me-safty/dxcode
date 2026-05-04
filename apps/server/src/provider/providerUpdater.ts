@@ -1,6 +1,7 @@
 import {
   ProviderDriverKind,
   ServerProviderUpdateError,
+  type ProviderInstanceId,
   type ServerProvider,
   type ServerProviderUpdatedPayload,
   type ServerProviderUpdateState,
@@ -34,7 +35,12 @@ export type ProviderUpdateRunner = (
 
 export interface ProviderUpdaterShape {
   readonly updateProvider: (
-    provider: ProviderDriverKind,
+    target:
+      | ProviderDriverKind
+      | {
+          readonly provider: ProviderDriverKind;
+          readonly instanceId?: ProviderInstanceId | undefined;
+        },
   ) => Effect.Effect<ServerProviderUpdatedPayload, ServerProviderUpdateError>;
 }
 
@@ -105,7 +111,7 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
   readonly providerRegistry: ProviderRegistryShape;
   readonly runUpdate?: ProviderUpdateRunner;
 }) {
-  const runningProvidersRef = yield* Ref.make<ReadonlySet<ProviderDriverKind>>(new Set());
+  const runningTargetsRef = yield* Ref.make<ReadonlySet<string>>(new Set());
   const updateLocks = new Map<string, Semaphore.Semaphore>(
     yield* Effect.forEach(SHARED_UPDATE_LOCK_KEYS, (updateLockKey) =>
       Semaphore.make(1).pipe(Effect.map((semaphore) => [updateLockKey, semaphore] as const)),
@@ -113,33 +119,40 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
   );
   const runUpdate = input.runUpdate ?? defaultRunner;
 
-  const acquireProvider = Effect.fn("acquireProvider")(function* (provider: ProviderDriverKind) {
-    return yield* Ref.modify(runningProvidersRef, (runningProviders) => {
-      if (runningProviders.has(provider)) {
-        return [false, runningProviders] as const;
+  const acquireTarget = Effect.fn("acquireTarget")(function* (targetKey: string) {
+    return yield* Ref.modify(runningTargetsRef, (runningTargets) => {
+      if (runningTargets.has(targetKey)) {
+        return [false, runningTargets] as const;
       }
-      const next = new Set(runningProviders);
-      next.add(provider);
+      const next = new Set(runningTargets);
+      next.add(targetKey);
       return [true, next] as const;
     });
   });
 
-  const releaseProvider = (provider: ProviderDriverKind) =>
-    Ref.update(runningProvidersRef, (runningProviders) => {
+  const releaseTarget = (targetKey: string) =>
+    Ref.update(runningTargetsRef, (runningProviders) => {
       const next = new Set(runningProviders);
-      next.delete(provider);
+      next.delete(targetKey);
       return next;
     });
 
   const verifyRefreshedProvider = (
     provider: ProviderDriverKind,
     versionLifecycle: ProviderVersionLifecycle,
+    instanceId?: ProviderInstanceId,
   ): Effect.Effect<VerifiedProviderRefresh> =>
     input.providerRegistry.getProviders.pipe(
       Effect.map((providers) =>
-        providers
-          .filter((candidate) => candidate.driver === provider)
-          .map((candidate) => candidate.instanceId),
+        instanceId
+          ? providers
+              .filter(
+                (candidate) => candidate.driver === provider && candidate.instanceId === instanceId,
+              )
+              .map((candidate) => candidate.instanceId)
+          : providers
+              .filter((candidate) => candidate.driver === provider)
+              .map((candidate) => candidate.instanceId),
       ),
       Effect.flatMap((instanceIds) =>
         instanceIds.length === 0
@@ -154,7 +167,10 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
             ).pipe(Effect.andThen(input.providerRegistry.getProviders)),
       ),
       Effect.flatMap((providers) => {
-        const refreshedProviders = providers.filter((candidate) => candidate.driver === provider);
+        const refreshedProviders = providers.filter(
+          (candidate) =>
+            candidate.driver === provider && (!instanceId || candidate.instanceId === instanceId),
+        );
         if (refreshedProviders.length === 0) {
           return Effect.succeed<VerifiedProviderRefresh>({
             providers,
@@ -190,9 +206,14 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
       }),
     );
 
-  const updateProvider: ProviderUpdaterShape["updateProvider"] = (provider) =>
+  const updateProvider: ProviderUpdaterShape["updateProvider"] = (target) =>
     Effect.gen(function* () {
-      const lifecycle = yield* input.providerRegistry.getProviderVersionLifecycle(provider);
+      const provider = typeof target === "string" ? target : target.provider;
+      const instanceId = typeof target === "string" ? undefined : target.instanceId;
+      const targetKey = instanceId ? `instance:${instanceId}` : `provider:${provider}`;
+      const lifecycle = yield* instanceId
+        ? input.providerRegistry.getProviderVersionLifecycleForInstance(instanceId, provider)
+        : input.providerRegistry.getProviderVersionLifecycle(provider);
       const updateExecutable = lifecycle.updateExecutable;
       const updateLockKey = lifecycle.updateLockKey;
       if (!updateExecutable || !updateLockKey) {
@@ -202,7 +223,7 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
         });
       }
 
-      const acquired = yield* acquireProvider(provider);
+      const acquired = yield* acquireTarget(targetKey);
       if (!acquired) {
         return yield* new ServerProviderUpdateError({
           provider,
@@ -219,8 +240,12 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
           });
         }
 
-        yield* input.providerRegistry.setProviderUpdateState(
-          provider,
+        const setUpdateState = (state: ServerProviderUpdateState | null) =>
+          instanceId
+            ? input.providerRegistry.setProviderInstanceUpdateState(instanceId, state)
+            : input.providerRegistry.setProviderUpdateState(provider, state);
+
+        yield* setUpdateState(
           makeUpdateState({
             status: "queued",
             startedAt: null,
@@ -230,16 +255,13 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
         );
 
         const finish = (state: ServerProviderUpdateState) =>
-          input.providerRegistry
-            .setProviderUpdateState(provider, state)
-            .pipe(Effect.map((providers) => ({ providers })));
+          setUpdateState(state).pipe(Effect.map((providers) => ({ providers })));
         const startedAtRef = yield* Ref.make<string | null>(null);
 
         const run = Effect.gen(function* () {
           const startedAt = new Date().toISOString();
           yield* Ref.set(startedAtRef, startedAt);
-          yield* input.providerRegistry.setProviderUpdateState(
-            provider,
+          yield* setUpdateState(
             makeUpdateState({
               status: "running",
               startedAt,
@@ -264,7 +286,11 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
             );
           }
 
-          const { verifiedProviders } = yield* verifyRefreshedProvider(provider, lifecycle);
+          const { verifiedProviders } = yield* verifyRefreshedProvider(
+            provider,
+            lifecycle,
+            instanceId,
+          );
           const couldNotVerify = verifiedProviders.length === 0;
           const stillOutdated =
             couldNotVerify ||
@@ -303,7 +329,7 @@ export const makeProviderUpdater = Effect.fn("makeProviderUpdater")(function* (i
               }),
             ),
           );
-      }).pipe(Effect.ensuring(releaseProvider(provider)));
+      }).pipe(Effect.ensuring(releaseTarget(targetKey)));
     });
 
   return {

@@ -37,7 +37,8 @@ import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
-  getProviderVersionLifecycleEffect,
+  makePackageManagedProviderVersionLifecycleResolver,
+  resolveProviderVersionLifecycleEffect,
 } from "../providerVersionLifecycle.ts";
 import {
   codexContinuationIdentity,
@@ -47,6 +48,12 @@ import {
 
 const DRIVER_KIND = ProviderDriverKind.make("codex");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
+const UPDATE = makePackageManagedProviderVersionLifecycleResolver({
+  provider: DRIVER_KIND,
+  npmPackageName: "@openai/codex",
+  homebrewFormula: "codex",
+  nativeUpdate: null,
+});
 
 /**
  * Services the driver needs to materialize an instance. Surfaced as the
@@ -88,6 +95,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
     displayName: "Codex",
     supportsMultipleInstances: true,
   },
+  update: UPDATE,
   configSchema: CodexSettings,
   defaultConfig: (): CodexSettings => Schema.decodeSync(CodexSettings)({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
@@ -119,7 +127,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         enabled,
         homePath: homeLayout.effectiveHomePath ?? "",
       } satisfies CodexSettings;
-      const versionLifecycle = yield* getProviderVersionLifecycleEffect(DRIVER_KIND, {
+      const versionLifecycle = yield* resolveProviderVersionLifecycleEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
       });

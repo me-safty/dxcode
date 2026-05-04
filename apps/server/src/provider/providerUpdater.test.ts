@@ -12,7 +12,10 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import type { ProcessRunResult } from "../processRunner.ts";
 import type { ProviderRegistryShape } from "./Services/ProviderRegistry.ts";
 import { makeProviderUpdater, type ProviderUpdateRunner } from "./providerUpdater.ts";
-import { getProviderVersionLifecycle } from "./providerVersionLifecycle.ts";
+import {
+  makeProviderVersionLifecycle,
+  type ProviderVersionLifecycle,
+} from "./providerVersionLifecycle.ts";
 
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const CURSOR_DRIVER = ProviderDriverKind.make("cursor");
@@ -20,6 +23,28 @@ const OPENCODE_DRIVER = ProviderDriverKind.make("opencode");
 const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
 const CURSOR_INSTANCE_ID = ProviderInstanceId.make("cursor");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
+
+function lifecycleFor(provider: ProviderDriverKind): ProviderVersionLifecycle {
+  if (provider === CURSOR_DRIVER) {
+    return makeProviderVersionLifecycle({
+      provider,
+      packageName: null,
+      updateExecutable: "agent",
+      updateArgs: ["update"],
+      updateLockKey: "cursor-agent",
+    });
+  }
+  return makeProviderVersionLifecycle({
+    provider,
+    packageName: provider === OPENCODE_DRIVER ? "opencode-ai" : "@openai/codex",
+    updateExecutable: "npm",
+    updateArgs:
+      provider === OPENCODE_DRIVER
+        ? ["install", "-g", "opencode-ai@latest"]
+        : ["install", "-g", "@openai/codex@latest"],
+    updateLockKey: "npm-global",
+  });
+}
 
 const baseProvider: ServerProvider = {
   instanceId: CODEX_INSTANCE_ID,
@@ -114,13 +139,40 @@ function makeRegistry(
         );
       });
 
+    const setProviderInstanceUpdateState = (
+      instanceId: ProviderInstanceId,
+      updateState: ServerProviderUpdateState | null,
+    ) =>
+      Effect.gen(function* () {
+        if (updateState) {
+          yield* Ref.update(updateStatesRef, (states) => [...states, updateState]);
+        }
+        return yield* Ref.updateAndGet(providersRef, (providers) =>
+          providers.map((candidate) => {
+            if (candidate.instanceId !== instanceId) {
+              return candidate;
+            }
+            if (!updateState) {
+              const { updateState: _updateState, ...providerWithoutUpdateState } = candidate;
+              return providerWithoutUpdateState;
+            }
+            return {
+              ...candidate,
+              updateState,
+            };
+          }),
+        );
+      });
+
     const registry: ProviderRegistryShape = {
       getProviders: Ref.get(providersRef),
       refresh: () => Ref.get(providersRef),
       refreshInstance: () => Ref.get(providersRef),
-      getProviderVersionLifecycle: (provider) =>
-        Effect.succeed(getProviderVersionLifecycle(provider)),
+      getProviderVersionLifecycle: (provider) => Effect.succeed(lifecycleFor(provider)),
+      getProviderVersionLifecycleForInstance: (_instanceId, provider) =>
+        Effect.succeed(lifecycleFor(provider)),
       setProviderUpdateState,
+      setProviderInstanceUpdateState,
       streamChanges: Stream.empty,
     };
 
@@ -201,6 +253,75 @@ describe("providerUpdater", () => {
         },
       ]);
     }),
+  );
+
+  it.effect("updates a single provider instance without touching sibling instances", () =>
+    Effect.gen(function* () {
+      const personalInstanceId = ProviderInstanceId.make("codex_personal");
+      const workInstanceId = ProviderInstanceId.make("codex_work");
+      const refreshedInstanceIds: Array<ProviderInstanceId> = [];
+      const { registry } = yield* makeRegistry([
+        {
+          ...baseProvider,
+          instanceId: personalInstanceId,
+          version: "0.124.0-alpha.3",
+        },
+        {
+          ...baseProvider,
+          instanceId: workInstanceId,
+          version: "0.124.0-alpha.3",
+        },
+      ]);
+      const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
+      const updater = yield* makeProviderUpdater({
+        providerRegistry: {
+          ...registry,
+          getProviderVersionLifecycleForInstance: (instanceId, provider) =>
+            Effect.succeed(
+              makeProviderVersionLifecycle({
+                provider,
+                packageName: "@openai/codex-instance-test",
+                updateExecutable: "vp",
+                updateArgs: ["i", "-g", "@openai/codex"],
+                updateLockKey: "vite-plus-global",
+              }),
+            ).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => assert.strictEqual(instanceId, personalInstanceId)),
+              ),
+            ),
+          refreshInstance: (instanceId) =>
+            registry.refreshInstance(instanceId).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  refreshedInstanceIds.push(instanceId);
+                }),
+              ),
+            ),
+        },
+        runUpdate: async (command, args) => {
+          calls.push({ command, args });
+          return okResult("updated");
+        },
+      });
+
+      const result = yield* updater.updateProvider({
+        provider: CODEX_DRIVER,
+        instanceId: personalInstanceId,
+      });
+
+      assert.deepStrictEqual(calls, [
+        {
+          command: "vp",
+          args: ["i", "-g", "@openai/codex"],
+        },
+      ]);
+      assert.deepStrictEqual(refreshedInstanceIds, [personalInstanceId]);
+      assert.strictEqual(result.providers[0]?.instanceId, personalInstanceId);
+      assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
+      assert.strictEqual(result.providers[1]?.instanceId, workInstanceId);
+      assert.strictEqual(result.providers[1]?.updateState, undefined);
+    }).pipe(Effect.provide(latestVersionHttpClient("0.124.0-alpha.3"))),
   );
 
   it.effect("records command failure output in provider update state", () =>
