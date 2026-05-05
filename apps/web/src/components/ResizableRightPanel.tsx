@@ -115,6 +115,8 @@ export function ResizableRightPanel({
 
   const handlePointerUp = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      const resizeState = resizeStateRef.current;
+      if (!resizeState || resizeState.pointerId !== event.pointerId) return;
       stopResize(event.pointerId);
     },
     [stopResize],

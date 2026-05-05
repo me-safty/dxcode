@@ -47,7 +47,10 @@ const DiffPanelInlineSidebar = (props: { diffOpen: boolean; renderDiffContent: b
   if (!diffOpen) return null;
 
   return (
-    <ResizableRightPanel storageKey={DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY}>
+    <ResizableRightPanel
+      className="border-l border-border bg-card text-foreground"
+      storageKey={DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY}
+    >
       {renderDiffContent ? <LazyDiffPanel mode="sidebar" /> : null}
     </ResizableRightPanel>
   );
