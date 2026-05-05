@@ -1695,7 +1695,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     if (!details.isRepo) {
       return {
         cwd: input.cwd,
-        generatedAt: new Date().toISOString(),
+        generatedAt: yield* DateTime.now,
         sources: [],
       };
     }
@@ -1784,7 +1784,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
     return {
       cwd: input.cwd,
-      generatedAt: new Date().toISOString(),
+      generatedAt: yield* DateTime.now,
       sources,
     };
   });
