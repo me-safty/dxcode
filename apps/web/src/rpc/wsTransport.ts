@@ -76,11 +76,11 @@ export class WsTransport {
     this.url = url;
     this.lifecycleHandlers = lifecycleHandlers;
     this.session = this.createSession();
-    if (typeof document !== 'undefined') {
+    if (typeof document !== "undefined") {
       this._visibilityHandler = () => {
-        if (document.visibilityState === 'visible') this._wakeReconnect?.();
+        if (document.visibilityState === "visible") this._wakeReconnect?.();
       };
-      document.addEventListener('visibilitychange', this._visibilityHandler);
+      document.addEventListener("visibilitychange", this._visibilityHandler);
     }
   }
 
@@ -196,7 +196,8 @@ export class WsTransport {
           }
           this.hasReportedTransportDisconnect = true;
           const isLikelyCongestion =
-            formattedError.includes('heartbeat timed out') || formattedError.includes('ping timeout');
+            formattedError.includes("heartbeat timed out") ||
+            formattedError.includes("ping timeout");
           const effectiveDelay = isLikelyCongestion ? Math.max(retryDelayMs, 8_000) : retryDelayMs;
           await Promise.race([
             sleep(effectiveDelay),
@@ -245,7 +246,7 @@ export class WsTransport {
       return;
     }
     if (this._visibilityHandler) {
-      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      document.removeEventListener("visibilitychange", this._visibilityHandler);
       this._visibilityHandler = null;
     }
     this._wakeReconnect?.();
