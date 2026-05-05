@@ -329,15 +329,17 @@ export const ProviderRegistryLive = Layer.effect(
           concurrency: "unbounded",
         },
       );
-      const [previousProviders, providers] = yield* Ref.modify(
+      const [previousProviders, providers, providersToPersist] = yield* Ref.modify(
         providersRef,
         (previousProviders) => {
           const mergedProviders = new Map(
             previousProviders.map((provider) => [snapshotInstanceKey(provider), provider] as const),
           );
+          const updatedKeys = new Set<ProviderInstanceId>();
 
           for (const provider of nextProvidersWithUpdateState) {
             const key = snapshotInstanceKey(provider);
+            updatedKeys.add(key);
             mergedProviders.set(
               key,
               options?.replace === true
@@ -347,13 +349,16 @@ export const ProviderRegistryLive = Layer.effect(
           }
 
           const providers = orderProviderSnapshots([...mergedProviders.values()]);
-          return [[previousProviders, providers] as const, providers];
+          const providersToPersist = providers.filter((provider) =>
+            updatedKeys.has(snapshotInstanceKey(provider)),
+          );
+          return [[previousProviders, providers, providersToPersist] as const, providers];
         },
       );
 
       if (haveProvidersChanged(previousProviders, providers)) {
         if (options?.persist !== false) {
-          yield* Effect.forEach(nextProvidersWithUpdateState, persistProvider, {
+          yield* Effect.forEach(providersToPersist, persistProvider, {
             concurrency: "unbounded",
             discard: true,
           });

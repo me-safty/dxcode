@@ -33,6 +33,7 @@ import {
 } from "./ProviderRegistry.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings.ts";
+import { readProviderStatusCache, resolveProviderStatusCachePath } from "../providerStatusCache.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
@@ -574,6 +575,118 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           },
         ]);
       });
+
+      it.effect("persists the merged snapshot when a live update has empty models", () =>
+        Effect.gen(function* () {
+          const cursorDriver = ProviderDriverKind.make("cursor");
+          const cursorInstanceId = ProviderInstanceId.make("cursor");
+          const initialProvider = {
+            instanceId: cursorInstanceId,
+            driver: cursorDriver,
+            status: "ready",
+            enabled: true,
+            installed: true,
+            auth: { status: "authenticated" },
+            checkedAt: "2026-04-14T00:00:00.000Z",
+            version: "2026.04.09-f2b0fcd",
+            models: [
+              {
+                slug: "claude-opus-4-6",
+                name: "Opus 4.6",
+                isCustom: false,
+                capabilities: createModelCapabilities({
+                  optionDescriptors: [
+                    selectDescriptor("reasoning", "Reasoning", [
+                      { id: "high", label: "High", isDefault: true },
+                    ]),
+                  ],
+                }),
+              },
+            ],
+            slashCommands: [],
+            skills: [],
+          } as const satisfies ServerProvider;
+          const refreshedProvider = {
+            ...initialProvider,
+            checkedAt: "2026-04-14T00:01:00.000Z",
+            models: [],
+          } satisfies ServerProvider;
+          const changes = yield* PubSub.unbounded<ServerProvider>();
+          const instance = {
+            instanceId: cursorInstanceId,
+            driverKind: cursorDriver,
+            continuationIdentity: {
+              driverKind: cursorDriver,
+              continuationKey: "cursor:instance:cursor",
+            },
+            displayName: undefined,
+            enabled: true,
+            snapshot: {
+              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
+                provider: cursorDriver,
+                packageName: null,
+              }),
+              getSnapshot: Effect.succeed(initialProvider),
+              refresh: Effect.succeed(refreshedProvider),
+              streamChanges: Stream.fromPubSub(changes),
+            },
+            adapter: {} as ProviderInstance["adapter"],
+            textGeneration: {} as ProviderInstance["textGeneration"],
+          } satisfies ProviderInstance;
+          const instanceRegistryLayer = Layer.succeed(ProviderInstanceRegistry, {
+            getInstance: (instanceId) =>
+              Effect.succeed(instanceId === cursorInstanceId ? instance : undefined),
+            listInstances: Effect.succeed([instance]),
+            listUnavailable: Effect.succeed([]),
+            streamChanges: Stream.empty,
+            subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), (pubsub) =>
+              PubSub.subscribe(pubsub),
+            ),
+          });
+          const scope = yield* Scope.make();
+          yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+          const runtimeServices = yield* Layer.build(
+            ProviderRegistryLive.pipe(
+              Layer.provideMerge(instanceRegistryLayer),
+              Layer.provideMerge(
+                ServerConfig.layerTest(process.cwd(), {
+                  prefix: "t3-provider-registry-merged-persist-",
+                }),
+              ),
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ).pipe(Scope.provide(scope));
+
+          yield* Effect.gen(function* () {
+            const registry = yield* ProviderRegistry;
+            const config = yield* ServerConfig;
+            const filePath = yield* resolveProviderStatusCachePath({
+              cacheDir: config.providerStatusCacheDir,
+              instanceId: cursorInstanceId,
+            });
+
+            assert.deepStrictEqual((yield* registry.getProviders)[0]?.models, [
+              ...initialProvider.models,
+            ]);
+            yield* PubSub.publish(changes, refreshedProvider);
+
+            let cachedProvider = yield* readProviderStatusCache(filePath);
+            for (
+              let attempt = 0;
+              attempt < 50 && cachedProvider?.checkedAt !== refreshedProvider.checkedAt;
+              attempt += 1
+            ) {
+              yield* Effect.sleep("10 millis");
+              cachedProvider = yield* readProviderStatusCache(filePath);
+            }
+
+            assert.deepStrictEqual(cachedProvider, {
+              ...refreshedProvider,
+              models: [...initialProvider.models],
+            });
+          }).pipe(Effect.provide(runtimeServices));
+        }),
+      );
 
       it.effect("returns the cached provider list when a manual refresh fails", () =>
         Effect.gen(function* () {
