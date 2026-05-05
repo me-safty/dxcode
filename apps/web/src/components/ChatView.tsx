@@ -3504,6 +3504,8 @@ export default function ChatView(props: ChatViewProps) {
           isElectron
             ? cn(
                 "drag-region flex h-[52px] items-center px-3 sm:px-5 wco:h-[env(titlebar-area-height)]",
+                "transition-[padding-left] duration-200 ease-linear",
+                "group-data-[state=collapsed]/sidebar-wrapper:pl-[90px] group-data-[state=collapsed]/sidebar-wrapper:wco:pl-[calc(env(titlebar-area-x)+1em)]",
                 reserveTitleBarControlInset &&
                   "wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
               )

@@ -12,6 +12,7 @@ import { resolveShortcutCommand } from "../keybindings";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
+import { useSidebar } from "~/components/ui/sidebar";
 import { useSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "~/rpc/serverState";
 
@@ -27,6 +28,7 @@ function ChatRouteGlobalShortcuts() {
       : false,
   );
   const appSettings = useSettings();
+  const { toggleSidebar } = useSidebar();
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
@@ -93,6 +95,32 @@ function ChatRouteGlobalShortcuts() {
     terminalOpen,
     appSettings.defaultThreadEnvMode,
   ]);
+
+  // Sidebar toggle runs on capture phase so it wins over in-editor handlers
+  // (Lexical claims mod+b for bold and calls preventDefault, which would
+  // otherwise trip the `event.defaultPrevented` guard above).
+  useEffect(() => {
+    const onWindowKeyDownCapture = (event: KeyboardEvent) => {
+      if (useCommandPaletteStore.getState().open) {
+        return;
+      }
+      const command = resolveShortcutCommand(event, keybindings, {
+        context: {
+          terminalFocus: isTerminalFocused(),
+          terminalOpen,
+        },
+      });
+      if (command !== "sidebar.toggle") return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggleSidebar();
+    };
+
+    window.addEventListener("keydown", onWindowKeyDownCapture, true);
+    return () => {
+      window.removeEventListener("keydown", onWindowKeyDownCapture, true);
+    };
+  }, [keybindings, terminalOpen, toggleSidebar]);
 
   return null;
 }

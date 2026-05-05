@@ -11,7 +11,11 @@ export function NoActiveThreadState() {
           className={cn(
             "border-b border-border px-3 sm:px-5",
             isElectron
-              ? "drag-region flex h-[52px] items-center wco:h-[env(titlebar-area-height)]"
+              ? cn(
+                  "drag-region flex h-[52px] items-center wco:h-[env(titlebar-area-height)]",
+                  "transition-[padding-left] duration-200 ease-linear",
+                  "group-data-[state=collapsed]/sidebar-wrapper:pl-[90px] group-data-[state=collapsed]/sidebar-wrapper:wco:pl-[calc(env(titlebar-area-x)+1em)]",
+                )
               : "py-2 sm:py-3",
           )}
         >

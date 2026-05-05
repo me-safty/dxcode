@@ -23,6 +23,7 @@ import {
   FolderPlusIcon,
   LinkIcon,
   MessageSquareIcon,
+  PanelLeftIcon,
   SettingsIcon,
   SquarePenIcon,
 } from "lucide-react";
@@ -115,6 +116,7 @@ import {
 import { Button } from "./ui/button";
 import { Kbd, KbdGroup } from "./ui/kbd";
 import { stackedThreadToast, toastManager } from "./ui/toast";
+import { useSidebar } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { ComposerHandleContext, useComposerHandleContext } from "../composerHandleContext";
 import type { ChatComposerHandle } from "./chat/ChatComposer";
@@ -392,6 +394,7 @@ function CommandPaletteDialog() {
 
 function OpenCommandPaletteDialog() {
   const navigate = useNavigate();
+  const { toggleSidebar } = useSidebar();
   const setOpen = useCommandPaletteStore((store) => store.setOpen);
   const openIntent = useCommandPaletteStore((store) => store.openIntent);
   const clearOpenIntent = useCommandPaletteStore((store) => store.clearOpenIntent);
@@ -1047,6 +1050,18 @@ function OpenCommandPaletteDialog() {
     keepOpen: true,
     run: async () => {
       openAddProjectFlow();
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:toggle-sidebar",
+    searchTerms: ["sidebar", "toggle", "collapse", "hide", "show"],
+    title: "Toggle sidebar",
+    icon: <PanelLeftIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "sidebar.toggle",
+    run: async () => {
+      toggleSidebar();
     },
   });
 
