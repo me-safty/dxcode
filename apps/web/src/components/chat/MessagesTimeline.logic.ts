@@ -223,7 +223,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return a.proposedPlan === (b as typeof a).proposedPlan;
 
     case "work":
-      return a.groupedEntries === (b as typeof a).groupedEntries;
+      return areWorkGroupsUnchanged(a.groupedEntries, (b as typeof a).groupedEntries);
 
     case "message": {
       const bm = b as typeof a;
@@ -237,4 +237,14 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       );
     }
   }
+}
+
+function areWorkGroupsUnchanged(a: WorkLogEntry[], b: WorkLogEntry[]): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((entry, index) => entry === b[index]);
 }
