@@ -8,7 +8,7 @@ import {
   SearchIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type KeyboardEvent, useCallback, useMemo, useReducer, useState } from "react";
 import { type KeybindingCommand, type KeybindingWhenNode } from "@t3tools/contracts";
 
 import { isElectron } from "../../env";
@@ -488,37 +488,36 @@ function WhenExpressionBuilder({
   const parseError = parseResult.ok ? null : parseResult.message;
   const unknownIdentifiers = parseResult.ok ? unknownWhenVariables(parseResult.value) : [];
 
-  useEffect(() => {
-    setExpressionDraft(expression);
-  }, [expression]);
-
-  useEffect(() => {
-    onValidityChange?.(parseResult.ok);
-  }, [onValidityChange, parseResult.ok]);
-
   const updateExpressionDraft = (nextExpression: string) => {
     setExpressionDraft(nextExpression);
     const nextResult = parseWhenExpressionDraft(nextExpression);
+    onValidityChange?.(nextResult.ok);
     if (nextResult.ok) {
       onChange(nextResult.value);
     }
   };
 
+  const updateExpressionValue = (nextValue: KeybindingWhenNode | undefined) => {
+    setExpressionDraft(whenAstToExpression(nextValue));
+    onValidityChange?.(true);
+    onChange(nextValue);
+  };
+
   const addRootCondition = () => {
     if (!value) {
-      onChange(defaultWhenCondition());
+      updateExpressionValue(defaultWhenCondition());
       return;
     }
-    onChange({ type: "and", left: value, right: defaultWhenCondition() });
+    updateExpressionValue({ type: "and", left: value, right: defaultWhenCondition() });
   };
 
   const addRootGroup = () => {
     const group = defaultWhenGroup("or");
     if (!value) {
-      onChange(group);
+      updateExpressionValue(group);
       return;
     }
-    onChange({ type: "and", left: value, right: group });
+    updateExpressionValue({ type: "and", left: value, right: group });
   };
 
   return (
@@ -584,8 +583,8 @@ function WhenExpressionBuilder({
           <WhenExpressionNodeEditor
             node={value}
             variables={variables}
-            onChange={onChange}
-            onRemove={() => onChange(undefined)}
+            onChange={updateExpressionValue}
+            onRemove={() => updateExpressionValue(undefined)}
           />
         ) : (
           <div className="rounded-md border border-dashed border-border/80 bg-muted/15 p-3">
@@ -617,6 +616,29 @@ function WhenExpressionBuilder({
   );
 }
 
+type KeybindingRowDraftState = {
+  keyDraft: string;
+  whenDraft: KeybindingWhenNode | undefined;
+  isRecording: boolean;
+  isWhenDraftValid: boolean;
+};
+
+function createKeybindingRowDraft(row: KeybindingRow): KeybindingRowDraftState {
+  return {
+    keyDraft: row.key,
+    whenDraft: row.binding.whenAst,
+    isRecording: false,
+    isWhenDraftValid: true,
+  };
+}
+
+function keybindingRowDraftReducer(
+  state: KeybindingRowDraftState,
+  patch: Partial<KeybindingRowDraftState>,
+): KeybindingRowDraftState {
+  return { ...state, ...patch };
+}
+
 function KeybindingTableRow({
   row,
   variables,
@@ -630,20 +652,12 @@ function KeybindingTableRow({
   onSave: (input: { command: KeybindingCommand; key: string; when: string }) => void;
   onReset: (row: KeybindingRow) => void;
 }) {
-  const [keyDraft, setKeyDraft] = useState(row.key);
-  const [whenDraft, setWhenDraft] = useState<KeybindingWhenNode | undefined>(row.binding.whenAst);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isWhenDraftValid, setIsWhenDraftValid] = useState(true);
+  const [draft, setDraft] = useReducer(keybindingRowDraftReducer, row, createKeybindingRowDraft);
+  const { keyDraft, whenDraft, isRecording, isWhenDraftValid } = draft;
   const whenDraftExpression = whenAstToExpression(whenDraft);
   const isDirty = keyDraft !== row.key || whenDraftExpression !== row.when;
   const displayShortcut = formatShortcutLabel(row.binding.shortcut);
   const canReset = row.source === "Custom" && row.defaultKey !== null;
-
-  useEffect(() => {
-    setKeyDraft(row.key);
-    setWhenDraft(row.binding.whenAst);
-    setIsWhenDraftValid(true);
-  }, [row.binding.whenAst, row.key]);
 
   const save = () => {
     onSave({ command: row.command, key: keyDraft, when: whenDraftExpression });
@@ -653,23 +667,20 @@ function KeybindingTableRow({
     if (event.key === "Tab") return;
     event.preventDefault();
     if (event.key === "Escape") {
-      setKeyDraft(row.key);
-      setIsRecording(false);
+      setDraft({ keyDraft: row.key, isRecording: false });
       return;
     }
     const next = keybindingFromKeyboardEvent(event.nativeEvent, navigator.platform);
     if (!next) return;
-    setKeyDraft(next);
-    setIsRecording(false);
+    setDraft({ keyDraft: next, isRecording: false });
   };
 
   return (
-    <div className="grid grid-cols-[minmax(220px,1.1fr)_minmax(250px,0.9fr)_minmax(210px,0.85fr)_150px] items-center px-4 py-2.5 text-sm even:bg-muted/15 hover:bg-accent/40">
+    <div className="grid grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,0.9fr)_110px] items-center px-4 py-1.5 text-sm even:bg-muted/15 hover:bg-accent/40">
       <div className="min-w-0 pr-4">
-        <div className="truncate text-[13px] font-medium text-foreground">
+        <div className="truncate text-[13px] font-medium text-foreground" title={row.command}>
           {commandLabel(row.command)}
         </div>
-        <div className="truncate font-mono text-[11px] text-muted-foreground/70">{row.command}</div>
       </div>
       <div className="flex min-w-0 items-center gap-2 pr-4">
         <Input
@@ -677,12 +688,12 @@ function KeybindingTableRow({
           value={isRecording ? "" : keyDraft}
           placeholder={isRecording ? "Press shortcut" : "Unassigned"}
           className={cn(
-            "h-8 w-36 font-mono text-[12px]",
+            "h-7 w-32 rounded-md font-mono text-[12px] sm:h-7",
             isRecording && "border-primary/70 bg-primary/5",
           )}
-          onFocus={() => setIsRecording(true)}
-          onBlur={() => setIsRecording(false)}
-          onChange={(event) => setKeyDraft(event.currentTarget.value)}
+          onFocus={() => setDraft({ isRecording: true })}
+          onBlur={() => setDraft({ isRecording: false })}
+          onChange={(event) => setDraft({ keyDraft: event.currentTarget.value })}
           onKeyDown={captureKeybinding}
         />
         {keyDraft === row.key && row.key ? (
@@ -695,7 +706,7 @@ function KeybindingTableRow({
         <Popover>
           <PopoverTrigger
             className={cn(
-              "inline-flex h-8 w-full max-w-60 items-center justify-between gap-2 rounded-md border border-input bg-background px-2.5 text-left font-mono text-[12px] text-foreground shadow-xs/5 outline-none transition-colors hover:bg-accent focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24",
+              "inline-flex h-7 w-full max-w-56 items-center justify-between gap-2 rounded-md border border-input bg-background px-2.5 text-left font-mono text-[12px] text-foreground shadow-xs/5 outline-none transition-colors hover:bg-accent focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24",
               !whenDraftExpression && "text-muted-foreground",
             )}
             aria-label={`Edit when clause for ${commandLabel(row.command)}`}
@@ -707,29 +718,29 @@ function KeybindingTableRow({
             <WhenExpressionBuilder
               value={whenDraft}
               variables={variables}
-              onChange={setWhenDraft}
-              onValidityChange={setIsWhenDraftValid}
+              onChange={(nextWhenDraft) => setDraft({ whenDraft: nextWhenDraft })}
+              onValidityChange={(nextIsValid) => setDraft({ isWhenDraftValid: nextIsValid })}
             />
           </PopoverContent>
         </Popover>
       </div>
       <div className="flex items-center gap-2">
-        <div className="w-12">
-          {isDirty ? (
-            <Button
-              size="xs"
-              disabled={isSaving || keyDraft.trim().length === 0 || !isWhenDraftValid}
-              onClick={save}
-            >
-              {isSaving ? "Saving" : "Save"}
-            </Button>
-          ) : null}
-        </div>
+        {isDirty ? (
+          <Button
+            size="xs"
+            className="h-7 sm:h-7"
+            disabled={isSaving || keyDraft.trim().length === 0 || !isWhenDraftValid}
+            onClick={save}
+          >
+            {isSaving ? "Saving" : "Save"}
+          </Button>
+        ) : null}
         {canReset ? (
           <Button
             type="button"
             variant="outline"
             size="xs"
+            className="h-7 sm:h-7"
             disabled={isSaving}
             onClick={() => onReset(row)}
           >
@@ -801,9 +812,8 @@ export function KeybindingsSettingsPanel() {
           <div className="flex items-start gap-2 border-b border-warning/20 bg-warning/5 px-3 py-2.5 text-[12px] leading-relaxed text-muted-foreground sm:px-4">
             <InfoIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
             <p>
-              Some shortcuts may be claimed by the browser before T3 Code sees them. Keybindings are
-              most faithful in the desktop app, where built-in browser shortcuts stay out of the
-              way.
+              Some shortcuts may be claimed by the browser before T3 Code sees them. Use the desktop
+              app for better keybinding support.
             </p>
           </div>
         ) : null}
@@ -822,13 +832,13 @@ export function KeybindingsSettingsPanel() {
         </div>
 
         <div className="overflow-x-auto">
-          <div className="grid min-w-[840px] grid-cols-[minmax(220px,1.1fr)_minmax(250px,0.9fr)_minmax(210px,0.85fr)_150px] border-b border-border/70 bg-muted/25 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+          <div className="grid min-w-[730px] grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,0.9fr)_110px] border-b border-border/70 bg-muted/25 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
             <div>Command</div>
             <div>Keybinding</div>
             <div>When</div>
             <div>Status</div>
           </div>
-          <div className="min-w-[840px] divide-y divide-border/60">
+          <div className="min-w-[730px] divide-y divide-border/60">
             {rows.map((row) => (
               <KeybindingTableRow
                 key={`${row.command}-${row.key}-${row.when}`}
