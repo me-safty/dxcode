@@ -140,6 +140,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
             settings,
             environment: processEnv,
             snapshot: currentSnapshot,
+            maintenanceCapabilities,
             publishSnapshot,
             stampIdentity,
             httpClient,

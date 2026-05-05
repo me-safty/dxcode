@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@effect/vitest";
+import { afterEach, describe, expect, it } from "@effect/vitest";
 import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import os from "node:os";
@@ -6,6 +6,7 @@ import path from "node:path";
 import { ProviderDriverKind } from "@t3tools/contracts";
 import { Effect, Random } from "effect";
 import {
+  clearLatestProviderVersionCacheForTests,
   createProviderVersionAdvisory,
   makePackageManagedProviderMaintenanceResolver,
   makeProviderMaintenanceCapabilities,
@@ -60,6 +61,10 @@ const staticToolUpdate = makeStaticProviderMaintenanceResolver(
     updateLockKey: "static-tool",
   }),
 );
+
+afterEach(() => {
+  clearLatestProviderVersionCacheForTests();
+});
 
 describe("providerMaintenance", () => {
   it("marks providers with unknown current versions as unknown", () => {

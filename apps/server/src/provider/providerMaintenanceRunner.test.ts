@@ -1,4 +1,4 @@
-import { describe, it, assert } from "@effect/vitest";
+import { afterEach, describe, it, assert } from "@effect/vitest";
 import {
   ProviderDriverKind,
   ProviderInstanceId,
@@ -13,6 +13,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { ProviderRegistry, type ProviderRegistryShape } from "./Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "./providerMaintenanceRunner.ts";
 import {
+  clearLatestProviderVersionCacheForTests,
   makeProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilities,
 } from "./providerMaintenance.ts";
@@ -24,6 +25,10 @@ const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
 const CURSOR_INSTANCE_ID = ProviderInstanceId.make("cursor");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
 const encoder = new TextEncoder();
+
+afterEach(() => {
+  clearLatestProviderVersionCacheForTests();
+});
 
 function lifecycleFor(provider: ProviderDriverKind): ProviderMaintenanceCapabilities {
   if (provider === CURSOR_DRIVER) {
@@ -501,9 +506,23 @@ describe("providerMaintenanceRunner", () => {
       yield* Effect.promise(() => firstStarted);
 
       const second = yield* updater.updateProvider(OPENCODE_DRIVER).pipe(Effect.forkScoped);
-      yield* Effect.promise(() => Promise.resolve());
-      yield* Effect.promise(() => Promise.resolve());
+      let providersWhileQueued: ReadonlyArray<ServerProvider> = [];
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        providersWhileQueued = yield* registry.getProviders;
+        const queuedStatus = providersWhileQueued.find(
+          (provider) => provider.instanceId === OPENCODE_INSTANCE_ID,
+        )?.updateState?.status;
+        if (queuedStatus === "queued") {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
       assert.deepStrictEqual(calls, ["install -g @openai/codex@latest"]);
+      assert.strictEqual(
+        providersWhileQueued.find((provider) => provider.instanceId === OPENCODE_INSTANCE_ID)
+          ?.updateState?.status,
+        "queued",
+      );
 
       releaseFirstLatch.resolve();
       yield* Fiber.join(first);

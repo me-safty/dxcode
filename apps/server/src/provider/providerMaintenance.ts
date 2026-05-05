@@ -61,6 +61,10 @@ const NpmLatestVersionResponse = Schema.Struct({
   version: Schema.optional(Schema.String),
 });
 
+export function clearLatestProviderVersionCacheForTests(): void {
+  latestVersionCache.clear();
+}
+
 function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -306,30 +310,6 @@ export function makeStaticProviderMaintenanceResolver(
   return {
     resolve: () => capabilities,
   };
-}
-
-export function haveProviderMaintenanceCapabilitiesEqual(
-  left: ProviderMaintenanceCapabilities,
-  right: ProviderMaintenanceCapabilities,
-): boolean {
-  return (
-    left.provider === right.provider &&
-    left.packageName === right.packageName &&
-    left.update?.command === right.update?.command &&
-    left.update?.executable === right.update?.executable &&
-    left.update?.lockKey === right.update?.lockKey &&
-    (left.update?.args.length ?? 0) === (right.update?.args.length ?? 0) &&
-    (left.update?.args.every((value, index) => value === right.update?.args[index]) ?? true)
-  );
-}
-
-export function disableProviderMaintenanceUpdates(
-  capabilities: ProviderMaintenanceCapabilities,
-): ProviderMaintenanceCapabilities {
-  return makeManualOnlyProviderMaintenanceCapabilities({
-    provider: capabilities.provider,
-    packageName: capabilities.packageName,
-  });
 }
 
 function makeManualProviderMaintenanceCapabilities(

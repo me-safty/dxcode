@@ -275,24 +275,23 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       });
     }
 
+    const setUpdateState = (state: ServerProviderUpdateState | null) =>
+      providerRegistry.setProviderMaintenanceActionState({
+        instanceId,
+        action: "update",
+        state,
+      });
+    const setQueuedState = setUpdateState(
+      makeUpdateState({
+        status: "queued",
+        startedAt: null,
+        finishedAt: null,
+        message: "Waiting for another provider update to finish.",
+      }),
+    ).pipe(Effect.asVoid);
+
     const runProviderUpdate = Effect.fn("ProviderMaintenanceRunner.runProviderUpdate")(
       function* () {
-        const setUpdateState = (state: ServerProviderUpdateState | null) =>
-          providerRegistry.setProviderMaintenanceActionState({
-            instanceId,
-            action: "update",
-            state,
-          });
-
-        yield* setUpdateState(
-          makeUpdateState({
-            status: "queued",
-            startedAt: null,
-            finishedAt: null,
-            message: "Waiting for another provider update to finish.",
-          }),
-        );
-
         const finish = (state: ServerProviderUpdateState) =>
           setUpdateState(state).pipe(Effect.map((providers) => ({ providers })));
         const startedAtRef = yield* Ref.make<string | null>(null);
@@ -373,6 +372,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       .withCommandLock({
         targetKey,
         lockKey: update.lockKey,
+        onQueued: setQueuedState,
         run: runProviderUpdate(),
       })
       .pipe(
