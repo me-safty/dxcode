@@ -33,12 +33,7 @@ import {
   ProviderService,
   type ProviderServiceShape,
 } from "../../provider/Services/ProviderService.ts";
-import { GitCore, type GitCoreShape } from "../../git/Services/GitCore.ts";
-import {
-  GitStatusBroadcaster,
-  type GitStatusBroadcasterShape,
-} from "../../git/Services/GitStatusBroadcaster.ts";
-import { TextGeneration, type TextGenerationShape } from "../../git/Services/TextGeneration.ts";
+import { TextGeneration, type TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
@@ -50,8 +45,11 @@ import {
 } from "./ProviderCommandReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
+import { GitWorkflowService, type GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
@@ -82,7 +80,7 @@ async function waitFor(
 
 describe("ProviderCommandReactor", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderCommandReactor,
+    OrchestrationEngineService | ProviderCommandReactor | ProjectionSnapshotQuery,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -243,9 +241,9 @@ describe("ProviderCommandReactor", () => {
     const refreshStatus = vi.fn((_: string) =>
       Effect.succeed({
         isRepo: true,
-        hasOriginRemote: true,
-        isDefaultBranch: false,
-        branch: "renamed-branch",
+        hasPrimaryRemote: true,
+        isDefaultRef: false,
+        refName: "renamed-branch",
         hasWorkingTreeChanges: false,
         workingTree: {
           files: [],
@@ -330,18 +328,27 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(RepositoryIdentityResolverLive),
       Layer.provide(SqlitePersistenceMemory),
     );
+    const projectionSnapshotLayer = OrchestrationProjectionSnapshotQueryLive.pipe(
+      Layer.provide(RepositoryIdentityResolverLive),
+      Layer.provide(SqlitePersistenceMemory),
+    );
     const layer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(orchestrationLayer),
+      Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
-      Layer.provideMerge(Layer.succeed(GitCore, { renameBranch } as unknown as GitCoreShape)),
       Layer.provideMerge(
-        Layer.succeed(GitStatusBroadcaster, {
+        Layer.mock(GitWorkflowService)({
+          renameBranch,
+        } satisfies Partial<GitWorkflowServiceShape>),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(VcsStatusBroadcaster, {
           getStatus: () => Effect.die("getStatus should not be called in this test"),
           refreshLocalStatus: () =>
             Effect.die("refreshLocalStatus should not be called in this test"),
           refreshStatus,
           streamStatus: () => Stream.die("streamStatus should not be called in this test"),
-        } satisfies GitStatusBroadcasterShape),
+        }),
       ),
       Layer.provideMerge(
         Layer.mock(TextGeneration, {
@@ -357,6 +364,7 @@ describe("ProviderCommandReactor", () => {
     runtime = ManagedRuntime.make(layer);
 
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
@@ -391,6 +399,7 @@ describe("ProviderCommandReactor", () => {
 
     return {
       engine,
+      readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       startSession,
       sendTurn,
       interruptTurn,
@@ -440,7 +449,7 @@ describe("ProviderCommandReactor", () => {
       runtimeMode: "approval-required",
     });
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
@@ -485,13 +494,13 @@ describe("ProviderCommandReactor", () => {
     });
 
     await waitFor(async () => {
-      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const readModel = await harness.readModel();
       return (
         readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"))?.title ===
         "Generated title"
       );
     });
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.title).toBe("Generated title");
   });
@@ -531,7 +540,7 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
     expect(harness.generateThreadTitle).not.toHaveBeenCalled();
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.title).toBe("Keep this custom title");
   });
@@ -575,14 +584,14 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.generateThreadTitle.mock.calls.length === 1);
     await waitFor(async () => {
-      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const readModel = await harness.readModel();
       return (
         readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"))?.title ===
         "Reconnect spinner resume bug"
       );
     });
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.title).toBe("Reconnect spinner resume bug");
   });
@@ -911,7 +920,7 @@ describe("ProviderCommandReactor", () => {
       },
     });
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.providerName).toBe("claudeAgent");
     expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("claudeAgent"));
@@ -1023,7 +1032,7 @@ describe("ProviderCommandReactor", () => {
       resumeCursor: { opaque: "resume-1" },
     });
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("codex_work"));
   });
@@ -1214,7 +1223,7 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(async () => {
-      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const readModel = await harness.readModel();
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
       return thread?.runtimeMode === "approval-required";
     });
@@ -1248,7 +1257,7 @@ describe("ProviderCommandReactor", () => {
       threadId: ThreadId.make("thread-1"),
     });
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
@@ -1351,7 +1360,7 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(async () => {
-      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const readModel = await harness.readModel();
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
       return thread?.runtimeMode === "approval-required";
     });
@@ -1361,7 +1370,7 @@ describe("ProviderCommandReactor", () => {
     expect(harness.stopSession.mock.calls.length).toBe(0);
     expect(harness.sendTurn.mock.calls.length).toBe(1);
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.runtimeMode).toBe("full-access");
@@ -1413,7 +1422,7 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(async () => {
-      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const readModel = await harness.readModel();
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
       return (
         thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed") ??
@@ -1425,7 +1434,7 @@ describe("ProviderCommandReactor", () => {
     expect(harness.sendTurn.mock.calls.length).toBe(1);
     expect(harness.stopSession.mock.calls.length).toBe(0);
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.providerName).toBe("codex");
@@ -1484,7 +1493,7 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(async () => {
-      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const readModel = await harness.readModel();
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
       return (
         thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed") ??
@@ -1494,7 +1503,7 @@ describe("ProviderCommandReactor", () => {
 
     expect(harness.startSession.mock.calls.length).toBe(0);
     expect(harness.sendTurn.mock.calls.length).toBe(0);
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(
       thread?.activities.find((activity) => activity.kind === "provider.turn.start.failed"),
@@ -1648,7 +1657,7 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(async () => {
-      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const readModel = await harness.readModel();
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
       return (
         thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed") ??
@@ -1658,7 +1667,7 @@ describe("ProviderCommandReactor", () => {
 
     expect(harness.startSession.mock.calls.length).toBe(0);
     expect(harness.sendTurn.mock.calls.length).toBe(0);
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(
       thread?.activities.find((activity) => activity.kind === "provider.turn.start.failed"),
@@ -1819,7 +1828,7 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(async () => {
-      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const readModel = await harness.readModel();
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
       if (!thread) return false;
       return thread.activities.some(
@@ -1827,7 +1836,7 @@ describe("ProviderCommandReactor", () => {
       );
     });
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread).toBeDefined();
 
@@ -1928,7 +1937,7 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(async () => {
-      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      const readModel = await harness.readModel();
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
       if (!thread) return false;
       return thread.activities.some(
@@ -1936,7 +1945,7 @@ describe("ProviderCommandReactor", () => {
       );
     });
 
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread).toBeDefined();
 
@@ -1992,7 +2001,7 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(() => harness.stopSession.mock.calls.length === 1);
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session).not.toBeNull();
     expect(thread?.session?.status).toBe("stopped");

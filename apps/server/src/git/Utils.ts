@@ -1,14 +1,7 @@
-/**
- * Shared utilities for text generation layers (Codex, Claude, etc.).
- *
- * @module textGenerationUtils
- */
-import { Schema } from "effect";
-
-import { TextGenerationError } from "@t3tools/contracts";
-
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { Schema } from "effect";
+import { TextGenerationError } from "@t3tools/contracts";
 
 export function isGitRepository(cwd: string): boolean {
   return existsSync(join(cwd, ".git"));
