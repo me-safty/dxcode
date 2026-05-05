@@ -40,6 +40,7 @@ import {
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
+import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { redactServerSettingsForClient, ServerSettingsService } from "./serverSettings.ts";
@@ -152,6 +153,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager;
       const providerRegistry = yield* ProviderRegistry;
+      const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const config = yield* ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents;
       const serverSettings = yield* ServerSettingsService;
@@ -236,9 +238,13 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             return Effect.gen(function* () {
               const workspaceRoot =
                 event.payload.workspaceRoot ??
-                (yield* orchestrationEngine.getReadModel()).projects.find(
-                  (project) => project.id === event.payload.projectId,
-                )?.workspaceRoot ??
+                Option.match(
+                  yield* projectionSnapshotQuery.getProjectShellById(event.payload.projectId),
+                  {
+                    onNone: () => null,
+                    onSome: (project) => project.workspaceRoot,
+                  },
+                ) ??
                 null;
               if (workspaceRoot === null) {
                 return event;
@@ -252,7 +258,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                   repositoryIdentity,
                 },
               } satisfies OrchestrationEvent;
-            });
+            }).pipe(Effect.catch(() => Effect.succeed(event)));
           default:
             return Effect.succeed(event);
         }
@@ -723,9 +729,16 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                       }),
                   ),
                 ),
-                orchestrationEngine
-                  .getReadModel()
-                  .pipe(Effect.map((readModel) => readModel.snapshotSequence)),
+                projectionSnapshotQuery.getSnapshotSequence().pipe(
+                  Effect.map(({ snapshotSequence }) => snapshotSequence),
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: "Failed to load orchestration snapshot sequence",
+                        cause,
+                      }),
+                  ),
+                ),
               ]);
 
               if (Option.isNone(threadDetail)) {
@@ -773,6 +786,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               : providerRegistry.refresh()
             ).pipe(Effect.map((providers) => ({ providers }))),
             { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverUpdateProvider]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverUpdateProvider,
+            providerMaintenanceRunner.updateProvider(input),
+            {
+              "rpc.aggregate": "server",
+            },
           ),
         [WS_METHODS.serverUpsertKeybinding]: (rule) =>
           observeRpcEffect(
@@ -1150,6 +1171,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           Effect.provide(
             makeWsRpcLayer(session.sessionId).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
+              Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(
                 SourceControlDiscoveryLayer.layer.pipe(
                   Layer.provide(

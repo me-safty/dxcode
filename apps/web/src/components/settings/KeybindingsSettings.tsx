@@ -898,11 +898,7 @@ function KeybindingTableRow({
                 </MenuItem>
               ) : null}
               {canRemove ? (
-                <MenuItem
-                  variant="destructive"
-                  disabled={isSaving}
-                  onClick={() => onRemove(row)}
-                >
+                <MenuItem variant="destructive" disabled={isSaving} onClick={() => onRemove(row)}>
                   Remove
                 </MenuItem>
               ) : null}

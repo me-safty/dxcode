@@ -28,6 +28,7 @@ import type {
 import type { ProviderInstanceId } from "./providerInstance.ts";
 import type {
   ServerConfig,
+  ServerProviderUpdateInput,
   ServerProviderUpdatedPayload,
   ServerRemoveKeybindingResult,
   ServerUpsertKeybindingResult,
@@ -297,6 +298,7 @@ export interface LocalApi {
     refreshProviders: (input?: {
       readonly instanceId?: ProviderInstanceId;
     }) => Promise<ServerProviderUpdatedPayload>;
+    updateProvider: (input: ServerProviderUpdateInput) => Promise<ServerProviderUpdatedPayload>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     removeKeybinding: (input: ServerRemoveKeybindingInput) => Promise<ServerRemoveKeybindingResult>;
     getSettings: () => Promise<ServerSettings>;
