@@ -1,15 +1,9 @@
-import { createFileRoute, useLocation } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 
 import { GeneralSettingsPanel } from "../components/settings/SettingsPanels";
 
 function SettingsGeneralRoute() {
-  const location = useLocation();
-
-  return (
-    <GeneralSettingsPanel
-      {...(location.hash === "providers" ? { initialScrollTarget: "providers" } : {})}
-    />
-  );
+  return <GeneralSettingsPanel />;
 }
 
 export const Route = createFileRoute("/settings/general")({

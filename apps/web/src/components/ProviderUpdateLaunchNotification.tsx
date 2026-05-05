@@ -128,7 +128,7 @@ export function ProviderUpdateLaunchNotification() {
       if (activeToast && (toastId === undefined || activeToast.toastId === toastId)) {
         activeToastRef.current = null;
       }
-      void navigate({ to: "/settings/general", hash: "providers" });
+      void navigate({ to: "/settings/providers" });
     },
     [navigate],
   );

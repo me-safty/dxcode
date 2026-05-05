@@ -601,7 +601,9 @@ export function ProviderInstanceCard({
   const titleHeadNode = (
     <>
       {titleIconNode}
-      <h3 className="truncate text-sm font-medium text-foreground">{displayName}</h3>
+      <h3 className="truncate text-[13px] font-semibold tracking-[-0.01em] text-foreground">
+        {displayName}
+      </h3>
       {String(instanceId) !== String(instance.driver) ? (
         <code className="truncate rounded bg-muted/60 px-1 py-0.5 text-[10px] text-muted-foreground">
           {instanceId}
@@ -668,11 +670,11 @@ export function ProviderInstanceCard({
   ) : null;
 
   return (
-    <div className="border-t border-border first:border-t-0">
-      <div className="px-4 py-4 sm:px-5">
+    <div className="border-t border-border/60 first:border-t-0">
+      <div className="px-4 py-3.5 sm:px-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex min-h-5 items-center gap-1.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               {titleHeadNode}
               {versionCodeNode}
               {versionAdvisory ? (
