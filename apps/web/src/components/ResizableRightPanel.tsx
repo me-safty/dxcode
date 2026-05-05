@@ -44,13 +44,10 @@ export function ResizableRightPanel({
     startX: number;
   } | null>(null);
 
-  useEffect(() => {
-    setWidthRatio(readStoredRatio(storageKey));
-  }, [storageKey]);
-
-  useEffect(() => {
-    widthRatioRef.current = widthRatio;
-  }, [widthRatio]);
+  const commitWidthRatio = useCallback((ratio: number) => {
+    widthRatioRef.current = ratio;
+    setWidthRatio(ratio);
+  }, []);
 
   const stopResize = useCallback(
     (pointerId: number) => {
@@ -92,28 +89,29 @@ export function ResizableRightPanel({
     document.body.style.userSelect = "none";
   }, []);
 
-  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const resizeState = resizeStateRef.current;
-    if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+  const handlePointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const resizeState = resizeStateRef.current;
+      if (!resizeState || resizeState.pointerId !== event.pointerId) return;
 
-    event.preventDefault();
-    if (resizeState.frameId !== null) return;
+      event.preventDefault();
+      if (resizeState.frameId !== null) return;
 
-    const clientX = event.clientX;
-    resizeState.frameId = window.requestAnimationFrame(() => {
-      const activeResizeState = resizeStateRef.current;
-      if (!activeResizeState) return;
+      const clientX = event.clientX;
+      resizeState.frameId = window.requestAnimationFrame(() => {
+        const activeResizeState = resizeStateRef.current;
+        if (!activeResizeState) return;
 
-      activeResizeState.frameId = null;
-      const containerWidth = activeResizeState.panel.parentElement?.clientWidth ?? 0;
-      if (containerWidth <= 0) return;
+        activeResizeState.frameId = null;
+        const containerWidth = activeResizeState.panel.parentElement?.clientWidth ?? 0;
+        if (containerWidth <= 0) return;
 
-      const nextWidth = activeResizeState.startWidth + activeResizeState.startX - clientX;
-      const nextRatio = clampRatio(nextWidth / containerWidth);
-      widthRatioRef.current = nextRatio;
-      setWidthRatio(nextRatio);
-    });
-  }, []);
+        const nextWidth = activeResizeState.startWidth + activeResizeState.startX - clientX;
+        commitWidthRatio(clampRatio(nextWidth / containerWidth));
+      });
+    },
+    [commitWidthRatio],
+  );
 
   const handlePointerUp = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
