@@ -11,17 +11,9 @@ export interface ProviderMaintenanceCommandCoordinatorShape<E> {
 
 export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
   "makeProviderMaintenanceCommandCoordinator",
-)(function* <E>(input: {
-  readonly lockKeys: ReadonlyArray<string>;
-  readonly makeAlreadyRunningError: (targetKey: string) => E;
-  readonly makeUnsupportedLockError: (lockKey: string) => E;
-}) {
+)(function* <E>(input: { readonly makeAlreadyRunningError: (targetKey: string) => E }) {
   const runningTargetsRef = yield* Ref.make<ReadonlySet<string>>(new Set());
-  const locks = new Map<string, Semaphore.Semaphore>(
-    yield* Effect.forEach(input.lockKeys, (lockKey) =>
-      Semaphore.make(1).pipe(Effect.map((semaphore) => [lockKey, semaphore] as const)),
-    ),
-  );
+  const locksRef = yield* Ref.make<ReadonlyMap<string, Semaphore.Semaphore>>(new Map());
 
   const acquireTarget = Effect.fn("acquireTarget")(function* (targetKey: string) {
     return yield* Ref.modify(runningTargetsRef, (runningTargets) => {
@@ -41,6 +33,24 @@ export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
       return next;
     });
 
+  const getLock = Effect.fn("getProviderMaintenanceCommandLock")(function* (lockKey: string) {
+    const existing = (yield* Ref.get(locksRef)).get(lockKey);
+    if (existing) {
+      return existing;
+    }
+
+    const lock = yield* Semaphore.make(1);
+    return yield* Ref.modify(locksRef, (locks) => {
+      const current = locks.get(lockKey);
+      if (current) {
+        return [current, locks] as const;
+      }
+      const next = new Map(locks);
+      next.set(lockKey, lock);
+      return [lock, next] as const;
+    });
+  });
+
   const withCommandLock: ProviderMaintenanceCommandCoordinatorShape<E>["withCommandLock"] = ({
     targetKey,
     lockKey,
@@ -53,10 +63,7 @@ export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
       }
 
       return yield* Effect.gen(function* () {
-        const lock = locks.get(lockKey);
-        if (!lock) {
-          return yield* Effect.fail(input.makeUnsupportedLockError(lockKey));
-        }
+        const lock = yield* getLock(lockKey);
         return yield* lock.withPermits(1)(run);
       }).pipe(Effect.ensuring(releaseTarget(targetKey)));
     });
