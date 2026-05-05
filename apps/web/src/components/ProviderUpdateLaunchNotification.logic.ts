@@ -2,6 +2,7 @@ import {
   defaultInstanceIdForDriver,
   PROVIDER_DISPLAY_NAMES,
   type ProviderDriverKind,
+  type ProviderInstanceId,
   type ServerProvider,
 } from "@t3tools/contracts";
 
@@ -73,6 +74,19 @@ function dedupeProvidersByDriver<T extends ServerProvider>(providers: ReadonlyAr
   }
 
   return [...latestProviderByDriver.values()];
+}
+
+function dedupeProvidersByInstanceId<T extends ServerProvider>(providers: ReadonlyArray<T>): T[] {
+  const latestProviderByInstanceId = new Map<ProviderInstanceId, T>();
+
+  for (const provider of providers) {
+    const current = latestProviderByInstanceId.get(provider.instanceId);
+    if (!current || provider.checkedAt.localeCompare(current.checkedAt) >= 0) {
+      latestProviderByInstanceId.set(provider.instanceId, provider);
+    }
+  }
+
+  return [...latestProviderByInstanceId.values()];
 }
 
 function getProviderUpdatedTitle(provider: Pick<ServerProvider, "driver" | "version">): string {
@@ -316,7 +330,7 @@ export function collectUpdatedProviderSnapshots(input: {
   readonly results: ReadonlyArray<
     PromiseSettledResult<{ readonly providers: ReadonlyArray<ServerProvider> }>
   >;
-  readonly providerKinds: ReadonlySet<ProviderDriverKind>;
+  readonly providerInstanceIds: ReadonlySet<ProviderInstanceId>;
 }): ServerProvider[] {
   const matchedProviders: ServerProvider[] = [];
 
@@ -325,13 +339,13 @@ export function collectUpdatedProviderSnapshots(input: {
       continue;
     }
     for (const provider of result.value.providers) {
-      if (input.providerKinds.has(provider.driver)) {
+      if (input.providerInstanceIds.has(provider.instanceId)) {
         matchedProviders.push(provider);
       }
     }
   }
 
-  return dedupeProvidersByDriver(matchedProviders);
+  return dedupeProvidersByInstanceId(matchedProviders);
 }
 
 export function firstRejectedProviderUpdateMessage(

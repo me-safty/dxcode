@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { DownloadIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { type ProviderDriverKind } from "@t3tools/contracts";
+import { type ProviderDriverKind, type ProviderInstanceId } from "@t3tools/contracts";
 
 import { ensureLocalApi } from "../localApi";
 import { useDismissedProviderUpdateNotificationKeys } from "../providerUpdateDismissal";
@@ -30,7 +30,7 @@ type ActiveProviderUpdateToast =
       readonly kind: "update";
       readonly key: string;
       readonly toastId: ProviderUpdateToastId;
-      readonly providerKinds: ReadonlySet<ProviderDriverKind>;
+      readonly providerInstanceIds: ReadonlySet<ProviderInstanceId>;
       readonly providerCount: number;
     };
 
@@ -140,7 +140,7 @@ export function ProviderUpdateLaunchNotification() {
     }
 
     const activeProviders = providers.filter((provider) =>
-      activeToast.providerKinds.has(provider.driver),
+      activeToast.providerInstanceIds.has(provider.instanceId),
     );
     const view = getProviderUpdateProgressToastView({
       providers: activeProviders,
@@ -191,12 +191,12 @@ export function ProviderUpdateLaunchNotification() {
       updateStarted = true;
 
       const providerCount = oneClickProviders.length;
-      const providerKinds = new Set(oneClickProviders.map((provider) => provider.driver));
+      const providerInstanceIds = new Set(oneClickProviders.map((provider) => provider.instanceId));
       activeToastRef.current = {
         kind: "update",
         key: notificationKey,
         toastId,
-        providerKinds,
+        providerInstanceIds,
         providerCount,
       };
 
@@ -232,7 +232,7 @@ export function ProviderUpdateLaunchNotification() {
 
         const updatedProviderSnapshots = collectUpdatedProviderSnapshots({
           results,
-          providerKinds,
+          providerInstanceIds,
         });
         const view = getProviderUpdateProgressToastView({
           providers: updatedProviderSnapshots,

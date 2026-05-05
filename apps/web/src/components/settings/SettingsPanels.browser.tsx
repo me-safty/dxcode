@@ -1085,10 +1085,9 @@ describe("GeneralSettingsPanel observability", () => {
       </AppAtomRegistryProvider>,
     );
 
-    await expect
-      .element(page.getByRole("button", { name: "Update", exact: true }))
-      .toBeInTheDocument();
-    await page.getByRole("button", { name: "Update", exact: true }).click();
+    await page.getByRole("button", { name: "Update available — view details" }).click();
+    await expect.element(page.getByRole("button", { name: "Update now" })).toBeInTheDocument();
+    await page.getByRole("button", { name: "Update now" }).click();
 
     expect(updateProvider).toHaveBeenCalledWith({
       provider: ProviderDriverKind.make("codex"),
