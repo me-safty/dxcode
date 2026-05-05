@@ -39,6 +39,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
+import { resolveThreadBranchAutoLink } from "~/lib/threadBranchTracking";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
@@ -150,6 +151,7 @@ import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./Branch
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { useThreadBranchTracking } from "./chat/useThreadBranchTracking";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
@@ -1659,6 +1661,25 @@ export default function ChatView(props: ChatViewProps) {
       : (storeServerTerminalLaunchContext ?? null);
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  // Branch-tracking glue: auto-link the chat to its first observed branch
+  // and surface a mismatch banner with checkout/relink actions when the
+  // working tree drifts. Only meaningful for server threads inside a repo.
+  const { mismatchBannerItem: branchMismatchBannerItem } = useThreadBranchTracking({
+    threadRef: isServerThread ? activeThreadRef : null,
+    threadBranch: activeThread?.branch ?? null,
+    worktreePath: activeThread?.worktreePath ?? null,
+    projectCwd: activeProject?.cwd ?? null,
+    gitStatus: isGitRepo ? (gitStatusQuery.data ?? null) : null,
+    isSendInFlight: isSendBusy,
+  });
+  const composerBannerItemsWithBranchMismatch = useMemo<ComposerBannerStackItem[]>(() => {
+    if (!branchMismatchBannerItem) {
+      return composerBannerItems;
+    }
+    // Mismatch goes first: it actively blocks the user's mental model of
+    // "where will this run?" and we want it to be the front-of-stack item.
+    return [branchMismatchBannerItem, ...composerBannerItems];
+  }, [branchMismatchBannerItem, composerBannerItems]);
   const terminalShortcutLabelOptions = useMemo(
     () => ({
       context: {
@@ -2334,6 +2355,18 @@ export default function ChatView(props: ChatViewProps) {
     canOverrideServerThreadEnvMode && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
+  // First-send fallback: when the chat doesn't carry a branch yet, capture
+  // the working tree's current branch so the brand-new chat is auto-tagged.
+  // Older chats without a branch get auto-linked via useThreadBranchTracking
+  // when the user opens them, but new chats need this capture point because
+  // their server-side row is created here in the same dispatch.
+  const initialThreadBranch =
+    activeThreadBranch ??
+    resolveThreadBranchAutoLink({
+      threadBranch: null,
+      gitStatus: gitStatusQuery.data ?? null,
+    })?.branch ??
+    null;
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
     isGitRepo,
@@ -2834,7 +2867,7 @@ export default function ChatView(props: ChatViewProps) {
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
                       interactionMode,
-                      branch: activeThreadBranch,
+                      branch: initialThreadBranch,
                       worktreePath: activeThread.worktreePath,
                       createdAt: activeThread.createdAt,
                     },
@@ -3288,7 +3321,7 @@ export default function ChatView(props: ChatViewProps) {
         modelSelection: nextThreadModelSelection,
         runtimeMode,
         interactionMode: "default",
-        branch: activeThreadBranch,
+        branch: initialThreadBranch,
         worktreePath: activeThread.worktreePath,
         createdAt,
       })
@@ -3351,7 +3384,7 @@ export default function ChatView(props: ChatViewProps) {
   }, [
     activeProject,
     activeProposedPlan,
-    activeThreadBranch,
+    initialThreadBranch,
     activeThread,
     beginLocalDispatch,
     activeEnvironmentUnavailable,
@@ -3602,7 +3635,10 @@ export default function ChatView(props: ChatViewProps) {
             )}
           >
             <div className="relative isolate">
-              <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+              <ComposerBannerStack
+                className="relative z-0"
+                items={composerBannerItemsWithBranchMismatch}
+              />
               <div className="relative z-10">
                 <ChatComposer
                   ref={composerRef}
