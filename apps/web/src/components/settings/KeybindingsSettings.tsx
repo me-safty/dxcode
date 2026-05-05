@@ -863,9 +863,7 @@ export function KeybindingsSettingsPanel() {
       if (
         target !== searchInputRef.current &&
         target instanceof HTMLElement &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
       ) {
         return;
       }
