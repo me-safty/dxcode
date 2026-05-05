@@ -7,6 +7,7 @@ import {
   type ProviderInstanceRegistryShape,
 } from "../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import { sanitizeToolWorkLogSummaryLine } from "../git/Utils.ts";
 
 export type TextGenerationProvider = "codex" | "claudeAgent" | "cursor" | "opencode";
 
@@ -143,7 +144,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "generateToolWorkLogSummary";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistryShape,
@@ -181,6 +183,11 @@ export const makeTextGenerationFromRegistry = (
   generateThreadTitle: (input) =>
     resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
       Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+    ),
+  generateToolWorkLogSummary: (input) =>
+    resolveInstance(registry, "generateToolWorkLogSummary", input.modelSelection.instanceId).pipe(
+      Effect.flatMap((textGeneration) => textGeneration.generateToolWorkLogSummary(input)),
+      Effect.map((r) => ({ line: sanitizeToolWorkLogSummaryLine(r.line, input.label) })),
     ),
 });
 

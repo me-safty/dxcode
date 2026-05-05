@@ -601,7 +601,7 @@ export const TraitsPicker = memo(function TraitsPicker({
                 <BrainIcon
                   aria-hidden="true"
                   className={cn(
-                    "!mx-0.5 size-3.5 shrink-0",
+                    "size-3.5",
                     toggleOn ? "text-current opacity-100" : "opacity-70",
                   )}
                 />
@@ -626,9 +626,12 @@ export const TraitsPicker = memo(function TraitsPicker({
                     />
                   }
                 >
-                  <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+                  <span className="flex min-w-0 flex-1 justify-center items-center gap-1.5 overflow-hidden">
                     {TriggerIcon ? (
-                      <TriggerIcon aria-hidden="true" className="size-3.5 shrink-0 opacity-70" />
+                      <TriggerIcon
+                        aria-hidden="true"
+                        className="ps-[2px] opacity-70"
+                      />
                     ) : null}
                     <span className="min-w-0 truncate">{triggerLabel}</span>
                   </span>
