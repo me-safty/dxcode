@@ -3,8 +3,10 @@ import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 
 import {
   buildKeybindingRows,
+  buildKeybindingCommandOptions,
   buildWhenVariableOptions,
   commandLabel,
+  keybindingConflictLabels,
   keybindingFromKeyboardEvent,
   parseWhenExpressionDraft,
   shortcutToKeybindingInput,
@@ -124,24 +126,7 @@ describe("KeybindingsSettings.logic", () => {
   });
 
   it("builds known when variable options from defaults without frontend labels", () => {
-    const options = buildWhenVariableOptions([
-      {
-        command: "terminal.toggle",
-        shortcut: {
-          key: "j",
-          modKey: true,
-          metaKey: false,
-          ctrlKey: false,
-          altKey: false,
-          shiftKey: false,
-        },
-        whenAst: {
-          type: "and",
-          left: { type: "identifier", name: "terminalOpen" },
-          right: { type: "identifier", name: "customModeActive" },
-        },
-      },
-    ] satisfies ResolvedKeybindingsConfig);
+    const options = buildWhenVariableOptions();
 
     expect(options).toEqual(
       expect.arrayContaining(["terminalFocus", "terminalOpen", "modelPickerOpen", "true", "false"]),
@@ -149,10 +134,115 @@ describe("KeybindingsSettings.logic", () => {
     expect(options).not.toContain("customModeActive");
   });
 
+  it("builds command options from defaults and resolved project bindings", () => {
+    const options = buildKeybindingCommandOptions([
+      {
+        command: "script.setup-db.run",
+        shortcut: {
+          key: "r",
+          modKey: true,
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+        },
+      },
+    ] satisfies ResolvedKeybindingsConfig);
+
+    expect(options).toEqual(expect.arrayContaining(["chat.new", "script.setup-db.run"]));
+  });
+
   it("reports unknown when variables without rejecting parseable expressions", () => {
     const parsed = parseWhenExpressionDraft("!terminalFocus && terminalFoc");
 
     expect(parsed.ok).toBe(true);
     expect(unknownWhenVariables(parsed.ok ? parsed.value : undefined)).toEqual(["terminalFoc"]);
+  });
+
+  it("marks each default shortcut for multi-binding commands as default", () => {
+    const rows = buildKeybindingRows(
+      [
+        {
+          command: "chat.new",
+          shortcut: {
+            key: "n",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+          whenAst: {
+            type: "not",
+            node: { type: "identifier", name: "terminalFocus" },
+          },
+        },
+        {
+          command: "chat.new",
+          shortcut: {
+            key: "o",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: true,
+          },
+          whenAst: {
+            type: "not",
+            node: { type: "identifier", name: "terminalFocus" },
+          },
+        },
+      ] satisfies ResolvedKeybindingsConfig,
+      "",
+    );
+
+    expect(rows.map((row) => row.source)).toEqual(["Default", "Default"]);
+  });
+
+  it("reports conflicting shortcuts that share an active when context", () => {
+    const rows = buildKeybindingRows(
+      [
+        {
+          command: "chat.new",
+          shortcut: {
+            key: "n",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+          whenAst: {
+            type: "not",
+            node: { type: "identifier", name: "terminalFocus" },
+          },
+        },
+        {
+          command: "chat.newLocal",
+          shortcut: {
+            key: "n",
+            modKey: true,
+            metaKey: false,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+          },
+          whenAst: {
+            type: "not",
+            node: { type: "identifier", name: "terminalFocus" },
+          },
+        },
+      ] satisfies ResolvedKeybindingsConfig,
+      "",
+    );
+
+    expect(rows[0]?.conflicts).toEqual(["Chat: New Local"]);
+    expect(
+      keybindingConflictLabels(rows, {
+        rowId: rows[0]?.id ?? "",
+        key: "mod+n",
+        when: "",
+      }),
+    ).toEqual(["Chat: New Local"]);
   });
 });

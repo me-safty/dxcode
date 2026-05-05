@@ -15,6 +15,7 @@ import { isMacPlatform } from "../../lib/utils";
 export type KeybindingSource = "Default" | "Custom" | "Project";
 
 export interface KeybindingRow {
+  readonly id: string;
   readonly command: KeybindingCommand;
   readonly key: string;
   readonly when: string;
@@ -22,9 +23,11 @@ export interface KeybindingRow {
   readonly defaultKey: string | null;
   readonly defaultWhen: string;
   readonly binding: ResolvedKeybindingRule;
+  readonly conflicts: ReadonlyArray<string>;
 }
 
 export type WhenVariableOption = string;
+export type KeybindingCommandOption = KeybindingCommand;
 
 const CORE_WHEN_VARIABLES = ["terminalFocus", "terminalOpen", "true", "false"] as const;
 
@@ -91,22 +94,61 @@ function sourceForBinding(binding: ResolvedKeybindingRule): KeybindingSource {
     return "Project";
   }
 
-  const defaultBinding = DEFAULT_RESOLVED_KEYBINDINGS.find(
-    (entry) => entry.command === binding.command,
+  const bindingKey = shortcutToKeybindingInput(binding.shortcut);
+  const bindingWhen = whenAstToExpression(binding.whenAst);
+  const isDefault = DEFAULT_RESOLVED_KEYBINDINGS.some(
+    (entry) =>
+      entry.command === binding.command &&
+      shortcutToKeybindingInput(entry.shortcut) === bindingKey &&
+      whenAstToExpression(entry.whenAst) === bindingWhen,
   );
-  if (!defaultBinding) {
-    return "Custom";
-  }
 
-  return shortcutToKeybindingInput(defaultBinding.shortcut) ===
-    shortcutToKeybindingInput(binding.shortcut) &&
-    whenAstToExpression(defaultBinding.whenAst) === whenAstToExpression(binding.whenAst)
-    ? "Default"
-    : "Custom";
+  return isDefault ? "Default" : "Custom";
 }
 
-function defaultBindingForCommand(command: KeybindingCommand): ResolvedKeybindingRule | undefined {
-  return DEFAULT_RESOLVED_KEYBINDINGS.find((entry) => entry.command === command);
+function defaultBindingForBinding(
+  binding: ResolvedKeybindingRule,
+): ResolvedKeybindingRule | undefined {
+  const bindingKey = shortcutToKeybindingInput(binding.shortcut);
+  const bindingWhen = whenAstToExpression(binding.whenAst);
+
+  return (
+    DEFAULT_RESOLVED_KEYBINDINGS.find(
+      (entry) =>
+        entry.command === binding.command &&
+        shortcutToKeybindingInput(entry.shortcut) === bindingKey &&
+        whenAstToExpression(entry.whenAst) === bindingWhen,
+    ) ??
+    DEFAULT_RESOLVED_KEYBINDINGS.find(
+      (entry) =>
+        entry.command === binding.command && whenAstToExpression(entry.whenAst) === bindingWhen,
+    ) ??
+    DEFAULT_RESOLVED_KEYBINDINGS.find((entry) => entry.command === binding.command)
+  );
+}
+
+function keybindingRowId(command: KeybindingCommand, key: string, when: string): string {
+  return `${command}\u0000${key}\u0000${when}`;
+}
+
+function conflictsWithWhen(leftWhen: string, rightWhen: string): boolean {
+  return leftWhen.length === 0 || rightWhen.length === 0 || leftWhen === rightWhen;
+}
+
+export function keybindingConflictLabels(
+  rows: ReadonlyArray<KeybindingRow>,
+  input: { readonly rowId: string; readonly key: string; readonly when: string },
+): ReadonlyArray<string> {
+  if (input.key.trim().length === 0) return [];
+  const conflicts = rows
+    .filter(
+      (candidate) =>
+        candidate.id !== input.rowId &&
+        candidate.key === input.key &&
+        conflictsWithWhen(candidate.when, input.when),
+    )
+    .map((candidate) => commandLabel(candidate.command));
+  return [...new Set(conflicts)].toSorted();
 }
 
 export function buildKeybindingRows(
@@ -114,11 +156,12 @@ export function buildKeybindingRows(
   query: string,
 ): ReadonlyArray<KeybindingRow> {
   const normalizedQuery = query.trim().toLowerCase();
-  const rows = keybindings.map((binding) => {
-    const defaultBinding = defaultBindingForCommand(binding.command);
+  const rows = keybindings.map((binding, index) => {
+    const defaultBinding = defaultBindingForBinding(binding);
     const key = shortcutToKeybindingInput(binding.shortcut);
     const when = whenAstToExpression(binding.whenAst);
     return {
+      id: `${keybindingRowId(binding.command, key, when)}\u0000${index}`,
       command: binding.command,
       key,
       when,
@@ -126,20 +169,32 @@ export function buildKeybindingRows(
       defaultKey: defaultBinding ? shortcutToKeybindingInput(defaultBinding.shortcut) : null,
       defaultWhen: whenAstToExpression(defaultBinding?.whenAst),
       binding,
+      conflicts: [],
     } satisfies KeybindingRow;
   });
 
-  rows.sort((left, right) => {
+  const rowsWithConflicts = rows.map((row) => {
+    const conflicts = keybindingConflictLabels(rows, {
+      rowId: row.id,
+      key: row.key,
+      when: row.when,
+    });
+    return conflicts.length > 0
+      ? Object.assign({}, row, { conflicts: [...new Set(conflicts)].toSorted() })
+      : row;
+  });
+
+  rowsWithConflicts.sort((left, right) => {
     const commandCompare = left.command.localeCompare(right.command);
     if (commandCompare !== 0) return commandCompare;
     return left.key.localeCompare(right.key);
   });
 
   if (normalizedQuery.length === 0) {
-    return rows;
+    return rowsWithConflicts;
   }
 
-  return rows.filter((row) => {
+  return rowsWithConflicts.filter((row) => {
     return (
       row.command.toLowerCase().includes(normalizedQuery) ||
       row.key.toLowerCase().includes(normalizedQuery) ||
@@ -179,9 +234,7 @@ export function unknownWhenVariables(node: KeybindingWhenNode | undefined): Read
   return [...identifiers].filter((identifier) => !isKnownWhenVariable(identifier)).toSorted();
 }
 
-export function buildWhenVariableOptions(
-  _keybindings: ResolvedKeybindingsConfig,
-): ReadonlyArray<WhenVariableOption> {
+export function buildWhenVariableOptions(): ReadonlyArray<WhenVariableOption> {
   return [...KNOWN_WHEN_VARIABLES].toSorted((left, right) => {
     const leftCoreIndex = CORE_WHEN_VARIABLES.indexOf(left as (typeof CORE_WHEN_VARIABLES)[number]);
     const rightCoreIndex = CORE_WHEN_VARIABLES.indexOf(
@@ -195,6 +248,21 @@ export function buildWhenVariableOptions(
     }
     return left.localeCompare(right);
   });
+}
+
+export function buildKeybindingCommandOptions(
+  keybindings: ResolvedKeybindingsConfig,
+): ReadonlyArray<KeybindingCommandOption> {
+  const commands = new Set<KeybindingCommand>();
+  for (const binding of DEFAULT_RESOLVED_KEYBINDINGS) {
+    commands.add(binding.command);
+  }
+  for (const binding of keybindings) {
+    commands.add(binding.command);
+  }
+  return [...commands].toSorted((left, right) =>
+    commandLabel(left).localeCompare(commandLabel(right)),
+  );
 }
 
 export function commandLabel(command: KeybindingCommand): string {

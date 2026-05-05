@@ -29,6 +29,7 @@ import type { ProviderInstanceId } from "./providerInstance.ts";
 import type {
   ServerConfig,
   ServerProviderUpdatedPayload,
+  ServerRemoveKeybindingResult,
   ServerUpsertKeybindingResult,
 } from "./server.ts";
 import type {
@@ -41,7 +42,7 @@ import type {
   TerminalSessionSnapshot,
   TerminalWriteInput,
 } from "./terminal.ts";
-import type { ServerUpsertKeybindingInput } from "./server.ts";
+import type { ServerRemoveKeybindingInput, ServerUpsertKeybindingInput } from "./server.ts";
 import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
@@ -297,6 +298,7 @@ export interface LocalApi {
       readonly instanceId?: ProviderInstanceId;
     }) => Promise<ServerProviderUpdatedPayload>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
+    removeKeybinding: (input: ServerRemoveKeybindingInput) => Promise<ServerRemoveKeybindingResult>;
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
     discoverSourceControl: () => Promise<SourceControlDiscoveryResult>;
