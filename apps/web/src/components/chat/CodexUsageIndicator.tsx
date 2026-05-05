@@ -1,5 +1,6 @@
 import type { CodexUsageSnapshot, CodexUsageWindow, ProviderInstanceId } from "@t3tools/contracts";
 import type { CodexUsageIndicatorMode } from "@t3tools/contracts/settings";
+import { sortCodexUsageWindowsForDisplay } from "@t3tools/shared/codexUsage";
 import { useQuery } from "@tanstack/react-query";
 import { GaugeIcon } from "lucide-react";
 import { memo, useMemo } from "react";
@@ -29,8 +30,8 @@ function selectedWindows(
     return [];
   }
   if (mode === "both") {
-    return snapshot.windows.filter(
-      (window) => window.kind === "five-hour" || window.kind === "weekly",
+    return sortCodexUsageWindowsForDisplay(
+      snapshot.windows.filter((window) => window.kind === "five-hour" || window.kind === "weekly"),
     );
   }
   return snapshot.windows.filter((window) => window.kind === "five-hour");

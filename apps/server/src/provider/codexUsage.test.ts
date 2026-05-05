@@ -102,6 +102,26 @@ describe("normalizeCodexUsageSnapshot", () => {
     ]);
   });
 
+  it("sorts fallback limit-id buckets by display priority", () => {
+    const snapshot = normalizeCodexUsageSnapshot({
+      providerInstanceId: instanceId,
+      source: "read",
+      payload: {
+        rateLimits: {},
+        rateLimitsByLimitId: {
+          WeeklyLimit: {
+            primary: { usedPercent: 34 },
+          },
+          FiveHourLimit: {
+            primary: { usedPercent: 12 },
+          },
+        },
+      },
+    });
+
+    expect(snapshot?.windows.map((window) => window.kind)).toEqual(["five-hour", "weekly"]);
+  });
+
   it("carries rate limit reached type from limit-id fallback buckets", () => {
     const snapshot = normalizeCodexUsageSnapshot({
       providerInstanceId: instanceId,

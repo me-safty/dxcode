@@ -4,6 +4,7 @@ import {
   type CodexUsageWindow,
   type ProviderInstanceId,
 } from "@t3tools/contracts";
+import { sortCodexUsageWindowsForDisplay } from "@t3tools/shared/codexUsage";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
@@ -123,7 +124,7 @@ function windowsFromLimitIdBuckets(
       windows.push(window);
     }
   }
-  return windows;
+  return sortCodexUsageWindowsForDisplay(windows);
 }
 
 function rateLimitReachedTypeFromLimitIdBuckets(
@@ -155,7 +156,7 @@ export function normalizeCodexUsageSnapshot(input: {
     : [];
   const windows =
     bucketWindows.length > 0
-      ? bucketWindows
+      ? sortCodexUsageWindowsForDisplay(bucketWindows)
       : windowsFromLimitIdBuckets(input.payload.rateLimitsByLimitId);
   if (windows.length === 0) {
     return null;
