@@ -42,8 +42,8 @@ const LazyDiffPanel = (props: { mode: DiffPanelMode }) => {
   );
 };
 
-const DiffPanelInlineSidebar = (props: { diffOpen: boolean; renderDiffContent: boolean }) => {
-  const { diffOpen, renderDiffContent } = props;
+const DiffPanelInlineSidebar = (props: { diffOpen: boolean }) => {
+  const { diffOpen } = props;
   if (!diffOpen) return null;
 
   return (
@@ -51,7 +51,7 @@ const DiffPanelInlineSidebar = (props: { diffOpen: boolean; renderDiffContent: b
       className="border-l border-border bg-card text-foreground"
       storageKey={DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY}
     >
-      {renderDiffContent ? <LazyDiffPanel mode="sidebar" /> : null}
+      <LazyDiffPanel mode="sidebar" />
     </ResizableRightPanel>
   );
 };
@@ -152,7 +152,7 @@ function ChatThreadRouteView() {
             routeKind="server"
           />
         </SidebarInset>
-        <DiffPanelInlineSidebar diffOpen={diffOpen} renderDiffContent={shouldRenderDiffContent} />
+        <DiffPanelInlineSidebar diffOpen={diffOpen} />
       </div>
     );
   }
