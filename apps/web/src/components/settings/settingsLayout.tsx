@@ -64,7 +64,7 @@ export function SettingsRow({
     <div
       className={cn(
         "border-t border-border/60 px-4 first:border-t-0 sm:px-5",
-        children ? "pt-4 pb-0" : "py-4",
+        children ? "pt-3.5 pb-0" : "py-3.5",
       )}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -77,7 +77,7 @@ export function SettingsRow({
               {resetAction}
             </span>
           </div>
-          <p className="text-xs leading-relaxed text-muted-foreground/80">{description}</p>
+          <p className="text-xs text-muted-foreground/80">{description}</p>
           {status ? <div className="pt-0.5 text-[11px] text-muted-foreground">{status}</div> : null}
         </div>
         {control ? (
