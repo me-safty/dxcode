@@ -113,7 +113,7 @@ export function SettingResetButton({ label, onClick }: { label: string; onClick:
               onClick();
             }}
           >
-            <Undo2Icon className="size-3" />
+            <Undo2Icon className="mx-4 size-3" />
           </Button>
         }
       />

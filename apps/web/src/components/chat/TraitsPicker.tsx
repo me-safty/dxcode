@@ -601,7 +601,7 @@ export const TraitsPicker = memo(function TraitsPicker({
                 <BrainIcon
                   aria-hidden="true"
                   className={cn(
-                    "size-3.5 shrink-0",
+                    "!mx-0.5 size-3.5 shrink-0",
                     toggleOn ? "text-current opacity-100" : "opacity-70",
                   )}
                 />
@@ -619,21 +619,24 @@ export const TraitsPicker = memo(function TraitsPicker({
                       variant={triggerVariant ?? "ghost"}
                       className={cn(
                         isCodexStyle
-                          ? "min-w-0 max-w-40 shrink justify-start whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:max-w-48 sm:px-3"
-                          : "shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3",
+                          ? "min-w-0 max-w-40 shrink justify-between whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:max-w-48 sm:px-3"
+                          : "shrink-0 justify-between whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3",
                         triggerClassName,
                       )}
                     />
                   }
                 >
-                  <span className="flex min-w-0 w-full items-center gap-1.5">
+                  <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
                     {TriggerIcon ? (
                       <TriggerIcon aria-hidden="true" className="size-3.5 shrink-0 opacity-70" />
                     ) : null}
                     <span className="min-w-0 truncate">{triggerLabel}</span>
-                    <span className="-me-1 inline-flex shrink-0 items-center">
-                      <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
-                    </span>
+                  </span>
+                  <span aria-hidden="true" className="flex items-center">
+                    <ChevronDownIcon
+                      aria-hidden="true"
+                      className="!ms-0 !-me-1 size-3 shrink-0 opacity-60"
+                    />
                   </span>
                 </MenuTrigger>
                 <MenuPopup align="start">

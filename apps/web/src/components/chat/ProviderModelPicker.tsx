@@ -157,7 +157,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             variant={props.triggerVariant ?? "ghost"}
             data-chat-provider-model-picker="true"
             className={cn(
-              "min-w-0 justify-start whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80",
+              "min-w-0 justify-between whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80",
               props.compact ? "max-w-42 shrink-0" : "max-w-48 shrink sm:max-w-56 sm:px-3",
               props.triggerClassName,
             )}
@@ -165,12 +165,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           />
         }
       >
-        <span
-          className={cn(
-            "flex min-w-0 w-full box-border items-center gap-2",
-            props.compact ? "max-w-36 sm:pl-1" : undefined,
-          )}
-        >
+        <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
           {activeEntry ? (
             <ProviderInstanceIcon
               driverKind={activeEntry.driverKind}
@@ -192,10 +187,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             </TooltipTrigger>
             <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
           </Tooltip>
-          <ChevronDownIcon
-            aria-hidden="true"
-            className="-me-2 ms-auto size-3 shrink-0 translate-x-1 opacity-60"
-          />
+        </span>
+        <span aria-hidden="true" className="flex items-center">
+          <ChevronDownIcon aria-hidden="true" className="!ms-0 !-me-1 size-3 shrink-0 opacity-60" />
         </span>
       </PopoverTrigger>
       <PopoverPopup
