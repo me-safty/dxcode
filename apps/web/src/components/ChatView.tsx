@@ -2355,18 +2355,18 @@ export default function ChatView(props: ChatViewProps) {
     canOverrideServerThreadEnvMode && pendingServerThreadBranch !== undefined
       ? pendingServerThreadBranch
       : (activeThread?.branch ?? null);
-  // First-send fallback: when the chat doesn't carry a branch yet, capture
-  // the working tree's current branch so the brand-new chat is auto-tagged.
-  // Older chats without a branch get auto-linked via useThreadBranchTracking
-  // when the user opens them, but new chats need this capture point because
-  // their server-side row is created here in the same dispatch.
-  const initialThreadBranch =
-    activeThreadBranch ??
+  const liveThreadBranch =
     resolveThreadBranchAutoLink({
       threadBranch: null,
       gitStatus: gitStatusQuery.data ?? null,
-    })?.branch ??
-    null;
+    })?.branch ?? null;
+  // First-send binding happens here, not when a new draft is opened. Drafts
+  // may carry a seeded branch from the previous chat or from the toolbar, but
+  // the actual chat link should reflect the working tree at send time.
+  const initialThreadBranch =
+    activeThread?.messages.length === 0
+      ? (liveThreadBranch ?? activeThreadBranch)
+      : (activeThreadBranch ?? liveThreadBranch);
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
     isGitRepo,
@@ -2724,14 +2724,14 @@ export default function ChatView(props: ChatViewProps) {
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
-        ? activeThreadBranch
+        ? initialThreadBranch
         : null;
 
     // In worktree mode, require an explicit base branch so we don't silently
     // fall back to local execution when branch selection is missing.
     const shouldCreateWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath;
-    if (shouldCreateWorktree && !activeThreadBranch) {
+    if (shouldCreateWorktree && !initialThreadBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
     }
