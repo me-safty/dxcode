@@ -32,6 +32,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Kbd, KbdGroup } from "../ui/kbd";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { ScrollArea } from "../ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Toggle } from "../ui/toggle";
 import { toastManager } from "../ui/toast";
@@ -978,7 +979,12 @@ export function KeybindingsSettingsPanel() {
           </div>
         ) : null}
 
-        <div className="overflow-x-auto">
+        <ScrollArea
+          chainVerticalScroll
+          scrollFade
+          hideScrollbars
+          className="w-full max-w-full rounded-none"
+        >
           <div className="grid min-w-[730px] grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,0.9fr)_110px] border-b border-border/70 bg-muted/25 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
             <div>Command</div>
             <div>Keybinding</div>
@@ -1002,7 +1008,7 @@ export function KeybindingsSettingsPanel() {
               </div>
             ) : null}
           </div>
-        </div>
+        </ScrollArea>
       </SettingsSection>
     </SettingsPageContainer>
   );
