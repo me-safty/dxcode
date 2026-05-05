@@ -1,6 +1,7 @@
 import {
   ChevronDownIcon,
   CircleXIcon,
+  FileJsonIcon,
   InfoIcon,
   KeyboardIcon,
   MinusIcon,
@@ -8,14 +9,25 @@ import {
   SearchIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { type KeyboardEvent, useCallback, useMemo, useReducer, useState } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { type KeybindingCommand, type KeybindingWhenNode } from "@t3tools/contracts";
 
 import { isElectron } from "../../env";
+import { openInPreferredEditor } from "../../editorPreferences";
 import { formatShortcutLabel } from "../../keybindings";
 import { cn } from "../../lib/utils";
 import { ensureLocalApi } from "../../localApi";
-import { useServerKeybindings } from "../../rpc/serverState";
+import { useServerKeybindings, useServerKeybindingsConfigPath } from "../../rpc/serverState";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Kbd, KbdGroup } from "../ui/kbd";
@@ -70,7 +82,7 @@ function StatusBadge({ source }: { source: KeybindingRow["source"] }) {
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded-sm border px-1.5 text-[11px] font-medium",
+        "inline-flex h-7 items-center rounded-md border px-2.5 text-xs font-medium",
         source === "Default" && "border-border/70 text-muted-foreground",
         source === "Custom" && "border-primary/30 bg-primary/8 text-primary",
         source === "Project" &&
@@ -79,6 +91,73 @@ function StatusBadge({ source }: { source: KeybindingRow["source"] }) {
     >
       {source}
     </span>
+  );
+}
+
+function ExpandableHeaderSearch({
+  query,
+  onChange,
+  isOpen,
+  onOpenChange,
+  inputRef,
+  collapsedAccessory,
+}: {
+  query: string;
+  onChange: (next: string) => void;
+  isOpen: boolean;
+  onOpenChange: (next: boolean) => void;
+  inputRef?: RefObject<HTMLInputElement | null>;
+  collapsedAccessory?: ReactNode;
+}) {
+  if (!isOpen) {
+    return (
+      <>
+        {collapsedAccessory}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
+                onClick={() => onOpenChange(true)}
+                aria-label="Search keybindings"
+              >
+                <SearchIcon className="size-3" />
+              </Button>
+            }
+          />
+          <TooltipPopup side="top">Search keybindings</TooltipPopup>
+        </Tooltip>
+      </>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground" />
+      <input
+        ref={inputRef}
+        autoFocus
+        type="text"
+        value={query}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        onBlur={() => {
+          if (query.length === 0) onOpenChange(false);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onChange("");
+            onOpenChange(false);
+          }
+        }}
+        placeholder="Search keybindings"
+        aria-label="Search keybindings"
+        className="h-6 w-44 rounded-md border border-input bg-background pl-7 pr-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/72 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24"
+      />
+    </div>
   );
 }
 
@@ -658,6 +737,7 @@ function KeybindingTableRow({
   const isDirty = keyDraft !== row.key || whenDraftExpression !== row.when;
   const displayShortcut = formatShortcutLabel(row.binding.shortcut);
   const canReset = row.source === "Custom" && row.defaultKey !== null;
+  const showPill = !isRecording && keyDraft === row.key && row.key.length > 0 && !isDirty;
 
   const save = () => {
     onSave({ command: row.command, key: keyDraft, when: whenDraftExpression });
@@ -683,24 +763,33 @@ function KeybindingTableRow({
         </div>
       </div>
       <div className="flex min-w-0 items-center gap-2 pr-4">
-        <Input
-          aria-label={`Keybinding for ${commandLabel(row.command)}`}
-          value={isRecording ? "" : keyDraft}
-          placeholder={isRecording ? "Press shortcut" : "Unassigned"}
-          className={cn(
-            "h-7 w-32 rounded-md font-mono text-[12px] sm:h-7",
-            isRecording && "border-primary/70 bg-primary/5",
-          )}
-          onFocus={() => setDraft({ isRecording: true })}
-          onBlur={() => setDraft({ isRecording: false })}
-          onChange={(event) => setDraft({ keyDraft: event.currentTarget.value })}
-          onKeyDown={captureKeybinding}
-        />
-        {keyDraft === row.key && row.key ? (
-          <div className="hidden min-w-28 sm:block">
+        {showPill ? (
+          <button
+            type="button"
+            onClick={() => setDraft({ isRecording: true })}
+            aria-label={`Edit shortcut for ${commandLabel(row.command)}`}
+            className="group inline-flex h-7 items-center gap-1.5 rounded-md border border-transparent px-1.5 outline-none transition-colors hover:border-border/70 hover:bg-background focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/24"
+          >
             <KeybindingPill value={row.key} />
-          </div>
-        ) : null}
+            <span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/0 transition-opacity group-hover:text-muted-foreground/70 group-focus-visible:text-muted-foreground/70">
+              Edit
+            </span>
+          </button>
+        ) : (
+          <Input
+            aria-label={`Keybinding for ${commandLabel(row.command)}`}
+            value={isRecording ? "" : keyDraft}
+            placeholder={isRecording ? "Press shortcut" : "Unassigned"}
+            className={cn(
+              "h-7 w-44 rounded-md font-mono text-[12px] sm:h-7",
+              isRecording && "border-primary/70 bg-primary/5",
+            )}
+            onFocus={() => setDraft({ isRecording: true })}
+            onBlur={() => setDraft({ isRecording: false })}
+            onChange={(event) => setDraft({ keyDraft: event.currentTarget.value })}
+            onKeyDown={captureKeybinding}
+          />
+        )}
       </div>
       <div className="pr-4">
         <Popover>
@@ -757,10 +846,52 @@ function KeybindingTableRow({
 
 export function KeybindingsSettingsPanel() {
   const keybindings = useServerKeybindings();
+  const keybindingsConfigPath = useServerKeybindingsConfigPath();
   const [query, setQuery] = useState("");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [savingCommand, setSavingCommand] = useState<KeybindingCommand | null>(null);
   const rows = useMemo(() => buildKeybindingRows(keybindings, query), [keybindings, query]);
   const whenVariables = useMemo(() => buildWhenVariableOptions(keybindings), [keybindings]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      const isMod = event.metaKey || event.ctrlKey;
+      if (!isMod || event.altKey || event.key.toLowerCase() !== "f") return;
+
+      const target = event.target;
+      if (
+        target !== searchInputRef.current &&
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      setIsSearchOpen(true);
+      requestAnimationFrame(() => {
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      });
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  const openKeybindingsFile = useCallback(() => {
+    if (!keybindingsConfigPath) return;
+    void openInPreferredEditor(ensureLocalApi(), keybindingsConfigPath).catch((error: unknown) => {
+      toastManager.add({
+        title: "Unable to open keybindings file",
+        description:
+          error instanceof Error ? error.message : "The keybindings file was not opened.",
+        type: "error",
+      });
+    });
+  }, [keybindingsConfigPath]);
 
   const saveKeybinding = useCallback(
     (input: { command: KeybindingCommand; key: string; when: string }) => {
@@ -797,15 +928,46 @@ export function KeybindingsSettingsPanel() {
     [saveKeybinding],
   );
 
+  const bindingsCount = (
+    <span className="text-[11px] text-muted-foreground">
+      {rows.length} {rows.length === 1 ? "binding" : "bindings"}
+    </span>
+  );
+
   return (
     <SettingsPageContainer className="max-w-5xl">
       <SettingsSection
         title="Keybindings"
         icon={<KeyboardIcon className="size-3.5" />}
         headerAction={
-          <span className="text-[11px] text-muted-foreground">
-            {rows.length} {rows.length === 1 ? "binding" : "bindings"}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <ExpandableHeaderSearch
+              query={query}
+              onChange={setQuery}
+              isOpen={isSearchOpen}
+              onOpenChange={setIsSearchOpen}
+              inputRef={searchInputRef}
+              collapsedAccessory={bindingsCount}
+            />
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
+                    disabled={!keybindingsConfigPath}
+                    onClick={openKeybindingsFile}
+                    aria-label="Open keybindings.json"
+                  >
+                    <FileJsonIcon className="size-3" />
+                  </Button>
+                }
+              />
+              <TooltipPopup side="top">Open keybindings.json</TooltipPopup>
+            </Tooltip>
+          </div>
         }
       >
         {!isElectron ? (
@@ -817,19 +979,6 @@ export function KeybindingsSettingsPanel() {
             </p>
           </div>
         ) : null}
-
-        <div className="border-b border-border/70 p-3 sm:p-4">
-          <div className="relative">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.currentTarget.value)}
-              placeholder="Search keybindings"
-              className="h-9 pl-9 text-sm"
-              aria-label="Search keybindings"
-            />
-          </div>
-        </div>
 
         <div className="overflow-x-auto">
           <div className="grid min-w-[730px] grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,0.9fr)_110px] border-b border-border/70 bg-muted/25 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
