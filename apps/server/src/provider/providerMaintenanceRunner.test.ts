@@ -10,12 +10,8 @@ import { Cause, Effect, Exit, Fiber, Layer, Ref, Schema, Sink, Stream } from "ef
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
-import type { ProviderRegistryShape } from "./Services/ProviderRegistry.ts";
-import {
-  makeProviderMaintenanceRunner,
-  type ProviderMaintenanceCommandRunner,
-  type ProviderMaintenanceCommandResult,
-} from "./providerMaintenanceRunner.ts";
+import { ProviderRegistry, type ProviderRegistryShape } from "./Services/ProviderRegistry.ts";
+import * as ProviderMaintenanceRunner from "./providerMaintenanceRunner.ts";
 import {
   makeProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilities,
@@ -77,24 +73,6 @@ const baseOpenCodeProvider: ServerProvider = {
   driver: OPENCODE_DRIVER,
 };
 
-const okResult = (stdout = ""): ProviderMaintenanceCommandResult => ({
-  stdout,
-  stderr: "",
-  exitCode: 0,
-  timedOut: false,
-  stdoutTruncated: false,
-  stderrTruncated: false,
-});
-
-const failedResult = (stderr: string): ProviderMaintenanceCommandResult => ({
-  stdout: "",
-  stderr,
-  exitCode: 1,
-  timedOut: false,
-  stdoutTruncated: false,
-  stderrTruncated: false,
-});
-
 const latestVersionHttpClient = (version: string) =>
   Layer.succeed(
     HttpClient.HttpClient,
@@ -112,10 +90,11 @@ function mockHandle(result: {
   readonly stdout?: string;
   readonly stderr?: string;
   readonly code?: number;
+  readonly exitCode?: Effect.Effect<ChildProcessSpawner.ExitCode>;
 }) {
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(1),
-    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(result.code ?? 0)),
+    exitCode: result.exitCode ?? Effect.succeed(ChildProcessSpawner.ExitCode(result.code ?? 0)),
     isRunning: Effect.succeed(false),
     kill: () => Effect.void,
     unref: Effect.succeed(Effect.void),
@@ -132,7 +111,12 @@ function mockSpawnerLayer(
   handler: (
     command: string,
     args: ReadonlyArray<string>,
-  ) => { readonly stdout?: string; readonly stderr?: string; readonly code?: number },
+  ) => {
+    readonly stdout?: string;
+    readonly stderr?: string;
+    readonly code?: number;
+    readonly exitCode?: Effect.Effect<ChildProcessSpawner.ExitCode>;
+  },
 ) {
   return Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
@@ -155,32 +139,33 @@ function makeRegistry(
     );
     const updateStatesRef = yield* Ref.make<ReadonlyArray<ServerProviderUpdateState>>([]);
 
-    const setProviderMaintenanceActionState = (input: {
+    const setProviderMaintenanceActionState = Effect.fn(
+      "providerMaintenanceRunner.test.setProviderMaintenanceActionState",
+    )(function* (input: {
       readonly instanceId: ProviderInstanceId;
       readonly action: "update";
       readonly state: ServerProviderUpdateState | null;
-    }) =>
-      Effect.gen(function* () {
-        const updateState = input.state;
-        if (updateState) {
-          yield* Ref.update(updateStatesRef, (states) => [...states, updateState]);
-        }
-        return yield* Ref.updateAndGet(providersRef, (providers) =>
-          providers.map((candidate) => {
-            if (candidate.instanceId !== input.instanceId) {
-              return candidate;
-            }
-            if (!updateState) {
-              const { updateState: _updateState, ...providerWithoutUpdateState } = candidate;
-              return providerWithoutUpdateState;
-            }
-            return {
-              ...candidate,
-              updateState,
-            };
-          }),
-        );
-      });
+    }) {
+      const updateState = input.state;
+      if (updateState) {
+        yield* Ref.update(updateStatesRef, (states) => [...states, updateState]);
+      }
+      return yield* Ref.updateAndGet(providersRef, (providers) =>
+        providers.map((candidate) => {
+          if (candidate.instanceId !== input.instanceId) {
+            return candidate;
+          }
+          if (!updateState) {
+            const { updateState: _updateState, ...providerWithoutUpdateState } = candidate;
+            return providerWithoutUpdateState;
+          }
+          return {
+            ...candidate,
+            updateState,
+          };
+        }),
+      );
+    });
 
     const registry: ProviderRegistryShape = {
       getProviders: Ref.get(providersRef),
@@ -199,19 +184,21 @@ function makeRegistry(
   });
 }
 
+const makeTestRunner = (registry: ProviderRegistryShape) =>
+  Effect.service(ProviderMaintenanceRunner.ProviderMaintenanceRunner).pipe(
+    Effect.provide(
+      ProviderMaintenanceRunner.layer.pipe(
+        Layer.provide(Layer.succeed(ProviderRegistry, registry)),
+      ),
+    ),
+  );
+
 describe("providerMaintenanceRunner", () => {
-  it.effect("runs the allowlisted provider update command and records success", () =>
-    Effect.gen(function* () {
+  it.effect("runs the allowlisted provider update command and records success", () => {
+    const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
+    return Effect.gen(function* () {
       const { registry, updateStatesRef } = yield* makeRegistry(baseCursorProvider);
-      const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
-      const updater = yield* makeProviderMaintenanceRunner({
-        providerRegistry: registry,
-        runMaintenanceCommand: (command, args) =>
-          Effect.sync(() => {
-            calls.push({ command, args });
-            return okResult("updated");
-          }),
-      });
+      const updater = yield* makeTestRunner(registry);
 
       const result = yield* updater.updateProvider(CURSOR_DRIVER);
       assert.deepStrictEqual(calls, [
@@ -225,11 +212,19 @@ describe("providerMaintenanceRunner", () => {
         (yield* Ref.get(updateStatesRef)).map((state) => state.status),
         ["queued", "running", "succeeded"],
       );
-    }),
-  );
+    }).pipe(
+      Effect.provide(
+        mockSpawnerLayer((command, args) => {
+          calls.push({ command, args });
+          return { stdout: "updated" };
+        }),
+      ),
+    );
+  });
 
-  it.effect("uses the resolved provider capabilities when choosing the update executable", () =>
-    Effect.gen(function* () {
+  it.effect("uses the resolved provider capabilities when choosing the update executable", () => {
+    const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
+    return Effect.gen(function* () {
       const { registry } = yield* makeRegistry({
         ...baseProvider,
         versionAdvisory: {
@@ -242,26 +237,18 @@ describe("providerMaintenanceRunner", () => {
           message: "Update available.",
         },
       });
-      const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
-      const updater = yield* makeProviderMaintenanceRunner({
-        providerRegistry: {
-          ...registry,
-          getProviderMaintenanceCapabilitiesForInstance: () =>
-            Effect.succeed(
-              makeProviderMaintenanceCapabilities({
-                provider: CODEX_DRIVER,
-                packageName: "@openai/codex",
-                updateExecutable: "bun",
-                updateArgs: ["i", "-g", "@openai/codex@latest"],
-                updateLockKey: "bun-global",
-              }),
-            ),
-        },
-        runMaintenanceCommand: (command, args) =>
-          Effect.sync(() => {
-            calls.push({ command, args });
-            return okResult("updated");
-          }),
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: () =>
+          Effect.succeed(
+            makeProviderMaintenanceCapabilities({
+              provider: CODEX_DRIVER,
+              packageName: "@openai/codex",
+              updateExecutable: "bun",
+              updateArgs: ["i", "-g", "@openai/codex@latest"],
+              updateLockKey: "bun-global",
+            }),
+          ),
       });
 
       yield* updater.updateProvider(CODEX_DRIVER);
@@ -271,8 +258,15 @@ describe("providerMaintenanceRunner", () => {
           args: ["i", "-g", "@openai/codex@latest"],
         },
       ]);
-    }),
-  );
+    }).pipe(
+      Effect.provide(
+        mockSpawnerLayer((command, args) => {
+          calls.push({ command, args });
+          return { stdout: "updated" };
+        }),
+      ),
+    );
+  });
 
   it.effect(
     "runs update commands through Effect ChildProcess when no test runner is injected",
@@ -280,9 +274,7 @@ describe("providerMaintenanceRunner", () => {
       const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
       return Effect.gen(function* () {
         const { registry } = yield* makeRegistry(baseProvider);
-        const runner = yield* makeProviderMaintenanceRunner({
-          providerRegistry: registry,
-        });
+        const runner = yield* makeTestRunner(registry);
 
         const result = yield* runner.updateProvider(CODEX_DRIVER);
 
@@ -304,8 +296,9 @@ describe("providerMaintenanceRunner", () => {
     },
   );
 
-  it.effect("updates a single provider instance without touching sibling instances", () =>
-    Effect.gen(function* () {
+  it.effect("updates a single provider instance without touching sibling instances", () => {
+    const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
+    return Effect.gen(function* () {
       const personalInstanceId = ProviderInstanceId.make("codex_personal");
       const workInstanceId = ProviderInstanceId.make("codex_work");
       const refreshedInstanceIds: Array<ProviderInstanceId> = [];
@@ -321,38 +314,28 @@ describe("providerMaintenanceRunner", () => {
           version: "0.124.0-alpha.3",
         },
       ]);
-      const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
-      const updater = yield* makeProviderMaintenanceRunner({
-        providerRegistry: {
-          ...registry,
-          getProviderMaintenanceCapabilitiesForInstance: (instanceId, provider) =>
-            Effect.succeed(
-              makeProviderMaintenanceCapabilities({
-                provider,
-                packageName: "@openai/codex-instance-test",
-                updateExecutable: "vp",
-                updateArgs: ["i", "-g", "@openai/codex"],
-                updateLockKey: "vite-plus-global",
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: (instanceId, provider) =>
+          Effect.succeed(
+            makeProviderMaintenanceCapabilities({
+              provider,
+              packageName: "@openai/codex-instance-test",
+              updateExecutable: "vp",
+              updateArgs: ["i", "-g", "@openai/codex"],
+              updateLockKey: "vite-plus-global",
+            }),
+          ).pipe(
+            Effect.tap(() => Effect.sync(() => assert.strictEqual(instanceId, personalInstanceId))),
+          ),
+        refreshInstance: (instanceId) =>
+          registry.refreshInstance(instanceId).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                refreshedInstanceIds.push(instanceId);
               }),
-            ).pipe(
-              Effect.tap(() =>
-                Effect.sync(() => assert.strictEqual(instanceId, personalInstanceId)),
-              ),
             ),
-          refreshInstance: (instanceId) =>
-            registry.refreshInstance(instanceId).pipe(
-              Effect.tap(() =>
-                Effect.sync(() => {
-                  refreshedInstanceIds.push(instanceId);
-                }),
-              ),
-            ),
-        },
-        runMaintenanceCommand: (command, args) =>
-          Effect.sync(() => {
-            calls.push({ command, args });
-            return okResult("updated");
-          }),
+          ),
       });
 
       const result = yield* updater.updateProvider({
@@ -371,16 +354,23 @@ describe("providerMaintenanceRunner", () => {
       assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
       assert.strictEqual(result.providers[1]?.instanceId, workInstanceId);
       assert.strictEqual(result.providers[1]?.updateState, undefined);
-    }).pipe(Effect.provide(latestVersionHttpClient("0.124.0-alpha.3"))),
-  );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          latestVersionHttpClient("0.124.0-alpha.3"),
+          mockSpawnerLayer((command, args) => {
+            calls.push({ command, args });
+            return { stdout: "updated" };
+          }),
+        ),
+      ),
+    );
+  });
 
   it.effect("records command failure output in provider update state", () =>
     Effect.gen(function* () {
       const { registry } = yield* makeRegistry();
-      const updater = yield* makeProviderMaintenanceRunner({
-        providerRegistry: registry,
-        runMaintenanceCommand: () => Effect.succeed(failedResult("permission denied")),
-      });
+      const updater = yield* makeTestRunner(registry);
 
       const result = yield* updater.updateProvider(CODEX_DRIVER);
       const updateState = result.providers[0]?.updateState;
@@ -388,7 +378,7 @@ describe("providerMaintenanceRunner", () => {
       assert.strictEqual(updateState?.status, "failed");
       assert.strictEqual(updateState?.message, "Update command exited with code 1.");
       assert.include(updateState?.output ?? "", "permission denied");
-    }),
+    }).pipe(Effect.provide(mockSpawnerLayer(() => ({ stderr: "permission denied", code: 1 })))),
   );
 
   it.effect(
@@ -400,39 +390,34 @@ describe("providerMaintenanceRunner", () => {
           installed: true,
           version: "0.1.0",
         });
-        const updater = yield* makeProviderMaintenanceRunner({
-          providerRegistry: registry,
-          runMaintenanceCommand: () => Effect.succeed(okResult()),
-        });
+        const updater = yield* makeTestRunner(registry);
 
         const result = yield* updater.updateProvider(CODEX_DRIVER);
 
         assert.strictEqual(result.providers[0]?.updateState?.status, "unchanged");
         assert.include(result.providers[0]?.updateState?.message ?? "", "still detects");
-      }).pipe(Effect.provide(latestVersionHttpClient("9.9.9"))),
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            latestVersionHttpClient("9.9.9"),
+            mockSpawnerLayer(() => ({ stdout: "updated" })),
+          ),
+        ),
+      ),
   );
 
-  it.effect("prevents concurrent updates for the same provider", () =>
-    Effect.gen(function* () {
+  it.effect("prevents concurrent updates for the same provider", () => {
+    const startedLatch: { resolve: () => void } = { resolve: () => {} };
+    const releaseLatch: { resolve: () => void } = { resolve: () => {} };
+    const started = new Promise<void>((resolve) => {
+      startedLatch.resolve = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseLatch.resolve = resolve;
+    });
+    return Effect.gen(function* () {
       const { registry } = yield* makeRegistry();
-      const startedLatch: { resolve: () => void } = { resolve: () => {} };
-      const releaseLatch: { resolve: () => void } = { resolve: () => {} };
-      const started = new Promise<void>((resolve) => {
-        startedLatch.resolve = resolve;
-      });
-      const release = new Promise<void>((resolve) => {
-        releaseLatch.resolve = resolve;
-      });
-      const runner: ProviderMaintenanceCommandRunner = () =>
-        Effect.gen(function* () {
-          startedLatch.resolve();
-          yield* Effect.promise(() => release);
-          return okResult();
-        });
-      const updater = yield* makeProviderMaintenanceRunner({
-        providerRegistry: registry,
-        runMaintenanceCommand: runner,
-      });
+      const updater = yield* makeTestRunner(registry);
 
       const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
       yield* Effect.promise(() => started);
@@ -449,47 +434,48 @@ describe("providerMaintenanceRunner", () => {
 
       releaseLatch.resolve();
       yield* Fiber.join(first);
-    }),
-  );
-
-  it.effect("serializes different providers that share the same update lock key", () =>
-    Effect.gen(function* () {
-      const { registry } = yield* makeRegistry([baseProvider, baseOpenCodeProvider]);
-      const firstStartedLatch: { resolve: () => void } = { resolve: () => {} };
-      const releaseFirstLatch: { resolve: () => void } = { resolve: () => {} };
-      const firstStarted = new Promise<void>((resolve) => {
-        firstStartedLatch.resolve = resolve;
-      });
-      const releaseFirst = new Promise<void>((resolve) => {
-        releaseFirstLatch.resolve = resolve;
-      });
-      const calls: Array<string> = [];
-      const updater = yield* makeProviderMaintenanceRunner({
-        providerRegistry: {
-          ...registry,
-          getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
-            Effect.succeed(
-              makeProviderMaintenanceCapabilities({
-                provider,
-                packageName: provider === OPENCODE_DRIVER ? "opencode-ai" : "@openai/codex",
-                updateExecutable: "npm",
-                updateArgs:
-                  provider === OPENCODE_DRIVER
-                    ? ["install", "-g", "opencode-ai@latest"]
-                    : ["install", "-g", "@openai/codex@latest"],
-                updateLockKey: "npm-global",
-              }),
+    }).pipe(
+      Effect.provide(
+        mockSpawnerLayer(() => {
+          startedLatch.resolve();
+          return {
+            stdout: "updated",
+            exitCode: Effect.promise(() => release).pipe(
+              Effect.as(ChildProcessSpawner.ExitCode(0)),
             ),
-        },
-        runMaintenanceCommand: (_command, args) =>
-          Effect.gen(function* () {
-            calls.push(args.join(" "));
-            if (calls.length === 1) {
-              firstStartedLatch.resolve();
-              yield* Effect.promise(() => releaseFirst);
-            }
-            return okResult();
-          }),
+          };
+        }),
+      ),
+    );
+  });
+
+  it.effect("serializes different providers that share the same update lock key", () => {
+    const firstStartedLatch: { resolve: () => void } = { resolve: () => {} };
+    const releaseFirstLatch: { resolve: () => void } = { resolve: () => {} };
+    const firstStarted = new Promise<void>((resolve) => {
+      firstStartedLatch.resolve = resolve;
+    });
+    const releaseFirst = new Promise<void>((resolve) => {
+      releaseFirstLatch.resolve = resolve;
+    });
+    const calls: Array<string> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry([baseProvider, baseOpenCodeProvider]);
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+          Effect.succeed(
+            makeProviderMaintenanceCapabilities({
+              provider,
+              packageName: provider === OPENCODE_DRIVER ? "opencode-ai" : "@openai/codex",
+              updateExecutable: "npm",
+              updateArgs:
+                provider === OPENCODE_DRIVER
+                  ? ["install", "-g", "opencode-ai@latest"]
+                  : ["install", "-g", "@openai/codex@latest"],
+              updateLockKey: "npm-global",
+            }),
+          ),
       });
 
       const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
@@ -507,39 +493,55 @@ describe("providerMaintenanceRunner", () => {
         "install -g @openai/codex@latest",
         "install -g opencode-ai@latest",
       ]);
-    }),
-  );
+    }).pipe(
+      Effect.provide(
+        mockSpawnerLayer((_command, args) => {
+          calls.push(args.join(" "));
+          if (calls.length === 1) {
+            firstStartedLatch.resolve();
+            return {
+              stdout: "updated",
+              exitCode: Effect.promise(() => releaseFirst).pipe(
+                Effect.as(ChildProcessSpawner.ExitCode(0)),
+              ),
+            };
+          }
+          return { stdout: "updated" };
+        }),
+      ),
+    );
+  });
 
-  it.effect("accepts arbitrary driver-provided update lock keys", () =>
-    Effect.gen(function* () {
+  it.effect("accepts arbitrary driver-provided update lock keys", () => {
+    const calls: Array<string> = [];
+    return Effect.gen(function* () {
       const { registry } = yield* makeRegistry(baseProvider);
-      const calls: Array<string> = [];
-      const updater = yield* makeProviderMaintenanceRunner({
-        providerRegistry: {
-          ...registry,
-          getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
-            Effect.succeed(
-              makeProviderMaintenanceCapabilities({
-                provider,
-                packageName: "@openai/codex",
-                updateExecutable: "npm",
-                updateArgs: ["install", "-g", "@openai/codex@latest"],
-                updateLockKey: "unknown-lock-key",
-              }),
-            ),
-        },
-        runMaintenanceCommand: (_command, args) =>
-          Effect.sync(() => {
-            calls.push(args.join(" "));
-            return okResult();
-          }),
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+          Effect.succeed(
+            makeProviderMaintenanceCapabilities({
+              provider,
+              packageName: "@openai/codex",
+              updateExecutable: "npm",
+              updateArgs: ["install", "-g", "@openai/codex@latest"],
+              updateLockKey: "unknown-lock-key",
+            }),
+          ),
       });
 
       const result = yield* updater.updateProvider(CODEX_DRIVER);
       assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
       assert.deepStrictEqual(calls, ["install -g @openai/codex@latest"]);
-    }),
-  );
+    }).pipe(
+      Effect.provide(
+        mockSpawnerLayer((_command, args) => {
+          calls.push(args.join(" "));
+          return { stdout: "updated" };
+        }),
+      ),
+    );
+  });
 
   it.effect(
     "releases the running-provider marker when interrupted after queuing but before the lock run starts",
@@ -556,20 +558,18 @@ describe("providerMaintenanceRunner", () => {
           releaseQueuedStateLatch.resolve = resolve;
         });
 
-        const updater = yield* makeProviderMaintenanceRunner({
-          providerRegistry: {
-            ...registry,
-            setProviderMaintenanceActionState: (input) =>
-              Effect.gen(function* () {
-                const providers = yield* registry.setProviderMaintenanceActionState(input);
-                if (input.state?.status === "queued" && blockQueuedState) {
-                  queuedStateWrittenLatch.resolve();
-                  yield* Effect.promise(() => releaseQueuedState);
-                }
-                return providers;
-              }),
-          },
-          runMaintenanceCommand: () => Effect.succeed(okResult()),
+        const updater = yield* makeTestRunner({
+          ...registry,
+          setProviderMaintenanceActionState: Effect.fn(
+            "providerMaintenanceRunner.test.blockQueuedState",
+          )(function* (input) {
+            const providers = yield* registry.setProviderMaintenanceActionState(input);
+            if (input.state?.status === "queued" && blockQueuedState) {
+              queuedStateWrittenLatch.resolve();
+              yield* Effect.promise(() => releaseQueuedState);
+            }
+            return providers;
+          }),
         });
 
         const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
@@ -584,6 +584,6 @@ describe("providerMaintenanceRunner", () => {
         if (Exit.isSuccess(second)) {
           assert.strictEqual(second.value.providers[0]?.updateState?.status, "succeeded");
         }
-      }),
+      }).pipe(Effect.provide(mockSpawnerLayer(() => ({ stdout: "updated" })))),
   );
 });
