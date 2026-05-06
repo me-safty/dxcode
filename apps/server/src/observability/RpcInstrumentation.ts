@@ -1,5 +1,5 @@
 import { WS_METHODS } from "@t3tools/contracts";
-import { Duration, Effect, Exit, Metric, Stream } from "effect";
+import { Clock, Duration, Effect, Exit, Metric, References, Stream } from "effect";
 
 import { outcomeFromExit } from "./Attributes.ts";
 import { metricAttributes, rpcRequestDuration, rpcRequestsTotal, withMetrics } from "./Metrics.ts";
@@ -28,15 +28,44 @@ const rpcSpanAttributes = (
   ...traceAttributes,
 });
 
+const withRpcEffectTracing = <A, E, R>(
+  method: string,
+  effect: Effect.Effect<A, E, R>,
+  traceAttributes?: Readonly<Record<string, unknown>>,
+): Effect.Effect<A, E, R> =>
+  shouldTraceRpc(method)
+    ? effect.pipe(
+        Effect.withSpan(`${RPC_SPAN_PREFIX}.${method}`, {
+          attributes: rpcSpanAttributes(method, traceAttributes),
+        }),
+      )
+    : effect.pipe(Effect.withTracerEnabled(false));
+
+const withRpcStreamTracing = <A, E, R>(
+  method: string,
+  stream: Stream.Stream<A, E, R>,
+  traceAttributes?: Readonly<Record<string, unknown>>,
+): Stream.Stream<A, E, R> =>
+  shouldTraceRpc(method)
+    ? stream.pipe(
+        Stream.withSpan(`${RPC_SPAN_PREFIX}.${method}`, {
+          attributes: rpcSpanAttributes(method, traceAttributes),
+        }),
+      )
+    : stream.pipe(Stream.provideService(References.TracerEnabled, false));
+
 const recordRpcStreamMetrics = <E>(
   method: string,
-  startedAt: number,
+  startedAt: bigint,
   exit: Exit.Exit<unknown, E>,
 ): Effect.Effect<void, never, never> =>
   Effect.gen(function* () {
+    const endedAt = yield* Clock.currentTimeNanos;
+    const elapsedNanos = endedAt > startedAt ? endedAt - startedAt : 0n;
+
     yield* Metric.update(
       Metric.withAttributes(rpcRequestDuration, metricAttributes({ method })),
-      Duration.millis(Math.max(0, Date.now() - startedAt)),
+      Duration.nanos(elapsedNanos),
     );
     yield* Metric.update(
       Metric.withAttributes(
@@ -65,13 +94,7 @@ export const observeRpcEffect = <A, E, R>(
     }),
   );
 
-  return shouldTraceRpc(method)
-    ? instrumented.pipe(
-        Effect.withSpan(`${RPC_SPAN_PREFIX}.${method}`, {
-          attributes: rpcSpanAttributes(method, traceAttributes),
-        }),
-      )
-    : instrumented.pipe(Effect.withTracerEnabled(false));
+  return withRpcEffectTracing(method, instrumented, traceAttributes);
 };
 
 export const observeRpcStream = <A, E, R>(
@@ -81,18 +104,12 @@ export const observeRpcStream = <A, E, R>(
 ): Stream.Stream<A, E, R> => {
   const instrumented = Stream.unwrap(
     Effect.gen(function* () {
-      const startedAt = Date.now();
+      const startedAt = yield* Clock.currentTimeNanos;
       return stream.pipe(Stream.onExit((exit) => recordRpcStreamMetrics(method, startedAt, exit)));
     }),
   );
 
-  return shouldTraceRpc(method)
-    ? instrumented.pipe(
-        Stream.withSpan(`${RPC_SPAN_PREFIX}.${method}`, {
-          attributes: rpcSpanAttributes(method, traceAttributes),
-        }),
-      )
-    : instrumented;
+  return withRpcStreamTracing(method, instrumented, traceAttributes);
 };
 
 export const observeRpcStreamEffect = <A, StreamError, StreamContext, EffectError, EffectContext>(
@@ -102,7 +119,7 @@ export const observeRpcStreamEffect = <A, StreamError, StreamContext, EffectErro
 ): Stream.Stream<A, StreamError | EffectError, StreamContext | EffectContext> => {
   const instrumented = Stream.unwrap(
     Effect.gen(function* () {
-      const startedAt = Date.now();
+      const startedAt = yield* Clock.currentTimeNanos;
       const exit = yield* Effect.exit(effect);
 
       if (Exit.isFailure(exit)) {
@@ -116,11 +133,5 @@ export const observeRpcStreamEffect = <A, StreamError, StreamContext, EffectErro
     }),
   );
 
-  return shouldTraceRpc(method)
-    ? instrumented.pipe(
-        Stream.withSpan(`${RPC_SPAN_PREFIX}.${method}`, {
-          attributes: rpcSpanAttributes(method, traceAttributes),
-        }),
-      )
-    : instrumented;
+  return withRpcStreamTracing(method, instrumented, traceAttributes);
 };
