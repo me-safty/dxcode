@@ -792,3 +792,16 @@ Append one entry per implementation pass.
   - Result: PASS
 - Notes/deviations:
   - The Codex command files are generated wrappers; update `.claude/commands/*.md` first, then run `bun codex:sync`.
+
+### 2026-05-06 15:40 - phase 1 CI runner portability
+
+- Summary:
+  - Switched PR CI jobs from Blacksmith runner labels to GitHub-hosted `ubuntu-24.04` so this fork can run required checks without external runner setup.
+- Files changed:
+  - `.github/workflows/ci.yml`
+  - `docs/tasks/t3-kanban-project-console.md`
+- Validation run:
+  - Command: `bun run fmt:check`
+  - Result: PASS
+- Notes/deviations:
+  - Blacksmith-specific release workflow labels remain outside this PR's required checks and can be revisited when release infrastructure is configured.
