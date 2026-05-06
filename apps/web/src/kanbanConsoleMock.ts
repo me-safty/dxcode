@@ -406,22 +406,48 @@ const commandRuns: KanbanConsoleCommandRun[] = [
 const gitStatuses: KanbanConsoleGitStatusSnapshot[] = [
   {
     repoId: "repo-kanban-console",
+    cwd: "/Users/mohanghabo/Projects/kanban-console",
+    isRepo: true,
     branch: "feature/t3-kanban-phase-3-contracts",
     upstream: "origin/feature/t3-kanban-phase-3-contracts",
     ahead: 1,
     behind: 0,
+    aheadOfDefault: 1,
     files: [
       {
         path: "apps/web/src/components/KanbanConsoleMock.tsx",
         status: "unstaged",
+        change: "modified",
         additions: 42,
         deletions: 3,
+        diffAvailable: true,
+        hunkStaging: "supported",
+      },
+      {
+        path: "apps/server/src/kanban/GitStatusProvider.ts",
+        status: "staged",
+        change: "added",
+        additions: 180,
+        deletions: 0,
+        diffAvailable: true,
+        hunkStaging: "supported",
       },
       {
         path: "packages/contracts/src/kanbanConsole.ts",
         status: "untracked",
+        change: "added",
         additions: 250,
         deletions: 0,
+        diffAvailable: true,
+        hunkStaging: "not-applicable",
+      },
+    ],
+    policyViolations: [
+      {
+        id: "missing-upstream",
+        kind: "missing-upstream",
+        severity: "warning",
+        message: "Branch has no upstream tracking branch in the mock GitOps state.",
       },
     ],
   },
@@ -463,9 +489,12 @@ const gitOpsPolicy: KanbanConsoleGitOpsPolicy = {
 
 const releaseReadiness: KanbanConsoleReleaseReadiness = {
   branch: "release/product-artifacts",
+  latestTag: "v0.4.0",
+  targetTag: "v0.5.0",
   gates: [
     { id: "gate-validate", label: "Validate", status: "passing" },
     { id: "gate-smoke", label: "Release smoke", status: "pending" },
+    { id: "gate-tag-readiness", label: "Tag readiness", status: "passing" },
     { id: "gate-policy", label: "Protected branch policy", status: "blocked" },
   ],
 };
