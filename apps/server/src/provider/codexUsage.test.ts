@@ -30,6 +30,30 @@ describe("normalizeCodexUsageSnapshot", () => {
     });
   });
 
+  it("prefers the codex named multi-bucket over the legacy bucket", () => {
+    const snapshot = normalizeCodexUsageSnapshot({
+      providerInstanceId: instanceId,
+      source: "read",
+      checkedAt: "2026-05-04T00:00:00.000Z",
+      payload: {
+        rateLimits: {
+          primary: { usedPercent: 90, windowDurationMins: 300 },
+        },
+        rateLimitsByName: {
+          codex: {
+            primary: { usedPercent: 25, windowDurationMins: 300 },
+          },
+        },
+      },
+    });
+
+    expect(snapshot?.windows[0]).toMatchObject({
+      kind: "five-hour",
+      usedPercent: 25,
+      remainingPercent: 75,
+    });
+  });
+
   it("falls back to the top-level rateLimits bucket", () => {
     const snapshot = normalizeCodexUsageSnapshot({
       providerInstanceId: instanceId,
@@ -116,6 +140,62 @@ describe("normalizeCodexUsageSnapshot", () => {
     ]);
   });
 
+  it("maps Codex named buckets when duration metadata is absent", () => {
+    const snapshot = normalizeCodexUsageSnapshot({
+      providerInstanceId: instanceId,
+      source: "read",
+      payload: {
+        rateLimits: {},
+        rateLimitsByName: {
+          "5-hour limit": {
+            primary: { usedPercent: 12 },
+          },
+          "weekly limit": {
+            primary: { usedPercent: 34 },
+          },
+        },
+      },
+    });
+
+    expect(snapshot?.windows).toEqual([
+      {
+        kind: "five-hour",
+        usedPercent: 12,
+        remainingPercent: 88,
+        resetsAt: null,
+        windowDurationMins: null,
+      },
+      {
+        kind: "weekly",
+        usedPercent: 34,
+        remainingPercent: 66,
+        resetsAt: null,
+        windowDurationMins: null,
+      },
+    ]);
+  });
+
+  it("falls through empty limit-id buckets to named buckets", () => {
+    const snapshot = normalizeCodexUsageSnapshot({
+      providerInstanceId: instanceId,
+      source: "read",
+      payload: {
+        rateLimits: {},
+        rateLimitsByLimitId: {},
+        rateLimitsByName: {
+          "5-hour limit": {
+            primary: { usedPercent: 12 },
+          },
+        },
+      },
+    });
+
+    expect(snapshot?.windows[0]).toMatchObject({
+      kind: "five-hour",
+      usedPercent: 12,
+    });
+  });
+
   it("sorts fallback limit-id buckets by display priority", () => {
     const snapshot = normalizeCodexUsageSnapshot({
       providerInstanceId: instanceId,
@@ -144,6 +224,24 @@ describe("normalizeCodexUsageSnapshot", () => {
         rateLimits: {},
         rateLimitsByLimitId: {
           FiveHourLimit: {
+            primary: { usedPercent: 100 },
+            rateLimitReachedType: "primary",
+          },
+        },
+      },
+    });
+
+    expect(snapshot?.rateLimitReachedType).toBe("primary");
+  });
+
+  it("carries rate limit reached type from named fallback buckets", () => {
+    const snapshot = normalizeCodexUsageSnapshot({
+      providerInstanceId: instanceId,
+      source: "read",
+      payload: {
+        rateLimits: {},
+        rateLimitsByName: {
+          "5-hour limit": {
             primary: { usedPercent: 100 },
             rateLimitReachedType: "primary",
           },

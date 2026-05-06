@@ -17,6 +17,7 @@ type RateLimitWindow = {
 
 type RateLimitBucket = {
   readonly limitId?: string | null;
+  readonly limitName?: string | null;
   readonly primary?: RateLimitWindow | null;
   readonly secondary?: RateLimitWindow | null;
   readonly rateLimitReachedType?: string | null;
@@ -32,12 +33,21 @@ type RateLimitPayload = {
   readonly rateLimitReachedType?: string | null;
   readonly rateLimits?: RateLimitBucket | null;
   readonly rateLimitsByLimitId?: Record<string, RateLimitBucket> | null;
+  readonly rateLimitsByName?: Record<string, RateLimitBucket> | null;
 };
 
 const FIVE_HOUR_WINDOW_MINS = 300;
 const WEEKLY_WINDOW_MINS = 10_080;
 
-const FIVE_HOUR_LIMIT_IDS = new Set(["fivehourlimit", "five_hour_limit", "5hourlimit", "5h"]);
+const FIVE_HOUR_LIMIT_IDS = new Set([
+  "fivehour",
+  "fivehourlimit",
+  "five_hour_limit",
+  "5hour",
+  "5hourlimit",
+  "5h",
+  "5hlimit",
+]);
 const WEEKLY_LIMIT_IDS = new Set(["weeklylimit", "weekly_limit", "week", "weekly"]);
 
 function unixSecondsToIso(value: number | null | undefined): string | null {
@@ -71,8 +81,10 @@ function windowKindForDuration(
   return null;
 }
 
-function windowKindForLimitId(limitId: string | null | undefined): CodexUsageWindow["kind"] | null {
-  const normalized = limitId
+function windowKindForLimitKey(
+  limitKey: string | null | undefined,
+): CodexUsageWindow["kind"] | null {
+  const normalized = limitKey
     ?.trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "");
@@ -126,18 +138,23 @@ function selectCodexBucket(payload: RateLimitPayload): RateLimitBucket | null {
   if (isRateLimitBucketPayload(payload)) {
     return payload;
   }
-  return payload.rateLimitsByLimitId?.codex ?? payload.rateLimits ?? null;
+  return (
+    payload.rateLimitsByLimitId?.codex ??
+    payload.rateLimitsByName?.codex ??
+    payload.rateLimits ??
+    null
+  );
 }
 
-function windowsFromLimitIdBuckets(
+function windowsFromBuckets(
   buckets: Record<string, RateLimitBucket> | null | undefined,
 ): CodexUsageWindow[] {
   if (!buckets) {
     return [];
   }
   const windows: CodexUsageWindow[] = [];
-  for (const [limitId, bucket] of Object.entries(buckets)) {
-    const kind = windowKindForLimitId(limitId);
+  for (const [limitKey, bucket] of Object.entries(buckets)) {
+    const kind = windowKindForLimitKey(bucket.limitId ?? bucket.limitName ?? limitKey);
     if (!kind) {
       continue;
     }
@@ -149,15 +166,42 @@ function windowsFromLimitIdBuckets(
   return sortCodexUsageWindowsForDisplay(windows);
 }
 
-function rateLimitReachedTypeFromLimitIdBuckets(
+function windowsFromBucketGroups(
+  ...groups: ReadonlyArray<Record<string, RateLimitBucket> | null | undefined>
+): CodexUsageWindow[] {
+  for (const group of groups) {
+    const windows = windowsFromBuckets(group);
+    if (windows.length > 0) {
+      return windows;
+    }
+  }
+  return [];
+}
+
+function rateLimitReachedTypeFromBuckets(
   buckets: Record<string, RateLimitBucket> | null | undefined,
 ): string | null {
   if (!buckets) {
     return null;
   }
-  for (const [limitId, bucket] of Object.entries(buckets)) {
-    if (windowKindForLimitId(limitId) && bucket.rateLimitReachedType) {
+  for (const [limitKey, bucket] of Object.entries(buckets)) {
+    if (
+      windowKindForLimitKey(bucket.limitId ?? bucket.limitName ?? limitKey) &&
+      bucket.rateLimitReachedType
+    ) {
       return bucket.rateLimitReachedType;
+    }
+  }
+  return null;
+}
+
+function rateLimitReachedTypeFromBucketGroups(
+  ...groups: ReadonlyArray<Record<string, RateLimitBucket> | null | undefined>
+): string | null {
+  for (const group of groups) {
+    const rateLimitReachedType = rateLimitReachedTypeFromBuckets(group);
+    if (rateLimitReachedType) {
+      return rateLimitReachedType;
     }
   }
   return null;
@@ -172,14 +216,17 @@ export function normalizeCodexUsageSnapshot(input: {
   const bucket = selectCodexBucket(input.payload);
   const bucketWindows = bucket
     ? [
-        normalizeWindow(bucket.primary, windowKindForLimitId(bucket.limitId) ?? "five-hour"),
+        normalizeWindow(
+          bucket.primary,
+          windowKindForLimitKey(bucket.limitId ?? bucket.limitName) ?? "five-hour",
+        ),
         normalizeWindow(bucket.secondary, "weekly"),
       ].filter((window): window is CodexUsageWindow => window !== null)
     : [];
   const windows =
     bucketWindows.length > 0
       ? sortCodexUsageWindowsForDisplay(bucketWindows)
-      : windowsFromLimitIdBuckets(input.payload.rateLimitsByLimitId);
+      : windowsFromBucketGroups(input.payload.rateLimitsByLimitId, input.payload.rateLimitsByName);
   if (windows.length === 0) {
     return null;
   }
@@ -190,7 +237,10 @@ export function normalizeCodexUsageSnapshot(input: {
     windows,
     rateLimitReachedType:
       bucket?.rateLimitReachedType ??
-      rateLimitReachedTypeFromLimitIdBuckets(input.payload.rateLimitsByLimitId),
+      rateLimitReachedTypeFromBucketGroups(
+        input.payload.rateLimitsByLimitId,
+        input.payload.rateLimitsByName,
+      ),
     source: input.source,
   };
 }
