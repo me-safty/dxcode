@@ -43,7 +43,7 @@ interface DesktopSshEnvironmentManagerOptions {
     request: SshPasswordRequest,
   ) => Effect.Effect<string | null, unknown>;
   readonly resolveCliPackageSpec?: () => string;
-  readonly resolveCliRunner?: () => RemoteT3RunnerOptions;
+  readonly resolveCliRunner?: Effect.Effect<RemoteT3RunnerOptions>;
 }
 
 export function discoverDesktopSshHostsEffect(input?: { readonly homeDir?: string }) {

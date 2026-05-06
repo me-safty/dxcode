@@ -3,10 +3,8 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
-import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -26,14 +24,8 @@ import {
   Menu,
   nativeTheme,
 } from "electron";
-import { autoUpdater } from "electron-updater";
 
-import type {
-  DesktopServerExposureMode,
-  DesktopServerExposureState,
-  DesktopUpdateChannel,
-  DesktopUpdateState,
-} from "@t3tools/contracts";
+import type { DesktopServerExposureMode, DesktopServerExposureState } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import type { RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
@@ -42,10 +34,8 @@ import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPortEffect } from ".
 import {
   type DesktopSettings,
   DEFAULT_DESKTOP_SETTINGS,
-  readDesktopSettingsEffect,
   setDesktopServerExposurePreference,
   setDesktopTailscaleServePreference,
-  setDesktopUpdateChannelPreference,
   writeDesktopSettingsEffect,
 } from "./desktopSettings.ts";
 import {
@@ -78,10 +68,11 @@ import * as ElectronMenu from "./electron/ElectronMenu.ts";
 import * as ElectronProtocol from "./electron/ElectronProtocol.ts";
 import * as ElectronShell from "./electron/ElectronShell.ts";
 import * as ElectronTheme from "./electron/ElectronTheme.ts";
+import * as ElectronUpdater from "./electron/ElectronUpdater.ts";
 import * as DesktopIpc from "./ipc/DesktopIpc.ts";
 import * as ElectronWindow from "./electron/ElectronWindow.ts";
 import { DesktopShutdown, makeDesktopShutdown } from "./desktopShutdown.ts";
-import { MENU_ACTION_CHANNEL, UPDATE_STATE_CHANNEL } from "./ipc/channels.ts";
+import { MENU_ACTION_CHANNEL } from "./ipc/channels.ts";
 import { installDesktopIpcHandlers } from "./ipc/DesktopIpcHandlers.ts";
 import { DesktopServerExposureIpcActions } from "./ipc/methods/serverExposure.ts";
 import { DesktopUpdateIpcActions } from "./ipc/methods/updates.ts";
@@ -102,33 +93,19 @@ import {
   DesktopShellEnvironmentLive,
   DesktopShellEnvironmentProbeLive,
 } from "./syncShellEnvironment.ts";
-import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState.ts";
-import { doesVersionMatchDesktopUpdateChannel } from "./updateChannels.ts";
-import {
-  createInitialDesktopUpdateState,
-  reduceDesktopUpdateStateOnCheckFailure,
-  reduceDesktopUpdateStateOnCheckStart,
-  reduceDesktopUpdateStateOnDownloadComplete,
-  reduceDesktopUpdateStateOnDownloadFailure,
-  reduceDesktopUpdateStateOnDownloadProgress,
-  reduceDesktopUpdateStateOnDownloadStart,
-  reduceDesktopUpdateStateOnInstallFailure,
-  reduceDesktopUpdateStateOnNoUpdate,
-  reduceDesktopUpdateStateOnUpdateAvailable,
-} from "./updateMachine.ts";
-import { isArm64HostRunningIntelBuild } from "./runtimeArch.ts";
 import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
+import { formatErrorMessage } from "./main/DesktopErrors.ts";
 import * as DesktopLocalEnvironment from "./main/DesktopLocalEnvironment.ts";
+import * as DesktopSettingsState from "./main/DesktopSettingsState.ts";
 import * as DesktopState from "./main/DesktopState.ts";
+import * as DesktopUpdates from "./main/DesktopUpdates.ts";
 
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
 const AppPackageMetadata = Schema.Struct({
   t3codeCommitHash: Schema.optional(Schema.String),
 });
-const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
-const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const DESKTOP_LOOPBACK_HOST = "127.0.0.1";
 const DESKTOP_REQUIRED_PORT_PROBE_HOSTS = ["0.0.0.0", "::"] as const;
 const TITLEBAR_HEIGHT = 40;
@@ -141,7 +118,6 @@ type WindowTitleBarOptions = Pick<
   "titleBarOverlay" | "titleBarStyle" | "trafficLightPosition"
 >;
 
-type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 interface BackendObservabilitySettings {
   readonly otlpTracesUrl: string | undefined;
   readonly otlpMetricsUrl: string | undefined;
@@ -152,7 +128,6 @@ let backendBootstrapToken = "";
 let backendHttpUrl: Option.Option<URL> = Option.none();
 let backendEndpointUrl: string | null = null;
 let backendAdvertisedHost: string | null = null;
-let appUpdateYmlConfig: Option.Option<Record<string, string>> = Option.none();
 let aboutCommitHashCache: Option.Option<string> | undefined;
 let desktopIconPaths: Readonly<Record<"ico" | "icns" | "png", Option.Option<string>>> = {
   ico: Option.none(),
@@ -177,6 +152,7 @@ type DesktopWindowBoundaryServices =
   | ElectronDialog.ElectronDialog
   | ElectronShell.ElectronShell
   | DesktopState.DesktopState
+  | DesktopUpdates.DesktopUpdates
   | ElectronWindow.ElectronWindow;
 type DesktopLifecycleBoundaryServices =
   | DesktopShutdown
@@ -200,17 +176,6 @@ function getBackendHttpUrlHref(): string | null {
     onNone: () => null,
     onSome: (url) => url.href,
   });
-}
-
-const initialUpdateState = (environment: DesktopEnvironmentShape): DesktopUpdateState =>
-  createInitialDesktopUpdateState(
-    environment.appVersion,
-    environment.runtimeInfo,
-    desktopSettings.updateChannel,
-  );
-
-function nowIsoTimestamp(): string {
-  return DateTime.formatIso(DateTime.nowUnsafe());
 }
 
 const withDesktopLogAnnotations = (
@@ -245,15 +210,6 @@ const logUpdaterInfo = (
   annotations?: Record<string, unknown>,
 ): Effect.Effect<void> =>
   withDesktopLogAnnotations(Effect.logInfo(message), {
-    component: "desktop-updater",
-    ...annotations,
-  });
-
-const logUpdaterError = (
-  message: string,
-  annotations?: Record<string, unknown>,
-): Effect.Effect<void> =>
-  withDesktopLogAnnotations(Effect.logError(message), {
     component: "desktop-updater",
     ...annotations,
   });
@@ -493,13 +449,6 @@ function relaunchDesktopAppEffect(
   });
 }
 
-function formatErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
-
 function handleBackendReady(
   runEffect: DesktopEffectRunner,
   environment: DesktopEnvironmentShape,
@@ -580,8 +529,6 @@ const resolveBackendStartConfig: Effect.Effect<
     captureOutput: captureBackendLogs,
   };
 });
-
-const currentIsoTimestamp = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
 const randomHexString = (length: number): Effect.Effect<string> =>
   Effect.gen(function* () {
@@ -684,7 +631,10 @@ const desktopBackendEventsLayer = Layer.effect(
   }),
 );
 
-function resolveDesktopSshCliRunner(environment: DesktopEnvironmentShape): RemoteT3RunnerOptions {
+function resolveDesktopSshCliRunner(
+  environment: DesktopEnvironmentShape,
+  settings: DesktopSettings,
+): RemoteT3RunnerOptions {
   const devRemoteEntryPath = Option.getOrUndefined(environment.devRemoteT3ServerEntryPath);
   if (environment.isDevelopment && devRemoteEntryPath !== undefined) {
     return { nodeScriptPath: devRemoteEntryPath };
@@ -692,7 +642,7 @@ function resolveDesktopSshCliRunner(environment: DesktopEnvironmentShape): Remot
   return {
     packageSpec: resolveRemoteT3CliPackageSpec({
       appVersion: environment.appVersion,
-      updateChannel: desktopSettings.updateChannel,
+      updateChannel: settings.updateChannel,
       isDevelopment: environment.isDevelopment,
     }),
   };
@@ -701,8 +651,11 @@ function resolveDesktopSshCliRunner(environment: DesktopEnvironmentShape): Remot
 const desktopSshEnvironmentLayer = Layer.unwrap(
   Effect.gen(function* () {
     const environment = yield* DesktopEnvironment;
+    const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
     return DesktopSshEnvironmentManager.layer({
-      resolveCliRunner: () => resolveDesktopSshCliRunner(environment),
+      resolveCliRunner: settingsState.get.pipe(
+        Effect.map((settings) => resolveDesktopSshCliRunner(environment, settings)),
+      ),
     });
   }),
 );
@@ -762,94 +715,21 @@ const desktopServerExposureIpcActionsLayer = Layer.effect(
   }),
 );
 
-type DesktopUpdateIpcActionServices =
-  | FileSystem.FileSystem
-  | EffectPath.Path
-  | DesktopEnvironment
-  | DesktopBackendManager
-  | DesktopState.DesktopState;
+const desktopUpdatesLayer = DesktopUpdates.layer.pipe(Layer.provideMerge(ElectronUpdater.layer));
 
 const desktopUpdateIpcActionsLayer = Layer.effect(
   DesktopUpdateIpcActions,
   Effect.gen(function* () {
-    const context = yield* Effect.context<DesktopUpdateIpcActionServices>();
-    const state = yield* DesktopState.DesktopState;
+    const updates = yield* DesktopUpdates.DesktopUpdates;
     return DesktopUpdateIpcActions.of({
-      getState: Effect.sync(() => updateState),
-      setChannel: (nextChannel) =>
-        Effect.gen(function* () {
-          const environment = yield* DesktopEnvironment;
-          if (updateCheckInFlight || updateDownloadInFlight || updateInstallInFlight) {
-            return yield* Effect.fail(
-              new Error("Cannot change update tracks while an update action is in progress."),
-            );
-          }
-
-          desktopSettings = setDesktopUpdateChannelPreference(desktopSettings, nextChannel);
-          yield* writeDesktopSettingsEffect(environment.desktopSettingsPath, desktopSettings);
-
-          if (nextChannel === updateState.channel) {
-            return updateState;
-          }
-
-          const enabled = shouldEnableAutoUpdates(environment);
-          setUpdateState(createBaseUpdateState(nextChannel, enabled, environment));
-
-          if (!enabled || !updaterConfigured) {
-            return updateState;
-          }
-
-          yield* applyAutoUpdaterChannel(nextChannel);
-          const allowDowngrade = autoUpdater.allowDowngrade;
-          autoUpdater.allowDowngrade = true;
-          yield* checkForUpdates("channel-change").pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                autoUpdater.allowDowngrade = allowDowngrade;
-              }),
-            ),
-          );
-          return updateState;
-        }).pipe(Effect.provide(context)),
-      download: Effect.gen(function* () {
-        const result = yield* downloadAvailableUpdate();
-        return {
-          accepted: result.accepted,
-          completed: result.completed,
-          state: updateState,
-        };
-      }).pipe(Effect.provide(context)),
-      install: Effect.gen(function* () {
-        if (yield* Ref.get(state.quitting)) {
-          return {
-            accepted: false,
-            completed: false,
-            state: updateState,
-          };
-        }
-        const result = yield* installDownloadedUpdate();
-        return {
-          accepted: result.accepted,
-          completed: result.completed,
-          state: updateState,
-        };
-      }).pipe(Effect.provide(context)),
-      check: Effect.gen(function* () {
-        if (!updaterConfigured) {
-          return {
-            checked: false,
-            state: updateState,
-          };
-        }
-        const checked = yield* checkForUpdates("web-ui");
-        return {
-          checked,
-          state: updateState,
-        };
-      }).pipe(Effect.provide(context)),
+      getState: updates.getState,
+      setChannel: updates.setChannel,
+      download: updates.download,
+      install: updates.install,
+      check: updates.check("web-ui"),
     });
   }),
-);
+).pipe(Layer.provideMerge(desktopUpdatesLayer));
 
 const desktopBackendDependenciesLayer = Layer.mergeAll(
   NodeServices.layer,
@@ -894,30 +774,9 @@ const desktopRuntimeLayer = Layer.mergeAll(
   Layer.provideMerge(ElectronProtocol.layer),
   Layer.provideMerge(ElectronShell.layer),
   Layer.provideMerge(ElectronTheme.layer),
+  Layer.provideMerge(DesktopSettingsState.layer),
   Layer.provideMerge(desktopEnvironmentLayer),
 );
-
-let updatePollerScope: Option.Option<Scope.Closeable> = Option.none();
-let updateCheckInFlight = false;
-let updateDownloadInFlight = false;
-let updateInstallInFlight = false;
-let updaterConfigured = false;
-let updateState: DesktopUpdateState = createInitialDesktopUpdateState(
-  "0.0.0",
-  {
-    hostArch: "other",
-    appArch: "other",
-    runningUnderArm64Translation: false,
-  },
-  DEFAULT_DESKTOP_SETTINGS.updateChannel,
-);
-
-function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
-  if (updateInstallInFlight) return "install";
-  if (updateDownloadInFlight) return "download";
-  if (updateCheckInFlight) return "check";
-  return updateState.errorContext;
-}
 
 function addScopedListener<Args extends ReadonlyArray<unknown>>(
   target: unknown,
@@ -938,36 +797,6 @@ function addScopedListener<Args extends ReadonlyArray<unknown>>(
         eventTarget.removeListener(eventName, untypedListener);
       }),
   ).pipe(Effect.asVoid);
-}
-
-function parseAppUpdateYml(raw: string): Option.Option<Record<string, string>> {
-  // The YAML is simple key-value pairs — avoid pulling in a YAML parser by
-  // doing a line-based parse (fields: provider, owner, repo, releaseType, ...).
-  const entries: Record<string, string> = {};
-  for (const line of raw.split("\n")) {
-    const match = line.match(/^(\w+):\s*(.+)$/);
-    if (match?.[1] && match[2]) entries[match[1]] = match[2].trim();
-  }
-  return entries.provider ? Option.some(entries) : Option.none();
-}
-
-/** Read the baked-in app-update.yml config (if applicable). */
-function readAppUpdateYmlEffect(): Effect.Effect<
-  Option.Option<Record<string, string>>,
-  never,
-  FileSystem.FileSystem | DesktopEnvironment
-> {
-  return Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const environment = yield* DesktopEnvironment;
-    const raw = yield* fileSystem
-      .readFileString(environment.appUpdateYmlPath, "utf-8")
-      .pipe(Effect.option);
-    return Option.match(raw, {
-      onNone: () => Option.none<Record<string, string>>(),
-      onSome: parseAppUpdateYml,
-    });
-  });
 }
 
 function normalizeCommitHash(value: unknown): string | null {
@@ -1118,60 +947,45 @@ function handleCheckForUpdatesMenuClick(
   runEffect: DesktopEffectRunner,
   environment: DesktopEnvironmentShape,
 ): void {
-  const disabledReason = getAutoUpdateDisabledReason({
-    isDevelopment: environment.isDevelopment,
-    isPackaged: environment.isPackaged,
-    platform: process.platform,
-    appImage: process.env.APPIMAGE,
-    disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
-    hasUpdateFeedConfig: hasDesktopUpdateFeedConfig(),
-  });
-  if (disabledReason) {
-    void runEffect(
-      logUpdaterInfo("manual update check requested, but updates are disabled", {
-        disabledReason,
-      }),
-    );
-    void runEffect(
-      Effect.gen(function* () {
-        const electronDialog = yield* ElectronDialog.ElectronDialog;
+  void runEffect(
+    Effect.gen(function* () {
+      const updates = yield* DesktopUpdates.DesktopUpdates;
+      const electronDialog = yield* ElectronDialog.ElectronDialog;
+      const disabledReason = yield* updates.disabledReason;
+      if (Option.isSome(disabledReason)) {
+        yield* logUpdaterInfo("manual update check requested, but updates are disabled", {
+          disabledReason: disabledReason.value,
+        });
         yield* electronDialog.showMessageBox({
           type: "info",
           title: "Updates unavailable",
           message: "Automatic updates are not available right now.",
-          detail: disabledReason,
+          detail: disabledReason.value,
           buttons: ["OK"],
         });
-      }),
-    );
-    return;
-  }
+        return;
+      }
 
-  if (!BrowserWindow.getAllWindows().length) {
-    void runEffect(
-      Effect.gen(function* () {
-        const electronWindow = yield* ElectronWindow.ElectronWindow;
+      const electronWindow = yield* ElectronWindow.ElectronWindow;
+      const existingWindow = yield* electronWindow.currentMainOrFirst;
+      if (Option.isNone(existingWindow)) {
         yield* electronWindow.setMain(createWindow(runEffect, environment, electronWindow));
-        yield* checkForUpdatesFromMenu();
-      }),
-    );
-    return;
-  }
-  void runEffect(checkForUpdatesFromMenu());
-}
-
-function hasDesktopUpdateFeedConfig(): boolean {
-  return Option.isSome(appUpdateYmlConfig) || Boolean(process.env.T3CODE_DESKTOP_MOCK_UPDATES);
+      }
+      yield* checkForUpdatesFromMenu();
+    }),
+  );
 }
 
 function checkForUpdatesFromMenu(): Effect.Effect<
   void,
   never,
-  DesktopState.DesktopState | ElectronDialog.ElectronDialog
+  DesktopUpdates.DesktopUpdates | ElectronDialog.ElectronDialog
 > {
   return Effect.gen(function* () {
+    const updates = yield* DesktopUpdates.DesktopUpdates;
     const electronDialog = yield* ElectronDialog.ElectronDialog;
-    yield* checkForUpdates("menu");
+    const result = yield* updates.check("menu");
+    const updateState = result.state;
 
     if (updateState.status === "up-to-date") {
       yield* electronDialog.showMessageBox({
@@ -1411,351 +1225,6 @@ function configureAppIdentity(): Effect.Effect<
   });
 }
 
-function clearUpdatePollTimer(): Effect.Effect<void> {
-  return Effect.gen(function* () {
-    const scope = updatePollerScope;
-    updatePollerScope = Option.none();
-    yield* Option.match(scope, {
-      onNone: () => Effect.void,
-      onSome: (value) => Scope.close(value, Exit.void).pipe(Effect.ignore),
-    });
-  });
-}
-
-function startUpdatePollers(): Effect.Effect<void, never, Scope.Scope | DesktopState.DesktopState> {
-  return Effect.gen(function* () {
-    yield* clearUpdatePollTimer();
-    const parentScope = yield* Scope.Scope;
-    const scope = yield* Scope.make("sequential");
-    updatePollerScope = Option.some(scope);
-    yield* Scope.addFinalizer(parentScope, Scope.close(scope, Exit.void).pipe(Effect.ignore));
-
-    yield* Effect.sleep(Duration.millis(AUTO_UPDATE_STARTUP_DELAY_MS)).pipe(
-      Effect.andThen(checkForUpdates("startup")),
-      Effect.catchCause((cause) =>
-        logUpdaterError("startup update check failed", { cause: Cause.pretty(cause) }),
-      ),
-      Effect.forkIn(scope),
-    );
-    yield* Effect.sleep(Duration.millis(AUTO_UPDATE_POLL_INTERVAL_MS)).pipe(
-      Effect.andThen(checkForUpdates("poll")),
-      Effect.forever,
-      Effect.catchCause((cause) =>
-        logUpdaterError("poll update check failed", { cause: Cause.pretty(cause) }),
-      ),
-      Effect.forkIn(scope),
-    );
-  });
-}
-
-function emitUpdateState(): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (window.isDestroyed()) continue;
-    window.webContents.send(UPDATE_STATE_CHANNEL, updateState);
-  }
-}
-
-function setUpdateState(patch: Partial<DesktopUpdateState>): void {
-  updateState = { ...updateState, ...patch };
-  emitUpdateState();
-}
-
-function createBaseUpdateState(
-  channel: DesktopUpdateChannel,
-  enabled: boolean,
-  environment: DesktopEnvironmentShape,
-): DesktopUpdateState {
-  return {
-    ...createInitialDesktopUpdateState(environment.appVersion, environment.runtimeInfo, channel),
-    enabled,
-    status: enabled ? "idle" : "disabled",
-  };
-}
-
-function applyAutoUpdaterChannel(channel: DesktopUpdateChannel): Effect.Effect<void> {
-  return Effect.gen(function* () {
-    const allowsPrerelease = channel === "nightly";
-    yield* Effect.sync(() => {
-      autoUpdater.channel = channel;
-      autoUpdater.allowPrerelease = allowsPrerelease;
-      autoUpdater.allowDowngrade = allowsPrerelease;
-    });
-    yield* logUpdaterInfo("using update channel", {
-      channel,
-      allowPrerelease: allowsPrerelease,
-      allowDowngrade: allowsPrerelease,
-    });
-  });
-}
-
-function shouldEnableAutoUpdates(environment: DesktopEnvironmentShape): boolean {
-  return (
-    getAutoUpdateDisabledReason({
-      isDevelopment: environment.isDevelopment,
-      isPackaged: environment.isPackaged,
-      platform: process.platform,
-      appImage: process.env.APPIMAGE,
-      disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
-      hasUpdateFeedConfig: hasDesktopUpdateFeedConfig(),
-    }) === null
-  );
-}
-
-function checkForUpdates(reason: string): Effect.Effect<boolean, never, DesktopState.DesktopState> {
-  return Effect.gen(function* () {
-    const state = yield* DesktopState.DesktopState;
-    if ((yield* Ref.get(state.quitting)) || !updaterConfigured || updateCheckInFlight) return false;
-    if (updateState.status === "downloading" || updateState.status === "downloaded") {
-      yield* logUpdaterInfo("skipping update check while update is active", {
-        reason,
-        status: updateState.status,
-      });
-      return false;
-    }
-
-    updateCheckInFlight = true;
-    const checkedAt = yield* currentIsoTimestamp;
-    setUpdateState(reduceDesktopUpdateStateOnCheckStart(updateState, checkedAt));
-    yield* logUpdaterInfo("checking for updates", { reason });
-
-    return yield* Effect.promise(() => autoUpdater.checkForUpdates()).pipe(
-      Effect.as(true),
-      Effect.catch((error: unknown) =>
-        Effect.gen(function* () {
-          const failedAt = yield* currentIsoTimestamp;
-          const message = formatErrorMessage(error);
-          setUpdateState(reduceDesktopUpdateStateOnCheckFailure(updateState, message, failedAt));
-          yield* logUpdaterError("failed to check for updates", { message });
-          return true;
-        }),
-      ),
-      Effect.ensuring(
-        Effect.sync(() => {
-          updateCheckInFlight = false;
-        }),
-      ),
-    );
-  });
-}
-
-function downloadAvailableUpdate(): Effect.Effect<
-  {
-    accepted: boolean;
-    completed: boolean;
-  },
-  never,
-  DesktopEnvironment
-> {
-  return Effect.gen(function* () {
-    const environment = yield* DesktopEnvironment;
-    if (!updaterConfigured || updateDownloadInFlight || updateState.status !== "available") {
-      return { accepted: false, completed: false };
-    }
-
-    updateDownloadInFlight = true;
-    setUpdateState(reduceDesktopUpdateStateOnDownloadStart(updateState));
-    autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(environment.runtimeInfo);
-    yield* logUpdaterInfo("downloading update");
-
-    return yield* Effect.promise(() => autoUpdater.downloadUpdate()).pipe(
-      Effect.as({ accepted: true, completed: true }),
-      Effect.catch((error: unknown) =>
-        Effect.sync(() => {
-          const message = formatErrorMessage(error);
-          setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, message));
-          return { accepted: true, completed: false };
-        }).pipe(
-          Effect.tap(() =>
-            logUpdaterError("failed to download update", { message: formatErrorMessage(error) }),
-          ),
-        ),
-      ),
-      Effect.ensuring(
-        Effect.sync(() => {
-          updateDownloadInFlight = false;
-        }),
-      ),
-    );
-  });
-}
-
-function installDownloadedUpdate(): Effect.Effect<
-  {
-    accepted: boolean;
-    completed: boolean;
-  },
-  never,
-  DesktopBackendManager | DesktopState.DesktopState
-> {
-  return Effect.gen(function* () {
-    const state = yield* DesktopState.DesktopState;
-    if (
-      (yield* Ref.get(state.quitting)) ||
-      !updaterConfigured ||
-      updateState.status !== "downloaded"
-    ) {
-      return { accepted: false, completed: false };
-    }
-
-    yield* Ref.set(state.quitting, true);
-    updateInstallInFlight = true;
-    yield* clearUpdatePollTimer();
-
-    return yield* Effect.gen(function* () {
-      const backendManager = yield* DesktopBackendManager;
-      yield* backendManager.stop({ timeout: Duration.seconds(5) });
-      yield* Effect.sync(() => {
-        // Destroy all windows before launching the NSIS installer to avoid the installer finding live windows it needs to close.
-        for (const win of BrowserWindow.getAllWindows()) {
-          win.destroy();
-        }
-        // `quitAndInstall()` only starts the handoff to the updater. The actual
-        // install may still fail asynchronously, so keep the action incomplete
-        // until we either quit or receive an updater error.
-        autoUpdater.quitAndInstall(true, true);
-      });
-      return { accepted: true, completed: false };
-    }).pipe(
-      Effect.catch((error: unknown) =>
-        Effect.gen(function* () {
-          const message = formatErrorMessage(error);
-          yield* Effect.sync(() => {
-            updateInstallInFlight = false;
-            setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
-          });
-          yield* Ref.set(state.quitting, false);
-          yield* logUpdaterError("failed to install update", { message });
-          return { accepted: true, completed: false };
-        }),
-      ),
-    );
-  });
-}
-
-function configureAutoUpdater(): Effect.Effect<
-  void,
-  never,
-  Scope.Scope | DesktopEnvironment | DesktopState.DesktopState
-> {
-  return Effect.gen(function* () {
-    const environment = yield* DesktopEnvironment;
-    const state = yield* DesktopState.DesktopState;
-    const context = yield* Effect.context<DesktopEnvironment>();
-    const runEffect = makeDesktopEffectRunner(context);
-    const githubToken =
-      process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
-    if (githubToken) {
-      // When a token is provided, re-configure the feed with `private: true` so
-      // electron-updater uses the GitHub API (api.github.com) instead of the
-      // public Atom feed (github.com/…/releases.atom) which rejects Bearer auth.
-      const appUpdateYml = Option.getOrUndefined(appUpdateYmlConfig);
-      if (appUpdateYml?.provider === "github") {
-        autoUpdater.setFeedURL({
-          ...appUpdateYml,
-          provider: "github" as const,
-          private: true,
-          token: githubToken,
-        });
-      }
-    }
-
-    if (process.env.T3CODE_DESKTOP_MOCK_UPDATES) {
-      autoUpdater.setFeedURL({
-        provider: "generic",
-        url: `http://localhost:${process.env.T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT ?? 3000}`,
-      });
-    }
-
-    const enabled = shouldEnableAutoUpdates(environment);
-    setUpdateState(createBaseUpdateState(desktopSettings.updateChannel, enabled, environment));
-    if (!enabled) {
-      return;
-    }
-    updaterConfigured = true;
-
-    autoUpdater.autoDownload = false;
-    autoUpdater.autoInstallOnAppQuit = false;
-    yield* applyAutoUpdaterChannel(desktopSettings.updateChannel);
-    autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(environment.runtimeInfo);
-    let lastLoggedDownloadMilestone = -1;
-
-    if (isArm64HostRunningIntelBuild(environment.runtimeInfo)) {
-      yield* logUpdaterInfo(
-        "Apple Silicon host detected while running Intel build; updates will switch to arm64 packages",
-      );
-    }
-
-    yield* addScopedListener(autoUpdater, "checking-for-update", () => {
-      void runEffect(logUpdaterInfo("looking for updates"));
-    });
-    yield* addScopedListener(autoUpdater, "update-available", (info: { version: string }) => {
-      if (!doesVersionMatchDesktopUpdateChannel(info.version, updateState.channel)) {
-        void runEffect(
-          logUpdaterInfo("ignoring update that does not match selected channel", {
-            version: info.version,
-            channel: updateState.channel,
-          }),
-        );
-        setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, nowIsoTimestamp()));
-        lastLoggedDownloadMilestone = -1;
-        return;
-      }
-
-      setUpdateState(
-        reduceDesktopUpdateStateOnUpdateAvailable(updateState, info.version, nowIsoTimestamp()),
-      );
-      lastLoggedDownloadMilestone = -1;
-      void runEffect(logUpdaterInfo("update available", { version: info.version }));
-    });
-    yield* addScopedListener(autoUpdater, "update-not-available", () => {
-      setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, nowIsoTimestamp()));
-      lastLoggedDownloadMilestone = -1;
-      void runEffect(logUpdaterInfo("no updates available"));
-    });
-    yield* addScopedListener(autoUpdater, "error", (error: unknown) => {
-      const message = formatErrorMessage(error);
-      if (updateInstallInFlight) {
-        updateInstallInFlight = false;
-        void runEffect(Ref.set(state.quitting, false));
-        setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
-        void runEffect(logUpdaterError("updater error", { message }));
-        return;
-      }
-      if (!updateCheckInFlight && !updateDownloadInFlight) {
-        setUpdateState({
-          status: "error",
-          message,
-          checkedAt: nowIsoTimestamp(),
-          downloadPercent: null,
-          errorContext: resolveUpdaterErrorContext(),
-          canRetry: updateState.availableVersion !== null || updateState.downloadedVersion !== null,
-        });
-      }
-      void runEffect(logUpdaterError("updater error", { message }));
-    });
-    yield* addScopedListener(autoUpdater, "download-progress", (progress: { percent: number }) => {
-      const percent = Math.floor(progress.percent);
-      if (
-        shouldBroadcastDownloadProgress(updateState, progress.percent) ||
-        updateState.message !== null
-      ) {
-        setUpdateState(reduceDesktopUpdateStateOnDownloadProgress(updateState, progress.percent));
-      }
-      const milestone = percent - (percent % 10);
-      if (milestone > lastLoggedDownloadMilestone) {
-        lastLoggedDownloadMilestone = milestone;
-        void runEffect(logUpdaterInfo("download progress", { percent }));
-      }
-    });
-    yield* addScopedListener(autoUpdater, "update-downloaded", (info: { version: string }) => {
-      setUpdateState(reduceDesktopUpdateStateOnDownloadComplete(updateState, info.version));
-      void runEffect(logUpdaterInfo("update downloaded", { version: info.version }));
-    });
-
-    yield* startUpdatePollers();
-  });
-}
-
 function startBackend(): Effect.Effect<
   void,
   never,
@@ -1778,11 +1247,11 @@ function startBackend(): Effect.Effect<
 function closeDesktopResourcesWithManager(
   backendManager: DesktopBackendManagerShape,
   desktopSshEnvironmentBridge: DesktopSshEnvironmentBridgeShape,
+  updates: DesktopUpdates.DesktopUpdatesShape,
 ): Effect.Effect<void> {
   return Effect.gen(function* () {
     yield* backendManager.shutdown;
-    updateInstallInFlight = false;
-    yield* clearUpdatePollTimer();
+    yield* updates.shutdown;
     yield* desktopSshEnvironmentBridge.disposeEffect().pipe(Effect.ignore);
   });
 }
@@ -1947,7 +1416,12 @@ function createWindow(
   });
   window.webContents.on("did-finish-load", () => {
     window.setTitle(environment.displayName);
-    emitUpdateState();
+    void runEffect(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.emitState;
+      }),
+    );
   });
 
   // On Linux/Wayland with `show: false`, Electron's `ready-to-show` only
@@ -2189,12 +1663,14 @@ const program = Effect.scoped(
       appRunId = (yield* Random.nextUUIDv4).replace(/-/g, "").slice(0, 12);
       const backendManager = yield* DesktopBackendManager;
       const shellEnvironment = yield* DesktopShellEnvironment;
+      const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
+      const updates = yield* DesktopUpdates.DesktopUpdates;
       const desktopSshEnvironmentBridge = yield* DesktopSshEnvironmentBridge;
       const sshPasswordPromptScope = yield* Scope.make("sequential");
       yield* desktopSshEnvironmentBridge.installPasswordPromptScope(sshPasswordPromptScope);
       yield* Scope.addFinalizer(
         yield* Scope.Scope,
-        closeDesktopResourcesWithManager(backendManager, desktopSshEnvironmentBridge).pipe(
+        closeDesktopResourcesWithManager(backendManager, desktopSshEnvironmentBridge, updates).pipe(
           Effect.ensuring(shutdown.markComplete),
         ),
       );
@@ -2204,15 +1680,10 @@ const program = Effect.scoped(
       // Must happen before Electron's ready event so Chromium profile data
       // lands in the desktop-specific userData directory.
       yield* electronApp.setPath("userData", userDataPath);
-      appUpdateYmlConfig = yield* readAppUpdateYmlEffect();
       yield* resolveDesktopIconPaths();
       yield* logDesktopInfo("runtime logging configured", { logDir: environment.logDir });
-      desktopSettings = yield* readDesktopSettingsEffect(
-        environment.desktopSettingsPath,
-        environment.appVersion,
-      );
+      desktopSettings = yield* settingsState.load;
       desktopServerExposureMode = desktopSettings.serverExposureMode;
-      updateState = initialUpdateState(environment);
 
       if (process.platform === "linux") {
         yield* electronApp.appendCommandLineSwitch("class", environment.linuxWmClass);
@@ -2228,7 +1699,7 @@ const program = Effect.scoped(
       yield* configureAppIdentity();
       yield* configureApplicationMenu();
       yield* registerDesktopProtocol();
-      yield* configureAutoUpdater();
+      yield* updates.configure;
       yield* bootstrap().pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
       yield* shutdown.awaitRequest;
     }).pipe(Effect.provideService(DesktopShutdown, shutdown));

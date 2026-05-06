@@ -64,7 +64,7 @@ export interface RemoteT3RunnerOptions {
 
 export interface SshEnvironmentManagerOptions {
   readonly resolveCliPackageSpec?: () => string;
-  readonly resolveCliRunner?: () => RemoteT3RunnerOptions;
+  readonly resolveCliRunner?: Effect.Effect<RemoteT3RunnerOptions>;
 }
 
 interface SshTunnelEntry {
@@ -1502,7 +1502,11 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     });
     const packageSpec = options.resolveCliPackageSpec?.();
     const runner =
-      options.resolveCliRunner?.() ?? (packageSpec === undefined ? undefined : { packageSpec });
+      options.resolveCliRunner === undefined
+        ? packageSpec === undefined
+          ? undefined
+          : { packageSpec }
+        : yield* options.resolveCliRunner;
     yield* Effect.logDebug("ssh.environment.runner.resolved", {
       ...sshTargetLogFields(resolvedTarget),
       ...sshRunnerLogFields(runner),

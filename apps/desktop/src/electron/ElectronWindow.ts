@@ -13,6 +13,8 @@ export interface ElectronWindowShape {
   readonly setMain: (window: Electron.BrowserWindow) => Effect.Effect<void>;
   readonly clearMain: (window?: Electron.BrowserWindow) => Effect.Effect<void>;
   readonly reveal: (window: Electron.BrowserWindow) => Effect.Effect<void>;
+  readonly sendAll: (channel: string, ...args: readonly unknown[]) => Effect.Effect<void>;
+  readonly destroyAll: Effect.Effect<void>;
   readonly syncAllAppearance: (
     sync: (window: Electron.BrowserWindow) => void,
   ) => Effect.Effect<void>;
@@ -85,6 +87,20 @@ const make = Effect.gen(function* () {
 
         window.focus();
       }),
+    sendAll: (channel, ...args) =>
+      Effect.sync(() => {
+        for (const window of Electron.BrowserWindow.getAllWindows()) {
+          if (window.isDestroyed()) {
+            continue;
+          }
+          window.webContents.send(channel, ...args);
+        }
+      }),
+    destroyAll: Effect.sync(() => {
+      for (const window of Electron.BrowserWindow.getAllWindows()) {
+        window.destroy();
+      }
+    }),
     syncAllAppearance: (sync) =>
       Effect.sync(() => {
         for (const window of Electron.BrowserWindow.getAllWindows()) {
