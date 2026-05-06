@@ -84,18 +84,21 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   discoverSshHosts: () => ipcRenderer.invoke(DISCOVER_SSH_HOSTS_CHANNEL),
   ensureSshEnvironment: async (target, options) =>
     unwrapEnsureSshEnvironmentResult(
-      await ipcRenderer.invoke(ENSURE_SSH_ENVIRONMENT_CHANNEL, target, options),
+      await ipcRenderer.invoke(ENSURE_SSH_ENVIRONMENT_CHANNEL, {
+        target,
+        ...(options === undefined ? {} : { options }),
+      }),
     ),
   disconnectSshEnvironment: (target) =>
     ipcRenderer.invoke(DISCONNECT_SSH_ENVIRONMENT_CHANNEL, target),
   fetchSshEnvironmentDescriptor: (httpBaseUrl) =>
-    ipcRenderer.invoke(FETCH_SSH_ENVIRONMENT_DESCRIPTOR_CHANNEL, httpBaseUrl),
+    ipcRenderer.invoke(FETCH_SSH_ENVIRONMENT_DESCRIPTOR_CHANNEL, { httpBaseUrl }),
   bootstrapSshBearerSession: (httpBaseUrl, credential) =>
-    ipcRenderer.invoke(BOOTSTRAP_SSH_BEARER_SESSION_CHANNEL, httpBaseUrl, credential),
+    ipcRenderer.invoke(BOOTSTRAP_SSH_BEARER_SESSION_CHANNEL, { httpBaseUrl, credential }),
   fetchSshSessionState: (httpBaseUrl, bearerToken) =>
-    ipcRenderer.invoke(FETCH_SSH_SESSION_STATE_CHANNEL, httpBaseUrl, bearerToken),
+    ipcRenderer.invoke(FETCH_SSH_SESSION_STATE_CHANNEL, { httpBaseUrl, bearerToken }),
   issueSshWebSocketToken: (httpBaseUrl, bearerToken) =>
-    ipcRenderer.invoke(ISSUE_SSH_WEBSOCKET_TOKEN_CHANNEL, httpBaseUrl, bearerToken),
+    ipcRenderer.invoke(ISSUE_SSH_WEBSOCKET_TOKEN_CHANNEL, { httpBaseUrl, bearerToken }),
   onSshPasswordPrompt: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, request: unknown) => {
       if (typeof request !== "object" || request === null) return;
@@ -108,7 +111,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     };
   },
   resolveSshPasswordPrompt: (requestId, password) =>
-    ipcRenderer.invoke(RESOLVE_SSH_PASSWORD_PROMPT_CHANNEL, requestId, password),
+    ipcRenderer.invoke(RESOLVE_SSH_PASSWORD_PROMPT_CHANNEL, { requestId, password }),
   getServerExposureState: () => ipcRenderer.invoke(GET_SERVER_EXPOSURE_STATE_CHANNEL),
   setServerExposureMode: (mode) => ipcRenderer.invoke(SET_SERVER_EXPOSURE_MODE_CHANNEL, mode),
   setTailscaleServeEnabled: (input) =>

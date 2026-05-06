@@ -25,7 +25,6 @@ import {
   type OpenDialogOptions,
   clipboard,
   dialog,
-  ipcMain,
   Menu,
   nativeImage,
   nativeTheme,
@@ -2056,14 +2055,6 @@ function quitFromSignal(signal: "SIGINT" | "SIGTERM", runEffect: DesktopEffectRu
   });
 }
 
-function registerIpcHandlers() {
-  return Effect.gen(function* () {
-    const desktopSshEnvironmentBridge = yield* DesktopSshEnvironmentBridge;
-    yield* installDesktopIpcHandlers;
-    yield* desktopSshEnvironmentBridge.registerIpcHandlers(ipcMain);
-  });
-}
-
 function getIconOption(): { icon: string } | Record<string, never> {
   if (process.platform === "darwin") return {}; // macOS uses .icns from app bundle
   const ext = process.platform === "win32" ? "ico" : "png";
@@ -2288,7 +2279,7 @@ function bootstrap() {
       );
     }
 
-    yield* registerIpcHandlers();
+    yield* installDesktopIpcHandlers;
     yield* logDesktopInfo("bootstrap ipc handlers registered");
     yield* startBackend();
     yield* logDesktopInfo("bootstrap backend start requested");

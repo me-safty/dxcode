@@ -60,14 +60,10 @@ import type {
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
 import { EnvironmentId } from "./baseSchemas.ts";
-import type {
-  AuthBearerBootstrapResult,
-  AuthSessionState,
-  AuthWebSocketTokenResult,
-} from "./auth.ts";
+import { AuthBearerBootstrapResult, AuthSessionState, AuthWebSocketTokenResult } from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { EditorId } from "./editor.ts";
-import type { ExecutionEnvironmentDescriptor } from "./environment.ts";
+import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import type { ClientSettings, ServerSettings, ServerSettingsPatch } from "./settings.ts";
 import type {
   SourceControlCloneRepositoryInput,
@@ -240,10 +236,19 @@ export const DesktopSshEnvironmentTargetSchema = Schema.Struct({
 export type DesktopSshEnvironmentTarget = typeof DesktopSshEnvironmentTargetSchema.Type;
 
 export type DesktopSshHostSource = "ssh-config" | "known-hosts";
+export const DesktopSshHostSourceSchema = Schema.Literals(["ssh-config", "known-hosts"]);
 
 export interface DesktopDiscoveredSshHost extends DesktopSshEnvironmentTarget {
   source: DesktopSshHostSource;
 }
+
+export const DesktopDiscoveredSshHostSchema = Schema.Struct({
+  alias: Schema.String,
+  hostname: Schema.String,
+  username: Schema.NullOr(Schema.String),
+  port: Schema.NullOr(Schema.Number),
+  source: DesktopSshHostSourceSchema,
+});
 
 export interface DesktopSshEnvironmentBootstrap {
   target: DesktopSshEnvironmentTarget;
@@ -254,6 +259,15 @@ export interface DesktopSshEnvironmentBootstrap {
   remoteServerKind?: "external" | "managed";
 }
 
+export const DesktopSshEnvironmentBootstrapSchema = Schema.Struct({
+  target: DesktopSshEnvironmentTargetSchema,
+  httpBaseUrl: Schema.String,
+  wsBaseUrl: Schema.String,
+  pairingToken: Schema.NullOr(Schema.String),
+  remotePort: Schema.optionalKey(Schema.Number),
+  remoteServerKind: Schema.optionalKey(Schema.Literals(["external", "managed"])),
+});
+
 export interface DesktopSshPasswordPromptRequest {
   requestId: string;
   destination: string;
@@ -261,6 +275,54 @@ export interface DesktopSshPasswordPromptRequest {
   prompt: string;
   expiresAt: string;
 }
+
+export const DesktopSshPasswordPromptRequestSchema = Schema.Struct({
+  requestId: Schema.String,
+  destination: Schema.String,
+  username: Schema.NullOr(Schema.String),
+  prompt: Schema.String,
+  expiresAt: Schema.String,
+});
+
+export const DesktopSshPasswordPromptCancelledType = "ssh-password-prompt-cancelled" as const;
+
+export const DesktopSshPasswordPromptCancelledResultSchema = Schema.Struct({
+  type: Schema.Literal(DesktopSshPasswordPromptCancelledType),
+  message: Schema.String,
+});
+
+export const DesktopSshEnvironmentEnsureOptionsSchema = Schema.Struct({
+  issuePairingToken: Schema.optionalKey(Schema.Boolean),
+});
+
+export const DesktopSshEnvironmentEnsureInputSchema = Schema.Struct({
+  target: DesktopSshEnvironmentTargetSchema,
+  options: Schema.optionalKey(DesktopSshEnvironmentEnsureOptionsSchema),
+});
+
+export const DesktopSshEnvironmentEnsureResultSchema = Schema.Union([
+  DesktopSshEnvironmentBootstrapSchema,
+  DesktopSshPasswordPromptCancelledResultSchema,
+]);
+
+export const DesktopSshHttpBaseUrlInputSchema = Schema.Struct({
+  httpBaseUrl: Schema.String,
+});
+
+export const DesktopSshBearerRequestInputSchema = Schema.Struct({
+  httpBaseUrl: Schema.String,
+  bearerToken: Schema.String,
+});
+
+export const DesktopSshBearerBootstrapInputSchema = Schema.Struct({
+  httpBaseUrl: Schema.String,
+  credential: Schema.String,
+});
+
+export const DesktopSshPasswordPromptResolutionInputSchema = Schema.Struct({
+  requestId: Schema.String,
+  password: Schema.NullOr(Schema.String),
+});
 
 export const PersistedSavedEnvironmentRecordSchema = Schema.Struct({
   environmentId: EnvironmentId,

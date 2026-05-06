@@ -1,13 +1,9 @@
 import { NetService } from "@t3tools/shared/Net";
 import type {
-  AuthBearerBootstrapResult,
   DesktopSshEnvironmentBootstrap,
-  AuthSessionState,
-  AuthWebSocketTokenResult,
   DesktopDiscoveredSshHost,
   DesktopSshEnvironmentTarget,
   DesktopSshPasswordPromptRequest,
-  ExecutionEnvironmentDescriptor,
 } from "@t3tools/contracts";
 import {
   SshPasswordPrompt,
@@ -16,11 +12,7 @@ import {
 } from "@t3tools/ssh/auth";
 import { discoverSshHosts } from "@t3tools/ssh/config";
 import { SshPasswordPromptError } from "@t3tools/ssh/errors";
-import {
-  fetchLoopbackSshJson,
-  SshEnvironmentManager,
-  type RemoteT3RunnerOptions,
-} from "@t3tools/ssh/tunnel";
+import { SshEnvironmentManager, type RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
 import {
   Cause,
   Context,
@@ -40,32 +32,11 @@ import {
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
-import {
-  BOOTSTRAP_SSH_BEARER_SESSION_CHANNEL,
-  DISCONNECT_SSH_ENVIRONMENT_CHANNEL,
-  DISCOVER_SSH_HOSTS_CHANNEL,
-  ENSURE_SSH_ENVIRONMENT_CHANNEL,
-  FETCH_SSH_ENVIRONMENT_DESCRIPTOR_CHANNEL,
-  FETCH_SSH_SESSION_STATE_CHANNEL,
-  ISSUE_SSH_WEBSOCKET_TOKEN_CHANNEL,
-  RESOLVE_SSH_PASSWORD_PROMPT_CHANNEL,
-  SSH_PASSWORD_PROMPT_CANCELLED_RESULT,
-  SSH_PASSWORD_PROMPT_CHANNEL,
-} from "./ipc/channels.ts";
+import { SSH_PASSWORD_PROMPT_CHANNEL } from "./ipc/channels.ts";
 
 export { resolveRemoteT3CliPackageSpec } from "@t3tools/ssh/command";
 
 const DEFAULT_SSH_PASSWORD_PROMPT_TIMEOUT_MS = 3 * 60 * 1000;
-const SSH_HANDLED_IPC_CHANNELS = [
-  DISCOVER_SSH_HOSTS_CHANNEL,
-  ENSURE_SSH_ENVIRONMENT_CHANNEL,
-  DISCONNECT_SSH_ENVIRONMENT_CHANNEL,
-  FETCH_SSH_ENVIRONMENT_DESCRIPTOR_CHANNEL,
-  BOOTSTRAP_SSH_BEARER_SESSION_CHANNEL,
-  FETCH_SSH_SESSION_STATE_CHANNEL,
-  ISSUE_SSH_WEBSOCKET_TOKEN_CHANNEL,
-  RESOLVE_SSH_PASSWORD_PROMPT_CHANNEL,
-] as const;
 
 interface DesktopSshEnvironmentManagerOptions {
   readonly passwordProvider?: (
@@ -79,7 +50,7 @@ export function discoverDesktopSshHostsEffect(input?: { readonly homeDir?: strin
   return discoverSshHosts(input ?? {});
 }
 
-type DesktopSshEnvironmentEffectContext =
+export type DesktopSshEnvironmentEffectContext =
   | ChildProcessSpawner.ChildProcessSpawner
   | FileSystem.FileSystem
   | Path.Path
@@ -167,40 +138,6 @@ export class DesktopSshEnvironmentManager extends Context.Service<
     );
 }
 
-function getSafeDesktopSshTarget(rawTarget: unknown): DesktopSshEnvironmentTarget | null {
-  if (typeof rawTarget !== "object" || rawTarget === null) {
-    return null;
-  }
-
-  const target = rawTarget as Partial<DesktopSshEnvironmentTarget>;
-  if (typeof target.alias !== "string" || typeof target.hostname !== "string") {
-    return null;
-  }
-  if (
-    target.username !== null &&
-    target.username !== undefined &&
-    typeof target.username !== "string"
-  ) {
-    return null;
-  }
-  if (target.port !== null && target.port !== undefined && !Number.isInteger(target.port)) {
-    return null;
-  }
-
-  const alias = target.alias.trim();
-  const hostname = target.hostname.trim();
-  if (alias.length === 0 || hostname.length === 0) {
-    return null;
-  }
-
-  return {
-    alias,
-    hostname,
-    username: target.username?.trim() || null,
-    port: target.port ?? null,
-  };
-}
-
 /** Minimal subset of Electron's BrowserWindow used by the SSH bridge. */
 export interface DesktopSshBridgeWindow {
   isDestroyed(): boolean;
@@ -210,15 +147,6 @@ export interface DesktopSshBridgeWindow {
   readonly webContents: {
     send(channel: string, ...args: readonly unknown[]): void;
   };
-}
-
-/** Minimal subset of Electron's ipcMain used by the SSH bridge. */
-export interface DesktopSshBridgeIpcMain {
-  removeHandler(channel: string): void;
-  handle(
-    channel: string,
-    listener: (event: unknown, ...args: readonly unknown[]) => unknown | Promise<unknown>,
-  ): void;
 }
 
 export interface DesktopSshEnvironmentBridgeOptions {
@@ -242,26 +170,17 @@ export function isSshPasswordPromptCancellation(error: unknown): error is SshPas
 export interface DesktopSshEnvironmentBridgeShape {
   readonly installPasswordPromptScope: (scope: Scope.Closeable) => Effect.Effect<void>;
   readonly passwordProvider: (request: SshPasswordRequest) => Effect.Effect<string | null, Error>;
-  readonly registerIpcHandlers: (
-    ipcMain: DesktopSshBridgeIpcMain,
-  ) => Effect.Effect<
-    void,
-    never,
-    Scope.Scope | DesktopSshEnvironmentManager | DesktopSshEnvironmentEffectContext
-  >;
+  readonly resolvePasswordPrompt: (
+    requestId: string,
+    password: string | null,
+  ) => Effect.Effect<void, Error>;
   readonly cancelPendingPasswordPromptsEffect: (reason: string) => Effect.Effect<void>;
   readonly disposeEffect: () => Effect.Effect<void>;
 }
 
-function clearDesktopSshIpcHandlers(ipcMain: DesktopSshBridgeIpcMain): void {
-  for (const channel of SSH_HANDLED_IPC_CHANNELS) {
-    ipcMain.removeHandler(channel);
-  }
-}
-
 /**
- * Wires the SSH environment manager to Electron IPC, owning the renderer-facing
- * password prompt state so `main.ts` only needs to register, cancel, and dispose.
+ * Owns renderer-facing SSH password prompt state so the manager can request
+ * credentials without depending on Electron IPC details.
  */
 function makeDesktopSshEnvironmentBridge(
   options: DesktopSshEnvironmentBridgeOptions,
@@ -288,25 +207,22 @@ function makeDesktopSshEnvironmentBridge(
   };
 
   const resolvePasswordPromptEffect = (
-    rawRequestId: unknown,
-    rawPassword: unknown,
+    requestId: string,
+    password: string | null,
   ): Effect.Effect<void, Error> => {
-    if (typeof rawRequestId !== "string" || rawRequestId.trim().length === 0) {
+    if (requestId.trim().length === 0) {
       return Effect.fail(new Error("Invalid SSH password prompt id."));
     }
-    if (rawPassword !== null && typeof rawPassword !== "string") {
-      return Effect.fail(new Error("Invalid SSH password prompt response."));
-    }
 
-    const pending = pendingPrompts.get(rawRequestId);
+    const pending = pendingPrompts.get(requestId);
     if (!pending) {
       return Effect.fail(new Error("SSH password prompt expired. Try connecting again."));
     }
 
-    pendingPrompts.delete(rawRequestId);
+    pendingPrompts.delete(requestId);
     return Fiber.interrupt(pending.timeoutFiber).pipe(
       Effect.ignore,
-      Effect.andThen(Deferred.succeed(pending.deferred, rawPassword)),
+      Effect.andThen(Deferred.succeed(pending.deferred, password)),
       Effect.asVoid,
     );
   };
@@ -404,135 +320,7 @@ function makeDesktopSshEnvironmentBridge(
         passwordPromptScope = Option.some(scope);
       }),
     passwordProvider: requestPasswordFromRendererEffect,
-    registerIpcHandlers: (ipcMain) =>
-      Effect.acquireRelease(
-        Effect.gen(function* () {
-          const context = yield* Effect.context<
-            DesktopSshEnvironmentManager | DesktopSshEnvironmentEffectContext
-          >();
-          const runEffect = <A, E, R>(effect: Effect.Effect<A, E, R>): Promise<A> =>
-            Effect.runPromiseWith(context as unknown as Context.Context<R>)(effect);
-
-          yield* Effect.sync(() => {
-            clearDesktopSshIpcHandlers(ipcMain);
-
-            ipcMain.handle(DISCOVER_SSH_HOSTS_CHANNEL, () =>
-              runEffect(
-                Effect.gen(function* () {
-                  const manager = yield* DesktopSshEnvironmentManager;
-                  return yield* manager.discoverHosts();
-                }),
-              ),
-            );
-
-            ipcMain.handle(
-              ENSURE_SSH_ENVIRONMENT_CHANNEL,
-              async (_event, rawTarget, rawOptions) => {
-                const target = getSafeDesktopSshTarget(rawTarget);
-                if (!target) {
-                  throw new Error("Invalid desktop SSH target.");
-                }
-
-                const issuePairingToken =
-                  typeof rawOptions === "object" &&
-                  rawOptions !== null &&
-                  "issuePairingToken" in rawOptions &&
-                  (rawOptions as { issuePairingToken?: unknown }).issuePairingToken === true;
-
-                try {
-                  return await runEffect(
-                    Effect.gen(function* () {
-                      const manager = yield* DesktopSshEnvironmentManager;
-                      return yield* manager.ensureEnvironment(target, {
-                        issuePairingToken,
-                      });
-                    }),
-                  );
-                } catch (error) {
-                  if (isSshPasswordPromptCancellation(error)) {
-                    return {
-                      type: SSH_PASSWORD_PROMPT_CANCELLED_RESULT,
-                      message: error.message,
-                    };
-                  }
-                  throw error;
-                }
-              },
-            );
-
-            ipcMain.handle(DISCONNECT_SSH_ENVIRONMENT_CHANNEL, async (_event, rawTarget) => {
-              const target = getSafeDesktopSshTarget(rawTarget);
-              if (!target) {
-                throw new Error("Invalid desktop SSH target.");
-              }
-
-              await runEffect(
-                Effect.gen(function* () {
-                  const manager = yield* DesktopSshEnvironmentManager;
-                  yield* manager.disconnectEnvironment(target);
-                }),
-              );
-            });
-
-            ipcMain.handle(
-              FETCH_SSH_ENVIRONMENT_DESCRIPTOR_CHANNEL,
-              async (_event, rawHttpBaseUrl) =>
-                runEffect(
-                  fetchLoopbackSshJson<ExecutionEnvironmentDescriptor>({
-                    httpBaseUrl: rawHttpBaseUrl,
-                    pathname: "/.well-known/t3/environment",
-                  }),
-                ),
-            );
-
-            ipcMain.handle(
-              BOOTSTRAP_SSH_BEARER_SESSION_CHANNEL,
-              async (_event, rawHttpBaseUrl, rawCredential) =>
-                runEffect(
-                  fetchLoopbackSshJson<AuthBearerBootstrapResult>({
-                    httpBaseUrl: rawHttpBaseUrl,
-                    pathname: "/api/auth/bootstrap/bearer",
-                    method: "POST",
-                    body: { credential: rawCredential },
-                  }),
-                ),
-            );
-
-            ipcMain.handle(
-              FETCH_SSH_SESSION_STATE_CHANNEL,
-              async (_event, rawHttpBaseUrl, rawBearerToken) =>
-                runEffect(
-                  fetchLoopbackSshJson<AuthSessionState>({
-                    httpBaseUrl: rawHttpBaseUrl,
-                    pathname: "/api/auth/session",
-                    bearerToken: rawBearerToken,
-                  }),
-                ),
-            );
-
-            ipcMain.handle(
-              ISSUE_SSH_WEBSOCKET_TOKEN_CHANNEL,
-              async (_event, rawHttpBaseUrl, rawBearerToken) =>
-                runEffect(
-                  fetchLoopbackSshJson<AuthWebSocketTokenResult>({
-                    httpBaseUrl: rawHttpBaseUrl,
-                    pathname: "/api/auth/ws-token",
-                    method: "POST",
-                    bearerToken: rawBearerToken,
-                  }),
-                ),
-            );
-
-            ipcMain.handle(
-              RESOLVE_SSH_PASSWORD_PROMPT_CHANNEL,
-              async (_event, rawRequestId, rawPassword) => {
-                await runEffect(resolvePasswordPromptEffect(rawRequestId, rawPassword));
-              },
-            );
-          });
-        }),
-        () => Effect.sync(() => clearDesktopSshIpcHandlers(ipcMain)),
-      ).pipe(Effect.asVoid),
+    resolvePasswordPrompt: resolvePasswordPromptEffect,
     cancelPendingPasswordPromptsEffect,
     disposeEffect: () => {
       if (disposed) return Effect.void;

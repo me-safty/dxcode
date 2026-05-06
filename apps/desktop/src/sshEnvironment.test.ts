@@ -1,17 +1,18 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { NetService } from "@t3tools/shared/Net";
 import { SshPasswordPromptError } from "@t3tools/ssh/errors";
 import { Effect, FileSystem, Layer, Path } from "effect";
 
 import {
-  DesktopSshEnvironmentBridge,
-  type DesktopSshBridgeIpcMain,
   DesktopSshEnvironmentManager,
   discoverDesktopSshHostsEffect,
   isSshPasswordPromptCancellation,
 } from "./sshEnvironment.ts";
+import * as DesktopIpc from "./ipc/DesktopIpc.ts";
+import { SSH_PASSWORD_PROMPT_CANCELLED_RESULT } from "./ipc/channels.ts";
+import { discoverSshHosts, ensureSshEnvironment } from "./ipc/methods/sshEnvironment.ts";
 
 function makeTempHomeDir() {
   return Effect.gen(function* () {
@@ -20,22 +21,20 @@ function makeTempHomeDir() {
   });
 }
 
-class TestIpcMain implements DesktopSshBridgeIpcMain {
-  readonly handlers = new Map<
-    string,
-    (event: unknown, ...args: readonly unknown[]) => unknown | Promise<unknown>
-  >();
+class TestIpcMain implements DesktopIpc.DesktopIpcMain {
+  readonly handlers = new Map<string, DesktopIpc.DesktopIpcHandleListener>();
 
   removeHandler(channel: string): void {
     this.handlers.delete(channel);
   }
 
-  handle(
-    channel: string,
-    listener: (event: unknown, ...args: readonly unknown[]) => unknown | Promise<unknown>,
-  ): void {
+  handle(channel: string, listener: DesktopIpc.DesktopIpcHandleListener): void {
     this.handlers.set(channel, listener);
   }
+
+  removeAllListeners(): void {}
+
+  on(): void {}
 }
 
 describe("sshEnvironment", () => {
@@ -118,14 +117,14 @@ describe("sshEnvironment", () => {
   it.effect("runs SSH IPC handlers with the captured Effect context", () =>
     Effect.gen(function* () {
       const ipcMain = new TestIpcMain();
-      const bridge = yield* DesktopSshEnvironmentBridge;
+      const ipc = DesktopIpc.make(ipcMain);
 
-      yield* bridge.registerIpcHandlers(ipcMain);
+      yield* ipc.handle(discoverSshHosts);
 
       const discoverHosts = ipcMain.handlers.get("desktop:discover-ssh-hosts");
       assert.ok(discoverHosts);
 
-      const hosts = yield* Effect.promise(() => Promise.resolve(discoverHosts({})));
+      const hosts = yield* Effect.promise(() => Promise.resolve(discoverHosts({}, undefined)));
       assert.deepEqual(hosts, [
         {
           alias: "devbox",
@@ -138,7 +137,6 @@ describe("sshEnvironment", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          DesktopSshEnvironmentBridge.layer({ getMainWindow: () => null }),
           Layer.succeed(
             DesktopSshEnvironmentManager,
             DesktopSshEnvironmentManager.of({
@@ -157,11 +155,49 @@ describe("sshEnvironment", () => {
             }),
           ),
           NodeServices.layer,
+        ),
+      ),
+      Effect.scoped,
+    ),
+  );
+
+  it.effect("encodes SSH password prompt cancellations as typed IPC results", () =>
+    Effect.gen(function* () {
+      const result = yield* ensureSshEnvironment.handler({
+        target: {
+          alias: "devbox",
+          hostname: "devbox.example.com",
+          username: null,
+          port: null,
+        },
+        options: { issuePairingToken: true },
+      });
+
+      assert.deepEqual(result, {
+        type: SSH_PASSWORD_PROMPT_CANCELLED_RESULT,
+        message: "SSH authentication timed out for devbox.",
+      });
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(
+            DesktopSshEnvironmentManager,
+            DesktopSshEnvironmentManager.of({
+              discoverHosts: () => Effect.die("unexpected discoverHosts"),
+              ensureEnvironment: () =>
+                Effect.fail(
+                  new SshPasswordPromptError({
+                    message: "SSH authentication timed out for devbox.",
+                  }),
+                ),
+              disconnectEnvironment: () => Effect.die("unexpected disconnectEnvironment"),
+            }),
+          ),
+          NodeServices.layer,
           NodeHttpClient.layerUndici,
           NetService.layer,
         ),
       ),
-      Effect.scoped,
     ),
   );
 });
