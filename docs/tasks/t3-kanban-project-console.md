@@ -501,17 +501,20 @@ template repo.
   - Launch Claude and Codex workflows from task actions.
 - Dependencies: Phase 4.
 - Tasks:
-  - [ ] Add Claude command launcher for `/init-project`, `/user-stories`, `/plan`, `/phase`, `/execute-task`, `/review`, `/open-pr`, `/ship`, `/extract-pr-learnings`, `/pdpl-audit`, `/ifrs-audit`, and `/orchestrate` where available.
-  - [ ] Add Codex-equivalent workflow recipes.
-  - [ ] Build shared task context package.
-  - [ ] Show agent session status on cards.
-  - [ ] Post GitHub comments for session started, completed, failed, and blocked states.
-  - [ ] Prevent duplicate agent runs for repeated drag/drop actions.
+  - [x] Add Claude command launcher for `/init-project`, `/user-stories`, `/plan`, `/phase`, `/execute-task`, `/review`, `/open-pr`, `/ship`, `/extract-pr-learnings`, `/pdpl-audit`, `/ifrs-audit`, and `/orchestrate` where available.
+  - [x] Add Codex-equivalent workflow recipes.
+  - [x] Build shared task context package.
+  - [x] Show agent session status on cards.
+  - [x] Post GitHub comments for session started, completed, failed, and blocked states.
+  - [x] Prevent duplicate agent runs for repeated drag/drop actions.
 - Validation:
-  - Mock agent session tests.
-  - Manual local session smoke where available.
+  - Mock agent session tests: PASS.
+  - Manual local session smoke: NOT RUN; the Phase 5 launcher queues confirmed
+    workflow sessions and posts lifecycle comments, while direct local process
+    execution remains gated behind the Phase 10 CLI adapter layer.
 - Exit criteria:
-  - Card transitions can trigger confirmed agent workflows.
+  - Card transitions can trigger confirmed queued agent workflows with shared
+    task context, duplicate suppression, and concise GitHub lifecycle comments.
 
 ### Phase 6: Git Status And GitOps Enforcement
 
@@ -971,3 +974,50 @@ Append one entry per implementation pass.
   - The provider currently maps available GitHub Project item fields into the Phase 3 Kanban contract; full end-to-end UI/RPC wiring remains a follow-up integration step.
   - PDPL: synthetic tests avoid real GitHub item text, comments, tokens, raw logs, or personal data. Live smoke output was read-only.
   - Well-Architected tradeoff: writes are implemented behind explicit confirmation and typed inputs, but persistence, backoff/rate-limit handling, redacted audit records, and duplicate comment suppression remain future hardening.
+
+### 2026-05-06 19:04 - phase 5 agent workflow launchers
+
+- Summary:
+  - Added shared contracts for agent workflow command IDs, task context
+    packages, agent session status, and queued workflow sessions.
+  - Added a server-side Agent Workflow Launcher that enumerates Claude and
+    Codex recipes for the supported governance command surface, builds redacted
+    task context packages, queues confirmed workflow sessions, suppresses
+    duplicate queued/running sessions, and posts concise GitHub issue comments
+    for started, completed, failed, and blocked lifecycle states.
+  - Extended the mock console snapshot and task cards with agent session
+    status, workflow recipes, and setup-required session examples.
+- Files changed:
+  - `packages/contracts/src/kanbanConsole.ts`
+  - `packages/contracts/src/kanbanConsole.test.ts`
+  - `apps/server/src/kanban/AgentWorkflowLauncher.ts`
+  - `apps/server/src/kanban/AgentWorkflowLauncher.test.ts`
+  - `apps/web/src/kanbanConsoleMock.ts`
+  - `apps/web/src/kanbanConsoleMock.test.ts`
+  - `apps/web/src/components/KanbanConsoleMock.tsx`
+  - `docs/tasks/t3-kanban-project-console.md`
+- Validation run:
+  - Command: `bun run --cwd packages/contracts test -- kanbanConsole`
+  - Result: PASS
+  - Command: `bun run --cwd packages/contracts typecheck`
+  - Result: PASS
+  - Command: `bun run --cwd apps/server test -- AgentWorkflowLauncher`
+  - Result: PASS
+  - Command: `bun run --cwd apps/server typecheck`
+  - Result: PASS with existing Effect diagnostic messages in unrelated files.
+  - Command: `bun run --cwd apps/web test -- kanbanConsoleMock`
+  - Result: PASS
+  - Command: `bun run --cwd apps/web typecheck`
+  - Result: PASS
+- Notes/deviations:
+  - Phase 5 intentionally queues and records confirmed workflow sessions instead
+    of spawning Claude or Codex local processes directly. Local process
+    execution requires the typed, redacted, timed-out CLI adapter layer planned
+    for Phase 10.
+  - GitHub lifecycle comments are concise summaries only and explicitly omit
+    raw command output.
+  - GitHub Projects remains the live status board; no Project state writes were
+    made.
+  - Well-Architected tradeoff: duplicate suppression is in-memory/session-input
+    based for this phase. Durable persistence and retry/backoff behavior remain
+    future hardening.

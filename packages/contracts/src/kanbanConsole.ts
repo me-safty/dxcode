@@ -56,6 +56,31 @@ export const KanbanConsoleCommandRunStatus = Schema.Literals([
 ]);
 export type KanbanConsoleCommandRunStatus = typeof KanbanConsoleCommandRunStatus.Type;
 
+export const KanbanConsoleAgentSessionStatus = Schema.Literals([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "blocked",
+]);
+export type KanbanConsoleAgentSessionStatus = typeof KanbanConsoleAgentSessionStatus.Type;
+
+export const KanbanConsoleAgentWorkflowCommandId = Schema.Literals([
+  "init-project",
+  "user-stories",
+  "plan",
+  "phase",
+  "execute-task",
+  "review",
+  "open-pr",
+  "ship",
+  "extract-pr-learnings",
+  "pdpl-audit",
+  "ifrs-audit",
+  "orchestrate",
+]);
+export type KanbanConsoleAgentWorkflowCommandId = typeof KanbanConsoleAgentWorkflowCommandId.Type;
+
 export const KanbanConsoleArtifactStatus = Schema.Literals(["clean", "dirty", "conflict"]);
 export type KanbanConsoleArtifactStatus = typeof KanbanConsoleArtifactStatus.Type;
 
@@ -115,6 +140,7 @@ export const KanbanConsoleTask = Schema.Struct({
   pr: Schema.optional(TrimmedNonEmptyString),
   checks: KanbanConsoleCheckSummary,
   agent: KanbanConsoleAgentKind,
+  agentSessionStatus: Schema.optional(KanbanConsoleAgentSessionStatus),
   updated: IsoDateTime,
   comments: NonNegativeInt,
 });
@@ -242,9 +268,60 @@ export const KanbanConsoleAgentWorkflow = Schema.Struct({
   label: TrimmedNonEmptyString,
   agent: KanbanConsoleAgentKind,
   command: TrimmedNonEmptyString,
+  commandId: Schema.optional(KanbanConsoleAgentWorkflowCommandId),
   available: Schema.Boolean,
 });
 export type KanbanConsoleAgentWorkflow = typeof KanbanConsoleAgentWorkflow.Type;
+
+export const KanbanConsoleTaskContextPackage = Schema.Struct({
+  task: Schema.Struct({
+    id: TrimmedNonEmptyString,
+    issue: TrimmedNonEmptyString,
+    title: TrimmedNonEmptyString,
+    repo: TrimmedNonEmptyString,
+    column: KanbanColumnId,
+    priority: KanbanConsolePriority,
+  }),
+  project: Schema.Struct({
+    id: TrimmedNonEmptyString,
+    owner: TrimmedNonEmptyString,
+    title: TrimmedNonEmptyString,
+  }),
+  repo: Schema.Struct({
+    id: TrimmedNonEmptyString,
+    owner: TrimmedNonEmptyString,
+    name: TrimmedNonEmptyString,
+    path: TrimmedNonEmptyString,
+    branch: TrimmedNonEmptyString,
+  }),
+  issueUrl: TrimmedNonEmptyString,
+  prUrl: Schema.optional(TrimmedNonEmptyString),
+  artifacts: Schema.Array(
+    Schema.Struct({
+      path: TrimmedNonEmptyString,
+      status: KanbanConsoleArtifactStatus,
+    }),
+  ),
+  gitStatus: Schema.optional(KanbanConsoleGitStatusSnapshot),
+  validationCommands: Schema.Array(TrimmedNonEmptyString),
+  governanceRules: Schema.Array(TrimmedNonEmptyString),
+});
+export type KanbanConsoleTaskContextPackage = typeof KanbanConsoleTaskContextPackage.Type;
+
+export const KanbanConsoleAgentWorkflowSession = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  taskId: TrimmedNonEmptyString,
+  workflowId: TrimmedNonEmptyString,
+  agent: KanbanConsoleAgentKind,
+  command: TrimmedNonEmptyString,
+  status: KanbanConsoleAgentSessionStatus,
+  duplicateKey: TrimmedNonEmptyString,
+  duplicateSuppressed: Schema.Boolean,
+  summary: TrimmedNonEmptyString,
+  startedAt: Schema.optional(IsoDateTime),
+  finishedAt: Schema.optional(IsoDateTime),
+});
+export type KanbanConsoleAgentWorkflowSession = typeof KanbanConsoleAgentWorkflowSession.Type;
 
 export const KanbanConsoleSnapshot = Schema.Struct({
   version: Schema.Literal(1),
@@ -261,5 +338,6 @@ export const KanbanConsoleSnapshot = Schema.Struct({
   gitOpsPolicy: KanbanConsoleGitOpsPolicy,
   releaseReadiness: KanbanConsoleReleaseReadiness,
   agentWorkflows: Schema.Array(KanbanConsoleAgentWorkflow),
+  agentSessions: Schema.optional(Schema.Array(KanbanConsoleAgentWorkflowSession)),
 });
 export type KanbanConsoleSnapshot = typeof KanbanConsoleSnapshot.Type;

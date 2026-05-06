@@ -463,7 +463,14 @@ function TaskCard({
           <span className="text-xs text-muted-foreground">{task.issue}</span>
         </div>
         <h3 className="mt-2 text-sm font-semibold leading-snug">{getTaskTitle(task, locale)}</h3>
-        <p className="mt-1 text-xs text-muted-foreground">{task.repo}</p>
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <p className="min-w-0 truncate text-xs text-muted-foreground">{task.repo}</p>
+          {task.agentSessionStatus ? (
+            <Badge className="shrink-0" variant="secondary">
+              {task.agentSessionStatus}
+            </Badge>
+          ) : null}
+        </div>
       </button>
       <div className="mt-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -487,10 +494,13 @@ function TaskDetailPanel({
   task: KanbanTaskMock | null;
 }) {
   const messages = getMessages(locale);
+  const snapshot = kanbanConsoleMockProvider.readSnapshot();
 
   if (!task) {
     return null;
   }
+
+  const taskSession = snapshot.agentSessions?.find((session) => session.taskId === task.id);
 
   return (
     <aside className="hidden min-h-0 overflow-auto bg-card/30 p-4 xl:block">
@@ -512,6 +522,10 @@ function TaskDetailPanel({
           <DetailRow label="Project field" value={task.column} />
           <DetailRow label="Updated" value={task.updated} />
           <DetailRow label="PR" value={task.pr ?? "No linked PR"} />
+          <DetailRow
+            label={messages.agentSessionStatus}
+            value={task.agentSessionStatus ?? "none"}
+          />
         </DetailBlock>
         <DetailBlock title={messages.checks}>
           <DetailRow label="Passing" value={String(task.checks.passing)} />
@@ -519,9 +533,13 @@ function TaskDetailPanel({
           <DetailRow label="Failing" value={String(task.checks.failing)} />
         </DetailBlock>
         <DetailBlock title={messages.agentActions}>
-          <MockCommand label="/orchestrate t3-kanban-project-console" />
-          <MockCommand label="/ship t3-kanban-project-console" />
-          <MockCommand label="/extract-pr-learnings 1" />
+          {taskSession ? <DetailRow label="Active" value={taskSession.summary} /> : null}
+          {snapshot.agentWorkflows.slice(0, 4).map((workflow) => (
+            <MockCommand
+              key={workflow.id}
+              label={`${workflow.command}${workflow.available ? "" : " · setup required"}`}
+            />
+          ))}
         </DetailBlock>
       </div>
     </aside>

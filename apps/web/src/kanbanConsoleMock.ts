@@ -1,6 +1,7 @@
 import type {
   KanbanColumnId,
   KanbanConsoleAgentWorkflow,
+  KanbanConsoleAgentWorkflowSession,
   KanbanConsoleArtifact,
   KanbanConsoleCommandRun,
   KanbanConsoleGitOpsPolicy,
@@ -20,6 +21,7 @@ import type {
 
 export type {
   KanbanColumnId,
+  KanbanConsoleAgentWorkflowSession,
   KanbanConsoleLocale,
   KanbanConsolePrWatchHealth,
   KanbanConsolePullRequestWatch,
@@ -90,6 +92,7 @@ export const kanbanConsoleMessages = {
     actionSimulate: "Simulate",
     actionWatch: "Watch",
     agentActions: "Agent actions",
+    agentSessionStatus: "Agent session",
     artifactsHeading: "Product artifacts",
     boardHeading: "GitHub Projects board",
     checks: "Checks",
@@ -136,6 +139,7 @@ export const kanbanConsoleMessages = {
     actionSimulate: "محاكاة",
     actionWatch: "مراقبة",
     agentActions: "إجراءات الوكيل",
+    agentSessionStatus: "حالة جلسة الوكيل",
     artifactsHeading: "مستندات المنتج",
     boardHeading: "لوحة مشاريع GitHub",
     checks: "الفحوصات",
@@ -237,6 +241,7 @@ const tasks: KanbanTaskMock[] = [
     pr: "kanban-console#2",
     checks: { passing: 5, pending: 2, failing: 0 },
     agent: "Codex",
+    agentSessionStatus: "queued",
     updated: "2026-05-06T10:20:00.000Z",
     comments: 6,
   },
@@ -251,6 +256,7 @@ const tasks: KanbanTaskMock[] = [
     assignee: "Claude",
     checks: { passing: 3, pending: 0, failing: 0 },
     agent: "Claude",
+    agentSessionStatus: "blocked",
     updated: "2026-05-06T09:05:00.000Z",
     comments: 2,
   },
@@ -266,6 +272,7 @@ const tasks: KanbanTaskMock[] = [
     pr: "kanban-console#1",
     checks: { passing: 12, pending: 0, failing: 1 },
     agent: "Human",
+    agentSessionStatus: "failed",
     updated: "2026-05-05T14:44:00.000Z",
     comments: 11,
   },
@@ -469,6 +476,7 @@ const agentWorkflows: KanbanConsoleAgentWorkflow[] = [
     label: "Implement phase",
     agent: "Codex",
     command: "/phase t3-kanban-project-console phase-3",
+    commandId: "phase",
     available: true,
   },
   {
@@ -476,7 +484,52 @@ const agentWorkflows: KanbanConsoleAgentWorkflow[] = [
     label: "Ship readiness",
     agent: "Claude",
     command: "/ship t3-kanban-project-console",
+    commandId: "ship",
     available: true,
+  },
+  {
+    id: "workflow-orchestrate",
+    label: "Orchestrate next step",
+    agent: "Codex",
+    command: "/orchestrate t3-kanban-project-console",
+    commandId: "orchestrate",
+    available: true,
+  },
+  {
+    id: "workflow-review",
+    label: "Review",
+    agent: "Claude",
+    command: "/review",
+    commandId: "review",
+    available: false,
+  },
+];
+
+const agentSessions = [
+  {
+    id: "agent-session-phase-3",
+    taskId: "t3-p2-1",
+    workflowId: "workflow-phase",
+    agent: "Codex" as const,
+    command: "/phase t3-kanban-project-console phase-3",
+    status: "queued" as const,
+    duplicateKey: "t3-p2-1:workflow-phase:in-progress:feature/t3-kanban-phase-3-contracts",
+    duplicateSuppressed: false,
+    summary: "Codex workflow queued with a redacted task context package.",
+    startedAt: "2026-05-06T13:25:00.000Z",
+  },
+  {
+    id: "agent-session-artifact-blocked",
+    taskId: "t3-p2-2",
+    workflowId: "workflow-review",
+    agent: "Claude" as const,
+    command: "/review",
+    status: "blocked" as const,
+    duplicateKey: "t3-p2-2:workflow-review:ready:feature/t3-kanban-phase-3-contracts",
+    duplicateSuppressed: false,
+    summary: "Claude workflow is unavailable on this machine.",
+    startedAt: "2026-05-06T13:26:00.000Z",
+    finishedAt: "2026-05-06T13:26:00.000Z",
   },
 ];
 
@@ -495,6 +548,7 @@ export const kanbanConsoleMockSnapshot: KanbanConsoleSnapshot = {
   gitOpsPolicy,
   releaseReadiness,
   agentWorkflows,
+  agentSessions,
 };
 
 export interface KanbanConsoleProvider {
@@ -504,6 +558,7 @@ export interface KanbanConsoleProvider {
   ): KanbanConsoleTaskTransitionResult;
   listPrWatches(): readonly KanbanConsolePullRequestWatch[];
   listSuggestedFixes(): readonly KanbanConsoleSuggestedFix[];
+  listAgentSessions(): readonly KanbanConsoleAgentWorkflowSession[];
   getPrWatchHealth(watch: KanbanConsolePullRequestWatch): KanbanConsolePrWatchHealth;
   isSuggestedFixEligible(fix: KanbanConsoleSuggestedFix): boolean;
 }
@@ -520,6 +575,9 @@ export const kanbanConsoleMockProvider: KanbanConsoleProvider = {
   },
   listSuggestedFixes() {
     return kanbanConsoleMockSnapshot.suggestedFixes;
+  },
+  listAgentSessions() {
+    return kanbanConsoleMockSnapshot.agentSessions ?? [];
   },
   getPrWatchHealth(watch) {
     return getPrWatchHealth(watch);

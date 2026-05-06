@@ -1,9 +1,14 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { KanbanConsoleSnapshot, KanbanConsoleTaskTransitionRequest } from "./kanbanConsole.ts";
+import {
+  KanbanConsoleSnapshot,
+  KanbanConsoleTaskContextPackage,
+  KanbanConsoleTaskTransitionRequest,
+} from "./kanbanConsole.ts";
 
 const decodeSnapshot = Schema.decodeUnknownSync(KanbanConsoleSnapshot);
+const decodeTaskContext = Schema.decodeUnknownSync(KanbanConsoleTaskContextPackage);
 const decodeTransitionRequest = Schema.decodeUnknownSync(KanbanConsoleTaskTransitionRequest);
 
 describe("kanbanConsole contracts", () => {
@@ -48,6 +53,7 @@ describe("kanbanConsole contracts", () => {
             assignee: "Codex",
             checks: { passing: 1, pending: 0, failing: 0 },
             agent: "Codex",
+            agentSessionStatus: "queued",
             updated: "2026-05-06T10:20:00.000Z",
             comments: 0,
           },
@@ -66,11 +72,70 @@ describe("kanbanConsole contracts", () => {
           branch: "release/test",
           gates: [{ id: "gate-1", label: "Validate", status: "pending" }],
         },
-        agentWorkflows: [],
+        agentWorkflows: [
+          {
+            id: "codex-phase",
+            label: "Codex /phase",
+            agent: "Codex",
+            command: "/phase t3-kanban-project-console phase-5",
+            commandId: "phase",
+            available: true,
+          },
+        ],
+        agentSessions: [
+          {
+            id: "session-1",
+            taskId: "task-1",
+            workflowId: "codex-phase",
+            agent: "Codex",
+            command: "/phase t3-kanban-project-console phase-5",
+            status: "queued",
+            duplicateKey: "task-1:codex-phase:ready",
+            duplicateSuppressed: false,
+            summary: "Queued Codex workflow.",
+            startedAt: "2026-05-06T10:21:00.000Z",
+          },
+        ],
       }),
     ).toMatchObject({
       version: 1,
       tasks: [{ id: "task-1", column: "ready" }],
+      agentSessions: [{ status: "queued" }],
+    });
+  });
+
+  it("decodes the shared task context package used by agent launchers", () => {
+    expect(
+      decodeTaskContext({
+        task: {
+          id: "task-1",
+          issue: "kanban-console#43",
+          title: "Launch agent workflow",
+          repo: "kanban-console",
+          column: "ready",
+          priority: "P1",
+        },
+        project: {
+          id: "board-1",
+          owner: "MohAnghabo",
+          title: "Kanban Project Console",
+        },
+        repo: {
+          id: "repo-1",
+          owner: "MohAnghabo",
+          name: "kanban-console",
+          path: "/tmp/kanban-console",
+          branch: "feature/agent-launchers",
+        },
+        issueUrl: "https://github.com/MohAnghabo/kanban-console/issues/43",
+        prUrl: "https://github.com/MohAnghabo/kanban-console/pull/7",
+        artifacts: [{ path: "docs/tasks/t3-kanban-project-console.md", status: "clean" }],
+        validationCommands: ["bun check"],
+        governanceRules: ["AGENTS.md", ".ai/rules/22-kanban-console.md"],
+      }),
+    ).toMatchObject({
+      task: { id: "task-1" },
+      validationCommands: ["bun check"],
     });
   });
 

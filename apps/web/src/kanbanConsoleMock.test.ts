@@ -101,4 +101,18 @@ describe("kanbanConsoleMock", () => {
 
     expect(fixes.map((fix) => isSuggestedFixEligible(fix))).toEqual([true, false]);
   });
+
+  it("exposes mock agent sessions and workflow recipes for card actions", () => {
+    const snapshot = kanbanConsoleMockProvider.readSnapshot();
+    const sessions = kanbanConsoleMockProvider.listAgentSessions();
+
+    expect(snapshot.agentWorkflows.map((workflow) => workflow.commandId)).toEqual([
+      "phase",
+      "ship",
+      "orchestrate",
+      "review",
+    ]);
+    expect(sessions.map((session) => session.status)).toEqual(["queued", "blocked"]);
+    expect(kanbanTasks.some((task) => task.agentSessionStatus === "queued")).toBe(true);
+  });
 });
