@@ -28,6 +28,8 @@ import {
 } from "../ui/menu";
 import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
+import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import { withRememberedReasoningLevel } from "../../lib/reasoningLevelMemory";
 import { cn } from "~/lib/utils";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
@@ -217,6 +219,11 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
+  const { updateSettings } = useUpdateSettings();
+  const reasoningMemory = useSettings((s) => ({
+    reasoningLevelByProviderModel: s.reasoningLevelByProviderModel,
+    rememberReasoningLevelPerModel: s.rememberReasoningLevelPerModel,
+  }));
   const updateModelOptions = useCallback(
     (nextOptions: ProviderOptions | undefined) => {
       if ("onModelOptionsChange" in persistence) {
@@ -273,6 +280,17 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       onPromptChange(stripped);
     }
     updateDescriptors(replaceDescriptorCurrentValue(descriptors, descriptor.id, value));
+
+    if (
+      reasoningMemory.rememberReasoningLevelPerModel &&
+      model &&
+      descriptor.id === primarySelectDescriptor?.id
+    ) {
+      const nextMemory = withRememberedReasoningLevel(reasoningMemory, provider, model, value);
+      if (nextMemory) {
+        updateSettings({ reasoningLevelByProviderModel: nextMemory });
+      }
+    }
   };
 
   if (!hasAnyControls) {

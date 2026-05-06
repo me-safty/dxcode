@@ -232,6 +232,17 @@ export function isClaudeUltrathinkPrompt(text: string | null | undefined): boole
   return typeof text === "string" && /\bultrathink\b/i.test(text);
 }
 
+export function reasoningLevelMemoryKey(
+  provider: ProviderDriverKind,
+  model: string | null | undefined,
+): string | null {
+  const normalized = normalizeModelSlug(model, provider);
+  if (!normalized) {
+    return null;
+  }
+  return `${provider}:${normalized}`;
+}
+
 export function normalizeModelSlug(
   model: string | null | undefined,
   provider: ProviderDriverKind = DEFAULT_PROVIDER_DRIVER_KIND,

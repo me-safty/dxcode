@@ -355,6 +355,12 @@ interface ComposerDraftStoreState {
   setModelSelection: (
     threadRef: ComposerThreadTarget,
     modelSelection: ModelSelection | null | undefined,
+    options?: {
+      rememberedReasoningLevel?: {
+        descriptorId: string;
+        value: string;
+      } | null;
+    },
   ) => void;
   /** Replace the model options for one or more providers in the draft. */
   setModelOptions: (
@@ -2353,12 +2359,13 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
         },
-        setModelSelection: (threadRef, modelSelection) => {
+        setModelSelection: (threadRef, modelSelection, options) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
           if (threadKey.length === 0) {
             return;
           }
           const normalized = normalizeModelSelection(modelSelection);
+          const remembered = options?.rememberedReasoningLevel ?? null;
           set((state) => {
             const existing = state.draftsByThreadKey[threadKey];
             if (!existing && normalized === null) {
@@ -2368,6 +2375,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const nextMap = { ...base.modelSelectionByProvider };
             if (normalized) {
               const current = nextMap[normalized.instanceId];
+              const modelChanged = current?.model !== normalized.model;
               if (normalized.options !== undefined) {
                 // Explicit options provided → use them
                 nextMap[normalized.instanceId] = normalized as ModelSelection;
@@ -2377,6 +2385,22 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   normalized.instanceId,
                   normalized.model,
                   current?.options,
+                );
+              }
+              if (remembered && modelChanged) {
+                const nextForProvider = nextMap[normalized.instanceId];
+                const existingOptions = nextForProvider?.options ?? [];
+                const withoutDescriptor = existingOptions.filter(
+                  (selection) => selection.id !== remembered.descriptorId,
+                );
+                const nextOptions: Array<ProviderOptionSelection> = [
+                  ...withoutDescriptor,
+                  { id: remembered.descriptorId, value: remembered.value },
+                ];
+                nextMap[normalized.instanceId] = createModelSelection(
+                  normalized.instanceId,
+                  normalized.model,
+                  nextOptions,
                 );
               }
             }

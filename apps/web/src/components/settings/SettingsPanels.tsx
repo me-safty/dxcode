@@ -373,6 +373,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar
         ? ["Auto-open task panel"]
         : []),
+      ...(settings.rememberReasoningLevelPerModel !==
+      DEFAULT_UNIFIED_SETTINGS.rememberReasoningLevelPerModel
+        ? ["Remember reasoning level"]
+        : []),
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
@@ -400,6 +404,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffIgnoreWhitespace,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.rememberReasoningLevelPerModel,
       settings.timestampFormat,
       theme,
     ],
@@ -847,6 +852,34 @@ export function GeneralSettingsPanel() {
                 }}
               />
             </div>
+          }
+        />
+
+        <SettingsRow
+          title="Remember reasoning level"
+          description="Restore the last chosen reasoning level when switching back to a model you used earlier."
+          resetAction={
+            settings.rememberReasoningLevelPerModel !==
+            DEFAULT_UNIFIED_SETTINGS.rememberReasoningLevelPerModel ? (
+              <SettingResetButton
+                label="remember reasoning level"
+                onClick={() =>
+                  updateSettings({
+                    rememberReasoningLevelPerModel:
+                      DEFAULT_UNIFIED_SETTINGS.rememberReasoningLevelPerModel,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.rememberReasoningLevelPerModel}
+              onCheckedChange={(checked) =>
+                updateSettings({ rememberReasoningLevelPerModel: Boolean(checked) })
+              }
+              aria-label="Remember the reasoning level per model"
+            />
           }
         />
       </SettingsSection>

@@ -414,6 +414,80 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("persists and merges reasoningLevelByProviderModel entries", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      const first = yield* serverSettings.updateSettings({
+        reasoningLevelByProviderModel: {
+          "claudeAgent:claude-sonnet-4-6": "medium",
+        },
+      });
+      assert.deepEqual(first.reasoningLevelByProviderModel, {
+        "claudeAgent:claude-sonnet-4-6": "medium",
+      });
+
+      const second = yield* serverSettings.updateSettings({
+        reasoningLevelByProviderModel: {
+          "claudeAgent:claude-opus-4-7": "high",
+        },
+      });
+      assert.deepEqual(second.reasoningLevelByProviderModel, {
+        "claudeAgent:claude-sonnet-4-6": "medium",
+        "claudeAgent:claude-opus-4-7": "high",
+      });
+
+      const third = yield* serverSettings.updateSettings({
+        reasoningLevelByProviderModel: {
+          "claudeAgent:claude-sonnet-4-6": "high",
+        },
+      });
+      assert.deepEqual(third.reasoningLevelByProviderModel, {
+        "claudeAgent:claude-sonnet-4-6": "high",
+        "claudeAgent:claude-opus-4-7": "high",
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("omits reasoningLevelByProviderModel from disk when empty", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      yield* serverSettings.updateSettings({
+        addProjectBaseDirectory: "~/Development",
+      });
+
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      assert.isUndefined(parsed.reasoningLevelByProviderModel);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("writes reasoningLevelByProviderModel as a whole once set", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      yield* serverSettings.updateSettings({
+        reasoningLevelByProviderModel: {
+          "claudeAgent:claude-sonnet-4-6": "medium",
+          "codex:gpt-5.4": "xhigh",
+        },
+      });
+
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.deepEqual(JSON.parse(raw), {
+        reasoningLevelByProviderModel: {
+          "claudeAgent:claude-sonnet-4-6": "medium",
+          "codex:gpt-5.4": "xhigh",
+        },
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("writes only non-default server settings to disk", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
