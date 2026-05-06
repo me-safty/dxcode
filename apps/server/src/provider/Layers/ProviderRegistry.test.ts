@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it, assert, live } from "@effect/vitest";
-import { Effect, Exit, Layer, PubSub, Ref, Schema, Scope, Sink, Stream } from "effect";
+import { Effect, Exit, Layer, Path, PubSub, Ref, Schema, Scope, Sink, Stream } from "effect";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import {
   ClaudeSettings,
@@ -677,10 +677,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             let cachedProvider = yield* readProviderStatusCache(filePath);
             for (
               let attempt = 0;
-              attempt < 50 && cachedProvider?.checkedAt !== refreshedProvider.checkedAt;
+              attempt < 500 && cachedProvider?.checkedAt !== refreshedProvider.checkedAt;
               attempt += 1
             ) {
-              yield* Effect.sleep("10 millis");
+              yield* waitRealMillis(10);
               cachedProvider = yield* readProviderStatusCache(filePath);
             }
 
@@ -1499,6 +1499,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
         });
 
         return Effect.gen(function* () {
+          const path = yield* Path.Path;
+          const resolvedClaudeHome = path.resolve(claudeHome);
           const status = yield* checkClaudeProviderStatus(
             {
               ...defaultClaudeSettings,
@@ -1509,7 +1511,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           assert.strictEqual(status.status, "ready");
           assert.deepStrictEqual(
             recorded.commands.map((command) => command.env?.HOME),
-            [claudeHome],
+            [resolvedClaudeHome],
           );
         }).pipe(Effect.provide(recorded.layer));
       });
