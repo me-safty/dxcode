@@ -17,7 +17,7 @@ const encoder = new TextEncoder();
 const encodeJsonl = (value: unknown) =>
   encoder.encode(`${Schema.encodeUnknownSync(Schema.UnknownFromJsonString)(value)}\n`);
 
-const decodeJson = Schema.decodeUnknownSync(Schema.UnknownFromJsonString);
+const decodeJson = Schema.decodeEffect(Schema.UnknownFromJsonString);
 
 it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
   it.effect(
@@ -64,7 +64,7 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
         const pendingInitialize = yield* transport
           .request("initialize", initializeParams)
           .pipe(Effect.forkScoped);
-        assert.deepEqual(decodeJson(yield* Queue.take(output)), {
+        assert.deepEqual(yield* decodeJson(yield* Queue.take(output)), {
           id: 1,
           method: "initialize",
           params: initializeParams,
@@ -157,7 +157,7 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
             },
           },
         });
-        assert.deepEqual(decodeJson(yield* Queue.take(output)), {
+        assert.deepEqual(yield* decodeJson(yield* Queue.take(output)), {
           id: 77,
           result: {
             answers: {
@@ -172,7 +172,7 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
           78,
           CodexError.CodexAppServerRequestError.methodNotFound("x/test"),
         );
-        assert.deepEqual(decodeJson(yield* Queue.take(output)), {
+        assert.deepEqual(yield* decodeJson(yield* Queue.take(output)), {
           id: 78,
           error: {
             code: -32601,
