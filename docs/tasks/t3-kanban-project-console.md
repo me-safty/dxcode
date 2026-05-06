@@ -434,19 +434,19 @@ template repo.
   - Build the complete clickable product UI with mock data and no real integrations.
 - Dependencies: Phase 1.
 - Tasks:
-  - [ ] Project sidebar for registered monorepos.
-  - [ ] GitHub Projects Kanban mock board.
-  - [ ] Task detail panel with issue metadata, project fields, PR links, comments, checks, and agent actions.
-  - [ ] Card-move action sheet.
-  - [ ] Lazygit-style git status mock view.
-  - [ ] `docs/product` artifact browser, preview, and editor mock flow.
-  - [ ] PR watcher mock view for comments, checks, suggestions, and auto-fix eligibility.
-  - [ ] Issue and PR action timeline.
-  - [ ] CLI command console.
-  - [ ] GitOps and release dashboard.
-  - [ ] Settings for organization, repos, trusted bots, branch rules, polling, and command permissions.
-  - [ ] Empty, loading, permission, missing-auth, and error states for each view.
-  - [ ] AR/EN translation keys and RTL checks for user-facing UI.
+  - [x] Project sidebar for registered monorepos.
+  - [x] GitHub Projects Kanban mock board.
+  - [x] Task detail panel with issue metadata, project fields, PR links, comments, checks, and agent actions.
+  - [x] Card-move action sheet.
+  - [x] Lazygit-style git status mock view.
+  - [x] `docs/product` artifact browser, preview, and editor mock flow.
+  - [x] PR watcher mock view for comments, checks, suggestions, and auto-fix eligibility.
+  - [x] Issue and PR action timeline.
+  - [x] CLI command console.
+  - [x] GitOps and release dashboard.
+  - [x] Settings for organization, repos, trusted bots, branch rules, polling, and command permissions.
+  - [x] Empty, loading, permission, missing-auth, and error states for each view.
+  - [x] AR/EN translation keys and RTL checks for user-facing UI.
 - Validation:
   - Playwright smoke flow across every major screen.
   - Desktop and mobile screenshots for review.
@@ -870,3 +870,34 @@ Append one entry per implementation pass.
   - Result: PASS
 - Notes/deviations:
   - Scope is limited to actionable CodeRabbit review hardening in the Phase 1 automation layer.
+
+### 2026-05-06 16:55 - phase 2 mock console surface
+
+- Summary:
+  - Added the authenticated home mock surface for the Kanban Project Console.
+  - Implemented mock-only project sidebar, GitHub Projects board, card move sheet, task detail panel, Git status, artifact browser/editor preview, PR watcher, timeline, CLI queue, GitOps dashboard, settings, and state preview screens.
+  - Added bilingual EN/AR message keys with RTL switching and browser coverage that clicks through every major mock screen.
+- Files changed:
+  - `apps/web/src/routes/_chat.index.tsx`
+  - `apps/web/src/components/KanbanConsoleMock.tsx`
+  - `apps/web/src/components/KanbanConsoleMock.browser.tsx`
+  - `apps/web/src/kanbanConsoleMock.ts`
+  - `apps/web/src/kanbanConsoleMock.test.ts`
+  - `docs/tasks/t3-kanban-project-console.md`
+- Validation run:
+  - Command: `bun run --filter @t3tools/web typecheck`
+  - Result: PASS
+  - Command: `bun run --filter @t3tools/web test`
+  - Result: PASS
+  - Command: `bun run --filter @t3tools/web test:browser`
+  - Result: PASS
+  - Command: `bun check`
+  - Result: PASS
+  - Command: `bun run fmt:check`
+  - Result: PASS
+  - Command: `bun run lint`
+  - Result: PASS with existing repo warnings; this branch adds no new lint warnings.
+- Notes/deviations:
+  - Phase 2 remains mock-only. The UI uses local React state and static fixtures; no GitHub Project state, git, CLI, provider, or docs/product writes were performed.
+  - Browser validation is component-level Vitest Browser/Playwright coverage across major mock views plus RTL toggle. Persistent desktop/mobile screenshot artifacts were not committed; visual review remains available by running the web app or browser test locally.
+  - GitHub Projects remains the live status board, but no Project state writes were made because that requires explicit user approval.

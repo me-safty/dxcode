@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
 
+import { KanbanConsoleMock } from "../components/KanbanConsoleMock";
 import { NoActiveThreadState } from "../components/NoActiveThreadState";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
@@ -16,6 +17,10 @@ function ChatIndexRouteView() {
 
   if (authGateState.status === "hosted-static" && savedEnvironmentCount === 0) {
     return <HostedStaticOnboardingState />;
+  }
+
+  if (authGateState.status === "authenticated") {
+    return <KanbanConsoleMock />;
   }
 
   return <NoActiveThreadState />;
