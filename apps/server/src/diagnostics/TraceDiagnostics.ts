@@ -1,4 +1,5 @@
 import type {
+  ServerTraceDiagnosticsErrorKind,
   ServerTraceDiagnosticsFailureSummary,
   ServerTraceDiagnosticsLogEvent,
   ServerTraceDiagnosticsRecentFailure,
@@ -7,9 +8,11 @@ import type {
   ServerTraceDiagnosticsSpanSummary,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 
 interface TraceRecordLike {
@@ -33,7 +36,7 @@ export interface TraceDiagnosticsOptions {
   readonly traceFilePath: string;
   readonly maxFiles: number;
   readonly slowSpanThresholdMs?: number;
-  readonly readAt?: Date;
+  readonly readAt?: DateTime.Utc;
 }
 
 export interface TraceDiagnosticsShape {
@@ -49,9 +52,14 @@ interface TraceDiagnosticsInput {
   readonly files: ReadonlyArray<{ readonly path: string; readonly text: string }>;
   readonly scannedFilePaths?: ReadonlyArray<string>;
   readonly slowSpanThresholdMs?: number;
-  readonly readAt?: Date;
-  readonly error?: ServerTraceDiagnosticsResult["error"];
+  readonly readAt: DateTime.Utc;
+  readonly error?: TraceDiagnosticsErrorSummary;
   readonly partialFailure?: boolean;
+}
+
+interface TraceDiagnosticsErrorSummary {
+  readonly kind: ServerTraceDiagnosticsErrorKind;
+  readonly message: string;
 }
 
 const DEFAULT_SLOW_SPAN_THRESHOLD_MS = 1_000;
@@ -78,17 +86,25 @@ function toNumberValue(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function unixNanoToIso(value: unknown): string | null {
+function unixNanoToDateTime(value: unknown): DateTime.Utc | null {
   const text = toStringValue(value);
   if (!text) return null;
 
   try {
     const millis = Number(BigInt(text) / 1_000_000n);
     if (!Number.isFinite(millis)) return null;
-    return new Date(millis).toISOString();
+    return DateTime.makeUnsafe(millis);
   } catch {
     return null;
   }
+}
+
+function isAfter(left: DateTime.Utc, right: DateTime.Utc): boolean {
+  return DateTime.toEpochMillis(left) > DateTime.toEpochMillis(right);
+}
+
+function isBefore(left: DateTime.Utc, right: DateTime.Utc): boolean {
+  return DateTime.toEpochMillis(left) < DateTime.toEpochMillis(right);
 }
 
 function readExitTag(exit: unknown): string | null {
@@ -114,19 +130,19 @@ function readEventAttributes(event: TraceEventLike): Readonly<Record<string, unk
 function makeEmptyDiagnostics(input: {
   readonly traceFilePath: string;
   readonly scannedFilePaths: ReadonlyArray<string>;
-  readonly readAt: Date;
+  readonly readAt: DateTime.Utc;
   readonly slowSpanThresholdMs: number;
-  readonly error?: ServerTraceDiagnosticsResult["error"];
+  readonly error?: TraceDiagnosticsErrorSummary;
   readonly partialFailure?: boolean;
 }): ServerTraceDiagnosticsResult {
   return {
     traceFilePath: input.traceFilePath,
     scannedFilePaths: [...input.scannedFilePaths],
-    readAt: input.readAt.toISOString(),
+    readAt: input.readAt,
     recordCount: 0,
     parseErrorCount: 0,
-    firstSpanAt: null,
-    lastSpanAt: null,
+    firstSpanAt: Option.none(),
+    lastSpanAt: Option.none(),
     failureCount: 0,
     interruptionCount: 0,
     slowSpanThresholdMs: input.slowSpanThresholdMs,
@@ -137,8 +153,8 @@ function makeEmptyDiagnostics(input: {
     commonFailures: [],
     latestFailures: [],
     latestWarningAndErrorLogs: [],
-    ...(input.partialFailure ? { partialFailure: true } : {}),
-    ...(input.error ? { error: input.error } : {}),
+    partialFailure: input.partialFailure ? Option.some(true) : Option.none(),
+    error: Option.fromNullishOr(input.error),
   };
 }
 
@@ -171,7 +187,7 @@ function insertBoundedSlowestSpan(
 export function aggregateTraceDiagnostics(
   input: TraceDiagnosticsInput,
 ): ServerTraceDiagnosticsResult {
-  const readAt = input.readAt ?? new Date();
+  const readAt = input.readAt;
   const slowSpanThresholdMs = input.slowSpanThresholdMs ?? DEFAULT_SLOW_SPAN_THRESHOLD_MS;
   const scannedFilePaths = input.scannedFilePaths ?? input.files.map((file) => file.path);
   if (input.files.length === 0) {
@@ -193,8 +209,8 @@ export function aggregateTraceDiagnostics(
   let failureCount = 0;
   let interruptionCount = 0;
   let slowSpanCount = 0;
-  let firstSpanAt: string | null = null;
-  let lastSpanAt: string | null = null;
+  let firstSpanAt: DateTime.Utc | null = null;
+  let lastSpanAt: DateTime.Utc | null = null;
 
   const spansByName = new Map<
     string,
@@ -228,8 +244,8 @@ export function aggregateTraceDiagnostics(
       const traceId = toStringValue(parsed.traceId);
       const spanId = toStringValue(parsed.spanId);
       const durationMs = toNumberValue(parsed.durationMs);
-      const endedAt = unixNanoToIso(parsed.endTimeUnixNano);
-      const startedAt = unixNanoToIso(parsed.startTimeUnixNano);
+      const endedAt = unixNanoToDateTime(parsed.endTimeUnixNano);
+      const startedAt = unixNanoToDateTime(parsed.startTimeUnixNano);
 
       if (!name || !traceId || !spanId || durationMs === null || !endedAt) {
         parseErrorCount += 1;
@@ -238,10 +254,10 @@ export function aggregateTraceDiagnostics(
 
       recordCount += 1;
       firstSpanAt =
-        startedAt && (firstSpanAt === null || startedAt.localeCompare(firstSpanAt) < 0)
+        startedAt && (firstSpanAt === null || isBefore(startedAt, firstSpanAt))
           ? startedAt
           : firstSpanAt;
-      lastSpanAt = endedAt.localeCompare(lastSpanAt ?? "") > 0 ? endedAt : lastSpanAt;
+      lastSpanAt = lastSpanAt === null || isAfter(endedAt, lastSpanAt) ? endedAt : lastSpanAt;
 
       const exitTag = readExitTag(parsed.exit);
       const isFailure = exitTag === "Failure";
@@ -273,20 +289,14 @@ export function aggregateTraceDiagnostics(
 
         const failureKey = `${name}\0${cause}`;
         const existing = failuresByKey.get(failureKey);
+        const isLatestFailure = !existing || isAfter(endedAt, existing.lastSeenAt);
         failuresByKey.set(failureKey, {
           name,
           cause,
           count: (existing?.count ?? 0) + 1,
-          lastSeenAt:
-            !existing || endedAt.localeCompare(existing.lastSeenAt) > 0
-              ? endedAt
-              : existing.lastSeenAt,
-          traceId:
-            !existing || endedAt.localeCompare(existing.lastSeenAt) > 0
-              ? traceId
-              : existing.traceId,
-          spanId:
-            !existing || endedAt.localeCompare(existing.lastSeenAt) > 0 ? spanId : existing.spanId,
+          lastSeenAt: isLatestFailure ? endedAt : existing!.lastSeenAt,
+          traceId: isLatestFailure ? traceId : existing!.traceId,
+          spanId: isLatestFailure ? spanId : existing!.spanId,
         });
       }
 
@@ -308,7 +318,7 @@ export function aggregateTraceDiagnostics(
             continue;
           }
 
-          const seenAt = unixNanoToIso(rawEvent.timeUnixNano) ?? endedAt;
+          const seenAt = unixNanoToDateTime(rawEvent.timeUnixNano) ?? endedAt;
           const message = toStringValue(rawEvent.name)?.trim() ?? "Log event";
           latestWarningAndErrorLogs.push({
             spanName: name,
@@ -338,11 +348,11 @@ export function aggregateTraceDiagnostics(
   return {
     traceFilePath: input.traceFilePath,
     scannedFilePaths,
-    readAt: readAt.toISOString(),
+    readAt,
     recordCount,
     parseErrorCount,
-    firstSpanAt,
-    lastSpanAt,
+    firstSpanAt: Option.fromNullishOr(firstSpanAt),
+    lastSpanAt: Option.fromNullishOr(lastSpanAt),
     failureCount,
     interruptionCount,
     slowSpanThresholdMs,
@@ -353,17 +363,23 @@ export function aggregateTraceDiagnostics(
     commonFailures: [...failuresByKey.values()]
       .toSorted(
         (left, right) =>
-          right.count - left.count || right.lastSeenAt.localeCompare(left.lastSeenAt),
+          right.count - left.count ||
+          DateTime.toEpochMillis(right.lastSeenAt) - DateTime.toEpochMillis(left.lastSeenAt),
       )
       .slice(0, TOP_LIMIT),
     latestFailures: latestFailures
-      .toSorted((left, right) => right.endedAt.localeCompare(left.endedAt))
+      .toSorted(
+        (left, right) =>
+          DateTime.toEpochMillis(right.endedAt) - DateTime.toEpochMillis(left.endedAt),
+      )
       .slice(0, RECENT_LIMIT),
     latestWarningAndErrorLogs: latestWarningAndErrorLogs
-      .toSorted((left, right) => right.seenAt.localeCompare(left.seenAt))
+      .toSorted(
+        (left, right) => DateTime.toEpochMillis(right.seenAt) - DateTime.toEpochMillis(left.seenAt),
+      )
       .slice(0, RECENT_LIMIT),
-    ...(input.partialFailure ? { partialFailure: true } : {}),
-    ...(input.error ? { error: input.error } : {}),
+    partialFailure: input.partialFailure ? Option.some(true) : Option.none(),
+    error: Option.fromNullishOr(input.error),
   };
 }
 
@@ -393,7 +409,7 @@ export const make = Effect.fn("makeTraceDiagnostics")(function* () {
 
   const read: TraceDiagnosticsShape["read"] = Effect.fn("TraceDiagnostics.read")(
     function* (options) {
-      const readAt = options.readAt ?? new Date();
+      const readAt = options.readAt ?? (yield* DateTime.now);
       const slowSpanThresholdMs = options.slowSpanThresholdMs ?? DEFAULT_SLOW_SPAN_THRESHOLD_MS;
       const paths = toRotatedTracePaths(options.traceFilePath, options.maxFiles);
       const results = yield* Effect.all(
@@ -410,7 +426,7 @@ export const make = Effect.fn("makeTraceDiagnostics")(function* () {
         ? ({
             kind: "trace-file-read-failed",
             message: readFailure.message.trim() || `Failed to read ${readFailure.path}.`,
-          } satisfies ServerTraceDiagnosticsResult["error"])
+          } satisfies TraceDiagnosticsErrorSummary)
         : undefined;
 
       if (files.length === 0) {
@@ -424,7 +440,7 @@ export const make = Effect.fn("makeTraceDiagnostics")(function* () {
             ({
               kind: "trace-file-not-found",
               message: "No local trace files were found.",
-            } satisfies ServerTraceDiagnosticsResult["error"]),
+            } satisfies TraceDiagnosticsErrorSummary),
         });
       }
 

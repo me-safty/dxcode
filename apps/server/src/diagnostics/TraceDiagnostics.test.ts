@@ -1,7 +1,9 @@
 import { assert, describe, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 
 import * as TraceDiagnostics from "./TraceDiagnostics.ts";
@@ -41,7 +43,7 @@ describe("TraceDiagnostics", () => {
     Effect.sync(() => {
       const diagnostics = TraceDiagnostics.aggregateTraceDiagnostics({
         traceFilePath: "/tmp/server.trace.ndjson",
-        readAt: new Date("2026-05-05T10:00:00.000Z"),
+        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
         slowSpanThresholdMs: 1_000,
         files: [
           {
@@ -104,6 +106,21 @@ describe("TraceDiagnostics", () => {
       });
 
       assert.equal(diagnostics.recordCount, 4);
+      assert.equal(DateTime.formatIso(diagnostics.readAt), "2026-05-05T10:00:00.000Z");
+      assert.equal(
+        Option.match(diagnostics.firstSpanAt, {
+          onNone: () => null,
+          onSome: DateTime.formatIso,
+        }),
+        "1970-01-01T00:00:01.000Z",
+      );
+      assert.equal(
+        Option.match(diagnostics.lastSpanAt, {
+          onNone: () => null,
+          onSome: DateTime.formatIso,
+        }),
+        "1970-01-01T00:00:05.025Z",
+      );
       assert.equal(diagnostics.parseErrorCount, 1);
       assert.equal(diagnostics.failureCount, 2);
       assert.equal(diagnostics.interruptionCount, 1);
@@ -123,12 +140,12 @@ describe("TraceDiagnostics", () => {
     Effect.sync(() => {
       const diagnostics = TraceDiagnostics.aggregateTraceDiagnostics({
         traceFilePath: "/tmp/missing.trace.ndjson",
-        readAt: new Date("2026-05-05T10:00:00.000Z"),
+        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
         files: [],
       });
 
       assert.equal(diagnostics.recordCount, 0);
-      assert.equal(diagnostics.error?.kind, "trace-file-not-found");
+      assert.equal(Option.getOrUndefined(diagnostics.error)?.kind, "trace-file-not-found");
     }),
   );
 
@@ -138,6 +155,7 @@ describe("TraceDiagnostics", () => {
       const longMessage = `provider warning: ${"retrying command ".repeat(80)}`.trim();
       const diagnostics = TraceDiagnostics.aggregateTraceDiagnostics({
         traceFilePath: "/tmp/server.trace.ndjson",
+        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
         files: [
           {
             path: "/tmp/server.trace.ndjson",
@@ -195,12 +213,15 @@ describe("TraceDiagnostics", () => {
       const diagnostics = yield* TraceDiagnostics.readTraceDiagnostics({
         traceFilePath,
         maxFiles: 1,
-        readAt: new Date("2026-05-05T10:00:00.000Z"),
+        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
       }).pipe(Effect.provide(TraceDiagnostics.layer.pipe(Layer.provide(fileSystemLayer))));
 
       assert.equal(diagnostics.recordCount, 1);
-      assert.equal(diagnostics.partialFailure, true);
-      assert.equal(diagnostics.error?.kind, "trace-file-read-failed");
+      assert.equal(
+        Option.getOrElse(diagnostics.partialFailure, () => false),
+        true,
+      );
+      assert.equal(Option.getOrUndefined(diagnostics.error)?.kind, "trace-file-read-failed");
       assert.deepStrictEqual(diagnostics.scannedFilePaths, [`${traceFilePath}.1`, traceFilePath]);
     }),
   );
@@ -209,6 +230,7 @@ describe("TraceDiagnostics", () => {
     Effect.sync(() => {
       const diagnostics = TraceDiagnostics.aggregateTraceDiagnostics({
         traceFilePath: "/tmp/server.trace.ndjson",
+        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
         files: [
           {
             path: "/tmp/server.trace.ndjson",

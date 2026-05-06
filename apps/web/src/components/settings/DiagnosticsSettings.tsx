@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import type { ServerProcessDiagnosticsEntry, ServerProcessSignal } from "@t3tools/contracts";
+import { DateTime, Option } from "effect";
 
 import { ensureLocalApi } from "../../localApi";
 import { cn } from "../../lib/utils";
@@ -46,13 +47,13 @@ function formatBytes(value: number): string {
   return `${next.toFixed(next >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 }
 
-function formatRelative(value: string | null): string {
+function formatRelative(value: DateTime.Utc | null): string {
   if (!value) return "No trace records";
-  const relative = formatRelativeTime(value);
+  const relative = formatRelativeTime(DateTime.formatIso(value));
   return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value;
 }
 
-function formatRelativeNoWrap(value: string | null): string {
+function formatRelativeNoWrap(value: DateTime.Utc | null): string {
   return formatRelative(value).replaceAll(" ", "\u00a0");
 }
 
@@ -500,9 +501,9 @@ function ProcessDiagnosticsTable({
   );
 }
 
-function DiagnosticsLastChecked({ checkedAt }: { checkedAt: string | null }) {
+function DiagnosticsLastChecked({ checkedAt }: { checkedAt: DateTime.Utc | null }) {
   useRelativeTimeTick();
-  const relative = checkedAt ? formatRelativeTime(checkedAt) : null;
+  const relative = checkedAt ? formatRelativeTime(DateTime.formatIso(checkedAt)) : null;
 
   if (!relative) {
     return <span className="text-[11px] text-muted-foreground/50">Checking</span>;
@@ -605,8 +606,9 @@ export function DiagnosticsSettingsPanel() {
         .server.signalProcess({ pid, signal })
         .then((result) => {
           if (!result.signaled) {
+            const message = Option.getOrUndefined(result.message);
             refreshProcesses();
-            if (isStaleProcessSignalMessage(result.message)) {
+            if (isStaleProcessSignalMessage(message)) {
               toastManager.add({
                 type: "info",
                 title: "Process already exited",
@@ -619,7 +621,7 @@ export function DiagnosticsSettingsPanel() {
             toastManager.add({
               type: "error",
               title: `Could not send ${signal}`,
-              description: result.message ?? `Failed to send ${signal}.`,
+              description: message ?? `Failed to send ${signal}.`,
             });
             return;
           }
@@ -638,6 +640,12 @@ export function DiagnosticsSettingsPanel() {
     },
     [refreshProcesses],
   );
+
+  const processDiagnosticsError = processData ? Option.getOrNull(processData.error) : null;
+  const traceDiagnosticsError = data ? Option.getOrNull(data.error) : null;
+  const traceDiagnosticsPartialFailure = data
+    ? Option.getOrElse(data.partialFailure, () => false)
+    : false;
 
   return (
     <SettingsPageContainer>
@@ -674,12 +682,12 @@ export function DiagnosticsSettingsPanel() {
             value={processData ? String(processData.serverPid) : "..."}
           />
         </StatsGrid>
-        {processData?.error || processError ? (
+        {processDiagnosticsError || processError ? (
           <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-            {processData?.error ? (
+            {processDiagnosticsError ? (
               <div className="flex items-start gap-2 text-destructive">
                 <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{processData.error.message}</span>
+                <span>{processDiagnosticsError.message}</span>
               </div>
             ) : null}
             {processError ? (
@@ -755,7 +763,7 @@ export function DiagnosticsSettingsPanel() {
             tone={data && data.parseErrorCount > 0 ? "warning" : "default"}
           />
         </StatsGrid>
-        {openLogsDirectoryError || data?.error || error ? (
+        {openLogsDirectoryError || traceDiagnosticsError || error ? (
           <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
             {openLogsDirectoryError ? (
               <div className="flex items-start gap-2 text-destructive">
@@ -763,18 +771,20 @@ export function DiagnosticsSettingsPanel() {
                 <span>{openLogsDirectoryError}</span>
               </div>
             ) : null}
-            {data?.error ? (
+            {traceDiagnosticsError ? (
               <div
                 className={cn(
                   "flex items-start gap-2",
-                  data.partialFailure ? "text-amber-600 dark:text-amber-400" : "text-destructive",
+                  traceDiagnosticsPartialFailure
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-destructive",
                 )}
               >
                 <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
                 <span>
-                  {data.partialFailure
-                    ? `Some trace files could not be read, so diagnostics may be incomplete. ${data.error.message}`
-                    : data.error.message}
+                  {traceDiagnosticsPartialFailure
+                    ? `Some trace files could not be read, so diagnostics may be incomplete. ${traceDiagnosticsError.message}`
+                    : traceDiagnosticsError.message}
                 </span>
               </div>
             ) : null}
@@ -900,7 +910,7 @@ export function DiagnosticsSettingsPanel() {
               <tbody className="divide-y divide-border/60">
                 {data.latestWarningAndErrorLogs.map((event) => (
                   <tr
-                    key={`${event.traceId}:${event.spanId}:${event.seenAt}:${event.message}`}
+                    key={`${event.traceId}:${event.spanId}:${DateTime.formatIso(event.seenAt)}:${event.message}`}
                     className="hover:bg-muted/15"
                   >
                     <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground sm:pl-5">

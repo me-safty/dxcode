@@ -1,6 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -68,7 +70,7 @@ describe("ProcessDiagnostics", () => {
     Effect.sync(() => {
       const diagnostics = ProcessDiagnostics.aggregateProcessDiagnostics({
         serverPid: 100,
-        readAt: new Date("2026-05-05T10:00:00.000Z"),
+        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
         rows: [
           {
             pid: 100,
@@ -124,12 +126,13 @@ describe("ProcessDiagnostics", () => {
       });
 
       expect(diagnostics.serverPid).toBe(100);
-      expect(diagnostics.readAt).toBe("2026-05-05T10:00:00.000Z");
+      expect(DateTime.formatIso(diagnostics.readAt)).toBe("2026-05-05T10:00:00.000Z");
       expect(diagnostics.processCount).toBe(2);
       expect(diagnostics.totalRssBytes).toBe(6_000);
       expect(diagnostics.totalCpuPercent).toBe(4.75);
       expect(diagnostics.processes.map((process) => process.pid)).toEqual([101, 102]);
       expect(diagnostics.processes.map((process) => process.depth)).toEqual([0, 1]);
+      expect(Option.getOrNull(diagnostics.processes[0]!.pgid)).toBe(100);
       expect(diagnostics.processes[0]?.childPids).toEqual([102]);
     }),
   );
@@ -138,6 +141,7 @@ describe("ProcessDiagnostics", () => {
     Effect.sync(() => {
       const diagnostics = ProcessDiagnostics.aggregateProcessDiagnostics({
         serverPid: 100,
+        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
         rows: [
           {
             pid: 101,
@@ -241,7 +245,7 @@ describe("ProcessDiagnostics", () => {
         pid: 4242,
         signal: "SIGINT",
         signaled: false,
-        message: "Process 4242 is not a live descendant of the T3 server.",
+        message: Option.some("Process 4242 is not a live descendant of the T3 server."),
       });
     }),
   );

@@ -232,7 +232,7 @@ export const ServerTraceDiagnosticsFailureSummary = Schema.Struct({
   name: TrimmedNonEmptyString,
   cause: TrimmedNonEmptyString,
   count: NonNegativeInt,
-  lastSeenAt: IsoDateTime,
+  lastSeenAt: Schema.DateTimeUtc,
   traceId: TrimmedNonEmptyString,
   spanId: TrimmedNonEmptyString,
 });
@@ -242,7 +242,7 @@ export const ServerTraceDiagnosticsRecentFailure = Schema.Struct({
   name: TrimmedNonEmptyString,
   cause: TrimmedNonEmptyString,
   durationMs: Schema.Number,
-  endedAt: IsoDateTime,
+  endedAt: Schema.DateTimeUtc,
   traceId: TrimmedNonEmptyString,
   spanId: TrimmedNonEmptyString,
 });
@@ -251,7 +251,7 @@ export type ServerTraceDiagnosticsRecentFailure = typeof ServerTraceDiagnosticsR
 export const ServerTraceDiagnosticsSpanOccurrence = Schema.Struct({
   name: TrimmedNonEmptyString,
   durationMs: Schema.Number,
-  endedAt: IsoDateTime,
+  endedAt: Schema.DateTimeUtc,
   traceId: TrimmedNonEmptyString,
   spanId: TrimmedNonEmptyString,
 });
@@ -261,7 +261,7 @@ export const ServerTraceDiagnosticsLogEvent = Schema.Struct({
   spanName: TrimmedNonEmptyString,
   level: TrimmedNonEmptyString,
   message: TrimmedNonEmptyString,
-  seenAt: IsoDateTime,
+  seenAt: Schema.DateTimeUtc,
   traceId: TrimmedNonEmptyString,
   spanId: TrimmedNonEmptyString,
 });
@@ -270,11 +270,11 @@ export type ServerTraceDiagnosticsLogEvent = typeof ServerTraceDiagnosticsLogEve
 export const ServerTraceDiagnosticsResult = Schema.Struct({
   traceFilePath: TrimmedNonEmptyString,
   scannedFilePaths: Schema.Array(TrimmedNonEmptyString),
-  readAt: IsoDateTime,
+  readAt: Schema.DateTimeUtc,
   recordCount: NonNegativeInt,
   parseErrorCount: NonNegativeInt,
-  firstSpanAt: Schema.NullOr(IsoDateTime),
-  lastSpanAt: Schema.NullOr(IsoDateTime),
+  firstSpanAt: Schema.Option(Schema.DateTimeUtc),
+  lastSpanAt: Schema.Option(Schema.DateTimeUtc),
   failureCount: NonNegativeInt,
   interruptionCount: NonNegativeInt,
   slowSpanThresholdMs: NonNegativeInt,
@@ -285,8 +285,8 @@ export const ServerTraceDiagnosticsResult = Schema.Struct({
   commonFailures: Schema.Array(ServerTraceDiagnosticsFailureSummary),
   latestFailures: Schema.Array(ServerTraceDiagnosticsRecentFailure),
   latestWarningAndErrorLogs: Schema.Array(ServerTraceDiagnosticsLogEvent),
-  partialFailure: Schema.optional(Schema.Boolean),
-  error: Schema.optional(
+  partialFailure: Schema.Option(Schema.Boolean),
+  error: Schema.Option(
     Schema.Struct({
       kind: ServerTraceDiagnosticsErrorKind,
       message: TrimmedNonEmptyString,
@@ -301,7 +301,7 @@ export type ServerProcessSignal = typeof ServerProcessSignal.Type;
 export const ServerProcessDiagnosticsEntry = Schema.Struct({
   pid: PositiveInt,
   ppid: NonNegativeInt,
-  pgid: Schema.NullOr(Schema.Int),
+  pgid: Schema.Option(Schema.Int),
   status: TrimmedNonEmptyString,
   cpuPercent: Schema.Number,
   rssBytes: NonNegativeInt,
@@ -314,12 +314,12 @@ export type ServerProcessDiagnosticsEntry = typeof ServerProcessDiagnosticsEntry
 
 export const ServerProcessDiagnosticsResult = Schema.Struct({
   serverPid: PositiveInt,
-  readAt: IsoDateTime,
+  readAt: Schema.DateTimeUtc,
   processCount: NonNegativeInt,
   totalRssBytes: NonNegativeInt,
   totalCpuPercent: Schema.Number,
   processes: Schema.Array(ServerProcessDiagnosticsEntry),
-  error: Schema.optional(
+  error: Schema.Option(
     Schema.Struct({
       message: TrimmedNonEmptyString,
     }),
@@ -337,7 +337,7 @@ export const ServerSignalProcessResult = Schema.Struct({
   pid: PositiveInt,
   signal: ServerProcessSignal,
   signaled: Schema.Boolean,
-  message: Schema.optional(TrimmedNonEmptyString),
+  message: Schema.Option(TrimmedNonEmptyString),
 });
 export type ServerSignalProcessResult = typeof ServerSignalProcessResult.Type;
 

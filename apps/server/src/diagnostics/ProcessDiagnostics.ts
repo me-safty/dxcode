@@ -5,6 +5,7 @@ import type {
   ServerSignalProcessResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -212,7 +213,7 @@ function buildDescendantEntries(
     entries.push({
       pid: item.row.pid,
       ppid: item.row.ppid,
-      pgid: item.row.pgid,
+      pgid: Option.fromNullishOr(item.row.pgid),
       status: item.row.status,
       cpuPercent: item.row.cpuPercent,
       rssBytes: item.row.rssBytes,
@@ -242,10 +243,10 @@ function isDiagnosticsQueryProcess(row: ProcessRow, serverPid: number): boolean 
 function makeResult(input: {
   readonly serverPid: number;
   readonly rows: ReadonlyArray<ProcessRow>;
-  readonly readAt?: Date;
+  readonly readAt: DateTime.Utc;
   readonly error?: string;
 }): ServerProcessDiagnosticsResult {
-  const readAt = input.readAt ?? new Date();
+  const readAt = input.readAt;
   const rows = input.rows.filter((row) => !isDiagnosticsQueryProcess(row, input.serverPid));
   const processes = buildDescendantEntries(rows, input.serverPid);
   const totalRssBytes = processes.reduce((total, process) => total + process.rssBytes, 0);
@@ -253,12 +254,12 @@ function makeResult(input: {
 
   return {
     serverPid: input.serverPid,
-    readAt: readAt.toISOString(),
+    readAt,
     processCount: processes.length,
     totalRssBytes,
     totalCpuPercent,
     processes,
-    ...(input.error ? { error: { message: input.error } } : {}),
+    error: input.error ? Option.some({ message: input.error }) : Option.none(),
   };
 }
 
@@ -374,7 +375,7 @@ const readProcessRows = (platform = process.platform) =>
 export function aggregateProcessDiagnostics(input: {
   readonly serverPid: number;
   readonly rows: ReadonlyArray<ProcessRow>;
-  readonly readAt?: Date;
+  readonly readAt: DateTime.Utc;
 }): ServerProcessDiagnosticsResult {
   return makeResult(input);
 }
@@ -404,11 +405,19 @@ function assertDescendantPid(
 export const make = Effect.fn("makeProcessDiagnostics")(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
-  const read: ProcessDiagnosticsShape["read"] = readProcessRows().pipe(
-    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-    Effect.map((rows) => makeResult({ serverPid: process.pid, rows })),
+  const read: ProcessDiagnosticsShape["read"] = Effect.gen(function* () {
+    const readAt = yield* DateTime.now;
+    const rows = yield* readProcessRows().pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    );
+    return makeResult({ serverPid: process.pid, rows, readAt });
+  }).pipe(
     Effect.catch((error: ProcessDiagnosticsError) =>
-      Effect.succeed(makeResult({ serverPid: process.pid, rows: [], error: error.message })),
+      DateTime.now.pipe(
+        Effect.map((readAt) =>
+          makeResult({ serverPid: process.pid, rows: [], readAt, error: error.message }),
+        ),
+      ),
     ),
   );
 
@@ -424,6 +433,7 @@ export const make = Effect.fn("makeProcessDiagnostics")(function* () {
                 pid: input.pid,
                 signal: input.signal,
                 signaled: true,
+                message: Option.none(),
               };
             },
             catch: (cause) =>
@@ -438,7 +448,7 @@ export const make = Effect.fn("makeProcessDiagnostics")(function* () {
             pid: input.pid,
             signal: input.signal,
             signaled: false,
-            message: error.message,
+            message: Option.some(error.message),
           }),
         ),
       );
