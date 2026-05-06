@@ -663,7 +663,7 @@ function AssistantChangedFilesSectionInner({
 
   return (
     <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
-      <div className="mb-1.5 flex items-center justify-between gap-2">
+      <div className="sticky top-2 z-10 mb-1.5 flex items-center justify-between gap-2 rounded-md border border-border/70 bg-card/95 px-2 py-1.5 shadow-sm backdrop-blur">
         <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
           <span>Changed files ({changedFileCountLabel})</span>
           {hasNonZeroStat(summaryStat) && (
