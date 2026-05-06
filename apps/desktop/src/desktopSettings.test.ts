@@ -11,6 +11,8 @@ import {
   setDesktopServerExposurePreference,
   setDesktopTailscaleServePreference,
   setDesktopUpdateChannelPreference,
+  setDesktopWindowDisplayState,
+  setDesktopWindowSize,
   writeDesktopSettings,
 } from "./desktopSettings.ts";
 
@@ -206,6 +208,199 @@ describe("desktopSettings", () => {
       updateChannel: "latest",
       updateChannelConfiguredByUser: true,
     });
+  });
+
+  it("round-trips a persisted window size", () => {
+    const settingsPath = makeSettingsPath();
+
+    writeDesktopSettings(settingsPath, {
+      serverExposureMode: "local-only",
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+      updateChannel: "latest",
+      updateChannelConfiguredByUser: false,
+      windowSize: { width: 1440, height: 900 },
+    });
+
+    expect(readDesktopSettings(settingsPath, "0.0.17")).toEqual({
+      serverExposureMode: "local-only",
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+      updateChannel: "latest",
+      updateChannelConfiguredByUser: false,
+      windowSize: { width: 1440, height: 900 },
+    });
+  });
+
+  it("omits windowSize when settings were written without one", () => {
+    const settingsPath = makeSettingsPath();
+
+    writeDesktopSettings(settingsPath, {
+      serverExposureMode: "local-only",
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+      updateChannel: "latest",
+      updateChannelConfiguredByUser: false,
+    });
+
+    const result = readDesktopSettings(settingsPath, "0.0.17");
+    expect(result.windowSize).toBeUndefined();
+  });
+
+  it.each([
+    { label: "not an object", value: "1200x800" },
+    { label: "null", value: null },
+    { label: "missing height", value: { width: 1200 } },
+    { label: "non-numeric width", value: { width: "1200", height: 800 } },
+    { label: "non-finite width", value: { width: Number.POSITIVE_INFINITY, height: 800 } },
+    { label: "non-finite height", value: { width: 1200, height: Number.NaN } },
+    { label: "negative width", value: { width: -1200, height: 800 } },
+    { label: "zero height", value: { width: 1200, height: 0 } },
+  ])("discards a malformed windowSize ($label)", ({ value }) => {
+    const settingsPath = makeSettingsPath();
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        serverExposureMode: "local-only",
+        updateChannel: "latest",
+        updateChannelConfiguredByUser: false,
+        windowSize: value,
+      }),
+      "utf8",
+    );
+
+    expect(readDesktopSettings(settingsPath, "0.0.17").windowSize).toBeUndefined();
+  });
+
+  it("adds a windowSize via setDesktopWindowSize", () => {
+    expect(
+      setDesktopWindowSize(
+        {
+          serverExposureMode: "local-only",
+          tailscaleServeEnabled: false,
+          tailscaleServePort: 443,
+          updateChannel: "latest",
+          updateChannelConfiguredByUser: false,
+        },
+        { width: 1280, height: 820 },
+      ),
+    ).toEqual({
+      serverExposureMode: "local-only",
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+      updateChannel: "latest",
+      updateChannelConfiguredByUser: false,
+      windowSize: { width: 1280, height: 820 },
+    });
+  });
+
+  it("returns the same reference when the windowSize is unchanged", () => {
+    const settings = {
+      serverExposureMode: "local-only" as const,
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+      updateChannel: "latest" as const,
+      updateChannelConfiguredByUser: false,
+      windowSize: { width: 1280, height: 820 },
+    };
+    expect(setDesktopWindowSize(settings, { width: 1280, height: 820 })).toBe(settings);
+  });
+
+  it("round-trips windowMaximized and windowFullscreen flags", () => {
+    const settingsPath = makeSettingsPath();
+
+    writeDesktopSettings(settingsPath, {
+      serverExposureMode: "local-only",
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+      updateChannel: "latest",
+      updateChannelConfiguredByUser: false,
+      windowMaximized: true,
+      windowFullscreen: false,
+    });
+
+    expect(readDesktopSettings(settingsPath, "0.0.17")).toEqual({
+      serverExposureMode: "local-only",
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+      updateChannel: "latest",
+      updateChannelConfiguredByUser: false,
+      windowMaximized: true,
+      windowFullscreen: false,
+    });
+  });
+
+  it.each([
+    { label: "string", value: "true" },
+    { label: "number", value: 1 },
+    { label: "null", value: null },
+    { label: "object", value: {} },
+  ])("discards a malformed windowMaximized ($label)", ({ value }) => {
+    const settingsPath = makeSettingsPath();
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        serverExposureMode: "local-only",
+        updateChannel: "latest",
+        updateChannelConfiguredByUser: false,
+        windowMaximized: value,
+      }),
+      "utf8",
+    );
+
+    const result = readDesktopSettings(settingsPath, "0.0.17");
+    expect(result.windowMaximized).toBeUndefined();
+  });
+
+  it("adds window display state via setDesktopWindowDisplayState", () => {
+    expect(
+      setDesktopWindowDisplayState(
+        {
+          serverExposureMode: "local-only",
+          tailscaleServeEnabled: false,
+          tailscaleServePort: 443,
+          updateChannel: "latest",
+          updateChannelConfiguredByUser: false,
+        },
+        { maximized: true, fullscreen: false },
+      ),
+    ).toEqual({
+      serverExposureMode: "local-only",
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+      updateChannel: "latest",
+      updateChannelConfiguredByUser: false,
+      windowMaximized: true,
+      windowFullscreen: false,
+    });
+  });
+
+  it("returns the same reference when display state is unchanged", () => {
+    const settings = {
+      serverExposureMode: "local-only" as const,
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+      updateChannel: "latest" as const,
+      updateChannelConfiguredByUser: false,
+      windowMaximized: true,
+      windowFullscreen: false,
+    };
+    expect(setDesktopWindowDisplayState(settings, { maximized: true, fullscreen: false })).toBe(
+      settings,
+    );
+  });
+
+  it("treats undefined maximized/fullscreen as false when diffing", () => {
+    const settings = {
+      serverExposureMode: "local-only" as const,
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+      updateChannel: "latest" as const,
+      updateChannelConfiguredByUser: false,
+    };
+    expect(setDesktopWindowDisplayState(settings, { maximized: false, fullscreen: false })).toBe(
+      settings,
+    );
   });
 
   it("falls back to the default Tailscale Serve port when the persisted port is invalid", () => {

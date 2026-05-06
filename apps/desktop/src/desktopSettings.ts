@@ -4,12 +4,25 @@ import type { DesktopServerExposureMode, DesktopUpdateChannel } from "@t3tools/c
 
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
 
+export interface DesktopWindowSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface DesktopWindowDisplayState {
+  readonly maximized: boolean;
+  readonly fullscreen: boolean;
+}
+
 export interface DesktopSettings {
   readonly serverExposureMode: DesktopServerExposureMode;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
   readonly updateChannel: DesktopUpdateChannel;
   readonly updateChannelConfiguredByUser: boolean;
+  readonly windowSize?: DesktopWindowSize;
+  readonly windowMaximized?: boolean;
+  readonly windowFullscreen?: boolean;
 }
 
 export const DEFAULT_TAILSCALE_SERVE_PORT = 443;
@@ -75,6 +88,67 @@ export function setDesktopUpdateChannelPreference(
   };
 }
 
+export function setDesktopWindowSize(
+  settings: DesktopSettings,
+  size: DesktopWindowSize,
+): DesktopSettings {
+  if (
+    settings.windowSize !== undefined &&
+    settings.windowSize.width === size.width &&
+    settings.windowSize.height === size.height
+  ) {
+    return settings;
+  }
+  return {
+    ...settings,
+    windowSize: {
+      width: size.width,
+      height: size.height,
+    },
+  };
+}
+
+export function setDesktopWindowDisplayState(
+  settings: DesktopSettings,
+  displayState: DesktopWindowDisplayState,
+): DesktopSettings {
+  const currentMaximized = settings.windowMaximized ?? false;
+  const currentFullscreen = settings.windowFullscreen ?? false;
+  if (
+    currentMaximized === displayState.maximized &&
+    currentFullscreen === displayState.fullscreen
+  ) {
+    return settings;
+  }
+  return {
+    ...settings,
+    windowMaximized: displayState.maximized,
+    windowFullscreen: displayState.fullscreen,
+  };
+}
+
+function parseWindowSize(candidate: unknown): DesktopWindowSize | undefined {
+  if (typeof candidate !== "object" || candidate === null) {
+    return undefined;
+  }
+  const { width, height } = candidate as { readonly width?: unknown; readonly height?: unknown };
+  if (
+    typeof width !== "number" ||
+    typeof height !== "number" ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return undefined;
+  }
+  return { width, height };
+}
+
+function parseBooleanFlag(candidate: unknown): boolean | undefined {
+  return typeof candidate === "boolean" ? candidate : undefined;
+}
+
 export function readDesktopSettings(settingsPath: string, appVersion: string): DesktopSettings {
   const defaultSettings = resolveDefaultDesktopSettings(appVersion);
 
@@ -90,6 +164,9 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
       readonly tailscaleServePort?: unknown;
       readonly updateChannel?: unknown;
       readonly updateChannelConfiguredByUser?: unknown;
+      readonly windowSize?: unknown;
+      readonly windowMaximized?: unknown;
+      readonly windowFullscreen?: unknown;
     };
     const parsedUpdateChannel =
       parsed.updateChannel === "nightly" || parsed.updateChannel === "latest"
@@ -99,8 +176,11 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
     const updateChannelConfiguredByUser =
       parsed.updateChannelConfiguredByUser === true ||
       (isLegacySettings && parsedUpdateChannel === "nightly");
+    const windowSize = parseWindowSize(parsed.windowSize);
+    const windowMaximized = parseBooleanFlag(parsed.windowMaximized);
+    const windowFullscreen = parseBooleanFlag(parsed.windowFullscreen);
 
-    return {
+    const resolvedSettings: DesktopSettings = {
       serverExposureMode:
         parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
       tailscaleServeEnabled: parsed.tailscaleServeEnabled === true,
@@ -110,7 +190,12 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
           ? parsedUpdateChannel
           : defaultSettings.updateChannel,
       updateChannelConfiguredByUser,
+      ...(windowSize === undefined ? {} : { windowSize }),
+      ...(windowMaximized === undefined ? {} : { windowMaximized }),
+      ...(windowFullscreen === undefined ? {} : { windowFullscreen }),
     };
+
+    return resolvedSettings;
   } catch {
     return defaultSettings;
   }
