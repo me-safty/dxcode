@@ -123,15 +123,7 @@ function normalizeWindow(
 }
 
 function isRateLimitBucketPayload(payload: RateLimitPayload): boolean {
-  return (
-    "primary" in payload ||
-    "secondary" in payload ||
-    "limitId" in payload ||
-    "limitName" in payload ||
-    "credits" in payload ||
-    "planType" in payload ||
-    "rateLimitReachedType" in payload
-  );
+  return "primary" in payload || "secondary" in payload;
 }
 
 function selectCodexBucket(payload: RateLimitPayload): RateLimitBucket | null {

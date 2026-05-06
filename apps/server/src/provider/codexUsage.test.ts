@@ -76,6 +76,31 @@ describe("normalizeCodexUsageSnapshot", () => {
     ]);
   });
 
+  it("does not treat wrapped payload metadata as a direct bucket", () => {
+    const snapshot = normalizeCodexUsageSnapshot({
+      providerInstanceId: instanceId,
+      source: "read",
+      payload: {
+        planType: "plus",
+        rateLimitReachedType: "secondary",
+        rateLimits: {
+          primary: { usedPercent: 60, windowDurationMins: 300 },
+        },
+      },
+    });
+
+    expect(snapshot?.windows).toEqual([
+      {
+        kind: "five-hour",
+        usedPercent: 60,
+        remainingPercent: 40,
+        resetsAt: null,
+        windowDurationMins: 300,
+      },
+    ]);
+    expect(snapshot?.rateLimitReachedType).toBeNull();
+  });
+
   it("accepts a direct rate-limit snapshot payload", () => {
     const snapshot = normalizeCodexUsageSnapshot({
       providerInstanceId: instanceId,
