@@ -78,10 +78,7 @@ import {
   useRelativeTimeTick,
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
-import {
-  useServerObservability,
-  useServerProviders,
-} from "../../rpc/serverState";
+import { useServerObservability, useServerProviders } from "../../rpc/serverState";
 
 const THEME_OPTIONS = [
   {
