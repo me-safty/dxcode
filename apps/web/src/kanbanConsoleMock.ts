@@ -237,7 +237,7 @@ const tasks: KanbanTaskMock[] = [
     pr: "kanban-console#2",
     checks: { passing: 5, pending: 2, failing: 0 },
     agent: "Codex",
-    updated: "Today 14:20",
+    updated: "2026-05-06T10:20:00.000Z",
     comments: 6,
   },
   {
@@ -251,7 +251,7 @@ const tasks: KanbanTaskMock[] = [
     assignee: "Claude",
     checks: { passing: 3, pending: 0, failing: 0 },
     agent: "Claude",
-    updated: "Today 13:05",
+    updated: "2026-05-06T09:05:00.000Z",
     comments: 2,
   },
   {
@@ -266,7 +266,7 @@ const tasks: KanbanTaskMock[] = [
     pr: "kanban-console#1",
     checks: { passing: 12, pending: 0, failing: 1 },
     agent: "Human",
-    updated: "Yesterday 18:44",
+    updated: "2026-05-05T14:44:00.000Z",
     comments: 11,
   },
   {
@@ -280,7 +280,7 @@ const tasks: KanbanTaskMock[] = [
     assignee: "Codex",
     checks: { passing: 0, pending: 0, failing: 0 },
     agent: "Codex",
-    updated: "May 5",
+    updated: "2026-05-05T08:00:00.000Z",
     comments: 1,
   },
   {
@@ -294,7 +294,7 @@ const tasks: KanbanTaskMock[] = [
     assignee: "Human",
     checks: { passing: 4, pending: 1, failing: 2 },
     agent: "Human",
-    updated: "May 4",
+    updated: "2026-05-04T08:00:00.000Z",
     comments: 9,
   },
   {
@@ -308,7 +308,7 @@ const tasks: KanbanTaskMock[] = [
     assignee: "Claude",
     checks: { passing: 8, pending: 0, failing: 0 },
     agent: "Claude",
-    updated: "May 3",
+    updated: "2026-05-03T08:00:00.000Z",
     comments: 4,
   },
 ];

@@ -115,7 +115,7 @@ export const KanbanConsoleTask = Schema.Struct({
   pr: Schema.optional(TrimmedNonEmptyString),
   checks: KanbanConsoleCheckSummary,
   agent: KanbanConsoleAgentKind,
-  updated: TrimmedNonEmptyString,
+  updated: IsoDateTime,
   comments: NonNegativeInt,
 });
 export type KanbanConsoleTask = typeof KanbanConsoleTask.Type;

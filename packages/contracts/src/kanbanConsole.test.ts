@@ -48,7 +48,7 @@ describe("kanbanConsole contracts", () => {
             assignee: "Codex",
             checks: { passing: 1, pending: 0, failing: 0 },
             agent: "Codex",
-            updated: "Today",
+            updated: "2026-05-06T10:20:00.000Z",
             comments: 0,
           },
         ],
