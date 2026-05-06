@@ -1,37 +1,66 @@
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { assert, describe, it } from "@effect/vitest";
 import {
   EnvironmentId,
   type ClientSettings,
   type PersistedSavedEnvironmentRecord,
 } from "@t3tools/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { Effect, FileSystem, Path, Schema } from "effect";
 
 import {
-  readClientSettings,
-  readSavedEnvironmentRegistry,
-  readSavedEnvironmentSecret,
-  removeSavedEnvironmentSecret,
-  writeClientSettings,
-  writeSavedEnvironmentRegistry,
-  writeSavedEnvironmentSecret,
+  readClientSettingsEffect,
+  readSavedEnvironmentRegistryEffect,
+  readSavedEnvironmentSecretEffect,
+  removeSavedEnvironmentSecretEffect,
+  writeClientSettingsEffect,
+  writeSavedEnvironmentRegistryEffect,
+  writeSavedEnvironmentSecretEffect,
   type DesktopSecretStorage,
 } from "./clientPersistence.ts";
 
-const tempDirectories: string[] = [];
-
-afterEach(() => {
-  for (const directory of tempDirectories.splice(0)) {
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
+const DesktopSshTargetSchema = Schema.Struct({
+  alias: Schema.String,
+  hostname: Schema.String,
+  username: Schema.NullOr(Schema.String),
+  port: Schema.NullOr(Schema.Number),
 });
 
-function makeTempPath(fileName: string): string {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "t3-client-persistence-test-"));
-  tempDirectories.push(directory);
-  return path.join(directory, fileName);
+const PersistedSavedEnvironmentStorageRecordSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  label: Schema.String,
+  httpBaseUrl: Schema.String,
+  wsBaseUrl: Schema.String,
+  createdAt: Schema.String,
+  lastConnectedAt: Schema.NullOr(Schema.String),
+  desktopSsh: Schema.optional(DesktopSshTargetSchema),
+  encryptedBearerToken: Schema.optional(Schema.String),
+});
+
+const SavedEnvironmentRegistryDocumentSchema = Schema.Struct({
+  records: Schema.Array(PersistedSavedEnvironmentStorageRecordSchema),
+});
+
+const decodeSavedEnvironmentRegistryDocument = Schema.decodeEffect(
+  Schema.fromJsonString(SavedEnvironmentRegistryDocumentSchema),
+);
+
+function makeTempPath(fileName: string) {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fs.makeTempDirectoryScoped({
+      prefix: "t3-client-persistence-test-",
+    });
+    return path.join(directory, fileName);
+  });
+}
+
+function readRegistryDocument(filePath: string) {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const raw = yield* fs.readFileString(filePath);
+    return yield* decodeSavedEnvironmentRegistryDocument(raw);
+  });
 }
 
 function makeSecretStorage(available: boolean): DesktopSecretStorage {
@@ -82,168 +111,179 @@ const savedRegistryRecord: PersistedSavedEnvironmentRecord = {
 };
 
 describe("clientPersistence", () => {
-  it("persists and reloads client settings", () => {
-    const settingsPath = makeTempPath("client-settings.json");
+  it.effect("persists and reloads client settings", () =>
+    Effect.gen(function* () {
+      const settingsPath = yield* makeTempPath("client-settings.json");
 
-    writeClientSettings(settingsPath, clientSettings);
+      yield* writeClientSettingsEffect(settingsPath, clientSettings);
 
-    expect(readClientSettings(settingsPath)).toEqual(clientSettings);
-  });
+      const settings = yield* readClientSettingsEffect(settingsPath);
+      assert.deepEqual(settings, clientSettings);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 
-  it("persists and reloads saved environment metadata", () => {
-    const registryPath = makeTempPath("saved-environments.json");
+  it.effect("persists and reloads saved environment metadata", () =>
+    Effect.gen(function* () {
+      const registryPath = yield* makeTempPath("saved-environments.json");
 
-    writeSavedEnvironmentRegistry(registryPath, [savedRegistryRecord]);
+      yield* writeSavedEnvironmentRegistryEffect(registryPath, [savedRegistryRecord]);
 
-    expect(readSavedEnvironmentRegistry(registryPath)).toEqual([savedRegistryRecord]);
-  });
+      const records = yield* readSavedEnvironmentRegistryEffect(registryPath);
+      assert.deepEqual(records, [savedRegistryRecord]);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 
-  it("persists encrypted saved environment secrets when encryption is available", () => {
-    const registryPath = makeTempPath("saved-environments.json");
-    const secretStorage = makeSecretStorage(true);
+  it.effect("persists encrypted saved environment secrets when encryption is available", () =>
+    Effect.gen(function* () {
+      const registryPath = yield* makeTempPath("saved-environments.json");
+      const secretStorage = makeSecretStorage(true);
 
-    writeSavedEnvironmentRegistry(registryPath, [savedRegistryRecord]);
+      yield* writeSavedEnvironmentRegistryEffect(registryPath, [savedRegistryRecord]);
 
-    expect(
-      writeSavedEnvironmentSecret({
+      const written = yield* writeSavedEnvironmentSecretEffect({
         registryPath,
         environmentId: savedRegistryRecord.environmentId,
         secret: "bearer-token",
         secretStorage,
-      }),
-    ).toBe(true);
+      });
+      assert.equal(written, true);
 
-    expect(
-      readSavedEnvironmentSecret({
+      const secret = yield* readSavedEnvironmentSecretEffect({
         registryPath,
         environmentId: savedRegistryRecord.environmentId,
         secretStorage,
-      }),
-    ).toBe("bearer-token");
+      });
+      assert.equal(secret, "bearer-token");
 
-    expect(JSON.parse(fs.readFileSync(registryPath, "utf8"))).toEqual({
-      records: [
-        {
-          ...savedRegistryRecord,
-          encryptedBearerToken: Buffer.from("enc:bearer-token", "utf8").toString("base64"),
-        },
-      ],
-    });
-  });
+      const document = yield* readRegistryDocument(registryPath);
+      assert.deepEqual(document, {
+        records: [
+          {
+            ...savedRegistryRecord,
+            encryptedBearerToken: Buffer.from("enc:bearer-token", "utf8").toString("base64"),
+          },
+        ],
+      });
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 
-  it("preserves existing secrets when encryption is unavailable", () => {
-    const registryPath = makeTempPath("saved-environments.json");
-    const availableSecretStorage = makeSecretStorage(true);
+  it.effect("preserves existing secrets when encryption is unavailable", () =>
+    Effect.gen(function* () {
+      const registryPath = yield* makeTempPath("saved-environments.json");
+      const availableSecretStorage = makeSecretStorage(true);
 
-    writeSavedEnvironmentRegistry(registryPath, [savedRegistryRecord]);
+      yield* writeSavedEnvironmentRegistryEffect(registryPath, [savedRegistryRecord]);
 
-    writeSavedEnvironmentSecret({
-      registryPath,
-      environmentId: savedRegistryRecord.environmentId,
-      secret: "bearer-token",
-      secretStorage: availableSecretStorage,
-    });
+      yield* writeSavedEnvironmentSecretEffect({
+        registryPath,
+        environmentId: savedRegistryRecord.environmentId,
+        secret: "bearer-token",
+        secretStorage: availableSecretStorage,
+      });
 
-    expect(
-      writeSavedEnvironmentSecret({
+      const written = yield* writeSavedEnvironmentSecretEffect({
         registryPath,
         environmentId: savedRegistryRecord.environmentId,
         secret: "next-token",
         secretStorage: makeSecretStorage(false),
-      }),
-    ).toBe(false);
+      });
+      assert.equal(written, false);
 
-    expect(
-      readSavedEnvironmentSecret({
+      const secret = yield* readSavedEnvironmentSecretEffect({
         registryPath,
         environmentId: savedRegistryRecord.environmentId,
         secretStorage: availableSecretStorage,
-      }),
-    ).toBe("bearer-token");
-  });
+      });
+      assert.equal(secret, "bearer-token");
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 
-  it("removes saved environment secrets", () => {
-    const registryPath = makeTempPath("saved-environments.json");
-    const secretStorage = makeSecretStorage(true);
+  it.effect("removes saved environment secrets", () =>
+    Effect.gen(function* () {
+      const registryPath = yield* makeTempPath("saved-environments.json");
+      const secretStorage = makeSecretStorage(true);
 
-    writeSavedEnvironmentRegistry(registryPath, [savedRegistryRecord]);
+      yield* writeSavedEnvironmentRegistryEffect(registryPath, [savedRegistryRecord]);
 
-    writeSavedEnvironmentSecret({
-      registryPath,
-      environmentId: savedRegistryRecord.environmentId,
-      secret: "bearer-token",
-      secretStorage,
-    });
+      yield* writeSavedEnvironmentSecretEffect({
+        registryPath,
+        environmentId: savedRegistryRecord.environmentId,
+        secret: "bearer-token",
+        secretStorage,
+      });
 
-    removeSavedEnvironmentSecret({
-      registryPath,
-      environmentId: savedRegistryRecord.environmentId,
-    });
+      yield* removeSavedEnvironmentSecretEffect({
+        registryPath,
+        environmentId: savedRegistryRecord.environmentId,
+      });
 
-    expect(
-      readSavedEnvironmentSecret({
+      const secret = yield* readSavedEnvironmentSecretEffect({
         registryPath,
         environmentId: savedRegistryRecord.environmentId,
         secretStorage,
-      }),
-    ).toBeNull();
-  });
+      });
+      assert.equal(secret, null);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 
-  it("treats malformed secrets documents as empty", () => {
-    const registryPath = makeTempPath("saved-environments.json");
-    fs.writeFileSync(registryPath, "{}\n", "utf8");
+  it.effect("treats malformed secrets documents as empty", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const registryPath = yield* makeTempPath("saved-environments.json");
+      yield* fs.writeFileString(registryPath, "{}\n");
 
-    expect(
-      readSavedEnvironmentSecret({
+      const secret = yield* readSavedEnvironmentSecretEffect({
         registryPath,
         environmentId: savedRegistryRecord.environmentId,
         secretStorage: makeSecretStorage(true),
-      }),
-    ).toBeNull();
+      });
+      assert.equal(secret, null);
 
-    expect(() =>
-      removeSavedEnvironmentSecret({
+      yield* removeSavedEnvironmentSecretEffect({
         registryPath,
         environmentId: savedRegistryRecord.environmentId,
-      }),
-    ).not.toThrow();
-  });
+      });
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 
-  it("returns false when writing a secret without metadata", () => {
-    const registryPath = makeTempPath("saved-environments.json");
+  it.effect("returns false when writing a secret without metadata", () =>
+    Effect.gen(function* () {
+      const registryPath = yield* makeTempPath("saved-environments.json");
 
-    expect(
-      writeSavedEnvironmentSecret({
+      const written = yield* writeSavedEnvironmentSecretEffect({
         registryPath,
         environmentId: savedRegistryRecord.environmentId,
         secret: "bearer-token",
         secretStorage: makeSecretStorage(true),
-      }),
-    ).toBe(false);
-  });
+      });
+      assert.equal(written, false);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 
-  it("preserves encrypted secrets when metadata is rewritten", () => {
-    const registryPath = makeTempPath("saved-environments.json");
-    const secretStorage = makeSecretStorage(true);
+  it.effect("preserves encrypted secrets when metadata is rewritten", () =>
+    Effect.gen(function* () {
+      const registryPath = yield* makeTempPath("saved-environments.json");
+      const secretStorage = makeSecretStorage(true);
 
-    writeSavedEnvironmentRegistry(registryPath, [savedRegistryRecord]);
+      yield* writeSavedEnvironmentRegistryEffect(registryPath, [savedRegistryRecord]);
 
-    writeSavedEnvironmentSecret({
-      registryPath,
-      environmentId: savedRegistryRecord.environmentId,
-      secret: "bearer-token",
-      secretStorage,
-    });
+      yield* writeSavedEnvironmentSecretEffect({
+        registryPath,
+        environmentId: savedRegistryRecord.environmentId,
+        secret: "bearer-token",
+        secretStorage,
+      });
 
-    writeSavedEnvironmentRegistry(registryPath, [savedRegistryRecord]);
+      yield* writeSavedEnvironmentRegistryEffect(registryPath, [savedRegistryRecord]);
 
-    expect(readSavedEnvironmentRegistry(registryPath)).toEqual([savedRegistryRecord]);
-    expect(
-      readSavedEnvironmentSecret({
+      const records = yield* readSavedEnvironmentRegistryEffect(registryPath);
+      assert.deepEqual(records, [savedRegistryRecord]);
+      const secret = yield* readSavedEnvironmentSecretEffect({
         registryPath,
         environmentId: savedRegistryRecord.environmentId,
         secretStorage,
-      }),
-    ).toBe("bearer-token");
-  });
+      });
+      assert.equal(secret, "bearer-token");
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 });

@@ -1,4 +1,3 @@
-import type { NetworkInterfaceInfo } from "node:os";
 import {
   createAdvertisedEndpoint,
   type CreateAdvertisedEndpointInput,
@@ -11,6 +10,20 @@ import type {
 
 const DESKTOP_LOOPBACK_HOST = "127.0.0.1";
 const DESKTOP_LAN_BIND_HOST = "0.0.0.0";
+
+export interface DesktopNetworkInterfaceInfo {
+  readonly address: string;
+  readonly family: string | number;
+  readonly internal: boolean;
+  readonly netmask?: string;
+  readonly mac?: string;
+  readonly cidr?: string | null;
+  readonly scopeid?: number;
+}
+
+export type DesktopNetworkInterfaces = Readonly<
+  Record<string, readonly DesktopNetworkInterfaceInfo[] | undefined>
+>;
 
 export interface DesktopServerExposure {
   readonly mode: DesktopServerExposureMode;
@@ -58,7 +71,7 @@ function isHttpsEndpointUrl(value: string): boolean {
 }
 
 export function resolveLanAdvertisedHost(
-  networkInterfaces: NodeJS.Dict<NetworkInterfaceInfo[]>,
+  networkInterfaces: DesktopNetworkInterfaces,
   explicitHost: string | undefined,
 ): string | null {
   const normalizedExplicitHost = normalizeOptionalHost(explicitHost);
@@ -83,7 +96,7 @@ export function resolveLanAdvertisedHost(
 export function resolveDesktopServerExposure(input: {
   readonly mode: DesktopServerExposureMode;
   readonly port: number;
-  readonly networkInterfaces: NodeJS.Dict<NetworkInterfaceInfo[]>;
+  readonly networkInterfaces: DesktopNetworkInterfaces;
   readonly advertisedHostOverride?: string;
 }): DesktopServerExposure {
   const localHttpUrl = `http://${DESKTOP_LOOPBACK_HOST}:${input.port}`;

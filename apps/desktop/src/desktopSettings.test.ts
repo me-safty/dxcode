@@ -1,40 +1,57 @@
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-
-import { afterEach, describe, expect, it } from "vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { assert, describe, it } from "@effect/vitest";
+import { Effect, FileSystem, Path, Schema } from "effect";
 
 import {
   DEFAULT_DESKTOP_SETTINGS,
-  readDesktopSettings,
+  readDesktopSettingsEffect,
   resolveDefaultDesktopSettings,
   setDesktopServerExposurePreference,
   setDesktopTailscaleServePreference,
   setDesktopUpdateChannelPreference,
-  writeDesktopSettings,
+  writeDesktopSettingsEffect,
 } from "./desktopSettings.ts";
 
-const tempDirectories: string[] = [];
-
-afterEach(() => {
-  for (const directory of tempDirectories.splice(0)) {
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
+const DesktopSettingsPatch = Schema.Struct({
+  serverExposureMode: Schema.optional(Schema.Literals(["local-only", "network-accessible"])),
+  tailscaleServeEnabled: Schema.optional(Schema.Boolean),
+  tailscaleServePort: Schema.optional(Schema.Number),
+  updateChannel: Schema.optional(Schema.Literals(["latest", "nightly"])),
+  updateChannelConfiguredByUser: Schema.optional(Schema.Boolean),
 });
 
+const encodeDesktopSettingsPatch = Schema.encodeEffect(Schema.fromJsonString(DesktopSettingsPatch));
+
 function makeSettingsPath() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "t3-desktop-settings-test-"));
-  tempDirectories.push(directory);
-  return path.join(directory, "desktop-settings.json");
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fs.makeTempDirectoryScoped({
+      prefix: "t3-desktop-settings-test-",
+    });
+    return path.join(directory, "desktop-settings.json");
+  });
+}
+
+function writeSettingsPatch(filePath: string, patch: typeof DesktopSettingsPatch.Type) {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const encoded = yield* encodeDesktopSettingsPatch(patch);
+    yield* fs.writeFileString(filePath, `${encoded}\n`);
+  });
 }
 
 describe("desktopSettings", () => {
-  it("returns defaults when no settings file exists", () => {
-    expect(readDesktopSettings(makeSettingsPath(), "0.0.17")).toEqual(DEFAULT_DESKTOP_SETTINGS);
-  });
+  it.effect("returns defaults when no settings file exists", () =>
+    Effect.gen(function* () {
+      const settingsPath = yield* makeSettingsPath();
+      const settings = yield* readDesktopSettingsEffect(settingsPath, "0.0.17");
+      assert.deepEqual(settings, DEFAULT_DESKTOP_SETTINGS);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 
   it("defaults packaged nightly builds to the nightly update channel", () => {
-    expect(resolveDefaultDesktopSettings("0.0.17-nightly.20260415.1")).toEqual({
+    assert.deepEqual(resolveDefaultDesktopSettings("0.0.17-nightly.20260415.1"), {
       serverExposureMode: "local-only",
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
@@ -43,28 +60,31 @@ describe("desktopSettings", () => {
     });
   });
 
-  it("persists and reloads the configured server exposure mode", () => {
-    const settingsPath = makeSettingsPath();
+  it.effect("persists and reloads the configured server exposure mode", () =>
+    Effect.gen(function* () {
+      const settingsPath = yield* makeSettingsPath();
 
-    writeDesktopSettings(settingsPath, {
-      serverExposureMode: "network-accessible",
-      tailscaleServeEnabled: true,
-      tailscaleServePort: 8443,
-      updateChannel: "latest",
-      updateChannelConfiguredByUser: true,
-    });
+      yield* writeDesktopSettingsEffect(settingsPath, {
+        serverExposureMode: "network-accessible",
+        tailscaleServeEnabled: true,
+        tailscaleServePort: 8443,
+        updateChannel: "latest",
+        updateChannelConfiguredByUser: true,
+      });
 
-    expect(readDesktopSettings(settingsPath, "0.0.17")).toEqual({
-      serverExposureMode: "network-accessible",
-      tailscaleServeEnabled: true,
-      tailscaleServePort: 8443,
-      updateChannel: "latest",
-      updateChannelConfiguredByUser: true,
-    });
-  });
+      const settings = yield* readDesktopSettingsEffect(settingsPath, "0.0.17");
+      assert.deepEqual(settings, {
+        serverExposureMode: "network-accessible",
+        tailscaleServeEnabled: true,
+        tailscaleServePort: 8443,
+        updateChannel: "latest",
+        updateChannelConfiguredByUser: true,
+      });
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 
   it("preserves the requested network-accessible preference across temporary fallback", () => {
-    expect(
+    assert.deepEqual(
       setDesktopServerExposurePreference(
         {
           serverExposureMode: "local-only",
@@ -75,17 +95,18 @@ describe("desktopSettings", () => {
         },
         "network-accessible",
       ),
-    ).toEqual({
-      serverExposureMode: "network-accessible",
-      tailscaleServeEnabled: false,
-      tailscaleServePort: 443,
-      updateChannel: "latest",
-      updateChannelConfiguredByUser: false,
-    });
+      {
+        serverExposureMode: "network-accessible",
+        tailscaleServeEnabled: false,
+        tailscaleServePort: 443,
+        updateChannel: "latest",
+        updateChannelConfiguredByUser: false,
+      },
+    );
   });
 
   it("persists the requested Tailscale Serve preference", () => {
-    expect(
+    assert.deepEqual(
       setDesktopTailscaleServePreference(
         {
           serverExposureMode: "local-only",
@@ -96,17 +117,18 @@ describe("desktopSettings", () => {
         },
         { enabled: true, port: 8443 },
       ),
-    ).toEqual({
-      serverExposureMode: "local-only",
-      tailscaleServeEnabled: true,
-      tailscaleServePort: 8443,
-      updateChannel: "latest",
-      updateChannelConfiguredByUser: false,
-    });
+      {
+        serverExposureMode: "local-only",
+        tailscaleServeEnabled: true,
+        tailscaleServePort: 8443,
+        updateChannel: "latest",
+        updateChannelConfiguredByUser: false,
+      },
+    );
   });
 
   it("preserves the configured Tailscale Serve port when no new port is requested", () => {
-    expect(
+    assert.deepEqual(
       setDesktopTailscaleServePreference(
         {
           serverExposureMode: "local-only",
@@ -117,17 +139,18 @@ describe("desktopSettings", () => {
         },
         { enabled: true },
       ),
-    ).toEqual({
-      serverExposureMode: "local-only",
-      tailscaleServeEnabled: true,
-      tailscaleServePort: 8443,
-      updateChannel: "latest",
-      updateChannelConfiguredByUser: false,
-    });
+      {
+        serverExposureMode: "local-only",
+        tailscaleServeEnabled: true,
+        tailscaleServePort: 8443,
+        updateChannel: "latest",
+        updateChannelConfiguredByUser: false,
+      },
+    );
   });
 
   it("persists the requested nightly update channel", () => {
-    expect(
+    assert.deepEqual(
       setDesktopUpdateChannelPreference(
         {
           serverExposureMode: "local-only",
@@ -138,93 +161,110 @@ describe("desktopSettings", () => {
         },
         "nightly",
       ),
-    ).toEqual({
-      serverExposureMode: "local-only",
-      tailscaleServeEnabled: false,
-      tailscaleServePort: 443,
-      updateChannel: "nightly",
-      updateChannelConfiguredByUser: true,
-    });
-  });
-
-  it("falls back to defaults when the settings file is malformed", () => {
-    const settingsPath = makeSettingsPath();
-    fs.writeFileSync(settingsPath, "{not-json", "utf8");
-
-    expect(readDesktopSettings(settingsPath, "0.0.17")).toEqual(DEFAULT_DESKTOP_SETTINGS);
-  });
-
-  it("falls back to the nightly channel for legacy nightly settings without an update track", () => {
-    const settingsPath = makeSettingsPath();
-    fs.writeFileSync(settingsPath, JSON.stringify({ serverExposureMode: "local-only" }), "utf8");
-
-    expect(readDesktopSettings(settingsPath, "0.0.17-nightly.20260415.1")).toEqual({
-      serverExposureMode: "local-only",
-      tailscaleServeEnabled: false,
-      tailscaleServePort: 443,
-      updateChannel: "nightly",
-      updateChannelConfiguredByUser: false,
-    });
-  });
-
-  it("migrates legacy implicit stable settings to nightly when running a nightly build", () => {
-    const settingsPath = makeSettingsPath();
-    fs.writeFileSync(
-      settingsPath,
-      JSON.stringify({
+      {
         serverExposureMode: "local-only",
-        updateChannel: "latest",
-      }),
-      "utf8",
+        tailscaleServeEnabled: false,
+        tailscaleServePort: 443,
+        updateChannel: "nightly",
+        updateChannelConfiguredByUser: true,
+      },
     );
-
-    expect(readDesktopSettings(settingsPath, "0.0.17-nightly.20260415.1")).toEqual({
-      serverExposureMode: "local-only",
-      tailscaleServeEnabled: false,
-      tailscaleServePort: 443,
-      updateChannel: "nightly",
-      updateChannelConfiguredByUser: false,
-    });
   });
 
-  it("preserves an explicit stable choice on nightly builds", () => {
-    const settingsPath = makeSettingsPath();
-    fs.writeFileSync(
-      settingsPath,
-      JSON.stringify({
+  it.effect("falls back to defaults when the settings file is malformed", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const settingsPath = yield* makeSettingsPath();
+      yield* fs.writeFileString(settingsPath, "{not-json");
+
+      const settings = yield* readDesktopSettingsEffect(settingsPath, "0.0.17");
+      assert.deepEqual(settings, DEFAULT_DESKTOP_SETTINGS);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it.effect(
+    "falls back to the nightly channel for legacy nightly settings without an update track",
+    () =>
+      Effect.gen(function* () {
+        const settingsPath = yield* makeSettingsPath();
+        yield* writeSettingsPatch(settingsPath, { serverExposureMode: "local-only" });
+
+        const settings = yield* readDesktopSettingsEffect(
+          settingsPath,
+          "0.0.17-nightly.20260415.1",
+        );
+        assert.deepEqual(settings, {
+          serverExposureMode: "local-only",
+          tailscaleServeEnabled: false,
+          tailscaleServePort: 443,
+          updateChannel: "nightly",
+          updateChannelConfiguredByUser: false,
+        });
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it.effect(
+    "migrates legacy implicit stable settings to nightly when running a nightly build",
+    () =>
+      Effect.gen(function* () {
+        const settingsPath = yield* makeSettingsPath();
+        yield* writeSettingsPatch(settingsPath, {
+          serverExposureMode: "local-only",
+          updateChannel: "latest",
+        });
+
+        const settings = yield* readDesktopSettingsEffect(
+          settingsPath,
+          "0.0.17-nightly.20260415.1",
+        );
+        assert.deepEqual(settings, {
+          serverExposureMode: "local-only",
+          tailscaleServeEnabled: false,
+          tailscaleServePort: 443,
+          updateChannel: "nightly",
+          updateChannelConfiguredByUser: false,
+        });
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it.effect("preserves an explicit stable choice on nightly builds", () =>
+    Effect.gen(function* () {
+      const settingsPath = yield* makeSettingsPath();
+      yield* writeSettingsPatch(settingsPath, {
         serverExposureMode: "local-only",
         updateChannel: "latest",
         updateChannelConfiguredByUser: true,
-      }),
-      "utf8",
-    );
+      });
 
-    expect(readDesktopSettings(settingsPath, "0.0.17-nightly.20260415.1")).toEqual({
-      serverExposureMode: "local-only",
-      tailscaleServeEnabled: false,
-      tailscaleServePort: 443,
-      updateChannel: "latest",
-      updateChannelConfiguredByUser: true,
-    });
-  });
+      const settings = yield* readDesktopSettingsEffect(settingsPath, "0.0.17-nightly.20260415.1");
+      assert.deepEqual(settings, {
+        serverExposureMode: "local-only",
+        tailscaleServeEnabled: false,
+        tailscaleServePort: 443,
+        updateChannel: "latest",
+        updateChannelConfiguredByUser: true,
+      });
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 
-  it("falls back to the default Tailscale Serve port when the persisted port is invalid", () => {
-    const settingsPath = makeSettingsPath();
-    fs.writeFileSync(
-      settingsPath,
-      JSON.stringify({
-        tailscaleServeEnabled: true,
-        tailscaleServePort: 0,
-      }),
-      "utf8",
-    );
+  it.effect(
+    "falls back to the default Tailscale Serve port when the persisted port is invalid",
+    () =>
+      Effect.gen(function* () {
+        const settingsPath = yield* makeSettingsPath();
+        yield* writeSettingsPatch(settingsPath, {
+          tailscaleServeEnabled: true,
+          tailscaleServePort: 0,
+        });
 
-    expect(readDesktopSettings(settingsPath, "0.0.17")).toEqual({
-      serverExposureMode: "local-only",
-      tailscaleServeEnabled: true,
-      tailscaleServePort: 443,
-      updateChannel: "latest",
-      updateChannelConfiguredByUser: false,
-    });
-  });
+        const settings = yield* readDesktopSettingsEffect(settingsPath, "0.0.17");
+        assert.deepEqual(settings, {
+          serverExposureMode: "local-only",
+          tailscaleServeEnabled: true,
+          tailscaleServePort: 443,
+          updateChannel: "latest",
+          updateChannelConfiguredByUser: false,
+        });
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 });

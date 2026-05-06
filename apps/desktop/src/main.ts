@@ -1,19 +1,28 @@
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as Crypto from "node:crypto";
-import * as FS from "node:fs";
-import * as OS from "node:os";
-import * as Path from "node:path";
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
+import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as EffectPath from "effect/Path";
+import * as Random from "effect/Random";
+import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
+import { HttpClient } from "effect/unstable/http";
+import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   app,
   BrowserWindow,
   type BrowserWindowConstructorOptions,
+  type MenuItemConstructorOptions,
+  type OpenDialogOptions,
   clipboard,
   dialog,
   ipcMain,
@@ -24,11 +33,12 @@ import {
   safeStorage,
   shell,
 } from "electron";
-import type { MenuItemConstructorOptions, OpenDialogOptions } from "electron";
+import { autoUpdater } from "electron-updater";
+
 import type {
   ClientSettings,
+  ContextMenuItem,
   DesktopTheme,
-  DesktopAppBranding,
   DesktopServerExposureMode,
   DesktopServerExposureState,
   DesktopUpdateChannel,
@@ -37,38 +47,64 @@ import type {
   DesktopUpdateCheckResult,
   DesktopUpdateState,
 } from "@t3tools/contracts";
-import { autoUpdater } from "electron-updater";
-
-import type { ContextMenuItem } from "@t3tools/contracts";
-import { RotatingFileSink } from "@t3tools/shared/logging";
+import * as NetService from "@t3tools/shared/Net";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import type { RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
-import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort.ts";
+
+import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPortEffect } from "./backendPort.ts";
 import {
   type DesktopSettings,
   DEFAULT_DESKTOP_SETTINGS,
-  readDesktopSettings,
+  readDesktopSettingsEffect,
   setDesktopServerExposurePreference,
   setDesktopTailscaleServePreference,
   setDesktopUpdateChannelPreference,
-  writeDesktopSettings,
+  writeDesktopSettingsEffect,
 } from "./desktopSettings.ts";
 import {
-  readClientSettings,
-  readSavedEnvironmentRegistry,
-  readSavedEnvironmentSecret,
-  removeSavedEnvironmentSecret,
-  writeClientSettings,
-  writeSavedEnvironmentRegistry,
-  writeSavedEnvironmentSecret,
+  readClientSettingsEffect,
+  readSavedEnvironmentRegistryEffect,
+  readSavedEnvironmentSecretEffect,
+  removeSavedEnvironmentSecretEffect,
+  writeClientSettingsEffect,
+  writeSavedEnvironmentRegistryEffect,
+  writeSavedEnvironmentSecretEffect,
 } from "./clientPersistence.ts";
-import { runBackendProcess } from "./backendProcess.ts";
 import { showDesktopConfirmDialog } from "./confirmDialog.ts";
+import {
+  DesktopBackendConfiguration,
+  DesktopBackendEvents,
+  DesktopBackendManager,
+  DesktopBackendManagerLive,
+  DesktopBackendProcessRunnerLive,
+  type DesktopBackendManagerShape,
+  type DesktopBackendStartConfig,
+} from "./desktopBackendManager.ts";
+import {
+  DesktopNetworkInterfacesLive,
+  DesktopNetworkInterfacesService,
+} from "./desktopNetworkInterfaces.ts";
+import {
+  DesktopBackendOutputLog,
+  DesktopBackendOutputLogLive,
+  DesktopLoggerLive,
+} from "./desktopLogger.ts";
+import {
+  DesktopEnvironment,
+  makeDesktopEnvironment,
+  type DesktopEnvironmentShape,
+} from "./desktopEnvironment.ts";
+import { DesktopShutdown, makeDesktopShutdown } from "./desktopShutdown.ts";
 import {
   resolveDesktopCoreAdvertisedEndpoints,
   resolveDesktopServerExposure,
 } from "./serverExposure.ts";
-import { DesktopSshEnvironmentBridge, resolveRemoteT3CliPackageSpec } from "./sshEnvironment.ts";
+import {
+  DesktopSshEnvironmentBridge,
+  DesktopSshEnvironmentManager,
+  type DesktopSshEnvironmentBridgeShape,
+  resolveRemoteT3CliPackageSpec,
+} from "./sshEnvironment.ts";
 import { syncShellEnvironment } from "./syncShellEnvironment.ts";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState.ts";
 import { doesVersionMatchDesktopUpdateChannel } from "./updateChannels.ts";
@@ -84,12 +120,9 @@ import {
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine.ts";
-import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch.ts";
-import { resolveDesktopAppBranding } from "./appBranding.ts";
+import { isArm64HostRunningIntelBuild } from "./runtimeArch.ts";
 import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
-
-syncShellEnvironment();
 
 const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 const CONFIRM_CHANNEL = "desktop:confirm";
@@ -116,64 +149,15 @@ const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
-const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
-const STATE_DIR = Path.join(BASE_DIR, "userdata");
-const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
-const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
-const SAVED_ENVIRONMENT_REGISTRY_PATH = Path.join(STATE_DIR, "saved-environments.json");
+
 const DESKTOP_SCHEME = "t3";
-const ROOT_DIR = Path.resolve(__dirname, "../../..");
-const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
-// Dev-only SSH launcher override. Set this to an absolute path on the SSH host
-// for a built server entry, for example:
-// "/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs"
-const DEV_REMOTE_T3_SERVER_ENTRY_PATH =
-  process.env.T3CODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH?.trim() ?? "";
-const desktopAppBranding: DesktopAppBranding = resolveDesktopAppBranding({
-  isDevelopment,
-  appVersion: app.getVersion(),
-});
-const APP_DISPLAY_NAME = desktopAppBranding.displayName;
-const APP_USER_MODEL_ID = isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code";
-const LINUX_DESKTOP_ENTRY_NAME = isDevelopment ? "t3code-dev.desktop" : "t3code.desktop";
-const LINUX_WM_CLASS = isDevelopment ? "t3code-dev" : "t3code";
-const USER_DATA_DIR_NAME = isDevelopment ? "t3code-dev" : "t3code";
-const LEGACY_USER_DATA_DIR_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
-const LOG_DIR = Path.join(STATE_DIR, "logs");
-const LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
-const LOG_FILE_MAX_FILES = 10;
-const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
-const SERVER_SETTINGS_PATH = Path.join(STATE_DIR, "settings.json");
+const AppPackageMetadata = Schema.Struct({
+  t3codeCommitHash: Schema.optional(Schema.String),
+});
 const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
-
-function resolvePickFolderDefaultPath(rawOptions: unknown): string | undefined {
-  if (typeof rawOptions !== "object" || rawOptions === null) {
-    return undefined;
-  }
-
-  const { initialPath } = rawOptions as { initialPath?: unknown };
-  if (typeof initialPath !== "string") {
-    return undefined;
-  }
-
-  const trimmedPath = initialPath.trim();
-  if (trimmedPath.length === 0) {
-    return undefined;
-  }
-
-  if (trimmedPath === "~") {
-    return OS.homedir();
-  }
-
-  if (trimmedPath.startsWith("~/") || trimmedPath.startsWith("~\\")) {
-    return Path.join(OS.homedir(), trimmedPath.slice(2));
-  }
-
-  return Path.resolve(trimmedPath);
-}
 const DESKTOP_LOOPBACK_HOST = "127.0.0.1";
 const DESKTOP_REQUIRED_PORT_PROBE_HOSTS = ["0.0.0.0", "::"] as const;
 const TITLEBAR_HEIGHT = 40;
@@ -219,8 +203,11 @@ type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 type LinuxDesktopNamedApp = Electron.App & {
   setDesktopName?: (desktopName: string) => void;
 };
+interface BackendObservabilitySettings {
+  readonly otlpTracesUrl: string | undefined;
+  readonly otlpMetricsUrl: string | undefined;
+}
 let mainWindow: BrowserWindow | null = null;
-let backendProcessFiber: Fiber.Fiber<void, never> | null = null;
 let backendReady = false;
 let backendPort = 0;
 let backendBindHost = DESKTOP_LOOPBACK_HOST;
@@ -229,20 +216,46 @@ let backendHttpUrl: Option.Option<URL> = Option.none();
 let backendWsUrl = "";
 let backendEndpointUrl: string | null = null;
 let backendAdvertisedHost: string | null = null;
-let restartAttempt = 0;
-let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let isQuitting = false;
 let desktopProtocolRegistered = false;
-let aboutCommitHashCache: string | null | undefined;
-let desktopLogSink: RotatingFileSink | null = null;
-let backendLogSink: RotatingFileSink | null = null;
-let restoreStdIoCapture: (() => void) | null = null;
-let backendObservabilitySettings = readPersistedBackendObservabilitySettings();
-let desktopSettings = readDesktopSettings(DESKTOP_SETTINGS_PATH, app.getVersion());
+let appUpdateYmlConfig: Option.Option<Record<string, string>> = Option.none();
+let aboutCommitHashCache: Option.Option<string> | undefined;
+let desktopIconPaths: Readonly<Record<"ico" | "icns" | "png", Option.Option<string>>> = {
+  ico: Option.none(),
+  icns: Option.none(),
+  png: Option.none(),
+};
+let appRunId = "startup";
+let backendObservabilitySettings: BackendObservabilitySettings = {
+  otlpTracesUrl: undefined,
+  otlpMetricsUrl: undefined,
+};
+let desktopSettings = DEFAULT_DESKTOP_SETTINGS;
 let desktopServerExposureMode: DesktopServerExposureMode = desktopSettings.serverExposureMode;
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
-const backendProcessLayer = Layer.merge(NodeServices.layer, NodeHttpClient.layerUndici);
+
+interface DesktopEffectRunner {
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Promise<A>;
+}
+
+type DesktopWindowBoundaryServices = DesktopEnvironment | DesktopSshEnvironmentBridge;
+type DesktopLifecycleBoundaryServices = DesktopShutdown | DesktopWindowBoundaryServices;
+type DesktopIpcBoundaryServices =
+  | ChildProcessSpawner.ChildProcessSpawner
+  | HttpClient.HttpClient
+  | FileSystem.FileSystem
+  | EffectPath.Path
+  | DesktopEnvironment
+  | DesktopBackendManager
+  | DesktopNetworkInterfacesService
+  | DesktopShutdown
+  | DesktopWindowBoundaryServices;
+
+function makeDesktopEffectRunner<R>(context: Context.Context<R>): DesktopEffectRunner {
+  return <A, E, R2>(effect: Effect.Effect<A, E, R2>) =>
+    Effect.runPromiseWith(context as unknown as Context.Context<R2>)(effect);
+}
 
 function requireBackendHttpUrl(): URL {
   return Option.getOrThrowWith(
@@ -258,43 +271,96 @@ function getBackendHttpUrlHref(): string | null {
   });
 }
 
-const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
-  platform: process.platform,
-  processArch: process.arch,
-  runningUnderArm64Translation: app.runningUnderARM64Translation === true,
-});
-const initialUpdateState = (): DesktopUpdateState =>
+const initialUpdateState = (environment: DesktopEnvironmentShape): DesktopUpdateState =>
   createInitialDesktopUpdateState(
-    app.getVersion(),
-    desktopRuntimeInfo,
+    environment.appVersion,
+    environment.runtimeInfo,
     desktopSettings.updateChannel,
   );
 
-function logTimestamp(): string {
-  return new Date().toISOString();
+function nowIsoTimestamp(): string {
+  return DateTime.formatIso(DateTime.nowUnsafe());
 }
 
-function logScope(scope: string): string {
-  return `${scope} run=${APP_RUN_ID}`;
-}
+const withDesktopLogAnnotations = (
+  effect: Effect.Effect<void>,
+  annotations?: Record<string, unknown>,
+): Effect.Effect<void> =>
+  effect.pipe(
+    Effect.annotateLogs({
+      scope: "desktop",
+      runId: appRunId,
+      ...annotations,
+    }),
+  );
 
-function sanitizeLogValue(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
+const logDesktopInfo = (
+  message: string,
+  annotations?: Record<string, unknown>,
+): Effect.Effect<void> => withDesktopLogAnnotations(Effect.logInfo(message), annotations);
 
-function readPersistedBackendObservabilitySettings(): {
-  readonly otlpTracesUrl: string | undefined;
-  readonly otlpMetricsUrl: string | undefined;
-} {
-  try {
-    if (!FS.existsSync(SERVER_SETTINGS_PATH)) {
+const logDesktopWarning = (
+  message: string,
+  annotations?: Record<string, unknown>,
+): Effect.Effect<void> => withDesktopLogAnnotations(Effect.logWarning(message), annotations);
+
+const logDesktopError = (
+  message: string,
+  annotations?: Record<string, unknown>,
+): Effect.Effect<void> => withDesktopLogAnnotations(Effect.logError(message), annotations);
+
+const logUpdaterInfo = (
+  message: string,
+  annotations?: Record<string, unknown>,
+): Effect.Effect<void> =>
+  withDesktopLogAnnotations(Effect.logInfo(message), {
+    component: "desktop-updater",
+    ...annotations,
+  });
+
+const logUpdaterError = (
+  message: string,
+  annotations?: Record<string, unknown>,
+): Effect.Effect<void> =>
+  withDesktopLogAnnotations(Effect.logError(message), {
+    component: "desktop-updater",
+    ...annotations,
+  });
+
+function readPersistedBackendObservabilitySettings(): Effect.Effect<
+  BackendObservabilitySettings,
+  never,
+  FileSystem.FileSystem | DesktopEnvironment
+> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const environment = yield* DesktopEnvironment;
+    const exists = yield* fileSystem
+      .exists(environment.serverSettingsPath)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (!exists) {
       return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
     }
-    return parsePersistedServerObservabilitySettings(FS.readFileSync(SERVER_SETTINGS_PATH, "utf8"));
-  } catch (error) {
-    console.warn("[desktop] failed to read persisted backend observability settings", error);
-    return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
-  }
+
+    const raw = yield* fileSystem
+      .readFileString(environment.serverSettingsPath)
+      .pipe(Effect.option);
+    if (Option.isNone(raw)) {
+      yield* logDesktopWarning("failed to read persisted backend observability settings");
+      return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
+    }
+
+    return yield* Effect.try({
+      try: () => parsePersistedServerObservabilitySettings(raw.value),
+      catch: (error) => error,
+    }).pipe(
+      Effect.catch((error) =>
+        logDesktopWarning("failed to parse persisted backend observability settings", {
+          error,
+        }).pipe(Effect.as({ otlpTracesUrl: undefined, otlpMetricsUrl: undefined })),
+      ),
+    );
+  });
 }
 
 function resolveConfiguredDesktopBackendPort(rawPort: string | undefined): number | undefined {
@@ -310,9 +376,9 @@ function resolveConfiguredDesktopBackendPort(rawPort: string | undefined): numbe
   return parsedPort;
 }
 
-function resolveDesktopDevServerUrl(): string {
-  const devServerUrl = process.env.VITE_DEV_SERVER_URL?.trim();
-  if (!devServerUrl) {
+function resolveDesktopDevServerUrl(environment: DesktopEnvironmentShape): string {
+  const devServerUrl = Option.getOrUndefined(environment.devServerUrl);
+  if (devServerUrl === undefined) {
     throw new Error("VITE_DEV_SERVER_URL is required in desktop development.");
   }
 
@@ -344,25 +410,28 @@ function getDesktopServerExposureState(): DesktopServerExposureState {
   };
 }
 
-async function getDesktopAdvertisedEndpoints() {
-  const exposure = resolveDesktopServerExposure({
-    mode: desktopServerExposureMode,
-    port: backendPort,
-    networkInterfaces: OS.networkInterfaces(),
-    ...(backendAdvertisedHost ? { advertisedHostOverride: backendAdvertisedHost } : {}),
+function getDesktopAdvertisedEndpoints() {
+  return Effect.gen(function* () {
+    const networkInterfaces = yield* (yield* DesktopNetworkInterfacesService).read;
+    const exposure = resolveDesktopServerExposure({
+      mode: desktopServerExposureMode,
+      port: backendPort,
+      networkInterfaces,
+      ...(backendAdvertisedHost ? { advertisedHostOverride: backendAdvertisedHost } : {}),
+    });
+    const coreEndpoints = resolveDesktopCoreAdvertisedEndpoints({
+      port: backendPort,
+      exposure,
+      customHttpsEndpointUrls: resolveCustomHttpsEndpointUrls(),
+    });
+    const tailscaleEndpoints = yield* resolveTailscaleAdvertisedEndpoints({
+      port: backendPort,
+      serveEnabled: desktopSettings.tailscaleServeEnabled,
+      servePort: desktopSettings.tailscaleServePort,
+      networkInterfaces,
+    });
+    return [...coreEndpoints, ...tailscaleEndpoints];
   });
-  const coreEndpoints = resolveDesktopCoreAdvertisedEndpoints({
-    port: backendPort,
-    exposure,
-    customHttpsEndpointUrls: resolveCustomHttpsEndpointUrls(),
-  });
-  const tailscaleEndpoints = await resolveTailscaleAdvertisedEndpoints({
-    port: backendPort,
-    serveEnabled: desktopSettings.tailscaleServeEnabled,
-    servePort: desktopSettings.tailscaleServePort,
-    networkInterfaces: OS.networkInterfaces(),
-  });
-  return [...coreEndpoints, ...tailscaleEndpoints];
 }
 
 function getDesktopSecretStorage() {
@@ -385,98 +454,104 @@ function resolveCustomHttpsEndpointUrls(): readonly string[] {
     .filter((entry) => entry.length > 0);
 }
 
-async function applyDesktopServerExposureMode(
+function applyDesktopServerExposureMode(
   mode: DesktopServerExposureMode,
   options?: {
     readonly persist?: boolean;
     readonly rejectIfUnavailable?: boolean;
   },
-): Promise<DesktopServerExposureState> {
-  const advertisedHostOverride = resolveAdvertisedHostOverride();
-  const requestedMode = mode;
-  let exposure = resolveDesktopServerExposure({
-    mode,
-    port: backendPort,
-    networkInterfaces: OS.networkInterfaces(),
-    ...(advertisedHostOverride ? { advertisedHostOverride } : {}),
-  });
-
-  if (requestedMode === "network-accessible" && exposure.endpointUrl === null) {
-    if (options?.rejectIfUnavailable) {
-      throw new Error("No reachable network address is available for this desktop right now.");
-    }
-    exposure = resolveDesktopServerExposure({
-      mode: "local-only",
+): Effect.Effect<
+  DesktopServerExposureState,
+  unknown,
+  FileSystem.FileSystem | EffectPath.Path | DesktopEnvironment | DesktopNetworkInterfacesService
+> {
+  return Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    const networkInterfaces = yield* (yield* DesktopNetworkInterfacesService).read;
+    const advertisedHostOverride = resolveAdvertisedHostOverride();
+    const requestedMode = mode;
+    let exposure = resolveDesktopServerExposure({
+      mode,
       port: backendPort,
-      networkInterfaces: OS.networkInterfaces(),
+      networkInterfaces,
       ...(advertisedHostOverride ? { advertisedHostOverride } : {}),
     });
-  }
 
-  desktopServerExposureMode = exposure.mode;
-  desktopSettings = setDesktopServerExposurePreference(desktopSettings, requestedMode);
-  backendBindHost = exposure.bindHost;
-  backendHttpUrl = Option.some(new URL(exposure.localHttpUrl));
-  backendWsUrl = exposure.localWsUrl;
-  backendEndpointUrl = exposure.endpointUrl;
-  backendAdvertisedHost = exposure.advertisedHost;
-
-  if (options?.persist) {
-    writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
-  }
-
-  return getDesktopServerExposureState();
-}
-
-async function applyDesktopTailscaleServeEnabled(
-  nextSettings: DesktopSettings,
-): Promise<DesktopServerExposureState> {
-  desktopSettings = nextSettings;
-  writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
-  relaunchDesktopApp(
-    desktopSettings.tailscaleServeEnabled ? "tailscale-serve-enabled" : "tailscale-serve-disabled",
-  );
-  return getDesktopServerExposureState();
-}
-
-function relaunchDesktopApp(reason: string): void {
-  writeDesktopLogHeader(`desktop relaunch requested reason=${reason}`);
-  setImmediate(() => {
-    isQuitting = true;
-    clearUpdatePollTimer();
-    void stopBackendAndWaitForExit()
-      .catch((error) => {
-        writeDesktopLogHeader(
-          `desktop relaunch backend shutdown warning message=${formatErrorMessage(error)}`,
+    if (requestedMode === "network-accessible" && exposure.endpointUrl === null) {
+      if (options?.rejectIfUnavailable) {
+        return yield* Effect.fail(
+          new Error("No reachable network address is available for this desktop right now."),
         );
-      })
-      .then(() => desktopSshEnvironmentBridge.dispose().catch(() => undefined))
-      .finally(() => {
-        restoreStdIoCapture?.();
-        if (isDevelopment) {
-          app.exit(75);
-          return;
-        }
-        app.relaunch({
-          execPath: process.execPath,
-          args: process.argv.slice(1),
-        });
-        app.exit(0);
+      }
+      exposure = resolveDesktopServerExposure({
+        mode: "local-only",
+        port: backendPort,
+        networkInterfaces,
+        ...(advertisedHostOverride ? { advertisedHostOverride } : {}),
       });
+    }
+
+    desktopServerExposureMode = exposure.mode;
+    desktopSettings = setDesktopServerExposurePreference(desktopSettings, requestedMode);
+    backendBindHost = exposure.bindHost;
+    backendHttpUrl = Option.some(new URL(exposure.localHttpUrl));
+    backendWsUrl = exposure.localWsUrl;
+    backendEndpointUrl = exposure.endpointUrl;
+    backendAdvertisedHost = exposure.advertisedHost;
+
+    if (options?.persist) {
+      yield* writeDesktopSettingsEffect(environment.desktopSettingsPath, desktopSettings);
+    }
+
+    return getDesktopServerExposureState();
   });
 }
 
-function writeDesktopLogHeader(message: string): void {
-  if (!desktopLogSink) return;
-  desktopLogSink.write(`[${logTimestamp()}] [${logScope("desktop")}] ${message}\n`);
+function applyDesktopTailscaleServeEnabled(
+  nextSettings: DesktopSettings,
+): Effect.Effect<
+  DesktopServerExposureState,
+  unknown,
+  FileSystem.FileSystem | EffectPath.Path | DesktopEnvironment | DesktopShutdown
+> {
+  return Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    desktopSettings = nextSettings;
+    yield* writeDesktopSettingsEffect(environment.desktopSettingsPath, desktopSettings);
+    yield* relaunchDesktopAppEffect(
+      desktopSettings.tailscaleServeEnabled
+        ? "tailscale-serve-enabled"
+        : "tailscale-serve-disabled",
+    );
+    return getDesktopServerExposureState();
+  });
 }
 
-function writeBackendSessionBoundary(phase: "START" | "END", details: string): void {
-  if (!backendLogSink) return;
-  const normalizedDetails = sanitizeLogValue(details);
-  backendLogSink.write(
-    `[${logTimestamp()}] ---- APP SESSION ${phase} run=${APP_RUN_ID} ${normalizedDetails} ----\n`,
-  );
+function relaunchDesktopAppEffect(
+  reason: string,
+): Effect.Effect<void, never, DesktopEnvironment | DesktopShutdown> {
+  return Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    const context = yield* Effect.context<DesktopEnvironment | DesktopShutdown>();
+    const runEffect = makeDesktopEffectRunner(context);
+    yield* logDesktopInfo("desktop relaunch requested", { reason });
+    yield* Effect.sync(() => {
+      setImmediate(() => {
+        isQuitting = true;
+        void runEffect(requestDesktopShutdownAndWait()).finally(() => {
+          if (environment.isDevelopment) {
+            app.exit(75);
+            return;
+          }
+          app.relaunch({
+            execPath: process.execPath,
+            args: process.argv.slice(1),
+          });
+          app.exit(0);
+        });
+      });
+    });
+  });
 }
 
 function formatErrorMessage(error: unknown): string {
@@ -513,111 +588,218 @@ function getSafeTheme(rawTheme: unknown): DesktopTheme | null {
   return null;
 }
 
-function handleBackendReady(): void {
-  backendReady = true;
-  writeDesktopLogHeader("bootstrap backend ready source=http");
+function handleBackendReady(
+  runEffect: DesktopEffectRunner,
+  environment: DesktopEnvironmentShape,
+): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    yield* Effect.sync(() => {
+      backendReady = true;
+    });
+    yield* logDesktopInfo("bootstrap backend ready", { source: "http" });
 
-  const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
-  if (isDevelopment || existingWindow !== null) {
-    return;
-  }
+    const createdWindow = yield* Effect.sync(() => {
+      const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+      if (environment.isDevelopment || existingWindow !== null) {
+        return false;
+      }
 
-  mainWindow = createWindow();
-  writeDesktopLogHeader("bootstrap main window created");
+      mainWindow = createWindow(runEffect, environment);
+      return true;
+    });
+    if (createdWindow) {
+      yield* logDesktopInfo("bootstrap main window created");
+    }
+  });
 }
 
-function createBackendWindowIfReady(): void {
+function createBackendWindowIfReady(
+  runEffect: DesktopEffectRunner,
+  environment: DesktopEnvironmentShape,
+): void {
   if (!backendReady) return;
   const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
   if (existingWindow !== null) return;
-  mainWindow = createWindow();
+  mainWindow = createWindow(runEffect, environment);
 }
 
-function writeDesktopStreamChunk(
-  streamName: "stdout" | "stderr",
-  chunk: unknown,
-  encoding: BufferEncoding | undefined,
-): void {
-  if (!desktopLogSink) return;
-  const buffer = Buffer.isBuffer(chunk)
-    ? chunk
-    : Buffer.from(String(chunk), typeof chunk === "string" ? encoding : undefined);
-  desktopLogSink.write(`[${logTimestamp()}] [${logScope(streamName)}] `);
-  desktopLogSink.write(buffer);
-  if (buffer.length === 0 || buffer[buffer.length - 1] !== 0x0a) {
-    desktopLogSink.write("\n");
-  }
-}
+const resolveBackendStartConfig: Effect.Effect<
+  DesktopBackendStartConfig,
+  never,
+  FileSystem.FileSystem | DesktopEnvironment
+> = Effect.gen(function* () {
+  const environment = yield* DesktopEnvironment;
+  backendObservabilitySettings = yield* readPersistedBackendObservabilitySettings();
+  const captureBackendLogs = !environment.isDevelopment;
 
-function installStdIoCapture(): void {
-  if (!app.isPackaged || desktopLogSink === null || restoreStdIoCapture !== null) {
-    return;
-  }
+  return {
+    executablePath: process.execPath,
+    entryPath: environment.backendEntryPath,
+    cwd: environment.backendCwd,
+    env: {
+      ...backendChildEnv(),
+      ELECTRON_RUN_AS_NODE: "1",
+    },
+    bootstrap: {
+      mode: "desktop",
+      noBrowser: true,
+      port: backendPort,
+      t3Home: environment.baseDir,
+      host: backendBindHost,
+      desktopBootstrapToken: backendBootstrapToken,
+      tailscaleServeEnabled: desktopSettings.tailscaleServeEnabled,
+      tailscaleServePort: desktopSettings.tailscaleServePort,
+      ...(backendObservabilitySettings.otlpTracesUrl
+        ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
+        : {}),
+      ...(backendObservabilitySettings.otlpMetricsUrl
+        ? { otlpMetricsUrl: backendObservabilitySettings.otlpMetricsUrl }
+        : {}),
+    },
+    httpBaseUrl: requireBackendHttpUrl(),
+    captureOutput: captureBackendLogs,
+  };
+});
 
-  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
-  const originalStderrWrite = process.stderr.write.bind(process.stderr);
+const currentIsoTimestamp = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
-  const patchWrite =
-    (streamName: "stdout" | "stderr", originalWrite: typeof process.stdout.write) =>
-    (
-      chunk: string | Uint8Array,
-      encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
-      callback?: (error?: Error | null) => void,
-    ): boolean => {
-      const encoding = typeof encodingOrCallback === "string" ? encodingOrCallback : undefined;
-      writeDesktopStreamChunk(streamName, chunk, encoding);
-      if (typeof encodingOrCallback === "function") {
-        return originalWrite(chunk, encodingOrCallback);
-      }
-      if (callback !== undefined) {
-        return originalWrite(chunk, encoding, callback);
-      }
-      if (encoding !== undefined) {
-        return originalWrite(chunk, encoding);
-      }
-      return originalWrite(chunk);
+const randomHexString = (length: number): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    let value = "";
+    while (value.length < length) {
+      value += (yield* Random.nextUUIDv4).replace(/-/g, "");
+    }
+    return value.slice(0, length);
+  });
+
+const desktopEnvironmentLayer = Layer.effect(
+  DesktopEnvironment,
+  makeDesktopEnvironment({
+    dirname: __dirname,
+    env: process.env,
+    cwd: process.cwd(),
+    platform: process.platform,
+    processArch: process.arch,
+    appVersion: app.getVersion(),
+    appPath: app.getAppPath(),
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    runningUnderArm64Translation: app.runningUnderARM64Translation === true,
+  }),
+).pipe(Layer.provide(EffectPath.layer));
+
+const desktopLoggerLayer = DesktopLoggerLive.pipe(Layer.provide(NodeServices.layer));
+
+const desktopBackendOutputLogLayer = DesktopBackendOutputLogLive.pipe(
+  Layer.provide(NodeServices.layer),
+);
+
+const desktopBackendConfigurationLayer = Layer.effect(
+  DesktopBackendConfiguration,
+  Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    return {
+      resolve: resolveBackendStartConfig.pipe(
+        Effect.provideService(DesktopEnvironment, environment),
+      ),
     };
+  }),
+);
+const desktopSshEnvironmentBridgeLayer = DesktopSshEnvironmentBridge.layer({
+  getMainWindow: () => mainWindow,
+});
+const desktopBackendEventsLayer = Layer.effect(
+  DesktopBackendEvents,
+  Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    const backendOutputLog = yield* DesktopBackendOutputLog;
+    const context = yield* Effect.context<DesktopEnvironment | DesktopSshEnvironmentBridge>();
+    const runEffect = makeDesktopEffectRunner(context);
 
-  process.stdout.write = patchWrite("stdout", originalStdoutWrite);
-  process.stderr.write = patchWrite("stderr", originalStderrWrite);
+    return {
+      onStarting: Effect.sync(() => {
+        backendReady = false;
+      }),
+      onStarted: ({ pid, config }) =>
+        backendOutputLog.writeSessionBoundary({
+          phase: "START",
+          runId: appRunId,
+          details: `pid=${pid} port=${config.bootstrap.port} cwd=${config.cwd}`,
+        }),
+      onReady: handleBackendReady(runEffect, environment),
+      onReadinessFailure: (error) =>
+        logDesktopWarning("backend readiness check failed during bootstrap", {
+          error: formatErrorMessage(error),
+        }),
+      onOutput: (streamName, chunk) => backendOutputLog.writeOutputChunk(streamName, chunk),
+      onExit: ({ pid, reason }) =>
+        Effect.gen(function* () {
+          yield* Option.match(pid, {
+            onNone: () => Effect.void,
+            onSome: (value) =>
+              backendOutputLog.writeSessionBoundary({
+                phase: "END",
+                runId: appRunId,
+                details: `pid=${value} ${reason}`,
+              }),
+          });
+          yield* Effect.sync(() => {
+            backendReady = false;
+          });
+        }),
+      onRestartScheduled: ({ reason, delay }) =>
+        logDesktopError("backend exited unexpectedly; restart scheduled", {
+          reason,
+          delayMs: Duration.toMillis(delay),
+        }),
+    };
+  }),
+);
 
-  restoreStdIoCapture = () => {
-    process.stdout.write = originalStdoutWrite;
-    process.stderr.write = originalStderrWrite;
-    restoreStdIoCapture = null;
+function resolveDesktopSshCliRunner(environment: DesktopEnvironmentShape): RemoteT3RunnerOptions {
+  const devRemoteEntryPath = Option.getOrUndefined(environment.devRemoteT3ServerEntryPath);
+  if (environment.isDevelopment && devRemoteEntryPath !== undefined) {
+    return { nodeScriptPath: devRemoteEntryPath };
+  }
+  return {
+    packageSpec: resolveRemoteT3CliPackageSpec({
+      appVersion: environment.appVersion,
+      updateChannel: desktopSettings.updateChannel,
+      isDevelopment: environment.isDevelopment,
+    }),
   };
 }
 
-function initializePackagedLogging(): void {
-  if (!app.isPackaged) return;
-  try {
-    desktopLogSink = new RotatingFileSink({
-      filePath: Path.join(LOG_DIR, "desktop-main.log"),
-      maxBytes: LOG_FILE_MAX_BYTES,
-      maxFiles: LOG_FILE_MAX_FILES,
+const desktopSshEnvironmentLayer = Layer.unwrap(
+  Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    return DesktopSshEnvironmentManager.layer({
+      resolveCliRunner: () => resolveDesktopSshCliRunner(environment),
     });
-    backendLogSink = new RotatingFileSink({
-      filePath: Path.join(LOG_DIR, "server-child.log"),
-      maxBytes: LOG_FILE_MAX_BYTES,
-      maxFiles: LOG_FILE_MAX_FILES,
-    });
-    installStdIoCapture();
-    writeDesktopLogHeader(`runtime log capture enabled logDir=${LOG_DIR}`);
-  } catch (error) {
-    // Logging setup should never block app startup.
-    console.error("[desktop] failed to initialize packaged logging", error);
-  }
-}
+  }),
+);
 
-function writeBackendOutputChunk(_streamName: "stdout" | "stderr", chunk: Uint8Array): void {
-  backendLogSink?.write(Buffer.from(chunk));
-}
+const desktopBackendDependenciesLayer = Layer.mergeAll(
+  NodeServices.layer,
+  NodeHttpClient.layerUndici,
+  NetService.layer,
+  DesktopBackendProcessRunnerLive,
+  desktopBackendConfigurationLayer,
+  desktopBackendEventsLayer.pipe(Layer.provide(desktopBackendOutputLogLayer)),
+);
 
-initializePackagedLogging();
-
-if (process.platform === "linux") {
-  app.commandLine.appendSwitch("class", LINUX_WM_CLASS);
-}
+const desktopRuntimeLayer = Layer.mergeAll(
+  desktopLoggerLayer,
+  DesktopBackendManagerLive.pipe(Layer.provide(desktopBackendDependenciesLayer)),
+  NetService.layer,
+  NodeServices.layer,
+  NodeHttpClient.layerUndici,
+  DesktopNetworkInterfacesLive,
+  desktopSshEnvironmentLayer,
+).pipe(
+  Layer.provideMerge(desktopSshEnvironmentBridgeLayer),
+  Layer.provideMerge(desktopEnvironmentLayer),
+);
 
 function getDestructiveMenuIcon(): Electron.NativeImage | undefined {
   if (process.platform !== "darwin") return undefined;
@@ -641,35 +823,47 @@ function getDestructiveMenuIcon(): Electron.NativeImage | undefined {
     return undefined;
   }
 }
-let updatePollTimer: ReturnType<typeof setInterval> | null = null;
-let updateStartupTimer: ReturnType<typeof setTimeout> | null = null;
+let updatePollerScope: Option.Option<Scope.Closeable> = Option.none();
 let updateCheckInFlight = false;
 let updateDownloadInFlight = false;
 let updateInstallInFlight = false;
 let updaterConfigured = false;
-let updateState: DesktopUpdateState = initialUpdateState();
-
-const desktopSshEnvironmentBridge = new DesktopSshEnvironmentBridge({
-  getMainWindow: () => mainWindow,
-  resolveCliRunner: (): RemoteT3RunnerOptions => {
-    if (isDevelopment && DEV_REMOTE_T3_SERVER_ENTRY_PATH.length > 0) {
-      return { nodeScriptPath: DEV_REMOTE_T3_SERVER_ENTRY_PATH };
-    }
-    return {
-      packageSpec: resolveRemoteT3CliPackageSpec({
-        appVersion: app.getVersion(),
-        updateChannel: desktopSettings.updateChannel,
-        isDevelopment,
-      }),
-    };
+let updateState: DesktopUpdateState = createInitialDesktopUpdateState(
+  "0.0.0",
+  {
+    hostArch: "other",
+    appArch: "other",
+    runningUnderArm64Translation: false,
   },
-});
+  DEFAULT_DESKTOP_SETTINGS.updateChannel,
+);
 
 function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
   if (updateInstallInFlight) return "install";
   if (updateDownloadInFlight) return "download";
   if (updateCheckInFlight) return "check";
   return updateState.errorContext;
+}
+
+function addScopedListener<Args extends ReadonlyArray<unknown>>(
+  target: unknown,
+  eventName: string,
+  listener: (...args: Args) => void,
+): Effect.Effect<void, never, Scope.Scope> {
+  const eventTarget = target as {
+    on: (eventName: string, listener: (...args: Array<unknown>) => void) => unknown;
+    removeListener: (eventName: string, listener: (...args: Array<unknown>) => void) => unknown;
+  };
+  const untypedListener = listener as unknown as (...args: Array<unknown>) => void;
+  return Effect.acquireRelease(
+    Effect.sync(() => {
+      eventTarget.on(eventName, untypedListener);
+    }),
+    () =>
+      Effect.sync(() => {
+        eventTarget.removeListener(eventName, untypedListener);
+      }),
+  ).pipe(Effect.asVoid);
 }
 
 protocol.registerSchemesAsPrivileged([
@@ -684,33 +878,34 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-function resolveAppRoot(): string {
-  if (!app.isPackaged) {
-    return ROOT_DIR;
+function parseAppUpdateYml(raw: string): Option.Option<Record<string, string>> {
+  // The YAML is simple key-value pairs — avoid pulling in a YAML parser by
+  // doing a line-based parse (fields: provider, owner, repo, releaseType, ...).
+  const entries: Record<string, string> = {};
+  for (const line of raw.split("\n")) {
+    const match = line.match(/^(\w+):\s*(.+)$/);
+    if (match?.[1] && match[2]) entries[match[1]] = match[2].trim();
   }
-  return app.getAppPath();
+  return entries.provider ? Option.some(entries) : Option.none();
 }
 
 /** Read the baked-in app-update.yml config (if applicable). */
-function readAppUpdateYml(): Record<string, string> | null {
-  try {
-    // electron-updater reads from process.resourcesPath in packaged builds,
-    // or dev-app-update.yml via app.getAppPath() in dev.
-    const ymlPath = app.isPackaged
-      ? Path.join(process.resourcesPath, "app-update.yml")
-      : Path.join(app.getAppPath(), "dev-app-update.yml");
-    const raw = FS.readFileSync(ymlPath, "utf-8");
-    // The YAML is simple key-value pairs — avoid pulling in a YAML parser by
-    // doing a line-based parse (fields: provider, owner, repo, releaseType, …).
-    const entries: Record<string, string> = {};
-    for (const line of raw.split("\n")) {
-      const match = line.match(/^(\w+):\s*(.+)$/);
-      if (match?.[1] && match[2]) entries[match[1]] = match[2].trim();
-    }
-    return entries.provider ? entries : null;
-  } catch {
-    return null;
-  }
+function readAppUpdateYmlEffect(): Effect.Effect<
+  Option.Option<Record<string, string>>,
+  never,
+  FileSystem.FileSystem | DesktopEnvironment
+> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const environment = yield* DesktopEnvironment;
+    const raw = yield* fileSystem
+      .readFileString(environment.appUpdateYmlPath, "utf-8")
+      .pipe(Effect.option);
+    return Option.match(raw, {
+      onNone: () => Option.none<Record<string, string>>(),
+      onSome: parseAppUpdateYml,
+    });
+  });
 }
 
 function normalizeCommitHash(value: unknown): string | null {
@@ -724,161 +919,230 @@ function normalizeCommitHash(value: unknown): string | null {
   return trimmed.slice(0, COMMIT_HASH_DISPLAY_LENGTH).toLowerCase();
 }
 
-function resolveEmbeddedCommitHash(): string | null {
-  const packageJsonPath = Path.join(resolveAppRoot(), "package.json");
-  if (!FS.existsSync(packageJsonPath)) {
-    return null;
-  }
-
-  try {
-    const raw = FS.readFileSync(packageJsonPath, "utf8");
-    const parsed = JSON.parse(raw) as { t3codeCommitHash?: unknown };
-    return normalizeCommitHash(parsed.t3codeCommitHash);
-  } catch {
-    return null;
-  }
+function resolveEmbeddedCommitHashEffect(): Effect.Effect<
+  Option.Option<string>,
+  never,
+  FileSystem.FileSystem | DesktopEnvironment
+> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const environment = yield* DesktopEnvironment;
+    const packageJsonPath = environment.path.join(environment.appRoot, "package.json");
+    const raw = yield* fileSystem.readFileString(packageJsonPath).pipe(Effect.option);
+    return yield* Option.match(raw, {
+      onNone: () => Effect.succeed(Option.none<string>()),
+      onSome: (value) =>
+        Schema.decodeEffect(Schema.fromJsonString(AppPackageMetadata))(value).pipe(
+          Effect.map((parsed) =>
+            Option.fromNullishOr(normalizeCommitHash(parsed.t3codeCommitHash)),
+          ),
+          Effect.catch(() => Effect.succeed(Option.none<string>())),
+        ),
+    });
+  });
 }
 
-function resolveAboutCommitHash(): string | null {
+function resolveAboutCommitHash(): Effect.Effect<
+  Option.Option<string>,
+  never,
+  FileSystem.FileSystem | DesktopEnvironment
+> {
   if (aboutCommitHashCache !== undefined) {
-    return aboutCommitHashCache;
+    return Effect.succeed(aboutCommitHashCache);
   }
 
   const envCommitHash = normalizeCommitHash(process.env.T3CODE_COMMIT_HASH);
   if (envCommitHash) {
-    aboutCommitHashCache = envCommitHash;
-    return aboutCommitHashCache;
+    aboutCommitHashCache = Option.some(envCommitHash);
+    return Effect.succeed(aboutCommitHashCache);
   }
 
   // Only packaged builds are required to expose commit metadata.
-  if (!app.isPackaged) {
-    aboutCommitHashCache = null;
-    return aboutCommitHashCache;
-  }
-
-  aboutCommitHashCache = resolveEmbeddedCommitHash();
-
-  return aboutCommitHashCache;
-}
-
-function resolveBackendEntry(): string {
-  return Path.join(resolveAppRoot(), "apps/server/dist/bin.mjs");
-}
-
-function resolveBackendCwd(): string {
-  if (!app.isPackaged) {
-    return resolveAppRoot();
-  }
-  return OS.homedir();
-}
-
-function resolveDesktopStaticDir(): string | null {
-  const appRoot = resolveAppRoot();
-  const candidates = [
-    Path.join(appRoot, "apps/server/dist/client"),
-    Path.join(appRoot, "apps/web/dist"),
-  ];
-
-  for (const candidate of candidates) {
-    if (FS.existsSync(Path.join(candidate, "index.html"))) {
-      return candidate;
+  return Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    if (!environment.isPackaged) {
+      aboutCommitHashCache = Option.none();
+      return aboutCommitHashCache;
     }
-  }
 
-  return null;
+    return yield* resolveEmbeddedCommitHashEffect().pipe(
+      Effect.tap((commitHash) =>
+        Effect.sync(() => {
+          aboutCommitHashCache = commitHash;
+        }),
+      ),
+    );
+  });
 }
 
-function resolveDesktopStaticPath(staticRoot: string, requestUrl: string): string {
-  const url = new URL(requestUrl);
-  const rawPath = decodeURIComponent(url.pathname);
-  const normalizedPath = Path.posix.normalize(rawPath).replace(/^\/+/, "");
-  if (normalizedPath.includes("..")) {
-    return Path.join(staticRoot, "index.html");
-  }
-
-  const requestedPath = normalizedPath.length > 0 ? normalizedPath : "index.html";
-  const resolvedPath = Path.join(staticRoot, requestedPath);
-
-  if (Path.extname(resolvedPath)) {
-    return resolvedPath;
-  }
-
-  const nestedIndex = Path.join(resolvedPath, "index.html");
-  if (FS.existsSync(nestedIndex)) {
-    return nestedIndex;
-  }
-
-  return Path.join(staticRoot, "index.html");
+function resolveDesktopStaticDir(): Effect.Effect<
+  Option.Option<string>,
+  never,
+  FileSystem.FileSystem | DesktopEnvironment
+> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const environment = yield* DesktopEnvironment;
+    const candidates = [
+      environment.path.join(environment.appRoot, "apps/server/dist/client"),
+      environment.path.join(environment.appRoot, "apps/web/dist"),
+    ];
+    for (const candidate of candidates) {
+      const hasIndex = yield* fileSystem
+        .exists(environment.path.join(candidate, "index.html"))
+        .pipe(Effect.orElseSucceed(() => false));
+      if (hasIndex) {
+        return Option.some(candidate);
+      }
+    }
+    return Option.none<string>();
+  });
 }
 
-function isStaticAssetRequest(requestUrl: string): boolean {
+function normalizeDesktopProtocolPathname(rawPath: string): Option.Option<string> {
+  const segments: string[] = [];
+  for (const segment of rawPath.split("/")) {
+    if (segment.length === 0 || segment === ".") {
+      continue;
+    }
+    if (segment === "..") {
+      return Option.none();
+    }
+    segments.push(segment);
+  }
+  return Option.some(segments.join("/"));
+}
+
+function resolveDesktopStaticPath(
+  staticRoot: string,
+  requestUrl: string,
+): Effect.Effect<string, never, FileSystem.FileSystem | DesktopEnvironment> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const environment = yield* DesktopEnvironment;
+    const url = new URL(requestUrl);
+    const rawPath = decodeURIComponent(url.pathname);
+    const normalizedPath = normalizeDesktopProtocolPathname(rawPath);
+    if (Option.isNone(normalizedPath)) {
+      return environment.path.join(staticRoot, "index.html");
+    }
+
+    const requestedPath = normalizedPath.value.length > 0 ? normalizedPath.value : "index.html";
+    const resolvedPath = environment.path.join(staticRoot, requestedPath);
+
+    if (environment.path.extname(resolvedPath)) {
+      return resolvedPath;
+    }
+
+    const nestedIndex = environment.path.join(resolvedPath, "index.html");
+    const nestedIndexExists = yield* fileSystem
+      .exists(nestedIndex)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (nestedIndexExists) {
+      return nestedIndex;
+    }
+
+    return environment.path.join(staticRoot, "index.html");
+  });
+}
+
+function isStaticAssetRequest(requestUrl: string, environment: DesktopEnvironmentShape): boolean {
   try {
     const url = new URL(requestUrl);
-    return Path.extname(url.pathname).length > 0;
+    return environment.path.extname(url.pathname).length > 0;
   } catch {
     return false;
   }
 }
 
-function handleFatalStartupError(stage: string, error: unknown): void {
-  const message = formatErrorMessage(error);
-  const detail =
-    error instanceof Error && typeof error.stack === "string" ? `\n${error.stack}` : "";
-  writeDesktopLogHeader(`fatal startup error stage=${stage} message=${message}`);
-  console.error(`[desktop] fatal startup error (${stage})`, error);
-  if (!isQuitting) {
-    isQuitting = true;
-    dialog.showErrorBox("T3 Code failed to start", `Stage: ${stage}\n${message}${detail}`);
-  }
-  stopBackend();
-  restoreStdIoCapture?.();
-  app.quit();
-}
-
-function registerDesktopProtocol(): void {
-  if (isDevelopment || desktopProtocolRegistered) return;
-
-  const staticRoot = resolveDesktopStaticDir();
-  if (!staticRoot) {
-    throw new Error(
-      "Desktop static bundle missing. Build apps/server (with bundled client) first.",
-    );
-  }
-
-  const staticRootResolved = Path.resolve(staticRoot);
-  const staticRootPrefix = `${staticRootResolved}${Path.sep}`;
-  const fallbackIndex = Path.join(staticRootResolved, "index.html");
-
-  protocol.registerFileProtocol(DESKTOP_SCHEME, (request, callback) => {
-    try {
-      const candidate = resolveDesktopStaticPath(staticRootResolved, request.url);
-      const resolvedCandidate = Path.resolve(candidate);
-      const isInRoot =
-        resolvedCandidate === fallbackIndex || resolvedCandidate.startsWith(staticRootPrefix);
-      const isAssetRequest = isStaticAssetRequest(request.url);
-
-      if (!isInRoot || !FS.existsSync(resolvedCandidate)) {
-        if (isAssetRequest) {
-          callback({ error: -6 });
-          return;
-        }
-        callback({ path: fallbackIndex });
-        return;
+function handleFatalStartupError(
+  stage: string,
+  error: unknown,
+): Effect.Effect<void, never, DesktopShutdown> {
+  return Effect.gen(function* () {
+    const shutdown = yield* DesktopShutdown;
+    const message = formatErrorMessage(error);
+    const detail =
+      error instanceof Error && typeof error.stack === "string" ? `\n${error.stack}` : "";
+    yield* logDesktopError("fatal startup error", {
+      stage,
+      message,
+      ...(detail.length > 0 ? { detail } : {}),
+    });
+    yield* Effect.sync(() => {
+      if (!isQuitting) {
+        isQuitting = true;
+        dialog.showErrorBox("T3 Code failed to start", `Stage: ${stage}\n${message}${detail}`);
       }
-
-      callback({ path: resolvedCandidate });
-    } catch {
-      callback({ path: fallbackIndex });
-    }
+    });
+    yield* shutdown.request;
+    yield* Effect.sync(() => {
+      app.quit();
+    });
   });
-
-  desktopProtocolRegistered = true;
 }
 
-function dispatchMenuAction(action: string): void {
+function registerDesktopProtocol(): Effect.Effect<
+  void,
+  unknown,
+  FileSystem.FileSystem | DesktopEnvironment
+> {
+  return Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    if (environment.isDevelopment || desktopProtocolRegistered) return;
+    const context = yield* Effect.context<FileSystem.FileSystem | DesktopEnvironment>();
+    const runProtocolEffect = makeDesktopEffectRunner(context);
+
+    const staticRoot = yield* resolveDesktopStaticDir();
+    if (Option.isNone(staticRoot)) {
+      return yield* Effect.fail(
+        new Error("Desktop static bundle missing. Build apps/server (with bundled client) first."),
+      );
+    }
+
+    const staticRootResolved = environment.path.resolve(staticRoot.value);
+    const staticRootPrefix = `${staticRootResolved}${environment.path.sep}`;
+    const fallbackIndex = environment.path.join(staticRootResolved, "index.html");
+
+    yield* Effect.sync(() => {
+      protocol.registerFileProtocol(DESKTOP_SCHEME, (request, callback) => {
+        const resolution = Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const candidate = yield* resolveDesktopStaticPath(staticRootResolved, request.url);
+          const environment = yield* DesktopEnvironment;
+          const resolvedCandidate = environment.path.resolve(candidate);
+          const isInRoot =
+            resolvedCandidate === fallbackIndex || resolvedCandidate.startsWith(staticRootPrefix);
+          const isAssetRequest = isStaticAssetRequest(request.url, environment);
+          const exists = yield* fileSystem
+            .exists(resolvedCandidate)
+            .pipe(Effect.orElseSucceed(() => false));
+
+          if (!isInRoot || !exists) {
+            return isAssetRequest ? ({ error: -6 } as const) : ({ path: fallbackIndex } as const);
+          }
+
+          return { path: resolvedCandidate } as const;
+        }).pipe(Effect.catch(() => Effect.succeed({ path: fallbackIndex } as const)));
+
+        void runProtocolEffect(resolution).then(callback, () => {
+          callback({ path: fallbackIndex });
+        });
+      });
+
+      desktopProtocolRegistered = true;
+    });
+  });
+}
+
+function dispatchMenuAction(
+  action: string,
+  runEffect: DesktopEffectRunner,
+  environment: DesktopEnvironmentShape,
+): void {
   const existingWindow =
     BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
-  const targetWindow = existingWindow ?? createWindow();
+  const targetWindow = existingWindow ?? createWindow(runEffect, environment);
   if (!existingWindow) {
     mainWindow = targetWindow;
   }
@@ -897,19 +1161,24 @@ function dispatchMenuAction(action: string): void {
   send();
 }
 
-function handleCheckForUpdatesMenuClick(): void {
-  const hasUpdateFeedConfig =
-    readAppUpdateYml() !== null || Boolean(process.env.T3CODE_DESKTOP_MOCK_UPDATES);
+function handleCheckForUpdatesMenuClick(
+  runEffect: DesktopEffectRunner,
+  environment: DesktopEnvironmentShape,
+): void {
   const disabledReason = getAutoUpdateDisabledReason({
-    isDevelopment,
+    isDevelopment: environment.isDevelopment,
     isPackaged: app.isPackaged,
     platform: process.platform,
     appImage: process.env.APPIMAGE,
     disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
-    hasUpdateFeedConfig,
+    hasUpdateFeedConfig: hasDesktopUpdateFeedConfig(),
   });
   if (disabledReason) {
-    console.info("[desktop-updater] Manual update check requested, but updates are disabled.");
+    void runEffect(
+      logUpdaterInfo("manual update check requested, but updates are disabled", {
+        disabledReason,
+      }),
+    );
     void dialog.showMessageBox({
       type: "info",
       title: "Updates unavailable",
@@ -921,141 +1190,176 @@ function handleCheckForUpdatesMenuClick(): void {
   }
 
   if (!BrowserWindow.getAllWindows().length) {
-    mainWindow = createWindow();
+    mainWindow = createWindow(runEffect, environment);
   }
-  void checkForUpdatesFromMenu();
+  void runEffect(checkForUpdatesFromMenu());
 }
 
-async function checkForUpdatesFromMenu(): Promise<void> {
-  await checkForUpdates("menu");
-
-  if (updateState.status === "up-to-date") {
-    void dialog.showMessageBox({
-      type: "info",
-      title: "You're up to date!",
-      message: `T3 Code ${updateState.currentVersion} is currently the newest version available.`,
-      buttons: ["OK"],
-    });
-  } else if (updateState.status === "error") {
-    void dialog.showMessageBox({
-      type: "warning",
-      title: "Update check failed",
-      message: "Could not check for updates.",
-      detail: updateState.message ?? "An unknown error occurred. Please try again later.",
-      buttons: ["OK"],
-    });
-  }
+function hasDesktopUpdateFeedConfig(): boolean {
+  return Option.isSome(appUpdateYmlConfig) || Boolean(process.env.T3CODE_DESKTOP_MOCK_UPDATES);
 }
 
-function configureApplicationMenu(): void {
-  const template: MenuItemConstructorOptions[] = [];
+function checkForUpdatesFromMenu(): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    yield* checkForUpdates("menu");
 
-  if (process.platform === "darwin") {
-    template.push({
-      label: app.name,
-      submenu: [
-        { role: "about" },
-        {
-          label: "Check for Updates...",
-          click: () => handleCheckForUpdatesMenuClick(),
-        },
-        { type: "separator" },
-        {
-          label: "Settings...",
-          accelerator: "CmdOrCtrl+,",
-          click: () => dispatchMenuAction("open-settings"),
-        },
-        { type: "separator" },
-        { role: "services" },
-        { type: "separator" },
-        { role: "hide" },
-        { role: "hideOthers" },
-        { role: "unhide" },
-        { type: "separator" },
-        { role: "quit" },
-      ],
-    });
-  }
-
-  template.push(
-    {
-      label: "File",
-      submenu: [
-        ...(process.platform === "darwin"
-          ? []
-          : [
-              {
-                label: "Settings...",
-                accelerator: "CmdOrCtrl+,",
-                click: () => dispatchMenuAction("open-settings"),
-              },
-              { type: "separator" as const },
-            ]),
-        { role: process.platform === "darwin" ? "close" : "quit" },
-      ],
-    },
-    { role: "editMenu" },
-    {
-      label: "View",
-      submenu: [
-        { role: "reload" },
-        { role: "forceReload" },
-        { role: "toggleDevTools" },
-        { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn", accelerator: "CmdOrCtrl+=" },
-        { role: "zoomIn", accelerator: "CmdOrCtrl+Plus", visible: false },
-        { role: "zoomOut" },
-        { type: "separator" },
-        { role: "togglefullscreen" },
-      ],
-    },
-    { role: "windowMenu" },
-    {
-      role: "help",
-      submenu: [
-        {
-          label: "Check for Updates...",
-          click: () => handleCheckForUpdatesMenuClick(),
-        },
-      ],
-    },
-  );
-
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-}
-
-function resolveResourcePath(fileName: string): string | null {
-  const candidates = [
-    Path.join(__dirname, "../resources", fileName),
-    Path.join(__dirname, "../prod-resources", fileName),
-    Path.join(process.resourcesPath, "resources", fileName),
-    Path.join(process.resourcesPath, fileName),
-  ];
-
-  for (const candidate of candidates) {
-    if (FS.existsSync(candidate)) {
-      return candidate;
+    if (updateState.status === "up-to-date") {
+      yield* Effect.promise(() =>
+        dialog.showMessageBox({
+          type: "info",
+          title: "You're up to date!",
+          message: `T3 Code ${updateState.currentVersion} is currently the newest version available.`,
+          buttons: ["OK"],
+        }),
+      );
+    } else if (updateState.status === "error") {
+      yield* Effect.promise(() =>
+        dialog.showMessageBox({
+          type: "warning",
+          title: "Update check failed",
+          message: "Could not check for updates.",
+          detail: updateState.message ?? "An unknown error occurred. Please try again later.",
+          buttons: ["OK"],
+        }),
+      );
     }
-  }
-
-  return null;
+  });
 }
 
-function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
-  if (isDevelopment && process.platform === "darwin" && ext === "png") {
-    const developmentDockIconPath = Path.join(
-      ROOT_DIR,
-      "assets",
-      "dev",
-      "blueprint-macos-1024.png",
+function configureApplicationMenu(): Effect.Effect<void, never, DesktopWindowBoundaryServices> {
+  return Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    const context = yield* Effect.context<DesktopWindowBoundaryServices>();
+    const runEffect = makeDesktopEffectRunner(context);
+    const template: MenuItemConstructorOptions[] = [];
+
+    if (process.platform === "darwin") {
+      template.push({
+        label: app.name,
+        submenu: [
+          { role: "about" },
+          {
+            label: "Check for Updates...",
+            click: () => handleCheckForUpdatesMenuClick(runEffect, environment),
+          },
+          { type: "separator" },
+          {
+            label: "Settings...",
+            accelerator: "CmdOrCtrl+,",
+            click: () => dispatchMenuAction("open-settings", runEffect, environment),
+          },
+          { type: "separator" },
+          { role: "services" },
+          { type: "separator" },
+          { role: "hide" },
+          { role: "hideOthers" },
+          { role: "unhide" },
+          { type: "separator" },
+          { role: "quit" },
+        ],
+      });
+    }
+
+    template.push(
+      {
+        label: "File",
+        submenu: [
+          ...(process.platform === "darwin"
+            ? []
+            : [
+                {
+                  label: "Settings...",
+                  accelerator: "CmdOrCtrl+,",
+                  click: () => dispatchMenuAction("open-settings", runEffect, environment),
+                },
+                { type: "separator" as const },
+              ]),
+          { role: process.platform === "darwin" ? "close" : "quit" },
+        ],
+      },
+      { role: "editMenu" },
+      {
+        label: "View",
+        submenu: [
+          { role: "reload" },
+          { role: "forceReload" },
+          { role: "toggleDevTools" },
+          { type: "separator" },
+          { role: "resetZoom" },
+          { role: "zoomIn", accelerator: "CmdOrCtrl+=" },
+          { role: "zoomIn", accelerator: "CmdOrCtrl+Plus", visible: false },
+          { role: "zoomOut" },
+          { type: "separator" },
+          { role: "togglefullscreen" },
+        ],
+      },
+      { role: "windowMenu" },
+      {
+        role: "help",
+        submenu: [
+          {
+            label: "Check for Updates...",
+            click: () => handleCheckForUpdatesMenuClick(runEffect, environment),
+          },
+        ],
+      },
     );
-    if (FS.existsSync(developmentDockIconPath)) {
-      return developmentDockIconPath;
-    }
-  }
 
-  return resolveResourcePath(`icon.${ext}`);
+    yield* Effect.sync(() => {
+      Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+    });
+  });
+}
+
+function resolveResourcePath(
+  fileName: string,
+): Effect.Effect<Option.Option<string>, never, FileSystem.FileSystem | DesktopEnvironment> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const environment = yield* DesktopEnvironment;
+    const candidates = environment.resolveResourcePathCandidates(fileName);
+    for (const candidate of candidates) {
+      const exists = yield* fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false));
+      if (exists) {
+        return Option.some(candidate);
+      }
+    }
+    return Option.none<string>();
+  });
+}
+
+function resolveIconPath(
+  ext: "ico" | "icns" | "png",
+): Effect.Effect<Option.Option<string>, never, FileSystem.FileSystem | DesktopEnvironment> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const environment = yield* DesktopEnvironment;
+    if (environment.isDevelopment && process.platform === "darwin" && ext === "png") {
+      const developmentDockIconPath = environment.developmentDockIconPath;
+      const developmentDockIconExists = yield* fileSystem
+        .exists(developmentDockIconPath)
+        .pipe(Effect.orElseSucceed(() => false));
+      if (developmentDockIconExists) {
+        return Option.some(developmentDockIconPath);
+      }
+    }
+
+    return yield* resolveResourcePath(`icon.${ext}`);
+  });
+}
+
+function resolveDesktopIconPaths(): Effect.Effect<
+  void,
+  never,
+  FileSystem.FileSystem | DesktopEnvironment
+> {
+  return Effect.gen(function* () {
+    const [ico, icns, png] = yield* Effect.all(
+      [resolveIconPath("ico"), resolveIconPath("icns"), resolveIconPath("png")] as const,
+      { concurrency: "unbounded" },
+    );
+    desktopIconPaths = { ico, icns, png };
+  });
 }
 
 /**
@@ -1070,56 +1374,101 @@ function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
  * directory already exists we keep using it so existing users don't
  * lose their Chromium profile data (localStorage, cookies, sessions).
  */
-function resolveUserDataPath(): string {
-  const appDataBase =
-    process.platform === "win32"
-      ? process.env.APPDATA || Path.join(OS.homedir(), "AppData", "Roaming")
-      : process.platform === "darwin"
-        ? Path.join(OS.homedir(), "Library", "Application Support")
-        : process.env.XDG_CONFIG_HOME || Path.join(OS.homedir(), ".config");
-
-  const legacyPath = Path.join(appDataBase, LEGACY_USER_DATA_DIR_NAME);
-  if (FS.existsSync(legacyPath)) {
-    return legacyPath;
-  }
-
-  return Path.join(appDataBase, USER_DATA_DIR_NAME);
-}
-
-function configureAppIdentity(): void {
-  app.setName(APP_DISPLAY_NAME);
-  const commitHash = resolveAboutCommitHash();
-  app.setAboutPanelOptions({
-    applicationName: APP_DISPLAY_NAME,
-    applicationVersion: app.getVersion(),
-    version: commitHash ?? "unknown",
+function resolveUserDataPath(): Effect.Effect<
+  string,
+  never,
+  FileSystem.FileSystem | DesktopEnvironment
+> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const environment = yield* DesktopEnvironment;
+    const appDataBase =
+      process.platform === "win32"
+        ? process.env.APPDATA ||
+          environment.path.join(environment.homeDirectory, "AppData", "Roaming")
+        : process.platform === "darwin"
+          ? environment.path.join(environment.homeDirectory, "Library", "Application Support")
+          : process.env.XDG_CONFIG_HOME ||
+            environment.path.join(environment.homeDirectory, ".config");
+    const legacyPath = environment.path.join(appDataBase, environment.legacyUserDataDirName);
+    const legacyPathExists = yield* fileSystem
+      .exists(legacyPath)
+      .pipe(Effect.orElseSucceed(() => false));
+    return legacyPathExists
+      ? legacyPath
+      : environment.path.join(appDataBase, environment.userDataDirName);
   });
-
-  if (process.platform === "win32") {
-    app.setAppUserModelId(APP_USER_MODEL_ID);
-  }
-
-  if (process.platform === "linux") {
-    (app as LinuxDesktopNamedApp).setDesktopName?.(LINUX_DESKTOP_ENTRY_NAME);
-  }
-
-  if (process.platform === "darwin" && app.dock) {
-    const iconPath = resolveIconPath("png");
-    if (iconPath) {
-      app.dock.setIcon(iconPath);
-    }
-  }
 }
 
-function clearUpdatePollTimer(): void {
-  if (updateStartupTimer) {
-    clearTimeout(updateStartupTimer);
-    updateStartupTimer = null;
-  }
-  if (updatePollTimer) {
-    clearInterval(updatePollTimer);
-    updatePollTimer = null;
-  }
+function configureAppIdentity(): Effect.Effect<
+  void,
+  never,
+  FileSystem.FileSystem | DesktopEnvironment
+> {
+  return Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    const commitHash = yield* resolveAboutCommitHash();
+    yield* Effect.sync(() => {
+      app.setName(environment.displayName);
+      app.setAboutPanelOptions({
+        applicationName: environment.displayName,
+        applicationVersion: environment.appVersion,
+        version: Option.getOrElse(commitHash, () => "unknown"),
+      });
+
+      if (process.platform === "win32") {
+        app.setAppUserModelId(environment.appUserModelId);
+      }
+
+      if (process.platform === "linux") {
+        (app as LinuxDesktopNamedApp).setDesktopName?.(environment.linuxDesktopEntryName);
+      }
+
+      if (process.platform === "darwin" && app.dock) {
+        const iconPath = Option.getOrUndefined(desktopIconPaths.png);
+        if (iconPath) {
+          app.dock.setIcon(iconPath);
+        }
+      }
+    });
+  });
+}
+
+function clearUpdatePollTimer(): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    const scope = updatePollerScope;
+    updatePollerScope = Option.none();
+    yield* Option.match(scope, {
+      onNone: () => Effect.void,
+      onSome: (value) => Scope.close(value, Exit.void).pipe(Effect.ignore),
+    });
+  });
+}
+
+function startUpdatePollers(): Effect.Effect<void, never, Scope.Scope> {
+  return Effect.gen(function* () {
+    yield* clearUpdatePollTimer();
+    const parentScope = yield* Scope.Scope;
+    const scope = yield* Scope.make("sequential");
+    updatePollerScope = Option.some(scope);
+    yield* Scope.addFinalizer(parentScope, Scope.close(scope, Exit.void).pipe(Effect.ignore));
+
+    yield* Effect.sleep(Duration.millis(AUTO_UPDATE_STARTUP_DELAY_MS)).pipe(
+      Effect.andThen(checkForUpdates("startup")),
+      Effect.catchCause((cause) =>
+        logUpdaterError("startup update check failed", { cause: Cause.pretty(cause) }),
+      ),
+      Effect.forkIn(scope),
+    );
+    yield* Effect.sleep(Duration.millis(AUTO_UPDATE_POLL_INTERVAL_MS)).pipe(
+      Effect.andThen(checkForUpdates("poll")),
+      Effect.forever,
+      Effect.catchCause((cause) =>
+        logUpdaterError("poll update check failed", { cause: Cause.pretty(cause) }),
+      ),
+      Effect.forkIn(scope),
+    );
+  });
 }
 
 function revealWindow(window: BrowserWindow): void {
@@ -1157,757 +1506,761 @@ function setUpdateState(patch: Partial<DesktopUpdateState>): void {
 function createBaseUpdateState(
   channel: DesktopUpdateChannel,
   enabled: boolean,
+  environment: DesktopEnvironmentShape,
 ): DesktopUpdateState {
   return {
-    ...createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo, channel),
+    ...createInitialDesktopUpdateState(environment.appVersion, environment.runtimeInfo, channel),
     enabled,
     status: enabled ? "idle" : "disabled",
   };
 }
 
-function applyAutoUpdaterChannel(channel: DesktopUpdateChannel): void {
-  autoUpdater.channel = channel;
-  autoUpdater.allowPrerelease = channel === "nightly";
-  autoUpdater.allowDowngrade = channel === "nightly";
-  console.info(
-    `[desktop-updater] Using update channel '${channel}' (allowPrerelease=${channel === "nightly"}, allowDowngrade=${channel === "nightly"}).`,
-  );
+function applyAutoUpdaterChannel(channel: DesktopUpdateChannel): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    const allowsPrerelease = channel === "nightly";
+    yield* Effect.sync(() => {
+      autoUpdater.channel = channel;
+      autoUpdater.allowPrerelease = allowsPrerelease;
+      autoUpdater.allowDowngrade = allowsPrerelease;
+    });
+    yield* logUpdaterInfo("using update channel", {
+      channel,
+      allowPrerelease: allowsPrerelease,
+      allowDowngrade: allowsPrerelease,
+    });
+  });
 }
 
-function shouldEnableAutoUpdates(): boolean {
-  const hasUpdateFeedConfig =
-    readAppUpdateYml() !== null || Boolean(process.env.T3CODE_DESKTOP_MOCK_UPDATES);
+function shouldEnableAutoUpdates(environment: DesktopEnvironmentShape): boolean {
   return (
     getAutoUpdateDisabledReason({
-      isDevelopment,
+      isDevelopment: environment.isDevelopment,
       isPackaged: app.isPackaged,
       platform: process.platform,
       appImage: process.env.APPIMAGE,
       disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
-      hasUpdateFeedConfig,
+      hasUpdateFeedConfig: hasDesktopUpdateFeedConfig(),
     }) === null
   );
 }
 
-async function checkForUpdates(reason: string): Promise<boolean> {
-  if (isQuitting || !updaterConfigured || updateCheckInFlight) return false;
-  if (updateState.status === "downloading" || updateState.status === "downloaded") {
-    console.info(
-      `[desktop-updater] Skipping update check (${reason}) while status=${updateState.status}.`,
-    );
-    return false;
-  }
-  updateCheckInFlight = true;
-  setUpdateState(reduceDesktopUpdateStateOnCheckStart(updateState, new Date().toISOString()));
-  console.info(`[desktop-updater] Checking for updates (${reason})...`);
-
-  try {
-    await autoUpdater.checkForUpdates();
-    return true;
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    setUpdateState(
-      reduceDesktopUpdateStateOnCheckFailure(updateState, message, new Date().toISOString()),
-    );
-    console.error(`[desktop-updater] Failed to check for updates: ${message}`);
-    return true;
-  } finally {
-    updateCheckInFlight = false;
-  }
-}
-
-async function downloadAvailableUpdate(): Promise<{
-  accepted: boolean;
-  completed: boolean;
-}> {
-  if (!updaterConfigured || updateDownloadInFlight || updateState.status !== "available") {
-    return { accepted: false, completed: false };
-  }
-  updateDownloadInFlight = true;
-  setUpdateState(reduceDesktopUpdateStateOnDownloadStart(updateState));
-  autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
-  console.info("[desktop-updater] Downloading update...");
-
-  try {
-    await autoUpdater.downloadUpdate();
-    return { accepted: true, completed: true };
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, message));
-    console.error(`[desktop-updater] Failed to download update: ${message}`);
-    return { accepted: true, completed: false };
-  } finally {
-    updateDownloadInFlight = false;
-  }
-}
-
-async function installDownloadedUpdate(): Promise<{
-  accepted: boolean;
-  completed: boolean;
-}> {
-  if (isQuitting || !updaterConfigured || updateState.status !== "downloaded") {
-    return { accepted: false, completed: false };
-  }
-
-  isQuitting = true;
-  updateInstallInFlight = true;
-  clearUpdatePollTimer();
-  try {
-    await stopBackendAndWaitForExit();
-    // Destroy all windows before launching the NSIS installer to avoid the installer finding live windows it needs to close.
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.destroy();
-    }
-    // `quitAndInstall()` only starts the handoff to the updater. The actual
-    // install may still fail asynchronously, so keep the action incomplete
-    // until we either quit or receive an updater error.
-    autoUpdater.quitAndInstall(true, true);
-    return { accepted: true, completed: false };
-  } catch (error: unknown) {
-    const message = formatErrorMessage(error);
-    updateInstallInFlight = false;
-    isQuitting = false;
-    setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
-    console.error(`[desktop-updater] Failed to install update: ${message}`);
-    return { accepted: true, completed: false };
-  }
-}
-
-function configureAutoUpdater(): void {
-  const githubToken =
-    process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
-  if (githubToken) {
-    // When a token is provided, re-configure the feed with `private: true` so
-    // electron-updater uses the GitHub API (api.github.com) instead of the
-    // public Atom feed (github.com/…/releases.atom) which rejects Bearer auth.
-    const appUpdateYml = readAppUpdateYml();
-    if (appUpdateYml?.provider === "github") {
-      autoUpdater.setFeedURL({
-        ...appUpdateYml,
-        provider: "github" as const,
-        private: true,
-        token: githubToken,
+function checkForUpdates(reason: string): Effect.Effect<boolean> {
+  return Effect.gen(function* () {
+    if (isQuitting || !updaterConfigured || updateCheckInFlight) return false;
+    if (updateState.status === "downloading" || updateState.status === "downloaded") {
+      yield* logUpdaterInfo("skipping update check while update is active", {
+        reason,
+        status: updateState.status,
       });
-    }
-  }
-
-  if (process.env.T3CODE_DESKTOP_MOCK_UPDATES) {
-    autoUpdater.setFeedURL({
-      provider: "generic",
-      url: `http://localhost:${process.env.T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT ?? 3000}`,
-    });
-  }
-
-  const enabled = shouldEnableAutoUpdates();
-  setUpdateState(createBaseUpdateState(desktopSettings.updateChannel, enabled));
-  if (!enabled) {
-    return;
-  }
-  updaterConfigured = true;
-
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = false;
-  applyAutoUpdaterChannel(desktopSettings.updateChannel);
-  autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
-  let lastLoggedDownloadMilestone = -1;
-
-  if (isArm64HostRunningIntelBuild(desktopRuntimeInfo)) {
-    console.info(
-      "[desktop-updater] Apple Silicon host detected while running Intel build; updates will switch to arm64 packages.",
-    );
-  }
-
-  autoUpdater.on("checking-for-update", () => {
-    console.info("[desktop-updater] Looking for updates...");
-  });
-  autoUpdater.on("update-available", (info) => {
-    if (!doesVersionMatchDesktopUpdateChannel(info.version, updateState.channel)) {
-      console.info(
-        `[desktop-updater] Ignoring ${info.version} because it does not match the selected '${updateState.channel}' channel.`,
-      );
-      setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
-      lastLoggedDownloadMilestone = -1;
-      return;
+      return false;
     }
 
-    setUpdateState(
-      reduceDesktopUpdateStateOnUpdateAvailable(
-        updateState,
-        info.version,
-        new Date().toISOString(),
+    updateCheckInFlight = true;
+    const checkedAt = yield* currentIsoTimestamp;
+    setUpdateState(reduceDesktopUpdateStateOnCheckStart(updateState, checkedAt));
+    yield* logUpdaterInfo("checking for updates", { reason });
+
+    return yield* Effect.promise(() => autoUpdater.checkForUpdates()).pipe(
+      Effect.as(true),
+      Effect.catch((error: unknown) =>
+        Effect.gen(function* () {
+          const failedAt = yield* currentIsoTimestamp;
+          const message = formatErrorMessage(error);
+          setUpdateState(reduceDesktopUpdateStateOnCheckFailure(updateState, message, failedAt));
+          yield* logUpdaterError("failed to check for updates", { message });
+          return true;
+        }),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => {
+          updateCheckInFlight = false;
+        }),
       ),
     );
-    lastLoggedDownloadMilestone = -1;
-    console.info(`[desktop-updater] Update available: ${info.version}`);
   });
-  autoUpdater.on("update-not-available", () => {
-    setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
-    lastLoggedDownloadMilestone = -1;
-    console.info("[desktop-updater] No updates available.");
-  });
-  autoUpdater.on("error", (error) => {
-    const message = formatErrorMessage(error);
-    if (updateInstallInFlight) {
-      updateInstallInFlight = false;
-      isQuitting = false;
-      setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
-      console.error(`[desktop-updater] Updater error: ${message}`);
-      return;
-    }
-    if (!updateCheckInFlight && !updateDownloadInFlight) {
-      setUpdateState({
-        status: "error",
-        message,
-        checkedAt: new Date().toISOString(),
-        downloadPercent: null,
-        errorContext: resolveUpdaterErrorContext(),
-        canRetry: updateState.availableVersion !== null || updateState.downloadedVersion !== null,
-      });
-    }
-    console.error(`[desktop-updater] Updater error: ${message}`);
-  });
-  autoUpdater.on("download-progress", (progress) => {
-    const percent = Math.floor(progress.percent);
-    if (
-      shouldBroadcastDownloadProgress(updateState, progress.percent) ||
-      updateState.message !== null
-    ) {
-      setUpdateState(reduceDesktopUpdateStateOnDownloadProgress(updateState, progress.percent));
-    }
-    const milestone = percent - (percent % 10);
-    if (milestone > lastLoggedDownloadMilestone) {
-      lastLoggedDownloadMilestone = milestone;
-      console.info(`[desktop-updater] Download progress: ${percent}%`);
-    }
-  });
-  autoUpdater.on("update-downloaded", (info) => {
-    setUpdateState(reduceDesktopUpdateStateOnDownloadComplete(updateState, info.version));
-    console.info(`[desktop-updater] Update downloaded: ${info.version}`);
-  });
-
-  clearUpdatePollTimer();
-
-  updateStartupTimer = setTimeout(() => {
-    updateStartupTimer = null;
-    void checkForUpdates("startup");
-  }, AUTO_UPDATE_STARTUP_DELAY_MS);
-  updateStartupTimer.unref();
-
-  updatePollTimer = setInterval(() => {
-    void checkForUpdates("poll");
-  }, AUTO_UPDATE_POLL_INTERVAL_MS);
-  updatePollTimer.unref();
-}
-function scheduleBackendRestart(reason: string): void {
-  if (isQuitting || restartTimer) return;
-
-  const delayMs = Math.min(500 * 2 ** restartAttempt, 10_000);
-  restartAttempt += 1;
-  console.error(`[desktop] backend exited unexpectedly (${reason}); restarting in ${delayMs}ms`);
-
-  restartTimer = setTimeout(() => {
-    restartTimer = null;
-    startBackend();
-  }, delayMs);
 }
 
-function clearBackendRestartTimer(): void {
-  if (restartTimer) {
-    clearTimeout(restartTimer);
-    restartTimer = null;
-  }
-}
-
-function startBackend(): void {
-  if (isQuitting || backendProcessFiber !== null) return;
-
-  backendReady = false;
-  backendObservabilitySettings = readPersistedBackendObservabilitySettings();
-  const backendEntry = resolveBackendEntry();
-  if (!FS.existsSync(backendEntry)) {
-    scheduleBackendRestart(`missing server entry at ${backendEntry}`);
-    return;
-  }
-
-  const captureBackendLogs = !isDevelopment;
-  let backendSessionClosed = false;
-  let backendSessionStarted = false;
-  let backendPid: number | null = null;
-  let startedFiber: Fiber.Fiber<void, never> | null = null;
-  const closeBackendSession = (details: string) => {
-    if (backendSessionClosed || !backendSessionStarted) return;
-    backendSessionClosed = true;
-    writeBackendSessionBoundary("END", details);
-  };
-
-  const clearStartedBackendState = (): void => {
-    if (backendProcessFiber === startedFiber) {
-      backendProcessFiber = null;
+function downloadAvailableUpdate(): Effect.Effect<
+  {
+    accepted: boolean;
+    completed: boolean;
+  },
+  never,
+  DesktopEnvironment
+> {
+  return Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    if (!updaterConfigured || updateDownloadInFlight || updateState.status !== "available") {
+      return { accepted: false, completed: false };
     }
-    backendReady = false;
-  };
 
-  const finalizeBackendSession = (details: string): void => {
-    clearStartedBackendState();
-    closeBackendSession(details);
-  };
+    updateDownloadInFlight = true;
+    setUpdateState(reduceDesktopUpdateStateOnDownloadStart(updateState));
+    autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(environment.runtimeInfo);
+    yield* logUpdaterInfo("downloading update");
 
-  const program = Effect.scoped(
-    runBackendProcess({
-      executablePath: process.execPath,
-      entryPath: backendEntry,
-      cwd: resolveBackendCwd(),
-      env: {
-        ...backendChildEnv(),
-        ELECTRON_RUN_AS_NODE: "1",
-      },
-      bootstrap: {
-        mode: "desktop",
-        noBrowser: true,
-        port: backendPort,
-        t3Home: BASE_DIR,
-        host: backendBindHost,
-        desktopBootstrapToken: backendBootstrapToken,
-        tailscaleServeEnabled: desktopSettings.tailscaleServeEnabled,
-        tailscaleServePort: desktopSettings.tailscaleServePort,
-        ...(backendObservabilitySettings.otlpTracesUrl
-          ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
-          : {}),
-        ...(backendObservabilitySettings.otlpMetricsUrl
-          ? { otlpMetricsUrl: backendObservabilitySettings.otlpMetricsUrl }
-          : {}),
-      },
-      httpBaseUrl: requireBackendHttpUrl(),
-      captureOutput: captureBackendLogs,
-      onStarted: (pid) =>
+    return yield* Effect.promise(() => autoUpdater.downloadUpdate()).pipe(
+      Effect.as({ accepted: true, completed: true }),
+      Effect.catch((error: unknown) =>
         Effect.sync(() => {
-          backendPid = pid;
-          backendSessionStarted = true;
-          restartAttempt = 0;
-          writeBackendSessionBoundary(
-            "START",
-            `pid=${pid} port=${backendPort} cwd=${resolveBackendCwd()}`,
-          );
-        }),
-      onReady: () => Effect.sync(handleBackendReady),
-      onReadinessFailure: (error) =>
-        Effect.sync(() => {
-          writeDesktopLogHeader(
-            `bootstrap backend readiness warning message=${formatErrorMessage(error)}`,
-          );
-          console.warn("[desktop] backend readiness check failed during bootstrap", error);
-        }),
-      onOutput: (streamName, chunk) =>
-        Effect.sync(() => {
-          writeBackendOutputChunk(streamName, chunk);
-        }),
-    }).pipe(
-      Effect.match({
-        onFailure: (error) => {
           const message = formatErrorMessage(error);
-          finalizeBackendSession(`pid=${backendPid ?? "unknown"} error=${message}`);
-          if (isQuitting) {
-            return;
-          }
-          scheduleBackendRestart(message);
-        },
-        onSuccess: (exit) => {
-          finalizeBackendSession(`pid=${backendPid ?? "unknown"} ${exit.reason}`);
-          if (isQuitting) {
-            return;
-          }
-          scheduleBackendRestart(exit.reason);
-        },
-      }),
-    ),
-  ).pipe(
-    Effect.ensuring(
-      Effect.sync(() => {
-        finalizeBackendSession(`pid=${backendPid ?? "unknown"} interrupted`);
-      }),
-    ),
-    Effect.provide(backendProcessLayer),
-  );
-
-  startedFiber = Effect.runFork(program);
-  backendProcessFiber = startedFiber;
-}
-
-function stopBackend(): void {
-  clearBackendRestartTimer();
-  backendReady = false;
-
-  const fiber = backendProcessFiber;
-  backendProcessFiber = null;
-  if (fiber !== null) {
-    Effect.runFork(Fiber.interrupt(fiber).pipe(Effect.ignore));
-  }
-}
-
-async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
-  clearBackendRestartTimer();
-  backendReady = false;
-
-  const fiber = backendProcessFiber;
-  backendProcessFiber = null;
-  if (fiber === null) return;
-
-  await Effect.runPromise(
-    Fiber.interrupt(fiber).pipe(
-      Effect.timeoutOption(Duration.millis(timeoutMs)),
-      Effect.asVoid,
-      Effect.ignore,
-    ),
-  );
-}
-
-function registerIpcHandlers(): void {
-  ipcMain.removeAllListeners(GET_APP_BRANDING_CHANNEL);
-  ipcMain.on(GET_APP_BRANDING_CHANNEL, (event) => {
-    event.returnValue = desktopAppBranding;
-  });
-
-  ipcMain.removeAllListeners(GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL);
-  ipcMain.on(GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL, (event) => {
-    event.returnValue = {
-      label: "Local environment",
-      httpBaseUrl: getBackendHttpUrlHref(),
-      wsBaseUrl: backendWsUrl || null,
-      bootstrapToken: backendBootstrapToken || undefined,
-    } as const;
-  });
-
-  ipcMain.removeHandler(GET_CLIENT_SETTINGS_CHANNEL);
-  ipcMain.handle(GET_CLIENT_SETTINGS_CHANNEL, async () => readClientSettings(CLIENT_SETTINGS_PATH));
-
-  ipcMain.removeHandler(SET_CLIENT_SETTINGS_CHANNEL);
-  ipcMain.handle(SET_CLIENT_SETTINGS_CHANNEL, async (_event, rawSettings: unknown) => {
-    if (typeof rawSettings !== "object" || rawSettings === null) {
-      throw new Error("Invalid client settings payload.");
-    }
-
-    writeClientSettings(CLIENT_SETTINGS_PATH, rawSettings as ClientSettings);
-  });
-
-  ipcMain.removeHandler(GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL);
-  ipcMain.handle(GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL, async () =>
-    readSavedEnvironmentRegistry(SAVED_ENVIRONMENT_REGISTRY_PATH),
-  );
-
-  ipcMain.removeHandler(SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL);
-  ipcMain.handle(SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL, async (_event, rawRecords: unknown) => {
-    if (!Array.isArray(rawRecords)) {
-      throw new Error("Invalid saved environment registry payload.");
-    }
-
-    writeSavedEnvironmentRegistry(
-      SAVED_ENVIRONMENT_REGISTRY_PATH,
-      rawRecords as readonly PersistedSavedEnvironmentRecord[],
+          setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, message));
+          return { accepted: true, completed: false };
+        }).pipe(
+          Effect.tap(() =>
+            logUpdaterError("failed to download update", { message: formatErrorMessage(error) }),
+          ),
+        ),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => {
+          updateDownloadInFlight = false;
+        }),
+      ),
     );
   });
+}
 
-  ipcMain.removeHandler(GET_SAVED_ENVIRONMENT_SECRET_CHANNEL);
-  ipcMain.handle(
-    GET_SAVED_ENVIRONMENT_SECRET_CHANNEL,
-    async (_event, rawEnvironmentId: unknown) => {
-      if (typeof rawEnvironmentId !== "string" || rawEnvironmentId.trim().length === 0) {
-        return null;
-      }
+function installDownloadedUpdate(): Effect.Effect<
+  {
+    accepted: boolean;
+    completed: boolean;
+  },
+  never,
+  DesktopBackendManager
+> {
+  return Effect.gen(function* () {
+    if (isQuitting || !updaterConfigured || updateState.status !== "downloaded") {
+      return { accepted: false, completed: false };
+    }
 
-      return readSavedEnvironmentSecret({
-        registryPath: SAVED_ENVIRONMENT_REGISTRY_PATH,
-        environmentId: rawEnvironmentId,
-        secretStorage: getDesktopSecretStorage(),
+    isQuitting = true;
+    updateInstallInFlight = true;
+    yield* clearUpdatePollTimer();
+
+    return yield* Effect.gen(function* () {
+      const backendManager = yield* DesktopBackendManager;
+      yield* backendManager.stop({ timeout: Duration.seconds(5) });
+      yield* Effect.sync(() => {
+        // Destroy all windows before launching the NSIS installer to avoid the installer finding live windows it needs to close.
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.destroy();
+        }
+        // `quitAndInstall()` only starts the handoff to the updater. The actual
+        // install may still fail asynchronously, so keep the action incomplete
+        // until we either quit or receive an updater error.
+        autoUpdater.quitAndInstall(true, true);
       });
-    },
-  );
+      return { accepted: true, completed: false };
+    }).pipe(
+      Effect.catch((error: unknown) =>
+        Effect.gen(function* () {
+          const message = formatErrorMessage(error);
+          yield* Effect.sync(() => {
+            updateInstallInFlight = false;
+            isQuitting = false;
+            setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
+          });
+          yield* logUpdaterError("failed to install update", { message });
+          return { accepted: true, completed: false };
+        }),
+      ),
+    );
+  });
+}
 
-  ipcMain.removeHandler(SET_SAVED_ENVIRONMENT_SECRET_CHANNEL);
-  ipcMain.handle(
-    SET_SAVED_ENVIRONMENT_SECRET_CHANNEL,
-    async (_event, rawEnvironmentId: unknown, rawSecret: unknown) => {
-      if (typeof rawEnvironmentId !== "string" || rawEnvironmentId.trim().length === 0) {
-        throw new Error("Invalid saved environment id.");
+function configureAutoUpdater(): Effect.Effect<void, never, Scope.Scope | DesktopEnvironment> {
+  return Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    const context = yield* Effect.context<DesktopEnvironment>();
+    const runEffect = makeDesktopEffectRunner(context);
+    const githubToken =
+      process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
+    if (githubToken) {
+      // When a token is provided, re-configure the feed with `private: true` so
+      // electron-updater uses the GitHub API (api.github.com) instead of the
+      // public Atom feed (github.com/…/releases.atom) which rejects Bearer auth.
+      const appUpdateYml = Option.getOrUndefined(appUpdateYmlConfig);
+      if (appUpdateYml?.provider === "github") {
+        autoUpdater.setFeedURL({
+          ...appUpdateYml,
+          provider: "github" as const,
+          private: true,
+          token: githubToken,
+        });
       }
-      if (typeof rawSecret !== "string" || rawSecret.trim().length === 0) {
-        throw new Error("Invalid saved environment secret.");
-      }
+    }
 
-      return writeSavedEnvironmentSecret({
-        registryPath: SAVED_ENVIRONMENT_REGISTRY_PATH,
-        environmentId: rawEnvironmentId,
-        secret: rawSecret,
-        secretStorage: getDesktopSecretStorage(),
+    if (process.env.T3CODE_DESKTOP_MOCK_UPDATES) {
+      autoUpdater.setFeedURL({
+        provider: "generic",
+        url: `http://localhost:${process.env.T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT ?? 3000}`,
       });
-    },
-  );
+    }
 
-  ipcMain.removeHandler(REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL);
-  ipcMain.handle(
-    REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL,
-    async (_event, rawEnvironmentId: unknown) => {
-      if (typeof rawEnvironmentId !== "string" || rawEnvironmentId.trim().length === 0) {
+    const enabled = shouldEnableAutoUpdates(environment);
+    setUpdateState(createBaseUpdateState(desktopSettings.updateChannel, enabled, environment));
+    if (!enabled) {
+      return;
+    }
+    updaterConfigured = true;
+
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = false;
+    yield* applyAutoUpdaterChannel(desktopSettings.updateChannel);
+    autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(environment.runtimeInfo);
+    let lastLoggedDownloadMilestone = -1;
+
+    if (isArm64HostRunningIntelBuild(environment.runtimeInfo)) {
+      yield* logUpdaterInfo(
+        "Apple Silicon host detected while running Intel build; updates will switch to arm64 packages",
+      );
+    }
+
+    yield* addScopedListener(autoUpdater, "checking-for-update", () => {
+      void runEffect(logUpdaterInfo("looking for updates"));
+    });
+    yield* addScopedListener(autoUpdater, "update-available", (info: { version: string }) => {
+      if (!doesVersionMatchDesktopUpdateChannel(info.version, updateState.channel)) {
+        void runEffect(
+          logUpdaterInfo("ignoring update that does not match selected channel", {
+            version: info.version,
+            channel: updateState.channel,
+          }),
+        );
+        setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, nowIsoTimestamp()));
+        lastLoggedDownloadMilestone = -1;
         return;
       }
 
-      removeSavedEnvironmentSecret({
-        registryPath: SAVED_ENVIRONMENT_REGISTRY_PATH,
-        environmentId: rawEnvironmentId,
-      });
-    },
-  );
-
-  desktopSshEnvironmentBridge.registerIpcHandlers(ipcMain);
-
-  ipcMain.removeHandler(GET_SERVER_EXPOSURE_STATE_CHANNEL);
-  ipcMain.handle(GET_SERVER_EXPOSURE_STATE_CHANNEL, async () => getDesktopServerExposureState());
-
-  ipcMain.removeHandler(SET_SERVER_EXPOSURE_MODE_CHANNEL);
-  ipcMain.handle(SET_SERVER_EXPOSURE_MODE_CHANNEL, async (_event, rawMode: unknown) => {
-    if (rawMode !== "local-only" && rawMode !== "network-accessible") {
-      throw new Error("Invalid desktop server exposure input.");
-    }
-
-    const nextMode = rawMode as DesktopServerExposureMode;
-    if (nextMode === desktopServerExposureMode) {
-      return getDesktopServerExposureState();
-    }
-
-    const nextState = await applyDesktopServerExposureMode(nextMode, {
-      persist: true,
-      rejectIfUnavailable: true,
+      setUpdateState(
+        reduceDesktopUpdateStateOnUpdateAvailable(updateState, info.version, nowIsoTimestamp()),
+      );
+      lastLoggedDownloadMilestone = -1;
+      void runEffect(logUpdaterInfo("update available", { version: info.version }));
     });
-    relaunchDesktopApp(`serverExposureMode=${nextMode}`);
-    return nextState;
-  });
-
-  ipcMain.removeHandler(SET_TAILSCALE_SERVE_ENABLED_CHANNEL);
-  ipcMain.handle(SET_TAILSCALE_SERVE_ENABLED_CHANNEL, async (_event, rawInput: unknown) => {
-    if (typeof rawInput !== "object" || rawInput === null) {
-      throw new Error("Invalid Tailscale Serve input.");
-    }
-    const input = rawInput as {
-      readonly enabled?: unknown;
-      readonly port?: unknown;
-    };
-    if (typeof input.enabled !== "boolean") {
-      throw new Error("Invalid Tailscale Serve input.");
-    }
-    const nextSettings = setDesktopTailscaleServePreference(desktopSettings, {
-      enabled: input.enabled,
-      ...(typeof input.port === "number" ? { port: input.port } : {}),
+    yield* addScopedListener(autoUpdater, "update-not-available", () => {
+      setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, nowIsoTimestamp()));
+      lastLoggedDownloadMilestone = -1;
+      void runEffect(logUpdaterInfo("no updates available"));
     });
-    if (nextSettings === desktopSettings) {
-      return getDesktopServerExposureState();
-    }
-    return applyDesktopTailscaleServeEnabled(nextSettings);
-  });
-
-  ipcMain.removeHandler(GET_ADVERTISED_ENDPOINTS_CHANNEL);
-  ipcMain.handle(GET_ADVERTISED_ENDPOINTS_CHANNEL, async () => getDesktopAdvertisedEndpoints());
-
-  ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
-  ipcMain.handle(PICK_FOLDER_CHANNEL, async (_event, rawOptions: unknown) => {
-    const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
-    const defaultPath = resolvePickFolderDefaultPath(rawOptions);
-    const openDialogOptions: OpenDialogOptions = {
-      properties: ["openDirectory", "createDirectory"],
-      ...(defaultPath ? { defaultPath } : {}),
-    };
-    const result = owner
-      ? await dialog.showOpenDialog(owner, openDialogOptions)
-      : await dialog.showOpenDialog(openDialogOptions);
-    if (result.canceled) return null;
-    return result.filePaths[0] ?? null;
-  });
-
-  ipcMain.removeHandler(CONFIRM_CHANNEL);
-  ipcMain.handle(CONFIRM_CHANNEL, async (_event, message: unknown) => {
-    if (typeof message !== "string") {
-      return false;
-    }
-
-    const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
-    return showDesktopConfirmDialog(message, owner);
-  });
-
-  ipcMain.removeHandler(SET_THEME_CHANNEL);
-  ipcMain.handle(SET_THEME_CHANNEL, async (_event, rawTheme: unknown) => {
-    const theme = getSafeTheme(rawTheme);
-    if (!theme) {
-      return;
-    }
-
-    nativeTheme.themeSource = theme;
-  });
-
-  ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
-  ipcMain.handle(
-    CONTEXT_MENU_CHANNEL,
-    async (_event, items: ContextMenuItem[], position?: { x: number; y: number }) => {
-      const normalizedItems = normalizeContextMenuItems(items);
-      if (normalizedItems.length === 0) {
-        return null;
+    yield* addScopedListener(autoUpdater, "error", (error: unknown) => {
+      const message = formatErrorMessage(error);
+      if (updateInstallInFlight) {
+        updateInstallInFlight = false;
+        isQuitting = false;
+        setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
+        void runEffect(logUpdaterError("updater error", { message }));
+        return;
       }
-
-      const popupPosition =
-        position &&
-        Number.isFinite(position.x) &&
-        Number.isFinite(position.y) &&
-        position.x >= 0 &&
-        position.y >= 0
-          ? {
-              x: Math.floor(position.x),
-              y: Math.floor(position.y),
-            }
-          : null;
-
-      const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
-      if (!window) return null;
-
-      return new Promise<string | null>((resolve) => {
-        const buildTemplate = (
-          entries: readonly ContextMenuItem[],
-        ): MenuItemConstructorOptions[] => {
-          const template: MenuItemConstructorOptions[] = [];
-          let hasInsertedDestructiveSeparator = false;
-          for (const item of entries) {
-            if (item.destructive && !hasInsertedDestructiveSeparator && template.length > 0) {
-              template.push({ type: "separator" });
-              hasInsertedDestructiveSeparator = true;
-            }
-            const itemOption: MenuItemConstructorOptions = {
-              label: item.label,
-              enabled: !item.disabled,
-            };
-            if (item.children && item.children.length > 0) {
-              itemOption.submenu = buildTemplate(item.children);
-            } else {
-              itemOption.click = () => resolve(item.id);
-            }
-            if (item.destructive && (!item.children || item.children.length === 0)) {
-              const destructiveIcon = getDestructiveMenuIcon();
-              if (destructiveIcon) {
-                itemOption.icon = destructiveIcon;
-              }
-            }
-            template.push(itemOption);
-          }
-          return template;
-        };
-
-        const menu = Menu.buildFromTemplate(buildTemplate(normalizedItems));
-        menu.popup({
-          window,
-          ...popupPosition,
-          callback: () => resolve(null),
+      if (!updateCheckInFlight && !updateDownloadInFlight) {
+        setUpdateState({
+          status: "error",
+          message,
+          checkedAt: nowIsoTimestamp(),
+          downloadPercent: null,
+          errorContext: resolveUpdaterErrorContext(),
+          canRetry: updateState.availableVersion !== null || updateState.downloadedVersion !== null,
         });
-      });
-    },
+      }
+      void runEffect(logUpdaterError("updater error", { message }));
+    });
+    yield* addScopedListener(autoUpdater, "download-progress", (progress: { percent: number }) => {
+      const percent = Math.floor(progress.percent);
+      if (
+        shouldBroadcastDownloadProgress(updateState, progress.percent) ||
+        updateState.message !== null
+      ) {
+        setUpdateState(reduceDesktopUpdateStateOnDownloadProgress(updateState, progress.percent));
+      }
+      const milestone = percent - (percent % 10);
+      if (milestone > lastLoggedDownloadMilestone) {
+        lastLoggedDownloadMilestone = milestone;
+        void runEffect(logUpdaterInfo("download progress", { percent }));
+      }
+    });
+    yield* addScopedListener(autoUpdater, "update-downloaded", (info: { version: string }) => {
+      setUpdateState(reduceDesktopUpdateStateOnDownloadComplete(updateState, info.version));
+      void runEffect(logUpdaterInfo("update downloaded", { version: info.version }));
+    });
+
+    yield* startUpdatePollers();
+  });
+}
+
+function startBackend(): Effect.Effect<void, never, DesktopBackendManager> {
+  if (isQuitting) return Effect.void;
+  return Effect.gen(function* () {
+    const backendManager = yield* DesktopBackendManager;
+    yield* backendManager.start;
+  }).pipe(
+    Effect.catchCause((cause) =>
+      logDesktopError("failed to start backend", {
+        cause: Cause.pretty(cause),
+      }),
+    ),
   );
+}
 
-  ipcMain.removeHandler(OPEN_EXTERNAL_CHANNEL);
-  ipcMain.handle(OPEN_EXTERNAL_CHANNEL, async (_event, rawUrl: unknown) => {
-    const externalUrl = getSafeExternalUrl(rawUrl);
-    if (!externalUrl) {
-      return false;
-    }
-
-    try {
-      await shell.openExternal(externalUrl);
-      return true;
-    } catch {
-      return false;
-    }
+function closeDesktopResourcesWithManager(
+  backendManager: DesktopBackendManagerShape,
+  desktopSshEnvironmentBridge: DesktopSshEnvironmentBridgeShape,
+): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    yield* backendManager.shutdown;
+    updateInstallInFlight = false;
+    yield* clearUpdatePollTimer();
+    yield* desktopSshEnvironmentBridge.disposeEffect().pipe(Effect.ignore);
   });
+}
 
-  ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);
-  ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async () => updateState);
-
-  ipcMain.removeHandler(UPDATE_SET_CHANNEL_CHANNEL);
-  ipcMain.handle(UPDATE_SET_CHANNEL_CHANNEL, async (_event, rawChannel: unknown) => {
-    if (rawChannel !== "latest" && rawChannel !== "nightly") {
-      throw new Error("Invalid desktop update channel input.");
-    }
-    if (updateCheckInFlight || updateDownloadInFlight || updateInstallInFlight) {
-      throw new Error("Cannot change update tracks while an update action is in progress.");
-    }
-
-    const nextChannel = rawChannel as DesktopUpdateChannel;
-
-    desktopSettings = setDesktopUpdateChannelPreference(desktopSettings, nextChannel);
-    writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
-
-    if (nextChannel === updateState.channel) {
-      return updateState;
-    }
-
-    const enabled = shouldEnableAutoUpdates();
-    setUpdateState(createBaseUpdateState(nextChannel, enabled));
-
-    if (!enabled || !updaterConfigured) {
-      return updateState;
-    }
-
-    applyAutoUpdaterChannel(nextChannel);
-    const allowDowngrade = autoUpdater.allowDowngrade;
-    // An explicit channel switch should allow the immediate nightly->stable rollback path.
-    autoUpdater.allowDowngrade = true;
-    try {
-      await checkForUpdates("channel-change");
-    } finally {
-      autoUpdater.allowDowngrade = allowDowngrade;
-    }
-    return updateState;
+function requestDesktopShutdownAndWait(): Effect.Effect<void, never, DesktopShutdown> {
+  return Effect.gen(function* () {
+    const shutdown = yield* DesktopShutdown;
+    yield* shutdown.request;
+    yield* shutdown.awaitComplete;
   });
+}
 
-  ipcMain.removeHandler(UPDATE_DOWNLOAD_CHANNEL);
-  ipcMain.handle(UPDATE_DOWNLOAD_CHANNEL, async () => {
-    const result = await downloadAvailableUpdate();
-    return {
-      accepted: result.accepted,
-      completed: result.completed,
-      state: updateState,
-    } satisfies DesktopUpdateActionResult;
+function quitFromSignal(signal: "SIGINT" | "SIGTERM", runEffect: DesktopEffectRunner): void {
+  if (isQuitting) return;
+  isQuitting = true;
+  void runEffect(
+    logDesktopInfo("process signal received", { signal }).pipe(
+      Effect.andThen(requestDesktopShutdownAndWait()),
+    ),
+  ).finally(() => {
+    app.quit();
   });
+}
 
-  ipcMain.removeHandler(UPDATE_INSTALL_CHANNEL);
-  ipcMain.handle(UPDATE_INSTALL_CHANNEL, async () => {
-    if (isQuitting) {
-      return {
-        accepted: false,
-        completed: false,
-        state: updateState,
-      } satisfies DesktopUpdateActionResult;
-    }
-    const result = await installDownloadedUpdate();
-    return {
-      accepted: result.accepted,
-      completed: result.completed,
-      state: updateState,
-    } satisfies DesktopUpdateActionResult;
-  });
+const syncIpcListenerChannels = [
+  GET_APP_BRANDING_CHANNEL,
+  GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL,
+] as const;
 
-  ipcMain.removeHandler(UPDATE_CHECK_CHANNEL);
-  ipcMain.handle(UPDATE_CHECK_CHANNEL, async () => {
-    if (!updaterConfigured) {
-      return {
-        checked: false,
-        state: updateState,
-      } satisfies DesktopUpdateCheckResult;
-    }
-    const checked = await checkForUpdates("web-ui");
-    return {
-      checked,
-      state: updateState,
-    } satisfies DesktopUpdateCheckResult;
+const handledIpcChannels = [
+  GET_CLIENT_SETTINGS_CHANNEL,
+  SET_CLIENT_SETTINGS_CHANNEL,
+  GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL,
+  SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL,
+  GET_SAVED_ENVIRONMENT_SECRET_CHANNEL,
+  SET_SAVED_ENVIRONMENT_SECRET_CHANNEL,
+  REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL,
+  GET_SERVER_EXPOSURE_STATE_CHANNEL,
+  SET_SERVER_EXPOSURE_MODE_CHANNEL,
+  SET_TAILSCALE_SERVE_ENABLED_CHANNEL,
+  GET_ADVERTISED_ENDPOINTS_CHANNEL,
+  PICK_FOLDER_CHANNEL,
+  CONFIRM_CHANNEL,
+  SET_THEME_CHANNEL,
+  CONTEXT_MENU_CHANNEL,
+  OPEN_EXTERNAL_CHANNEL,
+  UPDATE_GET_STATE_CHANNEL,
+  UPDATE_SET_CHANNEL_CHANNEL,
+  UPDATE_DOWNLOAD_CHANNEL,
+  UPDATE_INSTALL_CHANNEL,
+  UPDATE_CHECK_CHANNEL,
+] as const;
+
+function clearDesktopIpcHandlers(): void {
+  for (const channel of syncIpcListenerChannels) {
+    ipcMain.removeAllListeners(channel);
+  }
+  for (const channel of handledIpcChannels) {
+    ipcMain.removeHandler(channel);
+  }
+}
+
+function registerIpcHandlers() {
+  return Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    const desktopSshEnvironmentBridge = yield* DesktopSshEnvironmentBridge;
+    const context = yield* Effect.context<DesktopIpcBoundaryServices>();
+    const runIpcEffect = makeDesktopEffectRunner(context);
+
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        ipcMain.removeAllListeners(GET_APP_BRANDING_CHANNEL);
+        ipcMain.on(GET_APP_BRANDING_CHANNEL, (event) => {
+          event.returnValue = environment.branding;
+        });
+
+        ipcMain.removeAllListeners(GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL);
+        ipcMain.on(GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL, (event) => {
+          event.returnValue = {
+            label: "Local environment",
+            httpBaseUrl: getBackendHttpUrlHref(),
+            wsBaseUrl: backendWsUrl || null,
+            bootstrapToken: backendBootstrapToken || undefined,
+          } as const;
+        });
+
+        ipcMain.removeHandler(GET_CLIENT_SETTINGS_CHANNEL);
+        ipcMain.handle(GET_CLIENT_SETTINGS_CHANNEL, async () =>
+          runIpcEffect(readClientSettingsEffect(environment.clientSettingsPath)),
+        );
+
+        ipcMain.removeHandler(SET_CLIENT_SETTINGS_CHANNEL);
+        ipcMain.handle(SET_CLIENT_SETTINGS_CHANNEL, async (_event, rawSettings: unknown) => {
+          if (typeof rawSettings !== "object" || rawSettings === null) {
+            throw new Error("Invalid client settings payload.");
+          }
+
+          await runIpcEffect(
+            writeClientSettingsEffect(
+              environment.clientSettingsPath,
+              rawSettings as ClientSettings,
+            ),
+          );
+        });
+
+        ipcMain.removeHandler(GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL);
+        ipcMain.handle(GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL, async () =>
+          runIpcEffect(
+            readSavedEnvironmentRegistryEffect(environment.savedEnvironmentRegistryPath),
+          ),
+        );
+
+        ipcMain.removeHandler(SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL);
+        ipcMain.handle(
+          SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL,
+          async (_event, rawRecords: unknown) => {
+            if (!Array.isArray(rawRecords)) {
+              throw new Error("Invalid saved environment registry payload.");
+            }
+
+            await runIpcEffect(
+              writeSavedEnvironmentRegistryEffect(
+                environment.savedEnvironmentRegistryPath,
+                rawRecords as readonly PersistedSavedEnvironmentRecord[],
+              ),
+            );
+          },
+        );
+
+        ipcMain.removeHandler(GET_SAVED_ENVIRONMENT_SECRET_CHANNEL);
+        ipcMain.handle(
+          GET_SAVED_ENVIRONMENT_SECRET_CHANNEL,
+          async (_event, rawEnvironmentId: unknown) => {
+            if (typeof rawEnvironmentId !== "string" || rawEnvironmentId.trim().length === 0) {
+              return null;
+            }
+
+            return runIpcEffect(
+              readSavedEnvironmentSecretEffect({
+                registryPath: environment.savedEnvironmentRegistryPath,
+                environmentId: rawEnvironmentId,
+                secretStorage: getDesktopSecretStorage(),
+              }),
+            );
+          },
+        );
+
+        ipcMain.removeHandler(SET_SAVED_ENVIRONMENT_SECRET_CHANNEL);
+        ipcMain.handle(
+          SET_SAVED_ENVIRONMENT_SECRET_CHANNEL,
+          async (_event, rawEnvironmentId: unknown, rawSecret: unknown) => {
+            if (typeof rawEnvironmentId !== "string" || rawEnvironmentId.trim().length === 0) {
+              throw new Error("Invalid saved environment id.");
+            }
+            if (typeof rawSecret !== "string" || rawSecret.trim().length === 0) {
+              throw new Error("Invalid saved environment secret.");
+            }
+
+            return runIpcEffect(
+              writeSavedEnvironmentSecretEffect({
+                registryPath: environment.savedEnvironmentRegistryPath,
+                environmentId: rawEnvironmentId,
+                secret: rawSecret,
+                secretStorage: getDesktopSecretStorage(),
+              }),
+            );
+          },
+        );
+
+        ipcMain.removeHandler(REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL);
+        ipcMain.handle(
+          REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL,
+          async (_event, rawEnvironmentId: unknown) => {
+            if (typeof rawEnvironmentId !== "string" || rawEnvironmentId.trim().length === 0) {
+              return;
+            }
+
+            await runIpcEffect(
+              removeSavedEnvironmentSecretEffect({
+                registryPath: environment.savedEnvironmentRegistryPath,
+                environmentId: rawEnvironmentId,
+              }),
+            );
+          },
+        );
+
+        ipcMain.removeHandler(GET_SERVER_EXPOSURE_STATE_CHANNEL);
+        ipcMain.handle(GET_SERVER_EXPOSURE_STATE_CHANNEL, async () =>
+          getDesktopServerExposureState(),
+        );
+
+        ipcMain.removeHandler(SET_SERVER_EXPOSURE_MODE_CHANNEL);
+        ipcMain.handle(SET_SERVER_EXPOSURE_MODE_CHANNEL, async (_event, rawMode: unknown) => {
+          if (rawMode !== "local-only" && rawMode !== "network-accessible") {
+            throw new Error("Invalid desktop server exposure input.");
+          }
+
+          const nextMode = rawMode as DesktopServerExposureMode;
+          if (nextMode === desktopServerExposureMode) {
+            return getDesktopServerExposureState();
+          }
+
+          const nextState = await runIpcEffect(
+            applyDesktopServerExposureMode(nextMode, {
+              persist: true,
+              rejectIfUnavailable: true,
+            }),
+          );
+          await runIpcEffect(relaunchDesktopAppEffect(`serverExposureMode=${nextMode}`));
+          return nextState;
+        });
+
+        ipcMain.removeHandler(SET_TAILSCALE_SERVE_ENABLED_CHANNEL);
+        ipcMain.handle(SET_TAILSCALE_SERVE_ENABLED_CHANNEL, async (_event, rawInput: unknown) => {
+          if (typeof rawInput !== "object" || rawInput === null) {
+            throw new Error("Invalid Tailscale Serve input.");
+          }
+          const input = rawInput as {
+            readonly enabled?: unknown;
+            readonly port?: unknown;
+          };
+          if (typeof input.enabled !== "boolean") {
+            throw new Error("Invalid Tailscale Serve input.");
+          }
+          const nextSettings = setDesktopTailscaleServePreference(desktopSettings, {
+            enabled: input.enabled,
+            ...(typeof input.port === "number" ? { port: input.port } : {}),
+          });
+          if (nextSettings === desktopSettings) {
+            return getDesktopServerExposureState();
+          }
+          return runIpcEffect(applyDesktopTailscaleServeEnabled(nextSettings));
+        });
+
+        ipcMain.removeHandler(GET_ADVERTISED_ENDPOINTS_CHANNEL);
+        ipcMain.handle(GET_ADVERTISED_ENDPOINTS_CHANNEL, async () =>
+          runIpcEffect(getDesktopAdvertisedEndpoints()),
+        );
+
+        ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
+        ipcMain.handle(PICK_FOLDER_CHANNEL, async (_event, rawOptions: unknown) => {
+          const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
+          const defaultPath = Option.getOrUndefined(
+            environment.resolvePickFolderDefaultPath(rawOptions),
+          );
+          const openDialogOptions: OpenDialogOptions = {
+            properties: ["openDirectory", "createDirectory"],
+            ...(defaultPath ? { defaultPath } : {}),
+          };
+          const result = owner
+            ? await dialog.showOpenDialog(owner, openDialogOptions)
+            : await dialog.showOpenDialog(openDialogOptions);
+          if (result.canceled) return null;
+          return result.filePaths[0] ?? null;
+        });
+
+        ipcMain.removeHandler(CONFIRM_CHANNEL);
+        ipcMain.handle(CONFIRM_CHANNEL, async (_event, message: unknown) => {
+          if (typeof message !== "string") {
+            return false;
+          }
+
+          const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
+          return showDesktopConfirmDialog(message, owner);
+        });
+
+        ipcMain.removeHandler(SET_THEME_CHANNEL);
+        ipcMain.handle(SET_THEME_CHANNEL, async (_event, rawTheme: unknown) => {
+          const theme = getSafeTheme(rawTheme);
+          if (!theme) {
+            return;
+          }
+
+          nativeTheme.themeSource = theme;
+        });
+
+        ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
+        ipcMain.handle(
+          CONTEXT_MENU_CHANNEL,
+          async (_event, items: ContextMenuItem[], position?: { x: number; y: number }) => {
+            const normalizedItems = normalizeContextMenuItems(items);
+            if (normalizedItems.length === 0) {
+              return null;
+            }
+
+            const popupPosition =
+              position &&
+              Number.isFinite(position.x) &&
+              Number.isFinite(position.y) &&
+              position.x >= 0 &&
+              position.y >= 0
+                ? {
+                    x: Math.floor(position.x),
+                    y: Math.floor(position.y),
+                  }
+                : null;
+
+            const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+            if (!window) return null;
+
+            return new Promise<string | null>((resolve) => {
+              const buildTemplate = (
+                entries: readonly ContextMenuItem[],
+              ): MenuItemConstructorOptions[] => {
+                const template: MenuItemConstructorOptions[] = [];
+                let hasInsertedDestructiveSeparator = false;
+                for (const item of entries) {
+                  if (item.destructive && !hasInsertedDestructiveSeparator && template.length > 0) {
+                    template.push({ type: "separator" });
+                    hasInsertedDestructiveSeparator = true;
+                  }
+                  const itemOption: MenuItemConstructorOptions = {
+                    label: item.label,
+                    enabled: !item.disabled,
+                  };
+                  if (item.children && item.children.length > 0) {
+                    itemOption.submenu = buildTemplate(item.children);
+                  } else {
+                    itemOption.click = () => resolve(item.id);
+                  }
+                  if (item.destructive && (!item.children || item.children.length === 0)) {
+                    const destructiveIcon = getDestructiveMenuIcon();
+                    if (destructiveIcon) {
+                      itemOption.icon = destructiveIcon;
+                    }
+                  }
+                  template.push(itemOption);
+                }
+                return template;
+              };
+
+              const menu = Menu.buildFromTemplate(buildTemplate(normalizedItems));
+              menu.popup({
+                window,
+                ...popupPosition,
+                callback: () => resolve(null),
+              });
+            });
+          },
+        );
+
+        ipcMain.removeHandler(OPEN_EXTERNAL_CHANNEL);
+        ipcMain.handle(OPEN_EXTERNAL_CHANNEL, async (_event, rawUrl: unknown) => {
+          const externalUrl = getSafeExternalUrl(rawUrl);
+          if (!externalUrl) {
+            return false;
+          }
+
+          try {
+            await shell.openExternal(externalUrl);
+            return true;
+          } catch {
+            return false;
+          }
+        });
+
+        ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);
+        ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async () => updateState);
+
+        ipcMain.removeHandler(UPDATE_SET_CHANNEL_CHANNEL);
+        ipcMain.handle(UPDATE_SET_CHANNEL_CHANNEL, async (_event, rawChannel: unknown) => {
+          if (rawChannel !== "latest" && rawChannel !== "nightly") {
+            throw new Error("Invalid desktop update channel input.");
+          }
+          if (updateCheckInFlight || updateDownloadInFlight || updateInstallInFlight) {
+            throw new Error("Cannot change update tracks while an update action is in progress.");
+          }
+
+          const nextChannel = rawChannel as DesktopUpdateChannel;
+
+          desktopSettings = setDesktopUpdateChannelPreference(desktopSettings, nextChannel);
+          await runIpcEffect(
+            writeDesktopSettingsEffect(environment.desktopSettingsPath, desktopSettings),
+          );
+
+          if (nextChannel === updateState.channel) {
+            return updateState;
+          }
+
+          const enabled = shouldEnableAutoUpdates(environment);
+          setUpdateState(createBaseUpdateState(nextChannel, enabled, environment));
+
+          if (!enabled || !updaterConfigured) {
+            return updateState;
+          }
+
+          applyAutoUpdaterChannel(nextChannel);
+          const allowDowngrade = autoUpdater.allowDowngrade;
+          // An explicit channel switch should allow the immediate nightly->stable rollback path.
+          autoUpdater.allowDowngrade = true;
+          try {
+            await runIpcEffect(checkForUpdates("channel-change"));
+          } finally {
+            autoUpdater.allowDowngrade = allowDowngrade;
+          }
+          return updateState;
+        });
+
+        ipcMain.removeHandler(UPDATE_DOWNLOAD_CHANNEL);
+        ipcMain.handle(UPDATE_DOWNLOAD_CHANNEL, async () => {
+          const result = await runIpcEffect(downloadAvailableUpdate());
+          return {
+            accepted: result.accepted,
+            completed: result.completed,
+            state: updateState,
+          } satisfies DesktopUpdateActionResult;
+        });
+
+        ipcMain.removeHandler(UPDATE_INSTALL_CHANNEL);
+        ipcMain.handle(UPDATE_INSTALL_CHANNEL, async () => {
+          if (isQuitting) {
+            return {
+              accepted: false,
+              completed: false,
+              state: updateState,
+            } satisfies DesktopUpdateActionResult;
+          }
+          const result = await runIpcEffect(installDownloadedUpdate());
+          return {
+            accepted: result.accepted,
+            completed: result.completed,
+            state: updateState,
+          } satisfies DesktopUpdateActionResult;
+        });
+
+        ipcMain.removeHandler(UPDATE_CHECK_CHANNEL);
+        ipcMain.handle(UPDATE_CHECK_CHANNEL, async () => {
+          if (!updaterConfigured) {
+            return {
+              checked: false,
+              state: updateState,
+            } satisfies DesktopUpdateCheckResult;
+          }
+          const checked = await runIpcEffect(checkForUpdates("web-ui"));
+          return {
+            checked,
+            state: updateState,
+          } satisfies DesktopUpdateCheckResult;
+        });
+      }),
+      () => Effect.sync(clearDesktopIpcHandlers),
+    ).pipe(Effect.asVoid);
+
+    yield* desktopSshEnvironmentBridge.registerIpcHandlers(ipcMain);
   });
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {
   if (process.platform === "darwin") return {}; // macOS uses .icns from app bundle
   const ext = process.platform === "win32" ? "ico" : "png";
-  const iconPath = resolveIconPath(ext);
+  const iconPath = Option.getOrUndefined(desktopIconPaths[ext]);
   return iconPath ? { icon: iconPath } : {};
 }
 
@@ -1953,9 +2306,10 @@ function syncAllWindowAppearance(): void {
   }
 }
 
-nativeTheme.on("updated", syncAllWindowAppearance);
-
-function createWindow(): BrowserWindow {
+function createWindow(
+  runEffect: DesktopEffectRunner,
+  environment: DesktopEnvironmentShape,
+): BrowserWindow {
   const window = new BrowserWindow({
     width: 1100,
     height: 780,
@@ -1965,10 +2319,10 @@ function createWindow(): BrowserWindow {
     autoHideMenuBar: true,
     backgroundColor: getInitialWindowBackgroundColor(),
     ...getIconOption(),
-    title: APP_DISPLAY_NAME,
+    title: environment.displayName,
     ...getWindowTitleBarOptions(),
     webPreferences: {
-      preload: Path.join(__dirname, "preload.cjs"),
+      preload: environment.preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -2032,10 +2386,10 @@ function createWindow(): BrowserWindow {
 
   window.on("page-title-updated", (event) => {
     event.preventDefault();
-    window.setTitle(APP_DISPLAY_NAME);
+    window.setTitle(environment.displayName);
   });
   window.webContents.on("did-finish-load", () => {
-    window.setTitle(APP_DISPLAY_NAME);
+    window.setTitle(environment.displayName);
     emitUpdateState();
   });
 
@@ -2051,16 +2405,21 @@ function createWindow(): BrowserWindow {
   }
   bindFirstRevealTrigger(revealSubscribers, () => revealWindow(window));
 
-  if (isDevelopment) {
-    void window.loadURL(resolveDesktopDevServerUrl());
+  if (environment.isDevelopment) {
+    void window.loadURL(resolveDesktopDevServerUrl(environment));
     window.webContents.openDevTools({ mode: "detach" });
   } else {
     void window.loadURL(requireBackendHttpUrl().href);
   }
 
   window.on("closed", () => {
-    desktopSshEnvironmentBridge.cancelPendingPasswordPrompts(
-      "SSH authentication was cancelled because the app window closed.",
+    void runEffect(
+      Effect.gen(function* () {
+        const desktopSshEnvironmentBridge = yield* DesktopSshEnvironmentBridge;
+        yield* desktopSshEnvironmentBridge.cancelPendingPasswordPromptsEffect(
+          "SSH authentication was cancelled because the app window closed.",
+        );
+      }),
     );
     if (mainWindow === window) {
       mainWindow = null;
@@ -2070,131 +2429,220 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
-// Override Electron's userData path before the `ready` event so that
-// Chromium session data uses a filesystem-friendly directory name.
-// Must be called synchronously at the top level — before `app.whenReady()`.
-app.setPath("userData", resolveUserDataPath());
+function bootstrap() {
+  return Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    const context = yield* Effect.context<DesktopWindowBoundaryServices>();
+    const runEffect = makeDesktopEffectRunner(context);
+    yield* logDesktopInfo("bootstrap start");
+    const configuredBackendPort = resolveConfiguredDesktopBackendPort(process.env.T3CODE_PORT);
+    if (environment.isDevelopment && configuredBackendPort === undefined) {
+      return yield* Effect.fail(new Error("T3CODE_PORT is required in desktop development."));
+    }
 
-configureAppIdentity();
-
-async function bootstrap(): Promise<void> {
-  writeDesktopLogHeader("bootstrap start");
-  const configuredBackendPort = resolveConfiguredDesktopBackendPort(process.env.T3CODE_PORT);
-  if (isDevelopment && configuredBackendPort === undefined) {
-    throw new Error("T3CODE_PORT is required in desktop development.");
-  }
-
-  backendPort =
-    configuredBackendPort ??
-    (await resolveDesktopBackendPort({
-      host: DESKTOP_LOOPBACK_HOST,
-      startPort: DEFAULT_DESKTOP_BACKEND_PORT,
-      requiredHosts: DESKTOP_REQUIRED_PORT_PROBE_HOSTS,
-    }));
-  writeDesktopLogHeader(
-    configuredBackendPort === undefined
-      ? `selected backend port via sequential scan startPort=${DEFAULT_DESKTOP_BACKEND_PORT} port=${backendPort}`
-      : `using configured backend port port=${backendPort}`,
-  );
-  backendBootstrapToken = Crypto.randomBytes(24).toString("hex");
-  if (desktopSettings.serverExposureMode !== DEFAULT_DESKTOP_SETTINGS.serverExposureMode) {
-    writeDesktopLogHeader(
-      `bootstrap restoring persisted server exposure mode mode=${desktopSettings.serverExposureMode}`,
+    backendPort =
+      configuredBackendPort ??
+      (yield* resolveDesktopBackendPortEffect({
+        host: DESKTOP_LOOPBACK_HOST,
+        startPort: DEFAULT_DESKTOP_BACKEND_PORT,
+        requiredHosts: DESKTOP_REQUIRED_PORT_PROBE_HOSTS,
+      }));
+    yield* logDesktopInfo(
+      configuredBackendPort === undefined
+        ? "selected backend port via sequential scan"
+        : "using configured backend port",
+      {
+        port: backendPort,
+        ...(configuredBackendPort === undefined ? { startPort: DEFAULT_DESKTOP_BACKEND_PORT } : {}),
+      },
     );
-  }
-  const serverExposureState = await applyDesktopServerExposureMode(
-    desktopSettings.serverExposureMode,
-    {
-      persist: desktopSettings.serverExposureMode !== DEFAULT_DESKTOP_SETTINGS.serverExposureMode,
-    },
-  );
-  writeDesktopLogHeader(`bootstrap resolved backend endpoint baseUrl=${getBackendHttpUrlHref()}`);
-  if (serverExposureState.endpointUrl) {
-    writeDesktopLogHeader(
-      `bootstrap enabled network access endpointUrl=${serverExposureState.endpointUrl}`,
+    backendBootstrapToken = yield* randomHexString(48);
+    if (desktopSettings.serverExposureMode !== DEFAULT_DESKTOP_SETTINGS.serverExposureMode) {
+      yield* logDesktopInfo("bootstrap restoring persisted server exposure mode", {
+        mode: desktopSettings.serverExposureMode,
+      });
+    }
+    const serverExposureState = yield* applyDesktopServerExposureMode(
+      desktopSettings.serverExposureMode,
+      {
+        persist: desktopSettings.serverExposureMode !== DEFAULT_DESKTOP_SETTINGS.serverExposureMode,
+      },
     );
-  } else if (desktopSettings.serverExposureMode === "network-accessible") {
-    writeDesktopLogHeader(
-      "bootstrap fell back to local-only because no advertised network host was available",
-    );
-  }
+    yield* logDesktopInfo("bootstrap resolved backend endpoint", {
+      baseUrl: getBackendHttpUrlHref(),
+    });
+    if (serverExposureState.endpointUrl) {
+      yield* logDesktopInfo("bootstrap enabled network access", {
+        endpointUrl: serverExposureState.endpointUrl,
+      });
+    } else if (desktopSettings.serverExposureMode === "network-accessible") {
+      yield* logDesktopWarning(
+        "bootstrap fell back to local-only because no advertised network host was available",
+      );
+    }
 
-  registerIpcHandlers();
-  writeDesktopLogHeader("bootstrap ipc handlers registered");
-  startBackend();
-  writeDesktopLogHeader("bootstrap backend start requested");
+    yield* registerIpcHandlers();
+    yield* logDesktopInfo("bootstrap ipc handlers registered");
+    yield* startBackend();
+    yield* logDesktopInfo("bootstrap backend start requested");
 
-  if (isDevelopment) {
-    mainWindow = createWindow();
-    writeDesktopLogHeader("bootstrap main window created");
-  }
+    if (environment.isDevelopment) {
+      mainWindow = createWindow(runEffect, environment);
+      yield* logDesktopInfo("bootstrap main window created");
+    }
+  });
 }
 
-app.on("before-quit", () => {
+function handleBeforeQuit(
+  event: Electron.Event,
+  runEffect: DesktopEffectRunner,
+  allowQuit: () => boolean,
+  markQuitAllowed: () => void,
+): void {
   isQuitting = true;
-  updateInstallInFlight = false;
-  writeDesktopLogHeader("before-quit received");
-  clearUpdatePollTimer();
-  stopBackend();
-  void desktopSshEnvironmentBridge.dispose().catch(() => undefined);
-  restoreStdIoCapture?.();
-});
+  void runEffect(logDesktopInfo("before-quit received"));
+  if (allowQuit()) {
+    return;
+  }
 
-app
-  .whenReady()
-  .then(() => {
-    writeDesktopLogHeader("app ready");
-    configureAppIdentity();
-    configureApplicationMenu();
-    registerDesktopProtocol();
-    configureAutoUpdater();
-    void bootstrap().catch((error) => {
-      handleFatalStartupError("bootstrap", error);
-    });
-
-    app.on("activate", () => {
-      const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0];
-      if (existingWindow) {
-        revealWindow(existingWindow);
-        return;
-      }
-      if (isDevelopment) {
-        mainWindow = createWindow();
-        return;
-      }
-      createBackendWindowIfReady();
-    });
-  })
-  .catch((error) => {
-    handleFatalStartupError("whenReady", error);
+  event.preventDefault();
+  void runEffect(requestDesktopShutdownAndWait()).finally(() => {
+    markQuitAllowed();
+    app.quit();
   });
+}
 
-app.on("window-all-closed", () => {
+function handleActivate(
+  runEffect: DesktopEffectRunner,
+  environment: DesktopEnvironmentShape,
+): void {
+  const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0];
+  if (existingWindow) {
+    revealWindow(existingWindow);
+    return;
+  }
+  if (environment.isDevelopment) {
+    mainWindow = createWindow(runEffect, environment);
+    return;
+  }
+  createBackendWindowIfReady(runEffect, environment);
+}
+
+function handleWindowAllClosed(): void {
   if (process.platform !== "darwin" && !isQuitting) {
     app.quit();
   }
-});
+}
 
-if (process.platform !== "win32") {
-  process.on("SIGINT", () => {
-    if (isQuitting) return;
-    isQuitting = true;
-    writeDesktopLogHeader("SIGINT received");
-    clearUpdatePollTimer();
-    stopBackend();
-    void desktopSshEnvironmentBridge.dispose().catch(() => undefined);
-    restoreStdIoCapture?.();
-    app.quit();
-  });
+function registerDesktopLifecycleHandlers(): Effect.Effect<
+  void,
+  never,
+  Scope.Scope | DesktopLifecycleBoundaryServices
+> {
+  return Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment;
+    const context = yield* Effect.context<DesktopLifecycleBoundaryServices>();
+    const runEffect = makeDesktopEffectRunner(context);
+    let quitAllowed = false;
+    yield* addScopedListener(nativeTheme, "updated", () => {
+      syncAllWindowAppearance();
+    });
+    yield* addScopedListener(app, "before-quit", (event: Electron.Event) => {
+      handleBeforeQuit(
+        event,
+        runEffect,
+        () => quitAllowed,
+        () => {
+          quitAllowed = true;
+        },
+      );
+    });
+    yield* addScopedListener(app, "activate", () => {
+      handleActivate(runEffect, environment);
+    });
+    yield* addScopedListener(app, "window-all-closed", () => {
+      handleWindowAllClosed();
+    });
 
-  process.on("SIGTERM", () => {
-    if (isQuitting) return;
-    isQuitting = true;
-    writeDesktopLogHeader("SIGTERM received");
-    clearUpdatePollTimer();
-    stopBackend();
-    void desktopSshEnvironmentBridge.dispose().catch(() => undefined);
-    restoreStdIoCapture?.();
-    app.quit();
+    if (process.platform !== "win32") {
+      yield* addScopedListener(process, "SIGINT", () => {
+        quitFromSignal("SIGINT", runEffect);
+      });
+      yield* addScopedListener(process, "SIGTERM", () => {
+        quitFromSignal("SIGTERM", runEffect);
+      });
+    }
   });
 }
+
+function fatalStartupCause(stage: string, cause: Cause.Cause<unknown>) {
+  return handleFatalStartupError(stage, new Error(Cause.pretty(cause))).pipe(
+    Effect.andThen(Effect.failCause(cause)),
+  );
+}
+
+const waitForElectronReady = Effect.promise(() => app.whenReady()).pipe(Effect.asVoid);
+
+const program = Effect.scoped(
+  Effect.gen(function* () {
+    const shutdown = yield* makeDesktopShutdown;
+
+    yield* Effect.gen(function* () {
+      const environment = yield* DesktopEnvironment;
+      appRunId = (yield* Random.nextUUIDv4).replace(/-/g, "").slice(0, 12);
+      const backendManager = yield* DesktopBackendManager;
+      const desktopSshEnvironmentBridge = yield* DesktopSshEnvironmentBridge;
+      const sshPasswordPromptScope = yield* Scope.make("sequential");
+      yield* desktopSshEnvironmentBridge.installPasswordPromptScope(sshPasswordPromptScope);
+      yield* Scope.addFinalizer(
+        yield* Scope.Scope,
+        closeDesktopResourcesWithManager(backendManager, desktopSshEnvironmentBridge).pipe(
+          Effect.ensuring(shutdown.markComplete),
+        ),
+      );
+
+      yield* Effect.sync(syncShellEnvironment);
+      const userDataPath = yield* resolveUserDataPath();
+      yield* Effect.sync(() => {
+        // Must happen before Electron's ready event so Chromium profile data
+        // lands in the desktop-specific userData directory.
+        app.setPath("userData", userDataPath);
+      });
+      appUpdateYmlConfig = yield* readAppUpdateYmlEffect();
+      yield* resolveDesktopIconPaths();
+      yield* logDesktopInfo("runtime logging configured", { logDir: environment.logDir });
+      desktopSettings = yield* readDesktopSettingsEffect(
+        environment.desktopSettingsPath,
+        environment.appVersion,
+      );
+      desktopServerExposureMode = desktopSettings.serverExposureMode;
+      updateState = initialUpdateState(environment);
+
+      if (process.platform === "linux") {
+        app.commandLine.appendSwitch("class", environment.linuxWmClass);
+      }
+
+      yield* configureAppIdentity();
+      yield* registerDesktopLifecycleHandlers();
+
+      yield* waitForElectronReady.pipe(
+        Effect.catchCause((cause) => fatalStartupCause("whenReady", cause)),
+      );
+      yield* logDesktopInfo("app ready");
+      yield* configureAppIdentity();
+      yield* configureApplicationMenu();
+      yield* registerDesktopProtocol();
+      yield* configureAutoUpdater();
+      yield* bootstrap().pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
+      yield* shutdown.awaitRequest;
+    }).pipe(Effect.provideService(DesktopShutdown, shutdown));
+  }),
+).pipe(
+  Effect.catchCause((cause) =>
+    logDesktopError("desktop main fiber failed", {
+      cause: Cause.pretty(cause),
+    }),
+  ),
+);
+
+program.pipe(Effect.provide(desktopRuntimeLayer), NodeRuntime.runMain);

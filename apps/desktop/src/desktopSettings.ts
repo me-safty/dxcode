@@ -1,6 +1,11 @@
-import * as FS from "node:fs";
-import * as Path from "node:path";
 import type { DesktopServerExposureMode, DesktopUpdateChannel } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import type { PlatformError } from "effect/PlatformError";
+import * as Random from "effect/Random";
+import * as Schema from "effect/Schema";
 
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
 
@@ -21,6 +26,23 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   updateChannel: "latest",
   updateChannelConfiguredByUser: false,
 };
+
+const DesktopSettingsDocument = Schema.Struct({
+  serverExposureMode: Schema.optional(Schema.Literals(["local-only", "network-accessible"])),
+  tailscaleServeEnabled: Schema.optional(Schema.Boolean),
+  tailscaleServePort: Schema.optional(Schema.Number),
+  updateChannel: Schema.optional(Schema.Literals(["latest", "nightly"])),
+  updateChannelConfiguredByUser: Schema.optional(Schema.Boolean),
+});
+
+type DesktopSettingsDocument = typeof DesktopSettingsDocument.Type;
+
+const decodeDesktopSettingsJson = Schema.decodeEffect(
+  Schema.fromJsonString(DesktopSettingsDocument),
+);
+const encodeDesktopSettingsJson = Schema.encodeEffect(
+  Schema.fromJsonString(DesktopSettingsDocument),
+);
 
 export function resolveDefaultDesktopSettings(appVersion: string): DesktopSettings {
   return {
@@ -75,51 +97,62 @@ export function setDesktopUpdateChannelPreference(
   };
 }
 
-export function readDesktopSettings(settingsPath: string, appVersion: string): DesktopSettings {
+function normalizeDesktopSettingsDocument(
+  parsed: DesktopSettingsDocument,
+  appVersion: string,
+): DesktopSettings {
   const defaultSettings = resolveDefaultDesktopSettings(appVersion);
+  const parsedUpdateChannel = Option.fromNullishOr(parsed.updateChannel);
+  const isLegacySettings = parsed.updateChannelConfiguredByUser === undefined;
+  const updateChannelConfiguredByUser =
+    parsed.updateChannelConfiguredByUser === true ||
+    (isLegacySettings && Option.contains(parsedUpdateChannel, "nightly"));
 
-  try {
-    if (!FS.existsSync(settingsPath)) {
-      return defaultSettings;
-    }
-
-    const raw = FS.readFileSync(settingsPath, "utf8");
-    const parsed = JSON.parse(raw) as {
-      readonly serverExposureMode?: unknown;
-      readonly tailscaleServeEnabled?: unknown;
-      readonly tailscaleServePort?: unknown;
-      readonly updateChannel?: unknown;
-      readonly updateChannelConfiguredByUser?: unknown;
-    };
-    const parsedUpdateChannel =
-      parsed.updateChannel === "nightly" || parsed.updateChannel === "latest"
-        ? parsed.updateChannel
-        : null;
-    const isLegacySettings = parsed.updateChannelConfiguredByUser === undefined;
-    const updateChannelConfiguredByUser =
-      parsed.updateChannelConfiguredByUser === true ||
-      (isLegacySettings && parsedUpdateChannel === "nightly");
-
-    return {
-      serverExposureMode:
-        parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
-      tailscaleServeEnabled: parsed.tailscaleServeEnabled === true,
-      tailscaleServePort: normalizeTailscaleServePort(parsed.tailscaleServePort),
-      updateChannel:
-        updateChannelConfiguredByUser && parsedUpdateChannel !== null
-          ? parsedUpdateChannel
-          : defaultSettings.updateChannel,
-      updateChannelConfiguredByUser,
-    };
-  } catch {
-    return defaultSettings;
-  }
+  return {
+    serverExposureMode:
+      parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
+    tailscaleServeEnabled: parsed.tailscaleServeEnabled === true,
+    tailscaleServePort: normalizeTailscaleServePort(parsed.tailscaleServePort),
+    updateChannel: updateChannelConfiguredByUser
+      ? Option.getOrElse(parsedUpdateChannel, () => defaultSettings.updateChannel)
+      : defaultSettings.updateChannel,
+    updateChannelConfiguredByUser,
+  };
 }
 
-export function writeDesktopSettings(settingsPath: string, settings: DesktopSettings): void {
-  const directory = Path.dirname(settingsPath);
-  const tempPath = `${settingsPath}.${process.pid}.${Date.now()}.tmp`;
-  FS.mkdirSync(directory, { recursive: true });
-  FS.writeFileSync(tempPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
-  FS.renameSync(tempPath, settingsPath);
+export function readDesktopSettingsEffect(
+  settingsPath: string,
+  appVersion: string,
+): Effect.Effect<DesktopSettings, never, FileSystem.FileSystem> {
+  const defaultSettings = resolveDefaultDesktopSettings(appVersion);
+
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const raw = yield* fileSystem.readFileString(settingsPath).pipe(Effect.option);
+    return yield* Option.match(raw, {
+      onNone: () => Effect.succeed(defaultSettings),
+      onSome: (value) =>
+        decodeDesktopSettingsJson(value).pipe(
+          Effect.map((parsed) => normalizeDesktopSettingsDocument(parsed, appVersion)),
+          Effect.catch(() => Effect.succeed(defaultSettings)),
+        ),
+    });
+  });
+}
+
+export function writeDesktopSettingsEffect(
+  settingsPath: string,
+  settings: DesktopSettings,
+): Effect.Effect<void, PlatformError | Schema.SchemaError, FileSystem.FileSystem | Path.Path> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = path.dirname(settingsPath);
+    const suffix = (yield* Random.nextUUIDv4).replace(/-/g, "");
+    const tempPath = `${settingsPath}.${process.pid}.${suffix}.tmp`;
+    const encoded = yield* encodeDesktopSettingsJson(settings);
+    yield* fileSystem.makeDirectory(directory, { recursive: true });
+    yield* fileSystem.writeFileString(tempPath, `${encoded}\n`);
+    yield* fileSystem.rename(tempPath, settingsPath);
+  });
 }

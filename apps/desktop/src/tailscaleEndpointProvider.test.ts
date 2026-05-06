@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { assert, describe, it } from "@effect/vitest";
+import { Effect, Layer } from "effect";
+import { HttpClient } from "effect/unstable/http";
+import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   isTailscaleIpv4Address,
@@ -7,27 +9,40 @@ import {
   resolveTailscaleAdvertisedEndpoints,
 } from "./tailscaleEndpointProvider.ts";
 
+const unusedTailscaleExternalServicesLayer = Layer.mergeAll(
+  Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make(() => Effect.die("unexpected Tailscale HTTPS probe")),
+  ),
+  Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make(() => Effect.die("unexpected tailscale status process")),
+  ),
+);
+
 describe("tailscale endpoint provider", () => {
   it("detects Tailnet IPv4 addresses", () => {
-    expect(isTailscaleIpv4Address("100.64.0.1")).toBe(true);
-    expect(isTailscaleIpv4Address("100.127.255.254")).toBe(true);
-    expect(isTailscaleIpv4Address("100.128.0.1")).toBe(false);
-    expect(isTailscaleIpv4Address("192.168.1.44")).toBe(false);
+    assert.equal(isTailscaleIpv4Address("100.64.0.1"), true);
+    assert.equal(isTailscaleIpv4Address("100.127.255.254"), true);
+    assert.equal(isTailscaleIpv4Address("100.128.0.1"), false);
+    assert.equal(isTailscaleIpv4Address("192.168.1.44"), false);
   });
 
-  it("parses MagicDNS names from tailscale status", async () => {
-    expect(
-      Effect.runSync(
-        parseTailscaleMagicDnsName(JSON.stringify({ Self: { DNSName: "desktop.tail.ts.net." } })),
-      ),
-    ).toBe("desktop.tail.ts.net");
-    expect(Effect.runSync(parseTailscaleMagicDnsName("{}"))).toBeNull();
-    await expect(Effect.runPromise(parseTailscaleMagicDnsName("not-json"))).rejects.toBeDefined();
-  });
+  it.effect("parses MagicDNS names from tailscale status", () =>
+    Effect.gen(function* () {
+      const dnsName = yield* parseTailscaleMagicDnsName(
+        `{"Self":{"DNSName":"desktop.tail.ts.net."}}`,
+      );
+      assert.equal(dnsName, "desktop.tail.ts.net");
+      assert.equal(yield* parseTailscaleMagicDnsName("{}"), null);
+      const malformed = yield* Effect.result(parseTailscaleMagicDnsName("not-json"));
+      assert.isTrue(malformed._tag === "Failure");
+    }),
+  );
 
-  it("resolves Tailscale endpoints as add-on advertised endpoints", async () => {
-    await expect(
-      resolveTailscaleAdvertisedEndpoints({
+  it.effect("resolves Tailscale endpoints as add-on advertised endpoints", () =>
+    Effect.gen(function* () {
+      const endpoints = yield* resolveTailscaleAdvertisedEndpoints({
         port: 3773,
         networkInterfaces: {
           tailscale0: [
@@ -41,82 +56,86 @@ describe("tailscale endpoint provider", () => {
             },
           ],
         },
-        statusJson: JSON.stringify({ Self: { DNSName: "desktop.tail.ts.net." } }),
-      }),
-    ).resolves.toEqual([
-      {
-        id: "tailscale-ip:http://100.100.100.100:3773",
-        label: "Tailscale IP",
-        provider: {
-          id: "tailscale",
-          label: "Tailscale",
-          kind: "private-network",
-          isAddon: true,
+        statusJson: `{"Self":{"DNSName":"desktop.tail.ts.net."}}`,
+      });
+      assert.deepEqual(endpoints, [
+        {
+          id: "tailscale-ip:http://100.100.100.100:3773",
+          label: "Tailscale IP",
+          provider: {
+            id: "tailscale",
+            label: "Tailscale",
+            kind: "private-network",
+            isAddon: true,
+          },
+          httpBaseUrl: "http://100.100.100.100:3773/",
+          wsBaseUrl: "ws://100.100.100.100:3773/",
+          reachability: "private-network",
+          compatibility: {
+            hostedHttpsApp: "mixed-content-blocked",
+            desktopApp: "compatible",
+          },
+          source: "desktop-addon",
+          status: "available",
+          description: "Reachable from devices on the same Tailnet.",
         },
-        httpBaseUrl: "http://100.100.100.100:3773/",
-        wsBaseUrl: "ws://100.100.100.100:3773/",
-        reachability: "private-network",
-        compatibility: {
-          hostedHttpsApp: "mixed-content-blocked",
-          desktopApp: "compatible",
+        {
+          id: "tailscale-magicdns:https://desktop.tail.ts.net/",
+          label: "Tailscale HTTPS",
+          provider: {
+            id: "tailscale",
+            label: "Tailscale",
+            kind: "private-network",
+            isAddon: true,
+          },
+          httpBaseUrl: "https://desktop.tail.ts.net/",
+          wsBaseUrl: "wss://desktop.tail.ts.net/",
+          reachability: "private-network",
+          compatibility: {
+            hostedHttpsApp: "requires-configuration",
+            desktopApp: "compatible",
+          },
+          source: "desktop-addon",
+          status: "unavailable",
+          description: "MagicDNS hostname. Configure Tailscale Serve for HTTPS access.",
         },
-        source: "desktop-addon",
-        status: "available",
-        description: "Reachable from devices on the same Tailnet.",
-      },
-      {
-        id: "tailscale-magicdns:https://desktop.tail.ts.net/",
-        label: "Tailscale HTTPS",
-        provider: {
-          id: "tailscale",
-          label: "Tailscale",
-          kind: "private-network",
-          isAddon: true,
-        },
-        httpBaseUrl: "https://desktop.tail.ts.net/",
-        wsBaseUrl: "wss://desktop.tail.ts.net/",
-        reachability: "private-network",
-        compatibility: {
-          hostedHttpsApp: "requires-configuration",
-          desktopApp: "compatible",
-        },
-        source: "desktop-addon",
-        status: "unavailable",
-        description: "MagicDNS hostname. Configure Tailscale Serve for HTTPS access.",
-      },
-    ]);
-  });
+      ]);
+    }).pipe(Effect.provide(unusedTailscaleExternalServicesLayer)),
+  );
 
-  it("marks the Tailscale HTTPS endpoint available after Serve is enabled and reachable", async () => {
-    await expect(
-      resolveTailscaleAdvertisedEndpoints({
-        port: 3773,
-        networkInterfaces: {},
-        statusJson: JSON.stringify({ Self: { DNSName: "desktop.tail.ts.net." } }),
-        serveEnabled: true,
-        probe: async () => true,
-      }),
-    ).resolves.toEqual([
-      {
-        id: "tailscale-magicdns:https://desktop.tail.ts.net/",
-        label: "Tailscale HTTPS",
-        provider: {
-          id: "tailscale",
-          label: "Tailscale",
-          kind: "private-network",
-          isAddon: true,
-        },
-        httpBaseUrl: "https://desktop.tail.ts.net/",
-        wsBaseUrl: "wss://desktop.tail.ts.net/",
-        reachability: "private-network",
-        compatibility: {
-          hostedHttpsApp: "compatible",
-          desktopApp: "compatible",
-        },
-        source: "desktop-addon",
-        status: "available",
-        description: "HTTPS endpoint served by Tailscale Serve.",
-      },
-    ]);
-  });
+  it.effect(
+    "marks the Tailscale HTTPS endpoint available after Serve is enabled and reachable",
+    () =>
+      Effect.gen(function* () {
+        const endpoints = yield* resolveTailscaleAdvertisedEndpoints({
+          port: 3773,
+          networkInterfaces: {},
+          statusJson: `{"Self":{"DNSName":"desktop.tail.ts.net."}}`,
+          serveEnabled: true,
+          probe: () => Effect.succeed(true),
+        });
+        assert.deepEqual(endpoints, [
+          {
+            id: "tailscale-magicdns:https://desktop.tail.ts.net/",
+            label: "Tailscale HTTPS",
+            provider: {
+              id: "tailscale",
+              label: "Tailscale",
+              kind: "private-network",
+              isAddon: true,
+            },
+            httpBaseUrl: "https://desktop.tail.ts.net/",
+            wsBaseUrl: "wss://desktop.tail.ts.net/",
+            reachability: "private-network",
+            compatibility: {
+              hostedHttpsApp: "compatible",
+              desktopApp: "compatible",
+            },
+            source: "desktop-addon",
+            status: "available",
+            description: "HTTPS endpoint served by Tailscale Serve.",
+          },
+        ]);
+      }).pipe(Effect.provide(unusedTailscaleExternalServicesLayer)),
+  );
 });

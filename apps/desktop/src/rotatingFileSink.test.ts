@@ -1,74 +1,83 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { assert, describe, it } from "@effect/vitest";
 import { RotatingFileSink } from "@t3tools/shared/logging";
-import { afterEach, describe, expect, it } from "vitest";
+import { Effect, FileSystem, Path } from "effect";
 
-const tempRoots: string[] = [];
-
-function makeTempDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-rotating-log-"));
-  tempRoots.push(dir);
-  return dir;
+function makeTempDir() {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    return yield* fs.makeTempDirectoryScoped({ prefix: "t3-rotating-log-" });
+  });
 }
 
-afterEach(() => {
-  for (const dir of tempRoots.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 describe("RotatingFileSink", () => {
-  it("rotates when writes exceed max bytes", () => {
-    const dir = makeTempDir();
-    const logPath = path.join(dir, "desktop-main.log");
-    const sink = new RotatingFileSink({
-      filePath: logPath,
-      maxBytes: 10,
-      maxFiles: 3,
-    });
+  it.effect("rotates when writes exceed max bytes", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* makeTempDir();
+      const logPath = path.join(dir, "desktop-main.log");
+      const sink = new RotatingFileSink({
+        filePath: logPath,
+        maxBytes: 10,
+        maxFiles: 3,
+      });
 
-    sink.write("12345");
-    sink.write("67890");
-    sink.write("abc");
+      yield* Effect.sync(() => {
+        sink.write("12345");
+        sink.write("67890");
+        sink.write("abc");
+      });
 
-    expect(fs.readFileSync(path.join(dir, "desktop-main.log"), "utf8")).toBe("abc");
-    expect(fs.readFileSync(path.join(dir, "desktop-main.log.1"), "utf8")).toBe("1234567890");
-  });
+      assert.equal(yield* fs.readFileString(path.join(dir, "desktop-main.log")), "abc");
+      assert.equal(yield* fs.readFileString(path.join(dir, "desktop-main.log.1")), "1234567890");
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 
-  it("retains only maxFiles backups", () => {
-    const dir = makeTempDir();
-    const logPath = path.join(dir, "server-child.log");
-    const sink = new RotatingFileSink({
-      filePath: logPath,
-      maxBytes: 4,
-      maxFiles: 2,
-    });
+  it.effect("retains only maxFiles backups", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* makeTempDir();
+      const logPath = path.join(dir, "server-child.log");
+      const sink = new RotatingFileSink({
+        filePath: logPath,
+        maxBytes: 4,
+        maxFiles: 2,
+      });
 
-    sink.write("aaaa");
-    sink.write("bbbb");
-    sink.write("cccc");
-    sink.write("dddd");
+      yield* Effect.sync(() => {
+        sink.write("aaaa");
+        sink.write("bbbb");
+        sink.write("cccc");
+        sink.write("dddd");
+      });
 
-    expect(fs.existsSync(path.join(dir, "server-child.log.1"))).toBe(true);
-    expect(fs.existsSync(path.join(dir, "server-child.log.2"))).toBe(true);
-    expect(fs.existsSync(path.join(dir, "server-child.log.3"))).toBe(false);
-  });
+      assert.equal(yield* fs.exists(path.join(dir, "server-child.log.1")), true);
+      assert.equal(yield* fs.exists(path.join(dir, "server-child.log.2")), true);
+      assert.equal(yield* fs.exists(path.join(dir, "server-child.log.3")), false);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 
-  it("prunes stale backups above maxFiles on startup", () => {
-    const dir = makeTempDir();
-    const logPath = path.join(dir, "desktop-main.log");
-    fs.writeFileSync(path.join(dir, "desktop-main.log.1"), "first");
-    fs.writeFileSync(path.join(dir, "desktop-main.log.4"), "stale");
+  it.effect("prunes stale backups above maxFiles on startup", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* makeTempDir();
+      const logPath = path.join(dir, "desktop-main.log");
+      yield* fs.writeFileString(path.join(dir, "desktop-main.log.1"), "first");
+      yield* fs.writeFileString(path.join(dir, "desktop-main.log.4"), "stale");
 
-    const sink = new RotatingFileSink({
-      filePath: logPath,
-      maxBytes: 16,
-      maxFiles: 2,
-    });
-    sink.write("hello");
+      yield* Effect.sync(() => {
+        const sink = new RotatingFileSink({
+          filePath: logPath,
+          maxBytes: 16,
+          maxFiles: 2,
+        });
+        sink.write("hello");
+      });
 
-    expect(fs.existsSync(path.join(dir, "desktop-main.log.4"))).toBe(false);
-  });
+      assert.equal(yield* fs.exists(path.join(dir, "desktop-main.log.4")), false);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 });
