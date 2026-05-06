@@ -29,6 +29,7 @@ import * as Random from "effect/Random";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SchemaIssue from "effect/SchemaIssue";
+import * as Semaphore from "effect/Semaphore";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -711,6 +712,8 @@ export const makeCodexSessionRuntime = (
     const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>());
     const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>());
     const closedRef = yield* Ref.make(false);
+    const initializedRef = yield* Ref.make(false);
+    const initializeSemaphore = yield* Semaphore.make(1);
 
     // `~` is not shell-expanded when env vars are set via
     // `child_process.spawn`; `expandHomePath` lets a configured
@@ -783,6 +786,16 @@ export const makeCodexSessionRuntime = (
         method,
         message,
       });
+    const ensureInitialized = initializeSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        if (yield* Ref.get(initializedRef)) {
+          return;
+        }
+        yield* client.request("initialize", buildCodexInitializeParams());
+        yield* client.notify("initialized", undefined);
+        yield* Ref.set(initializedRef, true);
+      }),
+    );
 
     const settlePendingApprovals = (decision: ProviderApprovalDecision) =>
       Ref.get(pendingApprovalsRef).pipe(
@@ -1181,8 +1194,7 @@ export const makeCodexSessionRuntime = (
 
     const start = Effect.fn("CodexSessionRuntime.start")(function* () {
       yield* emitSessionEvent("session/connecting", "Starting Codex App Server session.");
-      yield* client.request("initialize", buildCodexInitializeParams());
-      yield* client.notify("initialized", undefined);
+      yield* ensureInitialized;
 
       const requestedModel = normalizeCodexModelSlug(options.model);
 
@@ -1311,7 +1323,9 @@ export const makeCodexSessionRuntime = (
           });
           return parseThreadSnapshot(response);
         }),
-      readAccountRateLimits: client.request("account/rateLimits/read", undefined),
+      readAccountRateLimits: ensureInitialized.pipe(
+        Effect.andThen(client.request("account/rateLimits/read", undefined)),
+      ),
       respondToRequest: (requestId, decision) =>
         Effect.gen(function* () {
           const pending = (yield* Ref.get(pendingApprovalsRef)).get(requestId);
