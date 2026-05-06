@@ -546,17 +546,17 @@ template repo.
   - Manage Markdown artifacts under `docs/product`.
 - Dependencies: Phase 6.
 - Tasks:
-  - [ ] Browse `docs/product`.
-  - [ ] Preview Markdown.
-  - [ ] Edit Markdown.
-  - [ ] Write through guarded branch/patch flow.
-  - [ ] Block edits on conflicting dirty files.
-  - [ ] Link artifact edits to a GitHub task or PR where applicable.
-  - [ ] Post concise GitHub comments for artifact edit actions.
+  - [x] Browse `docs/product`.
+  - [x] Preview Markdown.
+  - [x] Edit Markdown.
+  - [x] Write through guarded branch/patch flow.
+  - [x] Block edits on conflicting dirty files.
+  - [x] Link artifact edits to a GitHub task or PR where applicable.
+  - [x] Post concise GitHub comments for artifact edit actions.
 - Validation:
-  - Path confinement tests.
-  - Dirty-file conflict tests.
-  - Playwright edit, preview, patch flow.
+  - Path confinement tests: PASS.
+  - Dirty-file conflict tests: PASS.
+  - Playwright edit, preview, patch flow: PASS.
 - Exit criteria:
   - Product docs can be safely viewed and edited.
 
@@ -1079,3 +1079,62 @@ Append one entry per implementation pass.
     confirmation-gated future work.
   - GitHub Projects remains the live status board; no Project state writes were
     made.
+
+### 2026-05-06 - Phase 7 product artifacts provider slice
+
+- Command:
+  - `/orchestrate t3-kanban-project-console`
+  - Selected next safe command: `/phase t3-kanban-project-console phase-7`
+- Summary:
+  - Added shared artifact content and guarded write contracts for
+    `docs/product/**/*.md` browse, preview, edit, write, and write-result
+    flows.
+  - Added a server-side Product Artifacts Provider that confines paths to
+    `docs/product`, reads Markdown titles/previews, blocks dirty/conflicting
+    files, blocks protected branch writes, writes confirmed clean artifacts,
+    and posts concise linked issue/PR comments without raw diffs or command
+    output.
+  - Extended the mock artifact screen with an editable Markdown surface,
+    preview pane, guarded-patch action, AR/EN strings, and Playwright browser
+    coverage for the edit/preview/patch interaction.
+- Files changed:
+  - `packages/contracts/src/kanbanConsole.ts`
+  - `packages/contracts/src/kanbanConsole.test.ts`
+  - `apps/server/src/kanban/ProductArtifactsProvider.ts`
+  - `apps/server/src/kanban/ProductArtifactsProvider.test.ts`
+  - `apps/web/src/kanbanConsoleMock.ts`
+  - `apps/web/src/components/KanbanConsoleMock.tsx`
+  - `apps/web/src/components/KanbanConsoleMock.browser.tsx`
+  - `docs/tasks/t3-kanban-project-console.md`
+- Validation run:
+  - Command: `bun run --cwd packages/contracts test -- kanbanConsole`
+  - Result: PASS
+  - Command: `bun run --cwd apps/server test -- ProductArtifactsProvider`
+  - Result: PASS
+  - Command: `bun run --cwd apps/web test -- kanbanConsoleMock`
+  - Result: PASS
+  - Command: `bun run --cwd apps/web test:browser -- KanbanConsoleMock`
+  - Result: PASS
+  - Command: `bun run --cwd packages/contracts typecheck`
+  - Result: PASS
+  - Command: `bun run --cwd apps/server typecheck`
+  - Result: PASS with existing Effect diagnostic messages in unrelated files.
+  - Command: `bun run --cwd apps/web typecheck`
+  - Result: PASS
+  - Command: `bun run fmt:check`
+  - Result: PASS
+  - Command: `bun check`
+  - Result: PASS; 15 tasks successful, 130 test files passed, 1029 tests passed, 4 skipped.
+- Notes/deviations:
+  - The Phase 7 provider writes local Markdown files only after explicit
+    confirmation, clean target status, docs/product path confinement, and
+    protected-branch checks.
+  - GitHub comments are posted only when a linked repository and issue/PR
+    number are supplied. Comment bodies summarize the artifact action and omit
+    raw command output and diffs.
+  - GitHub Projects remains the live status board; no Project state writes were
+    made.
+  - Well-Architected tradeoff: file traversal and per-file git status checks are
+    intentionally simple for v1 correctness and auditability. Large artifact
+    trees may need cached or batched status reads in the Phase 12 performance
+    pass.

@@ -4,6 +4,9 @@ import { describe, expect, it } from "vitest";
 import {
   KanbanConsoleGitFileActionRequest,
   KanbanConsoleGitFileDiff,
+  KanbanConsoleArtifactContent,
+  KanbanConsoleArtifactWriteRequest,
+  KanbanConsoleArtifactWriteResult,
   KanbanConsoleSnapshot,
   KanbanConsoleTaskContextPackage,
   KanbanConsoleTaskTransitionRequest,
@@ -14,6 +17,9 @@ const decodeTaskContext = Schema.decodeUnknownSync(KanbanConsoleTaskContextPacka
 const decodeTransitionRequest = Schema.decodeUnknownSync(KanbanConsoleTaskTransitionRequest);
 const decodeGitFileActionRequest = Schema.decodeUnknownSync(KanbanConsoleGitFileActionRequest);
 const decodeGitFileDiff = Schema.decodeUnknownSync(KanbanConsoleGitFileDiff);
+const decodeArtifactContent = Schema.decodeUnknownSync(KanbanConsoleArtifactContent);
+const decodeArtifactWriteRequest = Schema.decodeUnknownSync(KanbanConsoleArtifactWriteRequest);
+const decodeArtifactWriteResult = Schema.decodeUnknownSync(KanbanConsoleArtifactWriteResult);
 
 describe("kanbanConsole contracts", () => {
   it("decodes a complete mock-runtime snapshot boundary", () => {
@@ -233,5 +239,41 @@ describe("kanbanConsole contracts", () => {
         confirmed: true,
       }),
     ).toThrow();
+  });
+
+  it("decodes product artifact read and guarded write contracts", () => {
+    expect(
+      decodeArtifactContent({
+        repoId: "repo-1",
+        path: "docs/product/project-console.md",
+        title: "Project Console",
+        status: "clean",
+        updatedAt: "2026-05-06T12:00:00.000Z",
+        content: "# Project Console\n\nSynthetic product note.",
+        preview: "Project Console\nSynthetic product note.",
+      }),
+    ).toMatchObject({ title: "Project Console", status: "clean" });
+
+    expect(
+      decodeArtifactWriteRequest({
+        repoId: "repo-1",
+        cwd: "/tmp/kanban-console",
+        path: "docs/product/project-console.md",
+        content: "# Project Console\n",
+        confirmed: true,
+        linkedRepository: "MohAnghabo/kanban-console",
+        linkedIssueNumber: 43,
+      }),
+    ).toMatchObject({ confirmed: true, linkedIssueNumber: 43 });
+
+    expect(
+      decodeArtifactWriteResult({
+        repoId: "repo-1",
+        path: "docs/product/project-console.md",
+        status: "applied",
+        message: "Artifact updated.",
+        commentTarget: "issue#43",
+      }),
+    ).toMatchObject({ status: "applied", commentTarget: "issue#43" });
   });
 });

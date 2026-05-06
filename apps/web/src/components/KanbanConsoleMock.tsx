@@ -584,6 +584,14 @@ function ArtifactsView({
   snapshot: ReturnType<typeof kanbanConsoleMockProvider.readSnapshot>;
 }) {
   const messages = getMessages(locale);
+  const [selectedArtifactId, setSelectedArtifactId] = useState(snapshot.artifacts[0]?.id ?? "");
+  const selectedArtifact =
+    snapshot.artifacts.find((artifact) => artifact.id === selectedArtifactId) ??
+    snapshot.artifacts[0];
+  const [draft, setDraft] = useState(
+    "# Project artifact\n\n- Browse docs/product Markdown\n- Preview before write\n- Apply through guarded patch flow",
+  );
+  const [saveStatus, setSaveStatus] = useState<string>(messages.artifactClean);
 
   return (
     <MockPanel icon={FileTextIcon} title={messages.artifactsHeading}>
@@ -592,10 +600,33 @@ function ArtifactsView({
           {snapshot.artifacts.map((artifact) => (
             <button
               key={artifact.id}
-              className="w-full rounded-md border border-border bg-card p-2 text-start text-sm"
+              className={cn(
+                "w-full rounded-md border p-2 text-start text-sm transition",
+                selectedArtifact?.id === artifact.id
+                  ? "border-primary/60 bg-primary/6"
+                  : "border-border bg-card",
+              )}
               type="button"
+              onClick={() => {
+                setSelectedArtifactId(artifact.id);
+                setSaveStatus(
+                  artifact.status === "clean" ? messages.artifactClean : messages.artifactBlocked,
+                );
+              }}
             >
-              {artifact.path}
+              <span className="block truncate">{artifact.path}</span>
+              <Badge
+                className="mt-2"
+                variant={
+                  artifact.status === "clean"
+                    ? "success"
+                    : artifact.status === "conflict"
+                      ? "error"
+                      : "warning"
+                }
+              >
+                {artifact.status}
+              </Badge>
             </button>
           ))}
         </div>
@@ -605,15 +636,40 @@ function ArtifactsView({
               <FileTextIcon />
               {messages.actionPreview}
             </Button>
-            <Button size="xs" variant="outline">
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() =>
+                setSaveStatus(
+                  selectedArtifact?.status === "clean"
+                    ? messages.artifactClean
+                    : messages.artifactBlocked,
+                )
+              }
+            >
               <CheckCircle2Icon />
-              {messages.actionSaveDraft}
+              {messages.actionPatchFlow}
             </Button>
           </div>
-          <pre className="min-h-64 overflow-auto rounded bg-background p-3 text-xs">
-            # Product artifact preview{"\n\n"}- Governance-linked planning notes{"\n"}- Mock editor
-            only{"\n"}- No docs/product write until Phase 3 scope
-          </pre>
+          <DetailRow label="Path" value={selectedArtifact?.path ?? "docs/product"} />
+          <DetailRow label="Guard" value={saveStatus} />
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <label className="space-y-2 text-xs font-medium">
+              {messages.artifactEditLabel}
+              <textarea
+                aria-label={messages.artifactEditLabel}
+                className="min-h-64 w-full rounded-md border border-border bg-background p-3 font-mono text-xs"
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+              />
+            </label>
+            <div>
+              <p className="mb-2 text-xs font-medium">{messages.artifactPreviewLabel}</p>
+              <pre className="min-h-64 overflow-auto rounded bg-background p-3 text-xs">
+                {draft}
+              </pre>
+            </div>
+          </div>
         </div>
       </div>
     </MockPanel>

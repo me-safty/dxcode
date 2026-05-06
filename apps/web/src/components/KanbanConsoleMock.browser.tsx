@@ -46,6 +46,14 @@ describe("KanbanConsoleMock", () => {
           .toBeInTheDocument();
       }
 
+      await page.getByRole("button", { exact: true, name: "Artifacts" }).click();
+      await page.getByRole("button", { name: /docs\/product\/project-console\.md/u }).click();
+      await page.getByLabelText("Artifact markdown editor").fill("# Product artifact\n\nUpdated.");
+      await page.getByRole("button", { exact: true, name: "Apply guarded patch" }).click();
+      await expect
+        .element(page.getByText("Clean artifact is ready for guarded patch flow."))
+        .toBeInTheDocument();
+
       await page.getByRole("button", { exact: true, name: "AR" }).click();
 
       await expect

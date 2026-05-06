@@ -84,6 +84,9 @@ export type KanbanConsoleAgentWorkflowCommandId = typeof KanbanConsoleAgentWorkf
 export const KanbanConsoleArtifactStatus = Schema.Literals(["clean", "dirty", "conflict"]);
 export type KanbanConsoleArtifactStatus = typeof KanbanConsoleArtifactStatus.Type;
 
+export const KanbanConsoleArtifactWriteStatus = Schema.Literals(["applied", "blocked"]);
+export type KanbanConsoleArtifactWriteStatus = typeof KanbanConsoleArtifactWriteStatus.Type;
+
 export const KanbanConsoleReleaseGateStatus = Schema.Literals(["passing", "pending", "blocked"]);
 export type KanbanConsoleReleaseGateStatus = typeof KanbanConsoleReleaseGateStatus.Type;
 
@@ -312,6 +315,38 @@ export const KanbanConsoleArtifact = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type KanbanConsoleArtifact = typeof KanbanConsoleArtifact.Type;
+
+export const KanbanConsoleArtifactContent = Schema.Struct({
+  repoId: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  status: KanbanConsoleArtifactStatus,
+  updatedAt: IsoDateTime,
+  content: Schema.String,
+  preview: Schema.String,
+});
+export type KanbanConsoleArtifactContent = typeof KanbanConsoleArtifactContent.Type;
+
+export const KanbanConsoleArtifactWriteRequest = Schema.Struct({
+  repoId: TrimmedNonEmptyString,
+  cwd: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  content: Schema.String,
+  confirmed: Schema.Boolean,
+  linkedRepository: Schema.optional(TrimmedNonEmptyString),
+  linkedIssueNumber: Schema.optional(NonNegativeInt),
+  linkedPullRequestNumber: Schema.optional(NonNegativeInt),
+});
+export type KanbanConsoleArtifactWriteRequest = typeof KanbanConsoleArtifactWriteRequest.Type;
+
+export const KanbanConsoleArtifactWriteResult = Schema.Struct({
+  repoId: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  status: KanbanConsoleArtifactWriteStatus,
+  message: TrimmedNonEmptyString,
+  commentTarget: Schema.optional(TrimmedNonEmptyString),
+});
+export type KanbanConsoleArtifactWriteResult = typeof KanbanConsoleArtifactWriteResult.Type;
 
 export const KanbanConsoleGitOpsPolicy = Schema.Struct({
   protectedBranches: Schema.Array(TrimmedNonEmptyString),
