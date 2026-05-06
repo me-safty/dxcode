@@ -105,8 +105,11 @@ describe("DesktopBackendManager", () => {
 
       yield* Effect.gen(function* () {
         const manager = yield* DesktopBackendManager;
+        assert.isTrue(Option.isNone(yield* manager.currentConfig));
+
         yield* manager.start;
         assert.equal(yield* Queue.take(startedPids), 123);
+        assert.deepEqual(yield* manager.currentConfig, Option.some(baseConfig));
 
         const runningSnapshot = yield* manager.snapshot;
         assert.equal(runningSnapshot.ready, true);

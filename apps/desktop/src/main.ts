@@ -23,20 +23,15 @@ import {
   BrowserWindow,
   type BrowserWindowConstructorOptions,
   type MenuItemConstructorOptions,
-  type OpenDialogOptions,
-  clipboard,
   dialog,
   Menu,
-  nativeImage,
   nativeTheme,
   protocol,
   safeStorage,
-  shell,
 } from "electron";
 import { autoUpdater } from "electron-updater";
 
 import type {
-  ContextMenuItem,
   DesktopServerExposureMode,
   DesktopServerExposureState,
   DesktopUpdateChannel,
@@ -56,7 +51,6 @@ import {
   setDesktopUpdateChannelPreference,
   writeDesktopSettingsEffect,
 } from "./desktopSettings.ts";
-import { showDesktopConfirmDialog } from "./confirmDialog.ts";
 import {
   DesktopBackendConfiguration,
   DesktopBackendEvents,
@@ -81,6 +75,10 @@ import {
   type DesktopEnvironmentShape,
 } from "./desktopEnvironment.ts";
 import * as DesktopSecretStorage from "./electron/DesktopSecretStorage.ts";
+import * as ElectronDialog from "./electron/ElectronDialog.ts";
+import * as ElectronMenu from "./electron/ElectronMenu.ts";
+import * as ElectronShell from "./electron/ElectronShell.ts";
+import * as ElectronTheme from "./electron/ElectronTheme.ts";
 import * as DesktopIpc from "./ipc/DesktopIpc.ts";
 import * as ElectronWindow from "./electron/ElectronWindow.ts";
 import { DesktopShutdown, makeDesktopShutdown } from "./desktopShutdown.ts";
@@ -88,7 +86,7 @@ import { MENU_ACTION_CHANNEL, UPDATE_STATE_CHANNEL } from "./ipc/channels.ts";
 import { installDesktopIpcHandlers } from "./ipc/DesktopIpcHandlers.ts";
 import { DesktopServerExposureIpcActions } from "./ipc/methods/serverExposure.ts";
 import { DesktopUpdateIpcActions } from "./ipc/methods/updates.ts";
-import { DesktopWindowIpcActions } from "./ipc/methods/window.ts";
+import * as DesktopWindowIpcActionsLive from "./ipc/methods/windowLive.ts";
 import {
   resolveDesktopCoreAdvertisedEndpoints,
   resolveDesktopServerExposure,
@@ -122,6 +120,7 @@ import {
 import { isArm64HostRunningIntelBuild } from "./runtimeArch.ts";
 import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
+import * as DesktopLocalEnvironment from "./main/DesktopLocalEnvironment.ts";
 import * as DesktopState from "./main/DesktopState.ts";
 
 const DESKTOP_SCHEME = "t3";
@@ -138,35 +137,6 @@ const TITLEBAR_HEIGHT = 40;
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
 const TITLEBAR_LIGHT_SYMBOL_COLOR = "#1f2937";
 const TITLEBAR_DARK_SYMBOL_COLOR = "#f8fafc";
-
-function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextMenuItem[] {
-  const normalizedItems: ContextMenuItem[] = [];
-
-  for (const sourceItem of source) {
-    if (typeof sourceItem.id !== "string" || typeof sourceItem.label !== "string") {
-      continue;
-    }
-
-    const normalizedItem: ContextMenuItem = {
-      id: sourceItem.id,
-      label: sourceItem.label,
-      destructive: sourceItem.destructive === true,
-      disabled: sourceItem.disabled === true,
-    };
-
-    if (sourceItem.children) {
-      const normalizedChildren = normalizeContextMenuItems(sourceItem.children);
-      if (normalizedChildren.length === 0) {
-        continue;
-      }
-      normalizedItem.children = normalizedChildren;
-    }
-
-    normalizedItems.push(normalizedItem);
-  }
-
-  return normalizedItems;
-}
 
 type WindowTitleBarOptions = Pick<
   BrowserWindowConstructorOptions,
@@ -185,7 +155,6 @@ let backendPort = 0;
 let backendBindHost = DESKTOP_LOOPBACK_HOST;
 let backendBootstrapToken = "";
 let backendHttpUrl: Option.Option<URL> = Option.none();
-let backendWsUrl = "";
 let backendEndpointUrl: string | null = null;
 let backendAdvertisedHost: string | null = null;
 let desktopProtocolRegistered = false;
@@ -204,8 +173,6 @@ let backendObservabilitySettings: BackendObservabilitySettings = {
 let desktopSettings = DEFAULT_DESKTOP_SETTINGS;
 let desktopServerExposureMode: DesktopServerExposureMode = desktopSettings.serverExposureMode;
 
-let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
-
 interface DesktopEffectRunner {
   <A, E, R>(effect: Effect.Effect<A, E, R>): Promise<A>;
 }
@@ -213,6 +180,7 @@ interface DesktopEffectRunner {
 type DesktopWindowBoundaryServices =
   | DesktopEnvironment
   | DesktopSshEnvironmentBridge
+  | ElectronShell.ElectronShell
   | DesktopState.DesktopState
   | ElectronWindow.ElectronWindow;
 type DesktopLifecycleBoundaryServices = DesktopShutdown | DesktopWindowBoundaryServices;
@@ -452,7 +420,6 @@ function applyDesktopServerExposureMode(
     desktopSettings = setDesktopServerExposurePreference(desktopSettings, requestedMode);
     backendBindHost = exposure.bindHost;
     backendHttpUrl = Option.some(new URL(exposure.localHttpUrl));
-    backendWsUrl = exposure.localWsUrl;
     backendEndpointUrl = exposure.endpointUrl;
     backendAdvertisedHost = exposure.advertisedHost;
 
@@ -526,29 +493,14 @@ function formatErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function getSafeExternalUrl(rawUrl: unknown): string | null {
-  if (typeof rawUrl !== "string" || rawUrl.length === 0) {
-    return null;
-  }
-
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(rawUrl);
-  } catch {
-    return null;
-  }
-
-  if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
-    return null;
-  }
-
-  return parsedUrl.toString();
-}
-
 function handleBackendReady(
   runEffect: DesktopEffectRunner,
   environment: DesktopEnvironmentShape,
-): Effect.Effect<void, never, DesktopState.DesktopState | ElectronWindow.ElectronWindow> {
+): Effect.Effect<
+  void,
+  never,
+  DesktopState.DesktopState | ElectronShell.ElectronShell | ElectronWindow.ElectronWindow
+> {
   return Effect.gen(function* () {
     const state = yield* DesktopState.DesktopState;
     const electronWindow = yield* ElectronWindow.ElectronWindow;
@@ -567,7 +519,11 @@ function handleBackendReady(
 function createBackendWindowIfReady(
   runEffect: DesktopEffectRunner,
   environment: DesktopEnvironmentShape,
-): Effect.Effect<void, never, DesktopState.DesktopState | ElectronWindow.ElectronWindow> {
+): Effect.Effect<
+  void,
+  never,
+  DesktopState.DesktopState | ElectronShell.ElectronShell | ElectronWindow.ElectronWindow
+> {
   return Effect.gen(function* () {
     const state = yield* DesktopState.DesktopState;
     const electronWindow = yield* ElectronWindow.ElectronWindow;
@@ -680,6 +636,7 @@ const desktopBackendEventsLayer = Layer.effect(
       | DesktopEnvironment
       | DesktopSshEnvironmentBridge
       | DesktopState.DesktopState
+      | ElectronShell.ElectronShell
       | ElectronWindow.ElectronWindow
     >();
     const runEffect = makeDesktopEffectRunner(context);
@@ -886,132 +843,6 @@ const desktopUpdateIpcActionsLayer = Layer.effect(
   }),
 );
 
-const desktopWindowIpcActionsLayer = Layer.effect(
-  DesktopWindowIpcActions,
-  Effect.gen(function* () {
-    const environment = yield* DesktopEnvironment;
-    const electronWindow = yield* ElectronWindow.ElectronWindow;
-    return DesktopWindowIpcActions.of({
-      getAppBranding: Effect.succeed(environment.branding),
-      getLocalEnvironmentBootstrap: Effect.sync(() => ({
-        label: "Local environment",
-        httpBaseUrl: getBackendHttpUrlHref(),
-        wsBaseUrl: backendWsUrl || null,
-        ...(backendBootstrapToken ? { bootstrapToken: backendBootstrapToken } : {}),
-      })),
-      pickFolder: (options) =>
-        Effect.gen(function* () {
-          const owner = Option.getOrUndefined(yield* electronWindow.focusedMainOrFirst);
-          const defaultPath = Option.getOrUndefined(
-            environment.resolvePickFolderDefaultPath(options),
-          );
-          const openDialogOptions: OpenDialogOptions = {
-            properties: ["openDirectory", "createDirectory"],
-            ...(defaultPath ? { defaultPath } : {}),
-          };
-          const result = yield* Effect.promise(() =>
-            owner
-              ? dialog.showOpenDialog(owner, openDialogOptions)
-              : dialog.showOpenDialog(openDialogOptions),
-          );
-          if (result.canceled) return null;
-          return result.filePaths[0] ?? null;
-        }),
-      confirm: (message) =>
-        Effect.gen(function* () {
-          const owner = Option.getOrUndefined(yield* electronWindow.focusedMainOrFirst);
-          return yield* Effect.promise(() => showDesktopConfirmDialog(message, owner ?? null));
-        }),
-      setTheme: (theme) =>
-        Effect.sync(() => {
-          nativeTheme.themeSource = theme;
-        }),
-      showContextMenu: ({ items, position }) =>
-        Effect.gen(function* () {
-          const window = Option.getOrUndefined(yield* electronWindow.focusedMainOrFirst);
-          if (!window) {
-            return null;
-          }
-
-          return yield* Effect.promise(
-            () =>
-              new Promise<string | null>((resolve) => {
-                const normalizedItems = normalizeContextMenuItems(items);
-                if (normalizedItems.length === 0) {
-                  resolve(null);
-                  return;
-                }
-
-                const popupPosition =
-                  position &&
-                  Number.isFinite(position.x) &&
-                  Number.isFinite(position.y) &&
-                  position.x >= 0 &&
-                  position.y >= 0
-                    ? {
-                        x: Math.floor(position.x),
-                        y: Math.floor(position.y),
-                      }
-                    : null;
-
-                const buildTemplate = (
-                  entries: readonly ContextMenuItem[],
-                ): MenuItemConstructorOptions[] => {
-                  const template: MenuItemConstructorOptions[] = [];
-                  let hasInsertedDestructiveSeparator = false;
-                  for (const item of entries) {
-                    if (
-                      item.destructive &&
-                      !hasInsertedDestructiveSeparator &&
-                      template.length > 0
-                    ) {
-                      template.push({ type: "separator" });
-                      hasInsertedDestructiveSeparator = true;
-                    }
-                    const itemOption: MenuItemConstructorOptions = {
-                      label: item.label,
-                      enabled: !item.disabled,
-                    };
-                    if (item.children && item.children.length > 0) {
-                      itemOption.submenu = buildTemplate(item.children);
-                    } else {
-                      itemOption.click = () => resolve(item.id);
-                    }
-                    if (item.destructive && (!item.children || item.children.length === 0)) {
-                      const destructiveIcon = getDestructiveMenuIcon();
-                      if (destructiveIcon) {
-                        itemOption.icon = destructiveIcon;
-                      }
-                    }
-                    template.push(itemOption);
-                  }
-                  return template;
-                };
-
-                const menu = Menu.buildFromTemplate(buildTemplate(normalizedItems));
-                menu.popup({
-                  window,
-                  ...popupPosition,
-                  callback: () => resolve(null),
-                });
-              }),
-          );
-        }),
-      openExternal: (rawUrl) => {
-        const externalUrl = getSafeExternalUrl(rawUrl);
-        if (!externalUrl) {
-          return Effect.succeed(false);
-        }
-
-        return Effect.promise(() => shell.openExternal(externalUrl)).pipe(
-          Effect.as(true),
-          Effect.catch(() => Effect.succeed(false)),
-        );
-      },
-    });
-  }),
-);
-
 const desktopSecretStorageLayer = Layer.succeed(
   DesktopSecretStorage.DesktopSecretStorage,
   DesktopSecretStorage.DesktopSecretStorage.of({
@@ -1034,6 +865,10 @@ const desktopBackendManagerLayer = DesktopBackendManagerLive.pipe(
   Layer.provide(desktopBackendDependenciesLayer),
 );
 
+const desktopBackendRuntimeLayer = DesktopLocalEnvironment.layer.pipe(
+  Layer.provideMerge(desktopBackendManagerLayer),
+);
+
 const desktopElectronWindowLayer = desktopSshEnvironmentBridgeLayer.pipe(
   Layer.provideMerge(ElectronWindow.layer),
 );
@@ -1046,39 +881,21 @@ const desktopRuntimeLayer = Layer.mergeAll(
   Layer.succeed(DesktopIpc.DesktopIpc, DesktopIpc.make(Electron.ipcMain)),
   desktopServerExposureIpcActionsLayer,
   desktopUpdateIpcActionsLayer,
-  desktopWindowIpcActionsLayer,
+  DesktopWindowIpcActionsLive.layer,
   desktopSecretStorageLayer,
 ).pipe(
   Layer.provideMerge(NodeServices.layer),
   Layer.provideMerge(NodeHttpClient.layerUndici),
   Layer.provideMerge(DesktopNetworkInterfacesLive),
-  Layer.provideMerge(desktopBackendManagerLayer),
+  Layer.provideMerge(desktopBackendRuntimeLayer),
   Layer.provideMerge(desktopElectronWindowLayer),
+  Layer.provideMerge(ElectronDialog.layer),
+  Layer.provideMerge(ElectronMenu.layer),
+  Layer.provideMerge(ElectronShell.layer),
+  Layer.provideMerge(ElectronTheme.layer),
   Layer.provideMerge(desktopEnvironmentLayer),
 );
 
-function getDestructiveMenuIcon(): Electron.NativeImage | undefined {
-  if (process.platform !== "darwin") return undefined;
-  if (destructiveMenuIconCache !== undefined) {
-    return destructiveMenuIconCache ?? undefined;
-  }
-  try {
-    const icon = nativeImage.createFromNamedImage("trash").resize({
-      width: 14,
-      height: 14,
-    });
-    if (icon.isEmpty()) {
-      destructiveMenuIconCache = null;
-      return undefined;
-    }
-    icon.setTemplateImage(true);
-    destructiveMenuIconCache = icon;
-    return icon;
-  } catch {
-    destructiveMenuIconCache = null;
-    return undefined;
-  }
-}
 let updatePollerScope: Option.Option<Scope.Closeable> = Option.none();
 let updateCheckInFlight = false;
 let updateDownloadInFlight = false;
@@ -2192,12 +2009,18 @@ function createWindow(
       menuTemplate.push({ type: "separator" });
     }
 
-    const externalUrl = getSafeExternalUrl(params.linkURL);
-    if (externalUrl) {
+    if (Option.isSome(ElectronShell.parseSafeExternalUrl(params.linkURL))) {
       menuTemplate.push(
         {
           label: "Copy Link",
-          click: () => clipboard.writeText(params.linkURL),
+          click: () => {
+            void runEffect(
+              Effect.gen(function* () {
+                const electronShell = yield* ElectronShell.ElectronShell;
+                yield* electronShell.copyText(params.linkURL);
+              }),
+            );
+          },
         },
         { type: "separator" },
       );
@@ -2222,9 +2045,13 @@ function createWindow(
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const externalUrl = getSafeExternalUrl(url);
-    if (externalUrl) {
-      void shell.openExternal(externalUrl);
+    if (Option.isSome(ElectronShell.parseSafeExternalUrl(url))) {
+      void runEffect(
+        Effect.gen(function* () {
+          const electronShell = yield* ElectronShell.ElectronShell;
+          yield* electronShell.openExternal(url);
+        }),
+      );
     }
     return { action: "deny" };
   });

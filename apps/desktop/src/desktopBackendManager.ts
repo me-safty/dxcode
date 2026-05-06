@@ -111,6 +111,7 @@ export interface DesktopBackendManagerShape {
   readonly start: Effect.Effect<void>;
   readonly stop: (options?: { readonly timeout?: Duration.Duration }) => Effect.Effect<void>;
   readonly shutdown: Effect.Effect<void>;
+  readonly currentConfig: Effect.Effect<Option.Option<DesktopBackendStartConfig>>;
   readonly snapshot: Effect.Effect<DesktopBackendSnapshot>;
 }
 
@@ -129,6 +130,7 @@ interface ActiveBackendRun {
 interface BackendManagerState {
   readonly desiredRunning: boolean;
   readonly ready: boolean;
+  readonly config: Option.Option<DesktopBackendStartConfig>;
   readonly active: Option.Option<ActiveBackendRun>;
   readonly restartAttempt: number;
   readonly restartFiber: Option.Option<Fiber.Fiber<void, never>>;
@@ -139,6 +141,7 @@ interface BackendManagerState {
 const initialState: BackendManagerState = {
   desiredRunning: false,
   ready: false,
+  config: Option.none(),
   active: Option.none(),
   restartAttempt: 0,
   restartFiber: Option.none(),
@@ -200,6 +203,7 @@ export const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(
       }),
     ),
   );
+  const currentConfig = Ref.get(state).pipe(Effect.map((current) => current.config));
 
   const cancelRestart = Effect.gen(function* () {
     const restartFiber = yield* Ref.modify(state, (current) => [
@@ -236,6 +240,7 @@ export const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(
           ...latest,
           desiredRunning: true,
           ready: false,
+          config: Option.some(config),
           restartFiber: Option.none(),
         }));
 
@@ -457,6 +462,7 @@ export const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(
     start,
     stop,
     shutdown,
+    currentConfig,
     snapshot,
   });
 });

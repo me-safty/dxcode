@@ -26,7 +26,7 @@ const make = Effect.gen(function* () {
   const mainWindowRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
 
   const liveMain = Ref.get(mainWindowRef).pipe(
-    Effect.map((window) => Option.filter(window, (value) => !value.isDestroyed())),
+    Effect.map(Option.filter((value) => !value.isDestroyed())),
   );
 
   const currentMainOrFirst = Effect.gen(function* () {
