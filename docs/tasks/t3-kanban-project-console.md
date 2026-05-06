@@ -477,19 +477,23 @@ template repo.
   - Connect Kanban to GitHub Projects through `gh`.
 - Dependencies: Phase 3.
 - Tasks:
-  - [ ] Add `gh auth` readiness check.
-  - [ ] Read organization Projects.
-  - [ ] Read selected Project fields and options.
-  - [ ] Read project items, linked issues, linked PRs, and repo names.
-  - [ ] Map GitHub Project items into Kanban tasks.
-  - [ ] Update GitHub Project status after confirmation.
-  - [ ] Post issue comments for status moves.
+  - [x] Add `gh auth` readiness check.
+  - [x] Read organization Projects.
+  - [x] Read selected Project fields and options.
+  - [x] Read project items, linked issues, linked PRs, and repo names.
+  - [x] Map GitHub Project items into Kanban tasks.
+  - [x] Update GitHub Project status after confirmation.
+  - [x] Post issue comments for status moves.
 - Validation:
-  - Synthetic `gh` fixture tests.
-  - Manual read-only smoke against a test Project.
-  - Manual status update smoke against a non-production test item.
+  - Synthetic `gh` fixture tests: PASS.
+  - Manual read-only smoke against GitHub Projects: PASS after refreshing `gh`
+    auth with `read:project`.
+  - Manual status update smoke against a non-production test item: NOT RUN;
+    requires explicit approval before writing GitHub Project state.
 - Exit criteria:
-  - GitHub Projects is live Kanban task state.
+  - GitHub Projects provider can read live project state and exposes
+    confirmation-gated status/comment writes. End-to-end UI wiring remains a
+    follow-up integration step.
 
 ### Phase 5: Agent Workflow Launchers
 
@@ -935,3 +939,35 @@ Append one entry per implementation pass.
   - Phase 3 remains mock-only. No GitHub Project state, git index, CLI, provider, or `docs/product` writes were performed.
   - GitHub Projects remains the live status board, but no Project state writes were made because that requires explicit user approval.
   - Well-Architected tradeoff: the mock provider returns in-memory static snapshots for speed and deterministic tests; real provider retries, redaction, persistence, and rate-limit handling remain future-phase work.
+
+### 2026-05-06 18:20 - phase 4 GitHub Projects provider
+
+- Summary:
+  - Added a server-side GitHub Projects provider backed by the existing `GitHubCli` service and `gh project`/`gh issue` commands.
+  - Implemented `gh auth` readiness, Project list reads, Project field/option reads, Project item reads, issue-to-Kanban task mapping, confirmation-gated status updates, and confirmation-gated issue comments for status moves.
+  - Tightened `KanbanConsoleTask.updated` to `IsoDateTime` so live GitHub `updatedAt` values do not drift from the shared contract.
+- Files changed:
+  - `apps/server/src/kanban/GitHubProjectsProvider.ts`
+  - `apps/server/src/kanban/GitHubProjectsProvider.test.ts`
+  - `packages/contracts/src/kanbanConsole.ts`
+  - `packages/contracts/src/kanbanConsole.test.ts`
+  - `apps/web/src/kanbanConsoleMock.ts`
+  - `docs/tasks/t3-kanban-project-console.md`
+- Validation run:
+  - Command: `bun run --cwd apps/server test -- GitHubProjectsProvider`
+  - Result: PASS
+  - Command: `bun run --cwd apps/server typecheck`
+  - Result: PASS
+  - Command: `bun run --cwd packages/contracts test -- kanbanConsole`
+  - Result: PASS
+  - Command: `bun run --cwd apps/web test -- kanbanConsoleMock`
+  - Result: PASS
+  - Command: `gh auth status`
+  - Result: PASS after `gh auth refresh --hostname github.com -s read:project`
+  - Command: `gh project list --owner MohAnghabo --limit 20 --format json`
+  - Result: PASS
+- Notes/deviations:
+  - Manual GitHub Project write smoke was not run. GitHub Projects is the live status board, and status writes require explicit approval plus a non-production Project item.
+  - The provider currently maps available GitHub Project item fields into the Phase 3 Kanban contract; full end-to-end UI/RPC wiring remains a follow-up integration step.
+  - PDPL: synthetic tests avoid real GitHub item text, comments, tokens, raw logs, or personal data. Live smoke output was read-only.
+  - Well-Architected tradeoff: writes are implemented behind explicit confirmation and typed inputs, but persistence, backoff/rate-limit handling, redacted audit records, and duplicate comment suppression remain future hardening.
