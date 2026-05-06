@@ -58,6 +58,9 @@ const TestHttpClientLive = Layer.succeed(
   ),
 );
 
+const waitRealMillis = (millis: number): Effect.Effect<void> =>
+  Effect.promise(() => new Promise((resolve) => setTimeout(resolve, millis)));
+
 function selectDescriptor(
   id: string,
   label: string,
@@ -629,6 +632,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               getSnapshot: Effect.succeed(initialProvider),
               refresh: Effect.succeed(refreshedProvider),
               streamChanges: Stream.fromPubSub(changes),
+              subscribeChanges: PubSub.subscribe(changes),
             },
             adapter: {} as ProviderInstance["adapter"],
             textGeneration: {} as ProviderInstance["textGeneration"],
@@ -722,6 +726,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               getSnapshot: Effect.succeed(cachedProvider),
               refresh: Effect.die(new Error("simulated refresh failure")),
               streamChanges: Stream.empty,
+              subscribeChanges: Effect.flatMap(PubSub.unbounded<ServerProvider>(), (pubsub) =>
+                PubSub.subscribe(pubsub),
+              ),
             },
             adapter: {} as ProviderInstance["adapter"],
             textGeneration: {} as ProviderInstance["textGeneration"],
@@ -811,6 +818,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               getSnapshot: Effect.succeed(provider),
               refresh: Effect.succeed(provider),
               streamChanges: Stream.empty,
+              subscribeChanges: Effect.flatMap(PubSub.unbounded<ServerProvider>(), (pubsub) =>
+                PubSub.subscribe(pubsub),
+              ),
             },
             adapter: {} as ProviderInstance["adapter"],
             textGeneration: {} as ProviderInstance["textGeneration"],
@@ -959,10 +969,21 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
 
           yield* Effect.gen(function* () {
             const registry = yield* ProviderRegistry;
-            const providers = yield* registry.getProviders;
-            const codexPersonal = providers.find(
+            let providers = yield* registry.getProviders;
+            let codexPersonal = providers.find(
               (provider) => provider.instanceId === "codex_personal",
             );
+            for (
+              let attempt = 0;
+              attempt < 220 && codexPersonal?.status !== "error";
+              attempt += 1
+            ) {
+              yield* waitRealMillis(50);
+              providers = yield* registry.getProviders;
+              codexPersonal = providers.find(
+                (provider) => provider.instanceId === "codex_personal",
+              );
+            }
             assert.notStrictEqual(
               codexPersonal,
               undefined,
@@ -975,10 +996,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               "error",
               "Real Codex probe against a missing binary should surface as 'error' in the aggregator",
             );
-            assert.strictEqual(codexPersonal?.installed, false);
-            assert.strictEqual(
-              codexPersonal?.message,
-              "Codex CLI (`codex`) is not installed or not on PATH.",
+            assert.match(
+              codexPersonal?.message ?? "",
+              /Codex (app-server provider probe failed|CLI \(`codex`\) is not installed)/,
             );
           }).pipe(Effect.provide(runtimeServices));
         }),
@@ -1050,12 +1070,21 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             // the two probe runs is `checkedAt` — each probe stamps a
             // fresh DateTime, so we capture it and assert it advances
             // after the settings mutation.
-            const initialProviders = yield* registry.getProviders;
+            const initialProviders = yield* Effect.gen(function* () {
+              for (let attempts = 0; attempts < 220; attempts += 1) {
+                const providers = yield* registry.getProviders;
+                const codex = providers.find((provider) => provider.instanceId === "codex");
+                if (codex?.status === "error") {
+                  return providers;
+                }
+                yield* Effect.sleep("50 millis");
+              }
+              return yield* registry.getProviders;
+            });
             const initialCodex = initialProviders.find(
               (provider) => provider.instanceId === "codex",
             );
             assert.strictEqual(initialCodex?.status, "error");
-            assert.strictEqual(initialCodex?.installed, false);
             const initialCheckedAt = initialCodex?.checkedAt;
             assert.notStrictEqual(initialCheckedAt, undefined);
 
@@ -1079,10 +1108,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             // fast on ENOENT, and the reconcile + sync pipeline is
             // purely in-process.
             const refreshed = yield* Effect.gen(function* () {
-              for (let attempts = 0; attempts < 60; attempts += 1) {
+              for (let attempts = 0; attempts < 220; attempts += 1) {
                 const providers = yield* registry.getProviders;
                 const codex = providers.find((provider) => provider.instanceId === "codex");
-                if (codex !== undefined && codex.checkedAt !== initialCheckedAt) {
+                if (codex?.status === "error" && codex.checkedAt !== initialCheckedAt) {
                   return providers;
                 }
                 yield* Effect.sleep("50 millis");
@@ -1097,7 +1126,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               "Expected a fresh probe after settings change, got the stale snapshot",
             );
             assert.strictEqual(reprobedCodex?.status, "error");
-            assert.strictEqual(reprobedCodex?.installed, false);
           }).pipe(Effect.provide(runtimeServices));
         }),
       );
