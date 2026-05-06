@@ -20,4 +20,3 @@ export function isExplicitRelativePath(value: string): boolean {
     value.startsWith("..\\")
   );
 }
-// PR tree render test marker.

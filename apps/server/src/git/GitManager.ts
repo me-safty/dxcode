@@ -1784,4 +1784,3 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
 });
 
 export const layer = Layer.effect(GitManager, makeGitManager());
-// PR tree render test marker.

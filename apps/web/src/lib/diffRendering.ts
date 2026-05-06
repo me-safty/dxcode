@@ -37,4 +37,3 @@ export function buildPatchCacheKey(patch: string, scope = "diff-panel"): string 
   ).toString(36);
   return `${scope}:${normalizedPatch.length}:${primary}:${secondary}`;
 }
-// PR tree render test marker.

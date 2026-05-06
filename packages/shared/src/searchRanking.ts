@@ -190,4 +190,3 @@ export function insertRankedSearchResult<T>(
   rankedEntries.splice(insertionIndex, 0, candidate);
   rankedEntries.pop();
 }
-// PR tree render test marker.

@@ -37,4 +37,3 @@ export const newThreadId = (): ThreadId => ThreadId.make(randomUUID());
 export const newDraftId = (): DraftId => DraftId.make(randomUUID());
 
 export const newMessageId = (): MessageId => MessageId.make(randomUUID());
-// PR tree render test marker.

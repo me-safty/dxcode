@@ -107,4 +107,3 @@ export function parseAttachmentIdFromRelativePath(relativePath: string): string 
   const id = normalized.slice(0, extensionIndex);
   return id.length > 0 && !id.includes(".") ? id : null;
 }
-// PR tree render test marker.

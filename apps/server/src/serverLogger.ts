@@ -11,4 +11,3 @@ export const ServerLoggerLive = Effect.gen(function* () {
 
   return Layer.mergeAll(loggerLayer, minimumLogLevelLayer);
 }).pipe(Layer.unwrap);
-// PR tree render test marker.

@@ -2,4 +2,3 @@ export * from "./advertisedEndpoint.ts";
 export * from "./knownEnvironment.ts";
 export * from "./scoped.ts";
 export * from "./sourceControlDiscoveryState.ts";
-// PR tree render test marker.

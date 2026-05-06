@@ -312,4 +312,3 @@ export const make = Effect.fn("makeGitWorkflowService")(function* () {
 });
 
 export const layer = Layer.effect(GitWorkflowService, make());
-// PR tree render test marker.

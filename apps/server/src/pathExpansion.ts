@@ -21,4 +21,3 @@ export function expandHomePath(value: string): string {
   }
   return value;
 }
-// PR tree render test marker.

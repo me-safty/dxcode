@@ -255,4 +255,3 @@ export function deriveToolActivityPresentation(
     summary: title ?? fallbackSummary,
   };
 }
-// PR tree render test marker.

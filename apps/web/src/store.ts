@@ -1984,4 +1984,3 @@ export const useStore = create<AppStore>((set) => ({
   setThreadBranch: (threadRef, branch, worktreePath) =>
     set((state) => setThreadBranch(state, threadRef, branch, worktreePath)),
 }));
-// PR tree render test marker.

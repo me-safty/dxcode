@@ -285,4 +285,3 @@ function markGitStatusPending(targetKey: string): void {
 
   appAtomRegistry.set(atom, next);
 }
-// PR tree render test marker.
