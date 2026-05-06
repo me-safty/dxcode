@@ -361,8 +361,9 @@ function normalizeClaudeTokenUsage(
     typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
       ? contextWindow
       : undefined;
+  const hasDirectContextUsedTokens = directUsedTokens !== undefined && directUsedTokens > 0;
   const usedTokens = (() => {
-    if (directUsedTokens !== undefined && directUsedTokens > 0) {
+    if (hasDirectContextUsedTokens) {
       return maxTokens !== undefined ? Math.min(directUsedTokens, maxTokens) : directUsedTokens;
     }
     return totalProcessedTokens ?? 0;
@@ -376,7 +377,7 @@ function normalizeClaudeTokenUsage(
       : {}),
     ...(inputTokens > 0 ? { inputTokens } : {}),
     ...(outputTokens > 0 ? { outputTokens } : {}),
-    ...(maxTokens !== undefined && directUsedTokens !== undefined ? { maxTokens } : {}),
+    ...(maxTokens !== undefined && hasDirectContextUsedTokens ? { maxTokens } : {}),
     ...(typeof usage.tool_uses === "number" && Number.isFinite(usage.tool_uses)
       ? { toolUses: usage.tool_uses }
       : {}),
