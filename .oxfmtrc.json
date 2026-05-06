@@ -11,7 +11,11 @@
     "**/routeTree.gen.ts",
     "apps/web/public/mockServiceWorker.js",
     "apps/web/src/lib/vendor/qrcodegen.ts",
-    "*.icon/**"
+    "*.icon/**",
+    ".local",
+    ".codex",
+    ".github/workflows/ai-fix-executor-claude.yml",
+    ".github/ai-loop.yml"
   ],
   "sortPackageJson": {},
   "overrides": [
