@@ -33,7 +33,12 @@ import {
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
 import { compareCliVersions } from "../cliVersion.ts";
-import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
+import { makeClaudeEnvironment, resolveClaudeHomePath } from "../Drivers/ClaudeHome.ts";
+import {
+  discoverClaudeSkills,
+  mergeProviderSkills,
+  mergeSkillsIntoSlashCommands,
+} from "../SkillDiscovery.ts";
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
@@ -516,6 +521,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     claudeSettings: ClaudeSettings,
   ) => Effect.Effect<ClaudeCapabilitiesProbe | undefined>,
   environment: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -622,6 +628,10 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     : undefined;
   const slashCommands = capabilities?.slashCommands ?? [];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
+  const claudeHome = yield* resolveClaudeHomePath(claudeSettings);
+  const discoveredSkills = yield* discoverClaudeSkills({ cwd, homeDir: claudeHome });
+  const skills = mergeProviderSkills([], discoveredSkills);
+  const mergedSlashCommands = mergeSkillsIntoSlashCommands(dedupedSlashCommands, skills);
 
   if (!capabilities) {
     return buildServerProvider({
@@ -629,7 +639,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       enabled: claudeSettings.enabled,
       checkedAt,
       models,
-      slashCommands: dedupedSlashCommands,
+      slashCommands: mergedSlashCommands,
+      skills,
       probe: {
         installed: true,
         version: parsedVersion,
@@ -649,7 +660,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     enabled: claudeSettings.enabled,
     checkedAt,
     models,
-    slashCommands: dedupedSlashCommands,
+    slashCommands: mergedSlashCommands,
+    skills,
     probe: {
       installed: true,
       version: parsedVersion,

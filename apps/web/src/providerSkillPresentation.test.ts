@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatProviderSkillDisplayName,
+  formatProviderSkillInvocation,
   formatProviderSkillInstallSource,
 } from "./providerSkillPresentation";
 
@@ -53,5 +54,17 @@ describe("formatProviderSkillInstallSource", () => {
         scope: "project",
       }),
     ).toBe("Project");
+  });
+});
+
+describe("formatProviderSkillInvocation", () => {
+  it("uses dollar invocation by default", () => {
+    expect(formatProviderSkillInvocation({ name: "review-follow-up" })).toBe("$review-follow-up");
+  });
+
+  it("uses provider-specific invocation prefixes", () => {
+    expect(
+      formatProviderSkillInvocation({ name: "summarize-changes", invocationPrefix: "/" }),
+    ).toBe("/summarize-changes");
   });
 });

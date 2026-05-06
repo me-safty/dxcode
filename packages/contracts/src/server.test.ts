@@ -71,4 +71,36 @@ describe("ServerProvider", () => {
 
     expect(parsed.continuation?.groupKey).toBe("codex:home:/Users/julius/.codex");
   });
+
+  it("decodes skill invocation prefixes while preserving legacy payloads", () => {
+    const parsed = decodeServerProvider({
+      instanceId: "claudeAgent",
+      driver: "claudeAgent",
+      enabled: true,
+      installed: true,
+      version: "1.0.0",
+      status: "ready",
+      auth: {
+        status: "authenticated",
+      },
+      checkedAt: "2026-04-10T00:00:00.000Z",
+      models: [],
+      skills: [
+        {
+          name: "review",
+          path: "/workspace/.claude/skills/review/SKILL.md",
+          enabled: true,
+          invocationPrefix: "/",
+        },
+        {
+          name: "legacy",
+          path: "/workspace/.agents/skills/legacy/SKILL.md",
+          enabled: true,
+        },
+      ],
+    });
+
+    expect(parsed.skills[0]?.invocationPrefix).toBe("/");
+    expect(parsed.skills[1]?.invocationPrefix).toBeUndefined();
+  });
 });

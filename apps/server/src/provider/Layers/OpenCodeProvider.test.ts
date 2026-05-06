@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
@@ -198,6 +201,48 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
       assert.equal(runtimeMock.state.closeCalls, 1);
     }),
   );
+
+  it.effect("includes discovered OpenCode-compatible skills", () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-opencode-skills-"));
+    const home = NodePath.join(root, "home");
+    const workspace = NodePath.join(root, "workspace", "apps", "web");
+    const skillDir = NodePath.join(root, "workspace", ".opencode", "skills", "git-release");
+    NodeFS.mkdirSync(NodePath.join(root, "workspace", ".git"), { recursive: true });
+    NodeFS.mkdirSync(workspace, { recursive: true });
+    NodeFS.mkdirSync(skillDir, { recursive: true });
+    NodeFS.writeFileSync(
+      NodePath.join(skillDir, "SKILL.md"),
+      ["---", "name: git-release", "description: Prepare a release.", "---"].join("\n"),
+      "utf8",
+    );
+    runtimeMock.state.inventory = {
+      providerList: { connected: ["openai"], all: [], default: {} },
+      agents: [],
+    };
+
+    return Effect.gen(function* () {
+      const snapshot = yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), workspace, {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+      });
+
+      assert.deepStrictEqual(snapshot.skills, [
+        {
+          name: "git-release",
+          description: "Prepare a release.",
+          shortDescription: "Prepare a release.",
+          displayName: "git-release",
+          path: NodePath.resolve(NodePath.join(skillDir, "SKILL.md")),
+          scope: "project",
+          enabled: true,
+          invocationPrefix: "$",
+        },
+      ]);
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(root, { force: true, recursive: true }))),
+    );
+  });
 });
 
 it.layer(testLayer)("checkOpenCodeProviderStatus with configured server URL", (it) => {

@@ -474,6 +474,7 @@ function skillSignature(skills: ReadonlyArray<ServerProviderSkill>): string {
         skill.path,
         skill.scope ?? "",
         skill.enabled ? "1" : "0",
+        skill.invocationPrefix ?? "$",
       ].join("\u001f"),
     )
     .join("\u001e");

@@ -50,3 +50,9 @@ export function formatProviderSkillInstallSource(
 
   return null;
 }
+
+export function formatProviderSkillInvocation(
+  skill: Pick<ServerProviderSkill, "name" | "invocationPrefix">,
+): string {
+  return `${skill.invocationPrefix ?? "$"}${skill.name}`;
+}

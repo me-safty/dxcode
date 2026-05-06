@@ -1,4 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
 import { describe, it, assert, live } from "@effect/vitest";
 import { Effect, Exit, Layer, PubSub, Ref, Schema, Scope, Sink, Stream } from "effect";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -39,7 +43,9 @@ import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.t
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 
-const defaultClaudeSettings: ClaudeSettings = Schema.decodeSync(ClaudeSettings)({});
+const defaultClaudeSettings: ClaudeSettings = Schema.decodeSync(ClaudeSettings)({
+  homePath: NodePath.join(NodeOS.tmpdir(), `t3code-claude-empty-home-${process.pid}`),
+});
 const defaultCodexSettings: CodexSettings = Schema.decodeSync(CodexSettings)({});
 const disabledCodexSettings: CodexSettings = Schema.decodeSync(CodexSettings)({
   enabled: false,
@@ -884,17 +890,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
         }),
       );
 
-      // This test intentionally avoids `mockCommandSpawnerLayer` so the real
-      // `probeCodexAppServerProvider` path runs — including the full
-      // `codex app-server` RPC handshake via `CodexClient.layerCommand`.
-      // We point `binaryPath` at a name that cannot exist on any machine so
-      // the real `ChildProcessSpawner` deterministically returns ENOENT; the
-      // probe wraps that as `CodexAppServerSpawnError` and
-      // `checkCodexProviderStatus` turns it into the user-visible "not
-      // installed" error snapshot. If the aggregator's `syncLiveSources`
-      // breaks — the `codex_personal`-never-probes bug we are guarding
-      // against — that snapshot never lands in `getProviders` and the
-      // assertions below fail.
+      // avoids the spawner mock so the real codex provider availability path runs
+      // the missing binary must land in the aggregated not-installed snapshot
       it.effect("propagates real Codex probe failures to the aggregator at boot", () =>
         Effect.gen(function* () {
           const missingBinary = `t3code_codex_missing_${process.pid}_${Date.now()}`;
@@ -912,15 +909,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
                   cursor: { enabled: false },
                   opencode: { enabled: false },
                 },
-                // `providerInstances` keys are branded `ProviderInstanceId`;
-                // the branded index signature rejects plain string literals
-                // at the TS level even though the runtime schema happily
-                // accepts + decodes them. Cast the patch to `unknown` so
-                // the `Schema.decodeSync` below does the real validation.
                 providerInstances: {
-                  // Matches the shape the user had in `.t3/dev/settings.json`
-                  // when the bug was reported: a custom enabled Codex instance
-                  // pointing at a binary the server has to actually spawn.
+                  // matches the reported custom enabled codex instance shape
+                  // with a configured binary that cannot be resolved
                   codex_personal: {
                     driver: "codex",
                     displayName: "Codex Personal",
@@ -947,11 +938,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             Layer.provideMerge(TestHttpClientLive),
             Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
             Layer.provideMerge(OpenCodeRuntimeLive),
-            // NO spawner mock — `ChildProcessSpawner` is supplied by the
-            // outer `NodeServices.layer` on `it.layer(...)` and will
-            // genuinely spawn a subprocess. The missing-binary ENOENT is
-            // what exercises the same failure mode as a misconfigured
-            // production `binaryPath`.
           );
           const runtimeServices = yield* Layer.build(providerRegistryLayer).pipe(
             Scope.provide(scope),
@@ -1044,12 +1030,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
 
           yield* Effect.gen(function* () {
             const registry = yield* ProviderRegistry;
-            // Boot-time probe: the default codex instance is enabled with
-            // `firstMissing`, so the real spawner yields ENOENT and the
-            // snapshot should be `status: "error"`. What *distinguishes*
-            // the two probe runs is `checkedAt` — each probe stamps a
-            // fresh DateTime, so we capture it and assert it advances
-            // after the settings mutation.
+            // boot-time probe: the default codex instance is enabled with
+            // `firstMissing`, so the snapshot should be `status: "error"`
+            // `checkedAt` distinguishes the two probe runs
             const initialProviders = yield* registry.getProviders;
             const initialCodex = initialProviders.find(
               (provider) => provider.instanceId === "codex",
@@ -1073,11 +1056,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               },
             });
 
-            // Poll with real timers (via `it.live`) until `checkedAt`
-            // advances or we hit a generous 3-second ceiling. Anything
-            // slower than that is a regression — the real probe fails
-            // fast on ENOENT, and the reconcile + sync pipeline is
-            // purely in-process.
+            // poll with real timers until `checkedAt` advances
             const refreshed = yield* Effect.gen(function* () {
               for (let attempts = 0; attempts < 60; attempts += 1) {
                 const providers = yield* registry.getProviders;
@@ -1458,6 +1437,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
 
       it.effect("runs Claude status probes with the configured Claude HOME", () => {
         const claudeHome = "/tmp/t3code-claude-home";
+        const resolvedClaudeHome = NodePath.resolve(claudeHome);
         const recorded = recordingMockSpawnerLayer((args) => {
           const joined = args.join(" ");
           if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
@@ -1481,7 +1461,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           assert.strictEqual(status.status, "ready");
           assert.deepStrictEqual(
             recorded.commands.map((command) => command.env?.HOME),
-            [claudeHome],
+            [resolvedClaudeHome],
           );
         }).pipe(Effect.provide(recorded.layer));
       });
@@ -1568,6 +1548,57 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           ),
         ),
       );
+
+      it.effect("includes discovered Claude skills and slash command entries", () => {
+        const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-claude-provider-"));
+        const home = NodePath.join(root, "home");
+        const workspace = NodePath.join(root, "workspace", "package");
+        const skillDir = NodePath.join(root, "workspace", ".claude", "skills", "review-diff");
+        NodeFS.mkdirSync(NodePath.join(root, "workspace", ".git"), { recursive: true });
+        NodeFS.mkdirSync(workspace, { recursive: true });
+        NodeFS.mkdirSync(skillDir, { recursive: true });
+        NodeFS.writeFileSync(
+          NodePath.join(skillDir, "SKILL.md"),
+          ["---", "name: review-diff", "description: Review the current diff.", "---"].join("\n"),
+          "utf8",
+        );
+
+        return Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            { ...defaultClaudeSettings, homePath: home },
+            claudeCapabilities({
+              slashCommands: [{ name: "review-diff", description: "Native command wins" }],
+            }),
+            process.env,
+            workspace,
+          );
+
+          assert.deepStrictEqual(status.skills, [
+            {
+              name: "review-diff",
+              description: "Review the current diff.",
+              shortDescription: "Review the current diff.",
+              displayName: "review-diff",
+              path: NodePath.resolve(NodePath.join(skillDir, "SKILL.md")),
+              scope: "project",
+              enabled: true,
+              invocationPrefix: "/",
+            },
+          ]);
+          assert.deepStrictEqual(status.slashCommands, [
+            { name: "review-diff", description: "Native command wins" },
+          ]);
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+          Effect.ensuring(Effect.sync(() => NodeFS.rmSync(root, { force: true, recursive: true }))),
+        );
+      });
 
       it.effect("returns an api key label for claude api key auth", () =>
         Effect.gen(function* () {

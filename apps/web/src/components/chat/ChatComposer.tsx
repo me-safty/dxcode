@@ -109,7 +109,10 @@ import type { SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
-import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
+import {
+  formatProviderSkillDisplayName,
+  formatProviderSkillInvocation,
+} from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 
@@ -146,6 +149,23 @@ const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-slot="combobox-popup"]',
   '[data-slot="autocomplete-popup"]',
 ].join(",");
+
+function makeComposerSkillItem(
+  provider: ProviderDriverKind,
+  skill: ServerProvider["skills"][number],
+): Extract<ComposerCommandItem, { type: "skill" }> {
+  return {
+    id: `skill:${provider}:${skill.name}`,
+    type: "skill",
+    provider,
+    skill,
+    label: formatProviderSkillDisplayName(skill),
+    description:
+      skill.shortDescription ??
+      skill.description ??
+      (skill.scope ? `${skill.scope} skill` : "Run provider skill"),
+  };
+}
 
 const extendReplacementRangeForTrailingSpace = (
   text: string,
@@ -888,38 +908,37 @@ export const ChatComposer = memo(
             description: "Switch this thread back to normal build mode",
           },
         ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
-        const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
-          (command) => ({
+        const providerSkills = selectedProviderStatus?.skills ?? [];
+        const providerSkillNames = new Set(
+          providerSkills
+            .filter((skill) => skill.enabled)
+            .map((skill) => skill.name.trim().toLowerCase()),
+        );
+        const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? [])
+          .filter((command) => !providerSkillNames.has(command.name.trim().toLowerCase()))
+          .map((command) => ({
             id: `provider-slash-command:${selectedProvider}:${command.name}`,
             type: "provider-slash-command" as const,
             provider: selectedProvider,
             command,
             label: `/${command.name}`,
             description: command.description ?? command.input?.hint ?? "Run provider command",
-          }),
-        );
+          }));
         const query = composerTrigger.query.trim().toLowerCase();
         const slashCommandItems = [...builtInSlashCommandItems, ...providerSlashCommandItems];
-        if (!query) {
-          return slashCommandItems;
-        }
-        return searchSlashCommandItems(slashCommandItems, query);
+        const skillItems = searchProviderSkills(providerSkills, composerTrigger.query).map(
+          (skill) => makeComposerSkillItem(selectedProvider, skill),
+        );
+        return [
+          ...(!query ? slashCommandItems : searchSlashCommandItems(slashCommandItems, query)),
+          ...skillItems,
+        ];
       }
       if (composerTrigger.kind === "skill") {
         return searchProviderSkills(
           selectedProviderStatus?.skills ?? [],
           composerTrigger.query,
-        ).map((skill) => ({
-          id: `skill:${selectedProvider}:${skill.name}`,
-          type: "skill" as const,
-          provider: selectedProvider,
-          skill,
-          label: formatProviderSkillDisplayName(skill),
-          description:
-            skill.shortDescription ??
-            skill.description ??
-            (skill.scope ? `${skill.scope} skill` : "Run provider skill"),
-        }));
+        ).map((skill) => makeComposerSkillItem(selectedProvider, skill));
       }
       return [];
     }, [composerTrigger, selectedProvider, selectedProviderStatus, workspaceEntries]);
@@ -997,7 +1016,7 @@ export const ChatComposer = memo(
       }
       return composerTriggerKind === "path"
         ? "No matching files or folders."
-        : "No matching command.";
+        : "No matching command or skill.";
     }, [composerTriggerKind]);
 
     // ------------------------------------------------------------------
@@ -1540,7 +1559,7 @@ export const ChatComposer = memo(
           return;
         }
         if (item.type === "skill") {
-          const replacement = `$${item.skill.name} `;
+          const replacement = `${formatProviderSkillInvocation(item.skill)} `;
           const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
             snapshot.value,
             trigger.rangeEnd,

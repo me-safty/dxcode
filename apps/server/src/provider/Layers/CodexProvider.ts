@@ -15,6 +15,8 @@ import type {
 import { ServerSettingsError } from "@t3tools/contracts";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
+import { isCommandAvailable } from "@t3tools/shared/shell";
+
 import { buildServerProvider, type ServerProviderDraft } from "../providerSnapshot.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { scopedSafeTeardown } from "./scopedSafeTeardown.ts";
@@ -168,7 +170,18 @@ function appendCustomCodexModels(
   return customEntries.length === 0 ? models : [...models, ...customEntries];
 }
 
-function parseCodexSkillsListResponse(
+function normalizeSkillPathSeparators(pathValue: string): string {
+  return pathValue.replaceAll("\\", "/");
+}
+
+function isCodexAppBackedSkill(skill: CodexSchema.V2SkillsListResponse__SkillMetadata): boolean {
+  const normalizedPath = normalizeSkillPathSeparators(skill.path);
+  return (
+    normalizedPath.includes("/.codex/plugins/") || normalizedPath.includes("/.agents/plugins/")
+  );
+}
+
+export function parseCodexSkillsListResponse(
   response: CodexSchema.V2SkillsListResponse,
   cwd: string,
 ): ReadonlyArray<ServerProviderSkill> {
@@ -177,31 +190,33 @@ function parseCodexSkillsListResponse(
     ? matchingEntry.skills
     : response.data.flatMap((entry) => entry.skills);
 
-  return skills.map((skill) => {
-    const shortDescription =
-      skill.shortDescription ?? skill.interface?.shortDescription ?? undefined;
+  return skills
+    .filter((skill) => !isCodexAppBackedSkill(skill))
+    .map((skill) => {
+      const shortDescription =
+        skill.shortDescription ?? skill.interface?.shortDescription ?? undefined;
 
-    const parsedSkill: Types.Mutable<ServerProviderSkill> = {
-      name: skill.name,
-      path: skill.path,
-      enabled: skill.enabled,
-    };
+      const parsedSkill: Types.Mutable<ServerProviderSkill> = {
+        name: skill.name,
+        path: skill.path,
+        enabled: skill.enabled,
+      };
 
-    if (skill.description) {
-      parsedSkill.description = skill.description;
-    }
-    if (skill.scope) {
-      parsedSkill.scope = skill.scope;
-    }
-    if (skill.interface?.displayName) {
-      parsedSkill.displayName = skill.interface.displayName;
-    }
-    if (shortDescription) {
-      parsedSkill.shortDescription = shortDescription;
-    }
+      if (skill.description) {
+        parsedSkill.description = skill.description;
+      }
+      if (skill.scope) {
+        parsedSkill.scope = skill.scope;
+      }
+      if (skill.interface?.displayName) {
+        parsedSkill.displayName = skill.interface.displayName;
+      }
+      if (shortDescription) {
+        parsedSkill.shortDescription = shortDescription;
+      }
 
-    return parsedSkill;
-  });
+      return parsedSkill;
+    });
 }
 
 const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
@@ -424,6 +439,26 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
         status: "warning",
         auth: { status: "unknown" },
         message: "Codex is disabled in T3 Code settings.",
+      },
+    });
+  }
+
+  if (
+    probe === probeCodexAppServerProvider &&
+    !isCommandAvailable(codexSettings.binaryPath, { env: environment })
+  ) {
+    return buildServerProvider({
+      presentation: CODEX_PRESENTATION,
+      enabled: codexSettings.enabled,
+      checkedAt,
+      models: emptyModels,
+      skills: [],
+      probe: {
+        installed: false,
+        version: null,
+        status: "error",
+        auth: { status: "unknown" },
+        message: "Codex CLI (`codex`) is not installed or not on PATH.",
       },
     });
   }

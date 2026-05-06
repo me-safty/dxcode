@@ -5,6 +5,7 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { Cause, Data, Effect } from "effect";
+import * as NodeOS from "node:os";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
 import {
@@ -20,6 +21,7 @@ import {
   openCodeRuntimeErrorDetail,
   type OpenCodeInventory,
 } from "../opencodeRuntime.ts";
+import { discoverOpenCodeSkills, mergeProviderSkills } from "../SkillDiscovery.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
@@ -46,6 +48,10 @@ function normalizeProbeMessage(message: string): string | undefined {
     return undefined;
   }
   return trimmed;
+}
+
+function homeDirFromEnvironment(environment: NodeJS.ProcessEnv): string {
+  return environment.HOME ?? environment.USERPROFILE ?? NodeOS.homedir();
 }
 
 function normalizedErrorMessage(cause: unknown): string | undefined {
@@ -445,12 +451,18 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     customModels,
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   );
+  const discoveredSkills = yield* discoverOpenCodeSkills({
+    cwd,
+    homeDir: homeDirFromEnvironment(environment),
+  });
+  const skills = mergeProviderSkills([], discoveredSkills);
   const connectedCount = inventoryExit.value.providerList.connected.length;
   return buildServerProvider({
     presentation: OPENCODE_PRESENTATION,
     enabled: true,
     checkedAt,
     models,
+    skills,
     probe: {
       installed: true,
       version,

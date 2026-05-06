@@ -87,6 +87,7 @@ export const ServerProviderSkill = Schema.Struct({
   enabled: Schema.Boolean,
   displayName: Schema.optional(TrimmedNonEmptyString),
   shortDescription: Schema.optional(TrimmedNonEmptyString),
+  invocationPrefix: Schema.optional(Schema.Literals(["$", "/"])),
 });
 export type ServerProviderSkill = typeof ServerProviderSkill.Type;
 
