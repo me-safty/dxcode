@@ -150,7 +150,7 @@ export interface DesktopSshBridgeWindow {
 }
 
 export interface DesktopSshEnvironmentBridgeOptions {
-  readonly getMainWindow: () => DesktopSshBridgeWindow | null;
+  readonly getMainWindow: Effect.Effect<Option.Option<DesktopSshBridgeWindow>, never>;
   readonly passwordPromptTimeoutMs?: number;
 }
 
@@ -236,7 +236,7 @@ function makeDesktopSshEnvironmentBridge(
     }
 
     return Effect.gen(function* () {
-      const window = options.getMainWindow();
+      const window = Option.getOrUndefined(yield* options.getMainWindow);
       if (!window || window.isDestroyed()) {
         return yield* Effect.fail(
           new Error("T3 Code window is not available for SSH authentication."),
