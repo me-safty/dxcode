@@ -1693,72 +1693,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const hasSession: CodexAdapterShape["hasSession"] = (threadId) =>
     Effect.succeed(Boolean(sessions.get(threadId) && !sessions.get(threadId)?.stopped));
 
-  const readCodexUsageWithoutSession = Effect.fn("readCodexUsageWithoutSession")(function* () {
-    const usageThreadId = ThreadId.make("codex-usage");
-    const createRuntime = options?.makeRuntime ?? makeCodexSessionRuntime;
-    return yield* Effect.acquireUseRelease(
-      Scope.make("sequential"),
-      (usageScope) =>
-        Effect.gen(function* () {
-          const runtime = yield* createRuntime({
-            threadId: usageThreadId,
-            providerInstanceId: boundInstanceId,
-            cwd: process.cwd(),
-            binaryPath: codexConfig.binaryPath,
-            ...(options?.environment ? { environment: options.environment } : {}),
-            ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
-            runtimeMode: "full-access",
-          }).pipe(
-            Effect.provideService(Scope.Scope, usageScope),
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
-            Effect.mapError(
-              (cause) =>
-                new ProviderAdapterProcessError({
-                  provider: PROVIDER,
-                  threadId: usageThreadId,
-                  detail: cause.message,
-                  cause,
-                }),
-            ),
-          );
-          const payload = yield* runtime.start().pipe(
-            Effect.mapError(
-              (cause) =>
-                new ProviderAdapterProcessError({
-                  provider: PROVIDER,
-                  threadId: usageThreadId,
-                  detail: cause.message,
-                  cause,
-                }),
-            ),
-            Effect.andThen(
-              runtime.readAccountRateLimits.pipe(
-                Effect.mapError((cause) =>
-                  mapCodexRuntimeError(usageThreadId, "account/rateLimits/read", cause),
-                ),
-              ),
-            ),
-            Effect.ensuring(runtime.close),
-          );
-          return normalizeCodexUsageSnapshot({
-            providerInstanceId: boundInstanceId,
-            payload,
-            source: "read",
-          });
-        }),
-      (usageScope) => Scope.close(usageScope, Exit.void),
-    );
-  });
-
   const readCodexUsage: CodexAdapterShape["readCodexUsage"] = Effect.fn("readCodexUsage")(
     function* () {
       const session = Array.from(sessions.values()).findLast((candidate) => !candidate.stopped);
       if (!session) {
-        const snapshot = yield* readCodexUsageWithoutSession();
-        cachedCodexUsage = snapshot ?? cachedCodexUsage;
-        return (
-          snapshot ?? (cachedCodexUsage ? { ...cachedCodexUsage, source: "cache" as const } : null)
-        );
+        return cachedCodexUsage ? { ...cachedCodexUsage, source: "cache" as const } : null;
       }
       const payload = yield* session.runtime.readAccountRateLimits.pipe(
         Effect.mapError((cause) =>

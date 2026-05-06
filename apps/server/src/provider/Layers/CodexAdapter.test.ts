@@ -482,18 +482,58 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     }),
   );
 
-  it.effect("reads account rate limits even before a Codex thread session exists", () =>
-    Effect.gen(function* () {
+  it.effect("returns no account rate limits before a Codex thread session exists", () => {
+    const isolatedRuntimeFactory = makeRuntimeFactory();
+    const isolatedLayer = Layer.effect(
+      CodexAdapter,
+      Effect.gen(function* () {
+        const codexConfig = Schema.decodeSync(CodexSettings)({});
+        return yield* makeCodexAdapter(codexConfig, {
+          makeRuntime: isolatedRuntimeFactory.factory,
+        });
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
       yield* adapter.stopAll();
-      const snapshot = yield* adapter.readCodexUsage!();
-      const runtime = sessionRuntimeFactory.lastRuntime;
+      const runtimeCount = isolatedRuntimeFactory.runtimes.length;
 
+      const snapshot = yield* adapter.readCodexUsage!();
+
+      assert.equal(snapshot, null);
+      assert.equal(isolatedRuntimeFactory.runtimes.length, runtimeCount);
+    }).pipe(Effect.provide(isolatedLayer));
+  });
+
+  it.effect("returns cached account rate limits without a Codex thread session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("usage-stopped-cache-thread"),
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
       assert.ok(runtime);
-      assert.equal(runtime.options.threadId, asThreadId("codex-usage"));
-      assert.equal(runtime.startImpl.mock.calls.length, 1);
-      assert.equal(runtime.readAccountRateLimitsImpl.mock.calls.length, 1);
-      assert.equal(runtime.closeImpl.mock.calls.length, 1);
+      runtime.readAccountRateLimitsImpl.mockResolvedValueOnce({
+        rateLimits: {
+          primary: { usedPercent: 25, windowDurationMins: 300 },
+        },
+      });
+      yield* adapter.readCodexUsage!();
+      yield* adapter.stopAll();
+      const runtimeCount = sessionRuntimeFactory.runtimes.length;
+
+      const snapshot = yield* adapter.readCodexUsage!();
+
+      assert.equal(sessionRuntimeFactory.runtimes.length, runtimeCount);
+      assert.equal(snapshot?.source, "cache");
       assert.deepStrictEqual(snapshot?.windows[0], {
         kind: "five-hour",
         usedPercent: 25,
