@@ -4,7 +4,6 @@ import {
   EllipsisIcon,
   FileJsonIcon,
   InfoIcon,
-  KeyboardIcon,
   MinusIcon,
   PlusIcon,
   SearchIcon,
@@ -1177,7 +1176,6 @@ export function KeybindingsSettingsPanel() {
     <SettingsPageContainer className="max-w-5xl">
       <SettingsSection
         title="Keybindings"
-        icon={<KeyboardIcon className="size-3.5" />}
         headerAction={
           <div className="flex items-center gap-1.5">
             <ExpandableHeaderSearch
