@@ -87,6 +87,33 @@ export type KanbanConsoleArtifactStatus = typeof KanbanConsoleArtifactStatus.Typ
 export const KanbanConsoleReleaseGateStatus = Schema.Literals(["passing", "pending", "blocked"]);
 export type KanbanConsoleReleaseGateStatus = typeof KanbanConsoleReleaseGateStatus.Type;
 
+export const KanbanConsoleGitFileChangeKind = Schema.Literals([
+  "added",
+  "modified",
+  "deleted",
+  "renamed",
+  "copied",
+  "unmerged",
+  "unknown",
+]);
+export type KanbanConsoleGitFileChangeKind = typeof KanbanConsoleGitFileChangeKind.Type;
+
+export const KanbanConsoleGitHunkStagingSupport = Schema.Literals([
+  "supported",
+  "unsupported",
+  "not-applicable",
+]);
+export type KanbanConsoleGitHunkStagingSupport = typeof KanbanConsoleGitHunkStagingSupport.Type;
+
+export const KanbanConsoleGitPolicyViolationKind = Schema.Literals([
+  "protected-branch",
+  "invalid-work-branch-prefix",
+  "missing-upstream",
+  "behind-upstream",
+  "dirty-release-branch",
+]);
+export type KanbanConsoleGitPolicyViolationKind = typeof KanbanConsoleGitPolicyViolationKind.Type;
+
 export const KanbanConsoleTransitionActionKind = Schema.Literals([
   "none",
   "open-action-sheet",
@@ -218,21 +245,63 @@ export type KanbanConsoleCommandRun = typeof KanbanConsoleCommandRun.Type;
 
 export const KanbanConsoleGitFileStatus = Schema.Struct({
   path: TrimmedNonEmptyString,
+  sourcePath: Schema.optional(TrimmedNonEmptyString),
   status: Schema.Literals(["staged", "unstaged", "untracked"]),
+  change: Schema.optional(KanbanConsoleGitFileChangeKind),
   additions: NonNegativeInt,
   deletions: NonNegativeInt,
+  diffAvailable: Schema.optional(Schema.Boolean),
+  hunkStaging: Schema.optional(KanbanConsoleGitHunkStagingSupport),
 });
 export type KanbanConsoleGitFileStatus = typeof KanbanConsoleGitFileStatus.Type;
 
+export const KanbanConsoleGitPolicyViolation = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  kind: KanbanConsoleGitPolicyViolationKind,
+  severity: Schema.Literals(["warning", "blocked"]),
+  message: TrimmedNonEmptyString,
+});
+export type KanbanConsoleGitPolicyViolation = typeof KanbanConsoleGitPolicyViolation.Type;
+
 export const KanbanConsoleGitStatusSnapshot = Schema.Struct({
   repoId: TrimmedNonEmptyString,
+  cwd: Schema.optional(TrimmedNonEmptyString),
+  isRepo: Schema.optional(Schema.Boolean),
   branch: TrimmedNonEmptyString,
   upstream: Schema.optional(TrimmedNonEmptyString),
   ahead: NonNegativeInt,
   behind: NonNegativeInt,
+  aheadOfDefault: Schema.optional(NonNegativeInt),
   files: Schema.Array(KanbanConsoleGitFileStatus),
+  policyViolations: Schema.optional(Schema.Array(KanbanConsoleGitPolicyViolation)),
 });
 export type KanbanConsoleGitStatusSnapshot = typeof KanbanConsoleGitStatusSnapshot.Type;
+
+export const KanbanConsoleGitFileDiff = Schema.Struct({
+  repoId: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  status: Schema.Literals(["staged", "unstaged", "untracked"]),
+  diff: TrimmedNonEmptyString,
+  truncated: Schema.Boolean,
+});
+export type KanbanConsoleGitFileDiff = typeof KanbanConsoleGitFileDiff.Type;
+
+export const KanbanConsoleGitFileActionRequest = Schema.Struct({
+  repoId: TrimmedNonEmptyString,
+  cwd: TrimmedNonEmptyString,
+  paths: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
+  confirmed: Schema.Boolean,
+});
+export type KanbanConsoleGitFileActionRequest = typeof KanbanConsoleGitFileActionRequest.Type;
+
+export const KanbanConsoleGitFileActionResult = Schema.Struct({
+  repoId: TrimmedNonEmptyString,
+  paths: Schema.Array(TrimmedNonEmptyString),
+  action: Schema.Literals(["stage", "unstage"]),
+  status: Schema.Literals(["applied", "blocked"]),
+  message: TrimmedNonEmptyString,
+});
+export type KanbanConsoleGitFileActionResult = typeof KanbanConsoleGitFileActionResult.Type;
 
 export const KanbanConsoleArtifact = Schema.Struct({
   id: TrimmedNonEmptyString,
@@ -253,6 +322,8 @@ export type KanbanConsoleGitOpsPolicy = typeof KanbanConsoleGitOpsPolicy.Type;
 
 export const KanbanConsoleReleaseReadiness = Schema.Struct({
   branch: TrimmedNonEmptyString,
+  latestTag: Schema.optional(TrimmedNonEmptyString),
+  targetTag: Schema.optional(TrimmedNonEmptyString),
   gates: Schema.Array(
     Schema.Struct({
       id: TrimmedNonEmptyString,

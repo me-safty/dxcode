@@ -522,19 +522,23 @@ template repo.
   - Add real git status and enforce branch policy.
 - Dependencies: Phase 3.
 - Tasks:
-  - [ ] Read branch and upstream state.
-  - [ ] Read staged, unstaged, and untracked files.
-  - [ ] Render file diffs.
-  - [ ] Support safe stage and unstage file actions.
-  - [ ] Evaluate hunk-level staging feasibility.
-  - [ ] Enforce branch naming policy.
-  - [ ] Detect protected branch violations.
-  - [ ] Show release readiness and tag readiness.
+  - [x] Read branch and upstream state.
+  - [x] Read staged, unstaged, and untracked files.
+  - [x] Render file diffs.
+  - [x] Support safe stage and unstage file actions.
+  - [x] Evaluate hunk-level staging feasibility.
+  - [x] Enforce branch naming policy.
+  - [x] Detect protected branch violations.
+  - [x] Show release readiness and tag readiness.
 - Validation:
-  - Temporary git repo tests.
-  - Playwright flow for clean, dirty, staged, unstaged, and untracked states.
+  - Temporary git repo tests: PASS.
+  - Playwright flow for clean, dirty, staged, unstaged, and untracked states:
+    NOT RUN; this phase adds the server-side GitOps provider and mock snapshot
+    contract coverage. Browser wiring remains a later UI integration slice.
 - Exit criteria:
-  - The app can inspect repo state and enforce GitOps rules.
+  - The app can inspect repo state and enforce GitOps rules for branch,
+    upstream, dirty-file, file-diff, stage/unstage, release readiness, and tag
+    readiness flows.
 
 ### Phase 7: Product Artifacts
 
@@ -1021,3 +1025,57 @@ Append one entry per implementation pass.
   - Well-Architected tradeoff: duplicate suppression is in-memory/session-input
     based for this phase. Durable persistence and retry/backoff behavior remain
     future hardening.
+
+### 2026-05-06 - Phase 6 GitOps provider slice
+
+- Command:
+  - `/orchestrate t3-kanban-project-console`
+  - Selected next safe command: `/phase t3-kanban-project-console phase-6`
+- Summary:
+  - Added shared GitOps contracts for enriched repo status snapshots, file
+    change metadata, policy violations, file diffs, and confirmation-gated file
+    actions.
+  - Added a server-side Kanban Git Status Provider backed by the existing
+    `GitVcsDriver`, covering branch/upstream reads, staged/unstaged/untracked
+    file status, diffs, stage/unstage actions, hunk-staging support metadata,
+    branch policy violations, release readiness, and tag readiness.
+  - Fixed rename/copy status parsing so the provider exposes the target path
+    for actions and preserves the source path as metadata.
+  - Extended the mock console snapshot with Phase 6 GitOps status details so
+    the web surface can exercise the contract shape before live UI wiring.
+- Files changed:
+  - `packages/contracts/src/kanbanConsole.ts`
+  - `packages/contracts/src/kanbanConsole.test.ts`
+  - `apps/server/src/kanban/GitStatusProvider.ts`
+  - `apps/server/src/kanban/GitStatusProvider.test.ts`
+  - `apps/web/src/kanbanConsoleMock.ts`
+  - `apps/web/src/kanbanConsoleMock.test.ts`
+  - `docs/tasks/t3-kanban-project-console.md`
+- Validation run:
+  - Command: `bun run --cwd packages/contracts test -- kanbanConsole`
+  - Result: PASS
+  - Command: `bun run --cwd packages/contracts typecheck`
+  - Result: PASS
+  - Command: `bun run --cwd apps/server test -- GitStatusProvider`
+  - Result: PASS
+  - Command: `bun run --cwd apps/server typecheck`
+  - Result: PASS with existing Effect diagnostic messages in unrelated files.
+  - Command: `bun run --cwd apps/web test -- kanbanConsoleMock`
+  - Result: PASS
+  - Command: `bun run --cwd apps/web typecheck`
+  - Result: PASS
+  - Command: `bun check`
+  - Result: PASS; 15 tasks successful, 1023 tests passed, 4 skipped.
+- Notes/deviations:
+  - The provider reuses the existing Git VCS driver instead of introducing a
+    second git CLI adapter; CLI hardening remains scoped to Phase 10.
+  - Hunk-level staging is represented as capability metadata for now. Applying
+    patch hunks remains a future UI/adapter capability.
+  - Stage and unstage operations are confirmation-gated and return blocked
+    results when not explicitly confirmed.
+  - Release/tag readiness is implemented as local GitOps gates for release
+    branch shape, clean tree state, release notes presence, tag availability,
+    and provider status inputs. Actual merge/deploy/tag execution remains
+    confirmation-gated future work.
+  - GitHub Projects remains the live status board; no Project state writes were
+    made.

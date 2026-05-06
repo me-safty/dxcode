@@ -115,4 +115,32 @@ describe("kanbanConsoleMock", () => {
     expect(sessions.map((session) => session.status)).toEqual(["queued", "blocked"]);
     expect(kanbanTasks.some((task) => task.agentSessionStatus === "queued")).toBe(true);
   });
+
+  it("exposes Phase 6 GitOps status details in the mock snapshot", () => {
+    const [status] = kanbanConsoleMockProvider.readSnapshot().gitStatuses;
+
+    expect(status).toMatchObject({
+      repoId: "repo-kanban-console",
+      isRepo: true,
+      aheadOfDefault: 1,
+    });
+    expect(status?.files.map((file) => file.status).toSorted()).toEqual([
+      "staged",
+      "unstaged",
+      "untracked",
+    ]);
+    expect(status?.files.some((file) => file.hunkStaging === "supported")).toBe(true);
+    expect(status?.policyViolations?.map((violation) => violation.kind)).toContain(
+      "missing-upstream",
+    );
+    expect(kanbanConsoleMockProvider.readSnapshot().releaseReadiness).toMatchObject({
+      latestTag: "v0.4.0",
+      targetTag: "v0.5.0",
+    });
+    expect(
+      kanbanConsoleMockProvider
+        .readSnapshot()
+        .releaseReadiness.gates.some((gate) => gate.id === "gate-tag-readiness"),
+    ).toBe(true);
+  });
 });
