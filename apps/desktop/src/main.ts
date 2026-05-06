@@ -105,7 +105,12 @@ import {
   type DesktopSshEnvironmentBridgeShape,
   resolveRemoteT3CliPackageSpec,
 } from "./sshEnvironment.ts";
-import { syncShellEnvironment } from "./syncShellEnvironment.ts";
+import {
+  DesktopShellEnvironment,
+  DesktopShellEnvironmentConfigLive,
+  DesktopShellEnvironmentLive,
+  DesktopShellEnvironmentProbeLive,
+} from "./syncShellEnvironment.ts";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState.ts";
 import { doesVersionMatchDesktopUpdateChannel } from "./updateChannels.ts";
 import {
@@ -246,6 +251,7 @@ type DesktopIpcBoundaryServices =
   | HttpClient.HttpClient
   | FileSystem.FileSystem
   | EffectPath.Path
+  | DesktopShellEnvironment
   | DesktopEnvironment
   | DesktopBackendManager
   | DesktopNetworkInterfacesService
@@ -779,6 +785,16 @@ const desktopSshEnvironmentLayer = Layer.unwrap(
   }),
 );
 
+const desktopShellEnvironmentProbeLayer = DesktopShellEnvironmentProbeLive.pipe(
+  Layer.provide(NodeServices.layer),
+);
+
+const desktopShellEnvironmentLayer = DesktopShellEnvironmentLive.pipe(
+  Layer.provide(
+    Layer.mergeAll(DesktopShellEnvironmentConfigLive, desktopShellEnvironmentProbeLayer),
+  ),
+);
+
 const desktopBackendDependenciesLayer = Layer.mergeAll(
   NodeServices.layer,
   NodeHttpClient.layerUndici,
@@ -795,6 +811,7 @@ const desktopRuntimeLayer = Layer.mergeAll(
   NodeServices.layer,
   NodeHttpClient.layerUndici,
   DesktopNetworkInterfacesLive,
+  desktopShellEnvironmentLayer,
   desktopSshEnvironmentLayer,
 ).pipe(
   Layer.provideMerge(desktopSshEnvironmentBridgeLayer),
@@ -2591,6 +2608,7 @@ const program = Effect.scoped(
       const environment = yield* DesktopEnvironment;
       appRunId = (yield* Random.nextUUIDv4).replace(/-/g, "").slice(0, 12);
       const backendManager = yield* DesktopBackendManager;
+      const shellEnvironment = yield* DesktopShellEnvironment;
       const desktopSshEnvironmentBridge = yield* DesktopSshEnvironmentBridge;
       const sshPasswordPromptScope = yield* Scope.make("sequential");
       yield* desktopSshEnvironmentBridge.installPasswordPromptScope(sshPasswordPromptScope);
@@ -2601,7 +2619,7 @@ const program = Effect.scoped(
         ),
       );
 
-      yield* Effect.sync(syncShellEnvironment);
+      yield* shellEnvironment.sync;
       const userDataPath = yield* resolveUserDataPath();
       yield* Effect.sync(() => {
         // Must happen before Electron's ready event so Chromium profile data
