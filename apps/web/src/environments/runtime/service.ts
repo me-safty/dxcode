@@ -693,6 +693,26 @@ async function persistSavedEnvironmentRegistryRollback(
   });
 }
 
+async function persistSavedEnvironmentRegistryRollbackOrThrowPrimaryError(input: {
+  readonly registrySnapshot: SavedEnvironmentRegistrySnapshot;
+  readonly primaryError: unknown;
+}): Promise<never> {
+  try {
+    await persistSavedEnvironmentRegistryRollback(input.registrySnapshot);
+  } catch (rollbackError) {
+    const message =
+      input.primaryError instanceof Error && input.primaryError.message.trim().length > 0
+        ? input.primaryError.message
+        : String(input.primaryError);
+    const error = new Error(message, {
+      cause: rollbackError,
+    });
+    Object.assign(error, { errors: [input.primaryError, rollbackError] });
+    throw error;
+  }
+  throw input.primaryError;
+}
+
 async function persistSavedEnvironmentBearerTokenOrRollback(input: {
   readonly environmentId: EnvironmentId;
   readonly bearerToken: string;
@@ -705,13 +725,17 @@ async function persistSavedEnvironmentBearerTokenOrRollback(input: {
       input.bearerToken,
     );
   } catch (error) {
-    await persistSavedEnvironmentRegistryRollback(input.registrySnapshot);
-    throw error;
+    await persistSavedEnvironmentRegistryRollbackOrThrowPrimaryError({
+      registrySnapshot: input.registrySnapshot,
+      primaryError: error,
+    });
   }
 
   if (!didPersistBearerToken) {
-    await persistSavedEnvironmentRegistryRollback(input.registrySnapshot);
-    throw new Error("Unable to persist saved environment credentials.");
+    await persistSavedEnvironmentRegistryRollbackOrThrowPrimaryError({
+      registrySnapshot: input.registrySnapshot,
+      primaryError: new Error("Unable to persist saved environment credentials."),
+    });
   }
 }
 

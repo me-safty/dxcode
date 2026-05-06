@@ -264,6 +264,27 @@ describe("addSavedEnvironment", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("preserves credential persistence error details when rollback fails", async () => {
+    mockWriteSavedEnvironmentBearerToken.mockRejectedValue(
+      new Error("T3 Code could not access GNOME Keyring to save this environment credential."),
+    );
+    mockSetSavedEnvironmentRegistry.mockRejectedValue(new Error("Registry rollback failed."));
+    const { addSavedEnvironment, resetEnvironmentServiceForTests } = await import("./service");
+
+    await expect(
+      addSavedEnvironment({
+        label: "Remote environment",
+        host: "remote.example.com",
+        pairingCode: "123456",
+      }),
+    ).rejects.toThrow("T3 Code could not access GNOME Keyring");
+
+    expect(mockSetSavedEnvironmentRegistry).toHaveBeenCalledWith([]);
+    expect(mockUpsert).not.toHaveBeenCalled();
+
+    await resetEnvironmentServiceForTests();
+  });
+
   it("restores unrelated saved environments when credential persistence rollback runs", async () => {
     mockSavedRecords = [
       {
