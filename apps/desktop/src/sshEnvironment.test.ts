@@ -1,15 +1,10 @@
-import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import { NetService } from "@t3tools/shared/Net";
 import { SshPasswordPromptError } from "@t3tools/ssh/errors";
 import { Effect, FileSystem, Layer, Path } from "effect";
 
-import {
-  DesktopSshEnvironmentManager,
-  discoverDesktopSshHostsEffect,
-  isSshPasswordPromptCancellation,
-} from "./sshEnvironment.ts";
+import * as DesktopSshEnvironment from "./main/DesktopSshEnvironment.ts";
+import * as DesktopSshPasswordPrompts from "./main/DesktopSshPasswordPrompts.ts";
 import * as DesktopIpc from "./ipc/DesktopIpc.ts";
 import { SSH_PASSWORD_PROMPT_CANCELLED_RESULT } from "./ipc/channels.ts";
 import { discoverSshHosts, ensureSshEnvironment } from "./ipc/methods/sshEnvironment.ts";
@@ -40,9 +35,13 @@ class TestIpcMain implements DesktopIpc.DesktopIpcMain {
 describe("sshEnvironment", () => {
   it("treats password prompt timeouts as cancellable authentication prompts", () => {
     assert.equal(
-      isSshPasswordPromptCancellation(
+      DesktopSshEnvironment.isDesktopSshPasswordPromptCancellation(
         new SshPasswordPromptError({
           message: "SSH authentication timed out for devbox.",
+          cause: new DesktopSshPasswordPrompts.DesktopSshPromptTimedOutError({
+            requestId: "prompt-1",
+            destination: "devbox",
+          }),
         }),
       ),
       true,
@@ -80,7 +79,7 @@ describe("sshEnvironment", () => {
         ].join("\n"),
       );
 
-      const hosts = yield* discoverDesktopSshHostsEffect({ homeDir });
+      const hosts = yield* DesktopSshEnvironment.discoverDesktopSshHostsEffect({ homeDir });
       assert.deepEqual(hosts, [
         {
           alias: "bastion.example.com",
@@ -138,8 +137,8 @@ describe("sshEnvironment", () => {
       Effect.provide(
         Layer.mergeAll(
           Layer.succeed(
-            DesktopSshEnvironmentManager,
-            DesktopSshEnvironmentManager.of({
+            DesktopSshEnvironment.DesktopSshEnvironment,
+            DesktopSshEnvironment.DesktopSshEnvironment.of({
               discoverHosts: () =>
                 Effect.succeed([
                   {
@@ -181,21 +180,23 @@ describe("sshEnvironment", () => {
       Effect.provide(
         Layer.mergeAll(
           Layer.succeed(
-            DesktopSshEnvironmentManager,
-            DesktopSshEnvironmentManager.of({
+            DesktopSshEnvironment.DesktopSshEnvironment,
+            DesktopSshEnvironment.DesktopSshEnvironment.of({
               discoverHosts: () => Effect.die("unexpected discoverHosts"),
               ensureEnvironment: () =>
                 Effect.fail(
                   new SshPasswordPromptError({
                     message: "SSH authentication timed out for devbox.",
+                    cause: new DesktopSshPasswordPrompts.DesktopSshPromptTimedOutError({
+                      requestId: "prompt-1",
+                      destination: "devbox",
+                    }),
                   }),
                 ),
               disconnectEnvironment: () => Effect.die("unexpected disconnectEnvironment"),
             }),
           ),
           NodeServices.layer,
-          NodeHttpClient.layerUndici,
-          NetService.layer,
         ),
       ),
     ),

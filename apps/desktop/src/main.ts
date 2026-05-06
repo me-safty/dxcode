@@ -26,6 +26,7 @@ import {
 import * as NetService from "@t3tools/shared/Net";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import type { RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
+import { resolveRemoteT3CliPackageSpec } from "@t3tools/ssh/command";
 
 import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPortEffect } from "./backendPort.ts";
 import { type DesktopSettings } from "./desktopSettings.ts";
@@ -66,12 +67,6 @@ import { DesktopServerExposureIpcActions } from "./ipc/methods/serverExposure.ts
 import { DesktopUpdateIpcActions } from "./ipc/methods/updates.ts";
 import * as DesktopWindowIpcActionsLive from "./ipc/methods/windowLive.ts";
 import {
-  DesktopSshEnvironmentBridge,
-  DesktopSshEnvironmentManager,
-  type DesktopSshEnvironmentBridgeShape,
-  resolveRemoteT3CliPackageSpec,
-} from "./sshEnvironment.ts";
-import {
   DesktopShellEnvironment,
   DesktopShellEnvironmentConfigLive,
   DesktopShellEnvironmentLive,
@@ -82,6 +77,9 @@ import { formatErrorMessage } from "./main/DesktopErrors.ts";
 import * as DesktopLocalEnvironment from "./main/DesktopLocalEnvironment.ts";
 import * as DesktopServerExposure from "./main/DesktopServerExposure.ts";
 import * as DesktopSettingsState from "./main/DesktopSettingsState.ts";
+import * as DesktopSshEnvironment from "./main/DesktopSshEnvironment.ts";
+import * as DesktopSshPasswordPrompts from "./main/DesktopSshPasswordPrompts.ts";
+import * as DesktopSshRemoteApi from "./main/DesktopSshRemoteApi.ts";
 import * as DesktopState from "./main/DesktopState.ts";
 import * as DesktopUpdates from "./main/DesktopUpdates.ts";
 
@@ -123,7 +121,6 @@ interface DesktopEffectRunner {
 
 type DesktopWindowBoundaryServices =
   | DesktopEnvironment
-  | DesktopSshEnvironmentBridge
   | ElectronDialog.ElectronDialog
   | ElectronShell.ElectronShell
   | DesktopState.DesktopState
@@ -430,14 +427,6 @@ const desktopBackendConfigurationLayer = Layer.effect(
     };
   }),
 );
-const desktopSshEnvironmentBridgeLayer = Layer.unwrap(
-  Effect.gen(function* () {
-    const electronWindow = yield* ElectronWindow.ElectronWindow;
-    return DesktopSshEnvironmentBridge.layer({
-      getMainWindow: electronWindow.main,
-    });
-  }),
-);
 const desktopBackendEventsLayer = Layer.effect(
   DesktopBackendEvents,
   Effect.gen(function* () {
@@ -447,7 +436,6 @@ const desktopBackendEventsLayer = Layer.effect(
     const context = yield* Effect.context<
       | DesktopEnvironment
       | DesktopServerExposure.DesktopServerExposure
-      | DesktopSshEnvironmentBridge
       | DesktopState.DesktopState
       | ElectronShell.ElectronShell
       | ElectronWindow.ElectronWindow
@@ -511,13 +499,18 @@ const desktopSshEnvironmentLayer = Layer.unwrap(
   Effect.gen(function* () {
     const environment = yield* DesktopEnvironment;
     const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
-    return DesktopSshEnvironmentManager.layer({
+    return DesktopSshEnvironment.layer({
       resolveCliRunner: settingsState.get.pipe(
         Effect.map((settings) => resolveDesktopSshCliRunner(environment, settings)),
       ),
     });
   }),
 );
+
+const desktopSshRuntimeLayer = Layer.mergeAll(
+  desktopSshEnvironmentLayer,
+  DesktopSshRemoteApi.layer,
+).pipe(Layer.provideMerge(DesktopSshPasswordPrompts.layer()), Layer.provideMerge(NetService.layer));
 
 const desktopShellEnvironmentProbeLayer = DesktopShellEnvironmentProbeLive.pipe(
   Layer.provide(NodeServices.layer),
@@ -608,15 +601,10 @@ const desktopBackendRuntimeLayer = DesktopLocalEnvironment.layer.pipe(
   Layer.provideMerge(desktopServerExposureLayer),
 );
 
-const desktopElectronWindowLayer = desktopSshEnvironmentBridgeLayer.pipe(
-  Layer.provideMerge(ElectronWindow.layer),
-);
-
 const desktopRuntimeLayer = Layer.mergeAll(
   desktopLoggerLayer,
-  NetService.layer,
   desktopShellEnvironmentLayer,
-  desktopSshEnvironmentLayer,
+  desktopSshRuntimeLayer,
   Layer.succeed(DesktopIpc.DesktopIpc, DesktopIpc.make(ipcMain)),
   desktopServerExposureIpcActionsLayer,
   desktopUpdateIpcActionsLayer,
@@ -627,7 +615,7 @@ const desktopRuntimeLayer = Layer.mergeAll(
   Layer.provideMerge(NodeHttpClient.layerUndici),
   Layer.provideMerge(DesktopNetworkInterfaces.layer),
   Layer.provideMerge(desktopBackendRuntimeLayer),
-  Layer.provideMerge(desktopElectronWindowLayer),
+  Layer.provideMerge(ElectronWindow.layer),
   Layer.provideMerge(ElectronApp.layer),
   Layer.provideMerge(ElectronDialog.layer),
   Layer.provideMerge(ElectronMenu.layer),
@@ -1112,13 +1100,11 @@ function startBackend(): Effect.Effect<
 
 function closeDesktopResourcesWithManager(
   backendManager: DesktopBackendManagerShape,
-  desktopSshEnvironmentBridge: DesktopSshEnvironmentBridgeShape,
   updates: DesktopUpdates.DesktopUpdatesShape,
 ): Effect.Effect<void> {
   return Effect.gen(function* () {
     yield* backendManager.shutdown;
     yield* updates.shutdown;
-    yield* desktopSshEnvironmentBridge.disposeEffect().pipe(Effect.ignore);
   });
 }
 
@@ -1313,14 +1299,6 @@ function createWindow(
   }
 
   window.on("closed", () => {
-    void runEffect(
-      Effect.gen(function* () {
-        const desktopSshEnvironmentBridge = yield* DesktopSshEnvironmentBridge;
-        yield* desktopSshEnvironmentBridge.cancelPendingPasswordPromptsEffect(
-          "SSH authentication was cancelled because the app window closed.",
-        );
-      }),
-    );
     void runEffect(electronWindow.clearMain(window));
   });
 
@@ -1540,12 +1518,9 @@ const program = Effect.scoped(
       const shellEnvironment = yield* DesktopShellEnvironment;
       const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
       const updates = yield* DesktopUpdates.DesktopUpdates;
-      const desktopSshEnvironmentBridge = yield* DesktopSshEnvironmentBridge;
-      const sshPasswordPromptScope = yield* Scope.make("sequential");
-      yield* desktopSshEnvironmentBridge.installPasswordPromptScope(sshPasswordPromptScope);
       yield* Scope.addFinalizer(
         yield* Scope.Scope,
-        closeDesktopResourcesWithManager(backendManager, desktopSshEnvironmentBridge, updates).pipe(
+        closeDesktopResourcesWithManager(backendManager, updates).pipe(
           Effect.ensuring(shutdown.markComplete),
         ),
       );

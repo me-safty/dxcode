@@ -1,7 +1,4 @@
 import {
-  AuthBearerBootstrapResult,
-  AuthSessionState,
-  AuthWebSocketTokenResult,
   DesktopDiscoveredSshHostSchema,
   DesktopSshBearerBootstrapInputSchema,
   DesktopSshBearerRequestInputSchema,
@@ -12,8 +9,10 @@ import {
   DesktopSshPasswordPromptCancelledType,
   DesktopSshPasswordPromptResolutionInputSchema,
   ExecutionEnvironmentDescriptor,
+  AuthBearerBootstrapResult,
+  AuthSessionState,
+  AuthWebSocketTokenResult,
 } from "@t3tools/contracts";
-import { fetchLoopbackSshJson } from "@t3tools/ssh/tunnel";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -28,18 +27,9 @@ import {
   RESOLVE_SSH_PASSWORD_PROMPT_CHANNEL,
 } from "../channels.ts";
 import { makeIpcMethod } from "../DesktopIpc.ts";
-import {
-  DesktopSshEnvironmentBridge,
-  DesktopSshEnvironmentManager,
-  isSshPasswordPromptCancellation,
-} from "../../sshEnvironment.ts";
-
-const decodeExecutionEnvironmentDescriptor = Schema.decodeUnknownEffect(
-  ExecutionEnvironmentDescriptor,
-);
-const decodeAuthBearerBootstrapResult = Schema.decodeUnknownEffect(AuthBearerBootstrapResult);
-const decodeAuthSessionState = Schema.decodeUnknownEffect(AuthSessionState);
-const decodeAuthWebSocketTokenResult = Schema.decodeUnknownEffect(AuthWebSocketTokenResult);
+import * as DesktopSshEnvironment from "../../main/DesktopSshEnvironment.ts";
+import * as DesktopSshPasswordPrompts from "../../main/DesktopSshPasswordPrompts.ts";
+import * as DesktopSshRemoteApi from "../../main/DesktopSshRemoteApi.ts";
 
 export const discoverSshHosts = makeIpcMethod({
   channel: DISCOVER_SSH_HOSTS_CHANNEL,
@@ -47,8 +37,8 @@ export const discoverSshHosts = makeIpcMethod({
   result: Schema.Array(DesktopDiscoveredSshHostSchema),
   handler: () =>
     Effect.gen(function* () {
-      const manager = yield* DesktopSshEnvironmentManager;
-      return yield* manager.discoverHosts();
+      const sshEnvironment = yield* DesktopSshEnvironment.DesktopSshEnvironment;
+      return yield* sshEnvironment.discoverHosts();
     }),
 });
 
@@ -58,10 +48,10 @@ export const ensureSshEnvironment = makeIpcMethod({
   result: DesktopSshEnvironmentEnsureResultSchema,
   handler: ({ target, options }) =>
     Effect.gen(function* () {
-      const manager = yield* DesktopSshEnvironmentManager;
-      return yield* manager.ensureEnvironment(target, options).pipe(
+      const sshEnvironment = yield* DesktopSshEnvironment.DesktopSshEnvironment;
+      return yield* sshEnvironment.ensureEnvironment(target, options).pipe(
         Effect.catch((error) =>
-          isSshPasswordPromptCancellation(error)
+          DesktopSshEnvironment.isDesktopSshPasswordPromptCancellation(error)
             ? Effect.succeed({
                 type: DesktopSshPasswordPromptCancelledType,
                 message: error.message,
@@ -78,8 +68,8 @@ export const disconnectSshEnvironment = makeIpcMethod({
   result: Schema.Void,
   handler: (target) =>
     Effect.gen(function* () {
-      const manager = yield* DesktopSshEnvironmentManager;
-      yield* manager.disconnectEnvironment(target);
+      const sshEnvironment = yield* DesktopSshEnvironment.DesktopSshEnvironment;
+      yield* sshEnvironment.disconnectEnvironment(target);
     }),
 });
 
@@ -88,10 +78,10 @@ export const fetchSshEnvironmentDescriptor = makeIpcMethod({
   payload: DesktopSshHttpBaseUrlInputSchema,
   result: ExecutionEnvironmentDescriptor,
   handler: ({ httpBaseUrl }) =>
-    fetchLoopbackSshJson<unknown>({
-      httpBaseUrl,
-      pathname: "/.well-known/t3/environment",
-    }).pipe(Effect.flatMap(decodeExecutionEnvironmentDescriptor)),
+    Effect.gen(function* () {
+      const remoteApi = yield* DesktopSshRemoteApi.DesktopSshRemoteApi;
+      return yield* remoteApi.fetchEnvironmentDescriptor({ httpBaseUrl });
+    }),
 });
 
 export const bootstrapSshBearerSession = makeIpcMethod({
@@ -99,12 +89,10 @@ export const bootstrapSshBearerSession = makeIpcMethod({
   payload: DesktopSshBearerBootstrapInputSchema,
   result: AuthBearerBootstrapResult,
   handler: ({ httpBaseUrl, credential }) =>
-    fetchLoopbackSshJson<unknown>({
-      httpBaseUrl,
-      pathname: "/api/auth/bootstrap/bearer",
-      method: "POST",
-      body: { credential },
-    }).pipe(Effect.flatMap(decodeAuthBearerBootstrapResult)),
+    Effect.gen(function* () {
+      const remoteApi = yield* DesktopSshRemoteApi.DesktopSshRemoteApi;
+      return yield* remoteApi.bootstrapBearerSession({ httpBaseUrl, credential });
+    }),
 });
 
 export const fetchSshSessionState = makeIpcMethod({
@@ -112,11 +100,10 @@ export const fetchSshSessionState = makeIpcMethod({
   payload: DesktopSshBearerRequestInputSchema,
   result: AuthSessionState,
   handler: ({ httpBaseUrl, bearerToken }) =>
-    fetchLoopbackSshJson<unknown>({
-      httpBaseUrl,
-      pathname: "/api/auth/session",
-      bearerToken,
-    }).pipe(Effect.flatMap(decodeAuthSessionState)),
+    Effect.gen(function* () {
+      const remoteApi = yield* DesktopSshRemoteApi.DesktopSshRemoteApi;
+      return yield* remoteApi.fetchSessionState({ httpBaseUrl, bearerToken });
+    }),
 });
 
 export const issueSshWebSocketToken = makeIpcMethod({
@@ -124,12 +111,10 @@ export const issueSshWebSocketToken = makeIpcMethod({
   payload: DesktopSshBearerRequestInputSchema,
   result: AuthWebSocketTokenResult,
   handler: ({ httpBaseUrl, bearerToken }) =>
-    fetchLoopbackSshJson<unknown>({
-      httpBaseUrl,
-      pathname: "/api/auth/ws-token",
-      method: "POST",
-      bearerToken,
-    }).pipe(Effect.flatMap(decodeAuthWebSocketTokenResult)),
+    Effect.gen(function* () {
+      const remoteApi = yield* DesktopSshRemoteApi.DesktopSshRemoteApi;
+      return yield* remoteApi.issueWebSocketToken({ httpBaseUrl, bearerToken });
+    }),
 });
 
 export const resolveSshPasswordPrompt = makeIpcMethod({
@@ -138,7 +123,7 @@ export const resolveSshPasswordPrompt = makeIpcMethod({
   result: Schema.Void,
   handler: ({ requestId, password }) =>
     Effect.gen(function* () {
-      const bridge = yield* DesktopSshEnvironmentBridge;
-      yield* bridge.resolvePasswordPrompt(requestId, password);
+      const prompts = yield* DesktopSshPasswordPrompts.DesktopSshPasswordPrompts;
+      yield* prompts.resolve({ requestId, password });
     }),
 });
