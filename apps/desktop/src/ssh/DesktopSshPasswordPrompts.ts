@@ -284,8 +284,11 @@ const make = (options: LayerOptions = {}) =>
         };
         yield* Ref.update(pendingRef, (entries) => new Map(entries).set(requestId, pending));
 
+        const context = yield* Effect.context();
+        const runFork = Effect.runForkWith(context);
+
         const cancelOnWindowClosed = () => {
-          Effect.runFork(
+          runFork(
             removePending(pendingRef, requestId).pipe(
               Effect.flatMap((entry) =>
                 Option.match(entry, {
