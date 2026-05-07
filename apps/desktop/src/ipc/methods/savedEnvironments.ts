@@ -1,16 +1,9 @@
 import { EnvironmentId, PersistedSavedEnvironmentRecordSchema } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import {
-  readSavedEnvironmentRegistryEffect,
-  readSavedEnvironmentSecretEffect,
-  removeSavedEnvironmentSecretEffect,
-  writeSavedEnvironmentRegistryEffect,
-  writeSavedEnvironmentSecretEffect,
-} from "../../settings/clientPersistence.ts";
-import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
-import * as ElectronSafeStorage from "../../electron/ElectronSafeStorage.ts";
+import * as DesktopSavedEnvironments from "../../settings/DesktopSavedEnvironments.ts";
 import * as IpcChannels from "../channels.ts";
 import { makeIpcMethod } from "../DesktopIpc.ts";
 
@@ -32,8 +25,8 @@ export const getSavedEnvironmentRegistry = makeIpcMethod({
   result: SavedEnvironmentRegistryPayload,
   handler: () =>
     Effect.gen(function* () {
-      const environment = yield* DesktopEnvironment.DesktopEnvironment;
-      return yield* readSavedEnvironmentRegistryEffect(environment.savedEnvironmentRegistryPath);
+      const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+      return yield* savedEnvironments.getRegistry;
     }),
 });
 
@@ -43,8 +36,8 @@ export const setSavedEnvironmentRegistry = makeIpcMethod({
   result: Schema.Void,
   handler: (records) =>
     Effect.gen(function* () {
-      const environment = yield* DesktopEnvironment.DesktopEnvironment;
-      yield* writeSavedEnvironmentRegistryEffect(environment.savedEnvironmentRegistryPath, records);
+      const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+      yield* savedEnvironments.setRegistry(records);
     }),
 });
 
@@ -54,13 +47,8 @@ export const getSavedEnvironmentSecret = makeIpcMethod({
   result: Schema.NullOr(Schema.String),
   handler: (environmentId) =>
     Effect.gen(function* () {
-      const environment = yield* DesktopEnvironment.DesktopEnvironment;
-      const secretStorage = yield* ElectronSafeStorage.ElectronSafeStorage;
-      return yield* readSavedEnvironmentSecretEffect({
-        registryPath: environment.savedEnvironmentRegistryPath,
-        environmentId,
-        secretStorage,
-      });
+      const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+      return Option.getOrNull(yield* savedEnvironments.getSecret(environmentId));
     }),
 });
 
@@ -70,13 +58,10 @@ export const setSavedEnvironmentSecret = makeIpcMethod({
   result: Schema.Boolean,
   handler: ({ environmentId, secret }) =>
     Effect.gen(function* () {
-      const environment = yield* DesktopEnvironment.DesktopEnvironment;
-      const secretStorage = yield* ElectronSafeStorage.ElectronSafeStorage;
-      return yield* writeSavedEnvironmentSecretEffect({
-        registryPath: environment.savedEnvironmentRegistryPath,
+      const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+      return yield* savedEnvironments.setSecret({
         environmentId,
         secret,
-        secretStorage,
       });
     }),
 });
@@ -87,10 +72,7 @@ export const removeSavedEnvironmentSecret = makeIpcMethod({
   result: Schema.Void,
   handler: (environmentId) =>
     Effect.gen(function* () {
-      const environment = yield* DesktopEnvironment.DesktopEnvironment;
-      yield* removeSavedEnvironmentSecretEffect({
-        registryPath: environment.savedEnvironmentRegistryPath,
-        environmentId,
-      });
+      const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
+      yield* savedEnvironments.removeSecret(environmentId);
     }),
 });

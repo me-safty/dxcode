@@ -13,24 +13,16 @@ import type {
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
-import {
-  DEFAULT_DESKTOP_SETTINGS,
-  type DesktopSettings,
-  setDesktopServerExposurePreference,
-  setDesktopTailscaleServePreference,
-} from "../settings/desktopSettings.ts";
-import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import { DEFAULT_DESKTOP_SETTINGS, type DesktopSettings } from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
-import * as DesktopSettingsState from "../settings/DesktopSettingsState.ts";
+import * as DesktopAppSettingsService from "../settings/DesktopAppSettings.ts";
 
 export const DESKTOP_LOOPBACK_HOST = "127.0.0.1";
 const DESKTOP_LAN_BIND_HOST = "0.0.0.0";
@@ -238,7 +230,7 @@ export class DesktopServerExposurePersistenceError extends Data.TaggedError(
   "DesktopServerExposurePersistenceError",
 )<{
   readonly operation: DesktopServerExposurePersistenceOperation;
-  readonly cause: DesktopSettingsState.DesktopSettingsPersistenceError;
+  readonly cause: DesktopAppSettingsService.DesktopSettingsWriteError;
 }> {
   override get message() {
     return `Failed to persist desktop ${this.operation} settings.`;
@@ -414,29 +406,11 @@ const requiresBackendRelaunch = (previous: RuntimeState, next: RuntimeState): bo
 
 const make = Effect.gen(function* () {
   const config = yield* DesktopConfig.DesktopConfig;
-  const environment = yield* DesktopEnvironment.DesktopEnvironment;
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
   const networkInterfaces = yield* DesktopNetworkInterfacesService;
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
-  const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
+  const desktopSettings = yield* DesktopAppSettingsService.DesktopAppSettings;
   const stateRef = yield* Ref.make(initialRuntimeState());
-
-  const persistSettings = <A>(
-    operation: DesktopServerExposurePersistenceOperation,
-    effect: Effect.Effect<
-      A,
-      DesktopSettingsState.DesktopSettingsPersistenceError,
-      FileSystem.FileSystem | Path.Path | DesktopEnvironment.DesktopEnvironment
-    >,
-  ) =>
-    effect.pipe(
-      Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
-      Effect.provideService(FileSystem.FileSystem, fileSystem),
-      Effect.provideService(Path.Path, path),
-      Effect.mapError((cause) => new DesktopServerExposurePersistenceError({ operation, cause })),
-    );
 
   const readNetworkInterfaces = networkInterfaces.read;
 
@@ -445,7 +419,7 @@ const make = Effect.gen(function* () {
 
   const configureFromSettings = ({ port }: { readonly port: number }) =>
     Effect.gen(function* () {
-      const settings = yield* settingsState.get;
+      const settings = yield* desktopSettings.get;
       const currentNetworkInterfaces = yield* readNetworkInterfaces;
       const resolved = resolveRuntimeState({
         requestedMode: settings.serverExposureMode,
@@ -461,8 +435,11 @@ const make = Effect.gen(function* () {
   const setMode = (mode: DesktopServerExposureMode) =>
     Effect.gen(function* () {
       const previous = yield* Ref.get(stateRef);
-      const currentSettings = yield* settingsState.get;
-      const nextSettings = setDesktopServerExposurePreference(currentSettings, mode);
+      const currentSettings = yield* desktopSettings.get;
+      const nextSettings = {
+        ...currentSettings,
+        serverExposureMode: mode,
+      };
       const currentNetworkInterfaces = yield* readNetworkInterfaces;
       const resolved = resolveRuntimeState({
         requestedMode: mode,
@@ -476,37 +453,39 @@ const make = Effect.gen(function* () {
         return yield* new DesktopServerExposureNoNetworkAddressError({ port: previous.port });
       }
 
-      if (nextSettings !== currentSettings) {
-        yield* persistSettings(
-          "server-exposure-mode",
-          settingsState.updatePersisted((settings) =>
-            setDesktopServerExposurePreference(settings, mode),
-          ),
-        );
-      }
+      const change = yield* desktopSettings.setServerExposureMode(mode).pipe(
+        Effect.mapError(
+          (cause) =>
+            new DesktopServerExposurePersistenceError({
+              operation: "server-exposure-mode",
+              cause,
+            }),
+        ),
+      );
 
       yield* Ref.set(stateRef, resolved.state);
       return {
         state: toContractState(resolved.state),
-        requiresRelaunch: requiresBackendRelaunch(previous, resolved.state),
+        requiresRelaunch: change.changed || requiresBackendRelaunch(previous, resolved.state),
       };
     });
 
   const setTailscaleServeEnabled = (input: { readonly enabled: boolean; readonly port?: number }) =>
     Effect.gen(function* () {
-      const result = yield* persistSettings(
-        "tailscale-serve",
-        settingsState.modifyPersisted((settings) => {
-          const nextSettings = setDesktopTailscaleServePreference(settings, input);
-          return [
-            {
-              changed: nextSettings !== settings,
-              settings: nextSettings,
-            },
-            nextSettings,
-          ] as const;
-        }),
-      );
+      const result = yield* desktopSettings
+        .setTailscaleServe({
+          enabled: input.enabled,
+          port: Option.fromNullishOr(input.port),
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new DesktopServerExposurePersistenceError({
+                operation: "tailscale-serve",
+                cause,
+              }),
+          ),
+        );
 
       const nextState = yield* Ref.updateAndGet(stateRef, (current) => ({
         ...current,

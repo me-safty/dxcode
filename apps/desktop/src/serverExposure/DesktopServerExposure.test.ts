@@ -10,17 +10,13 @@ import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
-  DEFAULT_DESKTOP_SETTINGS,
-  readDesktopSettingsEffect,
-} from "../settings/desktopSettings.ts";
-import {
   DesktopEnvironment,
   layer as makeDesktopEnvironmentLayer,
 } from "../app/DesktopEnvironment.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopServerExposure from "./DesktopServerExposure.ts";
 import type { DesktopNetworkInterfaces } from "./DesktopServerExposure.ts";
-import * as DesktopSettingsState from "../settings/DesktopSettingsState.ts";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 
 const encoder = new TextEncoder();
 
@@ -98,7 +94,7 @@ function makeLayer(input: {
   });
 
   return DesktopServerExposure.layer.pipe(
-    Layer.provideMerge(DesktopSettingsState.layer),
+    Layer.provideMerge(DesktopAppSettings.layer),
     Layer.provideMerge(NodeFileSystem.layer),
     Layer.provideMerge(NodeHttpClient.layerUndici),
     Layer.provideMerge(mockSpawnerLayer()),
@@ -117,7 +113,7 @@ const withHarness = <A, E, R>(
     | DesktopEnvironment
     | FileSystem.FileSystem
     | DesktopServerExposure.DesktopServerExposure
-    | DesktopSettingsState.DesktopSettingsState
+    | DesktopAppSettings.DesktopAppSettings
   >,
   env: Record<string, string | undefined> = {},
 ) =>
@@ -135,17 +131,14 @@ describe("DesktopServerExposure", () => {
       emptyNetworkInterfaces,
       Effect.gen(function* () {
         const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
-        const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
 
-        yield* settingsState.set({
-          ...DEFAULT_DESKTOP_SETTINGS,
-          serverExposureMode: "network-accessible",
-        });
+        yield* settings.setServerExposureMode("network-accessible");
 
         const state = yield* serverExposure.configureFromSettings({ port: 4173 });
         assert.equal(state.mode, "local-only");
         assert.equal(state.endpointUrl, null);
-        assert.equal((yield* settingsState.get).serverExposureMode, "network-accessible");
+        assert.equal((yield* settings.get).serverExposureMode, "network-accessible");
 
         const backendConfig = yield* serverExposure.backendConfig;
         assert.equal(backendConfig.bindHost, "127.0.0.1");
@@ -172,11 +165,10 @@ describe("DesktopServerExposure", () => {
     withHarness(
       lanNetworkInterfaces,
       Effect.gen(function* () {
-        const environment = yield* DesktopEnvironment;
         const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
-        const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
 
-        yield* settingsState.load;
+        yield* settings.load;
         yield* serverExposure.configureFromSettings({ port: 4173 });
 
         const change = yield* serverExposure.setMode("network-accessible");
@@ -193,10 +185,7 @@ describe("DesktopServerExposure", () => {
         assert.equal(backendConfig.bindHost, "0.0.0.0");
         assert.equal(backendConfig.httpBaseUrl.href, "http://127.0.0.1:4173/");
 
-        const persisted = yield* readDesktopSettingsEffect(
-          environment.desktopSettingsPath,
-          environment.appVersion,
-        );
+        const persisted = yield* settings.get;
         assert.equal(persisted.serverExposureMode, "network-accessible");
       }),
     ),
@@ -206,11 +195,10 @@ describe("DesktopServerExposure", () => {
     withHarness(
       emptyNetworkInterfaces,
       Effect.gen(function* () {
-        const environment = yield* DesktopEnvironment;
         const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
-        const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
 
-        yield* settingsState.load;
+        yield* settings.load;
         yield* serverExposure.configureFromSettings({ port: 4173 });
 
         const changed = yield* serverExposure.setTailscaleServeEnabled({
@@ -227,10 +215,7 @@ describe("DesktopServerExposure", () => {
         });
         assert.equal(unchanged.requiresRelaunch, false);
 
-        const persisted = yield* readDesktopSettingsEffect(
-          environment.desktopSettingsPath,
-          environment.appVersion,
-        );
+        const persisted = yield* settings.get;
         assert.equal(persisted.tailscaleServeEnabled, true);
         assert.equal(persisted.tailscaleServePort, 8443);
       }),

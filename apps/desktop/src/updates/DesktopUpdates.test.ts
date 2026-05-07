@@ -15,8 +15,7 @@ import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
-import { DEFAULT_DESKTOP_SETTINGS } from "../settings/desktopSettings.ts";
-import * as DesktopSettingsState from "../settings/DesktopSettingsState.ts";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
 
@@ -146,7 +145,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     Layer.provideMerge(windowLayer),
     Layer.provideMerge(backendLayer),
     Layer.provideMerge(DesktopState.layer),
-    Layer.provideMerge(DesktopSettingsState.layer),
+    Layer.provideMerge(DesktopAppSettings.layer),
     Layer.provideMerge(
       DesktopConfig.layerTest({
         T3CODE_HOME: `/tmp/t3-desktop-updates-test-${process.pid}`,
@@ -230,17 +229,16 @@ describe("DesktopUpdates", () => {
 
     return Effect.scoped(
       Effect.gen(function* () {
-        const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
         const updates = yield* DesktopUpdates.DesktopUpdates;
-        yield* settingsState.set(DEFAULT_DESKTOP_SETTINGS);
         yield* updates.configure;
 
         const state = yield* updates.setChannel("nightly");
-        const settings = yield* settingsState.get;
+        const persistedSettings = yield* settings.get;
 
         assert.equal(state.channel, "nightly");
-        assert.equal(settings.updateChannel, "nightly");
-        assert.equal(settings.updateChannelConfiguredByUser, true);
+        assert.equal(persistedSettings.updateChannel, "nightly");
+        assert.equal(persistedSettings.updateChannelConfiguredByUser, true);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
@@ -250,17 +248,16 @@ describe("DesktopUpdates", () => {
 
     return Effect.scoped(
       Effect.gen(function* () {
-        const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
         const updates = yield* DesktopUpdates.DesktopUpdates;
-        yield* settingsState.set(DEFAULT_DESKTOP_SETTINGS);
         yield* updates.configure;
 
         const state = yield* updates.setChannel("latest");
-        const settings = yield* settingsState.get;
+        const persistedSettings = yield* settings.get;
 
         assert.equal(state.channel, "latest");
-        assert.equal(settings.updateChannel, "latest");
-        assert.equal(settings.updateChannelConfiguredByUser, false);
+        assert.equal(persistedSettings.updateChannel, "latest");
+        assert.equal(persistedSettings.updateChannelConfiguredByUser, false);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

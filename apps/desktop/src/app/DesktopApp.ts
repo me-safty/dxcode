@@ -17,7 +17,7 @@ import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
 import * as DesktopRun from "./DesktopRun.ts";
 import * as DesktopServerExposure from "../serverExposure/DesktopServerExposure.ts";
-import * as DesktopSettingsState from "../settings/DesktopSettingsState.ts";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
@@ -128,7 +128,7 @@ const bootstrap = Effect.gen(function* () {
   const state = yield* DesktopState.DesktopState;
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
-  const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
+  const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
   const run = yield* DesktopRun.DesktopRun;
   yield* run.logInfo("bootstrap start");
@@ -149,7 +149,7 @@ const bootstrap = Effect.gen(function* () {
     },
   );
 
-  const settings = yield* settingsState.get;
+  const settings = yield* desktopSettings.get;
   if (settings.serverExposureMode !== environment.defaultDesktopSettings.serverExposureMode) {
     yield* run.logInfo("bootstrap restoring persisted server exposure mode", {
       mode: settings.serverExposureMode,
@@ -195,7 +195,7 @@ export const program = Effect.scoped(
       const electronProtocol = yield* ElectronProtocol.ElectronProtocol;
       const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
       const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
-      const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
+      const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
       const updates = yield* DesktopUpdates.DesktopUpdates;
       const environment = yield* DesktopEnvironment.DesktopEnvironment;
       const run = yield* DesktopRun.DesktopRun;
@@ -213,7 +213,7 @@ export const program = Effect.scoped(
       const userDataPath = yield* appIdentity.resolveUserDataPath;
       yield* electronApp.setPath("userData", userDataPath);
       yield* run.logInfo("runtime logging configured", { logDir: environment.logDir });
-      yield* settingsState.load;
+      yield* desktopSettings.load;
 
       if (environment.platform === "linux") {
         yield* electronApp.appendCommandLineSwitch("class", environment.linuxWmClass);

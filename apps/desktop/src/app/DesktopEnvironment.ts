@@ -14,7 +14,7 @@ import * as Path from "effect/Path";
 import {
   type DesktopSettings,
   resolveDefaultDesktopSettings,
-} from "../settings/desktopSettings.ts";
+} from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 

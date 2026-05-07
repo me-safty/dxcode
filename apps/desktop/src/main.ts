@@ -12,7 +12,7 @@ import * as NetService from "@t3tools/shared/Net";
 import { resolveRemoteT3CliPackageSpec } from "@t3tools/ssh/command";
 import type { RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
 
-import type { DesktopSettings } from "./settings/desktopSettings.ts";
+import type { DesktopSettings as DesktopSettingsValue } from "./settings/DesktopAppSettings.ts";
 import * as DesktopIpc from "./ipc/DesktopIpc.ts";
 import * as ElectronApp from "./electron/ElectronApp.ts";
 import * as ElectronDialog from "./electron/ElectronDialog.ts";
@@ -34,7 +34,9 @@ import * as DesktopLifecycle from "./app/DesktopLifecycle.ts";
 import { DesktopBackendOutputLogLive, DesktopLoggerLive } from "./app/DesktopLogging.ts";
 import * as DesktopRun from "./app/DesktopRun.ts";
 import * as DesktopServerExposure from "./serverExposure/DesktopServerExposure.ts";
-import * as DesktopSettingsState from "./settings/DesktopSettingsState.ts";
+import * as DesktopClientSettings from "./settings/DesktopClientSettings.ts";
+import * as DesktopSavedEnvironments from "./settings/DesktopSavedEnvironments.ts";
+import * as DesktopAppSettings from "./settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "./shell/DesktopShellEnvironment.ts";
 import * as DesktopSshEnvironment from "./ssh/DesktopSshEnvironment.ts";
 import * as DesktopSshPasswordPrompts from "./ssh/DesktopSshPasswordPrompts.ts";
@@ -60,7 +62,7 @@ const desktopEnvironmentLayer = Layer.unwrap(
 
 const resolveDesktopSshCliRunner = (
   environment: DesktopEnvironment.DesktopEnvironmentShape,
-  settings: DesktopSettings,
+  settings: DesktopSettingsValue,
 ): RemoteT3RunnerOptions => {
   const devRemoteEntryPath = Option.getOrUndefined(environment.devRemoteT3ServerEntryPath);
   if (environment.isDevelopment && devRemoteEntryPath !== undefined) {
@@ -78,10 +80,10 @@ const resolveDesktopSshCliRunner = (
 const desktopSshEnvironmentLayer = Layer.unwrap(
   Effect.gen(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
-    const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
+    const settings = yield* DesktopAppSettings.DesktopAppSettings;
     return DesktopSshEnvironment.layer({
-      resolveCliRunner: settingsState.get.pipe(
-        Effect.map((settings) => resolveDesktopSshCliRunner(environment, settings)),
+      resolveCliRunner: settings.get.pipe(
+        Effect.map((currentSettings) => resolveDesktopSshCliRunner(environment, currentSettings)),
       ),
     });
   }),
@@ -104,7 +106,9 @@ const desktopFoundationLayer = Layer.mergeAll(
   DesktopRun.layer,
   DesktopState.layer,
   DesktopLifecycle.layerShutdown,
-  DesktopSettingsState.layer,
+  DesktopAppSettings.layer,
+  DesktopClientSettings.layer,
+  DesktopSavedEnvironments.layer,
   DesktopAssets.layer,
   DesktopLoggerLive,
   DesktopBackendOutputLogLive,

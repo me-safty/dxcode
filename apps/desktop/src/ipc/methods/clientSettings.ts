@@ -1,12 +1,9 @@
 import { ClientSettingsSchema } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
-import {
-  readClientSettingsEffect,
-  writeClientSettingsEffect,
-} from "../../settings/clientPersistence.ts";
+import * as DesktopClientSettings from "../../settings/DesktopClientSettings.ts";
 import * as IpcChannels from "../channels.ts";
 import { makeIpcMethod } from "../DesktopIpc.ts";
 
@@ -16,8 +13,8 @@ export const getClientSettings = makeIpcMethod({
   result: Schema.NullOr(ClientSettingsSchema),
   handler: () =>
     Effect.gen(function* () {
-      const environment = yield* DesktopEnvironment.DesktopEnvironment;
-      return yield* readClientSettingsEffect(environment.clientSettingsPath);
+      const clientSettings = yield* DesktopClientSettings.DesktopClientSettings;
+      return Option.getOrNull(yield* clientSettings.get);
     }),
 });
 
@@ -27,7 +24,7 @@ export const setClientSettings = makeIpcMethod({
   result: Schema.Void,
   handler: (settings) =>
     Effect.gen(function* () {
-      const environment = yield* DesktopEnvironment.DesktopEnvironment;
-      yield* writeClientSettingsEffect(environment.clientSettingsPath, settings);
+      const clientSettings = yield* DesktopClientSettings.DesktopClientSettings;
+      yield* clientSettings.set(settings);
     }),
 });

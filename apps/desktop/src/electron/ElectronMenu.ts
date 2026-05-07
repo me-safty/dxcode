@@ -140,7 +140,7 @@ export const layer = Layer.sync(ElectronMenu, () => {
     popupTemplate: (input) =>
       Effect.sync(() => {
         if (input.template.length === 0) {
-          return Effect.void;
+          return;
         }
         Electron.Menu.buildFromTemplate([...input.template]).popup({ window: input.window });
       }),

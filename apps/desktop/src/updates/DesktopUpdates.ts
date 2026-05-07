@@ -15,7 +15,6 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -24,13 +23,9 @@ import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
-import * as DesktopSettingsState from "../settings/DesktopSettingsState.ts";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
-import {
-  type DesktopSettings,
-  setDesktopUpdateChannelPreference,
-} from "../settings/desktopSettings.ts";
 import * as IpcChannels from "../ipc/channels.ts";
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
 import {
@@ -75,7 +70,7 @@ export class DesktopUpdateActionInProgressError extends Data.TaggedError(
 export class DesktopUpdatePersistenceError extends Data.TaggedError(
   "DesktopUpdatePersistenceError",
 )<{
-  readonly cause: DesktopSettingsState.DesktopSettingsPersistenceError;
+  readonly cause: DesktopAppSettings.DesktopSettingsWriteError;
 }> {
   override get message() {
     return "Failed to persist desktop update settings.";
@@ -217,17 +212,7 @@ const make = Effect.gen(function* () {
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
-  const updatePersistedSettings = (
-    f: Parameters<typeof settingsState.updatePersisted>[0],
-  ): Effect.Effect<DesktopSettings, DesktopUpdatePersistenceError> =>
-    settingsState.updatePersisted(f).pipe(
-      Effect.mapError((cause) => new DesktopUpdatePersistenceError({ cause })),
-      Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
-      Effect.provideService(FileSystem.FileSystem, fileSystem),
-      Effect.provideService(Path.Path, path),
-    );
+  const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
 
   const appUpdateYmlConfigRef = yield* Ref.make<Option.Option<AppUpdateYmlConfig>>(Option.none());
   const updatePollerScopeRef = yield* Ref.make<Option.Option<Scope.Closeable>>(Option.none());
@@ -586,7 +571,7 @@ const make = Effect.gen(function* () {
         } as ElectronUpdater.ElectronUpdaterFeedUrl);
       }
 
-      const settings = yield* settingsState.get;
+      const settings = yield* desktopSettings.get;
       const enabled = yield* shouldEnableAutoUpdates;
       yield* setState(createBaseUpdateState(settings.updateChannel, enabled, environment));
       if (!enabled) {
@@ -640,9 +625,9 @@ const make = Effect.gen(function* () {
           return state;
         }
 
-        yield* updatePersistedSettings((settings) =>
-          setDesktopUpdateChannelPreference(settings, nextChannel),
-        );
+        yield* desktopSettings
+          .setUpdateChannel(nextChannel)
+          .pipe(Effect.mapError((cause) => new DesktopUpdatePersistenceError({ cause })));
 
         const enabled = yield* shouldEnableAutoUpdates;
         yield* setState(createBaseUpdateState(nextChannel, enabled, environment));
