@@ -223,9 +223,11 @@ export function readSavedEnvironmentSecretEffect(input: {
       return null;
     }
 
-    return yield* Effect.sync(() =>
-      input.secretStorage.decryptString(Buffer.from(encoded, "base64")),
-    ).pipe(Effect.catchDefect(() => Effect.succeed(null)));
+    try {
+      return input.secretStorage.decryptString(Buffer.from(encoded, "base64"));
+    } catch {
+      return null;
+    }
   });
 }
 

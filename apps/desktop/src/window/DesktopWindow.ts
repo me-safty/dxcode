@@ -262,14 +262,10 @@ const make = Effect.gen(function* () {
 
       if (environment.isDevelopment) {
         const devServerUrl = yield* resolveDesktopDevServerUrl(environment);
-        yield* Effect.sync(() => {
-          void window.loadURL(devServerUrl);
-          window.webContents.openDevTools({ mode: "detach" });
-        });
+        void window.loadURL(devServerUrl);
+        window.webContents.openDevTools({ mode: "detach" });
       } else {
-        yield* Effect.sync(() => {
-          void window.loadURL(backendHttpUrl.href);
-        });
+        void window.loadURL(backendHttpUrl.href);
       }
 
       window.on("closed", () => {
