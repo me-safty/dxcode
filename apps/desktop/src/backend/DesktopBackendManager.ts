@@ -103,13 +103,11 @@ export interface DesktopBackendSnapshot {
   readonly activePid: Option.Option<number>;
   readonly restartAttempt: number;
   readonly restartScheduled: boolean;
-  readonly shuttingDown: boolean;
 }
 
 export interface DesktopBackendManagerShape {
   readonly start: Effect.Effect<void>;
   readonly stop: (options?: { readonly timeout?: Duration.Duration }) => Effect.Effect<void>;
-  readonly shutdown: Effect.Effect<void>;
   readonly currentConfig: Effect.Effect<Option.Option<DesktopBackendStartConfig>>;
   readonly snapshot: Effect.Effect<DesktopBackendSnapshot>;
 }
@@ -134,7 +132,6 @@ interface BackendManagerState {
   readonly restartAttempt: number;
   readonly restartFiber: Option.Option<Fiber.Fiber<void, never>>;
   readonly nextRunId: number;
-  readonly shuttingDown: boolean;
 }
 
 const initialState: BackendManagerState = {
@@ -145,7 +142,6 @@ const initialState: BackendManagerState = {
   restartAttempt: 0,
   restartFiber: Option.none(),
   nextRunId: 1,
-  shuttingDown: false,
 };
 
 const activePid = (active: Option.Option<ActiveBackendRun>): Option.Option<number> =>
@@ -300,7 +296,6 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
         activePid: activePid(current.active),
         restartAttempt: current.restartAttempt,
         restartScheduled: Option.isSome(current.restartFiber),
-        shuttingDown: current.shuttingDown,
       }),
     ),
   );
@@ -325,7 +320,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
     mutex.withPermits(1)(
       Effect.gen(function* () {
         const current = yield* Ref.get(state);
-        if (current.shuttingDown || Option.isSome(current.active)) {
+        if (Option.isSome(current.active)) {
           return;
         }
 
@@ -418,7 +413,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                 yield* Ref.set(desktopState.backendReady, false);
               }
 
-              if (isCurrentRun && nextState.desiredRunning && !nextState.shuttingDown) {
+              if (isCurrentRun && nextState.desiredRunning) {
                 yield* scheduleRestart(reason);
               }
             }),
@@ -488,7 +483,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
   const scheduleRestart = (reason: string): Effect.Effect<void> =>
     Effect.gen(function* () {
       const scheduled = yield* Ref.modify(state, (latest) => {
-        if (latest.shuttingDown || !latest.desiredRunning || Option.isSome(latest.restartFiber)) {
+        if (!latest.desiredRunning || Option.isSome(latest.restartFiber)) {
           return [Option.none<Duration.Duration>(), latest] as const;
         }
 
@@ -569,22 +564,11 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
       });
     });
 
-  const shutdown = Effect.gen(function* () {
-    yield* Ref.update(state, (latest) => ({
-      ...latest,
-      shuttingDown: true,
-      desiredRunning: false,
-    }));
-    yield* cancelRestart;
-    yield* stop();
-  });
-
-  yield* Scope.addFinalizer(parentScope, shutdown);
+  yield* Effect.addFinalizer(() => stop());
 
   return DesktopBackendManager.of({
     start,
     stop,
-    shutdown,
     currentConfig,
     snapshot,
   });

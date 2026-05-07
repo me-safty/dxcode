@@ -7,12 +7,10 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
-import * as Scope from "effect/Scope";
 
 import * as IpcChannels from "../ipc/channels.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
@@ -137,7 +135,6 @@ interface PendingSshPasswordPrompt {
   readonly requestId: string;
   readonly destination: string;
   readonly deferred: Deferred.Deferred<string, DesktopSshPasswordPromptRequestError>;
-  readonly timeoutFiber: Fiber.Fiber<void, never>;
 }
 
 interface LayerOptions {
@@ -159,21 +156,13 @@ const removePending = (
     return [Option.some(entry), nextPending] as const;
   });
 
-const interruptTimeout = (pending: PendingSshPasswordPrompt) =>
-  Fiber.interrupt(pending.timeoutFiber).pipe(Effect.ignore);
-
 const failPending = (
   pending: PendingSshPasswordPrompt,
   error: DesktopSshPasswordPromptRequestError,
-) =>
-  interruptTimeout(pending).pipe(
-    Effect.andThen(Deferred.fail(pending.deferred, error)),
-    Effect.asVoid,
-  );
+) => Deferred.fail(pending.deferred, error).pipe(Effect.asVoid);
 
 const make = (options: LayerOptions = {}) =>
   Effect.gen(function* () {
-    const serviceScope = yield* Scope.Scope;
     const electronWindow = yield* ElectronWindow.ElectronWindow;
     const pendingRef = yield* Ref.make(new Map<string, PendingSshPasswordPrompt>());
     const passwordPromptTimeoutMs =
@@ -199,8 +188,7 @@ const make = (options: LayerOptions = {}) =>
         Effect.asVoid,
       );
 
-    yield* Scope.addFinalizer(
-      serviceScope,
+    yield* Effect.addFinalizer(() =>
       cancelPending("SSH password prompt service stopped.").pipe(Effect.ignore),
     );
 
@@ -231,7 +219,6 @@ const make = (options: LayerOptions = {}) =>
           return;
         }
 
-        yield* interruptTimeout(entry);
         yield* Deferred.succeed(entry.deferred, input.password).pipe(Effect.asVoid);
       });
 
@@ -259,28 +246,10 @@ const make = (options: LayerOptions = {}) =>
           expiresAt,
         };
         const deferred = yield* Deferred.make<string, DesktopSshPasswordPromptRequestError>();
-        const timeoutFiber = yield* Effect.sleep(Duration.millis(passwordPromptTimeoutMs)).pipe(
-          Effect.andThen(removePending(pendingRef, requestId)),
-          Effect.flatMap((pending) =>
-            Option.match(pending, {
-              onNone: () => Effect.void,
-              onSome: (entry) =>
-                Deferred.fail(
-                  entry.deferred,
-                  new DesktopSshPromptTimedOutError({
-                    requestId,
-                    destination: input.destination,
-                  }),
-                ).pipe(Effect.asVoid),
-            }),
-          ),
-          Effect.forkIn(serviceScope),
-        );
         const pending: PendingSshPasswordPrompt = {
           requestId,
           destination: input.destination,
           deferred,
-          timeoutFiber,
         };
         yield* Ref.update(pendingRef, (entries) => new Map(entries).set(requestId, pending));
 
@@ -311,9 +280,21 @@ const make = (options: LayerOptions = {}) =>
           if (!window.value.isDestroyed()) {
             window.value.removeListener("closed", cancelOnWindowClosed);
           }
-        }).pipe(
-          Effect.andThen(removePending(pendingRef, requestId)),
-          Effect.andThen(interruptTimeout(pending)),
+        }).pipe(Effect.andThen(removePending(pendingRef, requestId)), Effect.asVoid);
+        const waitForPassword = Deferred.await(deferred).pipe(
+          Effect.timeoutOption(Duration.millis(passwordPromptTimeoutMs)),
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.fail(
+                  new DesktopSshPromptTimedOutError({
+                    requestId,
+                    destination: input.destination,
+                  }),
+                ),
+              onSome: Effect.succeed,
+            }),
+          ),
         );
 
         return yield* Effect.try({
@@ -340,7 +321,7 @@ const make = (options: LayerOptions = {}) =>
               destination: input.destination,
               cause,
             }),
-        }).pipe(Effect.andThen(Deferred.await(deferred)), Effect.ensuring(cleanup));
+        }).pipe(Effect.andThen(waitForPassword), Effect.ensuring(cleanup));
       });
 
     return DesktopSshPasswordPrompts.of({

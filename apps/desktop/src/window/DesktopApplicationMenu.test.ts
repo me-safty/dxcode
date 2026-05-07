@@ -70,7 +70,6 @@ const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, {
   check: () => Effect.die("unexpected check"),
   download: Effect.die("unexpected download"),
   install: Effect.die("unexpected install"),
-  shutdown: Effect.void,
 } satisfies DesktopUpdates.DesktopUpdatesShape);
 
 const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>

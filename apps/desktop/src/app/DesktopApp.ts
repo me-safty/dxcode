@@ -3,7 +3,6 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
-import * as Scope from "effect/Scope";
 
 import * as NetService from "@t3tools/shared/Net";
 import * as ElectronApp from "../electron/ElectronApp.ts";
@@ -186,52 +185,46 @@ const bootstrap = Effect.gen(function* () {
 export const program = Effect.scoped(
   Effect.gen(function* () {
     const shutdown = yield* DesktopLifecycle.DesktopShutdown;
+    const appIdentity = yield* DesktopAppIdentity.DesktopAppIdentity;
+    const applicationMenu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
+    const backendManager = yield* DesktopBackendManager.DesktopBackendManager;
+    const electronApp = yield* ElectronApp.ElectronApp;
+    const electronProtocol = yield* ElectronProtocol.ElectronProtocol;
+    const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
+    const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
+    const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
+    const updates = yield* DesktopUpdates.DesktopUpdates;
+    const environment = yield* DesktopEnvironment.DesktopEnvironment;
+    const run = yield* DesktopRun.DesktopRun;
 
-    yield* Effect.gen(function* () {
-      const appIdentity = yield* DesktopAppIdentity.DesktopAppIdentity;
-      const applicationMenu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
-      const backendManager = yield* DesktopBackendManager.DesktopBackendManager;
-      const electronApp = yield* ElectronApp.ElectronApp;
-      const electronProtocol = yield* ElectronProtocol.ElectronProtocol;
-      const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
-      const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
-      const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
-      const updates = yield* DesktopUpdates.DesktopUpdates;
-      const environment = yield* DesktopEnvironment.DesktopEnvironment;
-      const run = yield* DesktopRun.DesktopRun;
+    yield* electronProtocol.registerDesktopSchemePrivileges;
+    yield* run.refreshId;
+    yield* Effect.addFinalizer(() =>
+      backendManager.stop().pipe(Effect.ensuring(shutdown.markComplete)),
+    );
 
-      yield* electronProtocol.registerDesktopSchemePrivileges;
-      yield* run.refreshId;
-      yield* Scope.addFinalizer(
-        yield* Scope.Scope,
-        Effect.zip(backendManager.shutdown, updates.shutdown).pipe(
-          Effect.ensuring(shutdown.markComplete),
-        ),
-      );
+    yield* shellEnvironment.installIntoProcess;
+    const userDataPath = yield* appIdentity.resolveUserDataPath;
+    yield* electronApp.setPath("userData", userDataPath);
+    yield* run.logInfo("runtime logging configured", { logDir: environment.logDir });
+    yield* desktopSettings.load;
 
-      yield* shellEnvironment.installIntoProcess;
-      const userDataPath = yield* appIdentity.resolveUserDataPath;
-      yield* electronApp.setPath("userData", userDataPath);
-      yield* run.logInfo("runtime logging configured", { logDir: environment.logDir });
-      yield* desktopSettings.load;
+    if (environment.platform === "linux") {
+      yield* electronApp.appendCommandLineSwitch("class", environment.linuxWmClass);
+    }
 
-      if (environment.platform === "linux") {
-        yield* electronApp.appendCommandLineSwitch("class", environment.linuxWmClass);
-      }
+    yield* appIdentity.configure;
+    yield* lifecycle.register;
 
-      yield* appIdentity.configure;
-      yield* lifecycle.register;
-
-      yield* electronApp.whenReady.pipe(
-        Effect.catchCause((cause) => fatalStartupCause("whenReady", cause)),
-      );
-      yield* run.logInfo("app ready");
-      yield* appIdentity.configure;
-      yield* applicationMenu.configure;
-      yield* electronProtocol.registerDesktopFileProtocol;
-      yield* updates.configure;
-      yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
-      yield* shutdown.awaitRequest;
-    });
+    yield* electronApp.whenReady.pipe(
+      Effect.catchCause((cause) => fatalStartupCause("whenReady", cause)),
+    );
+    yield* run.logInfo("app ready");
+    yield* appIdentity.configure;
+    yield* applicationMenu.configure;
+    yield* electronProtocol.registerDesktopFileProtocol;
+    yield* updates.configure;
+    yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
+    yield* shutdown.awaitRequest;
   }),
 );

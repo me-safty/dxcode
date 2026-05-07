@@ -11,7 +11,6 @@ import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -94,7 +93,6 @@ export interface DesktopUpdatesShape {
   readonly check: (reason: string) => Effect.Effect<DesktopUpdateCheckResult>;
   readonly download: Effect.Effect<DesktopUpdateActionResult>;
   readonly install: Effect.Effect<DesktopUpdateActionResult>;
-  readonly shutdown: Effect.Effect<void>;
 }
 
 export class DesktopUpdates extends Context.Service<DesktopUpdates, DesktopUpdatesShape>()(
@@ -215,7 +213,6 @@ const make = Effect.gen(function* () {
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
 
   const appUpdateYmlConfigRef = yield* Ref.make<Option.Option<AppUpdateYmlConfig>>(Option.none());
-  const updatePollerScopeRef = yield* Ref.make<Option.Option<Scope.Closeable>>(Option.none());
   const updateCheckInFlightRef = yield* Ref.make(false);
   const updateDownloadInFlightRef = yield* Ref.make(false);
   const updateInstallInFlightRef = yield* Ref.make(false);
@@ -286,14 +283,6 @@ const make = Effect.gen(function* () {
     if (yield* Ref.get(updateDownloadInFlightRef)) return Option.some("download" as const);
     if (yield* Ref.get(updateCheckInFlightRef)) return Option.some("check" as const);
     return Option.none<"check" | "download" | "install">();
-  });
-
-  const clearUpdatePollTimer = Effect.gen(function* () {
-    const scope = yield* Ref.getAndSet(updatePollerScopeRef, Option.none());
-    yield* Option.match(scope, {
-      onNone: () => Effect.void,
-      onSome: (value) => Scope.close(value, Exit.void).pipe(Effect.ignore),
-    });
   });
 
   const applyAutoUpdaterChannel = (channel: DesktopUpdateChannel): Effect.Effect<void> =>
@@ -392,7 +381,6 @@ const make = Effect.gen(function* () {
 
     yield* Ref.set(desktopState.quitting, true);
     yield* Ref.set(updateInstallInFlightRef, true);
-    yield* clearUpdatePollTimer;
 
     return yield* Effect.gen(function* () {
       yield* backendManager.stop({ timeout: Duration.seconds(5) });
@@ -418,18 +406,12 @@ const make = Effect.gen(function* () {
   });
 
   const startUpdatePollers: Effect.Effect<void, never, Scope.Scope> = Effect.gen(function* () {
-    yield* clearUpdatePollTimer;
-    const parentScope = yield* Scope.Scope;
-    const scope = yield* Scope.make("sequential");
-    yield* Ref.set(updatePollerScopeRef, Option.some(scope));
-    yield* Scope.addFinalizer(parentScope, Scope.close(scope, Exit.void));
-
     yield* Effect.sleep(AUTO_UPDATE_STARTUP_DELAY).pipe(
       Effect.andThen(checkForUpdates("startup")),
       Effect.catchCause((cause) =>
         logUpdaterError("startup update check failed", { cause: Cause.pretty(cause) }),
       ),
-      Effect.forkIn(scope),
+      Effect.forkScoped,
     );
     yield* Effect.sleep(AUTO_UPDATE_POLL_INTERVAL).pipe(
       Effect.andThen(checkForUpdates("poll")),
@@ -437,7 +419,7 @@ const make = Effect.gen(function* () {
       Effect.catchCause((cause) =>
         logUpdaterError("poll update check failed", { cause: Cause.pretty(cause) }),
       ),
-      Effect.forkIn(scope),
+      Effect.forkScoped,
     );
   });
 
@@ -681,7 +663,6 @@ const make = Effect.gen(function* () {
         state: yield* Ref.get(updateStateRef),
       };
     }),
-    shutdown: Ref.set(updateInstallInFlightRef, false).pipe(Effect.andThen(clearUpdatePollTimer)),
   });
 });
 

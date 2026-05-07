@@ -104,7 +104,6 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
   const backendLayer = Layer.succeed(DesktopBackendManager.DesktopBackendManager, {
     start: Effect.void,
     stop: () => Effect.void,
-    shutdown: Effect.void,
     currentConfig: Effect.succeed(Option.none()),
     snapshot: Effect.succeed({
       desiredRunning: false,
@@ -112,7 +111,6 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
       activePid: Option.none(),
       restartAttempt: 0,
       restartScheduled: false,
-      shuttingDown: false,
     }),
   });
 
