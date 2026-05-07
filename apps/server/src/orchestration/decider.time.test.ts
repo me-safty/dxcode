@@ -49,15 +49,16 @@ it.effect("uses the Effect clock for generated decider timestamps", () =>
       readModel,
     });
 
-    if (Array.isArray(result)) {
+    const event = Array.isArray(result) ? null : result;
+    if (event === null) {
       assert.fail("Expected a single project.meta-updated event.");
     }
 
-    if (result.type !== "project.meta-updated") {
-      assert.fail(`Expected project.meta-updated, got ${result.type}`);
+    if (event.type !== "project.meta-updated") {
+      assert.fail(`Expected project.meta-updated, got ${event.type}`);
     }
 
-    assert.equal(result.occurredAt, frozenAt);
-    assert.equal(result.payload.updatedAt, frozenAt);
+    assert.equal(event.occurredAt, frozenAt);
+    assert.equal(event.payload.updatedAt, frozenAt);
   }).pipe(Effect.provide(TestClock.layer())),
 );
