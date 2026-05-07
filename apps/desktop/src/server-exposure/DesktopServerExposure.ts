@@ -26,11 +26,11 @@ import {
   type DesktopSettings,
   setDesktopServerExposurePreference,
   setDesktopTailscaleServePreference,
-} from "../desktopSettings.ts";
-import * as DesktopEnvironment from "./DesktopEnvironment.ts";
-import * as DesktopConfig from "./DesktopConfig.ts";
-import { resolveTailscaleAdvertisedEndpoints } from "../tailscaleEndpointProvider.ts";
-import * as DesktopSettingsState from "./DesktopSettingsState.ts";
+} from "../settings/desktopSettings.ts";
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopConfig from "../app/DesktopConfig.ts";
+import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
+import * as DesktopSettingsState from "../settings/DesktopSettingsState.ts";
 
 export const DESKTOP_LOOPBACK_HOST = "127.0.0.1";
 const DESKTOP_LAN_BIND_HOST = "0.0.0.0";

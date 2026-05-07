@@ -7,9 +7,12 @@ import type {
 import { Context, Effect, Layer, Option } from "effect";
 import * as EffectPath from "effect/Path";
 
-import { type DesktopSettings, resolveDefaultDesktopSettings } from "../desktopSettings.ts";
+import {
+  type DesktopSettings,
+  resolveDefaultDesktopSettings,
+} from "../settings/desktopSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
-import { isNightlyDesktopVersion } from "../updateChannels.ts";
+import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 
 export interface MakeDesktopEnvironmentInput {
   readonly dirname: string;

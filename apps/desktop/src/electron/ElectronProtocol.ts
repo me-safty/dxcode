@@ -9,7 +9,7 @@ import * as Scope from "effect/Scope";
 
 import * as Electron from "electron";
 
-import { DesktopEnvironment, type DesktopEnvironmentShape } from "../main/DesktopEnvironment.ts";
+import { DesktopEnvironment, type DesktopEnvironmentShape } from "../app/DesktopEnvironment.ts";
 
 export const DESKTOP_SCHEME = "t3";
 

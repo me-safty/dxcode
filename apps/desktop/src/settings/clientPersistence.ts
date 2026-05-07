@@ -11,6 +11,8 @@ import * as Path from "effect/Path";
 import * as Random from "effect/Random";
 import * as Schema from "effect/Schema";
 
+import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
+
 interface ClientSettingsDocument {
   readonly settings: ClientSettings;
 }
@@ -25,12 +27,6 @@ interface PersistedSavedEnvironmentStorageRecord extends Omit<
 
 interface SavedEnvironmentRegistryDocument {
   readonly records: readonly PersistedSavedEnvironmentStorageRecord[];
-}
-
-export interface DesktopSecretStorage {
-  readonly isEncryptionAvailable: () => boolean;
-  readonly encryptString: (value: string) => Buffer;
-  readonly decryptString: (value: Buffer) => string;
 }
 
 const ClientSettingsDocumentSchema = Schema.Struct({
@@ -199,7 +195,7 @@ export function writeSavedEnvironmentRegistryEffect(
 export function readSavedEnvironmentSecretEffect(input: {
   readonly registryPath: string;
   readonly environmentId: string;
-  readonly secretStorage: DesktopSecretStorage;
+  readonly secretStorage: ElectronSafeStorage.ElectronSafeStorageShape;
 }): Effect.Effect<string | null, never, FileSystem.FileSystem> {
   return Effect.gen(function* () {
     const document = yield* readSavedEnvironmentRegistryDocumentEffect(input.registryPath);
@@ -224,7 +220,7 @@ export function writeSavedEnvironmentSecretEffect(input: {
   readonly registryPath: string;
   readonly environmentId: string;
   readonly secret: string;
-  readonly secretStorage: DesktopSecretStorage;
+  readonly secretStorage: ElectronSafeStorage.ElectronSafeStorageShape;
 }): Effect.Effect<boolean, unknown, FileSystem.FileSystem | Path.Path> {
   return Effect.gen(function* () {
     const document = yield* readSavedEnvironmentRegistryDocumentEffect(input.registryPath);

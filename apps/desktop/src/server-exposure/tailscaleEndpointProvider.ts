@@ -11,7 +11,7 @@ import { Effect, Option } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
-import type { DesktopNetworkInterfaces } from "./main/DesktopServerExposure.ts";
+import type { DesktopNetworkInterfaces } from "./DesktopServerExposure.ts";
 
 export { isTailscaleIpv4Address, parseTailscaleMagicDnsName } from "@t3tools/tailscale";
 

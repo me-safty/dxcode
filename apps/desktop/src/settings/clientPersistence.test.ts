@@ -15,8 +15,8 @@ import {
   writeClientSettingsEffect,
   writeSavedEnvironmentRegistryEffect,
   writeSavedEnvironmentSecretEffect,
-  type DesktopSecretStorage,
 } from "./clientPersistence.ts";
+import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
 
 const DesktopSshTargetSchema = Schema.Struct({
   alias: Schema.String,
@@ -63,7 +63,7 @@ function readRegistryDocument(filePath: string) {
   });
 }
 
-function makeSecretStorage(available: boolean): DesktopSecretStorage {
+function makeSecretStorage(available: boolean): ElectronSafeStorage.ElectronSafeStorageShape {
   return {
     isEncryptionAvailable: () => available,
     encryptString: (value) => Buffer.from(`enc:${value}`, "utf8"),

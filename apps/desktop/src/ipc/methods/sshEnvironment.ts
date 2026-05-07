@@ -18,9 +18,9 @@ import * as Schema from "effect/Schema";
 
 import * as IpcChannels from "../channels.ts";
 import { makeIpcMethod } from "../DesktopIpc.ts";
-import * as DesktopSshEnvironment from "../../main/DesktopSshEnvironment.ts";
-import * as DesktopSshPasswordPrompts from "../../main/DesktopSshPasswordPrompts.ts";
-import * as DesktopSshRemoteApi from "../../main/DesktopSshRemoteApi.ts";
+import * as DesktopSshEnvironment from "../../ssh/DesktopSshEnvironment.ts";
+import * as DesktopSshPasswordPrompts from "../../ssh/DesktopSshPasswordPrompts.ts";
+import * as DesktopSshRemoteApi from "../../ssh/DesktopSshRemoteApi.ts";
 
 export const discoverSshHosts = makeIpcMethod({
   channel: IpcChannels.DISCOVER_SSH_HOSTS_CHANNEL,

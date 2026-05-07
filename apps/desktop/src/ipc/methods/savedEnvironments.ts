@@ -8,8 +8,8 @@ import {
   removeSavedEnvironmentSecretEffect,
   writeSavedEnvironmentRegistryEffect,
   writeSavedEnvironmentSecretEffect,
-} from "../../clientPersistence.ts";
-import * as DesktopEnvironment from "../../main/DesktopEnvironment.ts";
+} from "../../settings/clientPersistence.ts";
+import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as ElectronSafeStorage from "../../electron/ElectronSafeStorage.ts";
 import * as IpcChannels from "../channels.ts";
 import { makeIpcMethod } from "../DesktopIpc.ts";

@@ -5,11 +5,11 @@ import * as EffectPath from "effect/Path";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
-import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
-import * as DesktopConfig from "./DesktopConfig.ts";
-import * as DesktopRun from "./DesktopRun.ts";
-import * as DesktopServerExposure from "./DesktopServerExposure.ts";
+import * as DesktopConfig from "../app/DesktopConfig.ts";
+import * as DesktopRun from "../app/DesktopRun.ts";
+import * as DesktopServerExposure from "../server-exposure/DesktopServerExposure.ts";
 
 const serverExposureLayer = Layer.succeed(DesktopServerExposure.DesktopServerExposure, {
   getState: Effect.die("unexpected getState"),

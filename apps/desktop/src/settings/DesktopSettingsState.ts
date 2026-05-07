@@ -12,8 +12,8 @@ import {
   DEFAULT_DESKTOP_SETTINGS,
   readDesktopSettingsEffect,
   writeDesktopSettingsEffect,
-} from "../desktopSettings.ts";
-import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+} from "./desktopSettings.ts";
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 
 export type DesktopSettingsPersistenceError = PlatformError.PlatformError | Schema.SchemaError;
 

@@ -11,14 +11,14 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { TestClock } from "effect/testing";
 
-import * as DesktopBackendManager from "./DesktopBackendManager.ts";
-import * as DesktopConfig from "./DesktopConfig.ts";
-import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
+import * as DesktopConfig from "../app/DesktopConfig.ts";
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
-import { DEFAULT_DESKTOP_SETTINGS } from "../desktopSettings.ts";
-import * as DesktopSettingsState from "./DesktopSettingsState.ts";
-import * as DesktopState from "./DesktopState.ts";
+import { DEFAULT_DESKTOP_SETTINGS } from "../settings/desktopSettings.ts";
+import * as DesktopSettingsState from "../settings/DesktopSettingsState.ts";
+import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
 
 interface UpdatesHarnessOptions {

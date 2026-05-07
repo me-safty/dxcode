@@ -22,14 +22,17 @@ import * as Scope from "effect/Scope";
 
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
-import * as DesktopBackendManager from "./DesktopBackendManager.ts";
-import * as DesktopConfig from "./DesktopConfig.ts";
-import * as DesktopSettingsState from "./DesktopSettingsState.ts";
-import * as DesktopState from "./DesktopState.ts";
-import * as DesktopEnvironment from "./DesktopEnvironment.ts";
-import { type DesktopSettings, setDesktopUpdateChannelPreference } from "../desktopSettings.ts";
+import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
+import * as DesktopConfig from "../app/DesktopConfig.ts";
+import * as DesktopSettingsState from "../settings/DesktopSettingsState.ts";
+import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import {
+  type DesktopSettings,
+  setDesktopUpdateChannelPreference,
+} from "../settings/desktopSettings.ts";
 import * as IpcChannels from "../ipc/channels.ts";
-import { resolveDefaultDesktopUpdateChannel } from "../updateChannels.ts";
+import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -41,7 +44,7 @@ import {
   reduceDesktopUpdateStateOnInstallFailure,
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
-} from "../updateMachine.ts";
+} from "./updateMachine.ts";
 
 const AUTO_UPDATE_STARTUP_DELAY = "15 seconds";
 const AUTO_UPDATE_POLL_INTERVAL = "4 minutes";

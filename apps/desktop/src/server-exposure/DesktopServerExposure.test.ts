@@ -10,12 +10,18 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
-import { DEFAULT_DESKTOP_SETTINGS, readDesktopSettingsEffect } from "../desktopSettings.ts";
-import { DesktopEnvironment, layer as makeDesktopEnvironmentLayer } from "./DesktopEnvironment.ts";
-import * as DesktopConfig from "./DesktopConfig.ts";
+import {
+  DEFAULT_DESKTOP_SETTINGS,
+  readDesktopSettingsEffect,
+} from "../settings/desktopSettings.ts";
+import {
+  DesktopEnvironment,
+  layer as makeDesktopEnvironmentLayer,
+} from "../app/DesktopEnvironment.ts";
+import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopServerExposure from "./DesktopServerExposure.ts";
 import type { DesktopNetworkInterfaces } from "./DesktopServerExposure.ts";
-import * as DesktopSettingsState from "./DesktopSettingsState.ts";
+import * as DesktopSettingsState from "../settings/DesktopSettingsState.ts";
 
 const encoder = new TextEncoder();
 

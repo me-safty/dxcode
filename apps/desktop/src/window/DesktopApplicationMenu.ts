@@ -9,9 +9,9 @@ import type * as Electron from "electron";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
-import * as DesktopEnvironment from "./DesktopEnvironment.ts";
-import * as DesktopRun from "./DesktopRun.ts";
-import * as DesktopUpdates from "./DesktopUpdates.ts";
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopRun from "../app/DesktopRun.ts";
+import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 
 type DesktopApplicationMenuRuntimeServices =

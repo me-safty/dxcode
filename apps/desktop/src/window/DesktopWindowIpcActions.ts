@@ -15,8 +15,8 @@ import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
-import * as DesktopBackendManager from "./DesktopBackendManager.ts";
-import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 
 export interface DesktopWindowIpcContextMenuInput {
   readonly items: readonly ContextMenuItem[];

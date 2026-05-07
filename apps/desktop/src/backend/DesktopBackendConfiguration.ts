@@ -8,9 +8,9 @@ import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
 
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
-import * as DesktopEnvironment from "./DesktopEnvironment.ts";
-import * as DesktopServerExposure from "./DesktopServerExposure.ts";
-import * as DesktopRun from "./DesktopRun.ts";
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopServerExposure from "../server-exposure/DesktopServerExposure.ts";
+import * as DesktopRun from "../app/DesktopRun.ts";
 
 export interface DesktopBackendConfigurationShape {
   readonly resolve: Effect.Effect<DesktopBackendManager.DesktopBackendStartConfig>;

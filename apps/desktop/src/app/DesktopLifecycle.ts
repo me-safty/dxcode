@@ -13,7 +13,7 @@ import * as DesktopRun from "./DesktopRun.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as DesktopState from "./DesktopState.ts";
-import * as DesktopWindow from "./DesktopWindow.ts";
+import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 export interface DesktopShutdownShape {
   readonly request: Effect.Effect<void>;

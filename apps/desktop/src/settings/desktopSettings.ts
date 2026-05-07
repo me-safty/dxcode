@@ -3,11 +3,11 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import type { PlatformError } from "effect/PlatformError";
+import * as PlatformError from "effect/PlatformError";
 import * as Random from "effect/Random";
 import * as Schema from "effect/Schema";
 
-import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
+import { resolveDefaultDesktopUpdateChannel } from "../updates/updateChannels.ts";
 
 export interface DesktopSettings {
   readonly serverExposureMode: DesktopServerExposureMode;
@@ -143,7 +143,11 @@ export function readDesktopSettingsEffect(
 export function writeDesktopSettingsEffect(
   settingsPath: string,
   settings: DesktopSettings,
-): Effect.Effect<void, PlatformError | Schema.SchemaError, FileSystem.FileSystem | Path.Path> {
+): Effect.Effect<
+  void,
+  PlatformError.PlatformError | Schema.SchemaError,
+  FileSystem.FileSystem | Path.Path
+> {
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;

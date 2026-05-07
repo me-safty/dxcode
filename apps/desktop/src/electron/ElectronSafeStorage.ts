@@ -3,9 +3,11 @@ import * as Layer from "effect/Layer";
 
 import * as Electron from "electron";
 
-import type { DesktopSecretStorage as ClientPersistenceSecretStorage } from "../clientPersistence.ts";
-
-export interface ElectronSafeStorageShape extends ClientPersistenceSecretStorage {}
+export interface ElectronSafeStorageShape {
+  readonly isEncryptionAvailable: () => boolean;
+  readonly encryptString: (value: string) => Buffer;
+  readonly decryptString: (value: Buffer) => string;
+}
 
 export class ElectronSafeStorage extends Context.Service<
   ElectronSafeStorage,

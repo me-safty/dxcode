@@ -7,15 +7,15 @@ import * as Ref from "effect/Ref";
 
 import type * as Electron from "electron";
 
-import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
-import * as DesktopServerExposure from "./DesktopServerExposure.ts";
-import * as DesktopState from "./DesktopState.ts";
-import * as DesktopAssets from "./DesktopAssets.ts";
+import * as DesktopServerExposure from "../server-exposure/DesktopServerExposure.ts";
+import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopAssets from "../app/DesktopAssets.ts";
 
 const TITLEBAR_HEIGHT = 40;
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux

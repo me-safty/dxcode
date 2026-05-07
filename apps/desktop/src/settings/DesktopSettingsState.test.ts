@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
-import { DEFAULT_DESKTOP_SETTINGS } from "../desktopSettings.ts";
+import { DEFAULT_DESKTOP_SETTINGS } from "./desktopSettings.ts";
 import * as DesktopSettingsState from "./DesktopSettingsState.ts";
 
 describe("DesktopSettingsState", () => {

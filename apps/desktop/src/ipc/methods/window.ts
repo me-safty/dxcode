@@ -8,7 +8,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import * as DesktopWindowIpcActions from "../../main/DesktopWindowIpcActions.ts";
+import * as DesktopWindowIpcActions from "../../window/DesktopWindowIpcActions.ts";
 import * as IpcChannels from "../channels.ts";
 import { makeIpcMethod, makeSyncIpcMethod } from "../DesktopIpc.ts";
 

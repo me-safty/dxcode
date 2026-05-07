@@ -6,10 +6,10 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
-import { DesktopBackendOutputLog } from "./DesktopLogging.ts";
-import * as DesktopRun from "./DesktopRun.ts";
-import * as DesktopState from "./DesktopState.ts";
-import * as DesktopWindow from "./DesktopWindow.ts";
+import { DesktopBackendOutputLog } from "../app/DesktopLogging.ts";
+import * as DesktopRun from "../app/DesktopRun.ts";
+import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 export interface DesktopBackendEventsShape {
   readonly onStarting: Effect.Effect<void>;
