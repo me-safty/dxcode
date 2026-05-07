@@ -32,7 +32,6 @@ import * as DesktopBackendManager from "./backend/DesktopBackendManager.ts";
 import * as DesktopEnvironment from "./app/DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./app/DesktopLifecycle.ts";
 import { DesktopBackendOutputLogLive, DesktopLoggerLive } from "./app/DesktopLogging.ts";
-import * as DesktopRun from "./app/DesktopRun.ts";
 import * as DesktopServerExposure from "./serverExposure/DesktopServerExposure.ts";
 import * as DesktopClientSettings from "./settings/DesktopClientSettings.ts";
 import * as DesktopSavedEnvironments from "./settings/DesktopSavedEnvironments.ts";
@@ -103,7 +102,6 @@ const electronLayer = Layer.mergeAll(
 );
 
 const desktopFoundationLayer = Layer.mergeAll(
-  DesktopRun.layer,
   DesktopState.layer,
   DesktopLifecycle.layerShutdown,
   DesktopAppSettings.layer,

@@ -27,7 +27,6 @@ export interface RotatingLogFileWriter {
 export interface DesktopBackendOutputLogShape {
   readonly writeSessionBoundary: (input: {
     readonly phase: "START" | "END";
-    readonly runId: string;
     readonly details: string;
   }) => Effect.Effect<void>;
   readonly writeOutputChunk: (
@@ -64,6 +63,12 @@ const DesktopBackendOutputLogNoop: DesktopBackendOutputLogShape = {
   writeSessionBoundary: () => Effect.void,
   writeOutputChunk: () => Effect.void,
 };
+
+const currentDesktopRunId = Effect.gen(function* () {
+  const annotations = yield* References.CurrentLogAnnotations;
+  const runId = annotations.runId;
+  return typeof runId === "string" && runId.length > 0 ? runId : "unknown";
+});
 
 const refreshFileSize = (
   fileSystem: FileSystem.FileSystem,
@@ -229,8 +234,9 @@ export const DesktopBackendOutputLogLive = Layer.effect(
       onNone: () => DesktopBackendOutputLogNoop,
       onSome: (logFile) =>
         ({
-          writeSessionBoundary: ({ phase, runId, details }) =>
+          writeSessionBoundary: ({ phase, details }) =>
             Effect.gen(function* () {
+              const runId = yield* currentDesktopRunId;
               const timestamp = DateTime.formatIso(yield* DateTime.now);
               yield* logFile.writeText(
                 `[${timestamp}] ---- APP SESSION ${phase} run=${runId} ${sanitizeLogValue(details)} ----\n`,

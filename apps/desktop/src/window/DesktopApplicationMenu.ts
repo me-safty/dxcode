@@ -10,18 +10,8 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
-import * as DesktopRun from "../app/DesktopRun.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
-
-type DesktopApplicationMenuRuntimeServices =
-  | DesktopEnvironment.DesktopEnvironment
-  | DesktopRun.DesktopRun
-  | DesktopUpdates.DesktopUpdates
-  | DesktopWindow.DesktopWindow
-  | ElectronApp.ElectronApp
-  | ElectronDialog.ElectronDialog
-  | ElectronMenu.ElectronMenu;
 
 export interface DesktopApplicationMenuShape {
   readonly configure: Effect.Effect<void>;
@@ -71,20 +61,18 @@ const checkForUpdatesFromMenu: Effect.Effect<
 const handleCheckForUpdatesMenuClick: Effect.Effect<
   void,
   DesktopWindow.DesktopWindowError,
-  | DesktopRun.DesktopRun
-  | DesktopUpdates.DesktopUpdates
-  | ElectronDialog.ElectronDialog
-  | DesktopWindow.DesktopWindow
+  DesktopUpdates.DesktopUpdates | ElectronDialog.ElectronDialog | DesktopWindow.DesktopWindow
 > = Effect.gen(function* () {
   const updates = yield* DesktopUpdates.DesktopUpdates;
   const electronDialog = yield* ElectronDialog.ElectronDialog;
-  const run = yield* DesktopRun.DesktopRun;
   const disabledReason = yield* updates.disabledReason;
   if (Option.isSome(disabledReason)) {
-    yield* run.logInfo("manual update check requested, but updates are disabled", {
-      component: "desktop-updater",
-      disabledReason: disabledReason.value,
-    });
+    yield* Effect.logInfo("manual update check requested, but updates are disabled").pipe(
+      Effect.annotateLogs({
+        component: "desktop-updater",
+        disabledReason: disabledReason.value,
+      }),
+    );
     yield* electronDialog.showMessageBox({
       type: "info",
       title: "Updates unavailable",
@@ -104,32 +92,30 @@ const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const electronMenu = yield* ElectronMenu.ElectronMenu;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
-  const run = yield* DesktopRun.DesktopRun;
   const appName = yield* electronApp.name;
-  const context = yield* Effect.context<DesktopApplicationMenuRuntimeServices>();
-
-  const runMenuEffect = <E, R>(action: string, effect: Effect.Effect<void, E, R>) => {
-    void Effect.runPromiseWith(context as unknown as Context.Context<R>)(
-      effect.pipe(
-        Effect.catchCause((cause) =>
-          run.logError("desktop menu action failed", {
-            action,
-            cause: Cause.pretty(cause),
-          }),
-        ),
-      ),
-    );
-  };
-
-  const checkForUpdatesClick = () => {
-    runMenuEffect("check-for-updates", handleCheckForUpdatesMenuClick);
-  };
-
-  const settingsClick = () => {
-    runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
-  };
 
   const configure = Effect.gen(function* () {
+    const context = yield* Effect.context<never>();
+    const runMenuEffect = <E, R>(action: string, effect: Effect.Effect<void, E, R>) => {
+      void Effect.runPromiseWith(context as unknown as Context.Context<R>)(
+        effect.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError("desktop menu action failed").pipe(
+              Effect.annotateLogs({
+                action,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          ),
+        ),
+      );
+    };
+    const checkForUpdatesClick = () => {
+      runMenuEffect("check-for-updates", handleCheckForUpdatesMenuClick);
+    };
+    const settingsClick = () => {
+      runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
+    };
     const template: Electron.MenuItemConstructorOptions[] = [];
 
     if (environment.platform === "darwin") {

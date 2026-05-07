@@ -25,7 +25,6 @@ import {
   DesktopBackendOutputLog,
   type DesktopBackendOutputLogShape,
 } from "../app/DesktopLogging.ts";
-import * as DesktopRun from "../app/DesktopRun.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
@@ -105,7 +104,6 @@ function makeManagerLayer(input: {
   readonly spawnerLayer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>;
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>;
   readonly backendOutputLog?: Partial<DesktopBackendOutputLogShape>;
-  readonly desktopRun?: Partial<DesktopRun.DesktopRunShape>;
   readonly desktopState?: DesktopState.DesktopStateShape;
   readonly desktopWindow?: Partial<DesktopWindow.DesktopWindowShape>;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
@@ -129,14 +127,6 @@ function makeManagerLayer(input: {
           writeOutputChunk: () => Effect.void,
           ...input.backendOutputLog,
         } satisfies DesktopBackendOutputLogShape),
-        Layer.succeed(DesktopRun.DesktopRun, {
-          id: Effect.succeed("test-run"),
-          refreshId: Effect.succeed("test-run"),
-          logInfo: () => Effect.void,
-          logWarning: () => Effect.void,
-          logError: () => Effect.void,
-          ...input.desktopRun,
-        } satisfies DesktopRun.DesktopRunShape),
         Layer.succeed(DesktopWindow.DesktopWindow, {
           createMain: Effect.die("unexpected createMain"),
           ensureMain: Effect.die("unexpected ensureMain"),
@@ -359,7 +349,6 @@ describe("DesktopBackendManager", () => {
   it.effect("restarts an unexpectedly exited backend with the Effect clock", () =>
     Effect.gen(function* () {
       const starts = yield* Queue.unbounded<number>();
-      const restartDelays = yield* Queue.unbounded<number>();
       let startCount = 0;
 
       const spawnerLayer = Layer.succeed(
@@ -379,10 +368,6 @@ describe("DesktopBackendManager", () => {
       const managerLayer = makeManagerLayer({
         spawnerLayer,
         httpClientLayer: httpClientLayer(() => Effect.never),
-        desktopRun: {
-          logError: (_message, annotations) =>
-            Queue.offer(restartDelays, Number(annotations?.delayMs ?? 0)).pipe(Effect.asVoid),
-        },
       });
 
       yield* Effect.gen(function* () {
@@ -390,13 +375,15 @@ describe("DesktopBackendManager", () => {
         yield* manager.start;
 
         assert.equal(yield* Queue.take(starts), 1);
-        assert.equal(yield* Queue.take(restartDelays), 500);
 
-        yield* TestClock.adjust(Duration.millis(500));
+        yield* TestClock.adjust(Duration.millis(499));
+        assert.equal(yield* Queue.size(starts), 0);
+        yield* TestClock.adjust(Duration.millis(1));
         assert.equal(yield* Queue.take(starts), 2);
-        assert.equal(yield* Queue.take(restartDelays), 1_000);
 
-        yield* TestClock.adjust(Duration.millis(1_000));
+        yield* TestClock.adjust(Duration.millis(999));
+        assert.equal(yield* Queue.size(starts), 0);
+        yield* TestClock.adjust(Duration.millis(1));
         assert.equal(yield* Queue.take(starts), 3);
       }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
     }),
@@ -405,7 +392,6 @@ describe("DesktopBackendManager", () => {
   it.effect("cancels a scheduled restart when start is requested manually", () =>
     Effect.gen(function* () {
       const starts = yield* Queue.unbounded<number>();
-      const restartDelays = yield* Queue.unbounded<number>();
       const secondClosed = yield* Deferred.make<void>();
       let startCount = 0;
 
@@ -438,10 +424,6 @@ describe("DesktopBackendManager", () => {
       const managerLayer = makeManagerLayer({
         spawnerLayer,
         httpClientLayer: httpClientLayer(() => Effect.never),
-        desktopRun: {
-          logError: (_message, annotations) =>
-            Queue.offer(restartDelays, Number(annotations?.delayMs ?? 0)).pipe(Effect.asVoid),
-        },
       });
 
       yield* Effect.gen(function* () {
@@ -449,7 +431,6 @@ describe("DesktopBackendManager", () => {
         yield* manager.start;
 
         assert.equal(yield* Queue.take(starts), 1);
-        assert.equal(yield* Queue.take(restartDelays), 500);
 
         yield* manager.start;
         assert.equal(yield* Queue.take(starts), 2);

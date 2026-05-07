@@ -2,6 +2,7 @@ import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
 
 import * as NetService from "@t3tools/shared/Net";
@@ -14,7 +15,6 @@ import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
-import * as DesktopRun from "./DesktopRun.ts";
 import * as DesktopServerExposure from "../serverExposure/DesktopServerExposure.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
@@ -25,6 +25,10 @@ import * as DesktopWindow from "../window/DesktopWindow.ts";
 const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
 const MAX_TCP_PORT = 65_535;
 const DESKTOP_BACKEND_PORT_PROBE_HOSTS = ["127.0.0.1", "0.0.0.0", "::"] as const;
+
+const makeDesktopRunId = Random.nextUUIDv4.pipe(
+  Effect.map((value) => value.replaceAll("-", "").slice(0, 12)),
+);
 
 class DesktopBackendPortUnavailableError extends Data.TaggedError(
   "DesktopBackendPortUnavailableError",
@@ -89,7 +93,6 @@ const handleFatalStartupError = (
   void,
   never,
   | DesktopLifecycle.DesktopShutdown
-  | DesktopRun.DesktopRun
   | DesktopState.DesktopState
   | ElectronApp.ElectronApp
   | ElectronDialog.ElectronDialog
@@ -99,15 +102,16 @@ const handleFatalStartupError = (
     const state = yield* DesktopState.DesktopState;
     const electronApp = yield* ElectronApp.ElectronApp;
     const electronDialog = yield* ElectronDialog.ElectronDialog;
-    const run = yield* DesktopRun.DesktopRun;
     const message = error instanceof Error ? error.message : String(error);
     const detail =
       error instanceof Error && typeof error.stack === "string" ? `\n${error.stack}` : "";
-    yield* run.logError("fatal startup error", {
-      stage,
-      message,
-      ...(detail.length > 0 ? { detail } : {}),
-    });
+    yield* Effect.logError("fatal startup error").pipe(
+      Effect.annotateLogs({
+        stage,
+        message,
+        ...(detail.length > 0 ? { detail } : {}),
+      }),
+    );
     const wasQuitting = yield* Ref.getAndSet(state.quitting, true);
     if (!wasQuitting) {
       yield* electronDialog.showErrorBox(
@@ -129,8 +133,7 @@ const bootstrap = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
-  const run = yield* DesktopRun.DesktopRun;
-  yield* run.logInfo("bootstrap start");
+  yield* Effect.logInfo("bootstrap start");
 
   if (environment.isDevelopment && Option.isNone(environment.configuredBackendPort)) {
     return yield* new DesktopDevelopmentBackendPortRequiredError();
@@ -138,44 +141,45 @@ const bootstrap = Effect.gen(function* () {
 
   const backendPortSelection = yield* resolveDesktopBackendPort(environment.configuredBackendPort);
   const backendPort = backendPortSelection.port;
-  yield* run.logInfo(
+  yield* Effect.logInfo(
     backendPortSelection.selectedByScan
       ? "selected backend port via sequential scan"
       : "using configured backend port",
-    {
+  ).pipe(
+    Effect.annotateLogs({
       port: backendPort,
       ...(backendPortSelection.selectedByScan ? { startPort: DEFAULT_DESKTOP_BACKEND_PORT } : {}),
-    },
+    }),
   );
 
   const settings = yield* desktopSettings.get;
   if (settings.serverExposureMode !== environment.defaultDesktopSettings.serverExposureMode) {
-    yield* run.logInfo("bootstrap restoring persisted server exposure mode", {
-      mode: settings.serverExposureMode,
-    });
+    yield* Effect.logInfo("bootstrap restoring persisted server exposure mode").pipe(
+      Effect.annotateLogs({ mode: settings.serverExposureMode }),
+    );
   }
   const serverExposureState = yield* serverExposure.configureFromSettings({ port: backendPort });
   const backendConfig = yield* serverExposure.backendConfig;
-  yield* run.logInfo("bootstrap resolved backend endpoint", {
-    baseUrl: backendConfig.httpBaseUrl.href,
-  });
+  yield* Effect.logInfo("bootstrap resolved backend endpoint").pipe(
+    Effect.annotateLogs({ baseUrl: backendConfig.httpBaseUrl.href }),
+  );
   if (serverExposureState.endpointUrl) {
-    yield* run.logInfo("bootstrap enabled network access", {
-      endpointUrl: serverExposureState.endpointUrl,
-    });
+    yield* Effect.logInfo("bootstrap enabled network access").pipe(
+      Effect.annotateLogs({ endpointUrl: serverExposureState.endpointUrl }),
+    );
   } else if (settings.serverExposureMode === "network-accessible") {
-    yield* run.logWarning(
+    yield* Effect.logWarning(
       "bootstrap fell back to local-only because no advertised network host was available",
     );
   }
 
   yield* installDesktopIpcHandlers;
-  yield* run.logInfo("bootstrap ipc handlers registered");
+  yield* Effect.logInfo("bootstrap ipc handlers registered");
 
   if (!(yield* Ref.get(state.quitting))) {
     yield* backendManager.start;
   }
-  yield* run.logInfo("bootstrap backend start requested");
+  yield* Effect.logInfo("bootstrap backend start requested");
 
   if (environment.isDevelopment) {
     yield* desktopWindow.ensureMain;
@@ -184,6 +188,9 @@ const bootstrap = Effect.gen(function* () {
 
 export const program = Effect.scoped(
   Effect.gen(function* () {
+    const runId = yield* makeDesktopRunId;
+    yield* Effect.annotateLogsScoped({ scope: "desktop", runId });
+
     const shutdown = yield* DesktopLifecycle.DesktopShutdown;
     const appIdentity = yield* DesktopAppIdentity.DesktopAppIdentity;
     const applicationMenu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
@@ -195,10 +202,8 @@ export const program = Effect.scoped(
     const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
     const updates = yield* DesktopUpdates.DesktopUpdates;
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
-    const run = yield* DesktopRun.DesktopRun;
 
     yield* electronProtocol.registerDesktopSchemePrivileges;
-    yield* run.refreshId;
     yield* Effect.addFinalizer(() =>
       backendManager.stop().pipe(Effect.ensuring(shutdown.markComplete)),
     );
@@ -206,7 +211,9 @@ export const program = Effect.scoped(
     yield* shellEnvironment.installIntoProcess;
     const userDataPath = yield* appIdentity.resolveUserDataPath;
     yield* electronApp.setPath("userData", userDataPath);
-    yield* run.logInfo("runtime logging configured", { logDir: environment.logDir });
+    yield* Effect.logInfo("runtime logging configured").pipe(
+      Effect.annotateLogs({ logDir: environment.logDir }),
+    );
     yield* desktopSettings.load;
 
     if (environment.platform === "linux") {
@@ -219,7 +226,7 @@ export const program = Effect.scoped(
     yield* electronApp.whenReady.pipe(
       Effect.catchCause((cause) => fatalStartupCause("whenReady", cause)),
     );
-    yield* run.logInfo("app ready");
+    yield* Effect.logInfo("app ready");
     yield* appIdentity.configure;
     yield* applicationMenu.configure;
     yield* electronProtocol.registerDesktopFileProtocol;

@@ -8,7 +8,6 @@ import * as Schema from "effect/Schema";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
-import * as DesktopRun from "../app/DesktopRun.ts";
 import * as DesktopServerExposure from "../serverExposure/DesktopServerExposure.ts";
 
 const PersistedServerObservabilitySettingsDocument = Schema.Struct({
@@ -83,7 +82,6 @@ const withHarness = <A, E, R>(
       Effect.provide(
         DesktopBackendConfiguration.layer.pipe(
           Layer.provideMerge(serverExposureLayer),
-          Layer.provideMerge(DesktopRun.layer),
           Layer.provideMerge(makeEnvironmentLayer(baseDir)),
         ),
       ),

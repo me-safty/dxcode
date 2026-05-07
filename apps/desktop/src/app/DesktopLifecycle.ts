@@ -9,7 +9,6 @@ import * as Scope from "effect/Scope";
 import type * as Electron from "electron";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
-import * as DesktopRun from "./DesktopRun.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as DesktopState from "./DesktopState.ts";
@@ -48,7 +47,6 @@ export const layerShutdown = Layer.effect(DesktopShutdown, makeShutdown);
 
 export type DesktopLifecycleRuntimeServices =
   | DesktopEnvironment.DesktopEnvironment
-  | DesktopRun.DesktopRun
   | DesktopShutdown
   | DesktopState.DesktopState
   | DesktopWindow.DesktopWindow
@@ -69,7 +67,6 @@ export class DesktopLifecycle extends Context.Service<DesktopLifecycle, DesktopL
 const logLifecycleInfo = (message: string, annotations?: Record<string, unknown>) =>
   Effect.logInfo(message).pipe(
     Effect.annotateLogs({
-      scope: "desktop",
       component: "desktop-lifecycle",
       ...annotations,
     }),
@@ -169,9 +166,8 @@ export const layer = Layer.succeed(
       Effect.gen(function* () {
         const electronApp = yield* ElectronApp.ElectronApp;
         const environment = yield* DesktopEnvironment.DesktopEnvironment;
-        const run = yield* DesktopRun.DesktopRun;
         const state = yield* DesktopState.DesktopState;
-        yield* run.logInfo("desktop relaunch requested", { reason });
+        yield* logLifecycleInfo("desktop relaunch requested", { reason });
         yield* Effect.gen(function* () {
           yield* Effect.yieldNow;
           yield* Ref.set(state.quitting, true);
@@ -187,9 +183,12 @@ export const layer = Layer.succeed(
           yield* electronApp.exit(0);
         }).pipe(
           Effect.catchCause((cause) =>
-            run.logError("desktop relaunch failed", {
-              cause: Cause.pretty(cause),
-            }),
+            Effect.logError("desktop relaunch failed").pipe(
+              Effect.annotateLogs({
+                component: "desktop-lifecycle",
+                cause: Cause.pretty(cause),
+              }),
+            ),
           ),
           Effect.forkDetach,
           Effect.asVoid,

@@ -13,7 +13,6 @@ import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as DesktopApplicationMenu from "./DesktopApplicationMenu.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
-import * as DesktopRun from "../app/DesktopRun.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 
@@ -52,14 +51,6 @@ const electronDialogLayer = Layer.succeed(ElectronDialog.ElectronDialog, {
   showMessageBox: () => Effect.succeed({ response: 0, checkboxChecked: false }),
   showErrorBox: () => Effect.void,
 } satisfies ElectronDialog.ElectronDialogShape);
-
-const desktopRunLayer = Layer.succeed(DesktopRun.DesktopRun, {
-  id: Effect.succeed("test-run"),
-  refreshId: Effect.succeed("test-run"),
-  logInfo: () => Effect.void,
-  logWarning: () => Effect.void,
-  logError: () => Effect.void,
-} satisfies DesktopRun.DesktopRunShape);
 
 const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, {
   getState: Effect.die("unexpected getState"),
@@ -110,7 +101,6 @@ describe("DesktopApplicationMenu", () => {
             Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate)),
             Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
             Layer.provideMerge(desktopUpdatesLayer),
-            Layer.provideMerge(desktopRunLayer),
             Layer.provideMerge(electronDialogLayer),
             Layer.provideMerge(electronAppLayer),
             Layer.provideMerge(

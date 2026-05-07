@@ -10,7 +10,6 @@ import * as Ref from "effect/Ref";
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopServerExposure from "../serverExposure/DesktopServerExposure.ts";
-import * as DesktopRun from "../app/DesktopRun.ts";
 
 export interface DesktopBackendConfigurationShape {
   readonly resolve: Effect.Effect<DesktopBackendManager.DesktopBackendStartConfig>;
@@ -50,11 +49,10 @@ const backendChildEnvPatch = (): Record<string, string | undefined> =>
 const readPersistedBackendObservabilitySettings: Effect.Effect<
   BackendObservabilitySettings,
   never,
-  FileSystem.FileSystem | DesktopEnvironment.DesktopEnvironment | DesktopRun.DesktopRun
+  FileSystem.FileSystem | DesktopEnvironment.DesktopEnvironment
 > = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
-  const run = yield* DesktopRun.DesktopRun;
   const exists = yield* fileSystem
     .exists(environment.serverSettingsPath)
     .pipe(Effect.orElseSucceed(() => false));
@@ -64,7 +62,7 @@ const readPersistedBackendObservabilitySettings: Effect.Effect<
 
   const raw = yield* fileSystem.readFileString(environment.serverSettingsPath).pipe(Effect.option);
   if (Option.isNone(raw)) {
-    yield* run.logWarning("failed to read persisted backend observability settings");
+    yield* Effect.logWarning("failed to read persisted backend observability settings");
     return emptyBackendObservabilitySettings;
   }
 
@@ -142,7 +140,6 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const fileSystem = yield* FileSystem.FileSystem;
-    const run = yield* DesktopRun.DesktopRun;
     const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
     const tokenRef = yield* Ref.make(Option.none<string>());
 
@@ -152,7 +149,6 @@ export const layer = Layer.effect(
         const observabilitySettings = yield* readPersistedBackendObservabilitySettings.pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
-          Effect.provideService(DesktopRun.DesktopRun, run),
         );
         return yield* resolveBackendStartConfig({
           bootstrapToken,

@@ -25,7 +25,6 @@ import {
 
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import { DesktopBackendOutputLog } from "../app/DesktopLogging.ts";
-import * as DesktopRun from "../app/DesktopRun.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
@@ -279,7 +278,6 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
   const backendOutputLog = yield* DesktopBackendOutputLog;
   const desktopState = yield* DesktopState.DesktopState;
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
-  const run = yield* DesktopRun.DesktopRun;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
   const state = yield* Ref.make(initialState);
@@ -403,10 +401,8 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
 
               if (isCurrentRun) {
                 if (Option.isSome(pid)) {
-                  const runId = yield* run.id;
                   yield* backendOutputLog.writeSessionBoundary({
                     phase: "END",
-                    runId,
                     details: `pid=${pid.value} ${reason}`,
                   });
                 }
@@ -427,10 +423,8 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                 ...run,
                 pid: Option.some(pid),
               }));
-              const desktopRunId = yield* run.id;
               yield* backendOutputLog.writeSessionBoundary({
                 phase: "START",
-                runId: desktopRunId,
                 details: `pid=${pid} port=${config.bootstrap.port} cwd=${config.cwd}`,
               });
             }),
@@ -449,16 +443,16 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
               }));
               yield* desktopWindow.handleBackendReady.pipe(
                 Effect.catch((error) =>
-                  run.logError("failed to open main window after backend readiness", {
-                    message: error.message,
-                  }),
+                  Effect.logError("failed to open main window after backend readiness").pipe(
+                    Effect.annotateLogs({ message: error.message }),
+                  ),
                 ),
               );
             }),
           onReadinessFailure: (error) =>
-            run.logWarning("backend readiness check failed during bootstrap", {
-              error: error.message,
-            }),
+            Effect.logWarning("backend readiness check failed during bootstrap").pipe(
+              Effect.annotateLogs({ error: error.message }),
+            ),
           onOutput: (streamName, chunk) => backendOutputLog.writeOutputChunk(streamName, chunk),
         }).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -501,10 +495,12 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
         onNone: () => Effect.void,
         onSome: (delay) =>
           Effect.gen(function* () {
-            yield* run.logError("backend exited unexpectedly; restart scheduled", {
-              reason,
-              delayMs: Duration.toMillis(delay),
-            });
+            yield* Effect.logError("backend exited unexpectedly; restart scheduled").pipe(
+              Effect.annotateLogs({
+                reason,
+                delayMs: Duration.toMillis(delay),
+              }),
+            );
             const restartFiber = yield* Effect.forkIn(
               Effect.sleep(delay).pipe(
                 Effect.andThen(
