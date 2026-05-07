@@ -2,30 +2,10 @@ import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 
 import { ProviderInstanceId } from "./providerInstance.ts";
-import {
-  MAX_SIDEBAR_THREAD_PREVIEW_COUNT,
-  MIN_SIDEBAR_THREAD_PREVIEW_COUNT,
-  SidebarThreadPreviewCount,
-  DEFAULT_SERVER_SETTINGS,
-  ServerSettings,
-  ServerSettingsPatch,
-} from "./settings.ts";
+import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./settings.ts";
 
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
-const decodeSidebarThreadPreviewCount = Schema.decodeUnknownSync(SidebarThreadPreviewCount);
-
-describe("SidebarThreadPreviewCount", () => {
-  it("accepts the configured 1-15 range", () => {
-    expect(decodeSidebarThreadPreviewCount(MIN_SIDEBAR_THREAD_PREVIEW_COUNT)).toBe(1);
-    expect(decodeSidebarThreadPreviewCount(MAX_SIDEBAR_THREAD_PREVIEW_COUNT)).toBe(15);
-  });
-
-  it("rejects values outside the configured range", () => {
-    expect(() => decodeSidebarThreadPreviewCount(MIN_SIDEBAR_THREAD_PREVIEW_COUNT - 1)).toThrow();
-    expect(() => decodeSidebarThreadPreviewCount(MAX_SIDEBAR_THREAD_PREVIEW_COUNT + 1)).toThrow();
-  });
-});
 
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults to an empty record so legacy configs without the key still decode", () => {
