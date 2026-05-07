@@ -335,12 +335,12 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
           .exists(config.entryPath)
           .pipe(Effect.orElseSucceed(() => false));
 
+        yield* cancelRestart;
         yield* Ref.update(state, (latest) => ({
           ...latest,
           desiredRunning: true,
           ready: false,
           config: Option.some(config),
-          restartFiber: Option.none(),
         }));
 
         if (!entryExists) {
@@ -432,10 +432,6 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                 ...run,
                 pid: Option.some(pid),
               }));
-              yield* Ref.update(state, (latest) => ({
-                ...latest,
-                restartAttempt: 0,
-              }));
               const desktopRunId = yield* run.id;
               yield* backendOutputLog.writeSessionBoundary({
                 phase: "START",
@@ -447,6 +443,10 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             Effect.gen(function* () {
               yield* Ref.update(state, (latest) => ({
                 ...latest,
+                restartAttempt: Option.match(latest.active, {
+                  onNone: () => latest.restartAttempt,
+                  onSome: (run) => (run.id === runId ? 0 : latest.restartAttempt),
+                }),
                 ready: Option.match(latest.active, {
                   onNone: () => latest.ready,
                   onSome: (run) => (run.id === runId ? true : latest.ready),
@@ -540,19 +540,23 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
   const stop = (options?: { readonly timeout?: Duration.Duration }): Effect.Effect<void> =>
     Effect.gen(function* () {
       const { active, restartFiber } = yield* mutex.withPermits(1)(
-        Ref.modify(state, (latest) => [
-          {
-            active: latest.active,
-            restartFiber: latest.restartFiber,
-          },
-          {
-            ...latest,
-            desiredRunning: false,
-            ready: false,
-            active: Option.none<ActiveBackendRun>(),
-            restartFiber: Option.none<Fiber.Fiber<void, never>>(),
-          },
-        ]),
+        Effect.gen(function* () {
+          const result = yield* Ref.modify(state, (latest) => [
+            {
+              active: latest.active,
+              restartFiber: latest.restartFiber,
+            },
+            {
+              ...latest,
+              desiredRunning: false,
+              ready: false,
+              active: Option.none<ActiveBackendRun>(),
+              restartFiber: Option.none<Fiber.Fiber<void, never>>(),
+            },
+          ]);
+          yield* Ref.set(desktopState.backendReady, false);
+          return result;
+        }),
       );
 
       yield* Option.match(restartFiber, {

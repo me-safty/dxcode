@@ -635,14 +635,14 @@ const make = Effect.gen(function* () {
           return yield* new DesktopUpdateActionInProgressError({ action: activeAction.value });
         }
 
-        yield* updatePersistedSettings((settings) =>
-          setDesktopUpdateChannelPreference(settings, nextChannel),
-        );
-
         const state = yield* Ref.get(updateStateRef);
         if (nextChannel === state.channel) {
           return state;
         }
+
+        yield* updatePersistedSettings((settings) =>
+          setDesktopUpdateChannelPreference(settings, nextChannel),
+        );
 
         const enabled = yield* shouldEnableAutoUpdates;
         yield* setState(createBaseUpdateState(nextChannel, enabled, environment));

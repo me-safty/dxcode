@@ -137,13 +137,13 @@ export const layer = Layer.sync(ElectronMenu, () => {
       Effect.sync(() => {
         Electron.Menu.setApplicationMenu(Electron.Menu.buildFromTemplate([...template]));
       }),
-    popupTemplate: (input) => {
-      if (input.template.length === 0) {
-        return Effect.void;
-      }
-      Electron.Menu.buildFromTemplate([...input.template]).popup({ window: input.window });
-      return Effect.void;
-    },
+    popupTemplate: (input) =>
+      Effect.sync(() => {
+        if (input.template.length === 0) {
+          return Effect.void;
+        }
+        Electron.Menu.buildFromTemplate([...input.template]).popup({ window: input.window });
+      }),
     showContextMenu: (input) =>
       Effect.callback<Option.Option<string>>((resume) => {
         const normalizedItems = normalizeContextMenuItems(input.items);

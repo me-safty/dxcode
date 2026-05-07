@@ -95,4 +95,25 @@ describe("ElectronMenu", () => {
       });
     }).pipe(Effect.provide(ElectronMenu.layer)),
   );
+
+  it.effect("defers popupTemplate side effects until the returned Effect runs", () =>
+    Effect.gen(function* () {
+      const popupMock = vi.fn();
+      buildFromTemplateMock.mockImplementation(() => ({ popup: popupMock }));
+
+      const electronMenu = yield* ElectronMenu.ElectronMenu;
+      const popup = electronMenu.popupTemplate({
+        window: {} as Electron.BrowserWindow,
+        template: [{ label: "Copy" }],
+      });
+
+      assert.equal(buildFromTemplateMock.mock.calls.length, 0);
+      assert.equal(popupMock.mock.calls.length, 0);
+
+      yield* popup;
+
+      assert.equal(buildFromTemplateMock.mock.calls.length, 1);
+      assert.equal(popupMock.mock.calls.length, 1);
+    }).pipe(Effect.provide(ElectronMenu.layer)),
+  );
 });

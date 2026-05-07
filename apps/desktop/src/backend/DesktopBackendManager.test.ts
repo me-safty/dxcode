@@ -10,6 +10,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Scope from "effect/Scope";
@@ -105,6 +106,7 @@ function makeManagerLayer(input: {
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>;
   readonly backendOutputLog?: Partial<DesktopBackendOutputLogShape>;
   readonly desktopRun?: Partial<DesktopRun.DesktopRunShape>;
+  readonly desktopState?: DesktopState.DesktopStateShape;
   readonly desktopWindow?: Partial<DesktopWindow.DesktopWindowShape>;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
 }) {
@@ -119,7 +121,9 @@ function makeManagerLayer(input: {
         }),
         input.spawnerLayer,
         input.httpClientLayer ?? healthyHttpClientLayer,
-        DesktopState.layer,
+        input.desktopState
+          ? Layer.succeed(DesktopState.DesktopState, input.desktopState)
+          : DesktopState.layer,
         Layer.succeed(DesktopBackendOutputLog, {
           writeSessionBoundary: () => Effect.void,
           writeOutputChunk: () => Effect.void,
@@ -289,6 +293,8 @@ describe("DesktopBackendManager", () => {
       const closed = yield* Deferred.make<void>();
       const startedPids = yield* Queue.unbounded<number>();
       const ready = yield* Deferred.make<void>();
+      const backendReady = yield* Ref.make(false);
+      const quitting = yield* Ref.make(false);
 
       const spawnerLayer = Layer.succeed(
         ChildProcessSpawner.ChildProcessSpawner,
@@ -313,6 +319,10 @@ describe("DesktopBackendManager", () => {
 
       const managerLayer = makeManagerLayer({
         spawnerLayer,
+        desktopState: {
+          backendReady,
+          quitting,
+        },
         desktopWindow: {
           handleBackendReady: Deferred.succeed(ready, void 0).pipe(Effect.asVoid),
         },
@@ -325,6 +335,8 @@ describe("DesktopBackendManager", () => {
         yield* manager.start;
         assert.equal(yield* Queue.take(startedPids), 123);
         yield* Deferred.await(ready);
+        yield* Ref.set(backendReady, true);
+        assert.isTrue(yield* Ref.get(backendReady));
         assert.deepEqual(yield* manager.currentConfig, Option.some(baseConfig));
 
         const runningSnapshot = yield* manager.snapshot;
@@ -336,6 +348,7 @@ describe("DesktopBackendManager", () => {
         assert.equal(closedCount, 1);
 
         const stoppedSnapshot = yield* manager.snapshot;
+        assert.isFalse(yield* Ref.get(backendReady));
         assert.equal(stoppedSnapshot.desiredRunning, false);
         assert.equal(stoppedSnapshot.ready, false);
         assert.equal(Option.isNone(stoppedSnapshot.activePid), true);
@@ -365,6 +378,7 @@ describe("DesktopBackendManager", () => {
 
       const managerLayer = makeManagerLayer({
         spawnerLayer,
+        httpClientLayer: httpClientLayer(() => Effect.never),
         desktopRun: {
           logError: (_message, annotations) =>
             Queue.offer(restartDelays, Number(annotations?.delayMs ?? 0)).pipe(Effect.asVoid),
@@ -380,6 +394,70 @@ describe("DesktopBackendManager", () => {
 
         yield* TestClock.adjust(Duration.millis(500));
         assert.equal(yield* Queue.take(starts), 2);
+        assert.equal(yield* Queue.take(restartDelays), 1_000);
+
+        yield* TestClock.adjust(Duration.millis(1_000));
+        assert.equal(yield* Queue.take(starts), 3);
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("cancels a scheduled restart when start is requested manually", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      const restartDelays = yield* Queue.unbounded<number>();
+      const secondClosed = yield* Deferred.make<void>();
+      let startCount = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.gen(function* () {
+            startCount += 1;
+            yield* Queue.offer(starts, startCount);
+
+            if (startCount === 1) {
+              return makeProcess({
+                exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
+              });
+            }
+
+            const scope = yield* Scope.Scope;
+            const close = Deferred.succeed(secondClosed, void 0).pipe(Effect.asVoid);
+            yield* Scope.addFinalizer(scope, close);
+            return makeProcess({
+              exitCode: Deferred.await(secondClosed).pipe(
+                Effect.as(ChildProcessSpawner.ExitCode(0)),
+              ),
+              kill: () => close,
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer(() => Effect.never),
+        desktopRun: {
+          logError: (_message, annotations) =>
+            Queue.offer(restartDelays, Number(annotations?.delayMs ?? 0)).pipe(Effect.asVoid),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+
+        assert.equal(yield* Queue.take(starts), 1);
+        assert.equal(yield* Queue.take(restartDelays), 500);
+
+        yield* manager.start;
+        assert.equal(yield* Queue.take(starts), 2);
+
+        yield* manager.stop();
+        yield* TestClock.adjust(Duration.millis(500));
+
+        assert.equal(yield* Queue.size(starts), 0);
       }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
     }),
   );

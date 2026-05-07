@@ -245,6 +245,26 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("does not persist an unchanged update channel as a user preference", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* settingsState.set(DEFAULT_DESKTOP_SETTINGS);
+        yield* updates.configure;
+
+        const state = yield* updates.setChannel("latest");
+        const settings = yield* settingsState.get;
+
+        assert.equal(state.channel, "latest");
+        assert.equal(settings.updateChannel, "latest");
+        assert.equal(settings.updateChannelConfiguredByUser, false);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
   it.effect("fails channel changes with a typed error while a check is in progress", () =>
     Effect.gen(function* () {
       const checkStarted = yield* Deferred.make<void>();
