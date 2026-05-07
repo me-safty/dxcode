@@ -266,11 +266,7 @@ export const resolveServerConfig = (
       },
     );
     const devUrl = Option.getOrElse(
-      resolveOptionPrecedence(
-        normalizedFlags.devUrl,
-        Option.fromUndefinedOr(env.devUrl),
-        Option.fromUndefinedOr(bootstrap?.devUrl),
-      ),
+      resolveOptionPrecedence(normalizedFlags.devUrl, Option.fromUndefinedOr(env.devUrl)),
       () => undefined,
     );
     const baseDir = yield* resolveBaseDir(
@@ -310,7 +306,6 @@ export const resolveServerConfig = (
         isHeadlessStartup ? Option.some(false) : Option.none(),
         normalizedFlags.autoBootstrapProjectFromCwd,
         Option.fromUndefinedOr(env.autoBootstrapProjectFromCwd),
-        Option.fromUndefinedOr(bootstrap?.autoBootstrapProjectFromCwd),
       ),
       () => mode === "web",
     );
@@ -318,7 +313,6 @@ export const resolveServerConfig = (
       resolveOptionPrecedence(
         normalizedFlags.logWebSocketEvents,
         Option.fromUndefinedOr(env.logWebSocketEvents),
-        Option.fromUndefinedOr(bootstrap?.logWebSocketEvents),
       ),
       () => Boolean(devUrl),
     );
