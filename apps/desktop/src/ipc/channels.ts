@@ -1,5 +1,3 @@
-import { DesktopSshPasswordPromptCancelledType } from "@t3tools/contracts";
-
 export const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
 export const CONFIRM_CHANNEL = "desktop:confirm";
 export const SET_THEME_CHANNEL = "desktop:set-theme";
@@ -34,4 +32,4 @@ export const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-st
 export const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 export const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 export const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
-export const SSH_PASSWORD_PROMPT_CANCELLED_RESULT = DesktopSshPasswordPromptCancelledType;
+export const SSH_PASSWORD_PROMPT_CANCELLED_RESULT = "desktop:ssh-password-prompt-cancelled";
