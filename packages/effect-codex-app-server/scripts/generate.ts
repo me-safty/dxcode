@@ -156,24 +156,15 @@ const ensureGeneratedDir = Effect.fn("ensureGeneratedDir")(function* () {
 });
 
 const fetchText = Effect.fn("fetchText")(function* (url: string) {
-  const request = HttpClientRequest.get(url).pipe(
+  return yield* HttpClientRequest.get(url).pipe(
     HttpClientRequest.setHeader("user-agent", USER_AGENT),
-  );
-  const response = yield* HttpClient.execute(request).pipe(
-    Effect.mapError(
-      (cause) =>
-        new GeneratorError({
-          detail: `Failed to fetch ${url}`,
-          cause,
-        }),
-    ),
-  );
-  return yield* HttpClientResponse.filterStatusOk(response).pipe(
+    HttpClient.execute,
+    Effect.flatMap(HttpClientResponse.filterStatusOk),
     Effect.flatMap((okResponse) => okResponse.text),
     Effect.mapError(
       (cause) =>
         new GeneratorError({
-          detail: `Failed to download ${url}: ${response.status}`,
+          detail: `Failed to fetch ${url}`,
           cause,
         }),
     ),
