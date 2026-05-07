@@ -4,8 +4,6 @@ import {
   ChevronRightIcon,
   CloudIcon,
   FolderPlusIcon,
-  MinusIcon,
-  PlusIcon,
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -133,6 +131,13 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "./ui/menu";
+import {
+  NumberField,
+  NumberFieldDecrement,
+  NumberFieldGroup,
+  NumberFieldIncrement,
+  NumberFieldInput,
+} from "./ui/number-field";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
@@ -2283,31 +2288,18 @@ function ProjectSortMenu({
   onProjectGroupingModeChange: (mode: SidebarProjectGroupingMode) => void;
   onThreadPreviewCountChange: (count: SidebarThreadPreviewCount) => void;
 }) {
-  const [threadPreviewInput, setThreadPreviewInput] = useState(() => String(threadPreviewCount));
+  const handleThreadPreviewCountChange = useCallback(
+    (nextValue: number | null) => {
+      if (nextValue === null) {
+        return;
+      }
 
-  useEffect(() => {
-    setThreadPreviewInput(String(threadPreviewCount));
-  }, [threadPreviewCount]);
-
-  const resolveThreadPreviewInputValue = useCallback(
-    (nextValue: string) => {
-      const parsedValue = Number.parseInt(nextValue, 10);
-      return Number.isInteger(parsedValue)
-        ? clampSidebarThreadPreviewCount(parsedValue)
-        : threadPreviewCount;
-    },
-    [threadPreviewCount],
-  );
-
-  const commitThreadPreviewCount = useCallback(
-    (nextValue: string) => {
-      const clampedValue = resolveThreadPreviewInputValue(nextValue);
-      setThreadPreviewInput(String(clampedValue));
+      const clampedValue = clampSidebarThreadPreviewCount(nextValue);
       if (clampedValue !== threadPreviewCount) {
         onThreadPreviewCountChange(clampedValue);
       }
     },
-    [onThreadPreviewCountChange, resolveThreadPreviewInputValue, threadPreviewCount],
+    [onThreadPreviewCountChange, threadPreviewCount],
   );
 
   return (
@@ -2365,61 +2357,36 @@ function ProjectSortMenu({
           <div className="px-2 pt-2 pb-1 text-muted-foreground sm:text-xs font-medium">
             Visible threads
           </div>
-          <div className="flex items-center gap-2 px-2 py-1">
-            <Button
-              size="icon-xs"
-              variant="outline"
-              className="size-7 shrink-0"
-              aria-label="Decrease visible thread count"
-              disabled={threadPreviewCount <= MIN_SIDEBAR_THREAD_PREVIEW_COUNT}
-              onClick={() => {
-                commitThreadPreviewCount(
-                  String(resolveThreadPreviewInputValue(threadPreviewInput) - 1),
-                );
-              }}
-            >
-              <MinusIcon className="size-3.5" />
-            </Button>
-            <Input
-              nativeInput
-              type="text"
-              inputMode="numeric"
-              min={MIN_SIDEBAR_THREAD_PREVIEW_COUNT}
-              max={MAX_SIDEBAR_THREAD_PREVIEW_COUNT}
-              pattern="[0-9]*"
-              size="sm"
-              className="w-14"
+          <div className="px-2 py-1">
+            <NumberField
               aria-label="Visible thread count"
-              value={threadPreviewInput}
-              onKeyDownCapture={(event) => {
-                event.stopPropagation();
-              }}
-              onChange={(event) => {
-                setThreadPreviewInput(event.currentTarget.value.replace(/[^0-9]/g, ""));
-              }}
-              onBlur={(event) => {
-                commitThreadPreviewCount(event.currentTarget.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  commitThreadPreviewCount(event.currentTarget.value);
-                }
-              }}
-            />
-            <Button
-              size="icon-xs"
-              variant="outline"
-              className="size-7 shrink-0"
-              aria-label="Increase visible thread count"
-              disabled={threadPreviewCount >= MAX_SIDEBAR_THREAD_PREVIEW_COUNT}
-              onClick={() => {
-                commitThreadPreviewCount(
-                  String(resolveThreadPreviewInputValue(threadPreviewInput) + 1),
-                );
-              }}
+              className="w-28 gap-0"
+              max={MAX_SIDEBAR_THREAD_PREVIEW_COUNT}
+              min={MIN_SIDEBAR_THREAD_PREVIEW_COUNT}
+              onValueChange={handleThreadPreviewCountChange}
+              size="sm"
+              step={1}
+              value={threadPreviewCount}
             >
-              <PlusIcon className="size-3.5" />
-            </Button>
+              <NumberFieldGroup className="h-7 rounded-md sm:h-6.5">
+                <NumberFieldDecrement
+                  aria-label="Decrease visible thread count"
+                  className="px-2 sm:px-2 [&_svg]:size-3.5"
+                />
+                <NumberFieldInput
+                  aria-label="Visible thread count"
+                  className="h-7 w-9 grow-0 px-0 text-xs leading-7 sm:h-6.5 sm:leading-6.5"
+                  inputMode="numeric"
+                  onKeyDownCapture={(event) => {
+                    event.stopPropagation();
+                  }}
+                />
+                <NumberFieldIncrement
+                  aria-label="Increase visible thread count"
+                  className="px-2 sm:px-2 [&_svg]:size-3.5"
+                />
+              </NumberFieldGroup>
+            </NumberField>
           </div>
         </MenuGroup>
         <MenuSeparator />
