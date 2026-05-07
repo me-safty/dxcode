@@ -989,6 +989,7 @@ export function makeGeminiAdapter(
         if (!turnState) {
           return;
         }
+        context.turnState = undefined;
 
         for (const item of turnState.items) {
           if (item.itemType !== "assistant_message" || item.status !== "inProgress") {
@@ -1073,8 +1074,6 @@ export function makeGeminiAdapter(
             ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
           },
         });
-
-        context.turnState = undefined;
 
         if (options?.persistSnapshot !== false) {
           const storedTurn = yield* persistTurnSnapshot(
