@@ -103,6 +103,41 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }),
   );
 
+  it.effect("compiles the checkpoint rewind double-Escape sequence", () =>
+    Effect.sync(() => {
+      const escapeShortcut = {
+        key: "escape",
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+        modKey: false,
+      };
+      assert.deepEqual(
+        compileResolvedKeybindingRule({
+          key: "esc esc",
+          command: "checkpoint.rewind",
+          when: "!terminalFocus",
+        }),
+        {
+          command: "checkpoint.rewind",
+          shortcut: escapeShortcut,
+          sequence: [escapeShortcut, escapeShortcut],
+          whenAst: {
+            type: "not",
+            node: { type: "identifier", name: "terminalFocus" },
+          },
+        },
+      );
+      assert.isNull(
+        compileResolvedKeybindingRule({
+          key: "esc esc",
+          command: "terminal.toggle",
+        }),
+      );
+    }),
+  );
+
   it.effect("encodes resolved plus-key shortcuts", () =>
     Effect.gen(function* () {
       const encoded = yield* Schema.encodeEffect(ResolvedKeybindingFromConfig)({
@@ -119,6 +154,27 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       assert.equal(encoded.key, "mod++");
       assert.equal(encoded.command, "terminal.toggle");
+    }),
+  );
+
+  it.effect("encodes resolved double-Escape sequence shortcuts", () =>
+    Effect.gen(function* () {
+      const escapeShortcut = {
+        key: "escape",
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+        modKey: false,
+      };
+      const encoded = yield* Schema.encodeEffect(ResolvedKeybindingFromConfig)({
+        command: "checkpoint.rewind",
+        shortcut: escapeShortcut,
+        sequence: [escapeShortcut, escapeShortcut],
+      });
+
+      assert.equal(encoded.key, "esc esc");
+      assert.equal(encoded.command, "checkpoint.rewind");
     }),
   );
 

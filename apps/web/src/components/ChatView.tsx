@@ -101,7 +101,11 @@ import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
-import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import {
+  resolveShortcutCommand,
+  shortcutLabelForCommand,
+  type ShortcutEventLike,
+} from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
@@ -143,6 +147,11 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
+import {
+  deriveRewindCheckpointCandidates,
+  type RewindCheckpointCandidate,
+} from "./chat/MessagesTimeline.logic";
+import { RewindCheckpointDialog } from "./chat/RewindCheckpointDialog";
 import { ChatHeader } from "./chat/ChatHeader";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
@@ -660,6 +669,9 @@ export default function ChatView(props: ChatViewProps) {
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
   );
+  const checkpointRewindRequestId = useCommandPaletteStore(
+    (store) => store.checkpointRewindRequestId,
+  );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const getDraftSessionByLogicalProjectKey = useComposerDraftStore(
@@ -691,6 +703,10 @@ export default function ChatView(props: ChatViewProps) {
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
+  const [rewindMenuOpen, setRewindMenuOpen] = useState(false);
+  const [rewindSelectedUserMessageId, setRewindSelectedUserMessageId] = useState<MessageId | null>(
+    null,
+  );
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
     ApprovalRequestId[]
@@ -1604,6 +1620,15 @@ export default function ChatView(props: ChatViewProps) {
 
     return byUserMessageId;
   }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
+  const rewindCandidates = useMemo(
+    () =>
+      deriveRewindCheckpointCandidates({
+        timelineEntries,
+        turnDiffSummaryByAssistantMessageId,
+        revertTurnCountByUserMessageId,
+      }),
+    [revertTurnCountByUserMessageId, timelineEntries, turnDiffSummaryByAssistantMessageId],
+  );
 
   const completionSummary = useMemo(() => {
     if (!latestTurnSettled) return null;
@@ -1660,6 +1685,29 @@ export default function ChatView(props: ChatViewProps) {
       : (storeServerTerminalLaunchContext ?? null);
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const rewindDisabledReason = useMemo(() => {
+    if (!isServerThread) {
+      return "Rewind is only available for saved threads.";
+    }
+    if (!isGitRepo) {
+      return "Checkpoints require a git repository.";
+    }
+    if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
+      return `Reconnect ${activeEnvironmentUnavailableLabel} before reverting checkpoints.`;
+    }
+    if (phase === "running" || isSendBusy || isConnecting) {
+      return "Interrupt the current turn before reverting checkpoints.";
+    }
+    return null;
+  }, [
+    activeEnvironmentUnavailable,
+    activeEnvironmentUnavailableLabel,
+    isConnecting,
+    isGitRepo,
+    isSendBusy,
+    isServerThread,
+    phase,
+  ]);
   const terminalShortcutLabelOptions = useMemo(
     () => ({
       context: {
@@ -2459,11 +2507,52 @@ export default function ChatView(props: ChatViewProps) {
     terminalOpenByThreadRef.current[activeThreadKey] = current;
   }, [activeThreadKey, focusComposer, terminalState.terminalOpen]);
 
+  const openRewindMenu = useCallback((selectedUserMessageId?: MessageId) => {
+    setRewindSelectedUserMessageId(selectedUserMessageId ?? null);
+    setRewindMenuOpen(true);
+  }, []);
+
+  const closeRewindMenu = useCallback(() => {
+    setRewindMenuOpen(false);
+    setRewindSelectedUserMessageId(null);
+  }, []);
+
+  const lastHandledCheckpointRewindRequestIdRef = useRef(checkpointRewindRequestId);
+  useEffect(() => {
+    if (checkpointRewindRequestId === lastHandledCheckpointRewindRequestIdRef.current) {
+      return;
+    }
+    lastHandledCheckpointRewindRequestIdRef.current = checkpointRewindRequestId;
+    openRewindMenu();
+  }, [checkpointRewindRequestId, openRewindMenu]);
+
+  const shortcutSequenceRef = useRef<
+    ReadonlyArray<{ readonly event: ShortcutEventLike; readonly occurredAt: number }>
+  >([]);
+
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
-      if (!activeThreadId || useCommandPaletteStore.getState().open || event.defaultPrevented) {
+      if (
+        !activeThreadId ||
+        rewindMenuOpen ||
+        useCommandPaletteStore.getState().open ||
+        event.defaultPrevented
+      ) {
         return;
       }
+      const occurredAt = Date.now();
+      const shortcutEvent: ShortcutEventLike = {
+        key: event.key,
+        code: event.code,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+      };
+      shortcutSequenceRef.current = [
+        ...shortcutSequenceRef.current.filter((entry) => occurredAt - entry.occurredAt <= 750),
+        { event: shortcutEvent, occurredAt },
+      ].slice(-2);
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
@@ -2472,8 +2561,17 @@ export default function ChatView(props: ChatViewProps) {
 
       const command = resolveShortcutCommand(event, keybindings, {
         context: shortcutContext,
+        sequence: shortcutSequenceRef.current.map((entry) => entry.event),
       });
       if (!command) return;
+
+      if (command === "checkpoint.rewind") {
+        event.preventDefault();
+        event.stopPropagation();
+        shortcutSequenceRef.current = [];
+        openRewindMenu();
+        return;
+      }
 
       if (command === "terminal.toggle") {
         event.preventDefault();
@@ -2541,6 +2639,8 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadId,
     closeTerminal,
     createNewTerminal,
+    openRewindMenu,
+    rewindMenuOpen,
     setTerminalOpen,
     runProjectScript,
     splitTerminal,
@@ -2569,8 +2669,8 @@ export default function ChatView(props: ChatViewProps) {
       const confirmed = await localApi.dialogs.confirm(
         [
           `Revert this thread to checkpoint ${turnCount}?`,
-          "This will discard newer messages and turn diffs in this thread.",
-          "This action cannot be undone.",
+          "This restores files and rewinds this thread to that point.",
+          "Newer messages and turn diffs will be discarded.",
         ].join("\n"),
       );
       if (!confirmed) {
@@ -2594,6 +2694,7 @@ export default function ChatView(props: ChatViewProps) {
         );
       }
       setIsRevertingCheckpoint(false);
+      closeRewindMenu();
     },
     [
       activeThread,
@@ -2604,6 +2705,7 @@ export default function ChatView(props: ChatViewProps) {
       isRevertingCheckpoint,
       isSendBusy,
       phase,
+      closeRewindMenu,
       setThreadError,
     ],
   );
@@ -3477,18 +3579,23 @@ export default function ChatView(props: ChatViewProps) {
     },
     [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
   );
+  const confirmRewindCandidate = useCallback(
+    (candidate: RewindCheckpointCandidate) => {
+      void onRevertToTurnCount(candidate.turnCount);
+    },
+    [onRevertToTurnCount],
+  );
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
   revertTurnCountRef.current = revertTurnCountByUserMessageId;
-  const onRevertToTurnCountRef = useRef(onRevertToTurnCount);
-  onRevertToTurnCountRef.current = onRevertToTurnCount;
+  const openRewindMenuRef = useRef(openRewindMenu);
+  openRewindMenuRef.current = openRewindMenu;
   const onRevertUserMessage = useCallback((messageId: MessageId) => {
-    const targetTurnCount = revertTurnCountRef.current.get(messageId);
-    if (typeof targetTurnCount !== "number") {
+    if (typeof revertTurnCountRef.current.get(messageId) !== "number") {
       return;
     }
-    void onRevertToTurnCountRef.current(targetTurnCount);
+    openRewindMenuRef.current(messageId);
   }, []);
 
   // Empty state: no active thread
@@ -3775,6 +3882,22 @@ export default function ChatView(props: ChatViewProps) {
       {expandedImage && (
         <ExpandedImageDialog preview={expandedImage} onClose={closeExpandedImage} />
       )}
+      <RewindCheckpointDialog
+        open={rewindMenuOpen}
+        candidates={rewindCandidates}
+        selectedUserMessageId={rewindSelectedUserMessageId}
+        disabledReason={rewindDisabledReason}
+        isReverting={isRevertingCheckpoint}
+        timestampFormat={timestampFormat}
+        onOpenChange={(open) => {
+          if (open) {
+            setRewindMenuOpen(true);
+            return;
+          }
+          closeRewindMenu();
+        }}
+        onRestore={confirmRewindCandidate}
+      />
     </div>
   );
 }
