@@ -109,10 +109,7 @@ import type { SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
-import {
-  formatProviderSkillDisplayName,
-  formatProviderSkillInvocation,
-} from "../../providerSkillPresentation";
+import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 
@@ -1558,7 +1555,7 @@ export const ChatComposer = memo(
           return;
         }
         if (item.type === "skill") {
-          const replacement = `${formatProviderSkillInvocation(item.skill)} `;
+          const replacement = `$${item.skill.name} `;
           const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
             snapshot.value,
             trigger.rangeEnd,
