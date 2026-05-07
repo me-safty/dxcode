@@ -39,6 +39,14 @@ class DesktopBackendPortUnavailableError extends Data.TaggedError(
   }
 }
 
+class DesktopDevelopmentBackendPortRequiredError extends Data.TaggedError(
+  "DesktopDevelopmentBackendPortRequiredError",
+)<{}> {
+  override get message() {
+    return "T3CODE_PORT is required in desktop development.";
+  }
+}
+
 const resolveDesktopBackendPort = Effect.fn("resolveDesktopBackendPort")(function* (
   configuredPort: Option.Option<number>,
 ) {
@@ -68,13 +76,11 @@ const resolveDesktopBackendPort = Effect.fn("resolveDesktopBackendPort")(functio
     }
   }
 
-  return yield* Effect.fail(
-    new DesktopBackendPortUnavailableError({
-      startPort: DEFAULT_DESKTOP_BACKEND_PORT,
-      maxPort: MAX_TCP_PORT,
-      hosts: DESKTOP_BACKEND_PORT_PROBE_HOSTS,
-    }),
-  );
+  return yield* new DesktopBackendPortUnavailableError({
+    startPort: DEFAULT_DESKTOP_BACKEND_PORT,
+    maxPort: MAX_TCP_PORT,
+    hosts: DESKTOP_BACKEND_PORT_PROBE_HOSTS,
+  });
 });
 
 const handleFatalStartupError = (
@@ -114,10 +120,8 @@ const handleFatalStartupError = (
     yield* electronApp.quit;
   });
 
-const fatalStartupCause = (stage: string, cause: Cause.Cause<unknown>) =>
-  handleFatalStartupError(stage, new Error(Cause.pretty(cause))).pipe(
-    Effect.andThen(Effect.failCause(cause)),
-  );
+const fatalStartupCause = <E>(stage: string, cause: Cause.Cause<E>) =>
+  handleFatalStartupError(stage, Cause.pretty(cause)).pipe(Effect.andThen(Effect.failCause(cause)));
 
 const bootstrap = Effect.gen(function* () {
   const backendManager = yield* DesktopBackendManager.DesktopBackendManager;
@@ -130,7 +134,7 @@ const bootstrap = Effect.gen(function* () {
   yield* run.logInfo("bootstrap start");
 
   if (environment.isDevelopment && Option.isNone(environment.configuredBackendPort)) {
-    return yield* Effect.fail(new Error("T3CODE_PORT is required in desktop development."));
+    return yield* new DesktopDevelopmentBackendPortRequiredError();
   }
 
   const backendPortSelection = yield* resolveDesktopBackendPort(environment.configuredBackendPort);

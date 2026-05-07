@@ -644,9 +644,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const activeAction = yield* activeUpdateAction;
         if (Option.isSome(activeAction)) {
-          return yield* Effect.fail(
-            new DesktopUpdateActionInProgressError({ action: activeAction.value }),
-          );
+          return yield* new DesktopUpdateActionInProgressError({ action: activeAction.value });
         }
 
         yield* updatePersistedSettings((settings) =>

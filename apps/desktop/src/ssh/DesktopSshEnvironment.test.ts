@@ -3,7 +3,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as NetService from "@t3tools/shared/Net";
 import { SshPasswordPromptError } from "@t3tools/ssh/errors";
-import { Effect, FileSystem, Layer, Path } from "effect";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 
 import * as DesktopSshEnvironment from "./DesktopSshEnvironment.ts";
 import * as DesktopSshPasswordPrompts from "./DesktopSshPasswordPrompts.ts";

@@ -1,17 +1,17 @@
-import {
-  Context,
-  DateTime,
-  Duration,
-  Effect,
-  FileSystem,
-  Layer,
-  Logger,
-  Option,
-  Path,
-  References,
-  Ref,
-  Semaphore,
-} from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
+import * as References from "effect/References";
+import * as Ref from "effect/Ref";
+import * as Semaphore from "effect/Semaphore";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
@@ -43,6 +43,21 @@ export class DesktopBackendOutputLog extends Context.Service<
 
 const textEncoder = new TextEncoder();
 
+class DesktopLogFileWriterConfigurationError extends Data.TaggedError(
+  "DesktopLogFileWriterConfigurationError",
+)<{
+  readonly option: "maxBytes" | "maxFiles";
+  readonly value: number;
+}> {
+  override get message() {
+    return `${this.option} must be >= 1 (received ${this.value})`;
+  }
+}
+
+type DesktopLogFileWriterError =
+  | DesktopLogFileWriterConfigurationError
+  | PlatformError.PlatformError;
+
 const sanitizeLogValue = (value: string): string => value.replace(/\s+/g, " ").trim();
 
 const DesktopBackendOutputLogNoop: DesktopBackendOutputLogShape = {
@@ -54,18 +69,20 @@ const refreshFileSize = (
   fileSystem: FileSystem.FileSystem,
   filePath: string,
 ): Effect.Effect<number, never> =>
-  Effect.gen(function* () {
-    return yield* fileSystem.stat(filePath).pipe(
-      Effect.map((stat) => Number(stat.size)),
-      Effect.orElseSucceed(() => 0),
-    );
-  });
+  fileSystem.stat(filePath).pipe(
+    Effect.map((stat) => Number(stat.size)),
+    Effect.orElseSucceed(() => 0),
+  );
 
 const makeRotatingLogFileWriter = Effect.fn("makeRotatingLogFileWriter")(function* (input: {
   readonly filePath: string;
   readonly maxBytes?: number;
   readonly maxFiles?: number;
-}): Effect.fn.Return<RotatingLogFileWriter, unknown, FileSystem.FileSystem | Path.Path> {
+}): Effect.fn.Return<
+  RotatingLogFileWriter,
+  DesktopLogFileWriterError,
+  FileSystem.FileSystem | Path.Path
+> {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const maxBytes = input.maxBytes ?? DESKTOP_LOG_FILE_MAX_BYTES;
@@ -74,10 +91,16 @@ const makeRotatingLogFileWriter = Effect.fn("makeRotatingLogFileWriter")(functio
   const baseName = path.basename(input.filePath);
 
   if (maxBytes < 1) {
-    return yield* Effect.fail(new Error(`maxBytes must be >= 1 (received ${maxBytes})`));
+    return yield* new DesktopLogFileWriterConfigurationError({
+      option: "maxBytes",
+      value: maxBytes,
+    });
   }
   if (maxFiles < 1) {
-    return yield* Effect.fail(new Error(`maxFiles must be >= 1 (received ${maxFiles})`));
+    return yield* new DesktopLogFileWriterConfigurationError({
+      option: "maxFiles",
+      value: maxFiles,
+    });
   }
 
   yield* fileSystem.makeDirectory(directory, { recursive: true });

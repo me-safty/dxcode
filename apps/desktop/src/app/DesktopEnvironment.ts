@@ -4,8 +4,11 @@ import type {
   DesktopRuntimeArch,
   DesktopRuntimeInfo,
 } from "@t3tools/contracts";
-import { Context, Effect, Layer, Option } from "effect";
-import * as EffectPath from "effect/Path";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 
 import {
   type DesktopSettings,
@@ -27,7 +30,7 @@ export interface MakeDesktopEnvironmentInput {
 }
 
 export interface DesktopEnvironmentShape {
-  readonly path: EffectPath.Path;
+  readonly path: Path.Path;
   readonly dirname: string;
   readonly platform: NodeJS.Platform;
   readonly processArch: string;
@@ -146,9 +149,9 @@ function resolveDesktopRuntimeInfo(input: {
 
 const makeDesktopEnvironment = (
   input: MakeDesktopEnvironmentInput,
-): Effect.Effect<DesktopEnvironmentShape, never, EffectPath.Path | DesktopConfig.DesktopConfig> =>
+): Effect.Effect<DesktopEnvironmentShape, never, Path.Path | DesktopConfig.DesktopConfig> =>
   Effect.gen(function* () {
-    const path = yield* EffectPath.Path;
+    const path = yield* Path.Path;
     const config = yield* DesktopConfig.DesktopConfig;
     const homeDirectory = resolveDesktopHomeDirectory({
       config,

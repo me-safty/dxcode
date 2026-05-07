@@ -1,4 +1,5 @@
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -19,20 +20,29 @@ interface WindowsProbeOptions {
   readonly loadProfile: boolean;
 }
 
+export class DesktopShellEnvironmentProbeError extends Data.TaggedError(
+  "DesktopShellEnvironmentProbeError",
+)<{
+  readonly message: string;
+}> {}
+
 interface ShellProbe {
   readonly readLoginShellEnvironment: (
     shell: string,
     names: ReadonlyArray<string>,
-  ) => Effect.Effect<EnvironmentPatch, unknown>;
-  readonly readLaunchctlPath: Effect.Effect<Option.Option<string>, unknown>;
+  ) => Effect.Effect<EnvironmentPatch, DesktopShellEnvironmentProbeError>;
+  readonly readLaunchctlPath: Effect.Effect<
+    Option.Option<string>,
+    DesktopShellEnvironmentProbeError
+  >;
   readonly readWindowsEnvironment: (
     names: ReadonlyArray<string>,
     options: WindowsProbeOptions,
-  ) => Effect.Effect<EnvironmentPatch, unknown>;
+  ) => Effect.Effect<EnvironmentPatch, DesktopShellEnvironmentProbeError>;
 }
 
 export interface DesktopShellEnvironmentShape {
-  readonly installIntoProcess: Effect.Effect<void>;
+  readonly installIntoProcess: Effect.Effect<void, never>;
 }
 
 export class DesktopShellEnvironment extends Context.Service<
@@ -201,7 +211,7 @@ const runCommandOutput = (
     readonly timeout: Duration.Duration;
     readonly shell?: boolean;
   },
-): Effect.Effect<string> =>
+): Effect.Effect<string, never> =>
   spawner
     .string(
       ChildProcess.make(input.command, input.args, {
@@ -269,13 +279,13 @@ const readWindowsEnvironment = (
   probe: ShellProbe,
   names: ReadonlyArray<string>,
   options: WindowsProbeOptions,
-): Effect.Effect<EnvironmentPatch> =>
+): Effect.Effect<EnvironmentPatch, never> =>
   probe.readWindowsEnvironment(names, options).pipe(Effect.catch(() => Effect.succeed({})));
 
 const installWindowsEnvironment = (
   config: ShellEnvironmentConfig,
   probe: ShellProbe,
-): Effect.Effect<void> =>
+): Effect.Effect<void, never> =>
   Effect.gen(function* () {
     const noProfile = yield* readWindowsEnvironment(probe, ["PATH"], { loadProfile: false });
     const profile = yield* readWindowsEnvironment(probe, WINDOWS_PROFILE_ENV_NAMES, {
@@ -302,7 +312,7 @@ const installWindowsEnvironment = (
 const installPosixEnvironment = (
   config: ShellEnvironmentConfig,
   probe: ShellProbe,
-): Effect.Effect<void> =>
+): Effect.Effect<void, never> =>
   Effect.gen(function* () {
     const shellEnvironment: EnvironmentPatch = {};
 
@@ -356,7 +366,7 @@ const installPosixEnvironment = (
 const installShellEnvironment = (
   config: ShellEnvironmentConfig,
   probe: ShellProbe,
-): Effect.Effect<void> => {
+): Effect.Effect<void, never> => {
   if (config.platform === "win32") {
     return installWindowsEnvironment(config, probe);
   }
@@ -392,12 +402,15 @@ export const layerTest = (input: {
     readonly readLoginShellEnvironment?: (
       shell: string,
       names: ReadonlyArray<string>,
-    ) => Effect.Effect<EnvironmentPatch, unknown>;
-    readonly readLaunchctlPath?: Effect.Effect<Option.Option<string>, unknown>;
+    ) => Effect.Effect<EnvironmentPatch, DesktopShellEnvironmentProbeError>;
+    readonly readLaunchctlPath?: Effect.Effect<
+      Option.Option<string>,
+      DesktopShellEnvironmentProbeError
+    >;
     readonly readWindowsEnvironment?: (
       names: ReadonlyArray<string>,
       options: WindowsProbeOptions,
-    ) => Effect.Effect<EnvironmentPatch, unknown>;
+    ) => Effect.Effect<EnvironmentPatch, DesktopShellEnvironmentProbeError>;
   };
 }) => {
   const config: ShellEnvironmentConfig = {

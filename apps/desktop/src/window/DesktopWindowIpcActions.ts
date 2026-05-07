@@ -85,12 +85,9 @@ const make = Effect.gen(function* () {
         return Option.getOrNull(selectedPath);
       }),
     confirm: (message) =>
-      Effect.gen(function* () {
-        return yield* electronDialog.confirm({
-          owner: yield* electronWindow.focusedMainOrFirst,
-          message,
-        });
-      }),
+      electronWindow.focusedMainOrFirst.pipe(
+        Effect.flatMap((owner) => electronDialog.confirm({ owner, message })),
+      ),
     setTheme: (theme) => electronTheme.setSource(theme),
     showContextMenu: ({ items, position }) =>
       Effect.gen(function* () {

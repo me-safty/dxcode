@@ -7,7 +7,8 @@ import {
   probeTailscaleHttpsEndpoint,
   readTailscaleStatus,
 } from "@t3tools/tailscale";
-import { Effect, Option } from "effect";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
@@ -63,7 +64,7 @@ const resolveTailscaleMagicDnsAdvertisedEndpoint = Effect.fn(
   readonly dnsName: string | null;
   readonly serveEnabled: boolean;
   readonly servePort?: number;
-  readonly probe?: (baseUrl: string) => Effect.Effect<boolean, unknown>;
+  readonly probe?: (baseUrl: string) => Effect.Effect<boolean, never, HttpClient.HttpClient>;
 }): Effect.fn.Return<Option.Option<AdvertisedEndpoint>, never, HttpClient.HttpClient> {
   if (!input.dnsName) {
     return Option.none();
@@ -73,13 +74,12 @@ const resolveTailscaleMagicDnsAdvertisedEndpoint = Effect.fn(
     magicDnsName: input.dnsName,
     ...(input.servePort === undefined ? {} : { servePort: input.servePort }),
   });
-  const probe = (input.probe?.(httpBaseUrl) ??
+  const probe =
+    input.probe?.(httpBaseUrl) ??
     probeTailscaleHttpsEndpoint({
       baseUrl: httpBaseUrl,
-    })) as Effect.Effect<boolean, unknown, HttpClient.HttpClient>;
-  const isReachable = input.serveEnabled
-    ? yield* probe.pipe(Effect.catch(() => Effect.succeed(false)))
-    : false;
+    });
+  const isReachable = input.serveEnabled ? yield* probe : false;
 
   return Option.some(
     createAdvertisedEndpoint({
@@ -105,7 +105,7 @@ export const resolveTailscaleAdvertisedEndpoints = Effect.fn("resolveTailscaleAd
     readonly servePort?: number;
     readonly networkInterfaces: DesktopNetworkInterfaces;
     readonly statusJson?: string | null;
-    readonly probe?: (baseUrl: string) => Effect.Effect<boolean, unknown>;
+    readonly probe?: (baseUrl: string) => Effect.Effect<boolean, never, HttpClient.HttpClient>;
   }): Effect.fn.Return<
     readonly AdvertisedEndpoint[],
     never,

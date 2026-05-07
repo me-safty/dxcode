@@ -473,9 +473,7 @@ const make = Effect.gen(function* () {
       });
 
       if (resolved.unavailable) {
-        return yield* Effect.fail(
-          new DesktopServerExposureNoNetworkAddressError({ port: previous.port }),
-        );
+        return yield* new DesktopServerExposureNoNetworkAddressError({ port: previous.port });
       }
 
       if (nextSettings !== currentSettings) {

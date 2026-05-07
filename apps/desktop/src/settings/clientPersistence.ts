@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as Random from "effect/Random";
 import * as Schema from "effect/Schema";
 
@@ -70,7 +71,7 @@ const encodeSavedEnvironmentRegistryDocumentJson = Schema.encodeEffect(
 
 function readJsonFileEffect<T>(
   filePath: string,
-  decode: (raw: string) => Effect.Effect<T, unknown>,
+  decode: (raw: string) => Effect.Effect<T, Schema.SchemaError>,
 ): Effect.Effect<Option.Option<T>, never, FileSystem.FileSystem> {
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -89,8 +90,12 @@ function readJsonFileEffect<T>(
 function writeJsonFileEffect<T>(
   filePath: string,
   value: T,
-  encode: (value: T) => Effect.Effect<string, unknown>,
-): Effect.Effect<void, unknown, FileSystem.FileSystem | Path.Path> {
+  encode: (value: T) => Effect.Effect<string, Schema.SchemaError>,
+): Effect.Effect<
+  void,
+  PlatformError.PlatformError | Schema.SchemaError,
+  FileSystem.FileSystem | Path.Path
+> {
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -137,7 +142,11 @@ export function readClientSettingsEffect(
 export function writeClientSettingsEffect(
   settingsPath: string,
   settings: ClientSettings,
-): Effect.Effect<void, unknown, FileSystem.FileSystem | Path.Path> {
+): Effect.Effect<
+  void,
+  PlatformError.PlatformError | Schema.SchemaError,
+  FileSystem.FileSystem | Path.Path
+> {
   return writeJsonFileEffect(
     settingsPath,
     { settings } satisfies ClientSettingsDocument,
@@ -158,7 +167,11 @@ export function readSavedEnvironmentRegistryEffect(
 export function writeSavedEnvironmentRegistryEffect(
   registryPath: string,
   records: readonly PersistedSavedEnvironmentRecord[],
-): Effect.Effect<void, unknown, FileSystem.FileSystem | Path.Path> {
+): Effect.Effect<
+  void,
+  PlatformError.PlatformError | Schema.SchemaError,
+  FileSystem.FileSystem | Path.Path
+> {
   return Effect.gen(function* () {
     const currentDocument = yield* readSavedEnvironmentRegistryDocumentEffect(registryPath);
     const encryptedBearerTokenById = new Map(
@@ -221,7 +234,11 @@ export function writeSavedEnvironmentSecretEffect(input: {
   readonly environmentId: string;
   readonly secret: string;
   readonly secretStorage: ElectronSafeStorage.ElectronSafeStorageShape;
-}): Effect.Effect<boolean, unknown, FileSystem.FileSystem | Path.Path> {
+}): Effect.Effect<
+  boolean,
+  PlatformError.PlatformError | Schema.SchemaError,
+  FileSystem.FileSystem | Path.Path
+> {
   return Effect.gen(function* () {
     const document = yield* readSavedEnvironmentRegistryDocumentEffect(input.registryPath);
 
@@ -275,7 +292,11 @@ export function writeSavedEnvironmentSecretEffect(input: {
 export function removeSavedEnvironmentSecretEffect(input: {
   readonly registryPath: string;
   readonly environmentId: string;
-}): Effect.Effect<void, unknown, FileSystem.FileSystem | Path.Path> {
+}): Effect.Effect<
+  void,
+  PlatformError.PlatformError | Schema.SchemaError,
+  FileSystem.FileSystem | Path.Path
+> {
   return Effect.gen(function* () {
     const document = yield* readSavedEnvironmentRegistryDocumentEffect(input.registryPath);
     if (

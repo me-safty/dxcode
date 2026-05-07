@@ -2,7 +2,6 @@ import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
-import * as EffectPath from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
@@ -140,7 +139,6 @@ const desktopApplicationLayer = Layer.mergeAll(
 ).pipe(Layer.provideMerge(DesktopUpdates.layer), Layer.provideMerge(desktopBackendLayer));
 
 const desktopRuntimeLayer = desktopApplicationLayer.pipe(
-  Layer.provideMerge(EffectPath.layer),
   Layer.provideMerge(NodeServices.layer),
   Layer.provideMerge(NodeHttpClient.layerUndici),
   Layer.provideMerge(NetService.layer),

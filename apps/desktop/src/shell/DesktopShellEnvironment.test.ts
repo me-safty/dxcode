@@ -153,7 +153,9 @@ describe("DesktopShellEnvironment", () => {
             Effect.gen(function* () {
               calls.push({ shell, names });
               if (calls.length === 1) {
-                return yield* Effect.fail(new Error("unknown flag"));
+                return yield* new DesktopShellEnvironment.DesktopShellEnvironmentProbeError({
+                  message: "unknown flag",
+                });
               }
               return {};
             }),
@@ -310,7 +312,11 @@ describe("DesktopShellEnvironment", () => {
         probe: {
           readWindowsEnvironment: (_names, options) =>
             options.loadProfile
-              ? Effect.fail(new Error("profile load failed"))
+              ? Effect.fail(
+                  new DesktopShellEnvironment.DesktopShellEnvironmentProbeError({
+                    message: "profile load failed",
+                  }),
+                )
               : Effect.succeed({ PATH: "C:\\Custom\\Bin;C:\\Windows\\System32" }),
         },
       });

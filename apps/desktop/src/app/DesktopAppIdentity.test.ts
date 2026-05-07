@@ -1,6 +1,6 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as EffectPath from "effect/Path";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -80,7 +80,7 @@ const makeEnvironmentLayer = (overrides: TestEnvironmentInput = {}) => {
   }).pipe(
     Layer.provide(
       Layer.mergeAll(
-        EffectPath.layer,
+        NodeServices.layer,
         DesktopConfig.layerTest({
           HOME: "/Users/alice",
           ...env,

@@ -3,7 +3,6 @@ import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as EffectPath from "effect/Path";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Sink from "effect/Sink";
@@ -82,7 +81,7 @@ function makeEnvironmentLayer(baseDir: string, env: Record<string, string | unde
     runningUnderArm64Translation: false,
   }).pipe(
     Layer.provide(
-      Layer.mergeAll(EffectPath.layer, DesktopConfig.layerTest({ T3CODE_HOME: baseDir, ...env })),
+      Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({ T3CODE_HOME: baseDir, ...env })),
     ),
   );
 }

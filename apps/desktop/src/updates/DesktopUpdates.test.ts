@@ -5,7 +5,6 @@ import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as EffectPath from "effect/Path";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -131,7 +130,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
   }).pipe(
     Layer.provide(
       Layer.mergeAll(
-        EffectPath.layer,
+        NodeServices.layer,
         DesktopConfig.layerTest({
           T3CODE_HOME: `/tmp/t3-desktop-updates-test-${process.pid}`,
           T3CODE_DESKTOP_MOCK_UPDATES: "true",
@@ -209,45 +208,41 @@ describe("DesktopUpdates", () => {
   it.effect("updates and broadcasts state from updater events", () => {
     const harness = makeHarness();
 
-    return Effect.gen(function* () {
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const updates = yield* DesktopUpdates.DesktopUpdates;
-          yield* updates.configure;
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
 
-          harness.emit("update-available", { version: "1.2.4" });
-          yield* flushCallbacks;
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
 
-          const state = yield* updates.getState;
-          assert.equal(state.status, "available");
-          assert.equal(state.availableVersion, "1.2.4");
-          assert.isNotNull(state.checkedAt);
-          assert.equal(harness.sentStates.at(-1)?.status, "available");
-        }),
-      );
-    }).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+        const state = yield* updates.getState;
+        assert.equal(state.status, "available");
+        assert.equal(state.availableVersion, "1.2.4");
+        assert.isNotNull(state.checkedAt);
+        assert.equal(harness.sentStates.at(-1)?.status, "available");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
   it.effect("persists channel changes through the settings service", () => {
     const harness = makeHarness();
 
-    return Effect.gen(function* () {
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
-          const updates = yield* DesktopUpdates.DesktopUpdates;
-          yield* settingsState.set(DEFAULT_DESKTOP_SETTINGS);
-          yield* updates.configure;
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* settingsState.set(DEFAULT_DESKTOP_SETTINGS);
+        yield* updates.configure;
 
-          const state = yield* updates.setChannel("nightly");
-          const settings = yield* settingsState.get;
+        const state = yield* updates.setChannel("nightly");
+        const settings = yield* settingsState.get;
 
-          assert.equal(state.channel, "nightly");
-          assert.equal(settings.updateChannel, "nightly");
-          assert.equal(settings.updateChannelConfiguredByUser, true);
-        }),
-      );
-    }).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+        assert.equal(state.channel, "nightly");
+        assert.equal(settings.updateChannel, "nightly");
+        assert.equal(settings.updateChannelConfiguredByUser, true);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
   it.effect("fails channel changes with a typed error while a check is in progress", () =>

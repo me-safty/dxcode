@@ -1,5 +1,6 @@
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -13,21 +14,40 @@ import { DesktopEnvironment, type DesktopEnvironmentShape } from "../app/Desktop
 
 export const DESKTOP_SCHEME = "t3";
 
+export class ElectronProtocolRegistrationError extends Data.TaggedError(
+  "ElectronProtocolRegistrationError",
+)<{
+  readonly scheme: string;
+  readonly cause: unknown;
+}> {
+  override get message() {
+    return `Failed to register ${this.scheme}: file protocol.`;
+  }
+}
+
+export class ElectronProtocolStaticBundleMissingError extends Data.TaggedError(
+  "ElectronProtocolStaticBundleMissingError",
+)<{}> {
+  override get message() {
+    return "Desktop static bundle missing. Build apps/server (with bundled client) first.";
+  }
+}
+
 export interface ElectronProtocolShape {
-  readonly registerDesktopSchemePrivileges: Effect.Effect<void>;
-  readonly registerFileProtocol: <R>(input: {
+  readonly registerDesktopSchemePrivileges: Effect.Effect<void, never>;
+  readonly registerFileProtocol: <E, R>(input: {
     readonly scheme: string;
     readonly handler: (
       request: Electron.ProtocolRequest,
-    ) => Effect.Effect<Electron.ProtocolResponse, unknown, R>;
+    ) => Effect.Effect<Electron.ProtocolResponse, E, R>;
     readonly onFailure?: (
       request: Electron.ProtocolRequest,
-      cause: Cause.Cause<unknown>,
+      cause: Cause.Cause<E>,
     ) => Electron.ProtocolResponse;
-  }) => Effect.Effect<void, unknown, R | Scope.Scope>;
+  }) => Effect.Effect<void, ElectronProtocolRegistrationError, R | Scope.Scope>;
   readonly registerDesktopFileProtocol: Effect.Effect<
     void,
-    unknown,
+    ElectronProtocolRegistrationError | ElectronProtocolStaticBundleMissingError,
     FileSystem.FileSystem | DesktopEnvironment | Scope.Scope
   >;
 }
@@ -131,7 +151,7 @@ function isStaticAssetRequest(requestUrl: string, environment: DesktopEnvironmen
 const make = Effect.gen(function* () {
   const registeredProtocols = yield* Ref.make<ReadonlySet<string>>(new Set());
 
-  const registerFileProtocol = <R>({
+  const registerFileProtocol = <E, R>({
     scheme,
     handler,
     onFailure,
@@ -139,12 +159,12 @@ const make = Effect.gen(function* () {
     readonly scheme: string;
     readonly handler: (
       request: Electron.ProtocolRequest,
-    ) => Effect.Effect<Electron.ProtocolResponse, unknown, R>;
+    ) => Effect.Effect<Electron.ProtocolResponse, E, R>;
     readonly onFailure?: (
       request: Electron.ProtocolRequest,
-      cause: Cause.Cause<unknown>,
+      cause: Cause.Cause<E>,
     ) => Electron.ProtocolResponse;
-  }): Effect.Effect<void, unknown, R | Scope.Scope> =>
+  }): Effect.Effect<void, ElectronProtocolRegistrationError, R | Scope.Scope> =>
     Effect.gen(function* () {
       const alreadyRegistered = yield* Ref.get(registeredProtocols).pipe(
         Effect.map((protocols) => protocols.has(scheme)),
@@ -172,10 +192,16 @@ const make = Effect.gen(function* () {
               },
             );
             if (!registered) {
-              throw new Error(`Failed to register ${scheme}: file protocol.`);
+              throw new ElectronProtocolRegistrationError({
+                scheme,
+                cause: "registerFileProtocol returned false",
+              });
             }
           },
-          catch: (error) => error,
+          catch: (cause) =>
+            cause instanceof ElectronProtocolRegistrationError
+              ? cause
+              : new ElectronProtocolRegistrationError({ scheme, cause }),
         }).pipe(
           Effect.andThen(
             Ref.update(registeredProtocols, (protocols) => new Set(protocols).add(scheme)),
@@ -202,9 +228,7 @@ const make = Effect.gen(function* () {
 
     const staticRoot = yield* resolveDesktopStaticDir;
     if (Option.isNone(staticRoot)) {
-      return yield* Effect.fail(
-        new Error("Desktop static bundle missing. Build apps/server (with bundled client) first."),
-      );
+      return yield* new ElectronProtocolStaticBundleMissingError();
     }
 
     const staticRootResolved = environment.path.resolve(staticRoot.value);

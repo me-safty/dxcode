@@ -1,15 +1,26 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as EffectPath from "effect/Path";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopRun from "../app/DesktopRun.ts";
 import * as DesktopServerExposure from "../serverExposure/DesktopServerExposure.ts";
+
+const PersistedServerObservabilitySettingsDocument = Schema.Struct({
+  observability: Schema.Struct({
+    otlpTracesUrl: Schema.String,
+    otlpMetricsUrl: Schema.String,
+  }),
+});
+
+const encodePersistedServerObservabilitySettingsDocument = Schema.encodeEffect(
+  Schema.fromJsonString(PersistedServerObservabilitySettingsDocument),
+);
 
 const serverExposureLayer = Layer.succeed(DesktopServerExposure.DesktopServerExposure, {
   getState: Effect.die("unexpected getState"),
@@ -40,7 +51,7 @@ function makeEnvironmentLayer(baseDir: string) {
   }).pipe(
     Layer.provide(
       Layer.mergeAll(
-        EffectPath.layer,
+        NodeServices.layer,
         DesktopConfig.layerTest({
           T3CODE_HOME: baseDir,
           T3CODE_PORT: "9999",
@@ -123,7 +134,7 @@ describe("DesktopBackendConfiguration", () => {
         });
         yield* fileSystem.writeFileString(
           environment.serverSettingsPath,
-          JSON.stringify({
+          yield* encodePersistedServerObservabilitySettingsDocument({
             observability: {
               otlpTracesUrl: " http://127.0.0.1:4318/v1/traces ",
               otlpMetricsUrl: " http://127.0.0.1:4318/v1/metrics ",
