@@ -34,6 +34,7 @@ const DEFAULT_BACKEND_READINESS_TIMEOUT = Duration.minutes(1);
 const DEFAULT_BACKEND_READINESS_INTERVAL = Duration.millis(100);
 const DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT = Duration.seconds(1);
 const DEFAULT_BACKEND_TERMINATE_GRACE = Duration.seconds(2);
+const BACKEND_READINESS_PATH = "/.well-known/t3/environment";
 
 type BackendProcessLayerServices = ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient;
 
@@ -175,16 +176,17 @@ const waitForHttpReady = Effect.fn("desktop.backendManager.waitForHttpReady")(fu
   baseUrl: URL,
   timeout: Duration.Duration,
 ): Effect.fn.Return<void, BackendTimeoutError, HttpClient.HttpClient> {
+  const readinessUrl = new URL(BACKEND_READINESS_PATH, baseUrl);
   const client = (yield* HttpClient.HttpClient).pipe(
     HttpClient.filterStatusOk,
     HttpClient.transformResponse(Effect.timeout(DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT)),
     HttpClient.retry(Schedule.spaced(DEFAULT_BACKEND_READINESS_INTERVAL)),
   );
 
-  yield* client.get(new URL("/", baseUrl)).pipe(
+  yield* client.get(readinessUrl).pipe(
     Effect.asVoid,
     Effect.timeout(timeout),
-    Effect.mapError(() => new BackendTimeoutError({ url: baseUrl })),
+    Effect.mapError(() => new BackendTimeoutError({ url: readinessUrl })),
   );
 });
 
