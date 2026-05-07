@@ -15,7 +15,7 @@ import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
 const defaultEnvironmentInput = {
   dirname: "/repo/apps/desktop/dist-electron",
-  cwd: "/repo",
+  homeDirectory: "/Users/alice",
   platform: "darwin",
   processArch: "arm64",
   appVersion: "1.2.3",
@@ -82,7 +82,6 @@ const makeEnvironmentLayer = (overrides: TestEnvironmentInput = {}) => {
       Layer.mergeAll(
         NodeServices.layer,
         DesktopConfig.layerTest({
-          HOME: "/Users/alice",
           ...env,
         }),
       ),
@@ -167,7 +166,6 @@ describe("DesktopAppIdentity", () => {
         calls,
         environment: {
           env: {
-            HOME: "/Users/alice",
             T3CODE_COMMIT_HASH: "0123456789abcdef",
           },
         },

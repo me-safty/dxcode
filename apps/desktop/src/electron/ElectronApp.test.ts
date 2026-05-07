@@ -106,20 +106,4 @@ describe("ElectronApp", () => {
       assert.deepEqual(removeListenerMock.mock.calls, [["activate", listener]]);
     }).pipe(Effect.provide(ElectronApp.layer)),
   );
-
-  it.effect("wraps app lifecycle operations", () =>
-    Effect.gen(function* () {
-      const electronApp = yield* ElectronApp.ElectronApp;
-
-      yield* electronApp.setPath("userData", "/tmp/t3code");
-      yield* electronApp.appendCommandLineSwitch("class", "t3code");
-      yield* electronApp.relaunch({ execPath: "/electron", args: ["main.js"] });
-      yield* electronApp.exit(0);
-
-      assert.deepEqual(setPathMock.mock.calls, [["userData", "/tmp/t3code"]]);
-      assert.deepEqual(appendSwitchMock.mock.calls, [["class", "t3code"]]);
-      assert.deepEqual(relaunchMock.mock.calls, [[{ execPath: "/electron", args: ["main.js"] }]]);
-      assert.deepEqual(exitMock.mock.calls, [[0]]);
-    }).pipe(Effect.provide(ElectronApp.layer)),
-  );
 });

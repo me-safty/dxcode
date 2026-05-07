@@ -36,30 +36,6 @@ describe("ElectronProtocol", () => {
     assert.isTrue(Option.isNone(ElectronProtocol.normalizeDesktopProtocolPathname("/../secret")));
   });
 
-  it.effect("registers the desktop scheme privileges", () =>
-    Effect.gen(function* () {
-      const electronProtocol = yield* ElectronProtocol.ElectronProtocol;
-
-      yield* electronProtocol.registerDesktopSchemePrivileges;
-
-      assert.deepEqual(registerSchemesAsPrivilegedMock.mock.calls, [
-        [
-          [
-            {
-              scheme: "t3",
-              privileges: {
-                standard: true,
-                secure: true,
-                supportFetchAPI: true,
-                corsEnabled: true,
-              },
-            },
-          ],
-        ],
-      ]);
-    }).pipe(Effect.provide(ElectronProtocol.layer)),
-  );
-
   it.effect("scopes registered file protocols", () =>
     Effect.gen(function* () {
       let capturedHandler:

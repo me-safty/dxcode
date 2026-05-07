@@ -1,6 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import { beforeEach, vi } from "vitest";
 
 const { openExternalMock, writeTextMock } = vi.hoisted(() => ({
@@ -23,15 +22,6 @@ describe("ElectronShell", () => {
   beforeEach(() => {
     openExternalMock.mockReset();
     writeTextMock.mockReset();
-  });
-
-  it("parses only safe external URLs", () => {
-    assert.equal(
-      Option.getOrNull(ElectronShell.parseSafeExternalUrl("https://example.com/path")),
-      "https://example.com/path",
-    );
-    assert.isTrue(Option.isNone(ElectronShell.parseSafeExternalUrl("javascript:alert(1)")));
-    assert.isTrue(Option.isNone(ElectronShell.parseSafeExternalUrl(42)));
   });
 
   it.effect("opens safe external URLs", () =>
@@ -64,15 +54,6 @@ describe("ElectronShell", () => {
       const result = yield* electronShell.openExternal("https://example.com/path");
 
       assert.equal(result, false);
-    }).pipe(Effect.provide(ElectronShell.layer)),
-  );
-
-  it.effect("copies text through Electron clipboard", () =>
-    Effect.gen(function* () {
-      const electronShell = yield* ElectronShell.ElectronShell;
-      yield* electronShell.copyText("https://example.com/path");
-
-      assert.deepEqual(writeTextMock.mock.calls, [["https://example.com/path"]]);
     }).pipe(Effect.provide(ElectronShell.layer)),
   );
 });

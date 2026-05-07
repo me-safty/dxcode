@@ -20,7 +20,13 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
-import * as DesktopBackendEvents from "./DesktopBackendEvents.ts";
+import {
+  DesktopBackendOutputLog,
+  type DesktopBackendOutputLogShape,
+} from "../app/DesktopLogging.ts";
+import * as DesktopRun from "../app/DesktopRun.ts";
+import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 const baseConfig: DesktopBackendManager.DesktopBackendStartConfig = {
   executablePath: "/electron",
@@ -97,7 +103,9 @@ function decodeBootstrap(raw: string) {
 function makeManagerLayer(input: {
   readonly spawnerLayer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>;
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>;
-  readonly events?: Partial<DesktopBackendEvents.DesktopBackendEventsShape>;
+  readonly backendOutputLog?: Partial<DesktopBackendOutputLogShape>;
+  readonly desktopRun?: Partial<DesktopRun.DesktopRunShape>;
+  readonly desktopWindow?: Partial<DesktopWindow.DesktopWindowShape>;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
 }) {
   return DesktopBackendManager.layer.pipe(
@@ -111,16 +119,31 @@ function makeManagerLayer(input: {
         }),
         input.spawnerLayer,
         input.httpClientLayer ?? healthyHttpClientLayer,
-        Layer.succeed(DesktopBackendEvents.DesktopBackendEvents, {
-          onStarting: Effect.void,
-          onStarted: () => Effect.void,
-          onReady: Effect.void,
-          onReadinessFailure: () => Effect.void,
-          onOutput: () => Effect.void,
-          onExit: () => Effect.void,
-          onRestartScheduled: () => Effect.void,
-          ...input.events,
-        } satisfies DesktopBackendEvents.DesktopBackendEventsShape),
+        DesktopState.layer,
+        Layer.succeed(DesktopBackendOutputLog, {
+          writeSessionBoundary: () => Effect.void,
+          writeOutputChunk: () => Effect.void,
+          ...input.backendOutputLog,
+        } satisfies DesktopBackendOutputLogShape),
+        Layer.succeed(DesktopRun.DesktopRun, {
+          id: Effect.succeed("test-run"),
+          refreshId: Effect.succeed("test-run"),
+          logInfo: () => Effect.void,
+          logWarning: () => Effect.void,
+          logError: () => Effect.void,
+          ...input.desktopRun,
+        } satisfies DesktopRun.DesktopRunShape),
+        Layer.succeed(DesktopWindow.DesktopWindow, {
+          createMain: Effect.die("unexpected createMain"),
+          ensureMain: Effect.die("unexpected ensureMain"),
+          revealOrCreateMain: Effect.die("unexpected revealOrCreateMain"),
+          activate: Effect.void,
+          createMainIfBackendReady: Effect.void,
+          handleBackendReady: Effect.void,
+          dispatchMenuAction: () => Effect.void,
+          syncAppearance: Effect.void,
+          ...input.desktopWindow,
+        } satisfies DesktopWindow.DesktopWindowShape),
       ),
     ),
   );
@@ -160,11 +183,14 @@ describe("DesktopBackendManager", () => {
           bootstrap: configWithObservability,
         },
         spawnerLayer,
-        events: {
-          onReady: Effect.sync(() => {
+        desktopWindow: {
+          handleBackendReady: Effect.sync(() => {
             readyCount += 1;
           }).pipe(Effect.andThen(Deferred.succeed(ready, void 0))),
-          onExit: () => Queue.offer(exited, void 0).pipe(Effect.asVoid),
+        },
+        backendOutputLog: {
+          writeSessionBoundary: ({ phase }) =>
+            phase === "END" ? Queue.offer(exited, void 0).pipe(Effect.asVoid) : Effect.void,
         },
       });
 
@@ -175,20 +201,23 @@ describe("DesktopBackendManager", () => {
 
         assert.equal(readyCount, 1);
         assert.isDefined(spawnedCommand);
-        if (spawnedCommand?._tag === "StandardCommand") {
-          assert.equal(spawnedCommand.command, "/electron");
-          assert.deepEqual(spawnedCommand.args, ["/server/bin.mjs", "--bootstrap-fd", "3"]);
-          assert.equal(spawnedCommand.options.cwd, "/server");
-          assert.equal(spawnedCommand.options.extendEnv, true);
-          assert.equal(spawnedCommand.options.stdout, "pipe");
-          assert.equal(spawnedCommand.options.stderr, "pipe");
-          assert.equal(spawnedCommand.options.killSignal, "SIGTERM");
-          assert.isDefined(spawnedCommand.options.forceKillAfter);
-          assert.equal(
-            Duration.toMillis(Duration.fromInputUnsafe(spawnedCommand.options.forceKillAfter)),
-            2_000,
-          );
+        if (spawnedCommand._tag !== "StandardCommand") {
+          throw new Error("Expected backend to spawn a standard command.");
         }
+
+        assert.equal(spawnedCommand.command, "/electron");
+        assert.deepEqual(spawnedCommand.args, ["/server/bin.mjs", "--bootstrap-fd", "3"]);
+        assert.equal(spawnedCommand.options.cwd, "/server");
+        assert.equal(spawnedCommand.options.extendEnv, true);
+        assert.equal(spawnedCommand.options.stdout, "pipe");
+        assert.equal(spawnedCommand.options.stderr, "pipe");
+        assert.equal(spawnedCommand.options.killSignal, "SIGTERM");
+        assert.isDefined(spawnedCommand.options.forceKillAfter);
+        assert.equal(
+          Duration.toMillis(Duration.fromInputUnsafe(spawnedCommand.options.forceKillAfter)),
+          2_000,
+        );
+
         assert.deepEqual(yield* decodeBootstrap(bootstrapJson), configWithObservability);
       }).pipe(Effect.provide(managerLayer));
     }),
@@ -225,11 +254,14 @@ describe("DesktopBackendManager", () => {
             return responseForRequest(request, status);
           }),
         ),
-        events: {
-          onReady: Effect.sync(() => {
+        desktopWindow: {
+          handleBackendReady: Effect.sync(() => {
             readyCount += 1;
           }).pipe(Effect.andThen(Deferred.succeed(ready, void 0))),
-          onExit: () => Queue.offer(exited, void 0).pipe(Effect.asVoid),
+        },
+        backendOutputLog: {
+          writeSessionBoundary: ({ phase }) =>
+            phase === "END" ? Queue.offer(exited, void 0).pipe(Effect.asVoid) : Effect.void,
         },
       });
 
@@ -250,50 +282,6 @@ describe("DesktopBackendManager", () => {
     }),
   );
 
-  it.effect("inherits child output when captureOutput is false", () =>
-    Effect.gen(function* () {
-      let spawnedCommand: ChildProcess.Command | undefined;
-      const ready = yield* Deferred.make<void>();
-      const exited = yield* Queue.unbounded<void>();
-
-      const spawnerLayer = Layer.succeed(
-        ChildProcessSpawner.ChildProcessSpawner,
-        ChildProcessSpawner.make((command) =>
-          Effect.sync(() => {
-            spawnedCommand = command;
-            return makeProcess({
-              exitCode: Deferred.await(ready).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
-            });
-          }),
-        ),
-      );
-
-      const managerLayer = makeManagerLayer({
-        config: {
-          ...baseConfig,
-          captureOutput: false,
-        },
-        spawnerLayer,
-        events: {
-          onReady: Deferred.succeed(ready, void 0).pipe(Effect.asVoid),
-          onExit: () => Queue.offer(exited, void 0).pipe(Effect.asVoid),
-        },
-      });
-
-      yield* Effect.gen(function* () {
-        const manager = yield* DesktopBackendManager.DesktopBackendManager;
-        yield* manager.start;
-        yield* Queue.take(exited);
-
-        assert.isDefined(spawnedCommand);
-        if (spawnedCommand?._tag === "StandardCommand") {
-          assert.equal(spawnedCommand.options.stdout, "inherit");
-          assert.equal(spawnedCommand.options.stderr, "inherit");
-        }
-      }).pipe(Effect.provide(managerLayer));
-    }),
-  );
-
   it.effect("starts the configured backend and closes the scoped process on stop", () =>
     Effect.gen(function* () {
       let startCount = 0;
@@ -308,6 +296,7 @@ describe("DesktopBackendManager", () => {
           Effect.gen(function* () {
             const scope = yield* Scope.Scope;
             startCount += 1;
+            yield* Queue.offer(startedPids, 123);
             const close = Effect.sync(() => {
               closedCount += 1;
             }).pipe(Effect.andThen(Deferred.succeed(closed, void 0)), Effect.asVoid);
@@ -324,9 +313,8 @@ describe("DesktopBackendManager", () => {
 
       const managerLayer = makeManagerLayer({
         spawnerLayer,
-        events: {
-          onStarted: ({ pid }) => Queue.offer(startedPids, pid).pipe(Effect.asVoid),
-          onReady: Deferred.succeed(ready, void 0).pipe(Effect.asVoid),
+        desktopWindow: {
+          handleBackendReady: Deferred.succeed(ready, void 0).pipe(Effect.asVoid),
         },
       });
 
@@ -377,9 +365,9 @@ describe("DesktopBackendManager", () => {
 
       const managerLayer = makeManagerLayer({
         spawnerLayer,
-        events: {
-          onRestartScheduled: ({ delay }) =>
-            Queue.offer(restartDelays, Duration.toMillis(delay)).pipe(Effect.asVoid),
+        desktopRun: {
+          logError: (_message, annotations) =>
+            Queue.offer(restartDelays, Number(annotations?.delayMs ?? 0)).pipe(Effect.asVoid),
         },
       });
 

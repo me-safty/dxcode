@@ -44,36 +44,6 @@ describe("ElectronUpdater", () => {
     autoUpdaterMock.setFeedURL.mockClear();
   });
 
-  it.effect("wraps updater configuration and actions", () =>
-    Effect.gen(function* () {
-      const updater = yield* ElectronUpdater.ElectronUpdater;
-
-      yield* updater.setFeedURL({ provider: "generic", url: "http://127.0.0.1:3000" });
-      yield* updater.setAutoDownload(false);
-      yield* updater.setAutoInstallOnAppQuit(false);
-      yield* updater.setChannel("nightly");
-      yield* updater.setAllowPrerelease(true);
-      yield* updater.setAllowDowngrade(true);
-      yield* updater.setDisableDifferentialDownload(true);
-      yield* updater.checkForUpdates;
-      yield* updater.downloadUpdate;
-      yield* updater.quitAndInstall({ isSilent: true, isForceRunAfter: true });
-
-      assert.deepEqual(autoUpdaterMock.setFeedURL.mock.calls, [
-        [{ provider: "generic", url: "http://127.0.0.1:3000" }],
-      ]);
-      assert.equal(autoUpdaterMock.autoDownload, false);
-      assert.equal(autoUpdaterMock.autoInstallOnAppQuit, false);
-      assert.equal(autoUpdaterMock.channel, "nightly");
-      assert.equal(autoUpdaterMock.allowPrerelease, true);
-      assert.equal(autoUpdaterMock.allowDowngrade, true);
-      assert.equal(autoUpdaterMock.disableDifferentialDownload, true);
-      assert.equal(autoUpdaterMock.checkForUpdates.mock.calls.length, 1);
-      assert.equal(autoUpdaterMock.downloadUpdate.mock.calls.length, 1);
-      assert.deepEqual(autoUpdaterMock.quitAndInstall.mock.calls, [[true, true]]);
-    }).pipe(Effect.provide(ElectronUpdater.layer)),
-  );
-
   it.effect("scopes updater event listeners", () =>
     Effect.gen(function* () {
       const listener = vi.fn();

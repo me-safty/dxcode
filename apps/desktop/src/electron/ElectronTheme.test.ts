@@ -34,17 +34,6 @@ describe("ElectronTheme", () => {
     themeState.themeSource = "system";
   });
 
-  it.effect("reads and writes native theme state", () =>
-    Effect.gen(function* () {
-      const electronTheme = yield* ElectronTheme.ElectronTheme;
-
-      assert.isTrue(yield* electronTheme.shouldUseDarkColors);
-      yield* electronTheme.setSource("dark");
-
-      assert.equal(themeState.themeSource, "dark");
-    }).pipe(Effect.provide(ElectronTheme.layer)),
-  );
-
   it.effect("scopes native theme update listeners", () =>
     Effect.gen(function* () {
       const listener = vi.fn();

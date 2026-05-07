@@ -1,5 +1,4 @@
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -18,27 +17,6 @@ interface ShellEnvironmentConfig {
 
 interface WindowsProbeOptions {
   readonly loadProfile: boolean;
-}
-
-export class DesktopShellEnvironmentProbeError extends Data.TaggedError(
-  "DesktopShellEnvironmentProbeError",
-)<{
-  readonly message: string;
-}> {}
-
-interface ShellProbe {
-  readonly readLoginShellEnvironment: (
-    shell: string,
-    names: ReadonlyArray<string>,
-  ) => Effect.Effect<EnvironmentPatch, DesktopShellEnvironmentProbeError>;
-  readonly readLaunchctlPath: Effect.Effect<
-    Option.Option<string>,
-    DesktopShellEnvironmentProbeError
-  >;
-  readonly readWindowsEnvironment: (
-    names: ReadonlyArray<string>,
-    options: WindowsProbeOptions,
-  ) => Effect.Effect<EnvironmentPatch, DesktopShellEnvironmentProbeError>;
 }
 
 export interface DesktopShellEnvironmentShape {
@@ -64,12 +42,6 @@ const WINDOWS_SHELL_CANDIDATES = ["pwsh.exe", "powershell.exe"] as const;
 const LOGIN_SHELL_TIMEOUT = Duration.seconds(5);
 const LAUNCHCTL_TIMEOUT = Duration.seconds(2);
 const PROCESS_TERMINATE_GRACE = Duration.seconds(1);
-
-const noneProbe: ShellProbe = {
-  readLoginShellEnvironment: () => Effect.succeed({}),
-  readLaunchctlPath: Effect.succeed(Option.none<string>()),
-  readWindowsEnvironment: () => Effect.succeed({}),
-};
 
 const trimNonEmpty = (value: string | null | undefined): Option.Option<string> =>
   Option.fromNullishOr(value).pipe(
@@ -203,92 +175,92 @@ const extractEnvironment = (output: string, names: ReadonlyArray<string>): Envir
   return environment;
 };
 
-const runCommandOutput = (
-  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
-  input: {
-    readonly command: string;
-    readonly args: ReadonlyArray<string>;
-    readonly timeout: Duration.Duration;
-    readonly shell?: boolean;
-  },
-): Effect.Effect<string, never> =>
-  spawner
-    .string(
-      ChildProcess.make(input.command, input.args, {
-        shell: input.shell ?? false,
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
-        killSignal: "SIGTERM",
-        forceKillAfter: PROCESS_TERMINATE_GRACE,
-      }),
-    )
-    .pipe(
-      Effect.timeoutOption(input.timeout),
-      Effect.map(Option.getOrElse(() => "")),
-      Effect.catch(() => Effect.succeed("")),
-    );
+const runCommandOutput = (input: {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+  readonly timeout: Duration.Duration;
+  readonly shell?: boolean;
+}): Effect.Effect<string, never, ChildProcessSpawner.ChildProcessSpawner> =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    return yield* spawner
+      .string(
+        ChildProcess.make(input.command, input.args, {
+          shell: input.shell ?? false,
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "pipe",
+          killSignal: "SIGTERM",
+          forceKillAfter: PROCESS_TERMINATE_GRACE,
+        }),
+      )
+      .pipe(
+        Effect.timeoutOption(input.timeout),
+        Effect.map(Option.getOrElse(() => "")),
+        Effect.catch(() => Effect.succeed("")),
+      );
+  });
 
-const makeProcessProbe = (
-  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
-): ShellProbe => ({
-  readLoginShellEnvironment: (shell, names) =>
-    names.length === 0
-      ? Effect.succeed({})
-      : runCommandOutput(spawner, {
-          command: shell,
-          args: ["-ilc", capturePosixEnvironmentCommand(names)],
-          timeout: LOGIN_SHELL_TIMEOUT,
-        }).pipe(Effect.map((output) => extractEnvironment(output, names))),
-  readLaunchctlPath: runCommandOutput(spawner, {
-    command: "/bin/launchctl",
-    args: ["getenv", "PATH"],
-    timeout: LAUNCHCTL_TIMEOUT,
-  }).pipe(Effect.map(trimNonEmpty)),
-  readWindowsEnvironment: (names, options) => {
-    if (names.length === 0) return Effect.succeed({});
+const readLoginShellEnvironment = (
+  shell: string,
+  names: ReadonlyArray<string>,
+): Effect.Effect<EnvironmentPatch, never, ChildProcessSpawner.ChildProcessSpawner> =>
+  names.length === 0
+    ? Effect.succeed({})
+    : runCommandOutput({
+        command: shell,
+        args: ["-ilc", capturePosixEnvironmentCommand(names)],
+        timeout: LOGIN_SHELL_TIMEOUT,
+      }).pipe(Effect.map((output) => extractEnvironment(output, names)));
 
-    const args = [
-      "-NoLogo",
-      ...(options.loadProfile ? ([] as const) : (["-NoProfile"] as const)),
-      "-NonInteractive",
-      "-Command",
-      captureWindowsEnvironmentCommand(names),
-    ];
-
-    return Effect.gen(function* () {
-      for (const command of WINDOWS_SHELL_CANDIDATES) {
-        const output = yield* runCommandOutput(spawner, {
-          command,
-          args,
-          shell: true,
-          timeout: LOGIN_SHELL_TIMEOUT,
-        });
-        const environment = extractEnvironment(output, names);
-        if (Object.keys(environment).length > 0) {
-          return environment;
-        }
-      }
-
-      return {};
-    });
-  },
-});
+const readLaunchctlPath: Effect.Effect<
+  Option.Option<string>,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner
+> = runCommandOutput({
+  command: "/bin/launchctl",
+  args: ["getenv", "PATH"],
+  timeout: LAUNCHCTL_TIMEOUT,
+}).pipe(Effect.map(trimNonEmpty));
 
 const readWindowsEnvironment = (
-  probe: ShellProbe,
   names: ReadonlyArray<string>,
   options: WindowsProbeOptions,
-): Effect.Effect<EnvironmentPatch, never> =>
-  probe.readWindowsEnvironment(names, options).pipe(Effect.catch(() => Effect.succeed({})));
+): Effect.Effect<EnvironmentPatch, never, ChildProcessSpawner.ChildProcessSpawner> => {
+  if (names.length === 0) return Effect.succeed({});
+
+  const args = [
+    "-NoLogo",
+    ...(options.loadProfile ? ([] as const) : (["-NoProfile"] as const)),
+    "-NonInteractive",
+    "-Command",
+    captureWindowsEnvironmentCommand(names),
+  ];
+
+  return Effect.gen(function* () {
+    for (const command of WINDOWS_SHELL_CANDIDATES) {
+      const output = yield* runCommandOutput({
+        command,
+        args,
+        shell: true,
+        timeout: LOGIN_SHELL_TIMEOUT,
+      });
+      const environment = extractEnvironment(output, names);
+      if (Object.keys(environment).length > 0) {
+        return environment;
+      }
+    }
+
+    return {};
+  });
+};
 
 const installWindowsEnvironment = (
   config: ShellEnvironmentConfig,
-  probe: ShellProbe,
-): Effect.Effect<void, never> =>
+): Effect.Effect<void, never, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
-    const noProfile = yield* readWindowsEnvironment(probe, ["PATH"], { loadProfile: false });
-    const profile = yield* readWindowsEnvironment(probe, WINDOWS_PROFILE_ENV_NAMES, {
+    const noProfile = yield* readWindowsEnvironment(["PATH"], { loadProfile: false });
+    const profile = yield* readWindowsEnvironment(WINDOWS_PROFILE_ENV_NAMES, {
       loadProfile: true,
     });
     const mergedPath = mergePaths("win32", [
@@ -311,32 +283,21 @@ const installWindowsEnvironment = (
 
 const installPosixEnvironment = (
   config: ShellEnvironmentConfig,
-  probe: ShellProbe,
-): Effect.Effect<void, never> =>
+): Effect.Effect<void, never, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const shellEnvironment: EnvironmentPatch = {};
 
     for (const shell of listLoginShellCandidates(config)) {
-      const result = yield* probe.readLoginShellEnvironment(shell, LOGIN_SHELL_ENV_NAMES).pipe(
-        Effect.option,
-        Effect.tap((environment) =>
-          Option.isNone(environment)
-            ? Effect.logWarning("failed to read login shell environment", { shell })
-            : Effect.void,
-        ),
+      Object.assign(
+        shellEnvironment,
+        yield* readLoginShellEnvironment(shell, LOGIN_SHELL_ENV_NAMES),
       );
-
-      if (Option.isSome(result)) {
-        Object.assign(shellEnvironment, result.value);
-        if (shellEnvironment.PATH) break;
-      }
+      if (shellEnvironment.PATH) break;
     }
 
     const launchctlPath =
       config.platform === "darwin" && !shellEnvironment.PATH
-        ? yield* probe.readLaunchctlPath.pipe(
-            Effect.catch(() => Effect.succeed(Option.none<string>())),
-          )
+        ? yield* readLaunchctlPath
         : Option.none<string>();
     const mergedPath = mergePaths(config.platform, [
       trimNonEmpty(shellEnvironment.PATH).pipe(Option.orElse(() => launchctlPath)),
@@ -365,13 +326,12 @@ const installPosixEnvironment = (
 
 const installShellEnvironment = (
   config: ShellEnvironmentConfig,
-  probe: ShellProbe,
-): Effect.Effect<void, never> => {
+): Effect.Effect<void, never, ChildProcessSpawner.ChildProcessSpawner> => {
   if (config.platform === "win32") {
-    return installWindowsEnvironment(config, probe);
+    return installWindowsEnvironment(config);
   }
   if (config.platform === "darwin" || config.platform === "linux") {
-    return installPosixEnvironment(config, probe);
+    return installPosixEnvironment(config);
   }
   return Effect.void;
 };
@@ -382,46 +342,11 @@ export const layer = Layer.effect(
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     return DesktopShellEnvironment.of({
-      installIntoProcess: installShellEnvironment(
-        {
-          env: process.env,
-          platform: environment.platform,
-          userShell: Option.none(),
-        },
-        makeProcessProbe(spawner),
-      ),
+      installIntoProcess: installShellEnvironment({
+        env: process.env,
+        platform: environment.platform,
+        userShell: Option.none(),
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
     });
   }),
 );
-
-export const layerTest = (input: {
-  readonly env: NodeJS.ProcessEnv;
-  readonly platform: NodeJS.Platform;
-  readonly userShell?: string;
-  readonly probe?: {
-    readonly readLoginShellEnvironment?: (
-      shell: string,
-      names: ReadonlyArray<string>,
-    ) => Effect.Effect<EnvironmentPatch, DesktopShellEnvironmentProbeError>;
-    readonly readLaunchctlPath?: Effect.Effect<
-      Option.Option<string>,
-      DesktopShellEnvironmentProbeError
-    >;
-    readonly readWindowsEnvironment?: (
-      names: ReadonlyArray<string>,
-      options: WindowsProbeOptions,
-    ) => Effect.Effect<EnvironmentPatch, DesktopShellEnvironmentProbeError>;
-  };
-}) => {
-  const config: ShellEnvironmentConfig = {
-    env: input.env,
-    platform: input.platform,
-    userShell: trimNonEmpty(input.userShell),
-  };
-  return Layer.succeed(
-    DesktopShellEnvironment,
-    DesktopShellEnvironment.of({
-      installIntoProcess: installShellEnvironment(config, { ...noneProbe, ...input.probe }),
-    }),
-  );
-};

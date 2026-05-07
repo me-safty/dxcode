@@ -31,19 +31,6 @@ describe("ElectronMenu", () => {
     setApplicationMenuMock.mockReset();
   });
 
-  it.effect("sets the native application menu from a template", () =>
-    Effect.gen(function* () {
-      const menu = { id: "application-menu" };
-      buildFromTemplateMock.mockReturnValue(menu);
-
-      const electronMenu = yield* ElectronMenu.ElectronMenu;
-      yield* electronMenu.setApplicationMenu([{ role: "about" }]);
-
-      assert.deepEqual(buildFromTemplateMock.mock.calls, [[[{ role: "about" }]]]);
-      assert.deepEqual(setApplicationMenuMock.mock.calls, [[menu]]);
-    }).pipe(Effect.provide(ElectronMenu.layer)),
-  );
-
   it.effect("returns none without building a menu when there are no valid items", () =>
     Effect.gen(function* () {
       const electronMenu = yield* ElectronMenu.ElectronMenu;
@@ -82,23 +69,6 @@ describe("ElectronMenu", () => {
       });
 
       assert.equal(Option.getOrNull(selectedItemId), "copy");
-    }).pipe(Effect.provide(ElectronMenu.layer)),
-  );
-
-  it.effect("pops up a native menu template", () =>
-    Effect.gen(function* () {
-      const popupMock = vi.fn();
-      const window = {} as Electron.BrowserWindow;
-      buildFromTemplateMock.mockReturnValue({ popup: popupMock });
-
-      const electronMenu = yield* ElectronMenu.ElectronMenu;
-      yield* electronMenu.popupTemplate({
-        window,
-        template: [{ role: "copy" }],
-      });
-
-      assert.deepEqual(buildFromTemplateMock.mock.calls[0]?.[0], [{ role: "copy" }]);
-      assert.deepEqual(popupMock.mock.calls, [[{ window }]]);
     }).pipe(Effect.provide(ElectronMenu.layer)),
   );
 

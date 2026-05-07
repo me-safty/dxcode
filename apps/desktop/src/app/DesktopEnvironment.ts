@@ -4,6 +4,7 @@ import type {
   DesktopRuntimeArch,
   DesktopRuntimeInfo,
 } from "@t3tools/contracts";
+import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -19,7 +20,7 @@ import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 
 export interface MakeDesktopEnvironmentInput {
   readonly dirname: string;
-  readonly cwd: string;
+  readonly homeDirectory: string;
   readonly platform: NodeJS.Platform;
   readonly processArch: string;
   readonly appVersion: string;
@@ -76,21 +77,6 @@ export class DesktopEnvironment extends Context.Service<
   DesktopEnvironment,
   DesktopEnvironmentShape
 >()("t3/desktop/Environment") {}
-
-function resolveDesktopHomeDirectory(input: {
-  readonly config: DesktopConfig.DesktopConfigShape;
-  readonly cwd: string;
-}): string {
-  const driveHome = Option.zipWith(
-    input.config.homeDrive,
-    input.config.homePath,
-    (drive, homePath) => `${drive}${homePath}`,
-  );
-  return Option.getOrElse(
-    Option.firstSomeOf([input.config.home, input.config.userProfile, driveHome]),
-    () => input.cwd,
-  );
-}
 
 const APP_BASE_NAME = "T3 Code";
 
@@ -149,14 +135,11 @@ function resolveDesktopRuntimeInfo(input: {
 
 const makeDesktopEnvironment = (
   input: MakeDesktopEnvironmentInput,
-): Effect.Effect<DesktopEnvironmentShape, never, Path.Path | DesktopConfig.DesktopConfig> =>
+): Effect.Effect<DesktopEnvironmentShape, Config.ConfigError, Path.Path> =>
   Effect.gen(function* () {
     const path = yield* Path.Path;
     const config = yield* DesktopConfig.DesktopConfig;
-    const homeDirectory = resolveDesktopHomeDirectory({
-      config,
-      cwd: input.cwd,
-    });
+    const homeDirectory = input.homeDirectory;
     const devServerUrl = config.devServerUrl;
     const isDevelopment = Option.isSome(devServerUrl);
     const appDataDirectory =

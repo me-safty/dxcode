@@ -9,7 +9,7 @@ import * as DesktopConfig from "./DesktopConfig.ts";
 
 const defaultInput = {
   dirname: "/repo/apps/desktop/dist-electron",
-  cwd: "/cwd",
+  homeDirectory: "/Users/alice",
   platform: "darwin",
   processArch: "arm64",
   appVersion: "0.0.22",
@@ -37,22 +37,11 @@ const makeEnvironment = (
   }).pipe(Effect.provide(makeEnvironmentLayer(overrides, env)));
 
 describe("DesktopEnvironment", () => {
-  it.effect("resolves home directory from platform env with cwd fallback", () =>
-    Effect.gen(function* () {
-      assert.equal(
-        (yield* makeEnvironment({}, { HOME: " /Users/alice " })).homeDirectory,
-        "/Users/alice",
-      );
-      assert.equal((yield* makeEnvironment({ cwd: "/cwd" })).homeDirectory, "/cwd");
-    }),
-  );
-
   it.effect("derives state paths and development identity inside Effect", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(
         {},
         {
-          HOME: "/Users/alice",
           T3CODE_HOME: " /tmp/t3 ",
           T3CODE_COMMIT_HASH: " 0123456789abcdef ",
           T3CODE_PORT: "4949",
@@ -91,7 +80,7 @@ describe("DesktopEnvironment", () => {
 
   it.effect("resolves picker defaults without nullish sentinels", () =>
     Effect.gen(function* () {
-      const environment = yield* makeEnvironment({}, { HOME: "/Users/alice" });
+      const environment = yield* makeEnvironment();
 
       assert.deepEqual(environment.resolvePickFolderDefaultPath(null), Option.none());
       assert.deepEqual(

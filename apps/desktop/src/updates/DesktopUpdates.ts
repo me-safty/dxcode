@@ -579,18 +579,6 @@ const make = Effect.gen(function* () {
       const appUpdateYmlConfig = yield* readAppUpdateYml;
       yield* Ref.set(appUpdateYmlConfigRef, appUpdateYmlConfig);
 
-      if (Option.isSome(config.desktopUpdateGithubToken)) {
-        const appUpdateConfig = Option.getOrUndefined(appUpdateYmlConfig);
-        if (appUpdateConfig?.provider === "github") {
-          yield* electronUpdater.setFeedURL({
-            ...appUpdateConfig,
-            provider: "github",
-            private: true,
-            token: config.desktopUpdateGithubToken.value,
-          } as ElectronUpdater.ElectronUpdaterFeedUrl);
-        }
-      }
-
       if (config.mockUpdates) {
         yield* electronUpdater.setFeedURL({
           provider: "generic",

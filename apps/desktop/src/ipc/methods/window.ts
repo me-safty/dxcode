@@ -6,9 +6,16 @@ import {
   PickFolderOptionsSchema,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import * as DesktopWindowIpcActions from "../../window/DesktopWindowIpcActions.ts";
+import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
+import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
+import * as ElectronDialog from "../../electron/ElectronDialog.ts";
+import * as ElectronMenu from "../../electron/ElectronMenu.ts";
+import * as ElectronShell from "../../electron/ElectronShell.ts";
+import * as ElectronTheme from "../../electron/ElectronTheme.ts";
+import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as IpcChannels from "../channels.ts";
 import { makeIpcMethod, makeSyncIpcMethod } from "../DesktopIpc.ts";
 
@@ -22,13 +29,19 @@ const ContextMenuInput = Schema.Struct({
   position: Schema.optionalKey(ContextMenuPosition),
 });
 
+function toWebSocketBaseUrl(httpBaseUrl: URL): string {
+  const url = new URL(httpBaseUrl.href);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.href;
+}
+
 export const getAppBranding = makeSyncIpcMethod({
   channel: IpcChannels.GET_APP_BRANDING_CHANNEL,
   result: Schema.NullOr(DesktopAppBrandingSchema),
   handler: () =>
     Effect.gen(function* () {
-      const window = yield* DesktopWindowIpcActions.DesktopWindowIpcActions;
-      return yield* window.getAppBranding;
+      const environment = yield* DesktopEnvironment.DesktopEnvironment;
+      return environment.branding;
     }),
 });
 
@@ -37,8 +50,19 @@ export const getLocalEnvironmentBootstrap = makeSyncIpcMethod({
   result: Schema.NullOr(DesktopEnvironmentBootstrapSchema),
   handler: () =>
     Effect.gen(function* () {
-      const window = yield* DesktopWindowIpcActions.DesktopWindowIpcActions;
-      return yield* window.getLocalEnvironmentBootstrap;
+      const backendManager = yield* DesktopBackendManager.DesktopBackendManager;
+      const config = yield* backendManager.currentConfig;
+      return Option.match(config, {
+        onNone: () => null,
+        onSome: ({ bootstrap, httpBaseUrl }) => ({
+          label: "Local environment",
+          httpBaseUrl: httpBaseUrl.href,
+          wsBaseUrl: toWebSocketBaseUrl(httpBaseUrl),
+          ...(bootstrap.desktopBootstrapToken
+            ? { bootstrapToken: bootstrap.desktopBootstrapToken }
+            : {}),
+        }),
+      });
     }),
 });
 
@@ -48,8 +72,14 @@ export const pickFolder = makeIpcMethod({
   result: Schema.NullOr(Schema.String),
   handler: (options) =>
     Effect.gen(function* () {
-      const window = yield* DesktopWindowIpcActions.DesktopWindowIpcActions;
-      return yield* window.pickFolder(options);
+      const dialog = yield* ElectronDialog.ElectronDialog;
+      const electronWindow = yield* ElectronWindow.ElectronWindow;
+      const environment = yield* DesktopEnvironment.DesktopEnvironment;
+      const selectedPath = yield* dialog.pickFolder({
+        owner: yield* electronWindow.focusedMainOrFirst,
+        defaultPath: environment.resolvePickFolderDefaultPath(options),
+      });
+      return Option.getOrNull(selectedPath);
     }),
 });
 
@@ -59,8 +89,11 @@ export const confirm = makeIpcMethod({
   result: Schema.Boolean,
   handler: (message) =>
     Effect.gen(function* () {
-      const window = yield* DesktopWindowIpcActions.DesktopWindowIpcActions;
-      return yield* window.confirm(message);
+      const dialog = yield* ElectronDialog.ElectronDialog;
+      const electronWindow = yield* ElectronWindow.ElectronWindow;
+      return yield* electronWindow.focusedMainOrFirst.pipe(
+        Effect.flatMap((owner) => dialog.confirm({ owner, message })),
+      );
     }),
 });
 
@@ -70,8 +103,8 @@ export const setTheme = makeIpcMethod({
   result: Schema.Void,
   handler: (theme) =>
     Effect.gen(function* () {
-      const window = yield* DesktopWindowIpcActions.DesktopWindowIpcActions;
-      yield* window.setTheme(theme);
+      const electronTheme = yield* ElectronTheme.ElectronTheme;
+      yield* electronTheme.setSource(theme);
     }),
 });
 
@@ -81,8 +114,19 @@ export const showContextMenu = makeIpcMethod({
   result: Schema.NullOr(Schema.String),
   handler: (input) =>
     Effect.gen(function* () {
-      const window = yield* DesktopWindowIpcActions.DesktopWindowIpcActions;
-      return yield* window.showContextMenu(input);
+      const electronMenu = yield* ElectronMenu.ElectronMenu;
+      const electronWindow = yield* ElectronWindow.ElectronWindow;
+      const window = yield* electronWindow.focusedMainOrFirst;
+      if (Option.isNone(window)) {
+        return null;
+      }
+
+      const selectedItemId = yield* electronMenu.showContextMenu({
+        window: window.value,
+        items: input.items,
+        position: Option.fromNullishOr(input.position),
+      });
+      return Option.getOrNull(selectedItemId);
     }),
 });
 
@@ -92,7 +136,7 @@ export const openExternal = makeIpcMethod({
   result: Schema.Boolean,
   handler: (url) =>
     Effect.gen(function* () {
-      const window = yield* DesktopWindowIpcActions.DesktopWindowIpcActions;
-      return yield* window.openExternal(url);
+      const shell = yield* ElectronShell.ElectronShell;
+      return yield* shell.openExternal(url);
     }),
 });

@@ -40,7 +40,7 @@ const serverExposureLayer = Layer.succeed(DesktopServerExposure.DesktopServerExp
 function makeEnvironmentLayer(baseDir: string) {
   return DesktopEnvironment.layer({
     dirname: "/repo/apps/desktop/src",
-    cwd: "/repo",
+    homeDirectory: baseDir,
     platform: "darwin",
     processArch: "x64",
     appVersion: "1.2.3",

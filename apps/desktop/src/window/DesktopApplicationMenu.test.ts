@@ -19,7 +19,7 @@ import * as DesktopWindow from "./DesktopWindow.ts";
 
 const environmentInput = {
   dirname: "/repo/apps/desktop/dist-electron",
-  cwd: "/repo",
+  homeDirectory: "/Users/alice",
   platform: "linux",
   processArch: "arm64",
   appVersion: "1.2.3",
@@ -116,12 +116,7 @@ describe("DesktopApplicationMenu", () => {
             Layer.provideMerge(electronAppLayer),
             Layer.provideMerge(
               DesktopEnvironment.layer(environmentInput).pipe(
-                Layer.provide(
-                  Layer.mergeAll(
-                    NodeServices.layer,
-                    DesktopConfig.layerTest({ HOME: "/Users/alice" }),
-                  ),
-                ),
+                Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
               ),
             ),
           ),

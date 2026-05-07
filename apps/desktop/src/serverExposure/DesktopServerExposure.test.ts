@@ -71,7 +71,7 @@ function mockSpawnerLayer(statusJson = "{}") {
 function makeEnvironmentLayer(baseDir: string, env: Record<string, string | undefined> = {}) {
   return makeDesktopEnvironmentLayer({
     dirname: "/repo/apps/desktop/src",
-    cwd: "/repo",
+    homeDirectory: baseDir,
     platform: "darwin",
     processArch: "x64",
     appVersion: "1.2.3",

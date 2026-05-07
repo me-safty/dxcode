@@ -24,7 +24,10 @@ import {
 } from "@t3tools/contracts";
 
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
-import * as DesktopBackendEvents from "./DesktopBackendEvents.ts";
+import { DesktopBackendOutputLog } from "../app/DesktopLogging.ts";
+import * as DesktopRun from "../app/DesktopRun.ts";
+import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 const INITIAL_RESTART_DELAY = Duration.millis(500);
 const MAX_RESTART_DELAY = Duration.seconds(10);
@@ -173,8 +176,6 @@ const closeRun = (
   ).pipe(Effect.ignore);
 };
 
-const encodeBootstrapJson = Schema.encodeEffect(Schema.fromJsonString(DesktopBackendBootstrap));
-
 const waitForHttpReady = Effect.fn("desktop.backendManager.waitForHttpReady")(function* (
   baseUrl: URL,
   timeout: Duration.Duration,
@@ -196,10 +197,9 @@ function describeProcessExit(
   result: Result.Result<ChildProcessSpawner.ExitCode, PlatformError.PlatformError>,
 ): BackendProcessExit {
   if (Result.isSuccess(result)) {
-    const code = Number(result.success);
     return {
-      code: Option.some(code),
-      reason: `code=${code}`,
+      code: Option.some(result.success),
+      reason: `code=${result.success}`,
       result,
     };
   }
@@ -221,6 +221,8 @@ function drainBackendOutput(
     Effect.ignore,
   );
 }
+
+const encodeBootstrapJson = Schema.encodeEffect(Schema.fromJsonString(DesktopBackendBootstrap));
 
 const runBackendProcess = Effect.fn("runBackendProcess")(function* (
   options: RunBackendProcessOptions,
@@ -257,7 +259,7 @@ const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     .spawn(command)
     .pipe(Effect.mapError((cause) => new BackendProcessSpawnError({ cause })));
 
-  yield* options.onStarted?.(Number(handle.pid)) ?? Effect.void;
+  yield* options.onStarted?.(handle.pid) ?? Effect.void;
   if (options.captureOutput) {
     yield* drainBackendOutput("stdout", handle.stdout, onOutput).pipe(Effect.forkScoped);
     yield* drainBackendOutput("stderr", handle.stderr, onOutput).pipe(Effect.forkScoped);
@@ -278,7 +280,10 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
   const parentScope = yield* Scope.Scope;
   const fileSystem = yield* FileSystem.FileSystem;
   const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
-  const events = yield* DesktopBackendEvents.DesktopBackendEvents;
+  const backendOutputLog = yield* DesktopBackendOutputLog;
+  const desktopState = yield* DesktopState.DesktopState;
+  const desktopWindow = yield* DesktopWindow.DesktopWindow;
+  const run = yield* DesktopRun.DesktopRun;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
   const state = yield* Ref.make(initialState);
@@ -324,7 +329,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
           return;
         }
 
-        yield* events.onStarting;
+        yield* Ref.set(desktopState.backendReady, false);
         const config = yield* configuration.resolve;
         const entryExists = yield* fileSystem
           .exists(config.entryPath)
@@ -402,10 +407,15 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
               );
 
               if (isCurrentRun) {
-                yield* events.onExit({
-                  pid,
-                  reason,
-                });
+                if (Option.isSome(pid)) {
+                  const runId = yield* run.id;
+                  yield* backendOutputLog.writeSessionBoundary({
+                    phase: "END",
+                    runId,
+                    details: `pid=${pid.value} ${reason}`,
+                  });
+                }
+                yield* Ref.set(desktopState.backendReady, false);
               }
 
               if (isCurrentRun && nextState.desiredRunning && !nextState.shuttingDown) {
@@ -426,7 +436,12 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                 ...latest,
                 restartAttempt: 0,
               }));
-              yield* events.onStarted({ pid, config });
+              const desktopRunId = yield* run.id;
+              yield* backendOutputLog.writeSessionBoundary({
+                phase: "START",
+                runId: desktopRunId,
+                details: `pid=${pid} port=${config.bootstrap.port} cwd=${config.cwd}`,
+              });
             }),
           onReady: () =>
             Effect.gen(function* () {
@@ -437,10 +452,19 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
                   onSome: (run) => (run.id === runId ? true : latest.ready),
                 }),
               }));
-              yield* events.onReady;
+              yield* desktopWindow.handleBackendReady.pipe(
+                Effect.catch((error) =>
+                  run.logError("failed to open main window after backend readiness", {
+                    message: error.message,
+                  }),
+                ),
+              );
             }),
-          onReadinessFailure: events.onReadinessFailure,
-          onOutput: events.onOutput,
+          onReadinessFailure: (error) =>
+            run.logWarning("backend readiness check failed during bootstrap", {
+              error: error.message,
+            }),
+          onOutput: (streamName, chunk) => backendOutputLog.writeOutputChunk(streamName, chunk),
         }).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.provideService(HttpClient.HttpClient, httpClient),
@@ -482,7 +506,10 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
         onNone: () => Effect.void,
         onSome: (delay) =>
           Effect.gen(function* () {
-            yield* events.onRestartScheduled({ reason, delay });
+            yield* run.logError("backend exited unexpectedly; restart scheduled", {
+              reason,
+              delayMs: Duration.toMillis(delay),
+            });
             const restartFiber = yield* Effect.forkIn(
               Effect.sleep(delay).pipe(
                 Effect.andThen(
