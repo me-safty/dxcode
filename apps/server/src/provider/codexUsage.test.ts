@@ -277,6 +277,27 @@ describe("normalizeCodexUsageSnapshot", () => {
     expect(snapshot?.rateLimitReachedType).toBe("primary");
   });
 
+  it("does not fall back when the selected bucket explicitly has no rate limit reached", () => {
+    const snapshot = normalizeCodexUsageSnapshot({
+      providerInstanceId: instanceId,
+      source: "read",
+      payload: {
+        rateLimits: {
+          primary: { usedPercent: 50, windowDurationMins: 300 },
+          rateLimitReachedType: null,
+        },
+        rateLimitsByLimitId: {
+          FiveHourLimit: {
+            primary: { usedPercent: 100 },
+            rateLimitReachedType: "primary",
+          },
+        },
+      },
+    });
+
+    expect(snapshot?.rateLimitReachedType).toBeNull();
+  });
+
   it("uses Codex primary and secondary semantics when durations are unknown", () => {
     const snapshot = normalizeCodexUsageSnapshot({
       providerInstanceId: instanceId,

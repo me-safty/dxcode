@@ -199,6 +199,16 @@ function rateLimitReachedTypeFromBucketGroups(
   return null;
 }
 
+function rateLimitReachedTypeFromSelectedBucket(
+  bucket: RateLimitBucket | null,
+  fallback: () => string | null,
+): string | null {
+  if (bucket && "rateLimitReachedType" in bucket) {
+    return bucket.rateLimitReachedType ?? null;
+  }
+  return fallback();
+}
+
 export function normalizeCodexUsageSnapshot(input: {
   readonly providerInstanceId: ProviderInstanceId;
   readonly payload: RateLimitPayload;
@@ -227,12 +237,12 @@ export function normalizeCodexUsageSnapshot(input: {
     providerInstanceId: input.providerInstanceId,
     checkedAt: input.checkedAt ?? DateTime.formatIso(DateTime.nowUnsafe()),
     windows,
-    rateLimitReachedType:
-      bucket?.rateLimitReachedType ??
+    rateLimitReachedType: rateLimitReachedTypeFromSelectedBucket(bucket, () =>
       rateLimitReachedTypeFromBucketGroups(
         input.payload.rateLimitsByLimitId,
         input.payload.rateLimitsByName,
       ),
+    ),
     source: input.source,
   };
 }
