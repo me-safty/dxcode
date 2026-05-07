@@ -18,16 +18,6 @@ import {
 import { projectEvent } from "./projector.ts";
 
 const currentIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
-const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
-  eventId: crypto.randomUUID() as OrchestrationEvent["eventId"],
-  aggregateKind: "thread",
-  aggregateId: "" as OrchestrationEvent["aggregateId"],
-  occurredAt: "" as OrchestrationEvent["occurredAt"],
-  commandId: null,
-  causationEventId: null,
-  correlationId: null,
-  metadata: {},
-};
 
 function withEventBase(
   input: Pick<OrchestrationCommand, "commandId"> & {
@@ -38,12 +28,12 @@ function withEventBase(
   },
 ): Omit<OrchestrationEvent, "sequence" | "type" | "payload"> {
   return {
-    ...defaultMetadata,
     eventId: crypto.randomUUID() as OrchestrationEvent["eventId"],
     aggregateKind: input.aggregateKind,
     aggregateId: input.aggregateId,
     occurredAt: input.occurredAt,
     commandId: input.commandId,
+    causationEventId: null,
     correlationId: input.commandId,
     metadata: input.metadata ?? {},
   };
