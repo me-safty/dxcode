@@ -16,7 +16,7 @@ import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
 import * as DesktopRun from "./DesktopRun.ts";
-import * as DesktopServerExposure from "../server-exposure/DesktopServerExposure.ts";
+import * as DesktopServerExposure from "../serverExposure/DesktopServerExposure.ts";
 import * as DesktopSettingsState from "../settings/DesktopSettingsState.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopState from "./DesktopState.ts";

@@ -9,7 +9,7 @@ import * as Ref from "effect/Ref";
 
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
-import * as DesktopServerExposure from "../server-exposure/DesktopServerExposure.ts";
+import * as DesktopServerExposure from "../serverExposure/DesktopServerExposure.ts";
 import * as DesktopRun from "../app/DesktopRun.ts";
 
 export interface DesktopBackendConfigurationShape {

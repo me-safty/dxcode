@@ -35,7 +35,7 @@ import * as DesktopEnvironment from "./app/DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./app/DesktopLifecycle.ts";
 import { DesktopBackendOutputLogLive, DesktopLoggerLive } from "./app/DesktopLogging.ts";
 import * as DesktopRun from "./app/DesktopRun.ts";
-import * as DesktopServerExposure from "./server-exposure/DesktopServerExposure.ts";
+import * as DesktopServerExposure from "./serverExposure/DesktopServerExposure.ts";
 import * as DesktopSettingsState from "./settings/DesktopSettingsState.ts";
 import * as DesktopShellEnvironment from "./shell/DesktopShellEnvironment.ts";
 import * as DesktopSshEnvironment from "./ssh/DesktopSshEnvironment.ts";

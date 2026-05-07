@@ -9,7 +9,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopRun from "../app/DesktopRun.ts";
-import * as DesktopServerExposure from "../server-exposure/DesktopServerExposure.ts";
+import * as DesktopServerExposure from "../serverExposure/DesktopServerExposure.ts";
 
 const serverExposureLayer = Layer.succeed(DesktopServerExposure.DesktopServerExposure, {
   getState: Effect.die("unexpected getState"),

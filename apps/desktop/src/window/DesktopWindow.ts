@@ -13,7 +13,7 @@ import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
-import * as DesktopServerExposure from "../server-exposure/DesktopServerExposure.ts";
+import * as DesktopServerExposure from "../serverExposure/DesktopServerExposure.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 
