@@ -7,12 +7,12 @@
         "namespaceImportPackages": ["@effect/platform-node", "effect"],
         "diagnosticSeverity": {
           "importFromBarrel": "error",
-          "anyUnknownInErrorContext": "warning",
+          "anyUnknownInErrorContext": "error",
           "instanceOfSchema": "warning",
           "deterministicKeys": "warning"
         }
       }
     ]
   },
-  "include": ["src"]
+  "include": ["src", "scripts", "test"]
 }
