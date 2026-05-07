@@ -65,6 +65,9 @@ it.effect("uses the Effect clock for generated decider timestamps", () =>
     }
 
     assert.equal(event.occurredAt, frozenAt);
+    if (!("updatedAt" in event.payload)) {
+      assert.fail("Expected event payload to include updatedAt.");
+    }
     assert.equal(event.payload.updatedAt, frozenAt);
   }).pipe(Effect.provide(TestClock.layer())),
 );
