@@ -126,6 +126,10 @@ function isRateLimitBucketPayload(payload: RateLimitPayload): boolean {
   return "primary" in payload || "secondary" in payload;
 }
 
+function hasBuckets(buckets: Record<string, RateLimitBucket> | null | undefined): boolean {
+  return Boolean(buckets && Object.keys(buckets).length > 0);
+}
+
 function selectCodexBucket(payload: RateLimitPayload): RateLimitBucket | null {
   if (isRateLimitBucketPayload(payload)) {
     return payload;
@@ -133,7 +137,9 @@ function selectCodexBucket(payload: RateLimitPayload): RateLimitBucket | null {
   return (
     payload.rateLimitsByLimitId?.codex ??
     payload.rateLimitsByName?.codex ??
-    payload.rateLimits ??
+    (hasBuckets(payload.rateLimitsByLimitId) || hasBuckets(payload.rateLimitsByName)
+      ? null
+      : payload.rateLimits) ??
     null
   );
 }

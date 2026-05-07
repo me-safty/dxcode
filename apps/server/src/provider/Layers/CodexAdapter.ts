@@ -1737,15 +1737,22 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
   });
 
+  const cacheCodexUsageSnapshot = (
+    snapshot: CodexUsageSnapshot | null,
+  ): CodexUsageSnapshot | null => {
+    if (snapshot) {
+      cachedCodexUsage = snapshot;
+      return snapshot;
+    }
+    return cachedCodexUsage ? { ...cachedCodexUsage, source: "cache" as const } : null;
+  };
+
   const readCodexUsage: CodexAdapterShape["readCodexUsage"] = Effect.fn("readCodexUsage")(
     function* () {
       const session = Array.from(sessions.values()).findLast((candidate) => !candidate.stopped);
       if (!session) {
         const snapshot = yield* readCodexUsageWithoutSession();
-        cachedCodexUsage = snapshot ?? cachedCodexUsage;
-        return (
-          snapshot ?? (cachedCodexUsage ? { ...cachedCodexUsage, source: "cache" as const } : null)
-        );
+        return cacheCodexUsageSnapshot(snapshot);
       }
       const payload = yield* session.runtime.readAccountRateLimits.pipe(
         Effect.mapError((cause) =>
@@ -1757,10 +1764,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         payload,
         source: "read",
       });
-      cachedCodexUsage = snapshot ?? cachedCodexUsage;
-      return (
-        snapshot ?? (cachedCodexUsage ? { ...cachedCodexUsage, source: "cache" as const } : null)
-      );
+      return cacheCodexUsageSnapshot(snapshot);
     },
   );
 
