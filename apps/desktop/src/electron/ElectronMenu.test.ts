@@ -67,6 +67,23 @@ describe("ElectronMenu", () => {
     }).pipe(Effect.provide(ElectronMenu.layer)),
   );
 
+  it.effect("pops up a native menu template", () =>
+    Effect.gen(function* () {
+      const popupMock = vi.fn();
+      const window = {} as Electron.BrowserWindow;
+      buildFromTemplateMock.mockReturnValue({ popup: popupMock });
+
+      const electronMenu = yield* ElectronMenu.ElectronMenu;
+      yield* electronMenu.popupTemplate({
+        window,
+        template: [{ role: "copy" }],
+      });
+
+      assert.deepEqual(buildFromTemplateMock.mock.calls[0]?.[0], [{ role: "copy" }]);
+      assert.deepEqual(popupMock.mock.calls, [[{ window }]]);
+    }).pipe(Effect.provide(ElectronMenu.layer)),
+  );
+
   it.effect("resolves with none when the menu closes without a click", () =>
     Effect.gen(function* () {
       buildFromTemplateMock.mockImplementation(() => ({

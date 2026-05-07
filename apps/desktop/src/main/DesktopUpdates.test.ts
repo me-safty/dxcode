@@ -1,9 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { DesktopUpdateState } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as EffectPath from "effect/Path";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { TestClock } from "effect/testing";
@@ -32,11 +35,18 @@ interface UpdatesHarness {
   readonly emit: (eventName: string, payload?: unknown) => void;
 }
 
+interface UpdatesHarnessOptions {
+  readonly checkForUpdates?: Effect.Effect<
+    void,
+    ElectronUpdater.ElectronUpdaterCheckForUpdatesError
+  >;
+}
+
 const flushCallbacks = Effect.callback<void>((resume) => {
   setImmediate(() => resume(Effect.void));
 });
 
-function makeHarness(): UpdatesHarness {
+function makeHarness(options: UpdatesHarnessOptions = {}): UpdatesHarness {
   let checkCount = 0;
   let allowDowngrade = false;
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
@@ -77,7 +87,7 @@ function makeHarness(): UpdatesHarness {
     setDisableDifferentialDownload: () => Effect.void,
     checkForUpdates: Effect.sync(() => {
       checkCount += 1;
-    }),
+    }).pipe(Effect.andThen(options.checkForUpdates ?? Effect.void)),
     downloadUpdate: Effect.void,
     quitAndInstall: () => Effect.void,
     on: (eventName, listener) =>
@@ -93,6 +103,7 @@ function makeHarness(): UpdatesHarness {
   } satisfies ElectronUpdater.ElectronUpdaterShape);
 
   const windowLayer = Layer.succeed(ElectronWindow.ElectronWindow, {
+    create: () => Effect.die("unexpected BrowserWindow creation"),
     main: Effect.succeed(Option.none()),
     currentMainOrFirst: Effect.succeed(Option.none()),
     focusedMainOrFirst: Effect.succeed(Option.none()),
@@ -256,4 +267,37 @@ describe("DesktopUpdates", () => {
       );
     }).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
+
+  it.effect("fails channel changes with a typed error while a check is in progress", () =>
+    Effect.gen(function* () {
+      const checkStarted = yield* Deferred.make<void>();
+      const releaseCheck = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        checkForUpdates: Deferred.succeed(checkStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseCheck)),
+        ),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+
+          const checkFiber = yield* updates.check("manual").pipe(Effect.forkScoped);
+          yield* Deferred.await(checkStarted);
+
+          const exit = yield* Effect.exit(updates.setChannel("nightly"));
+          assert.equal(exit._tag, "Failure");
+          if (exit._tag === "Failure") {
+            const error = Cause.squash(exit.cause);
+            assert.instanceOf(error, DesktopUpdates.DesktopUpdateActionInProgressError);
+            assert.equal(error.action, "check");
+          }
+
+          yield* Deferred.succeed(releaseCheck, undefined);
+          yield* Fiber.join(checkFiber);
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
 });

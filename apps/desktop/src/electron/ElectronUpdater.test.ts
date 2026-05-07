@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import { beforeEach, vi } from "vitest";
 
@@ -34,7 +35,9 @@ describe("ElectronUpdater", () => {
     autoUpdaterMock.channel = "latest";
     autoUpdaterMock.disableDifferentialDownload = false;
     autoUpdaterMock.checkForUpdates.mockClear();
+    autoUpdaterMock.checkForUpdates.mockImplementation(() => Promise.resolve(null));
     autoUpdaterMock.downloadUpdate.mockClear();
+    autoUpdaterMock.downloadUpdate.mockImplementation(() => Promise.resolve([]));
     autoUpdaterMock.on.mockClear();
     autoUpdaterMock.quitAndInstall.mockClear();
     autoUpdaterMock.removeListener.mockClear();
@@ -84,6 +87,23 @@ describe("ElectronUpdater", () => {
 
       assert.deepEqual(autoUpdaterMock.on.mock.calls, [["update-available", listener]]);
       assert.deepEqual(autoUpdaterMock.removeListener.mock.calls, [["update-available", listener]]);
+    }).pipe(Effect.provide(ElectronUpdater.layer)),
+  );
+
+  it.effect("wraps rejected update checks in the method-specific typed error", () =>
+    Effect.gen(function* () {
+      const cause = new Error("network unavailable");
+      autoUpdaterMock.checkForUpdates.mockImplementationOnce(() => Promise.reject(cause));
+      const updater = yield* ElectronUpdater.ElectronUpdater;
+
+      const exit = yield* Effect.exit(updater.checkForUpdates);
+
+      assert.equal(exit._tag, "Failure");
+      if (exit._tag === "Failure") {
+        const error = Cause.squash(exit.cause);
+        assert.instanceOf(error, ElectronUpdater.ElectronUpdaterCheckForUpdatesError);
+        assert.equal(error.cause, cause);
+      }
     }).pipe(Effect.provide(ElectronUpdater.layer)),
   );
 });

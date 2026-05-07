@@ -17,10 +17,16 @@ export interface ElectronMenuContextInput {
   readonly position: Option.Option<ElectronMenuPosition>;
 }
 
+export interface ElectronMenuTemplateInput {
+  readonly window: Electron.BrowserWindow;
+  readonly template: readonly Electron.MenuItemConstructorOptions[];
+}
+
 export interface ElectronMenuShape {
   readonly showContextMenu: (
     input: ElectronMenuContextInput,
   ) => Effect.Effect<Option.Option<string>>;
+  readonly popupTemplate: (input: ElectronMenuTemplateInput) => Effect.Effect<void>;
 }
 
 export class ElectronMenu extends Context.Service<ElectronMenu, ElectronMenuShape>()(
@@ -124,6 +130,13 @@ export const layer = Layer.sync(ElectronMenu, () => {
   };
 
   return ElectronMenu.of({
+    popupTemplate: (input) => {
+      if (input.template.length === 0) {
+        return Effect.void;
+      }
+      Electron.Menu.buildFromTemplate([...input.template]).popup({ window: input.window });
+      return Effect.void;
+    },
     showContextMenu: (input) =>
       Effect.callback<Option.Option<string>>((resume) => {
         const normalizedItems = normalizeContextMenuItems(input.items);

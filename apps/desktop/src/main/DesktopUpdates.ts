@@ -6,6 +6,7 @@ import type {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -59,14 +60,40 @@ const DownloadProgressInfo = Schema.Struct({
 
 const currentIsoTimestamp = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
+export class DesktopUpdateActionInProgressError extends Data.TaggedError(
+  "DesktopUpdateActionInProgressError",
+)<{
+  readonly action: "check" | "download" | "install";
+}> {
+  override get message() {
+    return `Cannot change update tracks while an update ${this.action} action is in progress.`;
+  }
+}
+
+export class DesktopUpdatePersistenceError extends Data.TaggedError(
+  "DesktopUpdatePersistenceError",
+)<{
+  readonly cause: DesktopSettingsState.DesktopSettingsPersistenceError;
+}> {
+  override get message() {
+    return "Failed to persist desktop update settings.";
+  }
+}
+
+export type DesktopUpdateConfigureError = never;
+
+export type DesktopUpdateSetChannelError =
+  | DesktopUpdateActionInProgressError
+  | DesktopUpdatePersistenceError;
+
 export interface DesktopUpdatesShape {
   readonly getState: Effect.Effect<DesktopUpdateState>;
   readonly emitState: Effect.Effect<void>;
   readonly disabledReason: Effect.Effect<Option.Option<string>>;
-  readonly configure: Effect.Effect<void, never, Scope.Scope>;
+  readonly configure: Effect.Effect<void, DesktopUpdateConfigureError, Scope.Scope>;
   readonly setChannel: (
     channel: DesktopUpdateChannel,
-  ) => Effect.Effect<DesktopUpdateState, unknown>;
+  ) => Effect.Effect<DesktopUpdateState, DesktopUpdateSetChannelError>;
   readonly check: (reason: string) => Effect.Effect<DesktopUpdateCheckResult>;
   readonly download: Effect.Effect<DesktopUpdateActionResult>;
   readonly install: Effect.Effect<DesktopUpdateActionResult>;
@@ -146,14 +173,13 @@ const make = Effect.gen(function* () {
   const settingsState = yield* DesktopSettingsState.DesktopSettingsState;
   const updatePersistedSettings = (
     f: Parameters<typeof settingsState.updatePersisted>[0],
-  ): Effect.Effect<DesktopSettings, DesktopSettingsState.DesktopSettingsPersistenceError> =>
-    settingsState
-      .updatePersisted(f)
-      .pipe(
-        Effect.provideService(DesktopEnvironment, environment),
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-        Effect.provideService(Path.Path, path),
-      );
+  ): Effect.Effect<DesktopSettings, DesktopUpdatePersistenceError> =>
+    settingsState.updatePersisted(f).pipe(
+      Effect.mapError((cause) => new DesktopUpdatePersistenceError({ cause })),
+      Effect.provideService(DesktopEnvironment, environment),
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+    );
 
   const appUpdateYmlConfigRef = yield* Ref.make<Option.Option<AppUpdateYmlConfig>>(Option.none());
   const updatePollerScopeRef = yield* Ref.make<Option.Option<Scope.Closeable>>(Option.none());
@@ -225,6 +251,13 @@ const make = Effect.gen(function* () {
     return (yield* Ref.get(updateStateRef)).errorContext;
   });
 
+  const activeUpdateAction = Effect.gen(function* () {
+    if (yield* Ref.get(updateInstallInFlightRef)) return Option.some("install" as const);
+    if (yield* Ref.get(updateDownloadInFlightRef)) return Option.some("download" as const);
+    if (yield* Ref.get(updateCheckInFlightRef)) return Option.some("check" as const);
+    return Option.none<"check" | "download" | "install">();
+  });
+
   const clearUpdatePollTimer = Effect.gen(function* () {
     const scope = yield* Ref.getAndSet(updatePollerScopeRef, Option.none());
     yield* Option.match(scope, {
@@ -270,7 +303,7 @@ const make = Effect.gen(function* () {
 
       return yield* electronUpdater.checkForUpdates.pipe(
         Effect.as(true),
-        Effect.catch((error: unknown) =>
+        Effect.catch((error) =>
           Effect.gen(function* () {
             const failedAt = yield* currentIsoTimestamp;
             const message = formatErrorMessage(error);
@@ -296,15 +329,16 @@ const make = Effect.gen(function* () {
     }
 
     yield* Ref.set(updateDownloadInFlightRef, true);
-    yield* setState(reduceDesktopUpdateStateOnDownloadStart(state));
-    yield* electronUpdater.setDisableDifferentialDownload(
-      isArm64HostRunningIntelBuild(environment.runtimeInfo),
-    );
-    yield* logUpdaterInfo("downloading update");
-
-    return yield* electronUpdater.downloadUpdate.pipe(
-      Effect.as({ accepted: true, completed: true }),
-      Effect.catch((error: unknown) =>
+    return yield* Effect.gen(function* () {
+      yield* setState(reduceDesktopUpdateStateOnDownloadStart(state));
+      yield* electronUpdater.setDisableDifferentialDownload(
+        isArm64HostRunningIntelBuild(environment.runtimeInfo),
+      );
+      yield* logUpdaterInfo("downloading update");
+      yield* electronUpdater.downloadUpdate;
+      return { accepted: true, completed: true };
+    }).pipe(
+      Effect.catch((error) =>
         Effect.gen(function* () {
           const message = formatErrorMessage(error);
           yield* updateState((current) =>
@@ -341,7 +375,7 @@ const make = Effect.gen(function* () {
       });
       return { accepted: true, completed: false };
     }).pipe(
-      Effect.catch((error: unknown) =>
+      Effect.catch((error) =>
         Effect.gen(function* () {
           const message = formatErrorMessage(error);
           yield* Ref.set(updateInstallInFlightRef, false);
@@ -570,13 +604,10 @@ const make = Effect.gen(function* () {
     }),
     setChannel: (nextChannel) =>
       Effect.gen(function* () {
-        if (
-          (yield* Ref.get(updateCheckInFlightRef)) ||
-          (yield* Ref.get(updateDownloadInFlightRef)) ||
-          (yield* Ref.get(updateInstallInFlightRef))
-        ) {
+        const activeAction = yield* activeUpdateAction;
+        if (Option.isSome(activeAction)) {
           return yield* Effect.fail(
-            new Error("Cannot change update tracks while an update action is in progress."),
+            new DesktopUpdateActionInProgressError({ action: activeAction.value }),
           );
         }
 
@@ -600,7 +631,7 @@ const make = Effect.gen(function* () {
         const allowDowngrade = yield* electronUpdater.allowDowngrade;
         yield* electronUpdater.setAllowDowngrade(true);
         yield* checkForUpdates("channel-change").pipe(
-          Effect.ensuring(electronUpdater.setAllowDowngrade(allowDowngrade)),
+          Effect.ensuring(electronUpdater.setAllowDowngrade(allowDowngrade).pipe(Effect.ignore)),
         );
         return yield* Ref.get(updateStateRef);
       }),

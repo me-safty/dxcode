@@ -1,4 +1,5 @@
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -6,18 +7,29 @@ import * as Ref from "effect/Ref";
 
 import * as Electron from "electron";
 
+export class ElectronWindowCreateError extends Data.TaggedError("ElectronWindowCreateError")<{
+  readonly cause: unknown;
+}> {
+  override get message() {
+    return "Failed to create Electron BrowserWindow.";
+  }
+}
+
 export interface ElectronWindowShape {
+  readonly create: (
+    options: Electron.BrowserWindowConstructorOptions,
+  ) => Effect.Effect<Electron.BrowserWindow, ElectronWindowCreateError>;
   readonly main: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
   readonly currentMainOrFirst: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
   readonly focusedMainOrFirst: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
   readonly setMain: (window: Electron.BrowserWindow) => Effect.Effect<void>;
-  readonly clearMain: (window?: Electron.BrowserWindow) => Effect.Effect<void>;
+  readonly clearMain: (window: Option.Option<Electron.BrowserWindow>) => Effect.Effect<void>;
   readonly reveal: (window: Electron.BrowserWindow) => Effect.Effect<void>;
   readonly sendAll: (channel: string, ...args: readonly unknown[]) => Effect.Effect<void>;
   readonly destroyAll: Effect.Effect<void>;
-  readonly syncAllAppearance: (
-    sync: (window: Electron.BrowserWindow) => void,
-  ) => Effect.Effect<void>;
+  readonly syncAllAppearance: <E, R>(
+    sync: (window: Electron.BrowserWindow) => Effect.Effect<void, E, R>,
+  ) => Effect.Effect<void, E, R>;
 }
 
 export class ElectronWindow extends Context.Service<ElectronWindow, ElectronWindowShape>()(
@@ -53,6 +65,11 @@ const make = Effect.gen(function* () {
   );
 
   return ElectronWindow.of({
+    create: (options) =>
+      Effect.try({
+        try: () => new Electron.BrowserWindow(options),
+        catch: (cause) => new ElectronWindowCreateError({ cause }),
+      }),
     main: liveMain,
     currentMainOrFirst,
     focusedMainOrFirst,
@@ -62,7 +79,7 @@ const make = Effect.gen(function* () {
         if (Option.isNone(current)) {
           return current;
         }
-        if (window !== undefined && current.value !== window) {
+        if (Option.isSome(window) && current.value !== window.value) {
           return current;
         }
         return Option.none();
@@ -102,9 +119,10 @@ const make = Effect.gen(function* () {
       }
     }),
     syncAllAppearance: (sync) =>
-      Effect.sync(() => {
-        for (const window of Electron.BrowserWindow.getAllWindows()) {
-          sync(window);
+      Effect.gen(function* () {
+        const windows = Electron.BrowserWindow.getAllWindows();
+        for (const window of windows) {
+          yield* sync(window);
         }
       }),
   });

@@ -1,4 +1,5 @@
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
@@ -9,6 +10,41 @@ type AutoUpdater = typeof autoUpdater;
 
 export type ElectronUpdaterFeedUrl = Parameters<AutoUpdater["setFeedURL"]>[0];
 
+export class ElectronUpdaterCheckForUpdatesError extends Data.TaggedError(
+  "ElectronUpdaterCheckForUpdatesError",
+)<{
+  readonly cause: unknown;
+}> {
+  override get message() {
+    return "Electron updater failed to check for updates.";
+  }
+}
+
+export class ElectronUpdaterDownloadUpdateError extends Data.TaggedError(
+  "ElectronUpdaterDownloadUpdateError",
+)<{
+  readonly cause: unknown;
+}> {
+  override get message() {
+    return "Electron updater failed to download the update.";
+  }
+}
+
+export class ElectronUpdaterQuitAndInstallError extends Data.TaggedError(
+  "ElectronUpdaterQuitAndInstallError",
+)<{
+  readonly cause: unknown;
+}> {
+  override get message() {
+    return "Electron updater failed to quit and install the update.";
+  }
+}
+
+export type ElectronUpdaterError =
+  | ElectronUpdaterCheckForUpdatesError
+  | ElectronUpdaterDownloadUpdateError
+  | ElectronUpdaterQuitAndInstallError;
+
 export interface ElectronUpdaterShape {
   readonly setFeedURL: (options: ElectronUpdaterFeedUrl) => Effect.Effect<void>;
   readonly setAutoDownload: (value: boolean) => Effect.Effect<void>;
@@ -18,12 +54,12 @@ export interface ElectronUpdaterShape {
   readonly allowDowngrade: Effect.Effect<boolean>;
   readonly setAllowDowngrade: (value: boolean) => Effect.Effect<void>;
   readonly setDisableDifferentialDownload: (value: boolean) => Effect.Effect<void>;
-  readonly checkForUpdates: Effect.Effect<void, unknown>;
-  readonly downloadUpdate: Effect.Effect<void, unknown>;
+  readonly checkForUpdates: Effect.Effect<void, ElectronUpdaterCheckForUpdatesError>;
+  readonly downloadUpdate: Effect.Effect<void, ElectronUpdaterDownloadUpdateError>;
   readonly quitAndInstall: (options: {
     readonly isSilent: boolean;
     readonly isForceRunAfter: boolean;
-  }) => Effect.Effect<void>;
+  }) => Effect.Effect<void, ElectronUpdaterQuitAndInstallError>;
   readonly on: <Args extends ReadonlyArray<unknown>>(
     eventName: string,
     listener: (...args: Args) => void,
@@ -34,49 +70,55 @@ export class ElectronUpdater extends Context.Service<ElectronUpdater, ElectronUp
   "t3/desktop/electron/Updater",
 ) {}
 
-const fromPromise = <A>(evaluate: () => Promise<A>): Effect.Effect<A, unknown> =>
-  Effect.callback<A, unknown>((resume) => {
-    evaluate().then(
-      (value) => resume(Effect.succeed(value)),
-      (error: unknown) => resume(Effect.fail(error)),
-    );
-  });
-
 export const layer = Layer.succeed(ElectronUpdater, {
   setFeedURL: (options) =>
-    Effect.sync(() => {
+    Effect.suspend(() => {
       autoUpdater.setFeedURL(options);
+      return Effect.void;
     }),
   setAutoDownload: (value) =>
-    Effect.sync(() => {
+    Effect.suspend(() => {
       autoUpdater.autoDownload = value;
+      return Effect.void;
     }),
   setAutoInstallOnAppQuit: (value) =>
-    Effect.sync(() => {
+    Effect.suspend(() => {
       autoUpdater.autoInstallOnAppQuit = value;
+      return Effect.void;
     }),
   setChannel: (channel) =>
-    Effect.sync(() => {
+    Effect.suspend(() => {
       autoUpdater.channel = channel;
+      return Effect.void;
     }),
   setAllowPrerelease: (value) =>
-    Effect.sync(() => {
+    Effect.suspend(() => {
       autoUpdater.allowPrerelease = value;
+      return Effect.void;
     }),
   allowDowngrade: Effect.sync(() => autoUpdater.allowDowngrade),
   setAllowDowngrade: (value) =>
-    Effect.sync(() => {
+    Effect.suspend(() => {
       autoUpdater.allowDowngrade = value;
+      return Effect.void;
     }),
   setDisableDifferentialDownload: (value) =>
-    Effect.sync(() => {
+    Effect.suspend(() => {
       autoUpdater.disableDifferentialDownload = value;
+      return Effect.void;
     }),
-  checkForUpdates: fromPromise(() => autoUpdater.checkForUpdates()).pipe(Effect.asVoid),
-  downloadUpdate: fromPromise(() => autoUpdater.downloadUpdate()).pipe(Effect.asVoid),
+  checkForUpdates: Effect.tryPromise({
+    try: () => autoUpdater.checkForUpdates(),
+    catch: (cause) => new ElectronUpdaterCheckForUpdatesError({ cause }),
+  }).pipe(Effect.asVoid),
+  downloadUpdate: Effect.tryPromise({
+    try: () => autoUpdater.downloadUpdate(),
+    catch: (cause) => new ElectronUpdaterDownloadUpdateError({ cause }),
+  }).pipe(Effect.asVoid),
   quitAndInstall: ({ isSilent, isForceRunAfter }) =>
-    Effect.sync(() => {
-      autoUpdater.quitAndInstall(isSilent, isForceRunAfter);
+    Effect.try({
+      try: () => autoUpdater.quitAndInstall(isSilent, isForceRunAfter),
+      catch: (cause) => new ElectronUpdaterQuitAndInstallError({ cause }),
     }),
   on: (eventName, listener) => {
     const eventTarget = autoUpdater as unknown as {

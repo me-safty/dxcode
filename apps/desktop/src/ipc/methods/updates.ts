@@ -20,12 +20,13 @@ import {
   UPDATE_SET_CHANNEL_CHANNEL,
 } from "../channels.ts";
 import { makeIpcMethod } from "../DesktopIpc.ts";
+import type * as DesktopUpdates from "../../main/DesktopUpdates.ts";
 
 export interface DesktopUpdateIpcActionsShape {
   readonly getState: Effect.Effect<DesktopUpdateState>;
   readonly setChannel: (
     channel: DesktopUpdateChannel,
-  ) => Effect.Effect<DesktopUpdateState, unknown>;
+  ) => Effect.Effect<DesktopUpdateState, DesktopUpdates.DesktopUpdateSetChannelError>;
   readonly download: Effect.Effect<DesktopUpdateActionResult>;
   readonly install: Effect.Effect<DesktopUpdateActionResult>;
   readonly check: Effect.Effect<DesktopUpdateCheckResult>;
