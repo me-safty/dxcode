@@ -391,7 +391,6 @@ export function resolveThreadStatusPill(input: {
       colorClass: "text-emerald-600 dark:text-emerald-300/90",
       dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
       pulse: false,
-      ...(workingProvider ? { workingProvider } : {}),
     };
   }
 

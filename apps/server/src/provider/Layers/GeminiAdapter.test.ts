@@ -25,6 +25,7 @@ import {
   normalizeGeminiPromptUsage,
   resolveRequestedGeminiModeId,
 } from "./GeminiAdapter.ts";
+import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 
 const GEMINI_PROVIDER = ProviderDriverKind.make("gemini");
 
@@ -190,6 +191,14 @@ function makeProviderRegistryLayer(providers: ReadonlyArray<ServerProvider> = []
     getProviders: Effect.succeed(providers),
     refresh: () => Effect.succeed(providers),
     refreshInstance: () => Effect.succeed(providers),
+    getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+      Effect.succeed(
+        makeManualOnlyProviderMaintenanceCapabilities({
+          provider,
+          packageName: null,
+        }),
+      ),
+    setProviderMaintenanceActionState: () => Effect.succeed(providers),
     streamChanges: Stream.empty,
   });
 }

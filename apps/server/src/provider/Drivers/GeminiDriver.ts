@@ -14,11 +14,21 @@ import {
   type ProviderDriver,
   type ProviderInstance,
 } from "../ProviderDriver.ts";
+import {
+  makePackageManagedProviderMaintenanceResolver,
+  resolveProviderMaintenanceCapabilitiesEffect,
+} from "../providerMaintenance.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("gemini");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.hours(1);
+const UPDATE = makePackageManagedProviderMaintenanceResolver({
+  provider: DRIVER_KIND,
+  npmPackageName: "@google/gemini-cli",
+  homebrewFormula: null,
+  nativeUpdate: null,
+});
 
 export type GeminiDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -57,6 +67,10 @@ export const GeminiDriver: ProviderDriver<GeminiSettings, GeminiDriverEnv> = {
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const effectiveConfig = { ...config, enabled } satisfies GeminiSettings;
       const stampIdentity = withInstanceIdentity({ instanceId, displayName, accentColor });
+      const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
+        binaryPath: effectiveConfig.binaryPath,
+        env: processEnv,
+      });
 
       const adapter = yield* makeGeminiAdapter(effectiveConfig, {
         environment: processEnv,
@@ -69,6 +83,7 @@ export const GeminiDriver: ProviderDriver<GeminiSettings, GeminiDriverEnv> = {
         Effect.provideService(ServerConfig, serverConfig),
       );
       const snapshot = yield* makeManagedServerProvider<GeminiSettings>({
+        maintenanceCapabilities,
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,

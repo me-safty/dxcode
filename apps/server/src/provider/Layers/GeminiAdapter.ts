@@ -1814,6 +1814,7 @@ export function makeGeminiAdapter(
           });
           const binaryPath = resolveGeminiBinaryPath(geminiSettings.binaryPath);
 
+          let nextContextRegistered = false;
           const nextContext = yield* createGeminiSessionContext({
             threadId,
             runtimeMode: context.session.runtimeMode,
@@ -1830,10 +1831,24 @@ export function makeGeminiAdapter(
             ...(launchConfig.systemSettingsPath
               ? { systemSettingsPath: launchConfig.systemSettingsPath }
               : {}),
-          });
+          }).pipe(
+            Effect.tap((createdContext) =>
+              Effect.addFinalizer(() =>
+                nextContextRegistered
+                  ? Effect.void
+                  : stopSessionInternal(createdContext, { emitExitEvent: false }).pipe(
+                      Effect.ignore,
+                    ),
+              ),
+            ),
+            Effect.uninterruptible,
+          );
 
           yield* stopSessionInternal(context, { emitExitEvent: false });
-          sessions.set(threadId, nextContext);
+          yield* Effect.sync(() => {
+            sessions.set(threadId, nextContext);
+            nextContextRegistered = true;
+          });
 
           return snapshotThread(nextContext);
         }).pipe(Effect.scoped),
