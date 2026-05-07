@@ -155,7 +155,7 @@ function makeComposerSkillItem(
   skill: ServerProvider["skills"][number],
 ): Extract<ComposerCommandItem, { type: "skill" }> {
   return {
-    id: `skill:${provider}:${skill.name}`,
+    id: `skill:${provider}:${skill.scope ?? ""}:${skill.name}`,
     type: "skill",
     provider,
     skill,
