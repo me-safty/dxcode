@@ -262,7 +262,7 @@ function createOutdatedProvider(driver: string): ServerProvider {
 }
 
 function makeUtc(value: string) {
-  return DateTime.makeUnsafe(Date.parse(value));
+  return DateTime.makeUnsafe(value);
 }
 
 function makePairingLink(input: {

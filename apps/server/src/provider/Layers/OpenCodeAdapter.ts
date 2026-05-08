@@ -48,6 +48,7 @@ import {
   toOpenCodeQuestionAnswers,
   type OpenCodeServerConnection,
 } from "../opencodeRuntime.ts";
+import * as Option from "effect/Option";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
 
@@ -355,12 +356,13 @@ export function appendOpenCodeAssistantTextDelta(
   };
 }
 
-function isoFromEpochMs(value: number | undefined): string | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return undefined;
-  }
-  return DateTime.formatIso(DateTime.makeUnsafe(value));
-}
+const isoFromEpochMs = (value: number) =>
+  DateTime.make(value).pipe(
+    Option.match({
+      onNone: () => undefined,
+      onSome: DateTime.formatIso,
+    }),
+  );
 
 function messageRoleForPart(
   context: OpenCodeSessionContext,
@@ -603,8 +605,8 @@ export function makeOpenCodeAdapter(
             turnId,
             itemId: part.id,
             createdAt:
-              part.type === "text" || part.type === "reasoning"
-                ? isoFromEpochMs(part.time?.start)
+              (part.type === "text" || part.type === "reasoning") && part.time !== undefined
+                ? isoFromEpochMs(part.time.start)
                 : undefined,
             raw,
           })),

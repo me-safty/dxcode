@@ -312,12 +312,19 @@ export const makeSessionCredentialService = Effect.gen(function* () {
         });
       }
 
+      const expiresAt = DateTime.make(claims.exp);
+      if (Option.isNone(expiresAt)) {
+        return yield* new SessionCredentialError({
+          message: "Invalid `exp` claim",
+        });
+      }
+
       return {
         sessionId: claims.sid,
         token,
         method: claims.method,
         client: toClientMetadata(row.value.client),
-        expiresAt: DateTime.makeUnsafe(claims.exp),
+        expiresAt: expiresAt.value,
         subject: claims.sub,
         role: claims.role,
       } satisfies VerifiedSession;
