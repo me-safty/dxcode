@@ -45,11 +45,13 @@ import * as Semaphore from "effect/Semaphore";
 import { writeFileStringAtomically } from "./atomicWrite.ts";
 import { ServerConfig } from "./config.ts";
 import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
-import { fromLenientJson } from "@t3tools/shared/schemaJson";
+import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerSecretStore } from "./auth/Services/ServerSecretStore.ts";
-const encodeServerSettingsSync = Schema.encodeSync(ServerSettings);
+
+const encodeServerSettings = Schema.encodeEffect(ServerSettings);
+const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 
 const textEncoder = new TextEncoder();
@@ -58,7 +60,8 @@ const textDecoder = new TextDecoder();
 const normalizeServerSettings = (
   settings: ServerSettings,
 ): Effect.Effect<ServerSettings, ServerSettingsError> =>
-  decodeServerSettings(encodeServerSettingsSync(settings)).pipe(
+  encodeServerSettings(settings).pipe(
+    Effect.flatMap(decodeServerSettings),
     Effect.mapError(
       (cause) =>
         new ServerSettingsError({
@@ -444,27 +447,34 @@ const makeServerSettings = Effect.gen(function* () {
       };
     });
 
-  const writeSettingsAtomically = (settings: ServerSettings) => {
-    const encodedSettings = encodeServerSettingsSync(settings);
-    const encodedDefaults = encodeServerSettingsSync(DEFAULT_SERVER_SETTINGS);
-    const sparseSettings = stripDefaultServerSettings(encodedSettings, encodedDefaults) ?? {};
+  const writeSettingsAtomically = Effect.fnUntraced(
+    function* (settings: ServerSettings) {
+      const sparseSettingsJson = yield* Effect.flatten(
+        Effect.zipWith(
+          encodeServerSettings(settings),
+          encodeServerSettings(DEFAULT_SERVER_SETTINGS),
+          (a, b) => encodeServerSettingsJson(stripDefaultServerSettings(a, b) ?? {}),
+          { concurrent: true },
+        ),
+      );
 
-    return writeFileStringAtomically({
-      filePath: settingsPath,
-      contents: `${JSON.stringify(sparseSettings, null, 2)}\n`,
-    }).pipe(
-      Effect.provideService(FileSystem.FileSystem, fs),
-      Effect.provideService(Path.Path, pathService),
-      Effect.mapError(
-        (cause) =>
-          new ServerSettingsError({
-            settingsPath,
-            detail: "failed to write settings file",
-            cause,
-          }),
-      ),
-    );
-  };
+      return yield* writeFileStringAtomically({
+        filePath: settingsPath,
+        contents: `${sparseSettingsJson}\n`,
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, pathService),
+      );
+    },
+    Effect.mapError(
+      (cause) =>
+        new ServerSettingsError({
+          settingsPath,
+          detail: "failed to write settings file",
+          cause,
+        }),
+    ),
+  );
 
   const revalidateAndEmit = writeSemaphore.withPermits(1)(
     Effect.gen(function* () {
