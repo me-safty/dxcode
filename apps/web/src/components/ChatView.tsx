@@ -1275,16 +1275,22 @@ export default function ChatView(props: ChatViewProps) {
       explicitSelectedInstanceId,
     ) ?? ProviderDriverKind.make("codex");
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
+  const activeThreadSessionProviderInstanceId = activeThread?.session?.providerInstanceId;
+  const activeThreadModelInstanceId = activeThread?.modelSelection.instanceId;
   const lockedContinuationGroupKey = useMemo((): string | null => {
-    if (!lockedProvider || !activeThread) return null;
-    const lockedInstanceId =
-      activeThread.session?.providerInstanceId ?? activeThread.modelSelection.instanceId;
+    if (!lockedProvider) return null;
+    const lockedInstanceId = activeThreadSessionProviderInstanceId ?? activeThreadModelInstanceId;
     if (!lockedInstanceId) return null;
     return (
       providerInstanceEntries.find((entry) => entry.instanceId === lockedInstanceId)
         ?.continuationGroupKey ?? null
     );
-  }, [activeThread, lockedProvider, providerInstanceEntries]);
+  }, [
+    activeThreadModelInstanceId,
+    activeThreadSessionProviderInstanceId,
+    lockedProvider,
+    providerInstanceEntries,
+  ]);
   const codexUsageInstanceId = useMemo(() => {
     if (settings.codexUsageIndicatorMode === "off") return null;
     const selectedInstanceId = resolveSelectedProviderInstanceId({
