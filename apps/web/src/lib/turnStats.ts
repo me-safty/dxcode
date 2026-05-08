@@ -9,7 +9,6 @@ import type { ChatMessage } from "../types";
 import {
   deriveLatestContextWindowSnapshotForTurn,
   deriveLatestUnassignedContextWindowSnapshotSince,
-  formatContextWindowTokens,
   type ContextWindowSnapshot,
 } from "./contextWindow";
 
@@ -272,8 +271,4 @@ export function buildLatestAssistantTurnStatsMap(input: {
     return new Map();
   }
   return new Map([[input.assistantMessage.id, stats]]);
-}
-
-export function formatAssistantTurnStatTokenCount(value: number): string {
-  return `${formatContextWindowTokens(value)} tokens`;
 }

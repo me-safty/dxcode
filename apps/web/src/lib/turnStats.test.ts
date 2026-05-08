@@ -10,11 +10,7 @@ import {
 import { createModelSelection } from "@t3tools/shared/model";
 
 import type { ChatMessage } from "../types";
-import {
-  buildLatestAssistantTurnStatsMap,
-  deriveLatestAssistantTurnStats,
-  formatAssistantTurnStatTokenCount,
-} from "./turnStats";
+import { buildLatestAssistantTurnStatsMap, deriveLatestAssistantTurnStats } from "./turnStats";
 
 const TURN_ID = TurnId.make("turn-1");
 
@@ -448,9 +444,5 @@ describe("turnStats", () => {
     });
 
     expect(statsByMessageId.get(assistantMessage.id)?.items[0]?.label).toBe("10 sec");
-  });
-
-  it("formats compact token count labels", () => {
-    expect(formatAssistantTurnStatTokenCount(1_400)).toBe("1.4k tokens");
   });
 });
