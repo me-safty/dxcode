@@ -89,9 +89,12 @@ function toNumberValue(value: unknown): number | null {
 function unixNanoToDateTime(value: unknown): DateTime.Utc | null {
   const text = toStringValue(value);
   if (!text) return null;
-
-  const millis = Number(BigInt(text) / 1_000_000n);
-  return Option.getOrNull(DateTime.make(millis));
+  try {
+    const millis = Number(BigInt(text) / 1_000_000n);
+    return Option.getOrNull(DateTime.make(millis));
+  } catch {
+    return null;
+  }
 }
 
 function readExitTag(exit: unknown): string | null {
