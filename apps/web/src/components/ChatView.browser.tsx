@@ -6263,6 +6263,68 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("closes checkpoint rewind when navigating to another thread", async () => {
+    const escapeShortcut = {
+      key: "escape",
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      modKey: false,
+    };
+    const secondThreadId = "thread-rewind-navigation-target" as ThreadId;
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: addThreadToSnapshot(createSnapshotWithRewindCheckpoint(), secondThreadId),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "checkpoint.rewind",
+              shortcut: escapeShortcut,
+              sequence: [escapeShortcut, escapeShortcut],
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      await waitForComposerEditor();
+      await pressGlobalEscape();
+      await pressGlobalEscape();
+
+      await expect.element(page.getByText("Rewind checkpoint")).toBeVisible();
+      await expect.element(page.getByText("add persistent checkpoint rewind menu")).toBeVisible();
+
+      await mounted.router.navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          threadId: secondThreadId,
+        },
+      });
+
+      await waitForURL(
+        mounted.router,
+        (path) => path === serverThreadPath(secondThreadId),
+        "Route should switch to the second server thread.",
+      );
+      await expect.element(page.getByText("Rewind checkpoint")).not.toBeInTheDocument();
+      await expect
+        .element(page.getByText("add persistent checkpoint rewind menu"))
+        .not.toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("shows a tooltip with the skill description when hovering a skill pill", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

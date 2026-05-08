@@ -2274,6 +2274,8 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     setPullRequestDialogState(null);
+    setRewindMenuOpen(false);
+    setRewindSelectedUserMessageId(null);
     isAtEndRef.current = true;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
@@ -2357,6 +2359,8 @@ export default function ChatView(props: ChatViewProps) {
     });
     resetLocalDispatch();
     setExpandedImage(null);
+    setRewindMenuOpen(false);
+    setRewindSelectedUserMessageId(null);
   }, [draftId, resetLocalDispatch, threadId]);
 
   const closeExpandedImage = useCallback(() => {
