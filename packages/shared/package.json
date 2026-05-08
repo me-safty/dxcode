@@ -20,6 +20,10 @@
       "types": "./src/logging.ts",
       "import": "./src/logging.ts"
     },
+    "./observability": {
+      "types": "./src/observability.ts",
+      "import": "./src/observability.ts"
+    },
     "./shell": {
       "types": "./src/shell.ts",
       "import": "./src/shell.ts"
@@ -91,6 +95,7 @@
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",
+    "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",
