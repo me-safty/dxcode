@@ -2662,14 +2662,25 @@ export function ConnectionsSettings() {
               }
             }}
           >
-            <DialogTrigger
-              render={
-                <Button size="xs" variant="outline">
-                  <PlusIcon className="size-3" />
-                  Add environment
-                </Button>
-              }
-            />
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <DialogTrigger
+                    render={
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
+                        aria-label="Add environment"
+                      >
+                        <PlusIcon className="size-3" />
+                      </Button>
+                    }
+                  />
+                }
+              />
+              <TooltipPopup side="top">Add environment</TooltipPopup>
+            </Tooltip>
             <DialogPopup className="max-h-[80dvh] sm:max-w-3xl">
               <DialogHeader>
                 <DialogTitle>Add Environment</DialogTitle>
