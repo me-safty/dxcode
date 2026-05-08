@@ -14,13 +14,8 @@ import {
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
-<<<<<<< t3code/1be1f71d
-import { Equal } from "effect";
+import * as Equal from "effect/Effect";
 import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../../branding";
-=======
-import * as Equal from "effect/Equal";
-import { APP_VERSION } from "../../branding";
->>>>>>> main
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
