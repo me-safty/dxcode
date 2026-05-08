@@ -449,13 +449,8 @@ const makeServerSettings = Effect.gen(function* () {
 
   const writeSettingsAtomically = Effect.fnUntraced(
     function* (settings: ServerSettings) {
-      const sparseSettingsJson = yield* Effect.flatten(
-        Effect.zipWith(
-          encodeServerSettings(settings),
-          encodeServerSettings(DEFAULT_SERVER_SETTINGS),
-          (a, b) => encodeServerSettingsJson(stripDefaultServerSettings(a, b) ?? {}),
-          { concurrent: true },
-        ),
+      const sparseSettingsJson = yield* encodeServerSettingsJson(
+        stripDefaultServerSettings(settings, DEFAULT_SERVER_SETTINGS) ?? {},
       );
 
       return yield* writeFileStringAtomically({
