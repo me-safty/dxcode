@@ -34,7 +34,7 @@ export interface UnavailableProviderSnapshotInput {
   readonly checkedAt?: string;
 }
 
-const nowIso = Effect.map(DateTime.now, DateTime.formatIso))
+const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
 /**
  * Produce a `ServerProvider` snapshot representing a configured instance
