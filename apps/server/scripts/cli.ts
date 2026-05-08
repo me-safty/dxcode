@@ -16,6 +16,7 @@ import {
   PUBLISH_ICON_OVERRIDES,
 } from "../../../scripts/lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
+import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import rootPackageJson from "../../../package.json" with { type: "json" };
 import serverPackageJson from "../package.json" with { type: "json" };
 
@@ -34,6 +35,9 @@ interface PackageJson {
   dependencies: Record<string, string>;
   overrides: Record<string, string>;
 }
+
+const PackageJsonPrettyJson = fromJsonStringPretty(Schema.Unknown);
+const encodePackageJson = Schema.encodeEffect(PackageJsonPrettyJson);
 
 class CliError extends Data.TaggedError("CliError")<{
   readonly message: string;
@@ -232,11 +236,9 @@ const publishCmd = Command.make(
           };
 
           const original = yield* fs.readFileString(packageJsonPath);
+          const packageJsonString = yield* encodePackageJson(pkg);
           yield* fs.writeFileString(backupPath, original);
-          yield* fs.writeFileString(
-            packageJsonPath,
-            `${Schema.encodeUnknownSync(Schema.UnknownFromJsonString)(pkg)}\n`,
-          );
+          yield* fs.writeFileString(packageJsonPath, `${packageJsonString}\n`);
           yield* Effect.log("[cli] Prepared package.json for publish");
 
           const iconBackups = yield* applyPublishIconOverrides(repoRoot, serverDir);

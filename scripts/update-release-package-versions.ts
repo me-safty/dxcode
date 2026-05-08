@@ -9,8 +9,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import * as SchemaGetter from "effect/SchemaGetter";
 import { Argument, Command, Flag } from "effect/unstable/cli";
+import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 
 export const releasePackageFiles = [
   "apps/server/package.json",
@@ -24,15 +24,7 @@ interface UpdateReleasePackageVersionsOptions {
 }
 
 const PackageJsonSchema = Schema.Record(Schema.String, Schema.Unknown);
-const PrettyJsonString = SchemaGetter.parseJson<string>().compose(
-  SchemaGetter.stringifyJson({ space: 2 }),
-);
-const PackageJsonPrettyJson = Schema.fromJsonString(PackageJsonSchema).pipe(
-  Schema.encode({
-    decode: PrettyJsonString,
-    encode: PrettyJsonString,
-  }),
-);
+const PackageJsonPrettyJson = fromJsonStringPretty(PackageJsonSchema);
 const decodePackageJson = Schema.decodeUnknownEffect(PackageJsonPrettyJson);
 const encodePackageJson = Schema.encodeSync(PackageJsonPrettyJson);
 
