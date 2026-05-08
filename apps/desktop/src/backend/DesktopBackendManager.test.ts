@@ -325,7 +325,6 @@ describe("DesktopBackendManager", () => {
         yield* manager.start;
         assert.equal(yield* Queue.take(startedPids), 123);
         yield* Deferred.await(ready);
-        yield* Ref.set(backendReady, true);
         assert.isTrue(yield* Ref.get(backendReady));
         assert.deepEqual(yield* manager.currentConfig, Option.some(baseConfig));
 
@@ -439,6 +438,52 @@ describe("DesktopBackendManager", () => {
         yield* TestClock.adjust(Duration.millis(500));
 
         assert.equal(yield* Queue.size(starts), 0);
+      }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
+    }),
+  );
+
+  it.effect("does not restart after stop cancels a scheduled restart", () =>
+    Effect.gen(function* () {
+      const starts = yield* Queue.unbounded<number>();
+      let startCount = 0;
+
+      const spawnerLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.sync(() => {
+            startCount += 1;
+            return makeProcess({
+              exitCode: Queue.offer(starts, startCount).pipe(
+                Effect.as(ChildProcessSpawner.ExitCode(1)),
+              ),
+            });
+          }),
+        ),
+      );
+
+      const managerLayer = makeManagerLayer({
+        spawnerLayer,
+        httpClientLayer: httpClientLayer(() => Effect.never),
+      });
+
+      yield* Effect.gen(function* () {
+        const manager = yield* DesktopBackendManager.DesktopBackendManager;
+        yield* manager.start;
+        assert.equal(yield* Queue.take(starts), 1);
+
+        let restartScheduled = false;
+        while (!restartScheduled) {
+          restartScheduled = (yield* manager.snapshot).restartScheduled;
+          if (!restartScheduled) {
+            yield* Effect.yieldNow;
+          }
+        }
+
+        yield* manager.stop();
+        yield* TestClock.adjust(Duration.millis(500));
+
+        assert.equal(yield* Queue.size(starts), 0);
+        assert.equal((yield* manager.snapshot).desiredRunning, false);
       }).pipe(Effect.provide(Layer.merge(TestClock.layer(), managerLayer)));
     }),
   );

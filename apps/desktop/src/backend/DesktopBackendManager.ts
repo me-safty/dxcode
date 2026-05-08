@@ -432,17 +432,26 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             }),
           onReady: () =>
             Effect.gen(function* () {
-              yield* Ref.update(state, (latest) => ({
-                ...latest,
-                restartAttempt: Option.match(latest.active, {
-                  onNone: () => latest.restartAttempt,
-                  onSome: (run) => (run.id === runId ? 0 : latest.restartAttempt),
-                }),
-                ready: Option.match(latest.active, {
-                  onNone: () => latest.ready,
-                  onSome: (run) => (run.id === runId ? true : latest.ready),
-                }),
-              }));
+              const isCurrentRun = yield* Ref.modify(state, (latest) => {
+                const activeRun = Option.getOrUndefined(latest.active);
+                if (activeRun?.id !== runId) {
+                  return [false, latest] as const;
+                }
+
+                return [
+                  true,
+                  {
+                    ...latest,
+                    restartAttempt: 0,
+                    ready: true,
+                  },
+                ] as const;
+              });
+              if (!isCurrentRun) {
+                return;
+              }
+
+              yield* Ref.set(desktopState.backendReady, true);
               yield* desktopWindow.handleBackendReady.pipe(
                 Effect.catch((error) =>
                   Effect.logError("failed to open main window after backend readiness").pipe(
@@ -506,12 +515,18 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             const restartFiber = yield* Effect.forkIn(
               Effect.sleep(delay).pipe(
                 Effect.andThen(
-                  Ref.update(state, (latest) => ({
-                    ...latest,
-                    restartFiber: Option.none(),
-                  })),
+                  Ref.modify(state, (latest) => {
+                    const shouldRestart = latest.desiredRunning;
+                    return [
+                      shouldRestart,
+                      {
+                        ...latest,
+                        restartFiber: Option.none(),
+                      },
+                    ] as const;
+                  }),
                 ),
-                Effect.andThen(start),
+                Effect.flatMap((shouldRestart) => (shouldRestart ? start : Effect.void)),
                 Effect.catchCause((cause) =>
                   Effect.logError("desktop backend restart fiber failed", { cause }),
                 ),
