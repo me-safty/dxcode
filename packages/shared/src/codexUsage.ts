@@ -5,7 +5,7 @@ const CODEX_USAGE_WINDOW_DISPLAY_ORDER = {
   weekly: 1,
 } satisfies Record<CodexUsageWindow["kind"], number>;
 
-export function compareCodexUsageWindowDisplayOrder(
+function compareCodexUsageWindowDisplayOrder(
   left: Pick<CodexUsageWindow, "kind">,
   right: Pick<CodexUsageWindow, "kind">,
 ): number {
