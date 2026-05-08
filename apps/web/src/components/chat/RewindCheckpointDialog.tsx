@@ -1,5 +1,5 @@
 import { SearchIcon, Undo2Icon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MessageId } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 
@@ -48,14 +48,27 @@ export function RewindCheckpointDialog({
 }: RewindCheckpointDialogProps) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<MessageId | null>(selectedUserMessageId);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
+      wasOpenRef.current = false;
       return;
     }
+    if (wasOpenRef.current) {
+      return;
+    }
+    wasOpenRef.current = true;
     setQuery("");
     setSelectedId(selectedUserMessageId ?? candidates[0]?.userMessageId ?? null);
   }, [candidates, open, selectedUserMessageId]);
+
+  useEffect(() => {
+    if (!open || !selectedUserMessageId) {
+      return;
+    }
+    setSelectedId(selectedUserMessageId);
+  }, [open, selectedUserMessageId]);
 
   const filteredCandidates = useMemo(() => {
     return filterRewindCheckpointCandidates(candidates, query);
