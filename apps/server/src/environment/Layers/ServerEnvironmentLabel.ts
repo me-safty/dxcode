@@ -1,6 +1,8 @@
 import * as OS from "node:os";
 
-import { Effect, FileSystem } from "effect";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { runProcess } from "../../processRunner.ts";
@@ -60,7 +62,7 @@ const runFriendlyLabelCommand = Effect.fn("runFriendlyLabelCommand")(function* (
     shell: process.platform === "win32",
   }).pipe(Effect.option);
 
-  if (result._tag === "None" || result.value.code !== 0) {
+  if (Option.isNone(result) || result.value.code !== 0) {
     return null;
   }
 

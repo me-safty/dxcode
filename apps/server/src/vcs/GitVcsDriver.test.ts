@@ -85,19 +85,22 @@ it.effect("GitVcsDriver forwards execute env to the VCS process", () => {
     });
   }).pipe(
     Effect.provide(
-      Layer.mock(VcsProcess.VcsProcess)({
-        run: (input) =>
-          Effect.sync(() => {
-            observedEnv = input.env;
-            return {
-              exitCode: ChildProcessSpawner.ExitCode(0),
-              stdout: "",
-              stderr: "",
-              stdoutTruncated: false,
-              stderrTruncated: false,
-            };
-          }),
-      }),
+      Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(VcsProcess.VcsProcess)({
+          run: (input) =>
+            Effect.sync(() => {
+              observedEnv = input.env;
+              return {
+                exitCode: ChildProcessSpawner.ExitCode(0),
+                stdout: "",
+                stderr: "",
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              };
+            }),
+        }),
+      ),
     ),
   );
 });

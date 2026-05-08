@@ -1,7 +1,9 @@
 import { afterAll, describe, expect, it } from "vitest";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as ManagedRuntime from "effect/ManagedRuntime";
 
 import { VcsProcessExitError, VcsProcessTimeoutError } from "@t3tools/contracts";
 import * as VcsProcess from "./VcsProcess.ts";

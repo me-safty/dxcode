@@ -1,4 +1,10 @@
-import { Data, Duration, Effect, Option, PlatformError, Scope, Stream } from "effect";
+import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as PlatformError from "effect/PlatformError";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {

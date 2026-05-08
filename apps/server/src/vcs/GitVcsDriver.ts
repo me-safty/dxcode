@@ -1,8 +1,12 @@
-import { rm } from "node:fs/promises";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { Context, DateTime, Effect, Layer, Option } from "effect";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -341,6 +345,8 @@ const gitCommand = (
   });
 
 export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const vcsProcess = yield* VcsProcess.VcsProcess;
   const capabilities = {
     kind: "git" as const,
@@ -584,16 +590,15 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
     );
 
   const resolveGitCommonDir = (cwd: string) =>
-    execute({
-      operation: "GitVcsDriver.checkpoints.resolveGitCommonDir",
-      cwd,
-      args: ["rev-parse", "--git-common-dir"],
-    }).pipe(
-      Effect.map((result) => {
-        const gitCommonDir = result.stdout.trim();
-        return path.isAbsolute(gitCommonDir) ? gitCommonDir : path.resolve(cwd, gitCommonDir);
-      }),
-    );
+    Effect.gen(function* () {
+      const result = yield* execute({
+        operation: "GitVcsDriver.checkpoints.resolveGitCommonDir",
+        cwd,
+        args: ["rev-parse", "--git-common-dir"],
+      });
+      const gitCommonDir = result.stdout.trim();
+      return path.isAbsolute(gitCommonDir) ? gitCommonDir : path.resolve(cwd, gitCommonDir);
+    });
 
   const checkpoints: VcsDriver.VcsCheckpointOps = {
     captureCheckpoint: Effect.fn("GitVcsDriver.checkpoints.captureCheckpoint")(function* (input) {
@@ -609,9 +614,9 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         GIT_COMMITTER_EMAIL: "t3code@users.noreply.github.com",
       };
 
-      const cleanupTempIndex = Effect.promise(() => rm(tempIndexPath, { force: true })).pipe(
-        Effect.ignore,
-      );
+      const cleanupTempIndex = fileSystem
+        .remove(tempIndexPath, { force: true })
+        .pipe(Effect.ignore);
 
       yield* Effect.gen(function* () {
         const headExists = yield* hasHeadCommit(input.cwd);

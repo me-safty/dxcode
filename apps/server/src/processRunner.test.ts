@@ -1,10 +1,12 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
-import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Effect, Sink, Stream } from "effect";
-import { afterAll, describe, expect, it } from "vitest";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
+import { describe, expect, it } from "vitest";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -14,44 +16,43 @@ import {
   runProcess,
 } from "./processRunner.ts";
 
-function makeHelperScript(): string {
-  const directory = mkdtempSync(path.join(os.tmpdir(), "t3-process-runner-test-"));
-  const helperPath = path.join(directory, "helper.js");
-  writeFileSync(
-    helperPath,
-    [
-      "const mode = process.argv[2];",
-      "if (mode === 'stdout-bytes') {",
-      "  process.stdout.write('x'.repeat(Number(process.argv[3] ?? '0')));",
-      "} else if (mode === 'stdin-echo') {",
-      "  process.stdin.setEncoding('utf8');",
-      "  let data = '';",
-      "  process.stdin.on('data', (chunk) => { data += chunk; });",
-      "  process.stdin.on('end', () => { process.stdout.write(data); });",
-      "} else if (mode === 'stderr-exit') {",
-      "  process.stderr.write(process.argv[3] ?? '');",
-      "  process.exit(Number(process.argv[4] ?? '0'));",
-      "} else if (mode === 'sleep') {",
-      "  setTimeout(() => process.stdout.write('late'), Number(process.argv[3] ?? '0'));",
-      "} else if (mode === 'spam-stdout') {",
-      "  const chunk = 'x'.repeat(Number(process.argv[3] ?? '64'));",
-      "  setInterval(() => { process.stdout.write(chunk); }, Number(process.argv[4] ?? '5'));",
-      "} else {",
-      "  process.exit(2);",
-      "}",
-      "",
-    ].join("\n"),
-    "utf8",
-  );
-  return helperPath;
-}
+const HELPER_SCRIPT_SOURCE = [
+  "const mode = process.argv[2];",
+  "if (mode === 'stdout-bytes') {",
+  "  process.stdout.write('x'.repeat(Number(process.argv[3] ?? '0')));",
+  "} else if (mode === 'stdin-echo') {",
+  "  process.stdin.setEncoding('utf8');",
+  "  let data = '';",
+  "  process.stdin.on('data', (chunk) => { data += chunk; });",
+  "  process.stdin.on('end', () => { process.stdout.write(data); });",
+  "} else if (mode === 'stderr-exit') {",
+  "  process.stderr.write(process.argv[3] ?? '');",
+  "  process.exit(Number(process.argv[4] ?? '0'));",
+  "} else if (mode === 'sleep') {",
+  "  setTimeout(() => process.stdout.write('late'), Number(process.argv[3] ?? '0'));",
+  "} else if (mode === 'spam-stdout') {",
+  "  const chunk = 'x'.repeat(Number(process.argv[3] ?? '64'));",
+  "  setInterval(() => { process.stdout.write(chunk); }, Number(process.argv[4] ?? '5'));",
+  "} else {",
+  "  process.exit(2);",
+  "}",
+  "",
+].join("\n");
 
-function cleanupHelperScript(helperPath: string) {
-  rmSync(path.dirname(helperPath), { recursive: true, force: true });
-}
+const withHelperScript = <A, E, R>(f: (helperScriptPath: string) => Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fileSystem.makeTempDirectoryScoped({
+      directory: os.tmpdir(),
+      prefix: "t3-process-runner-test-",
+    });
+    const helperPath = path.join(directory, "helper.js");
+    yield* fileSystem.writeFileString(helperPath, HELPER_SCRIPT_SOURCE);
+    return yield* f(helperPath);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
 describe("runProcess", () => {
-  const helperScriptPath = makeHelperScript();
   const runLive = (input: Parameters<typeof runProcess>[1]) =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -60,10 +61,12 @@ describe("runProcess", () => {
 
   it("supports the new Effect-native API", async () => {
     const result = await Effect.runPromise(
-      runLive({
-        command: "node",
-        args: [helperScriptPath, "stdout-bytes", "32"],
-      }),
+      withHelperScript((helperScriptPath) =>
+        runLive({
+          command: "node",
+          args: [helperScriptPath, "stdout-bytes", "32"],
+        }),
+      ),
     );
 
     expect(result.code).toBe(0);
@@ -112,11 +115,13 @@ describe("runProcess", () => {
   it("fails when output exceeds max buffer in default mode", async () => {
     await expect(
       Effect.runPromise(
-        runLive({
-          command: "node",
-          args: [helperScriptPath, "stdout-bytes", "2048"],
-          maxOutputBytes: 128,
-        }),
+        withHelperScript((helperScriptPath) =>
+          runLive({
+            command: "node",
+            args: [helperScriptPath, "stdout-bytes", "2048"],
+            maxOutputBytes: 128,
+          }),
+        ),
       ),
     ).rejects.toBeInstanceOf(ProcessOutputLimitError);
   });
@@ -124,24 +129,28 @@ describe("runProcess", () => {
   it("fails fast on output limit before timeout for long-running output", async () => {
     await expect(
       Effect.runPromise(
-        runLive({
-          command: "node",
-          args: [helperScriptPath, "spam-stdout", "64", "5"],
-          maxOutputBytes: 128,
-          timeoutMs: 2_000,
-        }),
+        withHelperScript((helperScriptPath) =>
+          runLive({
+            command: "node",
+            args: [helperScriptPath, "spam-stdout", "64", "5"],
+            maxOutputBytes: 128,
+            timeoutMs: 2_000,
+          }),
+        ),
       ),
     ).rejects.toBeInstanceOf(ProcessOutputLimitError);
   });
 
   it("truncates output when outputMode is truncate", async () => {
     const result = await Effect.runPromise(
-      runLive({
-        command: "node",
-        args: [helperScriptPath, "stdout-bytes", "2048"],
-        maxOutputBytes: 128,
-        outputMode: "truncate",
-      }),
+      withHelperScript((helperScriptPath) =>
+        runLive({
+          command: "node",
+          args: [helperScriptPath, "stdout-bytes", "2048"],
+          maxOutputBytes: 128,
+          outputMode: "truncate",
+        }),
+      ),
     );
 
     expect(result.code).toBe(0);
@@ -152,11 +161,13 @@ describe("runProcess", () => {
 
   it("writes stdin before waiting for exit", async () => {
     const result = await Effect.runPromise(
-      runLive({
-        command: "node",
-        args: [helperScriptPath, "stdin-echo"],
-        stdin: "stdin payload",
-      }),
+      withHelperScript((helperScriptPath) =>
+        runLive({
+          command: "node",
+          args: [helperScriptPath, "stdin-echo"],
+          stdin: "stdin payload",
+        }),
+      ),
     );
 
     expect(result.stdout).toBe("stdin payload");
@@ -164,10 +175,12 @@ describe("runProcess", () => {
 
   it("returns output for non-zero exit codes", async () => {
     const result = await Effect.runPromise(
-      runLive({
-        command: "node",
-        args: [helperScriptPath, "stderr-exit", "boom", "2"],
-      }),
+      withHelperScript((helperScriptPath) =>
+        runLive({
+          command: "node",
+          args: [helperScriptPath, "stderr-exit", "boom", "2"],
+        }),
+      ),
     );
 
     expect(result.code).toBe(2);
@@ -177,23 +190,27 @@ describe("runProcess", () => {
   it("fails on timeout", async () => {
     await expect(
       Effect.runPromise(
-        runLive({
-          command: "node",
-          args: [helperScriptPath, "sleep", "500"],
-          timeoutMs: 50,
-        }),
+        withHelperScript((helperScriptPath) =>
+          runLive({
+            command: "node",
+            args: [helperScriptPath, "sleep", "500"],
+            timeoutMs: 50,
+          }),
+        ),
       ),
     ).rejects.toBeInstanceOf(ProcessTimeoutError);
   });
 
   it("returns a synthetic timed out result when timeoutBehavior is timedOutResult", async () => {
     const result = await Effect.runPromise(
-      runLive({
-        command: "node",
-        args: [helperScriptPath, "sleep", "500"],
-        timeoutMs: 50,
-        timeoutBehavior: "timedOutResult",
-      }),
+      withHelperScript((helperScriptPath) =>
+        runLive({
+          command: "node",
+          args: [helperScriptPath, "sleep", "500"],
+          timeoutMs: 50,
+          timeoutBehavior: "timedOutResult",
+        }),
+      ),
     );
 
     expect(result).toMatchObject({
@@ -204,10 +221,6 @@ describe("runProcess", () => {
       stdoutTruncated: false,
       stderrTruncated: false,
     });
-  });
-
-  afterAll(() => {
-    cleanupHelperScript(helperScriptPath);
   });
 });
 

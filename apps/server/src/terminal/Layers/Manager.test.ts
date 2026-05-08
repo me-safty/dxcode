@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -8,19 +6,19 @@ import {
   type TerminalOpenInput,
   type TerminalRestartInput,
 } from "@t3tools/contracts";
-import {
-  Duration,
-  Effect,
-  Encoding,
-  Exit,
-  Fiber,
-  FileSystem,
-  Option,
-  PlatformError,
-  Ref,
-  Schedule,
-  Scope,
-} from "effect";
+import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Encoding from "effect/Encoding";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
+import * as PlatformError from "effect/PlatformError";
+import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
+import * as Scope from "effect/Scope";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
@@ -34,6 +32,20 @@ import {
   PtySpawnError,
 } from "../Services/PTY.ts";
 import { makeTerminalManagerWithOptions } from "./Manager.ts";
+
+function joinPath(...parts: ReadonlyArray<string>): string {
+  return parts
+    .map((part, index) => {
+      if (index === 0) return part.replace(/[\\/]+$/g, "");
+      return part.replace(/^[\\/]+|[\\/]+$/g, "");
+    })
+    .filter((part) => part.length > 0)
+    .join("/");
+}
+
+class WaitForConditionError extends Data.TaggedError("WaitForConditionError")<{
+  readonly message: string;
+}> {}
 
 class FakePtyProcess implements PtyProcess {
   readonly writes: string[] = [];
@@ -131,17 +143,18 @@ class FakePtyAdapter implements PtyAdapterShape {
 const waitFor = <E, R>(
   predicate: Effect.Effect<boolean, E, R>,
   timeout: Duration.Input = 800,
-): Effect.Effect<void, Error | E, R> =>
+): Effect.Effect<void, WaitForConditionError | E, R> =>
   predicate.pipe(
     Effect.filterOrFail(
       (done) => done,
-      () => new Error("Condition not met"),
+      () => new WaitForConditionError({ message: "Condition not met" }),
     ),
     Effect.retry(Schedule.spaced("15 millis")),
     Effect.timeoutOption(timeout),
     Effect.flatMap((result) =>
       Option.match(result, {
-        onNone: () => Effect.fail(new Error("Timed out waiting for condition")),
+        onNone: () =>
+          Effect.fail(new WaitForConditionError({ message: "Timed out waiting for condition" })),
         onSome: () => Effect.void,
       }),
     ),
@@ -182,7 +195,7 @@ function multiTerminalHistoryLogName(threadId: string, terminalId: string): stri
 }
 
 function historyLogPath(logsDir: string, threadId = "thread-1"): string {
-  return path.join(logsDir, historyLogName(threadId));
+  return joinPath(logsDir, historyLogName(threadId));
 }
 
 function multiTerminalHistoryLogPath(
@@ -190,7 +203,7 @@ function multiTerminalHistoryLogPath(
   threadId = "thread-1",
   terminalId = "default",
 ): string {
-  return path.join(logsDir, multiTerminalHistoryLogName(threadId, terminalId));
+  return joinPath(logsDir, multiTerminalHistoryLogName(threadId, terminalId));
 }
 
 interface CreateManagerOptions {
@@ -218,12 +231,12 @@ const createManager = (
 ): Effect.Effect<
   ManagerFixture,
   PlatformError.PlatformError,
-  FileSystem.FileSystem | Scope.Scope | ChildProcessSpawner.ChildProcessSpawner
+  FileSystem.FileSystem | Path.Path | Scope.Scope | ChildProcessSpawner.ChildProcessSpawner
 > =>
   Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) =>
     Effect.gen(function* () {
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-terminal-" });
-      const logsDir = path.join(baseDir, "userdata", "logs", "terminals");
+      const logsDir = joinPath(baseDir, "userdata", "logs", "terminals");
       const ptyAdapter = options.ptyAdapter ?? new FakePtyAdapter();
 
       const manager = yield* makeTerminalManagerWithOptions({
@@ -303,8 +316,8 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
       if (process.platform === "win32") return;
 
       const { manager, baseDir } = yield* createManager();
-      const blockedRoot = path.join(baseDir, "blocked-root");
-      const blockedCwd = path.join(blockedRoot, "cwd");
+      const blockedRoot = joinPath(baseDir, "blocked-root");
+      const blockedCwd = joinPath(blockedRoot, "cwd");
       yield* makeDirectory(blockedCwd);
       yield* chmod(blockedRoot, 0o000);
 
@@ -442,8 +455,8 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
   it.effect("propagates explicit worktree metadata through snapshots and lifecycle events", () =>
     Effect.gen(function* () {
       const { manager, getEvents, baseDir } = yield* createManager();
-      const firstWorktreePath = path.join(baseDir, "worktrees", "feature-a");
-      const secondWorktreePath = path.join(baseDir, "worktrees", "feature-b");
+      const firstWorktreePath = joinPath(baseDir, "worktrees", "feature-a");
+      const secondWorktreePath = joinPath(baseDir, "worktrees", "feature-b");
       yield* makeDirectory(firstWorktreePath);
       yield* makeDirectory(secondWorktreePath);
       const startedSnapshot = yield* manager.open(
@@ -479,7 +492,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
   it.effect("preserves worktree metadata when reopening an exited session", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter, getEvents, baseDir } = yield* createManager();
-      const worktreePath = path.join(baseDir, "worktrees", "feature-a");
+      const worktreePath = joinPath(baseDir, "worktrees", "feature-a");
       yield* makeDirectory(worktreePath);
 
       yield* manager.open(
@@ -817,7 +830,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
   it.effect("migrates legacy transcript filenames to terminal-scoped history path on open", () =>
     Effect.gen(function* () {
       const { manager, logsDir } = yield* createManager();
-      const legacyPath = path.join(logsDir, "thread-1.log");
+      const legacyPath = joinPath(logsDir, "thread-1.log");
       const nextPath = historyLogPath(logsDir);
       yield* writeFileString(legacyPath, "legacy-line\n");
 

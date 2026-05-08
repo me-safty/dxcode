@@ -1,4 +1,5 @@
 import { assert, it, describe } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -21,6 +22,7 @@ const normalizeGitArgs = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
 describe("VcsDriverRegistry", () => {
   it.effect("routes directly by VCS driver kind for non-repository workflows", () => {
     const layer = Layer.effect(VcsDriverRegistry.VcsDriverRegistry, VcsDriverRegistry.make()).pipe(
+      Layer.provide(NodeServices.layer),
       Layer.provide(
         Layer.mock(VcsProjectConfig.VcsProjectConfig)({
           resolveKind: (input) => Effect.succeed(input.requestedKind ?? "auto"),
@@ -44,6 +46,7 @@ describe("VcsDriverRegistry", () => {
   it.effect("caches repository detection for repeated resolves in the same cwd and kind", () => {
     const calls: VcsProcess.VcsProcessInput[] = [];
     const layer = Layer.effect(VcsDriverRegistry.VcsDriverRegistry, VcsDriverRegistry.make()).pipe(
+      Layer.provide(NodeServices.layer),
       Layer.provide(
         Layer.mock(VcsProjectConfig.VcsProjectConfig)({
           resolveKind: (input) => Effect.succeed(input.requestedKind ?? "auto"),

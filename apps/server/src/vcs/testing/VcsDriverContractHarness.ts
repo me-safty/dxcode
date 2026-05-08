@@ -1,5 +1,3 @@
-import nodePath from "node:path";
-
 import { assert, it, describe } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -14,7 +12,7 @@ import type { VcsDriverKind } from "@t3tools/contracts";
 import * as VcsDriver from "../VcsDriver.ts";
 
 function normalizePathForComparison(value: string): string {
-  return nodePath.normalize(value).replaceAll("\\", "/");
+  return value.replaceAll("\\", "/");
 }
 
 export interface VcsDriverFixture<R, E> {
