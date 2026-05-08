@@ -123,6 +123,9 @@ const make = Effect.gen(function* () {
     ) {
       const windows = Electron.BrowserWindow.getAllWindows();
       for (const window of windows) {
+        if (window.isDestroyed()) {
+          continue;
+        }
         yield* sync(window);
       }
     }),
