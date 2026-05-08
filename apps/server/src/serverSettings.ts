@@ -55,17 +55,10 @@ const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-function settingsInputForDecode(settings: ServerSettings): unknown {
-  return {
-    ...settings,
-    automaticGitFetchInterval: Duration.toMillis(settings.automaticGitFetchInterval),
-  };
-}
-
 const normalizeServerSettings = (
   settings: ServerSettings,
 ): Effect.Effect<ServerSettings, ServerSettingsError> =>
-  decodeServerSettings(settingsInputForDecode(settings)).pipe(
+  decodeServerSettings(encodeServerSettingsSync(settings)).pipe(
     Effect.mapError(
       (cause) =>
         new ServerSettingsError({
