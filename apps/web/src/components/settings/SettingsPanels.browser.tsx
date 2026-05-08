@@ -1256,7 +1256,7 @@ describe("SourceControlSettingsPanel discovery states", () => {
       </AppAtomRegistryProvider>,
     );
 
-    await expect.element(page.getByRole("heading", { name: "Git" })).toBeInTheDocument();
+    await expect.element(page.getByRole("switch", { name: "Git availability" })).toBeDisabled();
     await expect.element(page.getByText("Nothing detected yet")).not.toBeInTheDocument();
   });
 
@@ -1287,7 +1287,7 @@ describe("SourceControlSettingsPanel discovery states", () => {
       </AppAtomRegistryProvider>,
     );
 
-    await expect.element(page.getByRole("heading", { name: "Git" })).toBeInTheDocument();
+    await expect.element(page.getByRole("switch", { name: "Git availability" })).toBeDisabled();
     expect(calls).toBe(1);
 
     const teardown = mounted.cleanup ?? mounted.unmount;
@@ -1301,7 +1301,7 @@ describe("SourceControlSettingsPanel discovery states", () => {
       </AppAtomRegistryProvider>,
     );
 
-    await expect.element(page.getByRole("heading", { name: "Git" })).toBeInTheDocument();
+    await expect.element(page.getByRole("switch", { name: "Git availability" })).toBeDisabled();
     expect(calls).toBe(1);
   });
 });
