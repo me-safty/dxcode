@@ -39,7 +39,7 @@ export interface ExecuteGitInput {
   readonly allowNonZeroExit?: boolean;
   readonly timeoutMs?: number;
   readonly maxOutputBytes?: number;
-  readonly truncateOutputAtMaxBytes?: boolean;
+  readonly appendTruncationMarker?: boolean;
   readonly progress?: ExecuteGitProgress;
 }
 
@@ -323,7 +323,7 @@ const gitCommand = (
     readonly allowNonZeroExit?: boolean;
     readonly timeoutMs?: number;
     readonly maxOutputBytes?: number;
-    readonly truncateOutputAtMaxBytes?: boolean;
+    readonly appendTruncationMarker?: boolean;
   },
 ) =>
   process.run({
@@ -339,8 +339,8 @@ const gitCommand = (
       : {}),
     ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     ...(options?.maxOutputBytes !== undefined ? { maxOutputBytes: options.maxOutputBytes } : {}),
-    ...(options?.truncateOutputAtMaxBytes !== undefined
-      ? { appendTruncationMarker: options.truncateOutputAtMaxBytes }
+    ...(options?.appendTruncationMarker !== undefined
+      ? { appendTruncationMarker: options.appendTruncationMarker }
       : {}),
   });
 
@@ -425,7 +425,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         allowNonZeroExit: true,
         timeoutMs: 20_000,
         maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
-        truncateOutputAtMaxBytes: true,
+        appendTruncationMarker: true,
       },
     ).pipe(
       Effect.flatMap((result) =>
@@ -517,7 +517,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           allowNonZeroExit: true,
           timeoutMs: 20_000,
           maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
-          truncateOutputAtMaxBytes: true,
+          appendTruncationMarker: true,
         },
       );
 
