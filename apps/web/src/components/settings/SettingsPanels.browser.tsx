@@ -1260,6 +1260,43 @@ describe("SourceControlSettingsPanel discovery states", () => {
     await expect.element(page.getByText("Nothing detected yet")).not.toBeInTheDocument();
   });
 
+  it("shows Git fetch interval settings inside the Git details dropdown", async () => {
+    setSourceControlDiscoveryStub(async () => ({
+      versionControlSystems: [
+        {
+          kind: "git",
+          label: "Git",
+          executable: "git",
+          implemented: true,
+          status: "available",
+          version: Option.some("git version 2.50.0"),
+          installHint: "Install Git.",
+          detail: Option.none(),
+        },
+      ],
+      sourceControlProviders: [],
+    }));
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <SourceControlSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    const toggle = page.getByRole("button", { name: "Toggle Git details" });
+    await expect.element(toggle).toHaveAttribute("aria-expanded", "false");
+
+    await toggle.click();
+
+    await expect.element(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect
+      .element(page.getByLabelText("Automatic Git fetch interval in seconds"))
+      .toBeVisible();
+    await expect
+      .element(page.getByText("Automatic Git fetches run every 30 seconds"))
+      .not.toBeInTheDocument();
+  });
+
   it("does not rescan on remount while the discovery atom is fresh", async () => {
     let calls = 0;
     setSourceControlDiscoveryStub(async () => {
