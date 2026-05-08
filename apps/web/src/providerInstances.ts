@@ -210,10 +210,11 @@ export function resolveSelectedProviderInstanceId(input: {
     return ProviderInstanceId.make(explicitSelection);
   }
 
+  const fallbackProvider = lockedProvider ?? input.selectedProvider;
   const byKind = input.entries.find(
     (entry) =>
       entry.enabled &&
-      entry.driverKind === input.selectedProvider &&
+      entry.driverKind === fallbackProvider &&
       (!lockedContinuationGroupKey || entry.continuationGroupKey === lockedContinuationGroupKey),
   );
   if (byKind) return byKind.instanceId;

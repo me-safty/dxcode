@@ -4,6 +4,7 @@ import {
   deriveProviderInstanceEntries,
   resolveSelectableProviderInstance,
   resolveProviderDriverKindForInstanceSelection,
+  resolveSelectedProviderInstanceId,
 } from "./providerInstances";
 
 function provider(input: {
@@ -128,5 +129,24 @@ describe("resolveProviderDriverKindForInstanceSelection", () => {
         ProviderInstanceId.make("removed_instance"),
       ),
     ).toBeUndefined();
+  });
+});
+
+describe("resolveSelectedProviderInstanceId", () => {
+  it("falls back to the locked provider before the selected provider", () => {
+    const providers = [
+      provider({ provider: ProviderDriverKind.make("codex"), instanceId: "codex" }),
+      provider({ provider: ProviderDriverKind.make("claudeAgent"), instanceId: "claudeAgent" }),
+    ];
+    const entries = deriveProviderInstanceEntries(providers);
+
+    expect(
+      resolveSelectedProviderInstanceId({
+        entries,
+        candidates: [null],
+        selectedProvider: ProviderDriverKind.make("claudeAgent"),
+        lockedProvider: ProviderDriverKind.make("codex"),
+      }),
+    ).toBe("codex");
   });
 });
