@@ -6254,9 +6254,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           turnCount: 3,
         });
       });
-      expect(confirmSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Revert this thread to checkpoint 3?"),
-      );
+      expect(confirmSpy).not.toHaveBeenCalled();
     } finally {
       confirmSpy.mockRestore();
       await mounted.cleanup();

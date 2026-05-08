@@ -2656,8 +2656,7 @@ export default function ChatView(props: ChatViewProps) {
   const onRevertToTurnCount = useCallback(
     async (turnCount: number) => {
       const api = readEnvironmentApi(environmentId);
-      const localApi = readLocalApi();
-      if (!api || !localApi || !activeThread || isRevertingCheckpoint) return;
+      if (!api || !activeThread || isRevertingCheckpoint) return;
 
       if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
         setThreadError(
@@ -2670,17 +2669,6 @@ export default function ChatView(props: ChatViewProps) {
         setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
         return;
       }
-      const confirmed = await localApi.dialogs.confirm(
-        [
-          `Revert this thread to checkpoint ${turnCount}?`,
-          "This restores files and rewinds this thread to that point.",
-          "Newer messages and turn diffs will be discarded.",
-        ].join("\n"),
-      );
-      if (!confirmed) {
-        return;
-      }
-
       setIsRevertingCheckpoint(true);
       setThreadError(activeThread.id, null);
       try {
