@@ -123,6 +123,24 @@ describe("turnStats", () => {
     expect(stats?.summaryLabel).not.toContain("0 tool calls");
   });
 
+  it("formats rounded minute-boundary durations as minutes", () => {
+    const stats = deriveLatestAssistantTurnStats({
+      latestTurn: makeLatestTurn({
+        startedAt: "2026-05-07T23:00:00.000Z",
+        completedAt: "2026-05-07T23:00:59.500Z",
+      }),
+      assistantMessage: makeAssistantMessage({
+        createdAt: "2026-05-07T23:00:59.500Z",
+        completedAt: "2026-05-07T23:00:59.500Z",
+      }),
+      activities: [],
+      modelSelection: null,
+    });
+
+    expect(stats?.items.map((item) => item.label)).toEqual(["1 min"]);
+    expect(stats?.summaryLabel).not.toContain("60 sec");
+  });
+
   it("does not derive throughput or TTFT from whole-turn elapsed time", () => {
     const stats = deriveLatestAssistantTurnStats({
       latestTurn: makeLatestTurn({

@@ -49,15 +49,15 @@ function countSingularPlural(value: number, singular: string, plural = `${singul
 }
 
 function formatDurationSeconds(value: number): string {
-  if (value >= 60) {
-    const totalSeconds = Math.round(value);
+  const totalSeconds = Math.round(value);
+  if (totalSeconds >= 60) {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     const minuteLabel = `${minutes.toLocaleString()} min`;
     return seconds > 0 ? `${minuteLabel} ${seconds.toLocaleString()} sec` : minuteLabel;
   }
   if (value >= 10) {
-    return `${Math.round(value)} sec`;
+    return `${totalSeconds} sec`;
   }
   return `${value.toFixed(1).replace(/\.0$/, "")} sec`;
 }
