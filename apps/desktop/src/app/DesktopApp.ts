@@ -15,6 +15,7 @@ import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
+import * as DesktopObservability from "./DesktopObservability.ts";
 import * as DesktopServerExposure from "../serverExposure/DesktopServerExposure.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
@@ -48,6 +49,12 @@ class DesktopDevelopmentBackendPortRequiredError extends Data.TaggedError(
     return "T3CODE_PORT is required in desktop development.";
   }
 }
+
+const { logInfo: logBootstrapInfo, logWarning: logBootstrapWarning } =
+  DesktopObservability.makeComponentLogger("desktop-bootstrap");
+
+const { logInfo: logStartupInfo, logError: logStartupError } =
+  DesktopObservability.makeComponentLogger("desktop-startup");
 
 const resolveDesktopBackendPort = Effect.fn("resolveDesktopBackendPort")(function* (
   configuredPort: Option.Option<number>,
@@ -103,13 +110,11 @@ const handleFatalStartupError = Effect.fn("desktop.startup.handleFatalStartupErr
   const message = error instanceof Error ? error.message : String(error);
   const detail =
     error instanceof Error && typeof error.stack === "string" ? `\n${error.stack}` : "";
-  yield* Effect.logError("fatal startup error").pipe(
-    Effect.annotateLogs({
-      stage,
-      message,
-      ...(detail.length > 0 ? { detail } : {}),
-    }),
-  );
+  yield* logStartupError("fatal startup error", {
+    stage,
+    message,
+    ...(detail.length > 0 ? { detail } : {}),
+  });
   const wasQuitting = yield* Ref.getAndSet(state.quitting, true);
   if (!wasQuitting) {
     yield* electronDialog.showErrorBox(
@@ -130,7 +135,7 @@ const bootstrap = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
-  yield* Effect.logInfo("bootstrap start");
+  yield* logBootstrapInfo("bootstrap start");
 
   if (environment.isDevelopment && Option.isNone(environment.configuredBackendPort)) {
     return yield* new DesktopDevelopmentBackendPortRequiredError();
@@ -138,44 +143,43 @@ const bootstrap = Effect.gen(function* () {
 
   const backendPortSelection = yield* resolveDesktopBackendPort(environment.configuredBackendPort);
   const backendPort = backendPortSelection.port;
-  yield* Effect.logInfo(
+  yield* logBootstrapInfo(
     backendPortSelection.selectedByScan
       ? "selected backend port via sequential scan"
       : "using configured backend port",
-  ).pipe(
-    Effect.annotateLogs({
+    {
       port: backendPort,
       ...(backendPortSelection.selectedByScan ? { startPort: DEFAULT_DESKTOP_BACKEND_PORT } : {}),
-    }),
+    },
   );
 
   const settings = yield* desktopSettings.get;
   if (settings.serverExposureMode !== environment.defaultDesktopSettings.serverExposureMode) {
-    yield* Effect.logInfo("bootstrap restoring persisted server exposure mode").pipe(
-      Effect.annotateLogs({ mode: settings.serverExposureMode }),
-    );
+    yield* logBootstrapInfo("bootstrap restoring persisted server exposure mode", {
+      mode: settings.serverExposureMode,
+    });
   }
   const serverExposureState = yield* serverExposure.configureFromSettings({ port: backendPort });
   const backendConfig = yield* serverExposure.backendConfig;
-  yield* Effect.logInfo("bootstrap resolved backend endpoint").pipe(
-    Effect.annotateLogs({ baseUrl: backendConfig.httpBaseUrl.href }),
-  );
+  yield* logBootstrapInfo("bootstrap resolved backend endpoint", {
+    baseUrl: backendConfig.httpBaseUrl.href,
+  });
   if (serverExposureState.endpointUrl) {
-    yield* Effect.logInfo("bootstrap enabled network access").pipe(
-      Effect.annotateLogs({ endpointUrl: serverExposureState.endpointUrl }),
-    );
+    yield* logBootstrapInfo("bootstrap enabled network access", {
+      endpointUrl: serverExposureState.endpointUrl,
+    });
   } else if (settings.serverExposureMode === "network-accessible") {
-    yield* Effect.logWarning(
+    yield* logBootstrapWarning(
       "bootstrap fell back to local-only because no advertised network host was available",
     );
   }
 
   yield* installDesktopIpcHandlers;
-  yield* Effect.logInfo("bootstrap ipc handlers registered");
+  yield* logBootstrapInfo("bootstrap ipc handlers registered");
 
   if (!(yield* Ref.get(state.quitting))) {
     yield* backendManager.start;
-    yield* Effect.logInfo("bootstrap backend start requested");
+    yield* logBootstrapInfo("bootstrap backend start requested");
   }
 }).pipe(Effect.withSpan("desktop.bootstrap"));
 
@@ -193,9 +197,7 @@ const startup = Effect.gen(function* () {
   yield* shellEnvironment.installIntoProcess;
   const userDataPath = yield* appIdentity.resolveUserDataPath;
   yield* electronApp.setPath("userData", userDataPath);
-  yield* Effect.logInfo("runtime logging configured").pipe(
-    Effect.annotateLogs({ logDir: environment.logDir }),
-  );
+  yield* logStartupInfo("runtime logging configured", { logDir: environment.logDir });
   yield* desktopSettings.load;
 
   if (environment.platform === "linux") {
@@ -209,7 +211,7 @@ const startup = Effect.gen(function* () {
     Effect.withSpan("desktop.electron.whenReady"),
     Effect.catchCause((cause) => fatalStartupCause("whenReady", cause)),
   );
-  yield* Effect.logInfo("app ready");
+  yield* logStartupInfo("app ready");
   yield* appIdentity.configure;
   yield* applicationMenu.configure;
   yield* electronProtocol.registerDesktopFileProtocol;

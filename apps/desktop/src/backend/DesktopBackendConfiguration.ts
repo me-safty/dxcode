@@ -9,6 +9,7 @@ import * as Ref from "effect/Ref";
 
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopServerExposure from "../serverExposure/DesktopServerExposure.ts";
 
 export interface DesktopBackendConfigurationShape {
@@ -46,6 +47,10 @@ const DESKTOP_BACKEND_ENV_NAMES = [
 const backendChildEnvPatch = (): Record<string, string | undefined> =>
   Object.fromEntries(DESKTOP_BACKEND_ENV_NAMES.map((name) => [name, undefined]));
 
+const { logWarning: logBackendConfigurationWarning } = DesktopObservability.makeComponentLogger(
+  "desktop-backend-configuration",
+);
+
 const readPersistedBackendObservabilitySettings: Effect.Effect<
   BackendObservabilitySettings,
   never,
@@ -62,7 +67,9 @@ const readPersistedBackendObservabilitySettings: Effect.Effect<
 
   const raw = yield* fileSystem.readFileString(environment.serverSettingsPath).pipe(Effect.option);
   if (Option.isNone(raw)) {
-    yield* Effect.logWarning("failed to read persisted backend observability settings");
+    yield* logBackendConfigurationWarning(
+      "failed to read persisted backend observability settings",
+    );
     return emptyBackendObservabilitySettings;
   }
 

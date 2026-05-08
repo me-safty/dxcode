@@ -9,6 +9,7 @@ import * as Scope from "effect/Scope";
 import type * as Electron from "electron";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopObservability from "./DesktopObservability.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as DesktopState from "./DesktopState.ts";
@@ -64,13 +65,8 @@ export class DesktopLifecycle extends Context.Service<DesktopLifecycle, DesktopL
   "t3/desktop/Lifecycle",
 ) {}
 
-const logLifecycleInfo = (message: string, annotations?: Record<string, unknown>) =>
-  Effect.logInfo(message).pipe(
-    Effect.annotateLogs({
-      component: "desktop-lifecycle",
-      ...annotations,
-    }),
-  );
+const { logInfo: logLifecycleInfo, logError: logLifecycleError } =
+  DesktopObservability.makeComponentLogger("desktop-lifecycle");
 
 function addScopedListener<Args extends ReadonlyArray<unknown>>(
   target: unknown,
@@ -178,12 +174,9 @@ export const layer = Layer.succeed(
         yield* electronApp.exit(0);
       }).pipe(
         Effect.catchCause((cause) =>
-          Effect.logError("desktop relaunch failed").pipe(
-            Effect.annotateLogs({
-              component: "desktop-lifecycle",
-              cause: Cause.pretty(cause),
-            }),
-          ),
+          logLifecycleError("desktop relaunch failed", {
+            cause: Cause.pretty(cause),
+          }),
         ),
         Effect.forkDetach,
         Effect.asVoid,

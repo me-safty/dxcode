@@ -18,14 +18,15 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
-import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
-import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
-import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
-import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopObservability from "../app/DesktopObservability.ts";
+import * as DesktopState from "../app/DesktopState.ts";
+import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
+import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
 import {
   createInitialDesktopUpdateState,
@@ -99,32 +100,11 @@ export class DesktopUpdates extends Context.Service<DesktopUpdates, DesktopUpdat
   "t3/desktop/Updates",
 ) {}
 
-const withUpdaterLogAnnotations = (
-  effect: Effect.Effect<void>,
-  annotations?: Record<string, unknown>,
-): Effect.Effect<void> =>
-  effect.pipe(
-    Effect.annotateLogs({
-      scope: "desktop",
-      component: "desktop-updater",
-      ...annotations,
-    }),
-  );
-
-const logUpdaterInfo = (
-  message: string,
-  annotations?: Record<string, unknown>,
-): Effect.Effect<void> => withUpdaterLogAnnotations(Effect.logInfo(message), annotations);
-
-const logUpdaterWarning = (
-  message: string,
-  annotations?: Record<string, unknown>,
-): Effect.Effect<void> => withUpdaterLogAnnotations(Effect.logWarning(message), annotations);
-
-const logUpdaterError = (
-  message: string,
-  annotations?: Record<string, unknown>,
-): Effect.Effect<void> => withUpdaterLogAnnotations(Effect.logError(message), annotations);
+const {
+  logInfo: logUpdaterInfo,
+  logWarning: logUpdaterWarning,
+  logError: logUpdaterError,
+} = DesktopObservability.makeComponentLogger("desktop-updater");
 
 function parseAppUpdateYml(raw: string): Effect.Effect<Option.Option<AppUpdateYmlConfig>> {
   const entries: Record<string, string> = {};

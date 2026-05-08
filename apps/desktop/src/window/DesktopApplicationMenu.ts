@@ -6,6 +6,7 @@ import * as Option from "effect/Option";
 
 import type * as Electron from "electron";
 
+import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
@@ -26,6 +27,10 @@ type DesktopApplicationMenuRuntimeServices =
   | DesktopUpdates.DesktopUpdates
   | DesktopWindow.DesktopWindow
   | ElectronDialog.ElectronDialog;
+
+const { logInfo: logUpdaterInfo } = DesktopObservability.makeComponentLogger("desktop-updater");
+
+const { logError: logMenuError } = DesktopObservability.makeComponentLogger("desktop-menu");
 
 const dispatchMenuAction = Effect.fn("desktop.menu.dispatchMenuAction")(function* (
   action: string,
@@ -71,12 +76,9 @@ const handleCheckForUpdatesMenuClick: Effect.Effect<
   const electronDialog = yield* ElectronDialog.ElectronDialog;
   const disabledReason = yield* updates.disabledReason;
   if (Option.isSome(disabledReason)) {
-    yield* Effect.logInfo("manual update check requested, but updates are disabled").pipe(
-      Effect.annotateLogs({
-        component: "desktop-updater",
-        disabledReason: disabledReason.value,
-      }),
-    );
+    yield* logUpdaterInfo("manual update check requested, but updates are disabled", {
+      disabledReason: disabledReason.value,
+    });
     yield* electronDialog.showMessageBox({
       type: "info",
       title: "Updates unavailable",
@@ -109,12 +111,10 @@ const make = Effect.gen(function* () {
         Effect.annotateLogs({ action }),
         Effect.withSpan("desktop.menu.action"),
         Effect.catchCause((cause) =>
-          Effect.logError("desktop menu action failed").pipe(
-            Effect.annotateLogs({
-              action,
-              cause: Cause.pretty(cause),
-            }),
-          ),
+          logMenuError("desktop menu action failed", {
+            action,
+            cause: Cause.pretty(cause),
+          }),
         ),
       ),
     );

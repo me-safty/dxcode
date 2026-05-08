@@ -7,15 +7,16 @@ import * as Ref from "effect/Ref";
 
 import type * as Electron from "electron";
 
+import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopObservability from "../app/DesktopObservability.ts";
+import * as DesktopState from "../app/DesktopState.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopServerExposure from "../serverExposure/DesktopServerExposure.ts";
-import * as DesktopState from "../app/DesktopState.ts";
-import * as DesktopAssets from "../app/DesktopAssets.ts";
 
 const TITLEBAR_HEIGHT = 40;
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
@@ -64,23 +65,8 @@ export class DesktopWindow extends Context.Service<DesktopWindow, DesktopWindowS
   "t3/desktop/Window",
 ) {}
 
-const logWindowInfo = (message: string, annotations?: Record<string, unknown>) =>
-  Effect.logInfo(message).pipe(
-    Effect.annotateLogs({
-      scope: "desktop",
-      component: "desktop-window",
-      ...annotations,
-    }),
-  );
-
-const logWindowWarning = (message: string, annotations?: Record<string, unknown>) =>
-  Effect.logWarning(message).pipe(
-    Effect.annotateLogs({
-      scope: "desktop",
-      component: "desktop-window",
-      ...annotations,
-    }),
-  );
+const { logInfo: logWindowInfo, logWarning: logWindowWarning } =
+  DesktopObservability.makeComponentLogger("desktop-window");
 
 function resolveDesktopDevServerUrl(
   environment: DesktopEnvironment.DesktopEnvironmentShape,

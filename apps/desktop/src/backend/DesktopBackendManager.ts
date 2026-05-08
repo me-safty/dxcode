@@ -1,20 +1,21 @@
+import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PlatformError from "effect/PlatformError";
+import * as Ref from "effect/Ref";
+import * as Result from "effect/Result";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import * as Result from "effect/Result";
-import * as PlatformError from "effect/PlatformError";
-import * as Data from "effect/Data";
-import * as Context from "effect/Context";
-import * as Fiber from "effect/Fiber";
-import * as Exit from "effect/Exit";
-import * as Schedule from "effect/Schedule";
-import * as Ref from "effect/Ref";
-import * as Semaphore from "effect/Semaphore";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -116,6 +117,9 @@ export class DesktopBackendManager extends Context.Service<
   DesktopBackendManager,
   DesktopBackendManagerShape
 >()("t3/desktop/BackendManager") {}
+
+const { logWarning: logBackendManagerWarning, logError: logBackendManagerError } =
+  DesktopObservability.makeComponentLogger("desktop-backend-manager");
 
 interface ActiveBackendRun {
   readonly id: number;
@@ -455,16 +459,16 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             yield* Ref.set(desktopState.backendReady, true);
             yield* desktopWindow.handleBackendReady.pipe(
               Effect.catch((error) =>
-                Effect.logError("failed to open main window after backend readiness").pipe(
-                  Effect.annotateLogs({ message: error.message }),
-                ),
+                logBackendManagerError("failed to open main window after backend readiness", {
+                  message: error.message,
+                }),
               ),
             );
           }),
           onReadinessFailure: (error) =>
-            Effect.logWarning("backend readiness check failed during bootstrap").pipe(
-              Effect.annotateLogs({ error: error.message }),
-            ),
+            logBackendManagerWarning("backend readiness check failed during bootstrap", {
+              error: error.message,
+            }),
           onOutput: (streamName, chunk) => backendOutputLog.writeOutputChunk(streamName, chunk),
         }).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -507,12 +511,10 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
     yield* Option.match(scheduled, {
       onNone: () => Effect.void,
       onSome: Effect.fn("desktop.backendManager.scheduleRestartFiber")(function* (delay) {
-        yield* Effect.logError("backend exited unexpectedly; restart scheduled").pipe(
-          Effect.annotateLogs({
-            reason,
-            delayMs: Duration.toMillis(delay),
-          }),
-        );
+        yield* logBackendManagerError("backend exited unexpectedly; restart scheduled", {
+          reason,
+          delayMs: Duration.toMillis(delay),
+        });
         const restartFiber = yield* Effect.forkIn(
           Effect.sleep(delay).pipe(
             Effect.andThen(
@@ -529,7 +531,9 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
             ),
             Effect.flatMap((shouldRestart) => (shouldRestart ? start : Effect.void)),
             Effect.catchCause((cause) =>
-              Effect.logError("desktop backend restart fiber failed", { cause }),
+              logBackendManagerError("desktop backend restart fiber failed", {
+                cause: Cause.pretty(cause),
+              }),
             ),
           ),
           parentScope,
