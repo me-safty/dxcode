@@ -552,9 +552,11 @@ if [ -n "$DEFAULT_REMOTE_PORT" ]; then
         wait_for_pid_exit "$PID_TO_STOP"
       fi
       REMOTE_PID=""
-      REMOTE_PORT=""
-      REMOTE_MANAGED=""
-      rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE"
+      REMOTE_PORT="$DEFAULT_REMOTE_PORT"
+      REMOTE_MANAGED="external"
+      rm -f "$PID_FILE"
+      printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
+      printf 'external\\n' >"$MANAGED_FILE"
     else
       printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
       printf 'external\\n' >"$MANAGED_FILE"
@@ -592,7 +594,7 @@ else
   REMOTE_PORT=""
   REMOTE_MANAGED=""
 fi
-if [ -z "$REMOTE_PID" ] || [ -z "$REMOTE_PORT" ]; then
+if [ -z "$REMOTE_PORT" ]; then
   REMOTE_PORT="$(pick_port)" || true
   if [ -z "$REMOTE_PORT" ]; then
     printf 'Failed to find an available port on the remote host. Ensure node is available on PATH.\\n' >&2
