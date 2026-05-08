@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   HOSTED_WEB_CHANNEL_COOKIE,
+  default as middleware,
   isRouterHost,
   normalizeChannel,
   parseCookieValue,
@@ -8,8 +9,13 @@ import {
 } from "./middleware";
 
 function request(path: string, cookie?: string): Request {
+  const headers = new Headers({ host: "app.t3.codes" });
+  if (cookie) {
+    headers.set("cookie", cookie);
+  }
+
   return new Request(`https://app.t3.codes${path}`, {
-    headers: cookie ? { cookie } : undefined,
+    headers,
   });
 }
 
@@ -33,7 +39,6 @@ describe("hosted web channel middleware", () => {
     ).toEqual({
       channel: "nightly",
       setCookie: false,
-      nextPath: "/settings",
     });
   });
 
@@ -41,48 +46,24 @@ describe("hosted web channel middleware", () => {
     expect(selectChannel(request("/threads", `${HOSTED_WEB_CHANNEL_COOKIE}=bad`))).toEqual({
       channel: "latest",
       setCookie: false,
-      nextPath: "/threads",
     });
   });
 
-  it("handles channel opt-in requests with an internal next path only", () => {
+  it("handles channel opt-in requests without accepting redirect paths", () => {
     expect(selectChannel(request("/__t3code/channel?channel=nightly&next=/pair"))).toEqual({
       channel: "nightly",
       setCookie: true,
-      nextPath: "/pair",
     });
+  });
 
-    expect(
-      selectChannel(request("/__t3code/channel?channel=latest&next=https://evil.example")),
-    ).toEqual({
-      channel: "latest",
-      setCookie: true,
-      nextPath: "/",
-    });
-
-    expect(selectChannel(request("/__t3code/channel?channel=latest&next=/\\evil.example"))).toEqual(
-      {
-        channel: "latest",
-        setCookie: true,
-        nextPath: "/",
-      },
+  it("always redirects channel opt-in requests to root after setting the cookie", () => {
+    const response = middleware(
+      request("/__t3code/channel?channel=nightly&next=https://evil.example"),
     );
 
-    expect(
-      selectChannel(request("/__t3code/channel?channel=latest&next=/settings%3Adebug")),
-    ).toEqual({
-      channel: "latest",
-      setCookie: true,
-      nextPath: "/",
-    });
-
-    expect(
-      selectChannel(request("/__t3code/channel?channel=latest&next=/settings%0Adebug")),
-    ).toEqual({
-      channel: "latest",
-      setCookie: true,
-      nextPath: "/",
-    });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/");
+    expect(response.headers.get("set-cookie")).toContain(`${HOSTED_WEB_CHANNEL_COOKIE}=nightly`);
   });
 
   it("parses cookie values by exact name", () => {

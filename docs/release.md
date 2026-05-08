@@ -66,7 +66,7 @@ hosted app's About panel renders the release version. It also passes
 `VITE_HOSTED_APP_CHANNEL=latest|nightly`, which renders the hosted update track
 selector in the About panel. Changing the selector navigates through
 `/__t3code/channel` on the router domain so the user's channel cookie is updated
-before returning to the current app path.
+before redirecting to the hosted app root.
 
 One-time Vercel dashboard setup:
 

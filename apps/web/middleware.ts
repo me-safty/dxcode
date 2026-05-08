@@ -18,7 +18,6 @@ export interface ChannelRouterConfig {
 export interface ChannelSelection {
   readonly channel: HostedWebChannel;
   readonly setCookie: boolean;
-  readonly nextPath: string;
 }
 
 function envValue(name: string): string | undefined {
@@ -66,27 +65,6 @@ export function isRouterHost(hostHeader: string | null, routerHost: string): boo
   return host !== null && host === router;
 }
 
-function hasControlCharacter(value: string): boolean {
-  for (const char of value) {
-    const code = char.charCodeAt(0);
-    if (code <= 0x1f || code === 0x7f) return true;
-  }
-  return false;
-}
-
-function safeNextPath(value: string | null): string {
-  if (
-    !value?.startsWith("/") ||
-    value.startsWith("//") ||
-    value.includes("\\") ||
-    hasControlCharacter(value)
-  ) {
-    return "/";
-  }
-
-  return value;
-}
-
 export function selectChannel(request: Request): ChannelSelection {
   const url = new URL(request.url);
 
@@ -94,7 +72,6 @@ export function selectChannel(request: Request): ChannelSelection {
     return {
       channel: normalizeChannel(url.searchParams.get("channel")) ?? "latest",
       setCookie: true,
-      nextPath: safeNextPath(url.searchParams.get("next")),
     };
   }
 
@@ -104,7 +81,6 @@ export function selectChannel(request: Request): ChannelSelection {
         parseCookieValue(request.headers.get("cookie"), HOSTED_WEB_CHANNEL_COOKIE),
       ) ?? "latest",
     setCookie: false,
-    nextPath: `${url.pathname}${url.search}`,
   };
 }
 
@@ -144,7 +120,7 @@ export default function middleware(request: Request): Response {
     return new Response(null, {
       status: 302,
       headers: {
-        Location: selection.nextPath,
+        Location: "/",
         "Set-Cookie": channelCookie(selection.channel),
       },
     });

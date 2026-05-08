@@ -49,14 +49,13 @@ describe("hostedPairing", () => {
     const url = new URL(
       buildHostedChannelSelectionUrl({
         channel: "nightly",
-        currentUrl: new URL("https://latest.app.t3.codes/settings?tab=about#version"),
       }),
     );
 
     expect(url.origin).toBe("https://app.t3.codes");
     expect(url.pathname).toBe("/__t3code/channel");
     expect(url.searchParams.get("channel")).toBe("nightly");
-    expect(url.searchParams.get("next")).toBe("/settings?tab=about#version");
+    expect(url.searchParams.has("next")).toBe(false);
   });
 
   it("ignores incomplete hosted pairing requests", () => {

@@ -73,12 +73,8 @@ export function buildHostedPairingUrl(input: {
 
 export function buildHostedChannelSelectionUrl(input: {
   readonly channel: HostedAppChannel;
-  readonly currentUrl?: URL | undefined;
 }): string {
-  const currentUrl = input.currentUrl ?? new URL(window.location.href);
-  const nextPath = `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}` || "/";
   const url = new URL("/__t3code/channel", configuredHostedAppUrl());
   url.searchParams.set("channel", input.channel);
-  url.searchParams.set("next", nextPath);
   return url.toString();
 }
