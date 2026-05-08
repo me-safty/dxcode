@@ -3,7 +3,8 @@ import type {
   DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
-import { fromLenientJson } from "@t3tools/shared/schemaJson";
+import { extractJsonObject, fromLenientJson } from "@t3tools/shared/schemaJson";
+import { satisfiesSemverRange } from "@t3tools/shared/semver";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -167,21 +168,6 @@ const decodeRemoteLaunchResult = Schema.decodeEffect(fromLenientJson(RemoteLaunc
 const decodeRemotePairingResult = Schema.decodeEffect(fromLenientJson(RemotePairingResult));
 const decodeRemoteHttpError = Schema.decodeEffect(Schema.fromJsonString(RemoteHttpError));
 
-function getJsonOutputSuffixCandidates(stdout: string): ReadonlyArray<string> {
-  const trimmed = stdout.trim();
-  const candidates: Array<string> = [];
-  for (let index = trimmed.length - 1; index >= 0; index -= 1) {
-    const char = trimmed[index];
-    if (char === "{" || char === "[") {
-      const candidate = trimmed.slice(index);
-      if (candidate !== trimmed) {
-        candidates.push(candidate);
-      }
-    }
-  }
-  return candidates;
-}
-
 const decodeRemoteJsonOutput = <A, E>(
   stdout: string,
   decode: (input: string) => Effect.Effect<A, E>,
@@ -189,11 +175,13 @@ const decodeRemoteJsonOutput = <A, E>(
   decode(stdout).pipe(
     Effect.catch((error) =>
       Effect.gen(function* () {
-        for (const candidate of getJsonOutputSuffixCandidates(stdout)) {
-          const exit = yield* Effect.exit(decode(candidate));
-          if (Exit.isSuccess(exit)) {
-            return exit.value;
-          }
+        const jsonObject = extractJsonObject(stdout);
+        if (jsonObject === stdout.trim()) {
+          return yield* Effect.fail(error);
+        }
+        const exit = yield* Effect.exit(decode(jsonObject));
+        if (Exit.isSuccess(exit)) {
+          return exit.value;
         }
         return yield* Effect.fail(error);
       }),
@@ -205,6 +193,24 @@ const decodeRemoteLaunchOutput = (stdout: string) =>
 
 const decodeRemotePairingOutput = (stdout: string) =>
   decodeRemoteJsonOutput(stdout, decodeRemotePairingResult);
+
+const remoteNodeEngineCheckMain = function remoteNodeEngineCheckMain() {
+  const range = process.argv[2] || "";
+  const rawVersion =
+    process.versions && process.versions.node ? process.versions.node : process.version;
+
+  if (!satisfiesSemverRange(rawVersion, range)) {
+    process.stderr.write(
+      "Remote node " + rawVersion + " does not satisfy required range " + range + ".\n",
+    );
+    process.exit(1);
+  }
+};
+
+function buildRemoteNodeEngineCheckScript(): string {
+  return `${satisfiesSemverRange.toString()}
+(${remoteNodeEngineCheckMain.toString()})();`;
+}
 
 export function normalizeSshErrorMessage(stderr: string, fallbackMessage: string): string {
   const cleaned = stderr.trim();
@@ -337,67 +343,6 @@ function probe() {
   }
   process.exit(1);
 })().catch(() => process.exit(1));
-`;
-
-export const REMOTE_NODE_ENGINE_CHECK_SCRIPT = `const range = process.argv[2] || "";
-const rawVersion = process.versions && process.versions.node ? process.versions.node : process.version;
-
-function parseVersion(value) {
-  const match = String(value).trim().replace(/^v/, "").match(/^(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?/);
-  if (!match) return null;
-  return {
-    major: Number(match[1]),
-    minor: Number(match[2] || 0),
-    patch: Number(match[3] || 0),
-  };
-}
-
-function compare(left, right) {
-  if (left.major !== right.major) return left.major > right.major ? 1 : -1;
-  if (left.minor !== right.minor) return left.minor > right.minor ? 1 : -1;
-  if (left.patch !== right.patch) return left.patch > right.patch ? 1 : -1;
-  return 0;
-}
-
-function satisfiesComparator(version, comparator) {
-  const trimmed = comparator.trim();
-  if (!trimmed) return true;
-  const match = trimmed.match(/^(\\^|>=|>|<=|<|=)?\\s*v?(\\d+(?:\\.\\d+){0,2})$/);
-  if (!match) return false;
-  const operator = match[1] || "=";
-  const target = parseVersion(match[2]);
-  if (!target) return false;
-  const compared = compare(version, target);
-  switch (operator) {
-    case "^":
-      return version.major === target.major && compared >= 0;
-    case ">=":
-      return compared >= 0;
-    case ">":
-      return compared > 0;
-    case "<=":
-      return compared <= 0;
-    case "<":
-      return compared < 0;
-    case "=":
-      return compared === 0;
-    default:
-      return false;
-  }
-}
-
-function satisfiesRange(version, engineRange) {
-  return engineRange.split("||").some((group) => {
-    const comparators = group.trim().split(/\\s+/).filter(Boolean);
-    return comparators.length > 0 && comparators.every((comparator) => satisfiesComparator(version, comparator));
-  });
-}
-
-const version = parseVersion(rawVersion);
-if (!version || !satisfiesRange(version, range)) {
-  process.stderr.write("Remote node " + rawVersion + " does not satisfy required range " + range + ".\\n");
-  process.exit(1);
-}
 `;
 
 export const REMOTE_NODE_ENV_SCRIPT = `prepend_path_if_dir() {
@@ -726,7 +671,7 @@ function buildRemoteNodeEnvScript(input?: RemoteT3RunnerOptions): string {
   return stripTrailingNewlines(
     applyScriptPlaceholders(REMOTE_NODE_ENV_SCRIPT, {
       T3_NODE_ENGINE_RANGE: shellSingleQuote(input?.nodeEngineRange?.trim() || ""),
-      T3_NODE_ENGINE_CHECK_SCRIPT: stripTrailingNewlines(REMOTE_NODE_ENGINE_CHECK_SCRIPT),
+      T3_NODE_ENGINE_CHECK_SCRIPT: stripTrailingNewlines(buildRemoteNodeEngineCheckScript()),
     }),
   );
 }
