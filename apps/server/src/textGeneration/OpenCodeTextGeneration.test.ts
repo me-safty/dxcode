@@ -5,8 +5,8 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { TestClock } from "effect/testing";
-import { NetService } from "@t3tools/shared/Net";
+import * as TestClock from "effect/testing/TestClock";
+import * as NetService from "@t3tools/shared/Net";
 import { beforeEach, expect } from "vitest";
 
 import { ServerConfig } from "../config.ts";

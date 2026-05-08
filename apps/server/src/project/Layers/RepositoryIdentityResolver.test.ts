@@ -7,7 +7,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import { TestClock } from "effect/testing";
+import * as TestClock from "effect/testing/TestClock";
 
 import { runProcess } from "../../processRunner.ts";
 import { RepositoryIdentityResolver } from "../Services/RepositoryIdentityResolver.ts";

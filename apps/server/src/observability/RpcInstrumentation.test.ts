@@ -7,7 +7,7 @@ import * as Fiber from "effect/Fiber";
 import * as Metric from "effect/Metric";
 import * as Stream from "effect/Stream";
 import * as Tracer from "effect/Tracer";
-import { TestClock } from "effect/testing";
+import * as TestClock from "effect/testing/TestClock";
 
 import {
   observeRpcEffect,

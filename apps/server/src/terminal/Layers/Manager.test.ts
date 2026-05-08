@@ -18,7 +18,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
-import { TestClock } from "effect/testing";
+import * as TestClock from "effect/testing/TestClock";
 import { expect } from "vitest";
 
 import type { TerminalManagerShape } from "../Services/Manager.ts";

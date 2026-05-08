@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import { TestClock } from "effect/testing";
+import * as TestClock from "effect/testing/TestClock";
 import { vi } from "vitest";
 
 import { readBootstrapEnvelope, resolveFdPath } from "./bootstrap.ts";

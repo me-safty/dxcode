@@ -1,4 +1,4 @@
-import { NetService } from "@t3tools/shared/Net";
+import * as NetService from "@t3tools/shared/Net";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import { DesktopBackendBootstrap, PortSchema } from "@t3tools/contracts";
 import * as Config from "effect/Config";
@@ -213,7 +213,7 @@ export const resolveServerConfig = (
   },
 ) =>
   Effect.gen(function* () {
-    const { findAvailablePort } = yield* NetService;
+    const { findAvailablePort } = yield* NetService.NetService;
     const path = yield* Path.Path;
     const fs = yield* FileSystem.FileSystem;
     const env = yield* EnvServerConfig;
