@@ -188,7 +188,16 @@ export const satisfiesSemverRange: (rawVersion: string, range: string) => boolea
         const operator = match[1] || "=";
         switch (operator) {
           case "^":
-            return version.major === target.major && compared >= 0;
+            if (compared < 0) {
+              return false;
+            }
+            if (target.major > 0) {
+              return version.major === target.major;
+            }
+            if (target.minor > 0) {
+              return version.major === 0 && version.minor === target.minor;
+            }
+            return version.major === 0 && version.minor === 0 && version.patch === target.patch;
           case ">=":
             return compared >= 0;
           case ">":

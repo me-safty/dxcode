@@ -194,6 +194,10 @@ describe("ssh tunnel scripts", () => {
       buildRemoteLaunchScript(),
       'DEFAULT_RUNTIME_INFO="$(resolve_default_runtime_port',
     );
+    assert.include(
+      buildRemoteLaunchScript(),
+      "if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(port))",
+    );
     assert.include(buildRemoteLaunchScript(), 'PID_TO_STOP="${REMOTE_PID:-$DEFAULT_RUNTIME_PID}"');
     assert.include(buildRemoteLaunchScript(), 'REMOTE_PORT="$DEFAULT_REMOTE_PORT"');
     assert.include(buildRemoteLaunchScript(), 'rm -f "$PID_FILE"');

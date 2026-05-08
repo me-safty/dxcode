@@ -31,6 +31,15 @@ describe("semver helpers", () => {
     expect(satisfiesSemverRange("24.10.0", ">=24.0 <24.10")).toBe(false);
   });
 
+  it("honors caret range upper bounds for zero-major versions", () => {
+    expect(satisfiesSemverRange("0.2.3", "^0.2.3")).toBe(true);
+    expect(satisfiesSemverRange("0.2.9", "^0.2.3")).toBe(true);
+    expect(satisfiesSemverRange("0.3.0", "^0.2.3")).toBe(false);
+    expect(satisfiesSemverRange("0.5.0", "^0.2.3")).toBe(false);
+    expect(satisfiesSemverRange("0.0.3", "^0.0.3")).toBe(true);
+    expect(satisfiesSemverRange("0.0.4", "^0.0.3")).toBe(false);
+  });
+
   it("rejects invalid versions and unsupported range syntax", () => {
     expect(satisfiesSemverRange("not-a-version", ">=24.0")).toBe(false);
     expect(satisfiesSemverRange("24.10.0", "~24.10")).toBe(false);

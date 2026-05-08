@@ -515,12 +515,12 @@ resolve_default_runtime_port() {
 const fs = require("node:fs");
 const runtimePath = process.argv[2] ?? "";
 try {
-  const runtime = JSON.parse(fs.readFileSync(runtimePath, "utf8"));
-  const pid = Number(runtime.pid);
-  const port = Number(runtime.port);
-  if (!Number.isInteger(pid) || !Number.isInteger(port)) {
-    process.exit(1);
-  }
+	  const runtime = JSON.parse(fs.readFileSync(runtimePath, "utf8"));
+	  const pid = Number(runtime.pid);
+	  const port = Number(runtime.port);
+	  if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(port)) {
+	    process.exit(1);
+	  }
   const origin = new URL(String(runtime.origin ?? ""));
   if (origin.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(origin.hostname)) {
     process.exit(1);
