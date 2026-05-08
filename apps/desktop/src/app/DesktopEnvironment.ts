@@ -59,6 +59,8 @@ export interface DesktopEnvironmentShape {
   readonly devRemoteT3ServerEntryPath: Option.Option<string>;
   readonly configuredBackendPort: Option.Option<number>;
   readonly commitHashOverride: Option.Option<string>;
+  readonly otlpTracesUrl: Option.Option<string>;
+  readonly otlpExportIntervalMs: number;
   readonly branding: DesktopAppBranding;
   readonly displayName: string;
   readonly appUserModelId: string;
@@ -194,6 +196,8 @@ const makeDesktopEnvironment = (
       devRemoteT3ServerEntryPath: config.devRemoteT3ServerEntryPath,
       configuredBackendPort: config.configuredBackendPort,
       commitHashOverride: config.commitHashOverride,
+      otlpTracesUrl: config.otlpTracesUrl,
+      otlpExportIntervalMs: config.otlpExportIntervalMs,
       branding,
       displayName,
       appUserModelId: isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code",

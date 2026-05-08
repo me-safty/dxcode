@@ -21,10 +21,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
-import {
-  DesktopBackendOutputLog,
-  type DesktopBackendOutputLogShape,
-} from "../app/DesktopLogging.ts";
+import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
@@ -103,7 +100,7 @@ function decodeBootstrap(raw: string) {
 function makeManagerLayer(input: {
   readonly spawnerLayer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>;
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>;
-  readonly backendOutputLog?: Partial<DesktopBackendOutputLogShape>;
+  readonly backendOutputLog?: Partial<DesktopObservability.DesktopBackendOutputLogShape>;
   readonly desktopState?: DesktopState.DesktopStateShape;
   readonly desktopWindow?: Partial<DesktopWindow.DesktopWindowShape>;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
@@ -122,11 +119,11 @@ function makeManagerLayer(input: {
         input.desktopState
           ? Layer.succeed(DesktopState.DesktopState, input.desktopState)
           : DesktopState.layer,
-        Layer.succeed(DesktopBackendOutputLog, {
+        Layer.succeed(DesktopObservability.DesktopBackendOutputLog, {
           writeSessionBoundary: () => Effect.void,
           writeOutputChunk: () => Effect.void,
           ...input.backendOutputLog,
-        } satisfies DesktopBackendOutputLogShape),
+        } satisfies DesktopObservability.DesktopBackendOutputLogShape),
         Layer.succeed(DesktopWindow.DesktopWindow, {
           createMain: Effect.die("unexpected createMain"),
           ensureMain: Effect.die("unexpected ensureMain"),

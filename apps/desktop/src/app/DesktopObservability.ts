@@ -1,3 +1,5 @@
+import { makeLocalFileTracer, makeTraceSink } from "@t3tools/shared/observability";
+import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -11,13 +13,18 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as References from "effect/References";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as Tracer from "effect/Tracer";
+import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
 const DESKTOP_LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const DESKTOP_LOG_FILE_MAX_FILES = 10;
 const DESKTOP_LOG_BATCH_WINDOW = Duration.millis(250);
+const DESKTOP_BACKEND_CHILD_LOG_FIBER_ID = "#backend-child";
+const DESKTOP_TRACE_BATCH_WINDOW_MS = 200;
 
 export interface RotatingLogFileWriter {
   readonly writeBytes: (chunk: Uint8Array) => Effect.Effect<void>;
@@ -41,6 +48,7 @@ export class DesktopBackendOutputLog extends Context.Service<
 >()("t3/desktop/BackendOutputLog") {}
 
 const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
 
 class DesktopLogFileWriterConfigurationError extends Data.TaggedError(
   "DesktopLogFileWriterConfigurationError",
@@ -58,6 +66,19 @@ type DesktopLogFileWriterError =
   | PlatformError.PlatformError;
 
 const sanitizeLogValue = (value: string): string => value.replace(/\s+/g, " ").trim();
+
+const DesktopBackendChildLogRecord = Schema.Struct({
+  message: Schema.String,
+  level: Schema.Literals(["INFO", "ERROR"]),
+  timestamp: Schema.String,
+  annotations: Schema.Record(Schema.String, Schema.Unknown),
+  spans: Schema.Record(Schema.String, Schema.Unknown),
+  fiberId: Schema.String,
+});
+
+const encodeDesktopBackendChildLogRecord = Schema.encodeEffect(
+  Schema.fromJsonString(DesktopBackendChildLogRecord),
+);
 
 const DesktopBackendOutputLogNoop: DesktopBackendOutputLogShape = {
   writeSessionBoundary: () => Effect.void,
@@ -196,6 +217,30 @@ const makeDesktopFileLogger = Effect.gen(function* () {
   });
 });
 
+const readPersistedOtlpTracesUrl: Effect.Effect<
+  Option.Option<string>,
+  never,
+  FileSystem.FileSystem | DesktopEnvironment.DesktopEnvironment
+> = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const raw = yield* fileSystem.readFileString(environment.serverSettingsPath).pipe(Effect.option);
+  if (Option.isNone(raw)) {
+    return Option.none();
+  }
+
+  const parsed = parsePersistedServerObservabilitySettings(raw.value);
+  return Option.fromNullishOr(parsed.otlpTracesUrl);
+});
+
+const resolveOtlpTracesUrl = Effect.gen(function* () {
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  if (Option.isSome(environment.otlpTracesUrl)) {
+    return environment.otlpTracesUrl;
+  }
+  return yield* readPersistedOtlpTracesUrl;
+});
+
 const writeDevelopmentConsoleOutput = (
   streamName: "stdout" | "stderr",
   chunk: Uint8Array,
@@ -205,7 +250,77 @@ const writeDevelopmentConsoleOutput = (
     output.write(chunk);
   }).pipe(Effect.ignore);
 
-export const DesktopLoggerLive = Layer.unwrap(
+const writeBackendChildLogRecord = (
+  logFile: RotatingLogFileWriter,
+  input: {
+    readonly message: string;
+    readonly level: "INFO" | "ERROR";
+    readonly annotations: Record<string, unknown>;
+  },
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const timestamp = DateTime.formatIso(yield* DateTime.now);
+    const encoded = yield* encodeDesktopBackendChildLogRecord({
+      message: input.message,
+      level: input.level,
+      timestamp,
+      annotations: input.annotations,
+      spans: {},
+      fiberId: DESKTOP_BACKEND_CHILD_LOG_FIBER_ID,
+    });
+    yield* logFile.writeText(`${encoded}\n`);
+  }).pipe(Effect.ignore({ log: true }));
+
+const backendOutputLogLayer = Layer.effect(
+  DesktopBackendOutputLog,
+  Effect.gen(function* () {
+    const environment = yield* DesktopEnvironment.DesktopEnvironment;
+
+    const writer = yield* makeRotatingLogFileWriter({
+      filePath: environment.path.join(environment.logDir, "server-child.log"),
+    }).pipe(Effect.option);
+
+    return Option.match(writer, {
+      onNone: () => DesktopBackendOutputLogNoop,
+      onSome: (logFile) =>
+        ({
+          writeSessionBoundary: ({ phase, details }) =>
+            Effect.gen(function* () {
+              const runId = yield* currentDesktopRunId;
+              yield* writeBackendChildLogRecord(logFile, {
+                message: `backend child process session ${phase.toLowerCase()}`,
+                level: "INFO",
+                annotations: {
+                  component: "desktop-backend-child",
+                  runId,
+                  phase,
+                  details: sanitizeLogValue(details),
+                },
+              });
+            }),
+          writeOutputChunk: (streamName, chunk) =>
+            Effect.gen(function* () {
+              if (environment.isDevelopment) {
+                yield* writeDevelopmentConsoleOutput(streamName, chunk);
+              }
+              const runId = yield* currentDesktopRunId;
+              yield* writeBackendChildLogRecord(logFile, {
+                message: "backend child process output",
+                level: streamName === "stderr" ? "ERROR" : "INFO",
+                annotations: {
+                  component: "desktop-backend-child",
+                  runId,
+                  stream: streamName,
+                  text: textDecoder.decode(chunk),
+                },
+              });
+            }),
+        }) satisfies DesktopBackendOutputLogShape,
+    });
+  }),
+);
+
+const desktopLoggerLayer = Layer.unwrap(
   Effect.gen(function* () {
     const fileLogger = yield* makeDesktopFileLogger.pipe(Effect.option);
     const loggers: Array<Logger.Logger<unknown, unknown>> = [
@@ -224,34 +339,47 @@ export const DesktopLoggerLive = Layer.unwrap(
   }),
 );
 
-export const DesktopBackendOutputLogLive = Layer.effect(
-  DesktopBackendOutputLog,
+const tracerLayer = Layer.unwrap(
   Effect.gen(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
-
-    const writer = yield* makeRotatingLogFileWriter({
-      filePath: environment.path.join(environment.logDir, "server-child.log"),
-    }).pipe(Effect.option);
-
-    return Option.match(writer, {
-      onNone: () => DesktopBackendOutputLogNoop,
-      onSome: (logFile) =>
-        ({
-          writeSessionBoundary: ({ phase, details }) =>
-            Effect.gen(function* () {
-              const runId = yield* currentDesktopRunId;
-              const timestamp = DateTime.formatIso(yield* DateTime.now);
-              yield* logFile.writeText(
-                `[${timestamp}] ---- APP SESSION ${phase} run=${runId} ${sanitizeLogValue(details)} ----\n`,
-              );
-            }),
-          writeOutputChunk: (streamName, chunk) =>
-            environment.isDevelopment
-              ? writeDevelopmentConsoleOutput(streamName, chunk).pipe(
-                  Effect.andThen(logFile.writeBytes(chunk)),
-                )
-              : logFile.writeBytes(chunk),
-        }) satisfies DesktopBackendOutputLogShape,
+    const otlpTracesUrl = yield* resolveOtlpTracesUrl;
+    const tracePath = environment.path.join(environment.logDir, "desktop.trace.ndjson");
+    const sink = yield* makeTraceSink({
+      filePath: tracePath,
+      maxBytes: DESKTOP_LOG_FILE_MAX_BYTES,
+      maxFiles: DESKTOP_LOG_FILE_MAX_FILES,
+      batchWindowMs: DESKTOP_TRACE_BATCH_WINDOW_MS,
     });
+    const delegate = Option.isNone(otlpTracesUrl)
+      ? undefined
+      : yield* OtlpTracer.make({
+          url: otlpTracesUrl.value,
+          exportInterval: `${environment.otlpExportIntervalMs} millis`,
+          resource: {
+            serviceName: "desktop",
+            attributes: {
+              "service.runtime": "desktop",
+              "service.mode": environment.isDevelopment ? "development" : "packaged",
+            },
+          },
+        });
+    const tracer = yield* makeLocalFileTracer({
+      filePath: tracePath,
+      maxBytes: DESKTOP_LOG_FILE_MAX_BYTES,
+      maxFiles: DESKTOP_LOG_FILE_MAX_FILES,
+      batchWindowMs: DESKTOP_TRACE_BATCH_WINDOW_MS,
+      sink,
+      ...(delegate ? { delegate } : {}),
+    });
+
+    return Layer.succeed(Tracer.Tracer, tracer);
   }),
+).pipe(Layer.provideMerge(OtlpSerialization.layerJson));
+
+export const layer = Layer.mergeAll(
+  backendOutputLogLayer,
+  desktopLoggerLayer,
+  tracerLayer,
+  Layer.succeed(Tracer.MinimumTraceLevel, "Info"),
+  Layer.succeed(References.TracerTimingEnabled, true),
 );

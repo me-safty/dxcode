@@ -24,7 +24,7 @@ import {
 } from "@t3tools/contracts";
 
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
-import { DesktopBackendOutputLog } from "../app/DesktopLogging.ts";
+import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 
@@ -277,7 +277,7 @@ const makeDesktopBackendManager = Effect.fn("makeDesktopBackendManager")(functio
   const parentScope = yield* Scope.Scope;
   const fileSystem = yield* FileSystem.FileSystem;
   const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
-  const backendOutputLog = yield* DesktopBackendOutputLog;
+  const backendOutputLog = yield* DesktopObservability.DesktopBackendOutputLog;
   const desktopState = yield* DesktopState.DesktopState;
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;

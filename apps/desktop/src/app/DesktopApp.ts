@@ -217,14 +217,18 @@ export const program = Effect.scoped(
     yield* lifecycle.register;
 
     yield* electronApp.whenReady.pipe(
+      Effect.withSpan("desktop.electron.whenReady"),
       Effect.catchCause((cause) => fatalStartupCause("whenReady", cause)),
     );
     yield* Effect.logInfo("app ready");
     yield* appIdentity.configure;
     yield* applicationMenu.configure;
     yield* electronProtocol.registerDesktopFileProtocol;
-    yield* updates.configure;
-    yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
+    yield* updates.configure.pipe(Effect.withSpan("desktop.updates.configure"));
+    yield* bootstrap.pipe(
+      Effect.withSpan("desktop.bootstrap"),
+      Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)),
+    );
     yield* shutdown.awaitRequest;
   }),
 );
