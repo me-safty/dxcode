@@ -635,6 +635,10 @@ export const ChatComposer = memo(
         selectedProvider,
         lockedProvider,
         lockedContinuationGroupKey,
+        fallbackInstanceIds: [
+          activeThreadModelSelection?.instanceId,
+          activeProjectDefaultModelSelection?.instanceId,
+        ],
       });
     }, [
       activeProjectDefaultModelSelection?.instanceId,

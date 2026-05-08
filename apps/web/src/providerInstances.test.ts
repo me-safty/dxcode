@@ -149,4 +149,54 @@ describe("resolveSelectedProviderInstanceId", () => {
       }),
     ).toBe("codex");
   });
+
+  it("keeps persisted model selections as the last fallback before codex", () => {
+    const persistedInstanceId = ProviderInstanceId.make("codex_saved");
+
+    expect(
+      resolveSelectedProviderInstanceId({
+        entries: [],
+        candidates: [null],
+        selectedProvider: ProviderDriverKind.make("codex"),
+        fallbackInstanceIds: [persistedInstanceId],
+      }),
+    ).toBe(persistedInstanceId);
+  });
+
+  it("falls back instead of returning a disabled explicit selection", () => {
+    const providers = [
+      provider({
+        provider: ProviderDriverKind.make("codex"),
+        instanceId: "codex_disabled",
+        enabled: false,
+      }),
+      provider({ provider: ProviderDriverKind.make("codex"), instanceId: "codex" }),
+    ];
+    const entries = deriveProviderInstanceEntries(providers);
+
+    expect(
+      resolveSelectedProviderInstanceId({
+        entries,
+        candidates: [ProviderInstanceId.make("codex_disabled")],
+        selectedProvider: ProviderDriverKind.make("codex"),
+      }),
+    ).toBe("codex");
+  });
+
+  it("falls back instead of returning an explicit selection outside a lock", () => {
+    const providers = [
+      provider({ provider: ProviderDriverKind.make("claudeAgent"), instanceId: "claudeAgent" }),
+      provider({ provider: ProviderDriverKind.make("codex"), instanceId: "codex" }),
+    ];
+    const entries = deriveProviderInstanceEntries(providers);
+
+    expect(
+      resolveSelectedProviderInstanceId({
+        entries,
+        candidates: [ProviderInstanceId.make("claudeAgent")],
+        selectedProvider: ProviderDriverKind.make("claudeAgent"),
+        lockedProvider: ProviderDriverKind.make("codex"),
+      }),
+    ).toBe("codex");
+  });
 });

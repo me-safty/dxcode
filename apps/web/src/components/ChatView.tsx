@@ -1294,6 +1294,10 @@ export default function ChatView(props: ChatViewProps) {
       selectedProvider,
       lockedProvider,
       lockedContinuationGroupKey,
+      fallbackInstanceIds: [
+        activeThread?.modelSelection.instanceId,
+        activeProject?.defaultModelSelection?.instanceId,
+      ],
     });
     const selectedEntry = providerInstanceEntries.find(
       (entry) => entry.instanceId === selectedInstanceId,

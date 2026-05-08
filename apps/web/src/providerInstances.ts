@@ -190,10 +190,10 @@ export function resolveSelectedProviderInstanceId(input: {
   selectedProvider: ProviderDriverKind;
   lockedProvider?: ProviderDriverKind | null | undefined;
   lockedContinuationGroupKey?: string | null | undefined;
+  fallbackInstanceIds?: ReadonlyArray<ProviderInstanceId | null | undefined>;
 }): ProviderInstanceId {
   const lockedProvider = input.lockedProvider ?? null;
   const lockedContinuationGroupKey = input.lockedContinuationGroupKey ?? null;
-  const explicitSelection = input.candidates.find((candidate) => candidate != null);
 
   for (const candidate of input.candidates) {
     if (!candidate) continue;
@@ -206,10 +206,6 @@ export function resolveSelectedProviderInstanceId(input: {
     return match.instanceId;
   }
 
-  if (explicitSelection) {
-    return ProviderInstanceId.make(explicitSelection);
-  }
-
   const fallbackProvider = lockedProvider ?? input.selectedProvider;
   const byKind = input.entries.find(
     (entry) =>
@@ -220,7 +216,14 @@ export function resolveSelectedProviderInstanceId(input: {
   if (byKind) return byKind.instanceId;
 
   const anyEnabled = input.entries.find((entry) => entry.enabled);
-  return anyEnabled?.instanceId ?? input.entries[0]?.instanceId ?? ProviderInstanceId.make("codex");
+  const fallbackSelection = input.fallbackInstanceIds?.find((instanceId) => instanceId != null);
+  return (
+    anyEnabled?.instanceId ??
+    input.entries[0]?.instanceId ??
+    (fallbackSelection
+      ? ProviderInstanceId.make(fallbackSelection)
+      : ProviderInstanceId.make("codex"))
+  );
 }
 
 /**
