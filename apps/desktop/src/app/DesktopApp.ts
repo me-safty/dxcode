@@ -208,10 +208,11 @@ const startup = Effect.gen(function* () {
       preference: settings.linuxPasswordStore,
       env: process.env,
     });
-    if (passwordStore !== null) {
-      yield* electronApp.appendCommandLineSwitch("password-store", passwordStore);
-    }
-    yield* electronApp.appendCommandLineSwitch("class", environment.linuxWmClass);
+    yield* logStartupInfo("linux password store configured", {
+      passwordStore: passwordStore ?? "electron-default",
+      xdgCurrentDesktop: process.env.XDG_CURRENT_DESKTOP ?? null,
+      xdgSessionDesktop: process.env.XDG_SESSION_DESKTOP ?? null,
+    });
   }
 
   yield* appIdentity.configure;

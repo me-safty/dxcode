@@ -69,7 +69,10 @@ export function normalizeDesktopProtocolPathname(rawPath: string): Option.Option
   return Option.some(segments.join("/"));
 }
 
-const registerDesktopSchemePrivileges = Effect.sync(() => {
+/**
+ * Must run synchronously during process bootstrap, before Electron emits `ready`.
+ */
+export function registerDesktopSchemePrivilegesSync(): void {
   Electron.protocol.registerSchemesAsPrivileged([
     {
       scheme: DESKTOP_SCHEME,
@@ -81,7 +84,11 @@ const registerDesktopSchemePrivileges = Effect.sync(() => {
       },
     },
   ]);
-}).pipe(Effect.withSpan("desktop.electron.protocol.registerSchemePrivileges"));
+}
+
+export const registerDesktopSchemePrivileges = Effect.sync(
+  registerDesktopSchemePrivilegesSync,
+).pipe(Effect.withSpan("desktop.electron.protocol.registerSchemePrivileges"));
 
 export const layerSchemePrivileges = Layer.effectDiscard(registerDesktopSchemePrivileges);
 
