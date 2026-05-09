@@ -139,7 +139,7 @@ export interface ProjectionSnapshotQueryShape {
    * Read only the narrow context needed to compute a full-thread diff from
    * checkpoint 0 to a specific turn count.
    */
-  readonly getFullThreadDiffContext?: (
+  readonly getFullThreadDiffContext: (
     threadId: ThreadId,
     toTurnCount: number,
   ) => Effect.Effect<Option.Option<ProjectionFullThreadDiffContext>, ProjectionRepositoryError>;
