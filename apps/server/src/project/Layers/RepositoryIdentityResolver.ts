@@ -4,18 +4,12 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import { ChildProcessSpawner } from "effect/unstable/process";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
   normalizeGitRemoteUrl,
 } from "@t3tools/shared/git";
 
-import {
-  type ProcessRunError,
-  type ProcessRunInput,
-  type ProcessRunOutput,
-  runProcess,
-} from "../../processRunner.ts";
+import { ProcessRunner, layer as ProcessRunnerLive } from "../../processRunner.ts";
 import {
   RepositoryIdentityResolver,
   type RepositoryIdentityResolverShape,
@@ -89,22 +83,20 @@ interface RepositoryIdentityResolverOptions {
   readonly negativeCacheTtl?: Duration.Input;
 }
 
-type ManagedProcessRunner = (
-  input: ProcessRunInput,
-) => Effect.Effect<ProcessRunOutput, ProcessRunError>;
-
 const resolveRepositoryIdentityCacheKey = Effect.fn("resolveRepositoryIdentityCacheKey")(function* (
   cwd: string,
-  runManagedProcess: ManagedProcessRunner,
 ) {
+  const processRunner = yield* ProcessRunner;
   let cacheKey = cwd;
 
-  const topLevelResult = yield* runManagedProcess({
-    command: "git",
-    args: ["-C", cwd, "rev-parse", "--show-toplevel"],
-    timeoutBehavior: "timedOutResult",
-    shell: process.platform === "win32",
-  }).pipe(Effect.option);
+  const topLevelResult = yield* processRunner
+    .run({
+      command: "git",
+      args: ["-C", cwd, "rev-parse", "--show-toplevel"],
+      timeoutBehavior: "timedOutResult",
+      shell: process.platform === "win32",
+    })
+    .pipe(Effect.option);
   if (topLevelResult._tag === "None" || topLevelResult.value.code !== 0) {
     return cacheKey;
   }
@@ -118,16 +110,16 @@ const resolveRepositoryIdentityCacheKey = Effect.fn("resolveRepositoryIdentityCa
 });
 
 const resolveRepositoryIdentityFromCacheKey = Effect.fn("resolveRepositoryIdentityFromCacheKey")(
-  function* (
-    cacheKey: string,
-    runManagedProcess: ManagedProcessRunner,
-  ): Effect.fn.Return<RepositoryIdentity | null> {
-    const remoteResult = yield* runManagedProcess({
-      command: "git",
-      args: ["-C", cacheKey, "remote", "-v"],
-      timeoutBehavior: "timedOutResult",
-      shell: process.platform === "win32",
-    }).pipe(Effect.option);
+  function* (cacheKey: string): Effect.fn.Return<RepositoryIdentity | null, never, ProcessRunner> {
+    const processRunner = yield* ProcessRunner;
+    const remoteResult = yield* processRunner
+      .run({
+        command: "git",
+        args: ["-C", cacheKey, "remote", "-v"],
+        timeoutBehavior: "timedOutResult",
+        shell: process.platform === "win32",
+      })
+      .pipe(Effect.option);
     if (remoteResult._tag === "None" || remoteResult.value.code !== 0) {
       return null;
     }
@@ -139,11 +131,13 @@ const resolveRepositoryIdentityFromCacheKey = Effect.fn("resolveRepositoryIdenti
 
 export const makeRepositoryIdentityResolver = Effect.fn("makeRepositoryIdentityResolver")(
   function* (options: RepositoryIdentityResolverOptions = {}) {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const runManagedProcess: ManagedProcessRunner = (input) => runProcess(spawner, input);
+    const processRunner = yield* ProcessRunner;
 
     const repositoryIdentityCache = yield* Cache.makeWith<string, RepositoryIdentity | null>(
-      (cacheKey) => resolveRepositoryIdentityFromCacheKey(cacheKey, runManagedProcess),
+      (cacheKey) =>
+        resolveRepositoryIdentityFromCacheKey(cacheKey).pipe(
+          Effect.provideService(ProcessRunner, processRunner),
+        ),
       {
         capacity: options.cacheCapacity ?? DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY,
         timeToLive: Exit.match({
@@ -159,7 +153,9 @@ export const makeRepositoryIdentityResolver = Effect.fn("makeRepositoryIdentityR
     const resolve: RepositoryIdentityResolverShape["resolve"] = Effect.fn(
       "RepositoryIdentityResolver.resolve",
     )(function* (cwd) {
-      const cacheKey = yield* resolveRepositoryIdentityCacheKey(cwd, runManagedProcess);
+      const cacheKey = yield* resolveRepositoryIdentityCacheKey(cwd).pipe(
+        Effect.provideService(ProcessRunner, processRunner),
+      );
       return yield* Cache.get(repositoryIdentityCache, cacheKey);
     });
 
@@ -172,4 +168,4 @@ export const makeRepositoryIdentityResolver = Effect.fn("makeRepositoryIdentityR
 export const RepositoryIdentityResolverLive = Layer.effect(
   RepositoryIdentityResolver,
   makeRepositoryIdentityResolver(),
-);
+).pipe(Layer.provide(ProcessRunnerLive));

@@ -8,7 +8,7 @@ import * as Path from "effect/Path";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
-import { runProcess } from "../../processRunner.ts";
+import { layer as ProcessRunnerLive, runProcess } from "../../processRunner.ts";
 import { RepositoryIdentityResolver } from "../Services/RepositoryIdentityResolver.ts";
 import {
   makeRepositoryIdentityResolver,
@@ -38,7 +38,7 @@ const makeRepositoryIdentityResolverTestLayer = (options: {
       cacheCapacity: 16,
       ...options,
     }),
-  );
+  ).pipe(Layer.provide(ProcessRunnerLive));
 
 it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
   it.effect("normalizes equivalent GitHub remotes into a stable repository identity", () =>
