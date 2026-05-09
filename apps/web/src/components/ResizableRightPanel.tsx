@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -14,14 +14,33 @@ import { cn } from "~/lib/utils";
 const DEFAULT_RATIO = 0.4;
 const MIN_RATIO = 0.3;
 const MAX_RATIO = 0.8;
+let bodyResizeStyleOwner: symbol | null = null;
 
 const clampRatio = (ratio: number) => Math.max(MIN_RATIO, Math.min(ratio, MAX_RATIO));
 
 function readStoredRatio(storageKey: string | undefined) {
   if (!storageKey) return DEFAULT_RATIO;
-  const storedRatio = getLocalStorageItem(storageKey, Schema.Finite);
-  return storedRatio === null ? DEFAULT_RATIO : clampRatio(storedRatio);
+  try {
+    const storedRatio = getLocalStorageItem(storageKey, Schema.Finite);
+    return storedRatio === null ? DEFAULT_RATIO : clampRatio(storedRatio);
+  } catch (error) {
+    console.error("[LOCALSTORAGE] Error:", error);
+    return DEFAULT_RATIO;
+  }
 }
+
+const applyBodyResizeStyles = (owner: symbol) => {
+  bodyResizeStyleOwner = owner;
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+};
+
+const clearBodyResizeStyles = (owner: symbol) => {
+  if (bodyResizeStyleOwner !== owner) return;
+  document.body.style.removeProperty("cursor");
+  document.body.style.removeProperty("user-select");
+  bodyResizeStyleOwner = null;
+};
 
 export function ResizableRightPanel({
   children,
@@ -33,6 +52,7 @@ export function ResizableRightPanel({
   storageKey?: string;
 }) {
   const [widthRatio, setWidthRatio] = useState(() => readStoredRatio(storageKey));
+  const resizeOwnerRef = useRef(Symbol("ResizableRightPanel"));
   const panelRef = useRef<HTMLDivElement | null>(null);
   const widthRatioRef = useRef(widthRatio);
   const resizeStateRef = useRef<{
@@ -59,8 +79,7 @@ export function ResizableRightPanel({
       if (resizeState.handle.hasPointerCapture(pointerId)) {
         resizeState.handle.releasePointerCapture(pointerId);
       }
-      document.body.style.removeProperty("cursor");
-      document.body.style.removeProperty("user-select");
+      clearBodyResizeStyles(resizeOwnerRef.current);
       resizeStateRef.current = null;
       if (storageKey) {
         setLocalStorageItem(storageKey, widthRatioRef.current, Schema.Finite);
@@ -85,8 +104,7 @@ export function ResizableRightPanel({
       startX: event.clientX,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
+    applyBodyResizeStyles(resizeOwnerRef.current);
   }, []);
 
   const handlePointerMove = useCallback(
@@ -123,13 +141,13 @@ export function ResizableRightPanel({
   );
 
   useEffect(() => {
+    const resizeOwner = resizeOwnerRef.current;
     return () => {
       const resizeState = resizeStateRef.current;
       if (resizeState?.frameId !== null && resizeState?.frameId !== undefined) {
         window.cancelAnimationFrame(resizeState.frameId);
       }
-      document.body.style.removeProperty("cursor");
-      document.body.style.removeProperty("user-select");
+      clearBodyResizeStyles(resizeOwner);
     };
   }, []);
 

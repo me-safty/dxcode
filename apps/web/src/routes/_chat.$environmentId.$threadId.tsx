@@ -20,6 +20,7 @@ import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
 import { ResizableRightPanel } from "../components/ResizableRightPanel";
 import { RightPanelSheet } from "../components/RightPanelSheet";
 import { SidebarInset } from "~/components/ui/sidebar";
+import { cn } from "~/lib/utils";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
 const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width_ratio";
@@ -42,13 +43,13 @@ const LazyDiffPanel = (props: { mode: DiffPanelMode }) => {
   );
 };
 
-const DiffPanelInlineSidebar = (props: { diffOpen: boolean }) => {
-  const { diffOpen } = props;
-  if (!diffOpen) return null;
+const DiffPanelInlineSidebar = (props: { diffOpen: boolean; renderDiffContent: boolean }) => {
+  const { diffOpen, renderDiffContent } = props;
+  if (!renderDiffContent) return null;
 
   return (
     <ResizableRightPanel
-      className="border-l border-border bg-card text-foreground"
+      className={cn("border-l border-border bg-card text-foreground", !diffOpen && "hidden")}
       storageKey={DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY}
     >
       <LazyDiffPanel mode="sidebar" />
@@ -152,7 +153,7 @@ function ChatThreadRouteView() {
             routeKind="server"
           />
         </SidebarInset>
-        <DiffPanelInlineSidebar diffOpen={diffOpen} />
+        <DiffPanelInlineSidebar diffOpen={diffOpen} renderDiffContent={shouldRenderDiffContent} />
       </div>
     );
   }
