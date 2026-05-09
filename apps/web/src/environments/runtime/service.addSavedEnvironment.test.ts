@@ -643,7 +643,7 @@ describe("addSavedEnvironment", () => {
     await resetEnvironmentServiceForTests();
   });
 
-  it("disconnects the desktop ssh process before removing a saved ssh environment", async () => {
+  it("removes a saved ssh environment before cleaning up the desktop ssh process", async () => {
     mockSavedRecords = [
       {
         environmentId: EnvironmentId.make("environment-1"),
@@ -675,10 +675,81 @@ describe("addSavedEnvironment", () => {
     expect(mockRemoveSavedEnvironmentBearerToken).toHaveBeenCalledWith(
       EnvironmentId.make("environment-1"),
     );
-    expect(mockDisconnectSshEnvironment.mock.invocationCallOrder[0]).toBeLessThan(
-      mockRemove.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    expect(mockRemove.mock.invocationCallOrder[0]).toBeLessThan(
+      mockDisconnectSshEnvironment.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
 
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("does not wait for desktop ssh cleanup while removing a saved ssh environment", async () => {
+    mockSavedRecords = [
+      {
+        environmentId: EnvironmentId.make("environment-1"),
+        label: "Remote environment",
+        httpBaseUrl: "http://127.0.0.1:3774/",
+        wsBaseUrl: "ws://127.0.0.1:3774/",
+        createdAt: "2026-04-14T00:00:00.000Z",
+        lastConnectedAt: null,
+        desktopSsh: {
+          alias: "devbox",
+          hostname: "devbox.example.com",
+          username: "julius",
+          port: 22,
+        },
+      },
+    ];
+    mockDisconnectSshEnvironment.mockReturnValue(new Promise(() => undefined));
+
+    const { removeSavedEnvironment, resetEnvironmentServiceForTests } = await import("./service");
+
+    await expect(removeSavedEnvironment(EnvironmentId.make("environment-1"))).resolves.toBe(
+      undefined,
+    );
+
+    expect(mockDisconnectSshEnvironment).toHaveBeenCalledWith({
+      alias: "devbox",
+      hostname: "devbox.example.com",
+      username: "julius",
+      port: 22,
+    });
+    expect(mockRemove).toHaveBeenCalledWith(EnvironmentId.make("environment-1"));
+
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("logs desktop ssh cleanup failures after removing a saved ssh environment", async () => {
+    mockSavedRecords = [
+      {
+        environmentId: EnvironmentId.make("environment-1"),
+        label: "Remote environment",
+        httpBaseUrl: "http://127.0.0.1:3774/",
+        wsBaseUrl: "ws://127.0.0.1:3774/",
+        createdAt: "2026-04-14T00:00:00.000Z",
+        lastConnectedAt: null,
+        desktopSsh: {
+          alias: "devbox",
+          hostname: "devbox.example.com",
+          username: "julius",
+          port: 22,
+        },
+      },
+    ];
+    const cleanupError = new Error("cleanup failed");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mockDisconnectSshEnvironment.mockRejectedValue(cleanupError);
+
+    const { removeSavedEnvironment, resetEnvironmentServiceForTests } = await import("./service");
+
+    await removeSavedEnvironment(EnvironmentId.make("environment-1"));
+    await Promise.resolve();
+
+    expect(warn).toHaveBeenCalledWith(
+      "[SAVED_ENVIRONMENTS] SSH cleanup after removal failed",
+      cleanupError,
+    );
+
+    warn.mockRestore();
     await resetEnvironmentServiceForTests();
   });
 

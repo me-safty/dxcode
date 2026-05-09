@@ -1591,7 +1591,9 @@ export function getPrimaryEnvironmentConnection(): EnvironmentConnection {
   return createPrimaryEnvironmentConnection();
 }
 
-export async function disconnectSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
+async function detachSavedEnvironment(
+  environmentId: EnvironmentId,
+): Promise<SavedEnvironmentRecord | null> {
   const record = getSavedEnvironmentRecord(environmentId);
   const pendingConnection = pendingSavedEnvironmentConnections.get(environmentId);
   if (pendingConnection) {
@@ -1604,6 +1606,12 @@ export async function disconnectSavedEnvironment(environmentId: EnvironmentId): 
     await removeConnection(environmentId).catch(() => false);
   }
   setRuntimeDisconnected(environmentId);
+
+  return record;
+}
+
+export async function disconnectSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
+  const record = await detachSavedEnvironment(environmentId);
 
   if (record?.desktopSsh && typeof window !== "undefined") {
     await window.desktopBridge?.disconnectSshEnvironment(record.desktopSsh);
@@ -1664,12 +1672,18 @@ export async function reconnectSavedEnvironment(environmentId: EnvironmentId): P
 }
 
 export async function removeSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
-  await disconnectSavedEnvironment(environmentId);
+  const record = await detachSavedEnvironment(environmentId);
   disposeThreadDetailSubscriptionsForEnvironment(environmentId);
   useSavedEnvironmentRegistryStore.getState().remove(environmentId);
   useSavedEnvironmentRuntimeStore.getState().clear(environmentId);
   useStore.getState().removeEnvironmentState(environmentId);
   await removeSavedEnvironmentBearerToken(environmentId);
+
+  if (record?.desktopSsh && typeof window !== "undefined") {
+    void window.desktopBridge?.disconnectSshEnvironment(record.desktopSsh).catch((error) => {
+      console.warn("[SAVED_ENVIRONMENTS] SSH cleanup after removal failed", error);
+    });
+  }
 }
 
 export async function addSavedEnvironment(input: {
