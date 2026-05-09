@@ -43,6 +43,10 @@ const isDevelopmentEnvironment = (env: NodeJS.ProcessEnv): boolean =>
 const joinLinuxPath = (first: string, ...segments: string[]): string => {
   const normalizedFirst = first.replace(/\/+$/u, "");
   const normalizedSegments = segments.map((segment) => segment.replace(/^\/+|\/+$/gu, ""));
+  if (first.length > 0 && normalizedFirst.length === 0 && first.startsWith("/")) {
+    const normalizedPath = normalizedSegments.filter((segment) => segment.length > 0).join("/");
+    return normalizedPath.length > 0 ? `/${normalizedPath}` : "/";
+  }
   return [normalizedFirst, ...normalizedSegments].filter((segment) => segment.length > 0).join("/");
 };
 

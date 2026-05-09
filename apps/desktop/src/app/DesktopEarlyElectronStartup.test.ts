@@ -31,6 +31,19 @@ describe("DesktopEarlyElectronStartup", () => {
     assert.equal(preference, "auto");
   });
 
+  it("preserves absolute root paths when resolving early settings", () => {
+    const preference = resolveEarlyLinuxPasswordStorePreference({
+      env: { T3CODE_HOME: "/" },
+      homeDirectory: "/home/user",
+      readFileString: (path) => {
+        assert.equal(path, "/userdata/desktop-settings.json");
+        return JSON.stringify({ linuxPasswordStore: "kwallet6" });
+      },
+    });
+
+    assert.equal(preference, "kwallet6");
+  });
+
   it("resolves the early linux Electron switches and DBus fallback", () => {
     const options = resolveEarlyLinuxElectronOptions({
       env: {
