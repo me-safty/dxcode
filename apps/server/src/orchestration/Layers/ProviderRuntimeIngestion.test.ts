@@ -3067,6 +3067,114 @@ describe("ProviderRuntimeIngestion", () => {
     ).toBe(undefined);
   });
 
+  it("excludes command execution wall time from fallback assistant duration", async () => {
+    const harness = await createHarness();
+    const turnId = asTurnId("turn-throughput-command-gap");
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-throughput-command-gap-turn-started"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-05-08T12:00:00.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId,
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-throughput-command-gap-delta"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-05-08T12:00:01.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId,
+      itemId: asItemId("item-throughput-command-gap-assistant"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "I will inspect that.",
+      },
+    });
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-throughput-command-gap-tool-started"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-05-08T12:00:02.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId,
+      itemId: asItemId("item-throughput-command-gap-tool"),
+      payload: {
+        itemType: "command_execution",
+        status: "in_progress",
+        title: "Run command",
+        detail: "sleep 100",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-throughput-command-gap-tool-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-05-08T12:01:42.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId,
+      itemId: asItemId("item-throughput-command-gap-tool"),
+      payload: {
+        itemType: "command_execution",
+        title: "Run command",
+        detail: "done",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-throughput-command-gap-assistant-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-05-08T12:01:43.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId,
+      itemId: asItemId("item-throughput-command-gap-assistant"),
+      payload: {
+        itemType: "assistant_message",
+      },
+    });
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-throughput-command-gap-token-usage"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-05-08T12:01:43.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId,
+      payload: {
+        usage: {
+          usedTokens: 150_000,
+          lastOutputTokens: 1_790,
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.id === "evt-throughput-command-gap-token-usage",
+      ),
+    );
+    const usageActivity = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) =>
+        activity.id === "evt-throughput-command-gap-token-usage",
+    );
+
+    expect(usageActivity?.payload).toMatchObject({
+      usedTokens: 150_000,
+      lastOutputTokens: 1_790,
+      durationMs: 1_000,
+      timeToFirstTokenMs: 1_000,
+    });
+    expect((usageActivity?.payload as { durationMs?: number } | undefined)?.durationMs).not.toBe(
+      102_000,
+    );
+    expect(
+      thread.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "tool.started",
+      ),
+    ).toBe(true);
+  });
+
   it("sums assistant response segments without including tool gaps", async () => {
     const harness = await createHarness();
     const turnId = asTurnId("turn-throughput-tool-gap");

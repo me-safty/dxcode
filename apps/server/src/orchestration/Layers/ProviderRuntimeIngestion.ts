@@ -1566,6 +1566,22 @@ const make = Effect.gen(function* () {
         }
       }
 
+      const toolWorkTurnId =
+        ((event.type === "item.started" || event.type === "item.updated") &&
+          isToolLifecycleItemType(event.payload.itemType)) ||
+        (event.type === "content.delta" &&
+          (event.payload.streamKind === "command_output" ||
+            event.payload.streamKind === "file_change_output"))
+          ? toTurnId(event.turnId)
+          : undefined;
+      if (toolWorkTurnId) {
+        yield* closeAssistantResponseSegment({
+          threadId: thread.id,
+          turnId: toolWorkTurnId,
+          createdAt: now,
+        });
+      }
+
       const pauseForUserTurnId =
         event.type === "request.opened" || event.type === "user-input.requested"
           ? toTurnId(event.turnId)

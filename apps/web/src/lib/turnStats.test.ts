@@ -97,7 +97,7 @@ describe("turnStats", () => {
       "1 tool call",
     ]);
     expect(stats?.items.find((item) => item.id === "throughput")?.tooltip).toContain(
-      "Approximate throughput",
+      "derived timings exclude tool time",
     );
     expect(stats?.items.find((item) => item.id === "ttft")?.tooltip).toContain(
       "Approximate time-to-first",

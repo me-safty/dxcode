@@ -228,7 +228,8 @@ export function deriveLatestAssistantTurnStats(input: {
       items.push({
         id: "throughput",
         label: formatTokensPerSecond(tokensPerSecond),
-        tooltip: "Approximate throughput based on provider token counts and generation duration.",
+        tooltip:
+          "Approximate assistant output throughput based on token counts and provider or derived generation duration; derived timings exclude tool time.",
       });
     }
   }
