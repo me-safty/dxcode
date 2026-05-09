@@ -86,12 +86,6 @@ export function registerDesktopSchemePrivilegesSync(): void {
   ]);
 }
 
-export const registerDesktopSchemePrivileges = Effect.sync(
-  registerDesktopSchemePrivilegesSync,
-).pipe(Effect.withSpan("desktop.electron.protocol.registerSchemePrivileges"));
-
-export const layerSchemePrivileges = Layer.effectDiscard(registerDesktopSchemePrivileges);
-
 const resolveDesktopStaticDir: Effect.Effect<
   Option.Option<string>,
   never,

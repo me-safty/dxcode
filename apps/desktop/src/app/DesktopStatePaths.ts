@@ -1,12 +1,14 @@
+import * as Option from "effect/Option";
+
 export type JoinPath = (first: string, ...segments: string[]) => string;
 
 export function resolveDesktopBaseDir(input: {
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
-  readonly t3Home: string | null | undefined;
+  readonly t3Home: Option.Option<string>;
 }): string {
-  if (typeof input.t3Home === "string") {
-    const trimmed = input.t3Home.trim();
+  if (Option.isSome(input.t3Home)) {
+    const trimmed = input.t3Home.value.trim();
     if (trimmed.length > 0) {
       return trimmed;
     }

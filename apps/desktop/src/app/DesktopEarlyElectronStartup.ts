@@ -1,10 +1,5 @@
-// @effect-diagnostics nodeBuiltinImport:off
-import * as Fs from "node:fs";
-import * as NodeOS from "node:os";
+import * as Option from "effect/Option";
 
-import * as Electron from "electron";
-
-import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import {
   DEFAULT_LINUX_PASSWORD_STORE,
   normalizeLinuxPasswordStorePreference,
@@ -57,7 +52,7 @@ function resolveEarlyDesktopSettingsPath(input: {
   const baseDir = resolveDesktopBaseDir({
     homeDirectory: input.homeDirectory,
     joinPath: joinLinuxPath,
-    t3Home: input.env.T3CODE_HOME,
+    t3Home: Option.fromUndefinedOr(input.env.T3CODE_HOME),
   });
   const stateDir = resolveDesktopStateDir({
     baseDir,
@@ -103,26 +98,4 @@ export function resolveEarlyLinuxElectronOptions(
       env: input.env,
     }),
   };
-}
-
-export function configureElectronBeforeReady(): void {
-  if (process.platform === "linux") {
-    const options = resolveEarlyLinuxElectronOptions({
-      env: process.env,
-      exists: Fs.existsSync,
-      homeDirectory: NodeOS.homedir(),
-      readFileString: (path) => Fs.readFileSync(path, "utf8"),
-      uid: process.getuid?.(),
-    });
-    if (options.dbusSessionBusAddress !== null) {
-      process.env.DBUS_SESSION_BUS_ADDRESS = options.dbusSessionBusAddress;
-    }
-    if (options.passwordStore !== null) {
-      Electron.app.commandLine.appendSwitch("password-store", options.passwordStore);
-    }
-
-    Electron.app.commandLine.appendSwitch("class", options.linuxWmClass);
-  }
-
-  ElectronProtocol.registerDesktopSchemePrivilegesSync();
 }

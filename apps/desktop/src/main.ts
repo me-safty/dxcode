@@ -1,6 +1,8 @@
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+// @effect-diagnostics-next-line nodeBuiltinImport:off - synchronous pre-ready Electron bootstrap has no Effect runtime yet.
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -46,7 +48,30 @@ import * as DesktopState from "./app/DesktopState.ts";
 import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./window/DesktopWindow.ts";
 
-DesktopEarlyElectronStartup.configureElectronBeforeReady();
+function configureElectronBeforeReady(): void {
+  if (process.platform === "linux") {
+    const options = DesktopEarlyElectronStartup.resolveEarlyLinuxElectronOptions({
+      env: process.env,
+      exists: NodeFS.existsSync,
+      homeDirectory: NodeOS.homedir(),
+      readFileString: (path) => NodeFS.readFileSync(path, "utf8"),
+      uid: process.getuid?.(),
+    });
+    if (options.dbusSessionBusAddress !== null) {
+      process.env.DBUS_SESSION_BUS_ADDRESS = options.dbusSessionBusAddress;
+    }
+    if (options.passwordStore !== null) {
+      Electron.app.commandLine.appendSwitch("password-store", options.passwordStore);
+    }
+
+    Electron.app.commandLine.appendSwitch("class", options.linuxWmClass);
+  }
+
+  ElectronProtocol.registerDesktopSchemePrivilegesSync();
+}
+
+// Electron requires these switches and scheme privileges before app ready.
+configureElectronBeforeReady();
 
 const desktopEnvironmentLayer = Layer.unwrap(
   Effect.gen(function* () {
