@@ -19,7 +19,6 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as SynchronizedRef from "effect/SynchronizedRef";
-import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerConfig } from "../../config.ts";
 import {
@@ -27,7 +26,7 @@ import {
   terminalRestartsTotal,
   terminalSessionsTotal,
 } from "../../observability/Metrics.ts";
-import { runProcess } from "../../processRunner.ts";
+import { ProcessRunner, layer as ProcessRunnerLive } from "../../processRunner.ts";
 import {
   TerminalCwdError,
   TerminalHistoryError,
@@ -74,9 +73,7 @@ class TerminalProcessSignalError extends Schema.TaggedErrorClass<TerminalProcess
 ) {}
 
 interface TerminalSubprocessChecker {
-  (
-    terminalPid: number,
-  ): Effect.Effect<boolean, TerminalSubprocessCheckError, ChildProcessSpawner.ChildProcessSpawner>;
+  (terminalPid: number): Effect.Effect<boolean, TerminalSubprocessCheckError, ProcessRunner>;
 }
 
 interface ShellCandidate {
@@ -367,15 +364,15 @@ function isRetryableShellSpawnError(error: PtySpawnError): boolean {
 
 function checkWindowsSubprocessActivity(
   terminalPid: number,
-): Effect.Effect<boolean, TerminalSubprocessCheckError, ChildProcessSpawner.ChildProcessSpawner> {
+): Effect.Effect<boolean, TerminalSubprocessCheckError, ProcessRunner> {
   const command = [
     `$children = Get-CimInstance Win32_Process -Filter "ParentProcessId = ${terminalPid}" -ErrorAction SilentlyContinue`,
     "if ($children) { exit 0 }",
     "exit 1",
   ].join("; ");
   return Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    return yield* runProcess(spawner, {
+    const processRunner = yield* ProcessRunner;
+    return yield* processRunner.run({
       command: "powershell.exe",
       args: ["-NoProfile", "-NonInteractive", "-Command", command],
       timeoutMs: 1_500,
@@ -400,49 +397,49 @@ function checkWindowsSubprocessActivity(
 
 const checkPosixSubprocessActivity = Effect.fn("terminal.checkPosixSubprocessActivity")(function* (
   terminalPid: number,
-): Effect.fn.Return<
-  boolean,
-  TerminalSubprocessCheckError,
-  ChildProcessSpawner.ChildProcessSpawner
-> {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const runPgrep = runProcess(spawner, {
-    command: "pgrep",
-    args: ["-P", String(terminalPid)],
-    timeoutMs: 1_000,
-    maxOutputBytes: 32_768,
-    outputMode: "truncate",
-    timeoutBehavior: "timedOutResult",
-  }).pipe(
-    Effect.mapError(
-      (cause) =>
-        new TerminalSubprocessCheckError({
-          message: "Failed to inspect terminal subprocesses with pgrep.",
-          cause,
-          terminalPid,
-          command: "pgrep",
-        }),
-    ),
-  );
+): Effect.fn.Return<boolean, TerminalSubprocessCheckError, ProcessRunner> {
+  const processRunner = yield* ProcessRunner;
+  const runPgrep = processRunner
+    .run({
+      command: "pgrep",
+      args: ["-P", String(terminalPid)],
+      timeoutMs: 1_000,
+      maxOutputBytes: 32_768,
+      outputMode: "truncate",
+      timeoutBehavior: "timedOutResult",
+    })
+    .pipe(
+      Effect.mapError(
+        (cause) =>
+          new TerminalSubprocessCheckError({
+            message: "Failed to inspect terminal subprocesses with pgrep.",
+            cause,
+            terminalPid,
+            command: "pgrep",
+          }),
+      ),
+    );
 
-  const runPs = runProcess(spawner, {
-    command: "ps",
-    args: ["-eo", "pid=,ppid="],
-    timeoutMs: 1_000,
-    maxOutputBytes: 262_144,
-    outputMode: "truncate",
-    timeoutBehavior: "timedOutResult",
-  }).pipe(
-    Effect.mapError(
-      (cause) =>
-        new TerminalSubprocessCheckError({
-          message: "Failed to inspect terminal subprocesses with ps.",
-          cause,
-          terminalPid,
-          command: "ps",
-        }),
-    ),
-  );
+  const runPs = processRunner
+    .run({
+      command: "ps",
+      args: ["-eo", "pid=,ppid="],
+      timeoutMs: 1_000,
+      maxOutputBytes: 262_144,
+      outputMode: "truncate",
+      timeoutBehavior: "timedOutResult",
+    })
+    .pipe(
+      Effect.mapError(
+        (cause) =>
+          new TerminalSubprocessCheckError({
+            message: "Failed to inspect terminal subprocesses with ps.",
+            cause,
+            terminalPid,
+            command: "ps",
+          }),
+      ),
+    );
 
   const pgrepResult = yield* Effect.exit(runPgrep);
   if (pgrepResult._tag === "Success") {
@@ -473,11 +470,7 @@ const checkPosixSubprocessActivity = Effect.fn("terminal.checkPosixSubprocessAct
 
 const defaultSubprocessChecker = Effect.fn("terminal.defaultSubprocessChecker")(function* (
   terminalPid: number,
-): Effect.fn.Return<
-  boolean,
-  TerminalSubprocessCheckError,
-  ChildProcessSpawner.ChildProcessSpawner
-> {
+): Effect.fn.Return<boolean, TerminalSubprocessCheckError, ProcessRunner> {
   if (!Number.isInteger(terminalPid) || terminalPid <= 0) {
     return false;
   }
@@ -761,12 +754,12 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     const platform = options.platform ?? process.platform;
     const baseEnv = options.env ?? process.env;
     const shellResolver = options.shellResolver ?? (() => defaultShellResolver(platform, baseEnv));
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const processRunner = yield* ProcessRunner;
     const subprocessChecker =
       options.subprocessChecker ??
       ((terminalPid) =>
         defaultSubprocessChecker(terminalPid).pipe(
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(ProcessRunner, processRunner),
         ));
     const subprocessPollIntervalMs =
       options.subprocessPollIntervalMs ?? DEFAULT_SUBPROCESS_POLL_INTERVAL_MS;
@@ -1972,4 +1965,6 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
   },
 );
 
-export const TerminalManagerLive = Layer.effect(TerminalManager, makeTerminalManager());
+export const TerminalManagerLive = Layer.effect(TerminalManager, makeTerminalManager()).pipe(
+  Layer.provide(ProcessRunnerLive),
+);

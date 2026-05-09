@@ -328,7 +328,7 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
   } satisfies ProcessRunOutput;
 });
 
-export function runProcess(
+function runProcess(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   input: ProcessRunInput,
 ): Effect.Effect<ProcessRunOutput, ProcessRunError> {

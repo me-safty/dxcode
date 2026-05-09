@@ -2,25 +2,23 @@ import { afterEach, describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import { vi } from "vitest";
 
-vi.mock("../../processRunner.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../processRunner.ts")>();
-  return {
-    ...actual,
-    runProcess: vi.fn(),
-  };
-});
-
-import { ProcessSpawnError, runProcess } from "../../processRunner.ts";
+import { ProcessRunner, ProcessSpawnError, type ProcessRunnerShape } from "../../processRunner.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 
-const mockedRunProcess = vi.mocked(runProcess);
+const runMock = vi.fn<ProcessRunnerShape["run"]>();
+
+const ProcessRunnerTest = Layer.succeed(
+  ProcessRunner,
+  ProcessRunner.of({
+    run: (input) => runMock(input),
+  }),
+);
 const NoopFileSystemLayer = FileSystem.layerNoop({});
-const TestLayer = Layer.merge(NoopFileSystemLayer, NodeServices.layer);
+const TestLayer = Layer.merge(NoopFileSystemLayer, ProcessRunnerTest);
 const LinuxMachineInfoLayer = Layer.merge(
-  NodeServices.layer,
+  ProcessRunnerTest,
   FileSystem.layerNoop({
     exists: (path) => Effect.succeed(path === "/etc/machine-info"),
     readFileString: (path) =>
@@ -31,7 +29,7 @@ const LinuxMachineInfoLayer = Layer.merge(
 );
 
 afterEach(() => {
-  mockedRunProcess.mockReset();
+  runMock.mockReset();
 });
 
 describe("resolveServerEnvironmentLabel", () => {
@@ -49,7 +47,7 @@ describe("resolveServerEnvironmentLabel", () => {
 
   it.effect("prefers the macOS ComputerName", () =>
     Effect.gen(function* () {
-      mockedRunProcess.mockReturnValueOnce(
+      runMock.mockReturnValueOnce(
         Effect.succeed({
           stdout: " Julius's MacBook Pro \n",
           stderr: "",
@@ -67,8 +65,7 @@ describe("resolveServerEnvironmentLabel", () => {
       }).pipe(Effect.provide(TestLayer));
 
       expect(result).toBe("Julius's MacBook Pro");
-      expect(mockedRunProcess).toHaveBeenCalledWith(
-        expect.anything(),
+      expect(runMock).toHaveBeenCalledWith(
         expect.objectContaining({
           command: "scutil",
           args: ["--get", "ComputerName"],
@@ -87,13 +84,13 @@ describe("resolveServerEnvironmentLabel", () => {
       }).pipe(Effect.provide(LinuxMachineInfoLayer));
 
       expect(result).toBe("Build Agent 01");
-      expect(mockedRunProcess).not.toHaveBeenCalled();
+      expect(runMock).not.toHaveBeenCalled();
     }),
   );
 
   it.effect("falls back to hostnamectl pretty hostname on Linux", () =>
     Effect.gen(function* () {
-      mockedRunProcess.mockReturnValueOnce(
+      runMock.mockReturnValueOnce(
         Effect.succeed({
           stdout: "CI Runner\n",
           stderr: "",
@@ -111,8 +108,7 @@ describe("resolveServerEnvironmentLabel", () => {
       }).pipe(Effect.provide(TestLayer));
 
       expect(result).toBe("CI Runner");
-      expect(mockedRunProcess).toHaveBeenCalledWith(
-        expect.anything(),
+      expect(runMock).toHaveBeenCalledWith(
         expect.objectContaining({
           command: "hostnamectl",
           args: ["--pretty"],
@@ -136,7 +132,7 @@ describe("resolveServerEnvironmentLabel", () => {
 
   it.effect("falls back to the hostname when the friendly-label command is missing", () =>
     Effect.gen(function* () {
-      mockedRunProcess.mockReturnValueOnce(
+      runMock.mockReturnValueOnce(
         Effect.fail(
           new ProcessSpawnError({
             command: "scutil",
@@ -158,7 +154,7 @@ describe("resolveServerEnvironmentLabel", () => {
 
   it.effect("falls back to the cwd basename when the hostname is blank", () =>
     Effect.gen(function* () {
-      mockedRunProcess.mockReturnValueOnce(
+      runMock.mockReturnValueOnce(
         Effect.succeed({
           stdout: " ",
           stderr: "",

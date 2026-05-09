@@ -15,7 +15,6 @@ import {
   ProcessRunner,
   ProcessTimeoutError,
   layer as ProcessRunnerLive,
-  runProcess,
   type ProcessRunInput,
 } from "./processRunner.ts";
 
@@ -67,7 +66,16 @@ function makeSpawner(
 
 const runWith =
   (spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]) => (input: ProcessRunInput) =>
-    runProcess(spawner, input);
+    Effect.gen(function* () {
+      const runner = yield* ProcessRunner;
+      return yield* runner.run(input);
+    }).pipe(
+      Effect.provide(
+        ProcessRunnerLive.pipe(
+          Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner)),
+        ),
+      ),
+    );
 
 describe("runProcess", () => {
   it.effect("collects stdout through an injected ChildProcessSpawner", () =>

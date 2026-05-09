@@ -3,9 +3,8 @@ import * as OS from "node:os";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
-import { ChildProcessSpawner } from "effect/unstable/process";
 
-import { runProcess } from "../../processRunner.ts";
+import { ProcessRunner } from "../../processRunner.ts";
 
 interface ResolveServerEnvironmentLabelInput {
   readonly cwdBaseName: string;
@@ -54,13 +53,15 @@ const runFriendlyLabelCommand = Effect.fn("runFriendlyLabelCommand")(function* (
   command: string,
   args: readonly string[],
 ) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const result = yield* runProcess(spawner, {
-    command,
-    args,
-    timeoutBehavior: "timedOutResult",
-    shell: process.platform === "win32",
-  }).pipe(Effect.option);
+  const processRunner = yield* ProcessRunner;
+  const result = yield* processRunner
+    .run({
+      command,
+      args,
+      timeoutBehavior: "timedOutResult",
+      shell: process.platform === "win32",
+    })
+    .pipe(Effect.option);
 
   if (Option.isNone(result) || result.value.code !== 0) {
     return null;

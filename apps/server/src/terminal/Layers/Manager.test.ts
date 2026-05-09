@@ -13,16 +13,17 @@ import * as Encoding from "effect/Encoding";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
-import { ChildProcessSpawner } from "effect/unstable/process";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 
+import { ProcessRunner, layer as ProcessRunnerLive } from "../../processRunner.ts";
 import type { TerminalManagerShape } from "../Services/Manager.ts";
 import {
   type PtyAdapterShape,
@@ -225,7 +226,7 @@ const createManager = (
 ): Effect.Effect<
   ManagerFixture,
   PlatformError.PlatformError,
-  FileSystem.FileSystem | Path.Path | Scope.Scope | ChildProcessSpawner.ChildProcessSpawner
+  FileSystem.FileSystem | Path.Path | Scope.Scope | ProcessRunner
 > =>
   Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) =>
     Effect.gen(function* () {
@@ -270,7 +271,10 @@ const createManager = (
     }),
   );
 
-it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (it) => {
+it.layer(
+  Layer.merge(NodeServices.layer, ProcessRunnerLive.pipe(Layer.provide(NodeServices.layer))),
+  { excludeTestServices: true },
+)("TerminalManager", (it) => {
   it.effect("spawns lazily and reuses running terminal per thread", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager();
