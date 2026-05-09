@@ -177,18 +177,10 @@ const make = Effect.gen(function* () {
       return emptyDiff satisfies OrchestrationGetFullThreadDiffResult;
     }
 
-    if (!projectionSnapshotQuery.getFullThreadDiffContext) {
-      return yield* getTurnDiff({
-        threadId: input.threadId,
-        fromTurnCount: 0,
-        toTurnCount: input.toTurnCount,
-        ignoreWhitespace,
-      });
-    }
-
     const threadContext = yield* projectionSnapshotQuery
       .getFullThreadDiffContext(input.threadId, input.toTurnCount)
       .pipe(Effect.withSpan("checkpoint.fullThread.lookupContext"));
+
     if (Option.isNone(threadContext)) {
       return yield* new CheckpointInvariantError({
         operation,
