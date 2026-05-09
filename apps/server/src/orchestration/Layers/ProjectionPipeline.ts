@@ -683,6 +683,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
         case "thread.message-sent":
         case "thread.proposed-plan-upserted":
+        case "thread.proposed-plan-removed":
         case "thread.activity-appended":
         case "thread.approval-response-requested":
         case "thread.user-input-response-requested": {
@@ -868,6 +869,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             implementationThreadId: event.payload.proposedPlan.implementationThreadId,
             createdAt: event.payload.proposedPlan.createdAt,
             updatedAt: event.payload.proposedPlan.updatedAt,
+          });
+          return;
+
+        case "thread.proposed-plan-removed":
+          yield* projectionThreadProposedPlanRepository.deleteByPlanId({
+            planId: event.payload.planId,
           });
           return;
 

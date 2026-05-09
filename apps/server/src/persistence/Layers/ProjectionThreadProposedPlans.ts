@@ -4,6 +4,7 @@ import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
+  DeleteProjectionThreadProposedPlanByIdInput,
   DeleteProjectionThreadProposedPlansInput,
   ListProjectionThreadProposedPlansInput,
   ProjectionThreadProposedPlan,
@@ -76,6 +77,14 @@ const makeProjectionThreadProposedPlanRepository = Effect.gen(function* () {
     `,
   });
 
+  const deleteProjectionThreadProposedPlanRowById = SqlSchema.void({
+    Request: DeleteProjectionThreadProposedPlanByIdInput,
+    execute: ({ planId }) => sql`
+      DELETE FROM projection_thread_proposed_plans
+      WHERE plan_id = ${planId}
+    `,
+  });
+
   const upsert: ProjectionThreadProposedPlanRepositoryShape["upsert"] = (row) =>
     upsertProjectionThreadProposedPlanRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionThreadProposedPlanRepository.upsert:query")),
@@ -97,10 +106,18 @@ const makeProjectionThreadProposedPlanRepository = Effect.gen(function* () {
       ),
     );
 
+  const deleteByPlanId: ProjectionThreadProposedPlanRepositoryShape["deleteByPlanId"] = (input) =>
+    deleteProjectionThreadProposedPlanRowById(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlError("ProjectionThreadProposedPlanRepository.deleteByPlanId:query"),
+      ),
+    );
+
   return {
     upsert,
     listByThreadId,
     deleteByThreadId,
+    deleteByPlanId,
   } satisfies ProjectionThreadProposedPlanRepositoryShape;
 });
 
