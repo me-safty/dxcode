@@ -10,7 +10,7 @@ import {
   VcsProcessSpawnError,
   VcsProcessTimeoutError,
 } from "@t3tools/contracts";
-import { runProcess } from "../processRunner.ts";
+import { ProcessRunner, layer as ProcessRunnerLive } from "../processRunner.ts";
 import * as Match from "effect/Match";
 
 export interface VcsProcessInput {
@@ -52,7 +52,7 @@ function commandLabel(command: string, args: ReadonlyArray<string>): string {
 }
 
 export const make = Effect.fn("makeVcsProcess")(function* () {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const processRunner = yield* ProcessRunner;
 
   const run = Effect.fn("VcsProcess.run")(function* (input: VcsProcessInput) {
     const label = commandLabel(input.command, input.args);
@@ -62,33 +62,36 @@ export const make = Effect.fn("makeVcsProcess")(function* () {
       cwd: input.cwd,
     };
 
-    const result = yield* runProcess(spawner, {
-      command: input.command,
-      args: input.args,
-      cwd: input.cwd,
-      ...(input.spawnCwd !== undefined ? { spawnCwd: input.spawnCwd } : {}),
-      ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
-      ...(input.env !== undefined ? { env: input.env } : {}),
-      timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
-      outputMode: "truncate",
-      truncatedMarker: input.appendTruncationMarker ? OUTPUT_TRUNCATED_MARKER : "",
-      timeoutBehavior: "error",
-    }).pipe(
-      Effect.mapError((cause) =>
-        Match.valueTags(cause, {
-          ProcessSpawnError: (error) =>
-            VcsProcessSpawnError.fromProcessSpawnError(baseError, error),
-          ProcessOutputLimitError: (error) =>
-            VcsOutputDecodeError.fromProcessOutputLimitError(baseError, error),
-          ProcessTimeoutError: (error) =>
-            VcsProcessTimeoutError.fromProcessTimeoutError(baseError, error),
-          ProcessStdinError: (error) =>
-            VcsOutputDecodeError.fromProcessStdinError(baseError, error),
-          ProcessReadError: (error) => VcsOutputDecodeError.fromProcessReadError(baseError, error),
-        }),
-      ),
-    );
+    const result = yield* processRunner
+      .run({
+        command: input.command,
+        args: input.args,
+        cwd: input.cwd,
+        ...(input.spawnCwd !== undefined ? { spawnCwd: input.spawnCwd } : {}),
+        ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
+        ...(input.env !== undefined ? { env: input.env } : {}),
+        timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
+        outputMode: "truncate",
+        truncatedMarker: input.appendTruncationMarker ? OUTPUT_TRUNCATED_MARKER : "",
+        timeoutBehavior: "error",
+      })
+      .pipe(
+        Effect.mapError((cause) =>
+          Match.valueTags(cause, {
+            ProcessSpawnError: (error) =>
+              VcsProcessSpawnError.fromProcessSpawnError(baseError, error),
+            ProcessOutputLimitError: (error) =>
+              VcsOutputDecodeError.fromProcessOutputLimitError(baseError, error),
+            ProcessTimeoutError: (error) =>
+              VcsProcessTimeoutError.fromProcessTimeoutError(baseError, error),
+            ProcessStdinError: (error) =>
+              VcsOutputDecodeError.fromProcessStdinError(baseError, error),
+            ProcessReadError: (error) =>
+              VcsOutputDecodeError.fromProcessReadError(baseError, error),
+          }),
+        ),
+      );
 
     if (result.code === null) {
       return yield* VcsOutputDecodeError.missingExitCode(baseError);
@@ -118,4 +121,4 @@ export const make = Effect.fn("makeVcsProcess")(function* () {
   return VcsProcess.of({ run });
 });
 
-export const layer = Layer.effect(VcsProcess, make());
+export const layer = Layer.effect(VcsProcess, make()).pipe(Layer.provide(ProcessRunnerLive));

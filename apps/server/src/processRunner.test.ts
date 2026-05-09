@@ -3,6 +3,7 @@ import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
@@ -11,7 +12,9 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import {
   isWindowsCommandNotFound,
   ProcessOutputLimitError,
+  ProcessRunner,
   ProcessTimeoutError,
+  layer as ProcessRunnerLive,
   runProcess,
   type ProcessRunInput,
 } from "./processRunner.ts";
@@ -87,6 +90,29 @@ describe("runProcess", () => {
       expect(result.timedOut).toBe(false);
     }),
   );
+
+  it.effect("runs through the ProcessRunner service", () => {
+    const spawner = makeSpawner((command) =>
+      Effect.sync(() => {
+        expect(command.command).toBe("fake");
+        expect(command.args).toEqual(["--service"]);
+        return makeHandle({ stdout: "service ok" });
+      }),
+    );
+    const layer = ProcessRunnerLive.pipe(
+      Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner)),
+    );
+
+    return Effect.gen(function* () {
+      const runner = yield* ProcessRunner;
+      const result = yield* runner.run({
+        command: "fake",
+        args: ["--service"],
+      });
+
+      expect(result.stdout).toBe("service ok");
+    }).pipe(Effect.provide(layer));
+  });
 
   it.effect("fails when output exceeds max buffer in default mode", () =>
     Effect.gen(function* () {

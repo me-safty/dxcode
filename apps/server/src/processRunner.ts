@@ -1,6 +1,8 @@
 import * as Data from "effect/Data";
+import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Scope from "effect/Scope";
@@ -83,6 +85,14 @@ export type ProcessRunError =
   | ProcessOutputLimitError
   | ProcessReadError
   | ProcessTimeoutError;
+
+export interface ProcessRunnerShape {
+  readonly run: (input: ProcessRunInput) => Effect.Effect<ProcessRunOutput, ProcessRunError>;
+}
+
+export class ProcessRunner extends Context.Service<ProcessRunner, ProcessRunnerShape>()(
+  "t3/process/ProcessRunner",
+) {}
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -324,3 +334,12 @@ export function runProcess(
 ): Effect.Effect<ProcessRunOutput, ProcessRunError> {
   return finalizeRunProcess(runProcessCore(spawner, input), input);
 }
+
+export const make = Effect.fn("makeProcessRunner")(function* () {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  return ProcessRunner.of({
+    run: (input) => runProcess(spawner, input),
+  });
+});
+
+export const layer = Layer.effect(ProcessRunner, make());
