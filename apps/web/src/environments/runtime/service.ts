@@ -115,6 +115,7 @@ const pendingSavedEnvironmentConnections = new Map<
   PendingSavedEnvironmentConnection
 >();
 const environmentConnectionListeners = new Set<() => void>();
+const providerInvalidationListeners = new Set<() => void>();
 const threadDetailSubscriptions = new Map<string, ThreadDetailSubscriptionEntry>();
 const lastAppliedProjectionVersionByEnvironment = new Map<
   EnvironmentId,
@@ -596,6 +597,12 @@ export function retainThreadDetailSubscription(
 
 function emitEnvironmentConnectionRegistryChange() {
   for (const listener of environmentConnectionListeners) {
+    listener();
+  }
+}
+
+function emitProviderInvalidation() {
+  for (const listener of providerInvalidationListeners) {
     listener();
   }
 }
@@ -1538,6 +1545,13 @@ export function subscribeEnvironmentConnections(listener: () => void): () => voi
   };
 }
 
+export function subscribeProviderInvalidations(listener: () => void): () => void {
+  providerInvalidationListeners.add(listener);
+  return () => {
+    providerInvalidationListeners.delete(listener);
+  };
+}
+
 export function listEnvironmentConnections(): ReadonlyArray<EnvironmentConnection> {
   return [...environmentConnections.values()];
 }
@@ -1764,6 +1778,7 @@ export function startEnvironmentConnectionService(queryClient: QueryClient): () 
       }
       needsProviderInvalidation = false;
       void queryClient.invalidateQueries({ queryKey: providerQueryKeys.all });
+      emitProviderInvalidation();
     },
     {
       wait: 100,
