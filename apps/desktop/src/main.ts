@@ -2,8 +2,8 @@ import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 // @effect-diagnostics-next-line nodeBuiltinImport:off - synchronous pre-ready Electron bootstrap has no Effect runtime yet.
-import * as NodeFS from "node:fs";
-import * as NodeOS from "node:os";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -52,9 +52,9 @@ function configureElectronBeforeReady(): void {
   if (process.platform === "linux") {
     const options = DesktopEarlyElectronStartup.resolveEarlyLinuxElectronOptions({
       env: process.env,
-      exists: NodeFS.existsSync,
-      homeDirectory: NodeOS.homedir(),
-      readFileString: (path) => NodeFS.readFileSync(path, "utf8"),
+      exists: existsSync,
+      homeDirectory: homedir(),
+      readFileString: (path) => readFileSync(path, "utf8"),
       uid: process.getuid?.(),
     });
     if (options.dbusSessionBusAddress !== null) {
@@ -80,7 +80,7 @@ const desktopEnvironmentLayer = Layer.unwrap(
     );
     return DesktopEnvironment.layer({
       dirname: __dirname,
-      homeDirectory: NodeOS.homedir(),
+      homeDirectory: homedir(),
       platform: process.platform,
       processArch: process.arch,
       ...metadata,
