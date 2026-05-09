@@ -70,7 +70,7 @@ const linuxRuntimeDir = (env: NodeJS.ProcessEnv, uid: number | undefined): Optio
     Option.filter((value) => value.length > 0),
   );
 
-export function resolveDefaultLinuxDbusSessionBusPath(input: {
+function resolveDefaultLinuxDbusSessionBusPath(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly uid: number | undefined;
 }): string | null {

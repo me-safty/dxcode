@@ -1,7 +1,7 @@
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-// @effect-diagnostics-next-line nodeBuiltinImport:off - synchronous pre-ready Electron bootstrap has no Effect runtime yet.
+// @effect-diagnostics-next-line nodeBuiltinImport:off - pre-ready Electron setup reads persisted settings synchronously before app services are available.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import * as Effect from "effect/Effect";
@@ -48,7 +48,7 @@ import * as DesktopState from "./app/DesktopState.ts";
 import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./window/DesktopWindow.ts";
 
-function configureElectronBeforeReady(): void {
+const configureElectronBeforeReady = Effect.sync(() => {
   if (process.platform === "linux") {
     const options = DesktopEarlyElectronStartup.resolveEarlyLinuxElectronOptions({
       env: process.env,
@@ -68,10 +68,9 @@ function configureElectronBeforeReady(): void {
   }
 
   ElectronProtocol.registerDesktopSchemePrivilegesSync();
-}
+}).pipe(Effect.withSpan("desktop.electron.configureBeforeReady"));
 
-// Electron requires these switches and scheme privileges before app ready.
-configureElectronBeforeReady();
+const desktopElectronPreReadyLayer = Layer.effectDiscard(configureElectronBeforeReady);
 
 const desktopEnvironmentLayer = Layer.unwrap(
   Effect.gen(function* () {
@@ -171,11 +170,16 @@ const desktopApplicationLayer = Layer.mergeAll(
   desktopSshLayer,
 ).pipe(Layer.provideMerge(DesktopUpdates.layer), Layer.provideMerge(desktopBackendLayer));
 
-const desktopRuntimeLayer = desktopApplicationLayer.pipe(
-  Layer.provideMerge(NodeServices.layer),
-  Layer.provideMerge(NodeHttpClient.layerUndici),
-  Layer.provideMerge(NetService.layer),
-  Layer.provideMerge(electronLayer),
+// Electron requires these switches and scheme privileges before app ready.
+const desktopRuntimeLayer = desktopElectronPreReadyLayer.pipe(
+  Layer.flatMap(() =>
+    desktopApplicationLayer.pipe(
+      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(NodeHttpClient.layerUndici),
+      Layer.provideMerge(NetService.layer),
+      Layer.provideMerge(electronLayer),
+    ),
+  ),
 );
 
 DesktopApp.program.pipe(Effect.provide(desktopRuntimeLayer), NodeRuntime.runMain);
