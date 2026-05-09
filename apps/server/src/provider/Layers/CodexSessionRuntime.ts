@@ -87,6 +87,7 @@ const formatSchemaIssue = SchemaIssue.makeFormatterDefault();
 
 export type CodexResumeCursor = typeof CodexResumeCursorSchema.Type;
 type CodexServiceTier = NonNullable<EffectCodexSchema.V2ThreadStartParams["serviceTier"]>;
+type SupportedCodexServiceTier = "fast" | "flex";
 type CodexThreadItem =
   | EffectCodexSchema.V2ThreadReadResponse["thread"]["turns"][number]["items"][number]
   | EffectCodexSchema.V2ThreadRollbackResponse["thread"]["turns"][number]["items"][number];
@@ -281,6 +282,12 @@ function runtimeModeToThreadConfig(input: RuntimeMode): {
   }
 }
 
+function normalizeCodexServiceTier(
+  serviceTier: CodexServiceTier | undefined,
+): SupportedCodexServiceTier | undefined {
+  return serviceTier === "fast" || serviceTier === "flex" ? serviceTier : undefined;
+}
+
 function buildThreadStartParams(input: {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
@@ -288,12 +295,13 @@ function buildThreadStartParams(input: {
   readonly serviceTier: CodexServiceTier | undefined;
 }): EffectCodexSchema.V2ThreadStartParams {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
+  const serviceTier = normalizeCodexServiceTier(input.serviceTier);
   return {
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
     ...(input.model ? { model: input.model } : {}),
-    ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
+    ...(serviceTier ? { serviceTier } : {}),
   };
 }
 
@@ -367,6 +375,7 @@ export function buildTurnStartParams(input: {
   }
 
   const config = runtimeModeToThreadConfig(input.runtimeMode);
+  const serviceTier = normalizeCodexServiceTier(input.serviceTier);
   const collaborationMode = buildCodexCollaborationMode({
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.model ? { model: input.model } : {}),
@@ -379,7 +388,7 @@ export function buildTurnStartParams(input: {
     approvalPolicy: config.approvalPolicy,
     sandboxPolicy: runtimeModeToTurnSandboxPolicy(input.runtimeMode),
     ...(input.model ? { model: input.model } : {}),
-    ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
+    ...(serviceTier ? { serviceTier } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
     ...(collaborationMode ? { collaborationMode } : {}),
   }).pipe(
