@@ -45,6 +45,7 @@ import {
   listSavedEnvironmentRecords,
   persistSavedEnvironmentRecord,
   readSavedEnvironmentBearerToken,
+  removePersistedSavedEnvironment,
   removeSavedEnvironmentBearerToken,
   type SavedEnvironmentRecord,
   toPersistedSavedEnvironmentRecord,
@@ -1674,10 +1675,13 @@ export async function reconnectSavedEnvironment(environmentId: EnvironmentId): P
 export async function removeSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
   const record = await detachSavedEnvironment(environmentId);
   disposeThreadDetailSubscriptionsForEnvironment(environmentId);
-  useSavedEnvironmentRegistryStore.getState().remove(environmentId);
+  await removePersistedSavedEnvironment(environmentId);
+  useSavedEnvironmentRegistryStore.setState((state) => {
+    const { [environmentId]: _removed, ...byId } = state.byId;
+    return { byId };
+  });
   useSavedEnvironmentRuntimeStore.getState().clear(environmentId);
   useStore.getState().removeEnvironmentState(environmentId);
-  await removeSavedEnvironmentBearerToken(environmentId);
 
   if (record?.desktopSsh && typeof window !== "undefined") {
     void window.desktopBridge?.disconnectSshEnvironment(record.desktopSsh).catch((error) => {

@@ -12,6 +12,7 @@ const mockResolveRemoteWebSocketConnectionUrl = vi.fn();
 const mockBootstrapSshBearerSession = vi.fn();
 const mockFetchSshSessionState = vi.fn();
 const mockPersistSavedEnvironmentRecord = vi.fn();
+const mockRemovePersistedSavedEnvironment = vi.fn();
 const mockWriteSavedEnvironmentBearerToken = vi.fn();
 const mockSetSavedEnvironmentRegistry = vi.fn();
 const mockGetSavedEnvironmentRecord = vi.fn((environmentId: EnvironmentId) => {
@@ -21,9 +22,21 @@ const mockReadSavedEnvironmentBearerToken = vi.fn();
 const mockRemoveSavedEnvironmentBearerToken = vi.fn();
 const mockPatchRuntime = vi.fn();
 const mockClearRuntime = vi.fn();
-const mockRegistrySetState = vi.fn((next: { byId: Record<string, Record<string, unknown>> }) => {
-  mockSavedRecords = Object.values(next.byId);
-});
+const mockRegistrySetState = vi.fn(
+  (
+    next:
+      | { byId: Record<string, Record<string, unknown>> }
+      | ((state: { byId: Record<string, Record<string, unknown>> }) => {
+          byId: Record<string, Record<string, unknown>>;
+        }),
+  ) => {
+    const current = Object.fromEntries(
+      mockSavedRecords.map((record) => [record.environmentId, record]),
+    ) as Record<string, Record<string, unknown>>;
+    const resolved = typeof next === "function" ? next({ byId: current }) : next;
+    mockSavedRecords = Object.values(resolved.byId);
+  },
+);
 const mockRemove = vi.fn((environmentId: EnvironmentId) => {
   mockSavedRecords = mockSavedRecords.filter((record) => record.environmentId !== environmentId);
 });
@@ -72,6 +85,7 @@ vi.mock("~/localApi", () => ({
   ensureLocalApi: () => ({
     persistence: {
       setSavedEnvironmentRegistry: mockSetSavedEnvironmentRegistry,
+      removeSavedEnvironment: mockRemovePersistedSavedEnvironment,
     },
   }),
 }));
@@ -82,6 +96,7 @@ vi.mock("./catalog", () => ({
   listSavedEnvironmentRecords: mockListSavedEnvironmentRecords,
   persistSavedEnvironmentRecord: mockPersistSavedEnvironmentRecord,
   readSavedEnvironmentBearerToken: mockReadSavedEnvironmentBearerToken,
+  removePersistedSavedEnvironment: mockRemovePersistedSavedEnvironment,
   removeSavedEnvironmentBearerToken: mockRemoveSavedEnvironmentBearerToken,
   toPersistedSavedEnvironmentRecord: mockToPersistedSavedEnvironmentRecord,
   useSavedEnvironmentRegistryStore: {
@@ -183,6 +198,7 @@ describe("addSavedEnvironment", () => {
       role: "owner",
     });
     mockPersistSavedEnvironmentRecord.mockResolvedValue(undefined);
+    mockRemovePersistedSavedEnvironment.mockResolvedValue(undefined);
     mockWriteSavedEnvironmentBearerToken.mockResolvedValue(false);
     mockSetSavedEnvironmentRegistry.mockResolvedValue(undefined);
     mockReadSavedEnvironmentBearerToken.mockResolvedValue(null);
@@ -397,10 +413,10 @@ describe("addSavedEnvironment", () => {
         environmentId: EnvironmentId.make("environment-2"),
       }),
     );
-    expect(mockRemove).toHaveBeenCalledWith(EnvironmentId.make("environment-1"));
-    expect(mockRemoveSavedEnvironmentBearerToken).toHaveBeenCalledWith(
+    expect(mockRemovePersistedSavedEnvironment).toHaveBeenCalledWith(
       EnvironmentId.make("environment-1"),
     );
+    expect(mockRemoveSavedEnvironmentBearerToken).not.toHaveBeenCalled();
 
     await resetEnvironmentServiceForTests();
   });
@@ -671,11 +687,12 @@ describe("addSavedEnvironment", () => {
       username: "julius",
       port: 22,
     });
-    expect(mockRemove).toHaveBeenCalledWith(EnvironmentId.make("environment-1"));
-    expect(mockRemoveSavedEnvironmentBearerToken).toHaveBeenCalledWith(
+    expect(mockRemovePersistedSavedEnvironment).toHaveBeenCalledWith(
       EnvironmentId.make("environment-1"),
     );
-    expect(mockRemove.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mockRemoveSavedEnvironmentBearerToken).not.toHaveBeenCalled();
+    expect(mockSavedRecords).toEqual([]);
+    expect(mockRemovePersistedSavedEnvironment.mock.invocationCallOrder[0]).toBeLessThan(
       mockDisconnectSshEnvironment.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
 
@@ -713,7 +730,10 @@ describe("addSavedEnvironment", () => {
       username: "julius",
       port: 22,
     });
-    expect(mockRemove).toHaveBeenCalledWith(EnvironmentId.make("environment-1"));
+    expect(mockRemovePersistedSavedEnvironment).toHaveBeenCalledWith(
+      EnvironmentId.make("environment-1"),
+    );
+    expect(mockSavedRecords).toEqual([]);
 
     await resetEnvironmentServiceForTests();
   });
