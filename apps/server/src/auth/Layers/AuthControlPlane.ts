@@ -1,5 +1,7 @@
 import type { AuthClientSession, AuthPairingLink } from "@t3tools/contracts";
-import { DateTime, Effect, Layer } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 
 import { BootstrapCredentialServiceLive } from "./BootstrapCredentialService.ts";
 import { ServerSecretStoreLive } from "./ServerSecretStore.ts";
@@ -10,8 +12,10 @@ import { layerConfig as SqlitePersistenceLayerLive } from "../../persistence/Lay
 import {
   AuthControlPlane,
   AuthControlPlaneError,
-  AuthControlPlaneShape,
   DEFAULT_SESSION_SUBJECT,
+} from "../Services/AuthControlPlane.ts";
+import type {
+  AuthControlPlaneShape,
   IssuedBearerSession,
   IssuedPairingLink,
 } from "../Services/AuthControlPlane.ts";

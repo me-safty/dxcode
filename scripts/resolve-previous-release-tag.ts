@@ -2,7 +2,13 @@
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Array, Config, Effect, FileSystem, Schema, Stream, String } from "effect";
+import * as Array from "effect/Array";
+import * as Config from "effect/Config";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import * as String from "effect/String";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -75,11 +81,17 @@ const parseStableTag = (tag: string): StableVersion | undefined => {
   const [, major, minor, patch, prerelease] = match;
   if (!major || !minor || !patch) return undefined;
 
+  const prereleaseIdentifiers = prerelease ? prerelease.split(".") : [];
+  // Nightly tags also start with `v` and carry a `nightly.*` prerelease
+  // identifier. They must not be considered stable candidates when resolving
+  // the previous stable tag.
+  if (prereleaseIdentifiers[0] === "nightly") return undefined;
+
   return {
     major: Number(major),
     minor: Number(minor),
     patch: Number(patch),
-    prerelease: prerelease ? prerelease.split(".") : [],
+    prerelease: prereleaseIdentifiers,
   };
 };
 
@@ -92,7 +104,9 @@ const compareNightlyVersions = (left: NightlyVersion, right: NightlyVersion): nu
 };
 
 const parseNightlyTag = (tag: string): NightlyVersion | undefined => {
-  const match = /^nightly-v(\d+)\.(\d+)\.(\d+)-nightly\.(\d{8})\.(\d+)$/.exec(tag);
+  // Accept both the current `v<semver>` format and the legacy `nightly-v<semver>`
+  // format so release note diffs keep working across the tag-format transition.
+  const match = /^(?:nightly-)?v(\d+)\.(\d+)\.(\d+)-nightly\.(\d{8})\.(\d+)$/.exec(tag);
   if (!match) return undefined;
 
   const [, major, minor, patch, date, runNumber] = match;
@@ -196,8 +210,10 @@ const command = Command.make(
     ),
 ).pipe(Command.withDescription("Resolve the previous release tag for a stable or nightly series."));
 
-Command.run(command, { version: "0.0.0" }).pipe(
-  Effect.scoped,
-  Effect.provide(NodeServices.layer),
-  NodeRuntime.runMain,
-);
+if (import.meta.main) {
+  Command.run(command, { version: "0.0.0" }).pipe(
+    Effect.scoped,
+    Effect.provide(NodeServices.layer),
+    NodeRuntime.runMain,
+  );
+}
