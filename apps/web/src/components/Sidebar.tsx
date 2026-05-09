@@ -2970,8 +2970,17 @@ export default function Sidebar() {
     shortcutLabelForCommand(keybindings, "chat.newLocal", newThreadShortcutLabelOptions) ??
     shortcutLabelForCommand(keybindings, "chat.new", newThreadShortcutLabelOptions);
 
+  const clearPendingThreadJump = useCallback(() => {
+    pendingThreadJumpDigitRef.current = null;
+    if (pendingThreadJumpTimeoutRef.current !== null) {
+      window.clearTimeout(pendingThreadJumpTimeoutRef.current);
+      pendingThreadJumpTimeoutRef.current = null;
+    }
+  }, []);
+
   const navigateToThread = useCallback(
     (threadRef: ScopedThreadRef) => {
+      clearPendingThreadJump();
       if (useThreadSelectionStore.getState().selectedThreadKeys.size > 0) {
         clearSelection();
       }
@@ -2984,7 +2993,7 @@ export default function Sidebar() {
         params: buildThreadRouteParams(threadRef),
       });
     },
-    [clearSelection, isMobile, navigate, setOpenMobile, setSelectionAnchor],
+    [clearPendingThreadJump, clearSelection, isMobile, navigate, setOpenMobile, setSelectionAnchor],
   );
 
   const projectDnDSensors = useSensors(
@@ -3222,14 +3231,6 @@ export default function Sidebar() {
     updateThreadJumpHintsVisibility(shouldShowThreadJumpHintsNow);
   }, [shouldShowThreadJumpHintsNow, updateThreadJumpHintsVisibility]);
 
-  const clearPendingThreadJump = useCallback(() => {
-    pendingThreadJumpDigitRef.current = null;
-    if (pendingThreadJumpTimeoutRef.current !== null) {
-      window.clearTimeout(pendingThreadJumpTimeoutRef.current);
-      pendingThreadJumpTimeoutRef.current = null;
-    }
-  }, []);
-
   const navigateToThreadKey = useCallback(
     (threadKey: string | undefined) => {
       if (!threadKey) return;
@@ -3240,6 +3241,10 @@ export default function Sidebar() {
     },
     [navigateToThread, sidebarThreadByKey],
   );
+
+  useEffect(() => {
+    clearPendingThreadJump();
+  }, [clearPendingThreadJump, routeThreadKey]);
 
   useEffect(() => {
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
