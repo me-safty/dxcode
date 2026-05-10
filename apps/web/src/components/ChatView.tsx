@@ -1835,7 +1835,7 @@ export default function ChatView(props: ChatViewProps) {
       terminalState.terminalGroups,
     ],
   );
-  const focusPane = useCallback(
+  const focusSplit = useCallback(
     (direction: "left" | "right") => {
       if (!activeThreadRef) return;
       const activeGroup = terminalState.terminalGroups.find(
@@ -2576,14 +2576,14 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "terminal.focusLeft") {
         event.preventDefault();
         event.stopPropagation();
-        focusPane("left");
+        focusSplit("left");
         return;
       }
 
       if (command === "terminal.focusRight") {
         event.preventDefault();
         event.stopPropagation();
-        focusPane("right");
+        focusSplit("right");
         return;
       }
 
@@ -2619,7 +2619,7 @@ export default function ChatView(props: ChatViewProps) {
     closeTerminal,
     createNewTerminal,
     cycleTerminal,
-    focusPane,
+    focusSplit,
     setTerminalOpen,
     runProjectScript,
     splitTerminal,
