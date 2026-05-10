@@ -25,8 +25,6 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
   { key: "ctrl+tab", command: "terminal.next", when: "terminalFocus" },
   { key: "ctrl+shift+tab", command: "terminal.previous", when: "terminalFocus" },
-  { key: "alt+pagedown", command: "terminal.next", when: "terminalFocus" },
-  { key: "alt+pageup", command: "terminal.previous", when: "terminalFocus" },
   { key: "mod+alt+arrowleft", command: "terminal.focusLeft", when: "terminalFocus" },
   { key: "mod+alt+arrowright", command: "terminal.focusRight", when: "terminalFocus" },
   { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
