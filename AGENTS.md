@@ -28,7 +28,6 @@ Long term maintainability is a core priority. If you add new functionality, firs
 - In Effect-owned code, prefer named `Effect.fn` helpers, `Context.Service`, and `Layer.effect` over ad hoc promises or process-wide mutable state.
 - Keep `Option`, `Either`, and schema-validated values intact across internal boundaries. Convert to `null`, `undefined`, strings, or JSON only at external API, storage, or platform boundaries.
 - Prefer Effect platform services for filesystem, path, timers, HTTP, and process work once inside the runtime. Direct Node or Electron APIs belong in entrypoints, tests, or narrow adapter boundaries, with explicit diagnostic suppressions when required.
-- If an Electron API must run synchronously before `app.ready`, prefer an explicitly first Effect layer using `Layer.flatMap` when possible, and document the ordering requirement at the call site.
 
 ## Package Roles
 
