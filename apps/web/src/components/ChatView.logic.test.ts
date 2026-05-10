@@ -15,7 +15,7 @@ import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
   createLocalDispatchSnapshot,
-  deriveComposerSubmitState,
+  deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
@@ -25,9 +25,9 @@ import {
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 
-describe("deriveComposerSubmitState", () => {
+describe("deriveComposerSendState", () => {
   it("treats expired terminal pills as non-sendable content", () => {
-    const state = deriveComposerSubmitState({
+    const state = deriveComposerSendState({
       prompt: "\uFFFC",
       imageCount: 0,
       terminalContexts: [
@@ -51,7 +51,7 @@ describe("deriveComposerSubmitState", () => {
   });
 
   it("keeps text sendable while excluding expired terminal pills", () => {
-    const state = deriveComposerSubmitState({
+    const state = deriveComposerSendState({
       prompt: `yoo \uFFFC waddup`,
       imageCount: 0,
       terminalContexts: [

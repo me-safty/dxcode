@@ -156,7 +156,7 @@ import {
   buildLocalDraftThread,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
-  deriveComposerSubmitState,
+  deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
@@ -2641,7 +2641,7 @@ export default function ChatView(props: ChatViewProps) {
       sendableTerminalContexts: sendableComposerTerminalContexts,
       expiredTerminalContextCount,
       hasSendableContent,
-    } = deriveComposerSubmitState({
+    } = deriveComposerSendState({
       prompt: promptForSend,
       imageCount: composerImages.length,
       terminalContexts: composerTerminalContexts,

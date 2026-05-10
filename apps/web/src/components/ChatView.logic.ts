@@ -180,7 +180,7 @@ export function cloneComposerImageForRetry(
   }
 }
 
-export function deriveComposerSubmitState(options: {
+export function deriveComposerSendState(options: {
   prompt: string;
   imageCount: number;
   terminalContexts: ReadonlyArray<TerminalContextDraft>;
