@@ -2573,14 +2573,14 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
-      if (command === "terminal.focusLeftPane") {
+      if (command === "terminal.focusLeft") {
         event.preventDefault();
         event.stopPropagation();
         focusPane("left");
         return;
       }
 
-      if (command === "terminal.focusRightPane") {
+      if (command === "terminal.focusRight") {
         event.preventDefault();
         event.stopPropagation();
         focusPane("right");

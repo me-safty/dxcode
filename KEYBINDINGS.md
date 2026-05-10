@@ -27,8 +27,8 @@ See the full schema for more details: [`packages/contracts/src/keybindings.ts`](
   { "key": "ctrl+shift+tab", "command": "terminal.previous", "when": "terminalFocus" },
   { "key": "alt+pagedown", "command": "terminal.next", "when": "terminalFocus" },
   { "key": "alt+pageup", "command": "terminal.previous", "when": "terminalFocus" },
-  { "key": "mod+alt+arrowleft", "command": "terminal.focusLeftPane", "when": "terminalFocus" },
-  { "key": "mod+alt+arrowright", "command": "terminal.focusRightPane", "when": "terminalFocus" },
+  { "key": "mod+alt+arrowleft", "command": "terminal.focusLeft", "when": "terminalFocus" },
+  { "key": "mod+alt+arrowright", "command": "terminal.focusRight", "when": "terminalFocus" },
   { "key": "mod+k", "command": "commandPalette.toggle", "when": "!terminalFocus" },
   { "key": "mod+n", "command": "chat.new", "when": "!terminalFocus" },
   { "key": "mod+shift+o", "command": "chat.new", "when": "!terminalFocus" },
@@ -59,8 +59,8 @@ Invalid rules are ignored. Invalid config files are ignored. Warnings are logged
 - `terminal.close`: close/kill the focused terminal (in focused terminal context by default)
 - `terminal.next`: cycle to the next terminal (wraps around)
 - `terminal.previous`: cycle to the previous terminal (wraps around)
-- `terminal.focusLeftPane`: focus the pane to the left of the active pane within the current terminal (no wrap)
-- `terminal.focusRightPane`: focus the pane to the right of the active pane within the current terminal (no wrap)
+- `terminal.focusLeft`: focus the terminal to the left of the active one within the current split (no wrap)
+- `terminal.focusRight`: focus the terminal to the right of the active one within the current split (no wrap)
 
 Browser note: `ctrl+tab` and `cmd+alt+arrow` are reserved by most browsers and cannot be intercepted in the web app. Use the alt+pageup/pagedown alternatives, or override these in your custom keybindings — both work reliably in the desktop app and the web app.
 - `commandPalette.toggle`: open or close the global command palette

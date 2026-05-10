@@ -112,12 +112,12 @@ const DEFAULT_BINDINGS = compile([
   },
   {
     shortcut: modShortcut("arrowleft", { altKey: true }),
-    command: "terminal.focusLeftPane",
+    command: "terminal.focusLeft",
     whenAst: whenIdentifier("terminalFocus"),
   },
   {
     shortcut: modShortcut("arrowright", { altKey: true }),
-    command: "terminal.focusRightPane",
+    command: "terminal.focusRight",
     whenAst: whenIdentifier("terminalFocus"),
   },
   {
@@ -332,25 +332,25 @@ describe("terminal.next / terminal.previous", () => {
 });
 
 describe("terminal pane focus shortcuts", () => {
-  it("resolves cmd+alt+left to terminal.focusLeftPane on macOS", () => {
+  it("resolves cmd+alt+left to terminal.focusLeft on macOS", () => {
     assert.strictEqual(
       resolveShortcutCommand(
         event({ key: "ArrowLeft", metaKey: true, altKey: true }),
         DEFAULT_BINDINGS,
         { platform: "MacIntel", context: { terminalFocus: true } },
       ),
-      "terminal.focusLeftPane",
+      "terminal.focusLeft",
     );
   });
 
-  it("resolves ctrl+alt+right to terminal.focusRightPane on Linux/Windows", () => {
+  it("resolves ctrl+alt+right to terminal.focusRight on Linux/Windows", () => {
     assert.strictEqual(
       resolveShortcutCommand(
         event({ key: "ArrowRight", ctrlKey: true, altKey: true }),
         DEFAULT_BINDINGS,
         { platform: "Linux", context: { terminalFocus: true } },
       ),
-      "terminal.focusRightPane",
+      "terminal.focusRight",
     );
   });
 
