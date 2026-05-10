@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 export interface TimingStats {
   readonly count: number;
   readonly totalMs: number;
@@ -62,47 +60,4 @@ export function buildTimingSamples(
     });
   }
   return samples;
-}
-
-function stableValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(stableValue);
-  }
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value)
-        .toSorted(([left], [right]) => left.localeCompare(right))
-        .map(([key, nested]) => [key, stableValue(nested)]),
-    );
-  }
-  return value;
-}
-
-export function stableJson(value: unknown): string {
-  return JSON.stringify(stableValue(value));
-}
-
-export function checksumRows(rows: ReadonlyArray<Record<string, unknown>>): string {
-  const hash = createHash("sha256");
-  for (const row of rows) {
-    hash.update(stableJson(row));
-    hash.update("\n");
-  }
-  return hash.digest("hex");
-}
-
-export function classifyReplayEvent(event: {
-  readonly type: string;
-  readonly payload: unknown;
-}): "assistant-streaming-message" | "other" {
-  if (event.type !== "thread.message-sent") {
-    return "other";
-  }
-  const payload =
-    typeof event.payload === "object" && event.payload !== null
-      ? (event.payload as Record<string, unknown>)
-      : {};
-  return payload.role === "assistant" && payload.streaming === true
-    ? "assistant-streaming-message"
-    : "other";
 }

@@ -1,12 +1,6 @@
 import { assert, it } from "@effect/vitest";
 
-import {
-  buildTimingSamples,
-  calculateTimingStats,
-  checksumRows,
-  classifyReplayEvent,
-  stableJson,
-} from "./core.ts";
+import { buildTimingSamples, calculateTimingStats } from "./core.ts";
 
 it("calculates timing stats with stable percentile boundaries", () => {
   assert.deepEqual(calculateTimingStats([]), {
@@ -48,30 +42,4 @@ it("builds contiguous timing samples", () => {
       stats: calculateTimingStats([5]),
     },
   ]);
-});
-
-it("hashes rows independently of object key insertion order", () => {
-  const left = [{ b: 2, a: { d: 4, c: 3 } }];
-  const right = [{ a: { c: 3, d: 4 }, b: 2 }];
-
-  assert.equal(stableJson(left), stableJson(right));
-  assert.equal(checksumRows(left), checksumRows(right));
-});
-
-it("classifies assistant streaming events separately from other events", () => {
-  assert.equal(
-    classifyReplayEvent({
-      type: "thread.message-sent",
-      payload: { role: "assistant", streaming: true },
-    }),
-    "assistant-streaming-message",
-  );
-  assert.equal(
-    classifyReplayEvent({
-      type: "thread.message-sent",
-      payload: { role: "assistant", streaming: false },
-    }),
-    "other",
-  );
-  assert.equal(classifyReplayEvent({ type: "thread.created", payload: {} }), "other");
 });
