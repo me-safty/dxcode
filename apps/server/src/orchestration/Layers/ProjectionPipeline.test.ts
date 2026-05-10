@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -612,9 +613,9 @@ it.layer(
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
       const eventStore = yield* OrchestrationEventStore;
       const sql = yield* SqlClient.SqlClient;
-      const first = new Date("2026-02-24T00:00:01.000Z").toISOString();
-      const second = new Date("2026-02-24T00:00:02.000Z").toISOString();
-      const third = new Date("2026-02-24T00:00:03.000Z").toISOString();
+      const first = DateTime.formatIso(DateTime.makeUnsafe("2026-02-24T00:00:01.000Z"));
+      const second = DateTime.formatIso(DateTime.makeUnsafe("2026-02-24T00:00:02.000Z"));
+      const third = DateTime.formatIso(DateTime.makeUnsafe("2026-02-24T00:00:03.000Z"));
 
       const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
         eventStore
@@ -730,9 +731,9 @@ it.layer(
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const eventStore = yield* OrchestrationEventStore;
-      const first = new Date("2026-02-24T00:00:01.000Z").toISOString();
-      const second = new Date("2026-02-24T00:00:02.000Z").toISOString();
-      const third = new Date("2026-02-24T00:00:03.000Z").toISOString();
+      const first = DateTime.formatIso(DateTime.makeUnsafe("2026-02-24T00:00:01.000Z"));
+      const second = DateTime.formatIso(DateTime.makeUnsafe("2026-02-24T00:00:02.000Z"));
+      const third = DateTime.formatIso(DateTime.makeUnsafe("2026-02-24T00:00:03.000Z"));
 
       const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
         eventStore
