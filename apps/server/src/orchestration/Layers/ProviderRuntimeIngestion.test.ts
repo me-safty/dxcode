@@ -360,6 +360,48 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.lastError).toBe("turn failed");
   });
 
+  it("maps turn aborted events into ready thread session updates", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-before-abort"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId: asTurnId("turn-aborted"),
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" && thread.session?.activeTurnId === "turn-aborted",
+    );
+
+    harness.emit({
+      type: "turn.aborted",
+      eventId: asEventId("evt-turn-aborted"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-1"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      turnId: asTurnId("turn-aborted"),
+      payload: {
+        reason: "Interrupted by user.",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) =>
+        entry.session?.status === "ready" &&
+        entry.session?.activeTurnId === null &&
+        entry.session?.lastError === null,
+    );
+    expect(thread.session?.status).toBe("ready");
+    expect(thread.session?.activeTurnId).toBeNull();
+  });
+
   it("applies provider session.state.changed transitions directly", async () => {
     const harness = await createHarness();
     const waitingAt = "2026-01-01T00:00:00.000Z";
@@ -602,6 +644,62 @@ describe("ProviderRuntimeIngestion", () => {
       threadId: asThreadId("thread-1"),
       turnId: asTurnId("turn-primary"),
       status: "completed",
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) => thread.session?.status === "ready" && thread.session?.activeTurnId === null,
+    );
+  });
+
+  it("ignores auxiliary turn aborts for a non-active turn", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-before-aux-abort"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-primary-abort"),
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-primary-abort",
+    );
+
+    harness.emit({
+      type: "turn.aborted",
+      eventId: asEventId("evt-turn-aborted-aux"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-aux-abort"),
+      payload: {
+        reason: "Auxiliary turn aborted.",
+      },
+    });
+
+    await harness.drain();
+    const midReadModel = await harness.readModel();
+    const midThread = midReadModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(midThread?.session?.status).toBe("running");
+    expect(midThread?.session?.activeTurnId).toBe("turn-primary-abort");
+
+    harness.emit({
+      type: "turn.aborted",
+      eventId: asEventId("evt-turn-aborted-primary"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:02.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-primary-abort"),
+      payload: {
+        reason: "Primary turn aborted.",
+      },
     });
 
     await waitForThread(
