@@ -1,32 +1,32 @@
 import {
+  type EnvironmentId,
+  isProviderDriverKind,
   ProjectId,
-  ProviderInteractionMode,
-  RuntimeMode,
   type ModelSelection,
+  type ProviderDriverKind,
+  type ScopedThreadRef,
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
-import { type FollowUpBehavior } from "@t3tools/contracts/settings";
-import { type ChatMessage, type SessionPhase, type Thread, type ThreadSession } from "../types";
-import { type QueuedFollowUp } from "../types";
-import { randomUUID } from "~/lib/utils";
 import {
-  type ComposerImageAttachment,
-  type DraftThreadState,
-  type PersistedComposerImageAttachment,
-} from "../composerDraftStore";
-import { Schema } from "effect";
-import { useStore } from "../store";
+  type ChatMessage,
+  type QueuedFollowUp,
+  type SessionPhase,
+  type Thread,
+  type ThreadSession,
+} from "../types";
+import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
+import * as Schema from "effect/Schema";
+import { selectThreadByRef, useStore } from "../store";
 import {
   filterTerminalContextsWithText,
   stripInlineTerminalContextPlaceholders,
   type TerminalContextDraft,
 } from "../lib/terminalContext";
-import { isMacPlatform } from "../lib/utils";
+import type { DraftThreadEnvMode } from "../composerDraftStore";
 
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
-const WORKTREE_BRANCH_PREFIX = "t3code";
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
 
@@ -38,6 +38,7 @@ export function buildLocalDraftThread(
 ): Thread {
   return {
     id: threadId,
+    environmentId: draftThread.environmentId,
     codexThreadId: null,
     projectId: draftThread.projectId,
     title: "New thread",
@@ -46,7 +47,6 @@ export function buildLocalDraftThread(
     interactionMode: draftThread.interactionMode,
     session: null,
     messages: [],
-    queuedFollowUps: [],
     error,
     createdAt: draftThread.createdAt,
     archivedAt: null,
@@ -56,16 +56,41 @@ export function buildLocalDraftThread(
     turnDiffSummaries: [],
     activities: [],
     proposedPlans: [],
+    queuedFollowUps: [],
   };
 }
 
+export function describeQueuedFollowUp(followUp: Pick<QueuedFollowUp, "prompt">): string {
+  const trimmed = followUp.prompt.trim().replace(/\s+/g, " ");
+  return trimmed.length > 0 ? trimmed : "Empty follow-up";
+}
+
+export function shouldWriteThreadErrorToCurrentServerThread(input: {
+  serverThread:
+    | {
+        environmentId: EnvironmentId;
+        id: ThreadId;
+      }
+    | null
+    | undefined;
+  routeThreadRef: ScopedThreadRef;
+  targetThreadId: ThreadId;
+}): boolean {
+  return Boolean(
+    input.serverThread &&
+    input.targetThreadId === input.routeThreadRef.threadId &&
+    input.serverThread.environmentId === input.routeThreadRef.environmentId &&
+    input.serverThread.id === input.targetThreadId,
+  );
+}
+
 export function reconcileMountedTerminalThreadIds(input: {
-  currentThreadIds: ReadonlyArray<ThreadId>;
-  openThreadIds: ReadonlyArray<ThreadId>;
-  activeThreadId: ThreadId | null;
+  currentThreadIds: ReadonlyArray<string>;
+  openThreadIds: ReadonlyArray<string>;
+  activeThreadId: string | null;
   activeThreadTerminalOpen: boolean;
   maxHiddenThreadCount?: number;
-}): ThreadId[] {
+}): string[] {
   const openThreadIdSet = new Set(input.openThreadIds);
   const hiddenThreadIds = input.currentThreadIds.filter(
     (threadId) => threadId !== input.activeThreadId && openThreadIdSet.has(threadId),
@@ -144,10 +169,11 @@ export function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-export function buildTemporaryWorktreeBranchName(): string {
-  // Keep the 8-hex suffix shape for backend temporary-branch detection.
-  const token = randomUUID().slice(0, 8).toLowerCase();
-  return `${WORKTREE_BRANCH_PREFIX}/${token}`;
+export function resolveSendEnvMode(input: {
+  requestedEnvMode: DraftThreadEnvMode;
+  isGitRepo: boolean;
+}): DraftThreadEnvMode {
+  return input.isGitRepo ? input.requestedEnvMode : "local";
 }
 
 export function cloneComposerImageForRetry(
@@ -207,120 +233,52 @@ export function buildExpiredTerminalContextToastCopy(
   };
 }
 
-export function resolveFollowUpBehavior(
-  followUpBehavior: FollowUpBehavior,
-  invert: boolean,
-): FollowUpBehavior {
-  if (!invert) {
-    return followUpBehavior;
-  }
-  return followUpBehavior === "queue" ? "steer" : "queue";
-}
-
-export function shouldInvertFollowUpBehaviorFromKeyEvent(
-  event: Pick<KeyboardEvent, "altKey" | "ctrlKey" | "metaKey" | "shiftKey">,
-  platform = navigator.platform,
-): boolean {
-  if (!event.shiftKey || event.altKey) {
-    return false;
-  }
-  if (isMacPlatform(platform)) {
-    return event.metaKey && !event.ctrlKey;
-  }
-  return event.ctrlKey && !event.metaKey;
-}
-
-export function followUpBehaviorShortcutLabel(platform = navigator.platform): string {
-  return isMacPlatform(platform) ? "Cmd+Shift+Enter" : "Ctrl+Shift+Enter";
-}
-
-export interface QueuedFollowUpDraftSnapshot {
-  id: string;
-  createdAt: string;
-  prompt: string;
-  attachments: PersistedComposerImageAttachment[];
-  terminalContexts: TerminalContextDraft[];
-  modelSelection: ModelSelection;
-  runtimeMode: RuntimeMode;
-  interactionMode: ProviderInteractionMode;
-}
-
-export function buildQueuedFollowUpDraft(input: {
-  prompt: string;
-  attachments: ReadonlyArray<PersistedComposerImageAttachment>;
-  terminalContexts: ReadonlyArray<TerminalContextDraft>;
-  modelSelection: ModelSelection;
-  runtimeMode: RuntimeMode;
-  interactionMode: ProviderInteractionMode;
-  createdAt: string;
-}): QueuedFollowUpDraftSnapshot {
-  return {
-    id: randomUUID(),
-    createdAt: input.createdAt,
-    prompt: input.prompt,
-    attachments: [...input.attachments],
-    terminalContexts: input.terminalContexts.map((context) => ({ ...context })),
-    modelSelection: input.modelSelection,
-    runtimeMode: input.runtimeMode,
-    interactionMode: input.interactionMode,
-  };
-}
-
-export function canAutoDispatchQueuedFollowUp(input: {
-  phase: "disconnected" | "connecting" | "ready" | "running";
-  queuedFollowUpCount: number;
-  queuedHeadHasError: boolean;
-  isConnecting: boolean;
-  isSendBusy: boolean;
-  isRevertingCheckpoint: boolean;
-  hasThreadError: boolean;
-  hasPendingApproval: boolean;
-  hasPendingUserInput: boolean;
-}): boolean {
-  return (
-    input.phase === "ready" &&
-    input.queuedFollowUpCount > 0 &&
-    !input.queuedHeadHasError &&
-    !input.isConnecting &&
-    !input.isSendBusy &&
-    !input.isRevertingCheckpoint &&
-    !input.hasThreadError &&
-    !input.hasPendingApproval &&
-    !input.hasPendingUserInput
-  );
-}
-
-export function describeQueuedFollowUp(
-  followUp: Pick<QueuedFollowUp, "attachments" | "prompt" | "terminalContexts">,
-): string {
-  const trimmedPrompt = stripInlineTerminalContextPlaceholders(followUp.prompt).trim();
-  if (trimmedPrompt.length > 0) {
-    return trimmedPrompt;
-  }
-  if (followUp.attachments.length > 0) {
-    return followUp.attachments.length === 1
-      ? "1 image attached"
-      : `${followUp.attachments.length} images attached`;
-  }
-  if (followUp.terminalContexts.length > 0) {
-    return followUp.terminalContexts.length === 1
-      ? (followUp.terminalContexts[0]?.terminalLabel ?? "1 terminal context")
-      : `${followUp.terminalContexts.length} terminal contexts`;
-  }
-  return "Follow-up";
-}
-
 export function threadHasStarted(thread: Thread | null | undefined): boolean {
   return Boolean(
     thread && (thread.latestTurn !== null || thread.messages.length > 0 || thread.session !== null),
   );
 }
 
+// `threadProvider` is the open branded driver kind carried by the session.
+// Unknown driver kinds degrade to `null` (i.e. "unlocked"), which is the safe
+// rollback / fork behavior — the routing layer is the right place to surface
+// "driver not installed" errors, not the lock state.
+//
+// `selectedProvider` takes the same open-string shape because the composer
+// now tracks the picker selection as a `ProviderInstanceId` (e.g.
+// `codex_personal`). Custom instance ids that don't directly match a
+// registered driver resolve to `null` here, which matches the existing
+// "unknown driver -> unlocked" semantics. Callers that want the lock to track
+// a custom instance's underlying driver kind should resolve the instance id
+// upstream and pass the correlated kind.
+export function deriveLockedProvider(input: {
+  thread: Thread | null | undefined;
+  selectedProvider: string | null;
+  threadProvider: string | null;
+}): ProviderDriverKind | null {
+  if (!threadHasStarted(input.thread)) {
+    return null;
+  }
+  const sessionProvider = input.thread?.session?.provider ?? null;
+  if (sessionProvider) {
+    return sessionProvider;
+  }
+  const narrowedThreadProvider =
+    input.threadProvider && isProviderDriverKind(input.threadProvider)
+      ? input.threadProvider
+      : null;
+  const narrowedSelectedProvider =
+    input.selectedProvider && isProviderDriverKind(input.selectedProvider)
+      ? input.selectedProvider
+      : null;
+  return narrowedThreadProvider ?? narrowedSelectedProvider ?? null;
+}
+
 export async function waitForStartedServerThread(
-  threadId: ThreadId,
+  threadRef: ScopedThreadRef,
   timeoutMs = 1_000,
 ): Promise<boolean> {
-  const getThread = () => useStore.getState().threads.find((thread) => thread.id === threadId);
+  const getThread = () => selectThreadByRef(useStore.getState(), threadRef);
   const thread = getThread();
 
   if (threadHasStarted(thread)) {
@@ -343,7 +301,7 @@ export async function waitForStartedServerThread(
     };
 
     const unsubscribe = useStore.subscribe((state) => {
-      if (!threadHasStarted(state.threads.find((thread) => thread.id === threadId))) {
+      if (!threadHasStarted(selectThreadByRef(state, threadRef))) {
         return;
       }
       finish(true);
@@ -401,23 +359,37 @@ export function hasServerAcknowledgedLocalDispatch(input: {
   if (!input.localDispatch) {
     return false;
   }
-  if (
-    input.phase === "running" ||
-    input.hasPendingApproval ||
-    input.hasPendingUserInput ||
-    Boolean(input.threadError)
-  ) {
+  if (input.hasPendingApproval || input.hasPendingUserInput || Boolean(input.threadError)) {
     return true;
   }
 
   const latestTurn = input.latestTurn ?? null;
   const session = input.session ?? null;
-
-  return (
+  const latestTurnChanged =
     input.localDispatch.latestTurnTurnId !== (latestTurn?.turnId ?? null) ||
     input.localDispatch.latestTurnRequestedAt !== (latestTurn?.requestedAt ?? null) ||
     input.localDispatch.latestTurnStartedAt !== (latestTurn?.startedAt ?? null) ||
-    input.localDispatch.latestTurnCompletedAt !== (latestTurn?.completedAt ?? null) ||
+    input.localDispatch.latestTurnCompletedAt !== (latestTurn?.completedAt ?? null);
+
+  if (input.phase === "running") {
+    if (!latestTurnChanged) {
+      return false;
+    }
+    if (latestTurn?.startedAt === null || latestTurn === null) {
+      return false;
+    }
+    if (
+      session?.activeTurnId !== undefined &&
+      session.activeTurnId !== null &&
+      latestTurn?.turnId !== session.activeTurnId
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  return (
+    latestTurnChanged ||
     input.localDispatch.sessionOrchestrationStatus !== (session?.orchestrationStatus ?? null) ||
     input.localDispatch.sessionUpdatedAt !== (session?.updatedAt ?? null)
   );

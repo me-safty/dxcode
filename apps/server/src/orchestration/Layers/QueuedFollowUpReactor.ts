@@ -4,7 +4,12 @@ import {
   buildQueuedFollowUpMessageText,
   canDispatchQueuedFollowUp,
 } from "@t3tools/shared/orchestration";
-import { Cause, Effect, Exit, Layer, Stream } from "effect";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Random from "effect/Random";
+import * as Stream from "effect/Stream";
 
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
@@ -13,19 +18,21 @@ import {
 } from "../Services/QueuedFollowUpReactor.ts";
 
 const serverCommandId = (tag: string): CommandId =>
-  CommandId.makeUnsafe(`server:${tag}:${crypto.randomUUID()}`);
+  CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
 
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const inFlightFollowUpIds = new Set<string>();
   const pendingQueuedDispatchByThreadId = new Map<ThreadId, string>();
+  const getReadModel =
+    orchestrationEngine.getReadModel ?? (() => Effect.die("getReadModel unavailable"));
 
   const hasQueuedDispatchSettled = Effect.fnUntraced(function* (threadId: ThreadId) {
     const dispatchedAt = pendingQueuedDispatchByThreadId.get(threadId);
     if (!dispatchedAt) {
       return true;
     }
-    const readModel = yield* orchestrationEngine.getReadModel();
+    const readModel = yield* getReadModel();
     const thread = readModel.threads.find(
       (entry) => entry.id === threadId && entry.deletedAt === null,
     );
@@ -45,7 +52,7 @@ const make = Effect.gen(function* () {
   });
 
   const processThread = Effect.fnUntraced(function* (threadId: ThreadId) {
-    const readModel = yield* orchestrationEngine.getReadModel();
+    const readModel = yield* getReadModel();
     const thread = readModel.threads.find(
       (entry) => entry.id === threadId && entry.deletedAt === null,
     );
@@ -87,7 +94,7 @@ const make = Effect.gen(function* () {
           commandId: serverCommandId("queued-follow-up-turn-start"),
           threadId,
           message: {
-            messageId: MessageId.makeUnsafe(crypto.randomUUID()),
+            messageId: MessageId.make(yield* Random.nextUUIDv4),
             role: "user",
             text: buildQueuedFollowUpMessageText({
               prompt: queuedHead.prompt,
@@ -176,7 +183,7 @@ const make = Effect.gen(function* () {
   const enqueueThread = (threadId: ThreadId) => worker.enqueue(threadId);
 
   const start: QueuedFollowUpReactorShape["start"] = Effect.gen(function* () {
-    const snapshot = yield* orchestrationEngine.getReadModel();
+    const snapshot = yield* getReadModel();
     yield* Effect.forEach(
       snapshot.threads,
       (thread) =>

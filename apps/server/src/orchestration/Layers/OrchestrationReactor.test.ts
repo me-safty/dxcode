@@ -1,11 +1,15 @@
-import { Effect, Exit, Layer, ManagedRuntime, Scope } from "effect";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Scope from "effect/Scope";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
+import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
-import { QueuedFollowUpReactor } from "../Services/QueuedFollowUpReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
 
 describe("OrchestrationReactor", () => {
@@ -18,7 +22,7 @@ describe("OrchestrationReactor", () => {
     runtime = null;
   });
 
-  it("starts provider ingestion, provider command, and checkpoint reactors", async () => {
+  it("starts provider ingestion, provider command, checkpoint, and thread deletion reactors", async () => {
     const started: string[] = [];
 
     runtime = ManagedRuntime.make(
@@ -51,17 +55,18 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
-          Layer.succeed(QueuedFollowUpReactor, {
-            start: Effect.sync(() => {
-              started.push("queued-follow-up-reactor");
-            }),
+          Layer.succeed(ThreadDeletionReactor, {
+            start: () => {
+              started.push("thread-deletion-reactor");
+              return Effect.void;
+            },
             drain: Effect.void,
           }),
         ),
       ),
     );
 
-    const reactor = await runtime.runPromise(Effect.service(OrchestrationReactor));
+    const reactor = await runtime!.runPromise(Effect.service(OrchestrationReactor));
     const scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
 
@@ -69,7 +74,7 @@ describe("OrchestrationReactor", () => {
       "provider-runtime-ingestion",
       "provider-command-reactor",
       "checkpoint-reactor",
-      "queued-follow-up-reactor",
+      "thread-deletion-reactor",
     ]);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));

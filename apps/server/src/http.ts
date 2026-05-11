@@ -1,5 +1,10 @@
 import Mime from "@effect/platform-node/Mime";
-import { Data, Effect, FileSystem, Layer, Option, Path } from "effect";
+import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import { cast } from "effect/Function";
 import {
   HttpBody,
@@ -15,16 +20,66 @@ import {
   ATTACHMENTS_ROUTE_PREFIX,
   normalizeAttachmentRelativePath,
   resolveAttachmentRelativePath,
-} from "./attachmentPaths";
-import { resolveAttachmentPathById } from "./attachmentStore";
-import { ServerConfig } from "./config";
-import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
+} from "./attachmentPaths.ts";
+import { resolveAttachmentPathById } from "./attachmentStore.ts";
+import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
-import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver";
+import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
+import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { respondToAuthError } from "./auth/http.ts";
+import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
+import {
+  browserApiCorsAllowedHeaders,
+  browserApiCorsAllowedMethods,
+  browserApiCorsHeaders,
+} from "./httpCors.ts";
 
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+
+export const browserApiCorsLayer = HttpRouter.cors({
+  allowedMethods: [...browserApiCorsAllowedMethods],
+  allowedHeaders: [...browserApiCorsAllowedHeaders],
+  maxAge: 600,
+});
+
+export function isLoopbackHostname(hostname: string): boolean {
+  const normalizedHostname = hostname
+    .trim()
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/, "$1");
+  return LOOPBACK_HOSTNAMES.has(normalizedHostname);
+}
+
+export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
+  const redirectUrl = new URL(devUrl.toString());
+  redirectUrl.pathname = requestUrl.pathname;
+  redirectUrl.search = requestUrl.search;
+  redirectUrl.hash = requestUrl.hash;
+  return redirectUrl.toString();
+}
+
+const requireAuthenticatedRequest = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const serverAuth = yield* ServerAuth;
+  yield* serverAuth.authenticateHttpRequest(request);
+});
+
+export const serverEnvironmentRouteLayer = HttpRouter.add(
+  "GET",
+  "/.well-known/t3/environment",
+  Effect.gen(function* () {
+    const descriptor = yield* Effect.service(ServerEnvironment).pipe(
+      Effect.flatMap((serverEnvironment) => serverEnvironment.getDescriptor),
+    );
+    return HttpServerResponse.jsonUnsafe(descriptor, {
+      status: 200,
+      headers: browserApiCorsHeaders,
+    });
+  }),
+);
 
 class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{
   readonly cause: unknown;
@@ -35,6 +90,7 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
   "POST",
   OTLP_TRACES_PROXY_PATH,
   Effect.gen(function* () {
+    yield* requireAuthenticatedRequest;
     const request = yield* HttpServerRequest.HttpServerRequest;
     const config = yield* ServerConfig;
     const otlpTracesUrl = config.otlpTracesUrl;
@@ -76,21 +132,14 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
           Effect.succeed(HttpServerResponse.text("Trace export failed.", { status: 502 })),
         ),
       );
-  }),
-).pipe(
-  Layer.provide(
-    HttpRouter.cors({
-      allowedMethods: ["POST", "OPTIONS"],
-      allowedHeaders: ["content-type"],
-      maxAge: 600,
-    }),
-  ),
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
 export const attachmentsRouteLayer = HttpRouter.add(
   "GET",
   `${ATTACHMENTS_ROUTE_PREFIX}/*`,
   Effect.gen(function* () {
+    yield* requireAuthenticatedRequest;
     const request = yield* HttpServerRequest.HttpServerRequest;
     const url = HttpServerRequest.toURL(request);
     if (Option.isNone(url)) {
@@ -139,13 +188,14 @@ export const attachmentsRouteLayer = HttpRouter.add(
         Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
       ),
     );
-  }),
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
 export const projectFaviconRouteLayer = HttpRouter.add(
   "GET",
   "/api/project-favicon",
   Effect.gen(function* () {
+    yield* requireAuthenticatedRequest;
     const request = yield* HttpServerRequest.HttpServerRequest;
     const url = HttpServerRequest.toURL(request);
     if (Option.isNone(url)) {
@@ -179,7 +229,7 @@ export const projectFaviconRouteLayer = HttpRouter.add(
         Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
       ),
     );
-  }),
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
 export const staticAndDevRouteLayer = HttpRouter.add(
@@ -188,16 +238,20 @@ export const staticAndDevRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const url = HttpServerRequest.toURL(request);
+
     if (Option.isNone(url)) {
       return HttpServerResponse.text("Bad Request", { status: 400 });
     }
 
     const config = yield* ServerConfig;
-    if (config.devUrl) {
-      return HttpServerResponse.redirect(config.devUrl.href, { status: 302 });
+    if (config.devUrl && isLoopbackHostname(url.value.hostname)) {
+      return HttpServerResponse.redirect(resolveDevRedirectUrl(config.devUrl, url.value), {
+        status: 302,
+      });
     }
 
-    if (!config.staticDir) {
+    const staticDir = config.staticDir ?? (config.devUrl ? yield* resolveStaticDir() : undefined);
+    if (!staticDir) {
       return HttpServerResponse.text("No static directory configured and no dev URL set.", {
         status: 503,
       });
@@ -205,7 +259,7 @@ export const staticAndDevRouteLayer = HttpRouter.add(
 
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const staticRoot = path.resolve(config.staticDir);
+    const staticRoot = path.resolve(staticDir);
     const staticRequestPath = url.value.pathname === "/" ? "/index.html" : url.value.pathname;
     const rawStaticRelativePath = staticRequestPath.replace(/^[/\\]+/, "");
     const hasRawLeadingParentSegment = rawStaticRelativePath.startsWith("..");

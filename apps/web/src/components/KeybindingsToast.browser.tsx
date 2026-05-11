@@ -2,27 +2,35 @@ import "../index.css";
 
 import {
   DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
   ORCHESTRATION_WS_METHODS,
   type MessageId,
   type OrchestrationReadModel,
   type ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
   type ServerConfig,
   type ServerLifecycleWelcomePayload,
+  ServerConfig as ServerConfigSchema,
+  ServerSettings,
   type ThreadId,
   WS_METHODS,
 } from "@t3tools/contracts";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { ws, http, HttpResponse } from "msw";
 import { setupWorker } from "msw/browser";
+import * as Schema from "effect/Schema";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
-import { __resetNativeApiForTests } from "../nativeApi";
+import { __resetLocalApiForTests } from "../localApi";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
-import { getServerConfig } from "../rpc/serverState";
+import { getServerConfig, getServerConfigUpdatedNotification } from "../rpc/serverState";
+import { getWsConnectionStatus } from "../rpc/wsConnectionState";
 import { getRouter } from "../router";
 import { useStore } from "../store";
+import { createAuthenticatedSessionHandlers } from "../../test/authHttpHandlers";
 import { BrowserWsRpcHarness } from "../../test/wsRpcHarness";
 
 vi.mock("../lib/gitStatusState", () => ({
@@ -34,6 +42,7 @@ vi.mock("../lib/gitStatusState", () => ({
 
 const THREAD_ID = "thread-kb-toast-test" as ThreadId;
 const PROJECT_ID = "project-1" as ProjectId;
+const LOCAL_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const NOW_ISO = "2026-03-04T12:00:00.000Z";
 
 interface TestFixture {
@@ -44,18 +53,34 @@ interface TestFixture {
 
 let fixture: TestFixture;
 const rpcHarness = new BrowserWsRpcHarness();
+const encodeServerConfig = Schema.encodeSync(ServerConfigSchema);
+const encodeServerSettings = Schema.encodeSync(ServerSettings);
 
 const wsLink = ws.link(/ws(s)?:\/\/.*/);
 
 function createBaseServerConfig(): ServerConfig {
   return {
+    environment: {
+      environmentId: LOCAL_ENVIRONMENT_ID,
+      label: "Local environment",
+      platform: { os: "darwin" as const, arch: "arm64" as const },
+      serverVersion: "0.0.0-test",
+      capabilities: { repositoryIdentity: true },
+    },
+    auth: {
+      policy: "loopback-browser",
+      bootstrapMethods: ["one-time-token"],
+      sessionMethods: ["browser-session-cookie", "bearer-session-token"],
+      sessionCookieName: "t3_session",
+    },
     cwd: "/repo/project",
     keybindingsConfigPath: "/repo/project/.t3code-keybindings.json",
     keybindings: [],
     issues: [],
     providers: [
       {
-        provider: "codex",
+        driver: ProviderDriverKind.make("codex"),
+        instanceId: ProviderInstanceId.make("codex"),
         enabled: true,
         installed: true,
         version: "0.116.0",
@@ -63,6 +88,8 @@ function createBaseServerConfig(): ServerConfig {
         auth: { status: "authenticated" },
         checkedAt: NOW_ISO,
         models: [],
+        slashCommands: [],
+        skills: [],
       },
     ],
     availableEditors: [],
@@ -76,10 +103,33 @@ function createBaseServerConfig(): ServerConfig {
       ...DEFAULT_SERVER_SETTINGS,
       enableAssistantStreaming: false,
       defaultThreadEnvMode: "local" as const,
-      textGenerationModelSelection: { provider: "codex" as const, model: "gpt-5.4-mini" },
+      textGenerationModelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4-mini",
+      },
       providers: {
-        codex: { enabled: true, binaryPath: "", homePath: "", customModels: [] },
-        claudeAgent: { enabled: true, binaryPath: "", customModels: [] },
+        codex: {
+          enabled: true,
+          binaryPath: "",
+          homePath: "",
+          shadowHomePath: "",
+          customModels: [],
+        },
+        claudeAgent: {
+          enabled: true,
+          binaryPath: "",
+          homePath: "",
+          customModels: [],
+          launchArgs: "",
+        },
+        cursor: { enabled: true, binaryPath: "", apiEndpoint: "", customModels: [] },
+        opencode: {
+          enabled: true,
+          binaryPath: "",
+          serverUrl: "",
+          serverPassword: "",
+          customModels: [],
+        },
       },
     },
   };
@@ -94,7 +144,7 @@ function createMinimalSnapshot(): OrchestrationReadModel {
         title: "Project",
         workspaceRoot: "/repo/project",
         defaultModelSelection: {
-          provider: "codex",
+          instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5",
         },
         scripts: [],
@@ -109,7 +159,7 @@ function createMinimalSnapshot(): OrchestrationReadModel {
         projectId: PROJECT_ID,
         title: "Test thread",
         modelSelection: {
-          provider: "codex",
+          instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5",
         },
         interactionMode: "default",
@@ -151,11 +201,55 @@ function createMinimalSnapshot(): OrchestrationReadModel {
   };
 }
 
+function toShellSnapshot(snapshot: OrchestrationReadModel) {
+  return {
+    snapshotSequence: snapshot.snapshotSequence,
+    projects: snapshot.projects.map((project) => ({
+      id: project.id,
+      title: project.title,
+      workspaceRoot: project.workspaceRoot,
+      repositoryIdentity: project.repositoryIdentity ?? null,
+      defaultModelSelection: project.defaultModelSelection,
+      scripts: project.scripts,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+    })),
+    threads: snapshot.threads.map((thread) => ({
+      id: thread.id,
+      projectId: thread.projectId,
+      title: thread.title,
+      modelSelection: thread.modelSelection,
+      runtimeMode: thread.runtimeMode,
+      interactionMode: thread.interactionMode,
+      branch: thread.branch,
+      worktreePath: thread.worktreePath,
+      latestTurn: thread.latestTurn,
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+      archivedAt: thread.archivedAt,
+      session: thread.session,
+      latestUserMessageAt:
+        thread.messages.findLast((message) => message.role === "user")?.createdAt ?? null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    })),
+    updatedAt: snapshot.updatedAt,
+  };
+}
+
 function buildFixture(): TestFixture {
   return {
     snapshot: createMinimalSnapshot(),
     serverConfig: createBaseServerConfig(),
     welcome: {
+      environment: {
+        environmentId: LOCAL_ENVIRONMENT_ID,
+        label: "Local environment",
+        platform: { os: "darwin" as const, arch: "arm64" as const },
+        serverVersion: "0.0.0-test",
+        capabilities: { repositoryIdentity: true },
+      },
       cwd: "/repo/project",
       projectName: "Project",
       bootstrapProjectId: PROJECT_ID,
@@ -165,19 +259,16 @@ function buildFixture(): TestFixture {
 }
 
 function resolveWsRpc(tag: string): unknown {
-  if (tag === ORCHESTRATION_WS_METHODS.getSnapshot) {
-    return fixture.snapshot;
-  }
   if (tag === WS_METHODS.serverGetConfig) {
-    return fixture.serverConfig;
+    return encodeServerConfig(fixture.serverConfig);
   }
-  if (tag === WS_METHODS.gitListBranches) {
+  if (tag === WS_METHODS.vcsListRefs) {
     return {
       isRepo: true,
-      hasOriginRemote: true,
+      hasPrimaryRemote: true,
       nextCursor: null,
       totalCount: 1,
-      branches: [{ name: "main", current: true, isDefault: true, worktreePath: null }],
+      refs: [{ name: "main", current: true, isDefault: true, worktreePath: null }],
     };
   }
   if (tag === WS_METHODS.projectsSearchEntries) {
@@ -195,6 +286,7 @@ const worker = setupWorker(
       void rpcHarness.onMessage(rawData);
     });
   }),
+  ...createAuthenticatedSessionHandlers(() => fixture.serverConfig.auth),
   http.get("*/attachments/:attachmentId", () => new HttpResponse(null, { status: 204 })),
   http.get("*/api/project-favicon", () => new HttpResponse(null, { status: 204 })),
 );
@@ -203,7 +295,7 @@ function sendServerConfigUpdatedPush(issues: ServerConfig["issues"]) {
   rpcHarness.emitStreamValue(WS_METHODS.subscribeServerConfig, {
     version: 1,
     type: "keybindingsUpdated",
-    payload: { issues },
+    payload: { keybindings: fixture.serverConfig.keybindings, issues },
   });
 }
 
@@ -235,6 +327,22 @@ async function waitForComposerEditor(): Promise<HTMLElement> {
   );
 }
 
+async function waitForToastViewport(): Promise<HTMLElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLElement>('[data-slot="toast-viewport"]'),
+    "App should render the toast viewport before server config updates are pushed",
+  );
+}
+
+async function waitForWsConnection(): Promise<void> {
+  await vi.waitFor(
+    () => {
+      expect(getWsConnectionStatus().phase).toBe("connected");
+    },
+    { timeout: 8_000, interval: 16 },
+  );
+}
+
 async function waitForToast(title: string, count = 1): Promise<void> {
   await vi.waitFor(
     () => {
@@ -251,6 +359,15 @@ async function waitForNoToast(title: string): Promise<void> {
       expect(queryToastTitles().filter((t) => t === title)).toHaveLength(0);
     },
     { timeout: 10_000, interval: 50 },
+  );
+}
+
+async function waitForNoToasts(): Promise<void> {
+  await vi.waitFor(
+    () => {
+      expect(queryToastTitles()).toHaveLength(0);
+    },
+    { timeout: 8_000, interval: 16 },
   );
 }
 
@@ -277,6 +394,33 @@ async function waitForServerConfigSnapshot(): Promise<void> {
   );
 }
 
+async function waitForServerConfigStreamReady(): Promise<void> {
+  const previousNotificationId = getServerConfigUpdatedNotification()?.id ?? 0;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    rpcHarness.emitStreamValue(WS_METHODS.subscribeServerConfig, {
+      version: 1,
+      type: "settingsUpdated",
+      payload: { settings: encodeServerSettings(fixture.serverConfig.settings) },
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          const notification = getServerConfigUpdatedNotification();
+          expect(notification?.id).toBeGreaterThan(previousNotificationId);
+          expect(notification?.source).toBe("settingsUpdated");
+        },
+        { timeout: 200, interval: 16 },
+      );
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  throw new Error("Timed out waiting for the server config stream to deliver updates.");
+}
+
 async function mountApp(): Promise<{ cleanup: () => Promise<void> }> {
   const host = document.createElement("div");
   host.style.position = "fixed";
@@ -287,7 +431,9 @@ async function mountApp(): Promise<{ cleanup: () => Promise<void> }> {
   host.style.overflow = "hidden";
   document.body.append(host);
 
-  const router = getRouter(createMemoryHistory({ initialEntries: [`/${THREAD_ID}`] }));
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${LOCAL_ENVIRONMENT_ID}/${THREAD_ID}`] }),
+  );
 
   const screen = await render(
     <AppAtomRegistryProvider>
@@ -296,8 +442,12 @@ async function mountApp(): Promise<{ cleanup: () => Promise<void> }> {
     { container: host },
   );
   await waitForComposerEditor();
+  await waitForToastViewport();
   await waitForInitialWsSubscriptions();
+  await waitForWsConnection();
   await waitForServerConfigSnapshot();
+  await waitForServerConfigStreamReady();
+  await waitForNoToasts();
 
   return {
     cleanup: async () => {
@@ -341,25 +491,46 @@ describe("Keybindings update toast", () => {
             {
               version: 1,
               type: "snapshot",
-              config: fixture.serverConfig,
+              config: encodeServerConfig(fixture.serverConfig),
+            },
+          ];
+        }
+        if (request._tag === ORCHESTRATION_WS_METHODS.subscribeShell) {
+          return [
+            {
+              kind: "snapshot",
+              snapshot: toShellSnapshot(fixture.snapshot),
+            },
+          ];
+        }
+        if (
+          request._tag === ORCHESTRATION_WS_METHODS.subscribeThread &&
+          request.threadId === THREAD_ID
+        ) {
+          return [
+            {
+              kind: "snapshot",
+              snapshot: {
+                snapshotSequence: fixture.snapshot.snapshotSequence,
+                thread: fixture.snapshot.threads[0],
+              },
             },
           ];
         }
         return [];
       },
     });
-    await __resetNativeApiForTests();
+    await __resetLocalApiForTests();
     localStorage.clear();
     document.body.innerHTML = "";
     useComposerDraftStore.setState({
-      draftsByThreadId: {},
-      draftThreadsByThreadId: {},
-      projectDraftThreadIdByProjectId: {},
+      draftsByThreadKey: {},
+      draftThreadsByThreadKey: {},
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {},
     });
     useStore.setState({
-      projects: [],
-      threads: [],
-      bootstrapComplete: false,
+      activeEnvironmentId: null,
+      environmentStateById: {},
     });
   });
 
@@ -367,16 +538,20 @@ describe("Keybindings update toast", () => {
     document.body.innerHTML = "";
   });
 
-  it("shows a toast for each consecutive keybinding update with no issues", async () => {
+  it("coalesces rapid consecutive keybinding update toasts with no issues", async () => {
     const mounted = await mountApp();
 
     try {
       sendServerConfigUpdatedPush([]);
       await waitForToast("Keybindings updated", 1);
 
-      // Each server push represents a distinct file change, so it should produce its own toast.
+      // A single edit can produce several reload notifications as the direct update and
+      // filesystem watcher settle, so avoid stacking identical success toasts.
       sendServerConfigUpdatedPush([]);
-      await waitForToast("Keybindings updated", 2);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      const titles = queryToastTitles();
+      expect(titles.filter((title) => title === "Keybindings updated")).toHaveLength(1);
     } finally {
       await mounted.cleanup();
     }

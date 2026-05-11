@@ -10,6 +10,7 @@ import {
   ThreadId,
   type OrchestrationCommand,
   type OrchestrationReadModel,
+  ProviderInstanceId,
 } from "@t3tools/contracts";
 import { Effect, Exit, Layer, ManagedRuntime, Scope, Stream } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
@@ -46,6 +47,7 @@ function makeReadModel(input?: {
         title: "Project",
         workspaceRoot: "/tmp/project",
         defaultModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
           provider: "codex",
           model: "gpt-5.3-codex",
         },
@@ -61,6 +63,7 @@ function makeReadModel(input?: {
         projectId: ProjectId.makeUnsafe("project-1"),
         title: "Thread",
         modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
           provider: "codex",
           model: "gpt-5.3-codex",
         },
@@ -80,6 +83,7 @@ function makeReadModel(input?: {
           attachments: input?.queuedAttachments?.[index] ?? [],
           terminalContexts: input?.queuedTerminalContexts?.[index] ?? [],
           modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
             provider: "codex",
             model: "gpt-5.3-codex",
           },

@@ -17,7 +17,7 @@ const rows: TimelineRow[] = [
     durationStart: "2026-03-28T12:00:00.000Z",
     showCompletionDivider: false,
     message: {
-      id: MessageId.makeUnsafe("message-1"),
+      id: MessageId.make("message-1"),
       role: "assistant",
       text: "Needle in the response. Another needle is here.",
       createdAt: "2026-03-28T12:00:00.000Z",
@@ -40,7 +40,7 @@ const rows: TimelineRow[] = [
     durationStart: "2026-03-28T12:00:02.000Z",
     showCompletionDivider: false,
     message: {
-      id: MessageId.makeUnsafe("message-1a"),
+      id: MessageId.make("message-1a"),
       role: "assistant",
       text: [
         "See [thread search docs](https://example.com/thread-search) for **alpha marker** details.",
@@ -61,7 +61,7 @@ const rows: TimelineRow[] = [
     durationStart: "2026-03-28T12:00:05.000Z",
     showCompletionDivider: false,
     message: {
-      id: MessageId.makeUnsafe("message-1b"),
+      id: MessageId.make("message-1b"),
       role: "user",
       text: [
         "Visible composer text @terminal-1:1-5",
@@ -153,7 +153,7 @@ const rows: TimelineRow[] = [
     durationStart: "2026-03-28T12:00:25.000Z",
     showCompletionDivider: false,
     message: {
-      id: MessageId.makeUnsafe("message-empty"),
+      id: MessageId.make("message-empty"),
       role: "assistant",
       text: "",
       createdAt: "2026-03-28T12:00:25.000Z",

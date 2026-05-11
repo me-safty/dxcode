@@ -10,13 +10,29 @@ import {
   AntigravityIcon,
   CursorIcon,
   Icon,
+  KiroIcon,
   TraeIcon,
-  IntelliJIdeaIcon,
   VisualStudioCode,
+  VisualStudioCodeInsiders,
+  VSCodium,
   Zed,
 } from "../Icons";
+import {
+  AquaIcon,
+  CLionIcon,
+  DataGripIcon,
+  DataSpellIcon,
+  GoLandIcon,
+  IntelliJIdeaIcon,
+  PhpStormIcon,
+  PyCharmIcon,
+  RiderIcon,
+  RubyMineIcon,
+  RustRoverIcon,
+  WebStormIcon,
+} from "../JetBrainsIcons";
 import { isMacPlatform, isWindowsPlatform } from "~/lib/utils";
-import { readNativeApi } from "~/nativeApi";
+import { readLocalApi } from "~/localApi";
 
 const resolveOptions = (platform: string, availableEditors: ReadonlyArray<EditorId>) => {
   const baseOptions: ReadonlyArray<{ label: string; Icon: Icon; value: EditorId }> = [
@@ -31,18 +47,23 @@ const resolveOptions = (platform: string, availableEditors: ReadonlyArray<Editor
       value: "trae",
     },
     {
+      label: "Kiro",
+      Icon: KiroIcon,
+      value: "kiro",
+    },
+    {
       label: "VS Code",
       Icon: VisualStudioCode,
       value: "vscode",
     },
     {
       label: "VS Code Insiders",
-      Icon: VisualStudioCode,
+      Icon: VisualStudioCodeInsiders,
       value: "vscode-insiders",
     },
     {
       label: "VSCodium",
-      Icon: VisualStudioCode,
+      Icon: VSCodium,
       value: "vscodium",
     },
     {
@@ -59,6 +80,61 @@ const resolveOptions = (platform: string, availableEditors: ReadonlyArray<Editor
       label: "IntelliJ IDEA",
       Icon: IntelliJIdeaIcon,
       value: "idea",
+    },
+    {
+      label: "Aqua",
+      Icon: AquaIcon,
+      value: "aqua",
+    },
+    {
+      label: "CLion",
+      Icon: CLionIcon,
+      value: "clion",
+    },
+    {
+      label: "DataGrip",
+      Icon: DataGripIcon,
+      value: "datagrip",
+    },
+    {
+      label: "DataSpell",
+      Icon: DataSpellIcon,
+      value: "dataspell",
+    },
+    {
+      label: "GoLand",
+      Icon: GoLandIcon,
+      value: "goland",
+    },
+    {
+      label: "PhpStorm",
+      Icon: PhpStormIcon,
+      value: "phpstorm",
+    },
+    {
+      label: "PyCharm",
+      Icon: PyCharmIcon,
+      value: "pycharm",
+    },
+    {
+      label: "Rider",
+      Icon: RiderIcon,
+      value: "rider",
+    },
+    {
+      label: "RubyMine",
+      Icon: RubyMineIcon,
+      value: "rubymine",
+    },
+    {
+      label: "RustRover",
+      Icon: RustRoverIcon,
+      value: "rustrover",
+    },
+    {
+      label: "WebStorm",
+      Icon: WebStormIcon,
+      value: "webstorm",
     },
     {
       label: isMacPlatform(platform)
@@ -91,7 +167,7 @@ export const OpenInPicker = memo(function OpenInPicker({
 
   const openInEditor = useCallback(
     (editorId: EditorId | null) => {
-      const api = readNativeApi();
+      const api = readLocalApi();
       if (!api || !openInCwd) return;
       const editor = editorId ?? preferredEditor;
       if (!editor) return;
@@ -108,7 +184,7 @@ export const OpenInPicker = memo(function OpenInPicker({
 
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
-      const api = readNativeApi();
+      const api = readLocalApi();
       if (!isOpenFavoriteEditorShortcut(e, keybindings)) return;
       if (!api || !openInCwd) return;
       if (!preferredEditor) return;

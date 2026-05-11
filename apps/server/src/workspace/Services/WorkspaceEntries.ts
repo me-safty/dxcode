@@ -6,10 +6,16 @@
  *
  * @module WorkspaceEntries
  */
-import { Schema, ServiceMap } from "effect";
-import type { Effect } from "effect";
+import * as Schema from "effect/Schema";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
 
-import type { ProjectSearchEntriesInput, ProjectSearchEntriesResult } from "@t3tools/contracts";
+import type {
+  FilesystemBrowseInput,
+  FilesystemBrowseResult,
+  ProjectSearchEntriesInput,
+  ProjectSearchEntriesResult,
+} from "@t3tools/contracts";
 
 export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntriesError>()(
   "WorkspaceEntriesError",
@@ -21,11 +27,29 @@ export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntr
   },
 ) {}
 
+export class WorkspaceEntriesBrowseError extends Schema.TaggedErrorClass<WorkspaceEntriesBrowseError>()(
+  "WorkspaceEntriesBrowseError",
+  {
+    cwd: Schema.optional(Schema.String),
+    partialPath: Schema.String,
+    operation: Schema.String,
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
 /**
  * WorkspaceEntriesShape - Service API for workspace entry search and cache
  * invalidation.
  */
 export interface WorkspaceEntriesShape {
+  /**
+   * Browse matching directories for the provided partial path.
+   */
+  readonly browse: (
+    input: FilesystemBrowseInput,
+  ) => Effect.Effect<FilesystemBrowseResult, WorkspaceEntriesBrowseError>;
+
   /**
    * Search indexed workspace entries for files and directories matching the
    * provided query.
@@ -43,6 +67,6 @@ export interface WorkspaceEntriesShape {
 /**
  * WorkspaceEntries - Service tag for cached workspace entry search.
  */
-export class WorkspaceEntries extends ServiceMap.Service<WorkspaceEntries, WorkspaceEntriesShape>()(
+export class WorkspaceEntries extends Context.Service<WorkspaceEntries, WorkspaceEntriesShape>()(
   "t3/workspace/Services/WorkspaceEntries",
 ) {}

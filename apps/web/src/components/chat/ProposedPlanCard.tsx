@@ -1,4 +1,5 @@
 import { memo, useState, useId } from "react";
+import type { EnvironmentId } from "@t3tools/contracts";
 import {
   buildCollapsedProposedPlanPreviewMarkdown,
   buildProposedPlanMarkdownFilename,
@@ -23,19 +24,20 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import { toastManager } from "../ui/toast";
-import { readNativeApi } from "~/nativeApi";
-import { renderHighlightedText } from "./threadSearchHighlight";
+import { stackedThreadToast, toastManager } from "../ui/toast";
+import { readEnvironmentApi } from "~/environmentApi";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
   planMarkdown,
+  environmentId,
   cwd,
   workspaceRoot,
   searchQuery = "",
   searchActive = false,
 }: {
   planMarkdown: string;
+  environmentId?: EnvironmentId;
   cwd: string | undefined;
   workspaceRoot: string | undefined;
   searchQuery?: string;
@@ -47,11 +49,13 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
   const { copyToClipboard, isCopied } = useCopyToClipboard({
     onError: (error) => {
-      toastManager.add({
-        type: "error",
-        title: "Could not copy plan",
-        description: error instanceof Error ? error.message : "An error occurred while copying.",
-      });
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not copy plan",
+          description: error instanceof Error ? error.message : "An error occurred while copying.",
+        }),
+      );
     },
   });
   const savePathInputId = useId();
@@ -59,8 +63,6 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const lineCount = planMarkdown.split("\n").length;
   const canCollapse = planMarkdown.length > 900 || lineCount > 20;
   const displayedPlanMarkdown = stripDisplayedPlanMarkdown(planMarkdown);
-  const searchExpanded = canCollapse && searchQuery.trim().length > 0;
-  const showExpandedPlan = expanded || searchExpanded;
   const collapsedPreview = canCollapse
     ? buildCollapsedProposedPlanPreviewMarkdown(planMarkdown, { maxLines: 10 })
     : null;
@@ -77,11 +79,13 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
 
   const openSaveDialog = () => {
     if (!workspaceRoot) {
-      toastManager.add({
-        type: "error",
-        title: "Workspace path is unavailable",
-        description: "This thread does not have a workspace path to save into.",
-      });
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Workspace path is unavailable",
+          description: "This thread does not have a workspace path to save into.",
+        }),
+      );
       return;
     }
     setSavePath((existing) => (existing.length > 0 ? existing : downloadFilename));
@@ -89,8 +93,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   };
 
   const handleSaveToWorkspace = () => {
-    const api = readNativeApi();
     const relativePath = savePath.trim();
+    const api = environmentId ? readEnvironmentApi(environmentId) : null;
     if (!api || !workspaceRoot) {
       return;
     }
@@ -118,11 +122,13 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         });
       })
       .catch((error) => {
-        toastManager.add({
-          type: "error",
-          title: "Could not save plan",
-          description: error instanceof Error ? error.message : "An error occurred while saving.",
-        });
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not save plan",
+            description: error instanceof Error ? error.message : "An error occurred while saving.",
+          }),
+        );
       })
       .then(
         () => {
@@ -139,11 +145,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Badge variant="secondary">Plan</Badge>
-          <p className="truncate text-sm font-medium text-foreground">
-            {renderHighlightedText(title, searchQuery, `proposed-plan-title:${title}`, {
-              active: searchActive,
-            })}
-          </p>
+          <p className="truncate text-sm font-medium text-foreground">{title}</p>
         </div>
         <Menu>
           <MenuTrigger
@@ -156,20 +158,18 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
               {isCopied ? "Copied!" : "Copy to clipboard"}
             </MenuItem>
             <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
-            <MenuItem onClick={openSaveDialog} disabled={!workspaceRoot || isSavingToWorkspace}>
+            <MenuItem
+              onClick={openSaveDialog}
+              disabled={!environmentId || !workspaceRoot || isSavingToWorkspace}
+            >
               Save to workspace
             </MenuItem>
           </MenuPopup>
         </Menu>
       </div>
       <div className="mt-4">
-        <div
-          className={cn(
-            "relative",
-            canCollapse && !showExpandedPlan && "max-h-104 overflow-hidden",
-          )}
-        >
-          {canCollapse && !showExpandedPlan ? (
+        <div className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")}>
+          {canCollapse && !expanded ? (
             <ChatMarkdown
               text={collapsedPreview ?? ""}
               cwd={cwd}
@@ -186,11 +186,11 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
               searchActive={searchActive}
             />
           )}
-          {canCollapse && !showExpandedPlan ? (
+          {canCollapse && !expanded ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-linear-to-t from-card/95 via-card/80 to-transparent" />
           ) : null}
         </div>
-        {canCollapse && !searchExpanded ? (
+        {canCollapse ? (
           <div className="mt-4 flex justify-center">
             <Button
               size="sm"

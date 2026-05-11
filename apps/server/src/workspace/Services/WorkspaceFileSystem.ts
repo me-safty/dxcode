@@ -6,8 +6,9 @@
  *
  * @module WorkspaceFileSystem
  */
-import { Schema, ServiceMap } from "effect";
-import type { Effect } from "effect";
+import * as Schema from "effect/Schema";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
 
 import type { ProjectWriteFileInput, ProjectWriteFileResult } from "@t3tools/contracts";
 import { WorkspacePathOutsideRootError } from "./WorkspacePaths.ts";
@@ -44,7 +45,7 @@ export interface WorkspaceFileSystemShape {
 /**
  * WorkspaceFileSystem - Service tag for workspace file operations.
  */
-export class WorkspaceFileSystem extends ServiceMap.Service<
+export class WorkspaceFileSystem extends Context.Service<
   WorkspaceFileSystem,
   WorkspaceFileSystemShape
 >()("t3/workspace/Services/WorkspaceFileSystem") {}
