@@ -1,9 +1,11 @@
-import { promises as fs } from "node:fs";
-import os from "node:os";
-import path from "node:path";
+const fs = require("node:fs").promises as typeof import("node:fs/promises");
+const os = require("node:os") as typeof import("node:os");
+const path = require("node:path") as typeof import("node:path");
 
 import { TurnId as TurnIdSchema, type TurnId } from "@t3tools/contracts";
 import { buildGeminiThinkingModelConfigAliases } from "@t3tools/shared/model";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
 
 import { asArray, asNumber, asRecord, trimToUndefined } from "./jsonValue.ts";
 
@@ -105,8 +107,12 @@ function isStoredGeminiSession(value: unknown): value is Record<string, unknown>
   );
 }
 
-function makeGeminiSessionFileName(sessionId: string): string {
-  const timestamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
+async function currentIsoTimestamp(): Promise<string> {
+  return DateTime.formatIso(await Effect.runPromise(DateTime.now));
+}
+
+async function makeGeminiSessionFileName(sessionId: string): Promise<string> {
+  const timestamp = (await currentIsoTimestamp()).replaceAll(":", "-").replaceAll(".", "-");
   return `${GEMINI_SESSION_FILE_PREFIX}${timestamp}-${sessionId.slice(0, 8)}.json`;
 }
 
@@ -177,9 +183,12 @@ export async function cloneGeminiSessionFile(
   const nextSession = {
     ...storedSession,
     sessionId,
-    lastUpdated: new Date().toISOString(),
+    lastUpdated: await currentIsoTimestamp(),
   };
-  const destinationPath = path.join(path.dirname(sourcePath), makeGeminiSessionFileName(sessionId));
+  const destinationPath = path.join(
+    path.dirname(sourcePath),
+    await makeGeminiSessionFileName(sessionId),
+  );
   await fs.writeFile(destinationPath, `${JSON.stringify(nextSession, null, 2)}\n`, "utf8");
   return destinationPath;
 }

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
+const { chmodSync, mkdtempSync, rmSync, writeFileSync } =
+  require("node:fs") as typeof import("node:fs");
+const os = require("node:os") as typeof import("node:os");
+const path = require("node:path") as typeof import("node:path");
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -11,7 +12,10 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import { buildGeminiThinkingModelConfigAliases } from "@t3tools/shared/model";
-import { Effect, Layer, Ref, Stream } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { ServerConfig } from "../../config.ts";
@@ -404,9 +408,9 @@ describe("GeminiAdapterLive", () => {
             schemaVersion: 1,
             sessionId: expect.any(String),
           });
-          expect(JSON.stringify(startedTurn.resumeCursor)).not.toContain("snapshots");
-          expect(JSON.stringify(startedTurn.resumeCursor)).not.toContain("filePath");
-          expect(JSON.stringify(startedTurn.resumeCursor)).not.toContain("items");
+          expect(startedTurn.resumeCursor).not.toHaveProperty("snapshots");
+          expect(startedTurn.resumeCursor).not.toHaveProperty("filePath");
+          expect(startedTurn.resumeCursor).not.toHaveProperty("items");
         }).pipe(Effect.provide(makeHarness())),
       ),
     );

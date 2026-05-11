@@ -7,7 +7,7 @@
  *
  * @module GeminiAdapter
  */
-import { Context } from "effect";
+import * as Context from "effect/Context";
 
 import type { ProviderDriverKind } from "@t3tools/contracts";
 import type { ProviderAdapterError } from "../Errors.ts";

@@ -1,5 +1,9 @@
 import { GeminiSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
-import { Duration, Effect, FileSystem, Schema, Stream } from "effect";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerConfig } from "../../config.ts";
@@ -29,6 +33,7 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
   homebrewFormula: null,
   nativeUpdate: null,
 });
+const decodeDefaultGeminiSettings = Schema.decodeSync(GeminiSettings);
 
 export type GeminiDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -58,7 +63,7 @@ export const GeminiDriver: ProviderDriver<GeminiSettings, GeminiDriverEnv> = {
     supportsMultipleInstances: true,
   },
   configSchema: GeminiSettings,
-  defaultConfig: (): GeminiSettings => Schema.decodeSync(GeminiSettings)({}),
+  defaultConfig: (): GeminiSettings => decodeDefaultGeminiSettings({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -87,7 +92,8 @@ export const GeminiDriver: ProviderDriver<GeminiSettings, GeminiDriverEnv> = {
         getSettings: Effect.succeed(effectiveConfig),
         streamSettings: Stream.never,
         haveSettingsChanged: () => false,
-        initialSnapshot: (settings) => stampIdentity(makePendingGeminiProvider(settings)),
+        initialSnapshot: (settings) =>
+          makePendingGeminiProvider(settings).pipe(Effect.map(stampIdentity)),
         checkProvider,
         refreshInterval: SNAPSHOT_REFRESH_INTERVAL,
       }).pipe(

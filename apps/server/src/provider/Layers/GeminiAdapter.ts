@@ -6,7 +6,7 @@
  *
  * @module GeminiAdapterLive
  */
-import path from "node:path";
+const path = require("node:path") as typeof import("node:path");
 
 import {
   ApprovalRequestId,
@@ -25,20 +25,19 @@ import {
   ProviderDriverKind,
 } from "@t3tools/contracts";
 import { resolveGeminiApiModelId } from "@t3tools/shared/model";
-import {
-  Deferred,
-  Effect,
-  Exit,
-  Fiber,
-  FileSystem,
-  Layer,
-  Option,
-  Queue,
-  Scope,
-  Semaphore,
-  Stream,
-  SynchronizedRef,
-} from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
+import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
@@ -90,6 +89,10 @@ import { asNumber, asRecord, trimToUndefined } from "../jsonValue.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = ProviderDriverKind.make("gemini");
+
+function currentIsoTimestamp(): string {
+  return DateTime.formatIso(Effect.runSync(DateTime.now));
+}
 
 interface GeminiPendingApproval {
   readonly decision: Deferred.Deferred<ProviderApprovalDecision>;
@@ -389,7 +392,7 @@ function updateGeminiSession(
   context.session = {
     ...context.session,
     ...patch,
-    updatedAt: new Date().toISOString(),
+    updatedAt: currentIsoTimestamp(),
   };
   return context.session;
 }
@@ -506,7 +509,7 @@ export function makeGeminiAdapter(
 
     const makeEventStamp = () => ({
       eventId: EventId.make(crypto.randomUUID()),
-      createdAt: new Date().toISOString(),
+      createdAt: currentIsoTimestamp(),
     });
 
     const makeEventBase = (context: GeminiSessionContext) => ({
@@ -1382,7 +1385,7 @@ export function makeGeminiAdapter(
             pendingApprovals.set(approvalRequestId, { decision });
             const detail = isAskUserPermissionRequest(permissionRequest)
               ? "Gemini CLI requested user input, but Gemini ACP did not include the question payload. Accepting this request will continue with an empty answer set."
-              : (permissionRequest.detail ?? JSON.stringify(params).slice(0, 2000));
+              : (permissionRequest.detail ?? String(params).slice(0, 2000));
 
             yield* offerRuntimeEvent(
               makeAcpRequestOpenedEvent({
@@ -1434,7 +1437,7 @@ export function makeGeminiAdapter(
           ),
         );
 
-        const now = new Date().toISOString();
+        const now = DateTime.formatIso(yield* DateTime.now);
         const sessionSetupRecord = asRecord(started.sessionSetupResult);
         context = {
           threadId: input.threadId,

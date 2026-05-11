@@ -11,7 +11,9 @@ import {
   geminiCapabilitiesForModel,
 } from "@t3tools/shared/model";
 import { formatGeminiModelDisplayName } from "@t3tools/shared/gemini";
-import { Cause, Effect, Option } from "effect";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { makeGeminiAcpRuntime } from "./acp/GeminiAcpSupport.ts";

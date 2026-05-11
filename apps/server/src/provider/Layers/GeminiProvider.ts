@@ -1,6 +1,9 @@
 import { ProviderDriverKind, type GeminiSettings } from "@t3tools/contracts";
 import { formatGeminiModelDisplayName } from "@t3tools/shared/gemini";
-import { Effect, Option, Result } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -53,7 +56,7 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
   ChildProcessSpawner.ChildProcessSpawner | ServerConfig
 > {
   const serverConfig = yield* ServerConfig;
-  const checkedAt = new Date().toISOString();
+  const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const fallbackModels = providerModelsFromSettings(
     [],
     PROVIDER,
@@ -167,20 +170,38 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
   });
 });
 
-export const makePendingGeminiProvider = (geminiSettings: GeminiSettings): ServerProviderDraft => {
-  const checkedAt = new Date().toISOString();
-  const models = providerModelsFromSettings(
-    [],
-    PROVIDER,
-    geminiSettings.customModels,
-    DEFAULT_GEMINI_MODEL_CAPABILITIES,
-    { formatCustomModelName: formatGeminiModelDisplayName },
-  );
+export const makePendingGeminiProvider = (
+  geminiSettings: GeminiSettings,
+): Effect.Effect<ServerProviderDraft> =>
+  Effect.gen(function* () {
+    const checkedAt = DateTime.formatIso(yield* DateTime.now);
+    const models = providerModelsFromSettings(
+      [],
+      PROVIDER,
+      geminiSettings.customModels,
+      DEFAULT_GEMINI_MODEL_CAPABILITIES,
+      { formatCustomModelName: formatGeminiModelDisplayName },
+    );
 
-  if (!geminiSettings.enabled) {
+    if (!geminiSettings.enabled) {
+      return buildServerProvider({
+        presentation: GEMINI_PRESENTATION,
+        enabled: false,
+        checkedAt,
+        models,
+        probe: {
+          installed: false,
+          version: null,
+          status: "warning",
+          auth: { status: "unknown" },
+          message: "Gemini is disabled in T3 Code settings.",
+        },
+      });
+    }
+
     return buildServerProvider({
       presentation: GEMINI_PRESENTATION,
-      enabled: false,
+      enabled: true,
       checkedAt,
       models,
       probe: {
@@ -188,22 +209,7 @@ export const makePendingGeminiProvider = (geminiSettings: GeminiSettings): Serve
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Gemini is disabled in T3 Code settings.",
+        message: "Gemini provider status has not been checked in this session yet.",
       },
     });
-  }
-
-  return buildServerProvider({
-    presentation: GEMINI_PRESENTATION,
-    enabled: true,
-    checkedAt,
-    models,
-    probe: {
-      installed: false,
-      version: null,
-      status: "warning",
-      auth: { status: "unknown" },
-      message: "Gemini provider status has not been checked in this session yet.",
-    },
   });
-};

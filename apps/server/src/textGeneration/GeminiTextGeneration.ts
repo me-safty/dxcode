@@ -1,4 +1,7 @@
-import { Effect, Option, Schema, Stream } from "effect";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { type GeminiSettings, type ModelSelection, TextGenerationError } from "@t3tools/contracts";
@@ -33,6 +36,7 @@ const GeminiOutputEnvelope = Schema.Struct({
   session_id: Schema.optional(Schema.String),
   stats: Schema.optional(Schema.Unknown),
 });
+const decodeGeminiOutputEnvelope = Schema.decodeEffect(Schema.fromJsonString(GeminiOutputEnvelope));
 
 export const makeGeminiTextGeneration = Effect.fn("makeGeminiTextGeneration")(function* (
   geminiSettings: GeminiSettings,
@@ -169,9 +173,7 @@ export const makeGeminiTextGeneration = Effect.fn("makeGeminiTextGeneration")(fu
       ),
     );
 
-    const envelope = yield* Schema.decodeEffect(Schema.fromJsonString(GeminiOutputEnvelope))(
-      rawStdout,
-    ).pipe(
+    const envelope = yield* decodeGeminiOutputEnvelope(rawStdout).pipe(
       Effect.catchTag("SchemaError", (cause) =>
         Effect.fail(
           new TextGenerationError({
