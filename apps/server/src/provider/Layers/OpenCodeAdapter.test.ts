@@ -395,6 +395,41 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("clears active session state after interrupting a turn", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-interrupt-turn");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const started = yield* adapter.sendTurn({
+        threadId,
+        input: "Stop this",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("opencode"),
+          model: "openai/gpt-5",
+        },
+      });
+      const runningSessions = yield* adapter.listSessions();
+      const runningSession = runningSessions.find((session) => session.threadId === threadId);
+
+      assert.equal(runningSession?.status, "running");
+      assert.equal(runningSession?.activeTurnId, started.turnId);
+
+      yield* adapter.interruptTurn(threadId, started.turnId);
+      const interruptedSessions = yield* adapter.listSessions();
+      const interruptedSession = interruptedSessions.find((session) => session.threadId === threadId);
+
+      assert.equal(runtimeMock.state.abortCalls.at(-1), "http://127.0.0.1:9999/session");
+      assert.equal(interruptedSession?.status, "ready");
+      assert.equal(interruptedSession?.activeTurnId, undefined);
+      assert.equal(interruptedSession?.lastError, undefined);
+    }),
+  );
+
   it.effect("passes agent and variant options for the adapter's bound custom instance id", () => {
     const instanceId = ProviderInstanceId.make("opencode_zen");
     const adapterLayer = Layer.effect(
