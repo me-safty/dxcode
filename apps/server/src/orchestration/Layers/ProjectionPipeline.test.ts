@@ -2172,6 +2172,163 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
   ),
 );
 
+it.effect(
+  "settles running turns during a clean projection rebuild without thread latest-turn state",
+  () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const projectId = ProjectId.make("project-rebuild-settle");
+      const threadId = ThreadId.make("thread-rebuild-settle");
+      const turnId = TurnId.make("turn-rebuild-settle");
+      const messageId = MessageId.make("message-rebuild-settle");
+      const createdAt = "2026-02-26T15:00:00.000Z";
+      const runningAt = "2026-02-26T15:00:05.000Z";
+      const stoppedAt = "2026-02-26T15:00:10.000Z";
+
+      yield* eventStore.append({
+        type: "project.created",
+        eventId: EventId.make("evt-rebuild-settle-project"),
+        aggregateKind: "project",
+        aggregateId: projectId,
+        occurredAt: createdAt,
+        commandId: CommandId.make("cmd-rebuild-settle-project"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-rebuild-settle-project"),
+        metadata: {},
+        payload: {
+          projectId,
+          title: "Project Rebuild Settle",
+          workspaceRoot: "/tmp/project-rebuild-settle",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt,
+          updatedAt: createdAt,
+        },
+      });
+      yield* eventStore.append({
+        type: "thread.created",
+        eventId: EventId.make("evt-rebuild-settle-thread"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: createdAt,
+        commandId: CommandId.make("cmd-rebuild-settle-thread"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-rebuild-settle-thread"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId,
+          title: "Thread Rebuild Settle",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+          updatedAt: createdAt,
+        },
+      });
+      yield* eventStore.append({
+        type: "thread.turn-start-requested",
+        eventId: EventId.make("evt-rebuild-settle-turn-start"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: createdAt,
+        commandId: CommandId.make("cmd-rebuild-settle-turn-start"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-rebuild-settle-turn-start"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          runtimeMode: "approval-required",
+          createdAt,
+        },
+      });
+      yield* eventStore.append({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-rebuild-settle-running"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: runningAt,
+        commandId: CommandId.make("cmd-rebuild-settle-running"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-rebuild-settle-running"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            runtimeMode: "approval-required",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: runningAt,
+          },
+        },
+      });
+      yield* eventStore.append({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-rebuild-settle-stopped"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: stoppedAt,
+        commandId: CommandId.make("cmd-rebuild-settle-stopped"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-rebuild-settle-stopped"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "stopped",
+            providerName: "codex",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            lastError: "Provider runtime is no longer active.",
+            updatedAt: stoppedAt,
+          },
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      const turnRows = yield* sql<{
+        readonly turnId: string;
+        readonly state: string;
+        readonly completedAt: string | null;
+      }>`
+      SELECT
+        turn_id AS "turnId",
+        state,
+        completed_at AS "completedAt"
+      FROM projection_turns
+      WHERE thread_id = ${threadId}
+        AND turn_id = ${turnId}
+    `;
+
+      assert.deepEqual(turnRows, [
+        {
+          turnId,
+          state: "interrupted",
+          completedAt: stoppedAt,
+        },
+      ]);
+    }).pipe(
+      Effect.provide(
+        makeProjectionPipelinePrefixedTestLayer("t3-projection-pipeline-rebuild-settle-"),
+      ),
+    ),
+);
+
 const engineLayer = it.layer(
   OrchestrationEngineLive.pipe(
     Layer.provide(OrchestrationProjectionSnapshotQueryLive),

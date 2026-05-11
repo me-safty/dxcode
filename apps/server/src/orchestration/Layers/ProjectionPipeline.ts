@@ -3,6 +3,7 @@ import {
   type ChatAttachment,
   type OrchestrationEvent,
   ThreadId,
+  type TurnId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -712,9 +713,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           if (Option.isNone(existingRow)) {
             return;
           }
+          const latestTurnId =
+            event.payload.session.activeTurnId ??
+            (event.payload.session.status === "running" ? null : existingRow.value.latestTurnId);
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
-            latestTurnId: event.payload.session.activeTurnId,
+            latestTurnId,
             updatedAt: event.occurredAt,
           });
           yield* refreshThreadShellSummary(event.payload.threadId);
@@ -998,6 +1002,30 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         case "thread.session-set": {
           const turnId = event.payload.session.activeTurnId;
           if (turnId === null || event.payload.session.status !== "running") {
+            const turns = yield* projectionTurnRepository.listByThreadId({
+              threadId: event.payload.threadId,
+            });
+            const latestRunningTurn = turns
+              .filter(
+                (turn): turn is ProjectionTurn & { readonly turnId: TurnId } =>
+                  turn.turnId !== null && turn.state === "running",
+              )
+              .reduce<(ProjectionTurn & { readonly turnId: TurnId }) | null>(
+                (latest, turn) =>
+                  latest === null || turn.requestedAt > latest.requestedAt ? turn : latest,
+                null,
+              );
+            if (latestRunningTurn === null) {
+              return;
+            }
+
+            yield* projectionTurnRepository.upsertByTurnId({
+              ...latestRunningTurn,
+              state: "interrupted",
+              startedAt: latestRunningTurn.startedAt ?? event.payload.session.updatedAt,
+              requestedAt: latestRunningTurn.requestedAt ?? event.payload.session.updatedAt,
+              completedAt: latestRunningTurn.completedAt ?? event.payload.session.updatedAt,
+            });
             return;
           }
 

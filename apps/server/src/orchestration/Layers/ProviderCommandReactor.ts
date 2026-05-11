@@ -15,9 +15,11 @@ import {
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -88,6 +90,8 @@ const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const DEFAULT_THREAD_TITLE = "New thread";
+const STALE_RUNNING_SESSION_DETAIL =
+  "Provider runtime is no longer active. Start a new turn to reconnect this thread.";
 
 export function providerErrorLabel(value: string | undefined): string {
   const normalized = value?.trim();
@@ -278,6 +282,57 @@ const make = Effect.gen(function* () {
       },
       createdAt: input.createdAt,
     });
+  });
+
+  const reconcileStaleRunningSessions = Effect.fn("reconcileStaleRunningSessions")(function* () {
+    const snapshot = yield* projectionSnapshotQuery.getSnapshot();
+    const liveSessionsExit = yield* Effect.exit(providerService.listSessions());
+    if (Exit.isFailure(liveSessionsExit)) {
+      // Runtime state is unknowable here; leave projected sessions untouched rather than
+      // incorrectly stopping work that may still be active while the provider recovers.
+      yield* Effect.logWarning(
+        "provider command reactor skipped stale session reconciliation because live sessions could not be listed",
+        {
+          cause: Cause.pretty(liveSessionsExit.cause),
+        },
+      );
+      return;
+    }
+
+    const liveSessionsByThreadId = new Map(
+      liveSessionsExit.value.map((session) => [session.threadId, session]),
+    );
+    const now = DateTime.formatIso(yield* DateTime.now);
+    yield* Effect.forEach(
+      snapshot.threads,
+      (thread) => {
+        const session = thread.session;
+        if (session === null || session.status !== "running" || session.activeTurnId === null) {
+          return Effect.void;
+        }
+
+        const liveSession = liveSessionsByThreadId.get(thread.id);
+        if (
+          liveSession?.status === "running" &&
+          liveSession.activeTurnId === session.activeTurnId
+        ) {
+          return Effect.void;
+        }
+
+        return setThreadSession({
+          threadId: thread.id,
+          session: {
+            ...session,
+            status: "stopped",
+            activeTurnId: null,
+            lastError: session.lastError ?? STALE_RUNNING_SESSION_DETAIL,
+            updatedAt: now,
+          },
+          createdAt: now,
+        });
+      },
+      { discard: true },
+    );
   });
 
   const resolveProject = Effect.fnUntraced(function* (projectId: ProjectId) {
@@ -909,8 +964,31 @@ const make = Effect.gen(function* () {
     }
 
     const now = event.payload.createdAt;
+    let stopFailureDetail: string | null = null;
     if (thread.session && thread.session.status !== "stopped") {
-      yield* providerService.stopSession({ threadId: thread.id });
+      const stopExit = yield* Effect.exit(providerService.stopSession({ threadId: thread.id }));
+      if (Exit.isFailure(stopExit)) {
+        stopFailureDetail = formatFailureDetail(stopExit.cause);
+        yield* appendProviderFailureActivity({
+          threadId: thread.id,
+          kind: "provider.session.stop.failed",
+          summary: "Provider session stop failed",
+          detail: stopFailureDetail,
+          turnId: thread.session.activeTurnId,
+          createdAt: now,
+        }).pipe(
+          Effect.catchCause((activityCause) =>
+            Effect.logWarning(
+              "provider command reactor failed to record provider session stop failure",
+              {
+                threadId: thread.id,
+                cause: Cause.pretty(activityCause),
+                originalCause: Cause.pretty(stopExit.cause),
+              },
+            ),
+          ),
+        );
+      }
     }
 
     yield* setThreadSession({
@@ -924,7 +1002,7 @@ const make = Effect.gen(function* () {
           : {}),
         runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
         activeTurnId: null,
-        lastError: thread.session?.lastError ?? null,
+        lastError: stopFailureDetail ?? thread.session?.lastError ?? null,
         updatedAt: now,
       },
       createdAt: now,
@@ -1005,6 +1083,13 @@ const make = Effect.gen(function* () {
 
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent),
+    );
+    yield* reconcileStaleRunningSessions().pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("provider command reactor failed to reconcile stale running sessions", {
+          cause: Cause.pretty(cause),
+        }),
+      ),
     );
   });
 
