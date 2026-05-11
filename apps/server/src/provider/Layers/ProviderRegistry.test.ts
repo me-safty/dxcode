@@ -456,7 +456,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             Effect.forkChild,
           );
 
-          yield* TestClock.adjust("8 seconds");
+          yield* Effect.yieldNow;
+          yield* TestClock.adjust("11 seconds");
           yield* Effect.yieldNow;
 
           const status = yield* Fiber.join(statusFiber);
