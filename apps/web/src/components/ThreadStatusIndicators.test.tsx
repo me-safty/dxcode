@@ -2,6 +2,7 @@ import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
 import {
   EnvironmentId,
   ProjectId,
+  ProviderDriverKind,
   ThreadId,
   type OrchestrationLatestTurn,
 } from "@t3tools/contracts";
@@ -34,7 +35,7 @@ function makeThread(overrides: Partial<SidebarThreadSummary> = {}): SidebarThrea
     title: "Thread",
     interactionMode: "default",
     session: {
-      provider: "codex",
+      provider: ProviderDriverKind.make("codex"),
       status: "ready",
       createdAt: "2026-03-09T10:00:00.000Z",
       updatedAt: "2026-03-09T10:06:00.000Z",
