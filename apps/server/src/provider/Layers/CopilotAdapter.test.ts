@@ -310,7 +310,7 @@ it.layer(CopilotAdapterTestLayer)("CopilotAdapterLive", (it) => {
       }),
   );
 
-  it.effect("continues processing SDK events after one event handler fails", () =>
+  it.effect("ignores empty SDK tool progress messages without failing the session", () =>
     Effect.gen(function* () {
       const adapter = yield* CopilotAdapter;
       const threadId = asThreadId("copilot-sdk-event-queue-recovers-after-handler-failure");
@@ -377,7 +377,9 @@ it.layer(CopilotAdapterTestLayer)("CopilotAdapterLive", (it) => {
       yield* Fiber.interrupt(runtimeEventsFiber).pipe(Effect.ignore);
 
       const runtimeError = runtimeEvents.find((event) => event.type === "runtime.error");
-      assert.equal(runtimeError?.type, "runtime.error");
+      const toolProgress = runtimeEvents.find((event) => event.type === "tool.progress");
+      assert.equal(runtimeError, undefined);
+      assert.equal(toolProgress, undefined);
       assert.equal(completed?.type, "turn.completed");
       if (completed?.type === "turn.completed") {
         assert.equal(String(completed.turnId), String(turn.turnId));
