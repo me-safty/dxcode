@@ -899,11 +899,24 @@ export const ChatComposer = memo(
           }),
         );
         const query = composerTrigger.query.trim().toLowerCase();
+        const skillItems = searchProviderSkills(selectedProviderStatus?.skills ?? [], query).map(
+          (skill) => ({
+            id: `skill:${selectedProvider}:${skill.name}`,
+            type: "skill" as const,
+            provider: selectedProvider,
+            skill,
+            label: formatProviderSkillDisplayName(skill),
+            description:
+              skill.shortDescription ??
+              skill.description ??
+              (skill.scope ? `${skill.scope} skill` : "Run provider skill"),
+          }),
+        );
         const slashCommandItems = [...builtInSlashCommandItems, ...providerSlashCommandItems];
         if (!query) {
-          return slashCommandItems;
+          return [...slashCommandItems, ...skillItems];
         }
-        return searchSlashCommandItems(slashCommandItems, query);
+        return [...searchSlashCommandItems(slashCommandItems, query), ...skillItems];
       }
       if (composerTrigger.kind === "skill") {
         return searchProviderSkills(
