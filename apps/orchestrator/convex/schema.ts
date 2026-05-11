@@ -39,8 +39,8 @@ const workSessionStatus = v.union(
   v.literal("interrupted"),
   v.literal("superseded"),
 );
-const sandboxProviderKind = v.union(v.literal("local"), v.literal("modal"));
-const sandboxLifecycleStatus = v.union(
+const runtimeProviderKind = v.literal("local");
+const runtimeLifecycleStatus = v.union(
   v.literal("requested"),
   v.literal("queued"),
   v.literal("provisioning"),
@@ -57,21 +57,10 @@ const sandboxLifecycleStatus = v.union(
 export default defineSchema({
   projects: defineTable({
     repoName: v.string(),
-    sandboxWorkspaceRoot: v.string(),
+    workspaceRoot: v.string(),
     defaultBranch: v.string(),
     githubOwner: v.string(),
     githubRepo: v.string(),
-    sandboxProvider: v.optional(sandboxProviderKind),
-    modalAppName: v.optional(v.string()),
-    modalEnvironment: v.optional(v.string()),
-    modalImageTag: v.optional(v.string()),
-    modalCpu: v.optional(v.number()),
-    modalCpuLimit: v.optional(v.number()),
-    modalMemoryMiB: v.optional(v.number()),
-    modalMemoryLimitMiB: v.optional(v.number()),
-    modalTimeoutMs: v.optional(v.number()),
-    modalIdleTimeoutMs: v.optional(v.number()),
-    modalAllowedSecretNamesJson: v.optional(v.string()),
     linearTeamId: v.optional(v.string()),
     linearProjectId: v.optional(v.string()),
     t3ProjectId: v.optional(v.string()),
@@ -79,7 +68,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_repo", ["githubOwner", "githubRepo"])
-    .index("by_workspace_root", ["sandboxWorkspaceRoot"])
+    .index("by_workspace_root", ["workspaceRoot"])
     .index("by_linear_team_project", ["linearTeamId", "linearProjectId"]),
   tasks: defineTable({
     projectId: v.id("projects"),
@@ -130,21 +119,21 @@ export default defineSchema({
     t3TurnId: v.optional(v.string()),
     failureSummary: v.optional(v.string()),
     bridgeRunId: v.optional(v.string()),
-    sandboxId: v.optional(v.string()),
-    sandboxProviderKind: v.optional(sandboxProviderKind),
-    sandboxExternalId: v.optional(v.string()),
-    sandboxStatus: v.optional(sandboxLifecycleStatus),
-    sandboxEnvironmentId: v.optional(v.string()),
-    sandboxRuntimeEndpointUrl: v.optional(v.string()),
-    sandboxProviderRefJson: v.optional(v.string()),
-    sandboxServicesJson: v.optional(v.string()),
-    sandboxFailureSummary: v.optional(v.string()),
-    sandboxUpdatedAt: v.optional(v.number()),
+    runtimeId: v.optional(v.string()),
+    runtimeProviderKind: v.optional(runtimeProviderKind),
+    runtimeExternalId: v.optional(v.string()),
+    runtimeStatus: v.optional(runtimeLifecycleStatus),
+    environmentId: v.optional(v.string()),
+    runtimeEndpointUrl: v.optional(v.string()),
+    runtimeProviderRefJson: v.optional(v.string()),
+    runtimeServicesJson: v.optional(v.string()),
+    runtimeFailureSummary: v.optional(v.string()),
+    runtimeUpdatedAt: v.optional(v.number()),
   })
     .index("by_task_updated", ["taskId", "updatedAt"])
     .index("by_t3_thread", ["t3ThreadId"])
     .index("by_bridge_run", ["bridgeRunId"])
-    .index("by_sandbox_id", ["sandboxId"]),
+    .index("by_runtime_id", ["runtimeId"]),
   taskEvents: defineTable({
     taskId: v.id("tasks"),
     eventKey: v.optional(v.string()),

@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import * as DateTime from "effect/DateTime";
 
 import { mutation, query } from "./_generated/server.js";
 
@@ -11,8 +12,8 @@ const workSessionStatus = v.union(
   v.literal("interrupted"),
   v.literal("superseded"),
 );
-const sandboxProviderKind = v.union(v.literal("local"), v.literal("modal"));
-const sandboxLifecycleStatus = v.union(
+const runtimeProviderKind = v.literal("local");
+const runtimeLifecycleStatus = v.union(
   v.literal("requested"),
   v.literal("queued"),
   v.literal("provisioning"),
@@ -39,16 +40,16 @@ function workSessionReturn() {
     t3TurnId: v.optional(v.string()),
     failureSummary: v.optional(v.string()),
     bridgeRunId: v.optional(v.string()),
-    sandboxId: v.optional(v.string()),
-    sandboxProviderKind: v.optional(sandboxProviderKind),
-    sandboxExternalId: v.optional(v.string()),
-    sandboxStatus: v.optional(sandboxLifecycleStatus),
-    sandboxEnvironmentId: v.optional(v.string()),
-    sandboxRuntimeEndpointUrl: v.optional(v.string()),
-    sandboxProviderRefJson: v.optional(v.string()),
-    sandboxServicesJson: v.optional(v.string()),
-    sandboxFailureSummary: v.optional(v.string()),
-    sandboxUpdatedAt: v.optional(v.number()),
+    runtimeId: v.optional(v.string()),
+    runtimeProviderKind: v.optional(runtimeProviderKind),
+    runtimeExternalId: v.optional(v.string()),
+    runtimeStatus: v.optional(runtimeLifecycleStatus),
+    environmentId: v.optional(v.string()),
+    runtimeEndpointUrl: v.optional(v.string()),
+    runtimeProviderRefJson: v.optional(v.string()),
+    runtimeServicesJson: v.optional(v.string()),
+    runtimeFailureSummary: v.optional(v.string()),
+    runtimeUpdatedAt: v.optional(v.number()),
   });
 }
 
@@ -65,28 +66,24 @@ function toWorkSession(row: any) {
     ...(row.t3TurnId !== undefined ? { t3TurnId: row.t3TurnId } : {}),
     ...(row.failureSummary !== undefined ? { failureSummary: row.failureSummary } : {}),
     ...(row.bridgeRunId !== undefined ? { bridgeRunId: row.bridgeRunId } : {}),
-    ...(row.sandboxId !== undefined ? { sandboxId: row.sandboxId } : {}),
-    ...(row.sandboxProviderKind !== undefined
-      ? { sandboxProviderKind: row.sandboxProviderKind }
+    ...(row.runtimeId !== undefined ? { runtimeId: row.runtimeId } : {}),
+    ...(row.runtimeProviderKind !== undefined
+      ? { runtimeProviderKind: row.runtimeProviderKind }
       : {}),
-    ...(row.sandboxExternalId !== undefined ? { sandboxExternalId: row.sandboxExternalId } : {}),
-    ...(row.sandboxStatus !== undefined ? { sandboxStatus: row.sandboxStatus } : {}),
-    ...(row.sandboxEnvironmentId !== undefined
-      ? { sandboxEnvironmentId: row.sandboxEnvironmentId }
+    ...(row.runtimeExternalId !== undefined ? { runtimeExternalId: row.runtimeExternalId } : {}),
+    ...(row.runtimeStatus !== undefined ? { runtimeStatus: row.runtimeStatus } : {}),
+    ...(row.environmentId !== undefined ? { environmentId: row.environmentId } : {}),
+    ...(row.runtimeEndpointUrl !== undefined ? { runtimeEndpointUrl: row.runtimeEndpointUrl } : {}),
+    ...(row.runtimeProviderRefJson !== undefined
+      ? { runtimeProviderRefJson: row.runtimeProviderRefJson }
       : {}),
-    ...(row.sandboxRuntimeEndpointUrl !== undefined
-      ? { sandboxRuntimeEndpointUrl: row.sandboxRuntimeEndpointUrl }
+    ...(row.runtimeServicesJson !== undefined
+      ? { runtimeServicesJson: row.runtimeServicesJson }
       : {}),
-    ...(row.sandboxProviderRefJson !== undefined
-      ? { sandboxProviderRefJson: row.sandboxProviderRefJson }
+    ...(row.runtimeFailureSummary !== undefined
+      ? { runtimeFailureSummary: row.runtimeFailureSummary }
       : {}),
-    ...(row.sandboxServicesJson !== undefined
-      ? { sandboxServicesJson: row.sandboxServicesJson }
-      : {}),
-    ...(row.sandboxFailureSummary !== undefined
-      ? { sandboxFailureSummary: row.sandboxFailureSummary }
-      : {}),
-    ...(row.sandboxUpdatedAt !== undefined ? { sandboxUpdatedAt: row.sandboxUpdatedAt } : {}),
+    ...(row.runtimeUpdatedAt !== undefined ? { runtimeUpdatedAt: row.runtimeUpdatedAt } : {}),
   };
 }
 
@@ -109,7 +106,7 @@ export const createWorkSession = mutation({
       throw new Error(`Task thread ${args.taskThreadId} does not belong to Task ${args.taskId}`);
     }
 
-    const now = Date.now();
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const workSessionId = await ctx.db.insert("workSessions", {
       taskId: args.taskId,
       taskThreadId: args.taskThreadId,
@@ -146,7 +143,7 @@ export const updateWorkSessionStatus = mutation({
       throw new Error(`Work Session ${args.workSessionId} does not exist`);
     }
 
-    const now = Date.now();
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const shouldSetStartedAt = args.status === "started" && workSession.startedAt === undefined;
     const shouldSetEndedAt =
       args.status === "completed" ||

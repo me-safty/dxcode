@@ -1,5 +1,5 @@
 import { httpRouter } from "convex/server";
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { TaskRuntimeLifecycleEvent } from "@t3tools/contracts";
 
 import {

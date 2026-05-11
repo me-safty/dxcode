@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import * as DateTime from "effect/DateTime";
 
 import { mutation, query } from "./_generated/server.js";
 
@@ -50,7 +51,7 @@ export const attachTaskThread = mutation({
   },
   returns: taskThreadReturn(),
   handler: async (ctx, args) => {
-    const now = Date.now();
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const task = await ctx.db.get(args.taskId);
     if (task === null) {
       throw new Error(`Task ${args.taskId} does not exist`);

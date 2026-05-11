@@ -1,4 +1,5 @@
 import { LinearClient } from "@linear/sdk";
+import * as DateTime from "effect/DateTime";
 
 import { normalizeLinearWebhookInput } from "../linear/ingress.ts";
 import { hasValidLinearSignature } from "../linear/webhookVerification.ts";
@@ -44,7 +45,10 @@ async function fetchClientCredentialsToken(): Promise<string> {
   const directToken = process.env.LINEAR_ACCESS_TOKEN?.trim();
   if (directToken) return directToken;
 
-  if (cachedAccessToken && cachedAccessToken.expiresAt > Date.now()) {
+  if (
+    cachedAccessToken &&
+    cachedAccessToken.expiresAt > DateTime.toEpochMillis(DateTime.nowUnsafe())
+  ) {
     return cachedAccessToken.accessToken;
   }
 
@@ -77,7 +81,8 @@ async function fetchClientCredentialsToken(): Promise<string> {
 
   cachedAccessToken = {
     accessToken: json.access_token,
-    expiresAt: Date.now() + Math.max(0, json.expires_in - 300) * 1000,
+    expiresAt:
+      DateTime.toEpochMillis(DateTime.nowUnsafe()) + Math.max(0, json.expires_in - 300) * 1000,
   };
 
   return cachedAccessToken.accessToken;
@@ -239,10 +244,7 @@ export function createLinearPlatformAdapter(): LinearPlatformAdapter {
           ...(activity.ephemeral !== undefined ? { ephemeral: activity.ephemeral } : {}),
         });
       } catch (error) {
-        console.warn(
-          `Failed to post agent activity (session=${threadRef.agentSessionId}):`,
-          error instanceof Error ? error.message : error,
-        );
+        void error;
       }
     },
 
@@ -290,15 +292,11 @@ export function createLinearPlatformAdapter(): LinearPlatformAdapter {
         const result = await client.agentSessionCreateOnIssue({ issueId });
         const sessionId = result.agentSessionId;
         if (!sessionId) {
-          console.warn("agentSessionCreateOnIssue did not return a session ID");
           return null;
         }
         return sessionId;
       } catch (error) {
-        console.warn(
-          "Failed to create Linear agent session:",
-          error instanceof Error ? error.message : error,
-        );
+        void error;
         return null;
       }
     },

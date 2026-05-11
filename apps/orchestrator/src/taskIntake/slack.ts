@@ -1,4 +1,5 @@
 import type { TaskIntakeMessage } from "./contracts.ts";
+import * as DateTime from "effect/DateTime";
 
 export interface SlackTaskIntakeEnvelope {
   readonly eventId: string;
@@ -76,7 +77,7 @@ export function normalizeSlackWebhookInput(input: unknown): SlackTaskIntakeEnvel
     threadTs,
     messageTs,
     text,
-    receivedAt: Date.now(),
+    receivedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     ...(teamId !== undefined ? { teamId } : {}),
     ...(userId !== undefined ? { userId } : {}),
     ...(userName !== undefined ? { userName } : {}),

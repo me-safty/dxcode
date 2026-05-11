@@ -1,3 +1,5 @@
+import * as DateTime from "effect/DateTime";
+
 export type LinearThreadKind = "issue" | "comment";
 
 export interface LinearIngressEnvelope {
@@ -160,7 +162,7 @@ export function normalizeLinearWebhookInput(
     commentId: rootCommentId,
     messageId,
     body,
-    receivedAt: Date.now(),
+    receivedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     shouldStartRun,
     ...(issueIdentifier !== undefined ? { issueIdentifier } : {}),
     ...(authorName !== undefined ? { authorName } : {}),
@@ -194,7 +196,7 @@ function normalizeAgentSessionPrompted(
     linearThreadKey: `linear:${issueId}`,
     issueId,
     body: signal === "stop" ? "__stop__" : body,
-    receivedAt: Date.now(),
+    receivedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     shouldStartRun: signal !== "stop",
     ...(title !== undefined ? { title } : {}),
     ...(issueIdentifier !== undefined ? { issueIdentifier } : {}),

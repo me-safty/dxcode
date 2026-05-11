@@ -1,13 +1,18 @@
-import { Context, Effect, Layer, Result, Schema, SchemaIssue } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
 
-import { TrimmedNonEmptyString, type VcsError } from "@t3tools/contracts";
-
-import { VcsProcess, type VcsProcessOutput } from "../vcs/VcsProcess.ts";
 import {
-  decodeGitHubPullRequestJson,
-  decodeGitHubPullRequestListJson,
-  formatGitHubJsonDecodeError,
-} from "./gitHubPullRequests.ts";
+  TrimmedNonEmptyString,
+  type SourceControlRepositoryVisibility,
+  type VcsError,
+} from "@t3tools/contracts";
+
+import * as VcsProcess from "../vcs/VcsProcess.ts";
+import * as GitHubPullRequests from "./gitHubPullRequests.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -44,19 +49,17 @@ export interface GitHubCliShape {
     readonly cwd: string;
     readonly args: ReadonlyArray<string>;
     readonly timeoutMs?: number;
-  }) => Effect.Effect<VcsProcessOutput, GitHubCliError>;
+  }) => Effect.Effect<VcsProcess.VcsProcessOutput, GitHubCliError>;
 
   readonly listOpenPullRequests: (input: {
     readonly cwd: string;
     readonly headSelector: string;
-    readonly repository?: string;
     readonly limit?: number;
   }) => Effect.Effect<ReadonlyArray<GitHubPullRequestSummary>, GitHubCliError>;
 
   readonly getPullRequest: (input: {
     readonly cwd: string;
     readonly reference: string;
-    readonly repository?: string;
   }) => Effect.Effect<GitHubPullRequestSummary, GitHubCliError>;
 
   readonly getRepositoryCloneUrls: (input: {
@@ -64,9 +67,14 @@ export interface GitHubCliShape {
     readonly repository: string;
   }) => Effect.Effect<GitHubRepositoryCloneUrls, GitHubCliError>;
 
+  readonly createRepository: (input: {
+    readonly cwd: string;
+    readonly repository: string;
+    readonly visibility: SourceControlRepositoryVisibility;
+  }) => Effect.Effect<GitHubRepositoryCloneUrls, GitHubCliError>;
+
   readonly createPullRequest: (input: {
     readonly cwd: string;
-    readonly repository?: string;
     readonly baseBranch: string;
     readonly headSelector: string;
     readonly title: string;
@@ -76,13 +84,11 @@ export interface GitHubCliShape {
 
   readonly getDefaultBranch: (input: {
     readonly cwd: string;
-    readonly repository?: string;
   }) => Effect.Effect<string | null, GitHubCliError>;
 
   readonly checkoutPullRequest: (input: {
     readonly cwd: string;
     readonly reference: string;
-    readonly repository?: string;
     readonly force?: boolean;
   }) => Effect.Effect<void, GitHubCliError>;
 }
@@ -166,9 +172,41 @@ function normalizeRepositoryCloneUrls(
   };
 }
 
-function repoArgs(repository: string | undefined): ReadonlyArray<string> {
-  const trimmed = repository?.trim() ?? "";
-  return trimmed.length > 0 ? ["--repo", trimmed] : [];
+/**
+ * `gh repo create` prints the canonical URL of the new repository on stdout
+ * (e.g. `https://github.com/owner/repo`). Reading it back here avoids a
+ * follow-up `gh repo view`, which can race GitHub's GraphQL eventual
+ * consistency window and falsely report the just-created repo as missing.
+ */
+function deriveRepositoryCloneUrlsFromCreateOutput(
+  stdout: string,
+  repository: string,
+): GitHubRepositoryCloneUrls {
+  const fallbackHost = "github.com";
+  const match = stdout.match(/https?:\/\/[^\s]+/);
+  if (match) {
+    const cleaned = match[0].replace(/\.git$/, "");
+    try {
+      const parsed = new URL(cleaned);
+      const pathname = parsed.pathname.replace(/^\/+|\/+$/g, "");
+      const segments = pathname.split("/").filter(Boolean);
+      if (segments.length === 2) {
+        const nameWithOwner = `${segments[0]}/${segments[1]}`;
+        return {
+          nameWithOwner,
+          url: `${parsed.origin}/${nameWithOwner}`,
+          sshUrl: `git@${parsed.host}:${nameWithOwner}.git`,
+        };
+      }
+    } catch {
+      // Fall through to the input-derived defaults below.
+    }
+  }
+  return {
+    nameWithOwner: repository,
+    url: `https://${fallbackHost}/${repository}`,
+    sshUrl: `git@${fallbackHost}:${repository}.git`,
+  };
 }
 
 function decodeGitHubJson<S extends Schema.Top>(
@@ -190,7 +228,7 @@ function decodeGitHubJson<S extends Schema.Top>(
 }
 
 export const make = Effect.fn("makeGitHubCli")(function* () {
-  const process = yield* VcsProcess;
+  const process = yield* VcsProcess.VcsProcess;
 
   const execute: GitHubCliShape["execute"] = (input) =>
     process
@@ -211,7 +249,6 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         args: [
           "pr",
           "list",
-          ...repoArgs(input.repository),
           "--head",
           input.headSelector,
           "--state",
@@ -226,13 +263,13 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         Effect.flatMap((raw) =>
           raw.length === 0
             ? Effect.succeed([])
-            : Effect.sync(() => decodeGitHubPullRequestListJson(raw)).pipe(
+            : Effect.sync(() => GitHubPullRequests.decodeGitHubPullRequestListJson(raw)).pipe(
                 Effect.flatMap((decoded) => {
                   if (!Result.isSuccess(decoded)) {
                     return Effect.fail(
                       new GitHubCliError({
                         operation: "listOpenPullRequests",
-                        detail: `GitHub CLI returned invalid PR list JSON: ${formatGitHubJsonDecodeError(decoded.failure)}`,
+                        detail: `GitHub CLI returned invalid PR list JSON: ${GitHubPullRequests.formatGitHubJsonDecodeError(decoded.failure)}`,
                         cause: decoded.failure,
                       }),
                     );
@@ -252,20 +289,19 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
           "pr",
           "view",
           input.reference,
-          ...repoArgs(input.repository),
           "--json",
           "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
         ],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
         Effect.flatMap((raw) =>
-          Effect.sync(() => decodeGitHubPullRequestJson(raw)).pipe(
+          Effect.sync(() => GitHubPullRequests.decodeGitHubPullRequestJson(raw)).pipe(
             Effect.flatMap((decoded) => {
               if (!Result.isSuccess(decoded)) {
                 return Effect.fail(
                   new GitHubCliError({
                     operation: "getPullRequest",
-                    detail: `GitHub CLI returned invalid pull request JSON: ${formatGitHubJsonDecodeError(decoded.failure)}`,
+                    detail: `GitHub CLI returned invalid pull request JSON: ${GitHubPullRequests.formatGitHubJsonDecodeError(decoded.failure)}`,
                     cause: decoded.failure,
                   }),
                 );
@@ -294,13 +330,21 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         ),
         Effect.map(normalizeRepositoryCloneUrls),
       ),
+    createRepository: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: ["repo", "create", input.repository, `--${input.visibility}`],
+      }).pipe(
+        Effect.map((result) =>
+          deriveRepositoryCloneUrlsFromCreateOutput(result.stdout, input.repository),
+        ),
+      ),
     createPullRequest: (input) =>
       execute({
         cwd: input.cwd,
         args: [
           "pr",
           "create",
-          ...repoArgs(input.repository),
           "--base",
           input.baseBranch,
           "--head",
@@ -315,15 +359,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
     getDefaultBranch: (input) =>
       execute({
         cwd: input.cwd,
-        args: [
-          "repo",
-          "view",
-          ...(input.repository ? [input.repository] : []),
-          "--json",
-          "defaultBranchRef",
-          "--jq",
-          ".defaultBranchRef.name",
-        ],
+        args: ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
       }).pipe(
         Effect.map((value) => {
           const trimmed = value.stdout.trim();
@@ -333,13 +369,7 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
     checkoutPullRequest: (input) =>
       execute({
         cwd: input.cwd,
-        args: [
-          "pr",
-          "checkout",
-          input.reference,
-          ...repoArgs(input.repository),
-          ...(input.force ? ["--force"] : []),
-        ],
+        args: ["pr", "checkout", input.reference, ...(input.force ? ["--force"] : [])],
       }).pipe(Effect.asVoid),
   });
 });

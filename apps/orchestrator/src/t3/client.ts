@@ -18,7 +18,7 @@ import {
   TaskPullRequestEnsureResponse,
   type TaskPullRequestEnsureResponse as TaskPullRequestEnsureResponseType,
 } from "@t3tools/contracts";
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 
 const decodeExecutionRunCreateResponse = Schema.decodeUnknownSync(ExecutionRunCreateResponse);
 const decodeExecutionRunContinueResponse = Schema.decodeUnknownSync(ExecutionRunContinueResponse);

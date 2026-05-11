@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import * as DateTime from "effect/DateTime";
 
 import { internalMutation, query } from "./_generated/server.js";
 
@@ -80,7 +81,7 @@ export const appendTaskEvent = internalMutation({
       ...(args.eventKey !== undefined ? { eventKey: args.eventKey } : {}),
       kind: args.kind,
       summary: args.summary,
-      createdAt: args.createdAt ?? Date.now(),
+      createdAt: args.createdAt ?? DateTime.toEpochMillis(DateTime.nowUnsafe()),
       ...(args.payloadJson !== undefined ? { payloadJson: args.payloadJson } : {}),
     });
     const event = await ctx.db.get(eventId);
@@ -134,7 +135,7 @@ export const claimTaskLifecycleReplies = internalMutation({
       ...(args.failureSummary !== undefined ? { failureSummary: args.failureSummary } : {}),
       ...(pullRequestLink?.url !== undefined ? { pullRequestUrl: pullRequestLink.url } : {}),
     });
-    const now = Date.now();
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const claimed = [];
 
     for (const link of links) {
@@ -218,7 +219,7 @@ export const recordTaskLifecycleReplyDelivered = internalMutation({
           ? { externalMessageId: args.externalMessageId }
           : {}),
       }),
-      createdAt: Date.now(),
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     });
 
     return null;
@@ -254,7 +255,7 @@ export const recordTaskLifecycleReplyFailed = internalMutation({
         linkId: args.linkId,
         error: args.error,
       }),
-      createdAt: Date.now(),
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     });
 
     return null;

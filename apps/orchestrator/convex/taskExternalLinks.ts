@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import * as DateTime from "effect/DateTime";
 
 import { mutation, query } from "./_generated/server.js";
 
@@ -49,7 +50,7 @@ export const upsertTaskExternalLink = mutation({
   },
   returns: linkReturn(),
   handler: async (ctx, args) => {
-    const now = Date.now();
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const existing = await ctx.db
       .query("taskExternalLinks")
       .withIndex("by_kind_external_id", (q: any) =>
@@ -104,7 +105,7 @@ export const setTaskExternalLinkMuted = mutation({
 
     await ctx.db.patch(row._id, {
       muted: args.muted,
-      updatedAt: Date.now(),
+      updatedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     });
     const updated = await ctx.db.get(row._id);
     return toLink(updated);

@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Schema } from "effect";
-import { SandboxId, ThreadId } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import { ThreadId } from "@t3tools/contracts";
 
 import { createT3ExecutionBridgeClient } from "./client.ts";
 
 const decodeThreadId = Schema.decodeUnknownSync(ThreadId);
-const decodeSandboxId = Schema.decodeUnknownSync(SandboxId);
 
 describe("createT3ExecutionBridgeClient", () => {
   afterEach(() => {
@@ -62,7 +61,6 @@ describe("createT3ExecutionBridgeClient", () => {
     await client.ensureTaskPullRequest({
       taskId: "task-1",
       workSessionId: "work-session-1",
-      sandboxId: decodeSandboxId("sandbox-1"),
       branch: "task/example",
       worktreePath: "/workspace",
       title: "Example",

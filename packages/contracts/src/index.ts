@@ -1,6 +1,8 @@
 export * from "./baseSchemas.ts";
 export * from "./auth.ts";
 export * from "./environment.ts";
+export * from "./desktopBootstrap.ts";
+export * from "./remoteAccess.ts";
 export * from "./ipc.ts";
 export * from "./terminal.ts";
 export * from "./provider.ts";
@@ -14,7 +16,6 @@ export * from "./git.ts";
 export * from "./vcs.ts";
 export * from "./sourceControl.ts";
 export * from "./orchestration.ts";
-export * from "./sandbox.ts";
 export * from "./executionBridge.ts";
 export * from "./taskIntake.ts";
 export * from "./editor.ts";

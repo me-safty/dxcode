@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import * as DateTime from "effect/DateTime";
 
 import { isValidTaskStatusTransition } from "../src/domain/taskStatus.ts";
 import type { TaskStatus } from "../src/domain/taskStatus.ts";
@@ -62,7 +63,7 @@ function taskTreeReturn() {
       project: v.object({
         id: v.id("projects"),
         repoName: v.string(),
-        sandboxWorkspaceRoot: v.string(),
+        workspaceRoot: v.string(),
         defaultBranch: v.string(),
         githubOwner: v.string(),
         githubRepo: v.string(),
@@ -156,7 +157,7 @@ export const createTask = mutation({
       throw new Error(`Project ${args.projectId} does not exist`);
     }
 
-    const now = Date.now();
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const taskId = await ctx.db.insert("tasks", {
       projectId: args.projectId,
       title: args.title,
@@ -298,7 +299,7 @@ export const resolveTaskIntakeMessage = internalMutation({
         throw new Error(`Linked Task ${existingLink.taskId} does not exist`);
       }
 
-      const now = Date.now();
+      const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
       await ctx.db.insert("taskEvents", {
         taskId: task._id,
         eventKey: args.eventId,
@@ -323,7 +324,7 @@ export const resolveTaskIntakeMessage = internalMutation({
       );
     }
 
-    const now = Date.now();
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const taskId = await ctx.db.insert("tasks", {
       projectId: project._id,
       title: args.title || `${args.source} task`,
@@ -403,7 +404,7 @@ export const ensureTaskFromLinearIngress = internalMutation({
       );
     }
 
-    const now = Date.now();
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const title = (args.title ?? args.issueIdentifier ?? args.body.slice(0, 80)) || "Linear Task";
     const taskId = await ctx.db.insert("tasks", {
       projectId: project._id,
@@ -458,7 +459,7 @@ export const updateTaskStatus = mutation({
       throw new Error(`Task ${args.taskId} does not exist`);
     }
 
-    const now = Date.now();
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const transition = isValidTaskStatusTransition({
       from: task.status as TaskStatus,
       to: args.status as TaskStatus,
@@ -507,7 +508,7 @@ export const markTaskIntakeStartFailed = internalMutation({
       throw new Error(`Task ${args.taskId} does not exist`);
     }
 
-    const now = Date.now();
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     await ctx.db.patch(args.taskId, {
       status: "failed",
       statusReason: args.summary,
@@ -601,7 +602,7 @@ export const recordTaskIntakeLifecycleReplyPosted = internalMutation({
           ? { externalMessageId: args.externalMessageId }
           : {}),
       }),
-      createdAt: Date.now(),
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     });
 
     return null;
@@ -683,19 +684,8 @@ export const getTaskRuntimeSeed = query({
       project: v.object({
         id: v.id("projects"),
         repoName: v.string(),
-        sandboxWorkspaceRoot: v.string(),
+        workspaceRoot: v.string(),
         defaultBranch: v.string(),
-        sandboxProvider: v.optional(v.union(v.literal("local"), v.literal("modal"))),
-        modalAppName: v.optional(v.string()),
-        modalEnvironment: v.optional(v.string()),
-        modalImageTag: v.optional(v.string()),
-        modalCpu: v.optional(v.number()),
-        modalCpuLimit: v.optional(v.number()),
-        modalMemoryMiB: v.optional(v.number()),
-        modalMemoryLimitMiB: v.optional(v.number()),
-        modalTimeoutMs: v.optional(v.number()),
-        modalIdleTimeoutMs: v.optional(v.number()),
-        modalAllowedSecretNamesJson: v.optional(v.string()),
       }),
     }),
   ),
@@ -718,29 +708,8 @@ export const getTaskRuntimeSeed = query({
       project: {
         id: project._id,
         repoName: project.repoName,
-        sandboxWorkspaceRoot: project.sandboxWorkspaceRoot,
+        workspaceRoot: project.workspaceRoot,
         defaultBranch: project.defaultBranch,
-        ...(project.sandboxProvider !== undefined
-          ? { sandboxProvider: project.sandboxProvider }
-          : {}),
-        ...(project.modalAppName !== undefined ? { modalAppName: project.modalAppName } : {}),
-        ...(project.modalEnvironment !== undefined
-          ? { modalEnvironment: project.modalEnvironment }
-          : {}),
-        ...(project.modalImageTag !== undefined ? { modalImageTag: project.modalImageTag } : {}),
-        ...(project.modalCpu !== undefined ? { modalCpu: project.modalCpu } : {}),
-        ...(project.modalCpuLimit !== undefined ? { modalCpuLimit: project.modalCpuLimit } : {}),
-        ...(project.modalMemoryMiB !== undefined ? { modalMemoryMiB: project.modalMemoryMiB } : {}),
-        ...(project.modalMemoryLimitMiB !== undefined
-          ? { modalMemoryLimitMiB: project.modalMemoryLimitMiB }
-          : {}),
-        ...(project.modalTimeoutMs !== undefined ? { modalTimeoutMs: project.modalTimeoutMs } : {}),
-        ...(project.modalIdleTimeoutMs !== undefined
-          ? { modalIdleTimeoutMs: project.modalIdleTimeoutMs }
-          : {}),
-        ...(project.modalAllowedSecretNamesJson !== undefined
-          ? { modalAllowedSecretNamesJson: project.modalAllowedSecretNamesJson }
-          : {}),
       },
     };
   },
@@ -801,7 +770,7 @@ export const listTaskTree = query({
         project: {
           id: project._id,
           repoName: project.repoName,
-          sandboxWorkspaceRoot: project.sandboxWorkspaceRoot,
+          workspaceRoot: project.workspaceRoot,
           defaultBranch: project.defaultBranch,
           githubOwner: project.githubOwner,
           githubRepo: project.githubRepo,
