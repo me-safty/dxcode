@@ -1,8 +1,16 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import * as OS from "node:os";
 import fsPromises from "node:fs/promises";
 import type { Dirent } from "node:fs";
 
-import { Cache, DateTime, Duration, Effect, Exit, Layer, Option, Path } from "effect";
+import * as Cache from "effect/Cache";
+import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 
 import {
   type FilesystemBrowseInput,
