@@ -11,13 +11,13 @@ import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
 import { installDesktopIpcHandlers } from "../ipc/DesktopIpcHandlers.ts";
-import { resolveLinuxPasswordStoreSwitch } from "../linuxSecretStorage.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
 import * as DesktopObservability from "./DesktopObservability.ts";
+import * as DesktopPreReadyPlatform from "./DesktopPreReadyPlatform.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
@@ -193,6 +193,7 @@ const startup = Effect.gen(function* () {
   const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
   const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
+  const preReadyElectronOptions = yield* DesktopPreReadyPlatform.DesktopPreReadyElectronOptions;
   const safeStorage = yield* ElectronSafeStorage.ElectronSafeStorage;
   const updates = yield* DesktopUpdates.DesktopUpdates;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
@@ -201,15 +202,12 @@ const startup = Effect.gen(function* () {
   const userDataPath = yield* appIdentity.resolveUserDataPath;
   yield* electronApp.setPath("userData", userDataPath);
   yield* logStartupInfo("runtime logging configured", { logDir: environment.logDir });
-  const settings = yield* desktopSettings.load;
+  yield* desktopSettings.load;
 
-  if (environment.platform === "linux") {
-    const passwordStore = resolveLinuxPasswordStoreSwitch({
-      preference: settings.linuxPasswordStore,
-      env: process.env,
-    });
+  const linuxPreReadyOptions = preReadyElectronOptions.linux;
+  if (linuxPreReadyOptions !== null) {
     yield* logStartupInfo("linux password store configured", {
-      passwordStore: passwordStore ?? "electron-default",
+      passwordStore: linuxPreReadyOptions.passwordStore ?? "electron-default",
       xdgCurrentDesktop: process.env.XDG_CURRENT_DESKTOP ?? null,
       xdgSessionDesktop: process.env.XDG_SESSION_DESKTOP ?? null,
     });

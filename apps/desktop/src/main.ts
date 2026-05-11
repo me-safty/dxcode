@@ -46,23 +46,33 @@ import * as DesktopState from "./app/DesktopState.ts";
 import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./window/DesktopWindow.ts";
 
-const configureElectronBeforeReady = Effect.sync(() => {
-  if (process.platform === "linux") {
-    const options = DesktopPreReadyPlatform.resolveEarlyLinuxElectronOptionsFromProcess();
-    if (options.dbusSessionBusAddress !== null) {
-      process.env.DBUS_SESSION_BUS_ADDRESS = options.dbusSessionBusAddress;
+const configureElectronBeforeReady = Effect.sync(
+  (): DesktopPreReadyPlatform.DesktopPreReadyElectronOptionsShape => {
+    const linux =
+      process.platform === "linux"
+        ? DesktopPreReadyPlatform.resolveEarlyLinuxElectronOptionsFromProcess()
+        : null;
+
+    if (linux !== null) {
+      if (linux.dbusSessionBusAddress !== null) {
+        process.env.DBUS_SESSION_BUS_ADDRESS = linux.dbusSessionBusAddress;
+      }
+      if (linux.passwordStore !== null) {
+        Electron.app.commandLine.appendSwitch("password-store", linux.passwordStore);
+      }
+
+      Electron.app.commandLine.appendSwitch("class", linux.linuxWmClass);
     }
-    if (options.passwordStore !== null) {
-      Electron.app.commandLine.appendSwitch("password-store", options.passwordStore);
-    }
 
-    Electron.app.commandLine.appendSwitch("class", options.linuxWmClass);
-  }
+    ElectronProtocol.registerDesktopSchemePrivilegesSync();
+    return { linux };
+  },
+).pipe(Effect.withSpan("desktop.electron.configureBeforeReady"));
 
-  ElectronProtocol.registerDesktopSchemePrivilegesSync();
-}).pipe(Effect.withSpan("desktop.electron.configureBeforeReady"));
-
-const desktopElectronPreReadyLayer = Layer.effectDiscard(configureElectronBeforeReady);
+const desktopElectronPreReadyLayer = Layer.effect(
+  DesktopPreReadyPlatform.DesktopPreReadyElectronOptions,
+  configureElectronBeforeReady,
+);
 
 const desktopEnvironmentLayer = Layer.unwrap(
   Effect.gen(function* () {
@@ -163,15 +173,12 @@ const desktopApplicationLayer = Layer.mergeAll(
 ).pipe(Layer.provideMerge(DesktopUpdates.layer), Layer.provideMerge(desktopBackendLayer));
 
 // Electron requires these switches and scheme privileges before app ready.
-const desktopRuntimeLayer = desktopElectronPreReadyLayer.pipe(
-  Layer.flatMap(() =>
-    desktopApplicationLayer.pipe(
-      Layer.provideMerge(NodeServices.layer),
-      Layer.provideMerge(NodeHttpClient.layerUndici),
-      Layer.provideMerge(NetService.layer),
-      Layer.provideMerge(electronLayer),
-    ),
-  ),
+const desktopRuntimeLayer = desktopApplicationLayer.pipe(
+  Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(NodeHttpClient.layerUndici),
+  Layer.provideMerge(NetService.layer),
+  Layer.provideMerge(electronLayer),
+  Layer.provideMerge(desktopElectronPreReadyLayer),
 );
 
 DesktopApp.program.pipe(Effect.provide(desktopRuntimeLayer), NodeRuntime.runMain);
