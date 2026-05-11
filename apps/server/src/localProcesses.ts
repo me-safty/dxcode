@@ -4,8 +4,12 @@ import type {
   LocalProcessStopPortsInput,
   LocalProcessStopPortsResult,
 } from "@t3tools/contracts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 
-import { runProcess } from "./processRunner.ts";
+import { layer as ProcessRunnerLive, ProcessRunner } from "./processRunner.ts";
 
 const PORT_LOOKUP_TIMEOUT_MS = 2_000;
 const PORT_LOOKUP_MAX_BUFFER_BYTES = 64 * 1024;
@@ -30,6 +34,29 @@ export function parseListeningPidList(text: string): number[] {
   return [...seen];
 }
 
+async function runLocalProcess(
+  command: string,
+  args: readonly string[],
+): Promise<{ stdout: string }> {
+  const result = await Effect.runPromise(
+    Effect.gen(function* () {
+      const processRunner = yield* ProcessRunner;
+      return yield* processRunner.run({
+        command,
+        args,
+        maxOutputBytes: PORT_LOOKUP_MAX_BUFFER_BYTES,
+        outputMode: "truncate",
+        timeout: Duration.millis(PORT_LOOKUP_TIMEOUT_MS),
+        timeoutBehavior: "timedOutResult",
+      });
+    }).pipe(Effect.provide(ProcessRunnerLive.pipe(Layer.provide(NodeServices.layer)))),
+  );
+  if (result.timedOut) {
+    throw new Error(`${command} timed out after ${PORT_LOOKUP_TIMEOUT_MS}ms`);
+  }
+  return { stdout: result.stdout };
+}
+
 function normalizePorts(
   input: LocalProcessStopPortsInput | LocalProcessProbePortsInput,
   maxCount: number,
@@ -44,12 +71,7 @@ function normalizePorts(
 }
 
 async function listListeningPidsWithLsof(port: number): Promise<number[]> {
-  const result = await runProcess("lsof", ["-nP", "-ti", `TCP:${port}`, "-sTCP:LISTEN"], {
-    allowNonZeroExit: true,
-    maxBufferBytes: PORT_LOOKUP_MAX_BUFFER_BYTES,
-    outputMode: "truncate",
-    timeoutMs: PORT_LOOKUP_TIMEOUT_MS,
-  });
+  const result = await runLocalProcess("lsof", ["-nP", "-ti", `TCP:${port}`, "-sTCP:LISTEN"]);
   return parseListeningPidList(result.stdout);
 }
 
@@ -61,16 +83,12 @@ async function listListeningPidsWithPowerShell(port: number): Promise<number[]> 
     "-ErrorAction SilentlyContinue",
     "| Select-Object -ExpandProperty OwningProcess -Unique",
   ].join(" ");
-  const result = await runProcess(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-Command", command],
-    {
-      allowNonZeroExit: true,
-      maxBufferBytes: PORT_LOOKUP_MAX_BUFFER_BYTES,
-      outputMode: "truncate",
-      timeoutMs: PORT_LOOKUP_TIMEOUT_MS,
-    },
-  );
+  const result = await runLocalProcess("powershell.exe", [
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    command,
+  ]);
   return parseListeningPidList(result.stdout);
 }
 
