@@ -1708,12 +1708,14 @@ export async function addSavedEnvironment(input: {
         httpBaseUrl: resolvedTarget.httpBaseUrl,
       });
   const environmentId = descriptor.environmentId;
-  const registrySnapshot = snapshotSavedEnvironmentRegistry([environmentId]);
   const existingRecord =
     getSavedEnvironmentRecord(environmentId) ??
     findSavedEnvironmentRecordByDesktopSshTarget(input.desktopSsh);
   const staleDesktopSshRecord =
     existingRecord && existingRecord.environmentId !== environmentId ? existingRecord : null;
+  const registrySnapshot = snapshotSavedEnvironmentRegistry(
+    staleDesktopSshRecord ? [environmentId, staleDesktopSshRecord.environmentId] : [environmentId],
+  );
 
   const bearerSession = input.desktopSsh
     ? await bootstrapDesktopSshBearerSession(resolvedTarget.httpBaseUrl, resolvedTarget.credential)

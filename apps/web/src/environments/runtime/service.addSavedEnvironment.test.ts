@@ -421,6 +421,52 @@ describe("addSavedEnvironment", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("preserves an older ssh record when replacing it fails to persist credentials", async () => {
+    mockWriteSavedEnvironmentBearerToken.mockResolvedValue(false);
+    mockFetchSshEnvironmentDescriptor.mockResolvedValue({
+      environmentId: EnvironmentId.make("environment-2"),
+      label: "Remote environment",
+    });
+    const staleRecord = {
+      environmentId: EnvironmentId.make("environment-1"),
+      label: "Old ssh environment",
+      httpBaseUrl: "http://127.0.0.1:3774/",
+      wsBaseUrl: "ws://127.0.0.1:3774/",
+      createdAt: "2026-04-14T00:00:00.000Z",
+      lastConnectedAt: null,
+      desktopSsh: {
+        alias: "devbox",
+        hostname: "devbox.example.com",
+        username: "julius",
+        port: 22,
+      },
+    };
+    mockSavedRecords = [staleRecord];
+
+    const { addSavedEnvironment, resetEnvironmentServiceForTests } = await import("./service");
+
+    await expect(
+      addSavedEnvironment({
+        label: "Remote environment",
+        host: "http://127.0.0.1:3774/",
+        pairingCode: "ssh-pairing-code",
+        desktopSsh: {
+          alias: "devbox",
+          hostname: "devbox.example.com",
+          username: "julius",
+          port: 22,
+        },
+      }),
+    ).rejects.toThrow("Unable to persist saved environment credentials.");
+
+    expect(mockSetSavedEnvironmentRegistry).toHaveBeenCalledWith([staleRecord]);
+    expect(mockRemovePersistedSavedEnvironment).not.toHaveBeenCalled();
+    expect(mockUpsert).not.toHaveBeenCalled();
+    expect(mockSavedRecords).toEqual([staleRecord]);
+
+    await resetEnvironmentServiceForTests();
+  });
+
   it("retries desktop ssh session refresh when the forwarded endpoint returns ssh_http 401", async () => {
     mockWriteSavedEnvironmentBearerToken.mockResolvedValue(true);
     mockBootstrapSshBearerSession
