@@ -78,6 +78,9 @@ interface ExecutionBridgeRunRegistryShape {
     idempotencyKey: string,
     record: MaterializedTaskRuntimeRecord,
   ) => Effect.Effect<void, never, never>;
+  readonly resetTaskRuntimeLifecycle: (
+    input: Pick<TrackedExecutionRun, "taskId" | "workSessionId" | "threadId">,
+  ) => Effect.Effect<void, never, never>;
 }
 
 export class ExecutionBridgeRunRegistry extends Context.Service<
@@ -190,6 +193,25 @@ const makeExecutionBridgeRunRegistry = Effect.gen(function* () {
       Ref.update(materializedTaskRuntimes, (current) => {
         const next = new Map(current);
         next.set(idempotencyKey, record);
+        return next;
+      }),
+    resetTaskRuntimeLifecycle: (input) =>
+      Ref.update(state, (current) => {
+        const existing = current.get(String(input.threadId));
+        const next = new Map(current);
+        next.set(String(input.threadId), {
+          controlThreadId: input.taskId ?? existing?.controlThreadId ?? "",
+          executionRunId: input.workSessionId ?? existing?.executionRunId ?? "",
+          kind: "task",
+          taskId: input.taskId,
+          workSessionId: input.workSessionId,
+          threadId: input.threadId,
+          startedEventId: null,
+          completedEventId: null,
+          failedEventId: null,
+          interruptedEventId: null,
+          lastTurnId: null,
+        });
         return next;
       }),
   } satisfies ExecutionBridgeRunRegistryShape;
@@ -333,7 +355,16 @@ export const continueExecutionRun = (request: ExecutionRunContinueRequest) =>
     });
 
     const existingTracked = yield* runRegistry.getTrackedRun(request.t3ThreadId);
-    if (existingTracked === null || existingTracked.executionRunId !== request.executionRunId) {
+    if (request.taskRuntime === true || existingTracked?.kind === "task") {
+      yield* runRegistry.resetTaskRuntimeLifecycle({
+        taskId: request.controlThreadId,
+        workSessionId: request.executionRunId,
+        threadId: request.t3ThreadId,
+      });
+    } else if (
+      existingTracked === null ||
+      existingTracked.executionRunId !== request.executionRunId
+    ) {
       yield* runRegistry.trackAcceptedRun({
         controlThreadId: request.controlThreadId,
         executionRunId: request.executionRunId,

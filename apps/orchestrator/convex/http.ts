@@ -178,6 +178,7 @@ http.route({
           status: payload.type,
           occurredAt: payload.occurredAt,
           ...(payload.t3ThreadId !== undefined ? { t3ThreadId: String(payload.t3ThreadId) } : {}),
+          ...(payload.t3TurnId !== undefined ? { t3TurnId: String(payload.t3TurnId) } : {}),
           ...(payload.failureSummary !== undefined
             ? { failureSummary: payload.failureSummary }
             : {}),

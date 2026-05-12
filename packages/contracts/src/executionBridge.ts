@@ -81,6 +81,7 @@ export const ExecutionRunContinueRequest = Schema.Struct({
   executionRunId: ExecutionRunId,
   t3ThreadId: ThreadId,
   prompt: Schema.String,
+  taskRuntime: Schema.optional(Schema.Boolean),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),

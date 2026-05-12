@@ -173,7 +173,7 @@ describe("handleTaskIntakeMessage", () => {
     expect(continued?.prompt).toBe("Actually also update the failing cart test.");
     expect(result.resolution.type).toBe("route_existing_task");
     expect(result.taskId).toBe("task-existing");
-    expect(postedReplies[0]?.body).toContain("queued this follow-up");
+    expect(postedReplies).toHaveLength(0);
   });
 
   it("routes follow-ups without continuing when runtime references are not available", async () => {
@@ -206,7 +206,7 @@ describe("handleTaskIntakeMessage", () => {
     expect(continueCalls).toBe(0);
     expect(result.resolution.type).toBe("route_existing_task");
     expect(result.taskId).toBe("task-existing");
-    expect(postedReplies[0]?.body).toContain("queued this follow-up");
+    expect(postedReplies).toHaveLength(0);
   });
 
   it("skips duplicate events without posting another reply", async () => {

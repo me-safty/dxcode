@@ -20,7 +20,11 @@ export function taskLifecycleReplyEventKey(input: {
   readonly workSessionId: string;
   readonly status: "completed" | "failed";
   readonly linkId: string;
+  readonly t3TurnId?: string;
 }) {
+  if (input.t3TurnId !== undefined) {
+    return `task-lifecycle-reply:${input.workSessionId}:${input.t3TurnId}:${input.status}:${input.linkId}`;
+  }
   return `task-lifecycle-reply:${input.workSessionId}:${input.status}:${input.linkId}`;
 }
 
@@ -28,12 +32,7 @@ export function buildTaskLifecycleReplyBody(input: TaskLifecycleReplyInput) {
   if (input.status === "completed") {
     const assistantResponse = input.assistantResponse?.trim();
     if (assistantResponse) {
-      return [
-        assistantResponse,
-        ...(input.pullRequestUrl !== undefined && !assistantResponse.includes(input.pullRequestUrl)
-          ? [`Pull request: ${input.pullRequestUrl}`]
-          : []),
-      ].join("\n\n");
+      return assistantResponse;
     }
 
     return [
@@ -107,6 +106,7 @@ export const claimTaskLifecycleReplies = internalMutation({
     status: lifecycleReplyStatus,
     occurredAt: v.string(),
     t3ThreadId: v.optional(v.string()),
+    t3TurnId: v.optional(v.string()),
     failureSummary: v.optional(v.string()),
     assistantResponse: v.optional(v.string()),
   },
@@ -164,6 +164,7 @@ export const claimTaskLifecycleReplies = internalMutation({
         workSessionId: String(args.workSessionId),
         status: args.status,
         linkId: String(link._id),
+        ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
       });
       const existingClaim = await ctx.db
         .query("taskEvents")
@@ -187,6 +188,7 @@ export const claimTaskLifecycleReplies = internalMutation({
           status: args.status,
           occurredAt: args.occurredAt,
           ...(args.t3ThreadId !== undefined ? { t3ThreadId: args.t3ThreadId } : {}),
+          ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
         }),
         createdAt: now,
       });

@@ -177,6 +177,48 @@ export const startMaterializedTaskRuntimeAgent = action({
   },
 });
 
+export const claimTaskRuntimeContinuation = internalMutation({
+  args: {
+    taskId: v.id("tasks"),
+    workSessionId: v.id("workSessions"),
+    t3ThreadId: v.string(),
+    eventKey: v.string(),
+    claimedAt: v.number(),
+  },
+  returns: v.object({
+    claimed: v.boolean(),
+    claimedAt: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const existingEvent = await ctx.db
+      .query("taskEvents")
+      .withIndex("by_event_key", (q: any) => q.eq("eventKey", args.eventKey))
+      .unique();
+    if (existingEvent !== null) {
+      return {
+        claimed: false,
+        claimedAt: existingEvent.createdAt,
+      };
+    }
+
+    await ctx.db.insert("taskEvents", {
+      taskId: args.taskId,
+      eventKey: args.eventKey,
+      kind: "runtime.continuation-claimed",
+      summary: "Claimed T3 runtime continuation for the Task.",
+      payloadJson: JSON.stringify({
+        workSessionId: args.workSessionId,
+        t3ThreadId: args.t3ThreadId,
+      }),
+      createdAt: args.claimedAt,
+    });
+    return {
+      claimed: true,
+      claimedAt: args.claimedAt,
+    };
+  },
+});
+
 export const continueTaskRuntime = action({
   args: {
     eventId: v.string(),
@@ -191,12 +233,39 @@ export const continueTaskRuntime = action({
     t3ThreadId: v.string(),
     acceptedAt: v.string(),
   }),
-  handler: async (ctx, args) => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    taskId: string;
+    workSessionId: string;
+    t3ThreadId: string;
+    acceptedAt: string;
+  }> => {
     await ctx.runQuery(internal.t3Runtime.getTaskRuntimeContinuationRoute, {
       taskId: args.taskId,
       workSessionId: args.workSessionId,
       t3ThreadId: args.t3ThreadId,
     });
+
+    const claim: { claimed: boolean; claimedAt: number } = await ctx.runMutation(
+      internal.t3Runtime.claimTaskRuntimeContinuation,
+      {
+        taskId: args.taskId,
+        workSessionId: args.workSessionId,
+        t3ThreadId: args.t3ThreadId,
+        eventKey: `${args.eventId}:runtime-continuation:claim`,
+        claimedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+      },
+    );
+    if (!claim.claimed) {
+      return {
+        taskId: String(args.taskId),
+        workSessionId: String(args.workSessionId),
+        t3ThreadId: args.t3ThreadId,
+        acceptedAt: new Date(claim.claimedAt).toISOString(),
+      };
+    }
 
     const client = createT3ExecutionBridgeClient();
     const t3ThreadId = decodeThreadId(args.t3ThreadId);
@@ -205,6 +274,7 @@ export const continueTaskRuntime = action({
       executionRunId: String(args.workSessionId),
       t3ThreadId,
       prompt: args.prompt,
+      taskRuntime: true,
       runtimeMode: "full-access",
       interactionMode: "default",
     });
@@ -716,6 +786,14 @@ export const recordTaskRuntimeContinuationAccepted = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
+    const existingEvent = await ctx.db
+      .query("taskEvents")
+      .withIndex("by_event_key", (q: any) => q.eq("eventKey", args.eventKey))
+      .unique();
+    if (existingEvent !== null) {
+      return null;
+    }
+
     await ctx.db.patch(args.workSessionId, {
       t3ThreadId: args.t3ThreadId,
       status: "accepted",

@@ -142,6 +142,7 @@ export const postTaskRuntimeLifecycleReply = internalAction({
     status: v.union(v.literal("completed"), v.literal("failed")),
     occurredAt: v.string(),
     t3ThreadId: v.optional(v.string()),
+    t3TurnId: v.optional(v.string()),
     failureSummary: v.optional(v.string()),
     assistantResponse: v.optional(v.string()),
   },
@@ -164,6 +165,7 @@ export const postTaskRuntimeLifecycleReply = internalAction({
       status: args.status,
       occurredAt: args.occurredAt,
       ...(args.t3ThreadId !== undefined ? { t3ThreadId: args.t3ThreadId } : {}),
+      ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
       ...(args.failureSummary !== undefined ? { failureSummary: args.failureSummary } : {}),
       ...(args.assistantResponse !== undefined
         ? { assistantResponse: args.assistantResponse }

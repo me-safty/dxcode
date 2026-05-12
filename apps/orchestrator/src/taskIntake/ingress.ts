@@ -7,11 +7,7 @@ import {
   buildTaskIntakeInitialPrompt,
   buildTaskIntakeTitle,
 } from "./prompts.ts";
-import {
-  buildTaskIntakeFollowUpReply,
-  buildTaskIntakeNeedsInputReply,
-  buildTaskIntakeStartFailedReply,
-} from "./replies.ts";
+import { buildTaskIntakeNeedsInputReply, buildTaskIntakeStartFailedReply } from "./replies.ts";
 
 export type TaskIntakeIngressResult =
   | {
@@ -132,12 +128,7 @@ export async function handleTaskIntakeMessage(
       });
     }
 
-    const reply = buildTaskIntakeFollowUpReply({
-      message,
-      taskId: stored.taskId,
-      ...(stored.t3ThreadId !== undefined ? { t3ThreadId: stored.t3ThreadId } : {}),
-    });
-    await postReplyBestEffort(dependencies, reply);
+    await acknowledgeAcceptedBestEffort(dependencies, message);
     return {
       accepted: true,
       ignored: false,
