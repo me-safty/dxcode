@@ -1697,7 +1697,7 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
-  it("marks projected running sessions stopped on startup when the live provider session is not running the same turn", async () => {
+  it("mirrors live ready provider sessions on startup and settles the stale projected turn", async () => {
     const harness = await createHarness({ startReactor: false });
     const now = "2026-01-01T00:00:00.000Z";
 
@@ -1736,9 +1736,9 @@ describe("ProviderCommandReactor", () => {
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session).toMatchObject({
-      status: "stopped",
+      status: "ready",
       activeTurnId: null,
-      lastError: "Provider runtime is no longer active. Start a new turn to reconnect this thread.",
+      lastError: null,
     });
     expect(thread?.latestTurn).toMatchObject({
       turnId: asTurnId("turn-stale-live-ready"),
@@ -2197,7 +2197,7 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.activeTurnId).toBeNull();
   });
 
-  it("clears thread session state when provider session stop fails", async () => {
+  it("keeps thread session state when provider session stop fails", async () => {
     const now = "2026-01-01T00:00:00.000Z";
     const harness = await createHarness({
       stopSessionOverride: () =>
@@ -2242,8 +2242,8 @@ describe("ProviderCommandReactor", () => {
       const readModel = await harness.readModel();
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
       return (
-        thread?.session?.status === "stopped" &&
-        thread.session.activeTurnId === null &&
+        thread?.session?.status === "running" &&
+        thread.session.activeTurnId === asTurnId("turn-running") &&
         thread.activities.some((activity) => activity.kind === "provider.session.stop.failed")
       );
     });
@@ -2252,9 +2252,9 @@ describe("ProviderCommandReactor", () => {
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session).not.toBeNull();
-    expect(thread?.session?.status).toBe("stopped");
+    expect(thread?.session?.status).toBe("running");
     expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("codex_work"));
-    expect(thread?.session?.activeTurnId).toBeNull();
+    expect(thread?.session?.activeTurnId).toBe(asTurnId("turn-running"));
     expect(thread?.session?.lastError).toBe("No live provider session was found for this thread.");
 
     const failureActivity = thread?.activities.find(

@@ -421,7 +421,9 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
 
       yield* adapter.interruptTurn(threadId, started.turnId);
       const interruptedSessions = yield* adapter.listSessions();
-      const interruptedSession = interruptedSessions.find((session) => session.threadId === threadId);
+      const interruptedSession = interruptedSessions.find(
+        (session) => session.threadId === threadId,
+      );
 
       assert.equal(runtimeMock.state.abortCalls.at(-1), "http://127.0.0.1:9999/session");
       assert.equal(interruptedSession?.status, "ready");

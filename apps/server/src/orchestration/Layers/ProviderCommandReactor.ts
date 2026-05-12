@@ -28,7 +28,11 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
-import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
+import {
+  ProviderAdapterRequestError,
+  ProviderAdapterSessionNotFoundError,
+  ProviderSessionNotFoundError,
+} from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -42,6 +46,8 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
+const isProviderAdapterSessionNotFoundError = Schema.is(ProviderAdapterSessionNotFoundError);
+const isProviderSessionNotFoundError = Schema.is(ProviderSessionNotFoundError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
 type ProviderIntentEvent = Extract<
@@ -248,6 +254,14 @@ const make = Effect.gen(function* () {
     return Cause.pretty(cause);
   };
 
+  const isSessionAlreadyGoneFailure = (cause: Cause.Cause<unknown>): boolean => {
+    const failReason = cause.reasons.find(Cause.isFailReason);
+    return (
+      isProviderAdapterSessionNotFoundError(failReason?.error) ||
+      isProviderSessionNotFoundError(failReason?.error)
+    );
+  };
+
   const setThreadSession = (input: {
     readonly threadId: ThreadId;
     readonly session: OrchestrationSession;
@@ -312,11 +326,23 @@ const make = Effect.gen(function* () {
         }
 
         const liveSession = liveSessionsByThreadId.get(thread.id);
-        if (
-          liveSession?.status === "running" &&
-          liveSession.activeTurnId === session.activeTurnId
-        ) {
-          return Effect.void;
+        if (liveSession !== undefined) {
+          return setThreadSession({
+            threadId: thread.id,
+            session: {
+              ...session,
+              status: mapProviderSessionStatusToOrchestrationStatus(liveSession.status),
+              providerName: liveSession.provider,
+              ...(liveSession.providerInstanceId !== undefined
+                ? { providerInstanceId: liveSession.providerInstanceId }
+                : {}),
+              runtimeMode: liveSession.runtimeMode,
+              activeTurnId: liveSession.activeTurnId ?? null,
+              lastError: liveSession.lastError ?? session.lastError ?? null,
+              updatedAt: now,
+            },
+            createdAt: now,
+          });
         }
 
         return setThreadSession({
@@ -988,6 +1014,18 @@ const make = Effect.gen(function* () {
             ),
           ),
         );
+        if (!isSessionAlreadyGoneFailure(stopExit.cause)) {
+          yield* setThreadSession({
+            threadId: thread.id,
+            session: {
+              ...thread.session,
+              lastError: stopFailureDetail,
+              updatedAt: now,
+            },
+            createdAt: now,
+          });
+          return;
+        }
       }
     }
 
