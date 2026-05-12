@@ -327,18 +327,20 @@ const make = Effect.gen(function* () {
 
         const liveSession = liveSessionsByThreadId.get(thread.id);
         if (liveSession !== undefined) {
+          const status = mapProviderSessionStatusToOrchestrationStatus(liveSession.status);
           return setThreadSession({
             threadId: thread.id,
             session: {
               ...session,
-              status: mapProviderSessionStatusToOrchestrationStatus(liveSession.status),
+              status,
               providerName: liveSession.provider,
               ...(liveSession.providerInstanceId !== undefined
                 ? { providerInstanceId: liveSession.providerInstanceId }
                 : {}),
               runtimeMode: liveSession.runtimeMode,
               activeTurnId: liveSession.activeTurnId ?? null,
-              lastError: liveSession.lastError ?? session.lastError ?? null,
+              lastError:
+                liveSession.lastError ?? (status === "ready" ? null : (session.lastError ?? null)),
               updatedAt: now,
             },
             createdAt: now,

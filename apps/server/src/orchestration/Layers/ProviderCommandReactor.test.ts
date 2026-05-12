@@ -1716,7 +1716,7 @@ describe("ProviderCommandReactor", () => {
           providerInstanceId: ProviderInstanceId.make("codex"),
           runtimeMode: "approval-required",
           activeTurnId: asTurnId("turn-stale-live-ready"),
-          lastError: null,
+          lastError: "previous provider failure",
           updatedAt: now,
         },
         createdAt: now,
