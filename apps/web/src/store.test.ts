@@ -88,6 +88,27 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
   };
 }
 
+function makeThreadWithRunningTurn(turnId = TurnId.make("turn-1")): Thread {
+  return makeThread({
+    session: {
+      provider: ProviderDriverKind.make("codex"),
+      status: "running",
+      orchestrationStatus: "running",
+      activeTurnId: turnId,
+      createdAt: "2026-02-27T00:00:00.000Z",
+      updatedAt: "2026-02-27T00:00:01.000Z",
+    },
+    latestTurn: {
+      turnId,
+      state: "running",
+      requestedAt: "2026-02-27T00:00:00.000Z",
+      startedAt: "2026-02-27T00:00:01.000Z",
+      completedAt: null,
+      assistantMessageId: null,
+    },
+  });
+}
+
 function makeState(thread: Thread): AppState {
   const projectId = ProjectId.make("project-1");
   const project = {
@@ -783,24 +804,7 @@ describe("incremental orchestration updates", () => {
   });
 
   it("settles a running latest turn when the session is stopped", () => {
-    const thread = makeThread({
-      session: {
-        provider: ProviderDriverKind.make("codex"),
-        status: "running",
-        orchestrationStatus: "running",
-        activeTurnId: TurnId.make("turn-1"),
-        createdAt: "2026-02-27T00:00:00.000Z",
-        updatedAt: "2026-02-27T00:00:01.000Z",
-      },
-      latestTurn: {
-        turnId: TurnId.make("turn-1"),
-        state: "running",
-        requestedAt: "2026-02-27T00:00:00.000Z",
-        startedAt: "2026-02-27T00:00:01.000Z",
-        completedAt: null,
-        assistantMessageId: null,
-      },
-    });
+    const thread = makeThreadWithRunningTurn();
 
     const next = applyOrchestrationEvent(
       makeState(thread),
@@ -828,24 +832,7 @@ describe("incremental orchestration updates", () => {
   });
 
   it("settles a running latest turn across optimistic stop and server confirmation", () => {
-    const thread = makeThread({
-      session: {
-        provider: ProviderDriverKind.make("codex"),
-        status: "running",
-        orchestrationStatus: "running",
-        activeTurnId: TurnId.make("turn-1"),
-        createdAt: "2026-02-27T00:00:00.000Z",
-        updatedAt: "2026-02-27T00:00:01.000Z",
-      },
-      latestTurn: {
-        turnId: TurnId.make("turn-1"),
-        state: "running",
-        requestedAt: "2026-02-27T00:00:00.000Z",
-        startedAt: "2026-02-27T00:00:01.000Z",
-        completedAt: null,
-        assistantMessageId: null,
-      },
-    });
+    const thread = makeThreadWithRunningTurn();
     const stopRequestedAt = "2026-02-27T00:00:04.000Z";
 
     const afterOptimisticStop = applyOrchestrationEvent(
@@ -893,24 +880,7 @@ describe("incremental orchestration updates", () => {
   });
 
   it("preserves a failed latest turn when the session enters error", () => {
-    const thread = makeThread({
-      session: {
-        provider: ProviderDriverKind.make("codex"),
-        status: "running",
-        orchestrationStatus: "running",
-        activeTurnId: TurnId.make("turn-1"),
-        createdAt: "2026-02-27T00:00:00.000Z",
-        updatedAt: "2026-02-27T00:00:01.000Z",
-      },
-      latestTurn: {
-        turnId: TurnId.make("turn-1"),
-        state: "running",
-        requestedAt: "2026-02-27T00:00:00.000Z",
-        startedAt: "2026-02-27T00:00:01.000Z",
-        completedAt: null,
-        assistantMessageId: null,
-      },
-    });
+    const thread = makeThreadWithRunningTurn();
 
     const next = applyOrchestrationEvent(
       makeState(thread),
