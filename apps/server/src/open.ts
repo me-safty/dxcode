@@ -48,7 +48,7 @@ function parseTargetPathAndPosition(target: string): Option.Option<TargetPathAnd
   return Option.some({
     path: match[1],
     line: match[2],
-    column: Option.fromNullish(match[3]),
+    column: Option.fromUndefinedOr(match[3]),
   });
 }
 
