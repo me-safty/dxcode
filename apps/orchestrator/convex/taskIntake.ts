@@ -220,3 +220,87 @@ export const postTaskRuntimeLifecycleReply = internalAction({
     };
   },
 });
+
+export const postTaskRuntimeAssistantMessage = internalAction({
+  args: {
+    eventId: v.string(),
+    taskId: v.id("tasks"),
+    workSessionId: v.id("workSessions"),
+    occurredAt: v.string(),
+    t3ThreadId: v.string(),
+    t3MessageId: v.string(),
+    t3TurnId: v.optional(v.string()),
+    assistantMessage: v.string(),
+  },
+  returns: v.object({
+    posted: v.boolean(),
+    reason: v.optional(v.string()),
+    externalMessageId: v.optional(v.string()),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    readonly posted: boolean;
+    readonly reason?: string;
+    readonly externalMessageId?: string;
+  }> => {
+    const claims = await ctx.runMutation(internal.taskEvents.claimTaskAssistantMessageReplies, {
+      eventId: args.eventId,
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      occurredAt: args.occurredAt,
+      t3ThreadId: args.t3ThreadId,
+      t3MessageId: args.t3MessageId,
+      ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
+      assistantMessage: args.assistantMessage,
+    });
+    if (claims.length === 0) {
+      return { posted: false, reason: "no_unclaimed_intake_links" };
+    }
+
+    const bot = createTaskIntakeChatSdkBot({
+      sources: new Set(claims.map((claim) => (claim.kind === "linear_issue" ? "linear" : "slack"))),
+      async onMessage() {},
+    });
+    await bot.initialize();
+
+    const postedIds: string[] = [];
+    for (const claim of claims) {
+      try {
+        const posted: { readonly id: string } = await bot
+          .thread(
+            chatSdkThreadIdForLifecycleReply({
+              kind: claim.kind,
+              externalId: claim.externalId,
+            }),
+          )
+          .post(claim.body);
+        postedIds.push(posted.id);
+        await ctx.runMutation(internal.taskEvents.recordTaskAssistantMessageReplyDelivered, {
+          taskId: claim.taskId,
+          workSessionId: claim.workSessionId,
+          claimEventKey: claim.claimEventKey,
+          linkId: claim.linkId,
+          externalMessageId: posted.id,
+        });
+      } catch (error) {
+        await ctx.runMutation(internal.taskEvents.recordTaskAssistantMessageReplyFailed, {
+          taskId: claim.taskId,
+          workSessionId: claim.workSessionId,
+          claimEventKey: claim.claimEventKey,
+          linkId: claim.linkId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (postedIds.length === 0) {
+      return { posted: false, reason: "all_assistant_message_replies_failed" };
+    }
+    return {
+      posted: true,
+      ...(postedIds[0] !== undefined ? { externalMessageId: postedIds[0] } : {}),
+    };
+  },
+});

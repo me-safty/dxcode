@@ -1,6 +1,7 @@
 import {
   type ExecutionRunActivityEvent,
   type ExecutionRunLifecycleEvent,
+  type TaskRuntimeAssistantMessageEvent,
   ExecutionRunContinueRequest,
   ExecutionRunCreateRequest,
   ExecutionRunInterruptRequest,
@@ -94,6 +95,9 @@ const postActivityEvent = (event: ExecutionRunActivityEvent) =>
 const postTaskRuntimeLifecycleEvent = (event: ReturnType<typeof buildTaskRuntimeLifecycleEvent>) =>
   postToOrchestrator("/t3/task-runtime-events", event);
 
+const postTaskRuntimeAssistantMessageEvent = (event: TaskRuntimeAssistantMessageEvent) =>
+  postToOrchestrator("/t3/task-runtime-assistant-messages", event);
+
 const MAX_LIFECYCLE_ASSISTANT_RESPONSE_CHARS = 12_000;
 
 interface AssistantResponseCacheEntry {
@@ -137,6 +141,27 @@ function cacheAssistantMessage(
     ? existing.map((entry) => (entry.messageId === nextEntry.messageId ? nextEntry : entry))
     : [...existing, nextEntry];
   cache.set(threadKey, next.slice(-20));
+}
+
+export function collectCompletedAssistantMessage(input: {
+  readonly cache: Map<string, AssistantResponseCacheEntry[]>;
+  readonly event: Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
+}) {
+  const { cache, event } = input;
+  cacheAssistantMessage(cache, event);
+  if (event.payload.role !== "assistant" || event.payload.streaming) {
+    return undefined;
+  }
+
+  return (
+    normalizeAssistantResponse(event.payload.text) ??
+    readCachedAssistantResponse({
+      cache,
+      threadId: event.payload.threadId,
+      assistantMessageId: String(event.payload.messageId),
+      ...(event.payload.turnId !== null ? { turnId: event.payload.turnId } : {}),
+    })
+  );
 }
 
 function readCachedAssistantResponse(input: {
@@ -469,8 +494,11 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
         if (event.type === "thread.message-sent") {
-          cacheAssistantMessage(assistantResponseCache, event);
-          if (event.payload.role !== "assistant") {
+          const assistantMessage = collectCompletedAssistantMessage({
+            cache: assistantResponseCache,
+            event,
+          });
+          if (assistantMessage === undefined) {
             return Effect.void;
           }
 
@@ -480,39 +508,19 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
               return;
             }
 
-            const lifecycle = {
-              type: "completed" as const,
-              turnId: event.payload.turnId,
-            };
-            if (
-              !shouldForwardLifecycleCheckpoint({
-                type: lifecycle.type,
-                trackedRun,
-              })
-            ) {
-              return;
-            }
-
-            const assistantResponse = normalizeAssistantResponse(event.payload.text);
-            const payload = buildTaskRuntimeLifecycleEvent({
-              trackedRun,
-              type: lifecycle.type,
+            yield* postTaskRuntimeAssistantMessageEvent({
               eventId: event.eventId,
+              taskId: trackedRun.taskId!,
+              workSessionId: trackedRun.workSessionId!,
               occurredAt: event.occurredAt,
-              ...(lifecycle.turnId !== null ? { t3TurnId: lifecycle.turnId } : {}),
-              ...(assistantResponse !== undefined ? { assistantResponse } : {}),
-            });
-            yield* postTaskRuntimeLifecycleEvent(payload);
-
-            yield* runRegistry.markLifecycleDelivered({
-              threadId: trackedRun.threadId,
-              type: lifecycle.type,
-              eventId: event.eventId,
-              ...(lifecycle.turnId !== null ? { turnId: lifecycle.turnId } : {}),
+              t3ThreadId: trackedRun.threadId,
+              t3MessageId: event.payload.messageId,
+              ...(event.payload.turnId !== null ? { t3TurnId: event.payload.turnId } : {}),
+              assistantMessage,
             });
           }).pipe(
             Effect.catch((error: Error) =>
-              Effect.logWarning("execution bridge failed to forward assistant completion event", {
+              Effect.logWarning("execution bridge failed to forward assistant message event", {
                 eventId: event.eventId,
                 threadId: String(event.payload.threadId),
                 message: error.message,

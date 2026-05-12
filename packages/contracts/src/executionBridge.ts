@@ -1,7 +1,14 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import { IsoDateTime, ProjectId, ThreadId, TrimmedNonEmptyString, TurnId } from "./baseSchemas.ts";
+import {
+  IsoDateTime,
+  MessageId,
+  ProjectId,
+  ThreadId,
+  TrimmedNonEmptyString,
+  TurnId,
+} from "./baseSchemas.ts";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -176,6 +183,18 @@ export const TaskRuntimeLifecycleEvent = Schema.Struct({
   assistantResponse: Schema.optional(TrimmedNonEmptyString),
 });
 export type TaskRuntimeLifecycleEvent = typeof TaskRuntimeLifecycleEvent.Type;
+
+export const TaskRuntimeAssistantMessageEvent = Schema.Struct({
+  eventId: TrimmedNonEmptyString,
+  taskId: TrimmedNonEmptyString,
+  workSessionId: TaskRuntimeMaterializationId,
+  occurredAt: IsoDateTime,
+  t3ThreadId: ThreadId,
+  t3MessageId: MessageId,
+  t3TurnId: Schema.optional(TurnId),
+  assistantMessage: TrimmedNonEmptyString,
+});
+export type TaskRuntimeAssistantMessageEvent = typeof TaskRuntimeAssistantMessageEvent.Type;
 
 export const TaskPullRequestEnsureRequest = Schema.Struct({
   taskId: TrimmedNonEmptyString,

@@ -1,6 +1,6 @@
 import { httpRouter } from "convex/server";
 import * as Schema from "effect/Schema";
-import { TaskRuntimeLifecycleEvent } from "@t3tools/contracts";
+import { TaskRuntimeAssistantMessageEvent, TaskRuntimeLifecycleEvent } from "@t3tools/contracts";
 
 import {
   buildLinearInstallUrl,
@@ -13,6 +13,9 @@ import type { Id } from "./_generated/dataModel.js";
 import { httpAction } from "./_generated/server.js";
 
 const http = httpRouter();
+const decodeTaskRuntimeAssistantMessageEvent = Schema.decodeUnknownSync(
+  TaskRuntimeAssistantMessageEvent,
+);
 const decodeTaskRuntimeLifecycleEvent = Schema.decodeUnknownSync(TaskRuntimeLifecycleEvent);
 
 function requireBridgeAuthorization(request: Request) {
@@ -116,6 +119,34 @@ http.route({
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     return forwardChatSdkWebhook(ctx, request, "slack");
+  }),
+});
+
+http.route({
+  path: "/t3/task-runtime-assistant-messages",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = requireBridgeAuthorization(request);
+    if (!auth.ok) {
+      return Response.json({ error: auth.message }, { status: auth.status });
+    }
+
+    const payload = decodeTaskRuntimeAssistantMessageEvent(await request.json());
+    const result = await ctx.runAction(internal.taskIntake.postTaskRuntimeAssistantMessage, {
+      eventId: payload.eventId,
+      taskId: payload.taskId as Id<"tasks">,
+      workSessionId: payload.workSessionId as Id<"workSessions">,
+      occurredAt: payload.occurredAt,
+      t3ThreadId: String(payload.t3ThreadId),
+      t3MessageId: String(payload.t3MessageId),
+      ...(payload.t3TurnId !== undefined ? { t3TurnId: String(payload.t3TurnId) } : {}),
+      assistantMessage: payload.assistantMessage,
+    });
+
+    return Response.json({
+      accepted: true,
+      ...result,
+    });
   }),
 });
 

@@ -28,6 +28,14 @@ export function taskLifecycleReplyEventKey(input: {
   return `task-lifecycle-reply:${input.workSessionId}:${input.status}:${input.linkId}`;
 }
 
+export function taskAssistantMessageReplyEventKey(input: {
+  readonly workSessionId: string;
+  readonly t3MessageId: string;
+  readonly linkId: string;
+}) {
+  return `task-assistant-message-reply:${input.workSessionId}:${input.t3MessageId}:${input.linkId}`;
+}
+
 export function buildTaskLifecycleReplyBody(input: TaskLifecycleReplyInput) {
   if (input.status === "completed") {
     const assistantResponse = input.assistantResponse?.trim();
@@ -49,6 +57,34 @@ export function buildTaskLifecycleReplyBody(input: TaskLifecycleReplyInput) {
     ...(input.pullRequestUrl !== undefined ? [`Pull request: ${input.pullRequestUrl}`] : []),
     `Failure summary: ${input.failureSummary?.trim() || "Unknown error"}`,
   ].join("\n");
+}
+
+function hasDeliveredAssistantMessageReply(input: {
+  readonly taskEvents: Array<{
+    readonly kind: string;
+    readonly payloadJson?: string;
+  }>;
+  readonly workSessionId: string;
+  readonly linkId: string;
+}) {
+  return input.taskEvents.some((event) => {
+    if (event.kind !== "assistant-message-reply.delivered" || event.payloadJson === undefined) {
+      return false;
+    }
+
+    try {
+      const payload = JSON.parse(event.payloadJson) as {
+        readonly workSessionId?: unknown;
+        readonly linkId?: unknown;
+      };
+      return (
+        String(payload.workSessionId) === input.workSessionId &&
+        String(payload.linkId) === input.linkId
+      );
+    } catch {
+      return false;
+    }
+  });
 }
 
 function taskEventReturn() {
@@ -139,6 +175,13 @@ export const claimTaskLifecycleReplies = internalMutation({
       .withIndex("by_task", (q: any) => q.eq("taskId", args.taskId))
       .collect();
     const pullRequestLink = links.find((candidate) => candidate.kind === "github_pr");
+    const taskEvents =
+      args.status === "completed"
+        ? await ctx.db
+            .query("taskEvents")
+            .withIndex("by_task_created", (q: any) => q.eq("taskId", args.taskId))
+            .collect()
+        : [];
     const replyBody = buildTaskLifecycleReplyBody({
       taskId: String(args.taskId),
       workSessionId: String(args.workSessionId),
@@ -157,6 +200,16 @@ export const claimTaskLifecycleReplies = internalMutation({
 
     for (const link of links) {
       if (link.muted || (link.kind !== "linear_issue" && link.kind !== "slack_thread")) {
+        continue;
+      }
+      if (
+        args.status === "completed" &&
+        hasDeliveredAssistantMessageReply({
+          taskEvents,
+          workSessionId: String(args.workSessionId),
+          linkId: String(link._id),
+        })
+      ) {
         continue;
       }
 
@@ -207,6 +260,107 @@ export const claimTaskLifecycleReplies = internalMutation({
   },
 });
 
+export const claimTaskAssistantMessageReplies = internalMutation({
+  args: {
+    eventId: v.string(),
+    taskId: v.id("tasks"),
+    workSessionId: v.id("workSessions"),
+    occurredAt: v.string(),
+    t3ThreadId: v.string(),
+    t3MessageId: v.string(),
+    t3TurnId: v.optional(v.string()),
+    assistantMessage: v.string(),
+  },
+  returns: v.array(
+    v.object({
+      claimEventKey: v.string(),
+      taskId: v.id("tasks"),
+      workSessionId: v.id("workSessions"),
+      linkId: v.id("taskExternalLinks"),
+      kind: lifecycleReplyLinkKind,
+      externalId: v.string(),
+      body: v.string(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const task = await ctx.db.get(args.taskId);
+    if (task === null) {
+      throw new Error(`Task ${args.taskId} does not exist`);
+    }
+
+    const workSession = await ctx.db.get(args.workSessionId);
+    if (workSession === null) {
+      throw new Error(`Work Session ${args.workSessionId} does not exist`);
+    }
+    if (String(workSession.taskId) !== String(args.taskId)) {
+      throw new Error(`Work Session ${args.workSessionId} does not belong to Task ${args.taskId}`);
+    }
+
+    const body = args.assistantMessage.trim();
+    if (!body) {
+      return [];
+    }
+
+    const links = await ctx.db
+      .query("taskExternalLinks")
+      .withIndex("by_task", (q: any) => q.eq("taskId", args.taskId))
+      .collect();
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
+    const claimed = [];
+
+    for (const link of links) {
+      if (link.muted || (link.kind !== "linear_issue" && link.kind !== "slack_thread")) {
+        continue;
+      }
+
+      const claimEventKey = taskAssistantMessageReplyEventKey({
+        workSessionId: String(args.workSessionId),
+        t3MessageId: args.t3MessageId,
+        linkId: String(link._id),
+      });
+      const existingClaim = await ctx.db
+        .query("taskEvents")
+        .withIndex("by_event_key", (q: any) => q.eq("eventKey", claimEventKey))
+        .unique();
+      if (existingClaim !== null) {
+        continue;
+      }
+
+      await ctx.db.insert("taskEvents", {
+        taskId: args.taskId,
+        eventKey: claimEventKey,
+        kind: "assistant-message-reply.claimed",
+        summary: `Claimed assistant message reply for ${link.kind}.`,
+        payloadJson: JSON.stringify({
+          eventId: args.eventId,
+          taskId: args.taskId,
+          workSessionId: args.workSessionId,
+          linkId: link._id,
+          kind: link.kind,
+          externalId: link.externalId,
+          occurredAt: args.occurredAt,
+          t3ThreadId: args.t3ThreadId,
+          t3MessageId: args.t3MessageId,
+          ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
+        }),
+        createdAt: now,
+      });
+
+      claimed.push({
+        claimEventKey,
+        taskId: args.taskId,
+        workSessionId: args.workSessionId,
+        linkId: link._id,
+        kind: link.kind,
+        externalId: link.externalId,
+        body,
+      });
+    }
+
+    return claimed;
+  },
+});
+
 export const recordTaskLifecycleReplyDelivered = internalMutation({
   args: {
     taskId: v.id("tasks"),
@@ -245,6 +399,45 @@ export const recordTaskLifecycleReplyDelivered = internalMutation({
   },
 });
 
+export const recordTaskAssistantMessageReplyDelivered = internalMutation({
+  args: {
+    taskId: v.id("tasks"),
+    workSessionId: v.id("workSessions"),
+    claimEventKey: v.string(),
+    linkId: v.id("taskExternalLinks"),
+    externalMessageId: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const eventKey = `${args.claimEventKey}:delivered`;
+    const existingEvent = await ctx.db
+      .query("taskEvents")
+      .withIndex("by_event_key", (q: any) => q.eq("eventKey", eventKey))
+      .unique();
+    if (existingEvent !== null) {
+      return null;
+    }
+
+    await ctx.db.insert("taskEvents", {
+      taskId: args.taskId,
+      eventKey,
+      kind: "assistant-message-reply.delivered",
+      summary: "Delivered assistant message reply.",
+      payloadJson: JSON.stringify({
+        claimEventKey: args.claimEventKey,
+        workSessionId: args.workSessionId,
+        linkId: args.linkId,
+        ...(args.externalMessageId !== undefined
+          ? { externalMessageId: args.externalMessageId }
+          : {}),
+      }),
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+    });
+
+    return null;
+  },
+});
+
 export const recordTaskLifecycleReplyFailed = internalMutation({
   args: {
     taskId: v.id("tasks"),
@@ -271,6 +464,43 @@ export const recordTaskLifecycleReplyFailed = internalMutation({
       summary: `Failed to deliver ${args.status} lifecycle reply.`,
       payloadJson: JSON.stringify({
         claimEventKey: args.claimEventKey,
+        linkId: args.linkId,
+        error: args.error,
+      }),
+      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+    });
+
+    return null;
+  },
+});
+
+export const recordTaskAssistantMessageReplyFailed = internalMutation({
+  args: {
+    taskId: v.id("tasks"),
+    workSessionId: v.id("workSessions"),
+    claimEventKey: v.string(),
+    linkId: v.id("taskExternalLinks"),
+    error: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const eventKey = `${args.claimEventKey}:failed`;
+    const existingEvent = await ctx.db
+      .query("taskEvents")
+      .withIndex("by_event_key", (q: any) => q.eq("eventKey", eventKey))
+      .unique();
+    if (existingEvent !== null) {
+      return null;
+    }
+
+    await ctx.db.insert("taskEvents", {
+      taskId: args.taskId,
+      eventKey,
+      kind: "assistant-message-reply.failed",
+      summary: "Failed to deliver assistant message reply.",
+      payloadJson: JSON.stringify({
+        claimEventKey: args.claimEventKey,
+        workSessionId: args.workSessionId,
         linkId: args.linkId,
         error: args.error,
       }),
