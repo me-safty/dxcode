@@ -695,6 +695,65 @@ describe("ProviderRuntimeIngestion", () => {
     );
   });
 
+  it("keeps OpenCode main turn tracking when title turn events interleave", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-opencode-main-started"),
+      provider: ProviderDriverKind.make("opencode"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-opencode-main"),
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-opencode-main",
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-opencode-title-completed"),
+      provider: ProviderDriverKind.make("opencode"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-opencode-title"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await harness.drain();
+    const midReadModel = await harness.readModel();
+    const midThread = midReadModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(midThread?.session?.status).toBe("running");
+    expect(midThread?.session?.activeTurnId).toBe("turn-opencode-main");
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-opencode-main-completed"),
+      provider: ProviderDriverKind.make("opencode"),
+      createdAt: "2026-01-01T00:00:02.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-opencode-main"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "ready" &&
+        thread.session?.activeTurnId === null &&
+        thread.session?.lastError === null,
+    );
+  });
+
   it("ignores auxiliary turn aborts for a non-active turn", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
