@@ -63,7 +63,7 @@ import {
 } from "./checkpointing/Services/CheckpointDiffQuery.ts";
 import { GitManager, type GitManagerShape } from "./git/GitManager.ts";
 import { Keybindings, type KeybindingsShape } from "./keybindings.ts";
-import { ExternalLauncher, type ExternalLauncherShape } from "./process/externalLauncher.ts";
+import * as ExternalLauncher from "./process/externalLauncher.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -319,7 +319,7 @@ const buildAppUnderTest = (options?: {
     keybindings?: Partial<KeybindingsShape>;
     providerRegistry?: Partial<ProviderRegistryShape>;
     serverSettings?: Partial<ServerSettingsShape>;
-    externalLauncher?: Partial<ExternalLauncherShape>;
+    externalLauncher?: Partial<ExternalLauncher.ExternalLauncherShape>;
     vcsDriver?: Partial<VcsDriver.VcsDriverShape>;
     vcsDriverRegistry?: Partial<VcsDriverRegistry.VcsDriverRegistryShape>;
     gitVcsDriver?: Partial<GitVcsDriver.GitVcsDriverShape>;
@@ -540,7 +540,7 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ExternalLauncher)({
+        Layer.mock(ExternalLauncher.ExternalLauncher)({
           ...options?.layers?.externalLauncher,
         }),
       ),

@@ -23,7 +23,7 @@ import * as DateTime from "effect/DateTime";
 
 import { ServerConfig } from "./config.ts";
 import { Keybindings } from "./keybindings.ts";
-import { ExternalLauncher } from "./process/externalLauncher.ts";
+import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor.ts";
@@ -261,9 +261,9 @@ const maybeOpenBrowser = (target: string) =>
     if (serverConfig.noBrowser) {
       return;
     }
-    const { launchBrowser } = yield* ExternalLauncher;
+    const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
 
-    yield* launchBrowser(target).pipe(
+    yield* externalLauncher.launchBrowser(target).pipe(
       Effect.catch(() =>
         Effect.logInfo("browser auto-open unavailable", {
           hint: `Open ${target} in your browser.`,

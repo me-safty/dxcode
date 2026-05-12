@@ -361,4 +361,4 @@ const make = Effect.gen(function* () {
   } satisfies ExternalLauncherShape;
 });
 
-export const ExternalLauncherLive = Layer.effect(ExternalLauncher, make);
+export const layer = Layer.effect(ExternalLauncher, make);
