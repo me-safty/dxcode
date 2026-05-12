@@ -510,7 +510,10 @@ it.layer(NodeServices.layer)("launchDetached", (it) => {
       const spawnerLayer = Layer.mock(ChildProcessSpawner.ChildProcessSpawner, {
         spawn: (command) =>
           Effect.sync(() => {
-            assert.equal(command._tag, "StandardCommand");
+            assert.equal(ChildProcess.isStandardCommand(command), true);
+            if (!ChildProcess.isStandardCommand(command)) {
+              throw new Error("Expected a standard command");
+            }
             spawnedCommand = command;
             return makeMockDetachedHandle(() => {
               didUnref = true;
