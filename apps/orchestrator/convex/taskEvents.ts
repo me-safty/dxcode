@@ -13,6 +13,7 @@ export interface TaskLifecycleReplyInput {
   readonly t3ThreadId?: string;
   readonly failureSummary?: string;
   readonly pullRequestUrl?: string;
+  readonly assistantResponse?: string;
 }
 
 export function taskLifecycleReplyEventKey(input: {
@@ -25,6 +26,16 @@ export function taskLifecycleReplyEventKey(input: {
 
 export function buildTaskLifecycleReplyBody(input: TaskLifecycleReplyInput) {
   if (input.status === "completed") {
+    const assistantResponse = input.assistantResponse?.trim();
+    if (assistantResponse) {
+      return [
+        assistantResponse,
+        ...(input.pullRequestUrl !== undefined && !assistantResponse.includes(input.pullRequestUrl)
+          ? [`Pull request: ${input.pullRequestUrl}`]
+          : []),
+      ].join("\n\n");
+    }
+
     return [
       `Task ${input.taskId} completed.`,
       ...(input.t3ThreadId !== undefined ? [`Primary T3 thread: \`${input.t3ThreadId}\``] : []),
@@ -97,6 +108,7 @@ export const claimTaskLifecycleReplies = internalMutation({
     occurredAt: v.string(),
     t3ThreadId: v.optional(v.string()),
     failureSummary: v.optional(v.string()),
+    assistantResponse: v.optional(v.string()),
   },
   returns: v.array(
     v.object({
@@ -134,6 +146,11 @@ export const claimTaskLifecycleReplies = internalMutation({
       ...(args.t3ThreadId !== undefined ? { t3ThreadId: args.t3ThreadId } : {}),
       ...(args.failureSummary !== undefined ? { failureSummary: args.failureSummary } : {}),
       ...(pullRequestLink?.url !== undefined ? { pullRequestUrl: pullRequestLink.url } : {}),
+      ...(args.assistantResponse !== undefined
+        ? { assistantResponse: args.assistantResponse }
+        : workSession.assistantResponse !== undefined
+          ? { assistantResponse: workSession.assistantResponse }
+          : {}),
     });
     const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
     const claimed = [];

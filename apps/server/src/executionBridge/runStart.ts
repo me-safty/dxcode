@@ -743,6 +743,7 @@ export function buildTaskRuntimeLifecycleEvent(input: {
   readonly occurredAt: string;
   readonly t3TurnId?: TurnId;
   readonly failureSummary?: string;
+  readonly assistantResponse?: string;
 }): TaskRuntimeLifecycleEvent {
   if (input.trackedRun.taskId === null || input.trackedRun.workSessionId === null) {
     throw new Error("Cannot build Task runtime lifecycle event for non-Task tracked run.");
@@ -759,5 +760,6 @@ export function buildTaskRuntimeLifecycleEvent(input: {
       ? { t3TurnId: input.t3TurnId ?? input.trackedRun.lastTurnId! }
       : {}),
     ...(input.failureSummary ? { failureSummary: input.failureSummary } : {}),
+    ...(input.assistantResponse ? { assistantResponse: input.assistantResponse } : {}),
   };
 }

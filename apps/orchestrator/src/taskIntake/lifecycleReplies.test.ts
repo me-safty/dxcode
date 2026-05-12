@@ -42,4 +42,22 @@ describe("chatSdkThreadIdForLifecycleReply", () => {
       }),
     ).toContain("Pull request: https://github.com/acme/app/pull/42");
   });
+
+  it("uses the assistant response as the completion reply when available", () => {
+    expect(
+      buildTaskLifecycleReplyBody({
+        taskId: "task-123",
+        workSessionId: "work-session-123",
+        status: "completed",
+        t3ThreadId: "thread-123",
+        assistantResponse: "I checked the local bridge and verified the smoke path end to end.",
+        pullRequestUrl: "https://github.com/acme/app/pull/42",
+      }),
+    ).toBe(
+      [
+        "I checked the local bridge and verified the smoke path end to end.",
+        "Pull request: https://github.com/acme/app/pull/42",
+      ].join("\n\n"),
+    );
+  });
 });

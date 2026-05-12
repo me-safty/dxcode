@@ -8,6 +8,8 @@ import {
   TaskPullRequestEnsureRequest,
   TaskRuntimeMaterializeRequest,
   type OrchestrationEvent,
+  type ThreadId,
+  type TurnId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -91,6 +93,116 @@ const postActivityEvent = (event: ExecutionRunActivityEvent) =>
 
 const postTaskRuntimeLifecycleEvent = (event: ReturnType<typeof buildTaskRuntimeLifecycleEvent>) =>
   postToOrchestrator("/t3/task-runtime-events", event);
+
+const MAX_LIFECYCLE_ASSISTANT_RESPONSE_CHARS = 12_000;
+
+interface AssistantResponseCacheEntry {
+  readonly messageId: string;
+  readonly turnId: string | null;
+  readonly text: string;
+}
+
+function normalizeAssistantResponse(text: string) {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  if (trimmed.length <= MAX_LIFECYCLE_ASSISTANT_RESPONSE_CHARS) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, MAX_LIFECYCLE_ASSISTANT_RESPONSE_CHARS).trimEnd()}\n\n[Response truncated for intake reply.]`;
+}
+
+function cacheAssistantMessage(
+  cache: Map<string, AssistantResponseCacheEntry[]>,
+  event: Extract<OrchestrationEvent, { type: "thread.message-sent" }>,
+) {
+  if (event.payload.role !== "assistant") {
+    return;
+  }
+
+  const response = normalizeAssistantResponse(event.payload.text);
+  if (response === undefined) {
+    return;
+  }
+
+  const threadKey = String(event.payload.threadId);
+  const existing = cache.get(threadKey) ?? [];
+  const nextEntry: AssistantResponseCacheEntry = {
+    messageId: String(event.payload.messageId),
+    turnId: event.payload.turnId === null ? null : String(event.payload.turnId),
+    text: response,
+  };
+  const next = existing.some((entry) => entry.messageId === nextEntry.messageId)
+    ? existing.map((entry) => (entry.messageId === nextEntry.messageId ? nextEntry : entry))
+    : [...existing, nextEntry];
+  cache.set(threadKey, next.slice(-20));
+}
+
+function readCachedAssistantResponse(input: {
+  readonly cache: Map<string, AssistantResponseCacheEntry[]>;
+  readonly threadId: ThreadId;
+  readonly turnId?: TurnId;
+  readonly assistantMessageId?: string | null;
+}) {
+  const entries = input.cache.get(String(input.threadId)) ?? [];
+  if (input.assistantMessageId !== undefined && input.assistantMessageId !== null) {
+    const byMessage = entries.find((entry) => entry.messageId === String(input.assistantMessageId));
+    if (byMessage !== undefined) {
+      return byMessage.text;
+    }
+  }
+  if (input.turnId !== undefined) {
+    const byTurn = entries.findLast((entry) => entry.turnId === String(input.turnId));
+    if (byTurn !== undefined) {
+      return byTurn.text;
+    }
+  }
+  return entries.at(-1)?.text;
+}
+
+function resolveAssistantResponse(input: {
+  readonly cache: Map<string, AssistantResponseCacheEntry[]>;
+  readonly threadId: ThreadId;
+  readonly turnId?: TurnId;
+  readonly assistantMessageId?: string | null;
+}) {
+  const cached = readCachedAssistantResponse(input);
+  if (cached !== undefined) {
+    return Effect.succeed(cached);
+  }
+
+  return Effect.gen(function* () {
+    const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+    const thread = yield* projectionSnapshotQuery.getThreadDetailById(input.threadId);
+    if (Option.isNone(thread)) {
+      return undefined;
+    }
+
+    if (input.assistantMessageId !== undefined && input.assistantMessageId !== null) {
+      const byMessage = thread.value.messages.find(
+        (message) => String(message.id) === String(input.assistantMessageId),
+      );
+      if (byMessage !== undefined) {
+        return normalizeAssistantResponse(byMessage.text);
+      }
+    }
+
+    if (input.turnId !== undefined) {
+      const byTurn = thread.value.messages.findLast(
+        (message) =>
+          message.role === "assistant" && String(message.turnId) === String(input.turnId),
+      );
+      if (byTurn !== undefined) {
+        return normalizeAssistantResponse(byTurn.text);
+      }
+    }
+
+    return normalizeAssistantResponse(
+      thread.value.messages.findLast((message) => message.role === "assistant")?.text ?? "",
+    );
+  }).pipe(Effect.catch(() => Effect.succeed(undefined)));
+}
 
 function toLifecycleCheckpoint(
   event: Extract<OrchestrationEvent, { type: "thread.session-set" }>,
@@ -352,9 +464,15 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
 
     const orchestrationEngine = yield* OrchestrationEngineService;
     const runRegistry = yield* ExecutionBridgeRunRegistry;
+    const assistantResponseCache = new Map<string, AssistantResponseCacheEntry[]>();
 
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+        if (event.type === "thread.message-sent") {
+          cacheAssistantMessage(assistantResponseCache, event);
+          return Effect.void;
+        }
+
         if (event.type === "thread.activity-appended") {
           return Effect.gen(function* () {
             const trackedRun = yield* runRegistry.getTrackedRun(event.payload.threadId);
@@ -399,12 +517,22 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
             }
 
             if (trackedRun.kind === "task") {
+              const assistantResponse = yield* resolveAssistantResponse({
+                cache: assistantResponseCache,
+                threadId: event.payload.threadId,
+                turnId: event.payload.turnId,
+                assistantMessageId:
+                  event.payload.assistantMessageId === null
+                    ? null
+                    : String(event.payload.assistantMessageId),
+              });
               const payload = buildTaskRuntimeLifecycleEvent({
                 trackedRun,
                 type: lifecycle.type,
                 eventId: event.eventId,
                 occurredAt: event.occurredAt,
                 t3TurnId: lifecycle.turnId,
+                ...(assistantResponse !== undefined ? { assistantResponse } : {}),
               });
               yield* postTaskRuntimeLifecycleEvent(payload);
             } else {
@@ -462,6 +590,20 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
           }
 
           if (trackedRun.kind === "task") {
+            if (lifecycle.type === "completed" && lifecycle.turnId === undefined) {
+              // Claude can mark the session ready before the turn completion identifies the
+              // assistant message. Wait for the turn event so intake replies use the AI output.
+              return;
+            }
+
+            const assistantResponse =
+              lifecycle.type === "completed"
+                ? yield* resolveAssistantResponse({
+                    cache: assistantResponseCache,
+                    threadId: event.payload.threadId,
+                    ...(lifecycle.turnId !== undefined ? { turnId: lifecycle.turnId } : {}),
+                  })
+                : undefined;
             const payload = buildTaskRuntimeLifecycleEvent({
               trackedRun,
               type: lifecycle.type,
@@ -471,6 +613,7 @@ export const executionBridgeLifecycleCallbacksLive = Layer.effectDiscard(
               ...(lifecycle.failureSummary !== undefined
                 ? { failureSummary: lifecycle.failureSummary }
                 : {}),
+              ...(assistantResponse !== undefined ? { assistantResponse } : {}),
             });
             yield* postTaskRuntimeLifecycleEvent(payload);
           } else {

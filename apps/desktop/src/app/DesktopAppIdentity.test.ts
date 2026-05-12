@@ -136,9 +136,18 @@ describe("DesktopAppIdentity", () => {
     withIdentity(
       Effect.gen(function* () {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
         const userDataPath = yield* identity.resolveUserDataPath;
 
-        assert.equal(userDataPath, "/Users/alice/Library/Application Support/T3 Code (Alpha)");
+        assert.equal(
+          userDataPath,
+          environment.path.join(
+            "/Users/alice",
+            "Library",
+            "Application Support",
+            "T3 Code (Alpha)",
+          ),
+        );
       }),
       { legacyPathExists: true },
     ),

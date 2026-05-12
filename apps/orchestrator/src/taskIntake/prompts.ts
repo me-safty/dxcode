@@ -58,7 +58,7 @@ export function buildTaskIntakeInitialPrompt(message: TaskIntakeMessage): string
     "MVP operating notes:",
     "- Work only from the normalized message text and URLs above.",
     "- Do not assume hidden attachments or platform context are available unless linked in the message.",
-    "- Leave a concise final summary in the T3 thread; intake sources receive only coarse lifecycle replies.",
+    "- Leave a concise final summary in the T3 thread; Slack and Linear will receive that final summary as the completion reply.",
   ].join("\n");
 }
 

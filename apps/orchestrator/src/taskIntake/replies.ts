@@ -84,16 +84,20 @@ export function buildTaskIntakeLifecycleReply(input: {
   readonly taskId: string;
   readonly t3ThreadId?: string;
   readonly failureSummary?: string;
+  readonly assistantResponse?: string;
 }): TaskIntakeReply {
   if (input.status === "completed") {
+    const assistantResponse = input.assistantResponse?.trim();
     return replyBase({
       message: input.message,
       suffix: "completed",
-      body: [
-        `Task ${input.taskId} completed.`,
-        ...(input.t3ThreadId !== undefined ? [`Primary T3 thread: \`${input.t3ThreadId}\``] : []),
-        "Detailed output lives in T3 for this MVP.",
-      ].join("\n"),
+      body:
+        assistantResponse ||
+        [
+          `Task ${input.taskId} completed.`,
+          ...(input.t3ThreadId !== undefined ? [`Primary T3 thread: \`${input.t3ThreadId}\``] : []),
+          "Detailed output lives in T3 for this MVP.",
+        ].join("\n"),
     });
   }
 

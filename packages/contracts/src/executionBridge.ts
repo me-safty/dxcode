@@ -172,6 +172,7 @@ export const TaskRuntimeLifecycleEvent = Schema.Struct({
   t3ThreadId: Schema.optional(ThreadId),
   t3TurnId: Schema.optional(TurnId),
   failureSummary: Schema.optional(TrimmedNonEmptyString),
+  assistantResponse: Schema.optional(TrimmedNonEmptyString),
 });
 export type TaskRuntimeLifecycleEvent = typeof TaskRuntimeLifecycleEvent.Type;
 

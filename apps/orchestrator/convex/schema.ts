@@ -118,6 +118,7 @@ export default defineSchema({
     updatedAt: v.number(),
     t3TurnId: v.optional(v.string()),
     failureSummary: v.optional(v.string()),
+    assistantResponse: v.optional(v.string()),
     bridgeRunId: v.optional(v.string()),
     runtimeId: v.optional(v.string()),
     runtimeProviderKind: v.optional(runtimeProviderKind),

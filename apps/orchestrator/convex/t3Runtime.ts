@@ -976,6 +976,7 @@ export const applyTaskRuntimeLifecycleEvent = internalMutation({
     t3ThreadId: v.optional(v.string()),
     t3TurnId: v.optional(v.string()),
     failureSummary: v.optional(v.string()),
+    assistantResponse: v.optional(v.string()),
   },
   returns: v.object({
     applied: v.boolean(),
@@ -1020,6 +1021,9 @@ export const applyTaskRuntimeLifecycleEvent = internalMutation({
       ...(args.t3ThreadId !== undefined ? { t3ThreadId: args.t3ThreadId } : {}),
       ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
       ...(args.failureSummary !== undefined ? { failureSummary: args.failureSummary } : {}),
+      ...(args.assistantResponse !== undefined
+        ? { assistantResponse: args.assistantResponse }
+        : {}),
     });
 
     if (args.type === "failed") {
@@ -1040,6 +1044,9 @@ export const applyTaskRuntimeLifecycleEvent = internalMutation({
         ...(args.t3ThreadId !== undefined ? { t3ThreadId: args.t3ThreadId } : {}),
         ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
         ...(args.failureSummary !== undefined ? { failureSummary: args.failureSummary } : {}),
+        ...(args.assistantResponse !== undefined
+          ? { assistantResponse: args.assistantResponse }
+          : {}),
       }),
       createdAt: occurredAtMs,
     });
