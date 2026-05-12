@@ -168,6 +168,10 @@ export function deriveMessagesTimelineRows(input: {
       input.activeTurnId != null &&
       timelineEntry.message.turnId === input.activeTurnId;
 
+    const showCompletionDivider =
+      timelineEntry.message.role === "assistant" &&
+      input.completionDividerBeforeEntryId === timelineEntry.id;
+
     nextRows.push({
       kind: "message",
       id: timelineEntry.id,
@@ -175,10 +179,8 @@ export function deriveMessagesTimelineRows(input: {
       message: timelineEntry.message,
       durationStart:
         durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt,
-      showCompletionDivider:
-        timelineEntry.message.role === "assistant" &&
-        input.completionDividerBeforeEntryId === timelineEntry.id,
-      completionSummary: input.completionSummary ?? null,
+      showCompletionDivider,
+      completionSummary: showCompletionDivider ? (input.completionSummary ?? null) : null,
       showAssistantCopyButton:
         timelineEntry.message.role === "assistant" &&
         terminalAssistantMessageIds.has(timelineEntry.message.id),

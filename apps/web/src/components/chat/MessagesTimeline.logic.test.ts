@@ -316,6 +316,7 @@ describe("deriveMessagesTimelineRows", () => {
     );
 
     expect(assistantRows[0]?.assistantCopyStreaming).toBe(false);
+    expect(assistantRows[0]?.completionSummary).toBeNull();
     expect(assistantRows[1]?.assistantCopyStreaming).toBe(true);
     expect(assistantRows[1]?.completionSummary).toBe("done");
   });
