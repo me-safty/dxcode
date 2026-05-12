@@ -236,10 +236,20 @@ function ChatThreadRouteView() {
   });
 
   useMobileEdgeSwipe({
-    enabled: shouldUseDiffSheet,
-    onOpen: openLastUsedRightPanel,
+    enabled: shouldUseDiffSheet && !diffOpen,
+    onSwipe: openLastUsedRightPanel,
     side: "right",
     startArea: "screen",
+    startSurface: "outside-panels",
+  });
+
+  useMobileEdgeSwipe({
+    action: "close",
+    enabled: shouldUseDiffSheet && diffOpen,
+    onSwipe: closeDiff,
+    side: "right",
+    startArea: "screen",
+    startSurface: "panel",
   });
 
   useEffect(() => {

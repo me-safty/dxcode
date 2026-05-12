@@ -325,4 +325,44 @@ describe("CompactComposerControlsMenu", () => {
     await screen.unmount();
     host.remove();
   });
+
+  it("shows the Codex auto review switch in the Access section when available", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const onAutoReviewChange = vi.fn();
+    const screen = await render(
+      <CompactComposerControlsMenu
+        activePlan={false}
+        interactionMode="default"
+        planSidebarLabel="Plan"
+        planSidebarOpen={false}
+        runtimeMode="approval-required"
+        showInteractionModeToggle={false}
+        autoReviewAvailable
+        autoReviewEnabled={false}
+        onToggleInteractionMode={vi.fn()}
+        onTogglePlanSidebar={vi.fn()}
+        onRuntimeModeChange={vi.fn()}
+        onAutoReviewChange={onAutoReviewChange}
+      />,
+      { container: host },
+    );
+
+    await page.getByLabelText("More composer controls").click();
+
+    await vi.waitFor(() => {
+      const text = document.body.textContent ?? "";
+      expect(text).toContain("Access");
+      expect(text).toContain("Auto Review");
+    });
+
+    await page.getByText("Auto Review").click();
+
+    await vi.waitFor(() => {
+      expect(onAutoReviewChange).toHaveBeenCalledWith(true);
+    });
+
+    await screen.unmount();
+    host.remove();
+  });
 });

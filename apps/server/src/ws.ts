@@ -114,6 +114,113 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   );
 }
 
+type OrderedCatchupInput =
+  | {
+      readonly kind: "caught-up";
+    }
+  | {
+      readonly kind: "event";
+      readonly event: OrchestrationEvent;
+    };
+
+interface OrderedCatchupState {
+  readonly bufferedEvents: ReadonlyArray<OrchestrationEvent>;
+  readonly caughtUp: boolean;
+  readonly emittedSequence: number;
+}
+
+function selectOrderedUniqueCatchupEvents(
+  events: ReadonlyArray<OrchestrationEvent>,
+  emittedSequence: number,
+): ReadonlyArray<OrchestrationEvent> {
+  const seenSequences = new Set<number>();
+  const orderedEvents = events
+    .filter((event) => event.sequence > emittedSequence)
+    .toSorted((left, right) => left.sequence - right.sequence);
+  const uniqueEvents: OrchestrationEvent[] = [];
+
+  for (const event of orderedEvents) {
+    if (seenSequences.has(event.sequence)) {
+      continue;
+    }
+    seenSequences.add(event.sequence);
+    uniqueEvents.push(event);
+  }
+
+  return uniqueEvents;
+}
+
+function streamOrderedCatchupEvents<E, R1, R2>(input: {
+  readonly fromSequenceExclusive: number;
+  readonly replayStream: Stream.Stream<OrchestrationEvent, E, R1>;
+  readonly liveStream: Stream.Stream<OrchestrationEvent, E, R2>;
+}): Stream.Stream<OrchestrationEvent, E, R1 | R2> {
+  const replayItems = Stream.concat(
+    input.replayStream.pipe(
+      Stream.map(
+        (event): OrderedCatchupInput => ({
+          kind: "event",
+          event,
+        }),
+      ),
+    ),
+    Stream.succeed({
+      kind: "caught-up",
+    } satisfies OrderedCatchupInput),
+  );
+  const liveItems = input.liveStream.pipe(
+    Stream.filter((event) => event.sequence > input.fromSequenceExclusive),
+    Stream.map(
+      (event): OrderedCatchupInput => ({
+        kind: "event",
+        event,
+      }),
+    ),
+  );
+
+  return Stream.merge(replayItems, liveItems).pipe(
+    Stream.mapAccum(
+      (): OrderedCatchupState => ({
+        bufferedEvents: [],
+        caughtUp: false,
+        emittedSequence: input.fromSequenceExclusive,
+      }),
+      (state, item) => {
+        if (!state.caughtUp) {
+          if (item.kind === "caught-up") {
+            const orderedEvents = selectOrderedUniqueCatchupEvents(
+              state.bufferedEvents,
+              state.emittedSequence,
+            );
+            const nextState: OrderedCatchupState = {
+              bufferedEvents: [],
+              caughtUp: true,
+              emittedSequence: orderedEvents.at(-1)?.sequence ?? state.emittedSequence,
+            };
+            return [nextState, orderedEvents] as const;
+          }
+
+          const nextState: OrderedCatchupState = {
+            ...state,
+            bufferedEvents: [...state.bufferedEvents, item.event],
+          };
+          return [nextState, [] as ReadonlyArray<OrchestrationEvent>] as const;
+        }
+
+        if (item.kind === "caught-up" || item.event.sequence <= state.emittedSequence) {
+          return [state, [] as ReadonlyArray<OrchestrationEvent>] as const;
+        }
+
+        const nextState: OrderedCatchupState = {
+          ...state,
+          emittedSequence: item.event.sequence,
+        };
+        return [nextState, [item.event]] as const;
+      },
+    ),
+  );
+}
+
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
 function toAuthAccessStreamEvent(
@@ -738,19 +845,34 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 ),
               );
 
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-                Stream.mapEffect(toShellStreamEvent),
-                Stream.flatMap((event) =>
-                  Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
+              const toShellItemStream = <E, R>(events: Stream.Stream<OrchestrationEvent, E, R>) =>
+                events.pipe(
+                  Stream.mapEffect(toShellStreamEvent),
+                  Stream.flatMap((event) =>
+                    Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
+                  ),
+                );
+              const replayStream = orchestrationEngine.readEvents(snapshot.snapshotSequence).pipe(
+                Stream.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: "Failed to replay orchestration shell events",
+                      cause,
+                    }),
                 ),
               );
+              const catchupStream = streamOrderedCatchupEvents({
+                fromSequenceExclusive: snapshot.snapshotSequence,
+                replayStream,
+                liveStream: orchestrationEngine.streamDomainEvents,
+              });
 
               return Stream.concat(
                 Stream.make({
                   kind: "snapshot" as const,
                   snapshot,
                 }),
-                liveStream,
+                toShellItemStream(catchupStream),
               );
             }),
             { "rpc.aggregate": "orchestration" },
@@ -776,8 +898,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeThread,
             Effect.gen(function* () {
-              const [threadDetail, snapshotSequence] = yield* Effect.all([
-                projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
+              const threadDetailSnapshot = yield* projectionSnapshotQuery
+                .getThreadDetailSnapshotById(input.threadId)
+                .pipe(
                   Effect.mapError(
                     (cause) =>
                       new OrchestrationGetSnapshotError({
@@ -785,48 +908,49 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                         cause,
                       }),
                   ),
-                ),
-                projectionSnapshotQuery.getSnapshotSequence().pipe(
-                  Effect.map(({ snapshotSequence }) => snapshotSequence),
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationGetSnapshotError({
-                        message: "Failed to load orchestration snapshot sequence",
-                        cause,
-                      }),
-                  ),
-                ),
-              ]);
+                );
 
-              if (Option.isNone(threadDetail)) {
+              if (Option.isNone(threadDetailSnapshot)) {
                 return yield* new OrchestrationGetSnapshotError({
                   message: `Thread ${input.threadId} was not found`,
                   cause: input.threadId,
                 });
               }
 
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-                Stream.filter(
-                  (event) =>
-                    event.aggregateKind === "thread" &&
-                    event.aggregateId === input.threadId &&
-                    isThreadDetailEvent(event),
+              const snapshot = threadDetailSnapshot.value;
+              const isSubscribedThreadDetailEvent = (event: OrchestrationEvent) =>
+                event.aggregateKind === "thread" &&
+                event.aggregateId === input.threadId &&
+                isThreadDetailEvent(event);
+              const toThreadItemStream = <E, R>(events: Stream.Stream<OrchestrationEvent, E, R>) =>
+                events.pipe(
+                  Stream.filter(isSubscribedThreadDetailEvent),
+                  Stream.map((event) => ({
+                    kind: "event" as const,
+                    event,
+                  })),
+                );
+              const replayStream = orchestrationEngine.readEvents(snapshot.snapshotSequence).pipe(
+                Stream.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: `Failed to replay thread ${input.threadId}`,
+                      cause,
+                    }),
                 ),
-                Stream.map((event) => ({
-                  kind: "event" as const,
-                  event,
-                })),
               );
+              const catchupStream = streamOrderedCatchupEvents({
+                fromSequenceExclusive: snapshot.snapshotSequence,
+                replayStream,
+                liveStream: orchestrationEngine.streamDomainEvents,
+              });
 
               return Stream.concat(
                 Stream.make({
                   kind: "snapshot" as const,
-                  snapshot: {
-                    snapshotSequence,
-                    thread: threadDetail.value,
-                  },
+                  snapshot,
                 }),
-                liveStream,
+                toThreadItemStream(catchupStream),
               );
             }),
             { "rpc.aggregate": "orchestration" },

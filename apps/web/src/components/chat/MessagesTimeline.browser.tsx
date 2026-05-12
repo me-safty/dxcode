@@ -181,6 +181,42 @@ describe("MessagesTimeline", () => {
     }
   });
 
+  it("reports wheel and touch scroll intent from the list surface", async () => {
+    const onUserScrollIntent = vi.fn();
+    const screen = await render(
+      <MessagesTimeline
+        {...buildProps()}
+        onUserScrollIntent={onUserScrollIntent}
+        timelineEntries={[
+          {
+            id: "work-1",
+            kind: "work",
+            createdAt: "2026-04-13T12:00:00.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-04-13T12:00:00.000Z",
+              label: "thinking",
+              detail: "Inspecting repository state",
+              tone: "thinking",
+            },
+          },
+        ]}
+      />,
+    );
+
+    try {
+      const list = document.querySelector("[data-testid='legend-list']");
+      expect(list).not.toBeNull();
+
+      list?.dispatchEvent(new WheelEvent("wheel", { bubbles: true }));
+      list?.dispatchEvent(new Event("touchmove", { bubbles: true }));
+
+      expect(onUserScrollIntent).toHaveBeenCalledTimes(2);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("starts long user messages collapsed by default", async () => {
     const screen = await render(
       <MessagesTimeline

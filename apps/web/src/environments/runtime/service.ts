@@ -110,6 +110,11 @@ interface PendingSavedEnvironmentConnection {
   readonly promise: Promise<EnvironmentConnection>;
 }
 
+interface ProjectionRecovery {
+  highestObservedSequence: number;
+  promise: Promise<void>;
+}
+
 const pendingSavedEnvironmentConnections = new Map<
   EnvironmentId,
   PendingSavedEnvironmentConnection
@@ -123,6 +128,7 @@ const lastAppliedProjectionVersionByEnvironment = new Map<
     readonly updatedAt: string | null;
   }
 >();
+const projectionRecoveryByEnvironment = new Map<EnvironmentId, ProjectionRecovery>();
 
 let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
@@ -253,11 +259,25 @@ export function shouldApplyProjectionEvent(input: {
   } | null;
   readonly sequence: number;
 }): boolean {
+  return classifyProjectionEvent(input) === "apply";
+}
+
+export function classifyProjectionEvent(input: {
+  readonly current: {
+    readonly sequence: number;
+    readonly updatedAt: string | null;
+  } | null;
+  readonly sequence: number;
+}): "apply" | "gap" | "stale" {
   if (input.current === null) {
-    return true;
+    return "apply";
   }
 
-  return input.sequence > input.current.sequence;
+  if (input.sequence <= input.current.sequence) {
+    return "stale";
+  }
+
+  return input.sequence === input.current.sequence + 1 ? "apply" : "gap";
 }
 
 function readLastAppliedProjectionVersion(environmentId: EnvironmentId): {
@@ -293,6 +313,140 @@ function markAppliedProjectionEvent(environmentId: EnvironmentId, sequence: numb
     sequence,
     updatedAt: currentVersion?.updatedAt ?? null,
   });
+}
+
+function noteProjectionRecoveryObservedSequence(
+  environmentId: EnvironmentId,
+  sequence: number,
+): void {
+  const existing = projectionRecoveryByEnvironment.get(environmentId);
+  if (!existing) {
+    return;
+  }
+
+  existing.highestObservedSequence = Math.max(existing.highestObservedSequence, sequence);
+}
+
+function applyRecoveredProjectionEventBatch(
+  events: ReadonlyArray<OrchestrationEvent>,
+  environmentId: EnvironmentId,
+): void {
+  if (events.length === 0) {
+    return;
+  }
+
+  applyRecoveredEventBatch(events, environmentId);
+  markAppliedProjectionEvent(environmentId, events.at(-1)?.sequence ?? 0);
+}
+
+function selectContiguousReplayEvents(
+  events: ReadonlyArray<OrchestrationEvent>,
+  currentSequence: number,
+): ReadonlyArray<OrchestrationEvent> {
+  const nextEvents = events
+    .filter((event) => event.sequence > currentSequence)
+    .toSorted((left, right) => left.sequence - right.sequence);
+  const contiguousEvents: OrchestrationEvent[] = [];
+  let expectedSequence = currentSequence + 1;
+
+  for (const event of nextEvents) {
+    if (event.sequence < expectedSequence) {
+      continue;
+    }
+    if (event.sequence !== expectedSequence) {
+      break;
+    }
+
+    contiguousEvents.push(event);
+    expectedSequence += 1;
+  }
+
+  return contiguousEvents;
+}
+
+async function recoverProjectionSequenceGap(
+  environmentId: EnvironmentId,
+  recovery: ProjectionRecovery,
+): Promise<void> {
+  const connection = readEnvironmentConnection(environmentId);
+  if (!connection) {
+    return;
+  }
+
+  for (;;) {
+    if (
+      projectionRecoveryByEnvironment.get(environmentId) !== recovery ||
+      readEnvironmentConnection(environmentId) !== connection
+    ) {
+      return;
+    }
+
+    const currentSequence = readLastAppliedProjectionVersion(environmentId)?.sequence ?? 0;
+    const replayedEvents = await connection.client.orchestration.replayEvents({
+      fromSequenceExclusive: currentSequence,
+    });
+    if (
+      projectionRecoveryByEnvironment.get(environmentId) !== recovery ||
+      readEnvironmentConnection(environmentId) !== connection
+    ) {
+      return;
+    }
+
+    const contiguousEvents = selectContiguousReplayEvents(replayedEvents, currentSequence);
+
+    if (contiguousEvents.length === 0) {
+      if (
+        projectionRecoveryByEnvironment.get(environmentId) === recovery &&
+        readEnvironmentConnection(environmentId) === connection
+      ) {
+        await connection.reconnect();
+      }
+      return;
+    }
+
+    applyRecoveredProjectionEventBatch(contiguousEvents, environmentId);
+
+    const recoveredSequence = readLastAppliedProjectionVersion(environmentId)?.sequence ?? 0;
+    if (recoveredSequence >= recovery.highestObservedSequence) {
+      return;
+    }
+  }
+}
+
+function queueProjectionRecovery(environmentId: EnvironmentId, observedSequence: number): void {
+  const existing = projectionRecoveryByEnvironment.get(environmentId);
+  if (existing) {
+    existing.highestObservedSequence = Math.max(existing.highestObservedSequence, observedSequence);
+    return;
+  }
+
+  const recovery = {
+    highestObservedSequence: observedSequence,
+    promise: Promise.resolve(),
+  };
+  projectionRecoveryByEnvironment.set(environmentId, recovery);
+  recovery.promise = recoverProjectionSequenceGap(environmentId, recovery)
+    .catch((error) => {
+      console.warn("Projection replay recovery failed", {
+        environmentId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      const connection = readEnvironmentConnection(environmentId);
+      if (projectionRecoveryByEnvironment.get(environmentId) !== recovery || !connection) {
+        return;
+      }
+      return connection.reconnect().catch((reconnectError) => {
+        console.warn("Projection snapshot recovery failed", {
+          environmentId,
+          error: reconnectError instanceof Error ? reconnectError.message : String(reconnectError),
+        });
+      });
+    })
+    .finally(() => {
+      if (projectionRecoveryByEnvironment.get(environmentId) === recovery) {
+        projectionRecoveryByEnvironment.delete(environmentId);
+      }
+    });
 }
 function getThreadDetailSubscriptionKey(environmentId: EnvironmentId, threadId: ThreadId): string {
   return scopedThreadKey(scopeThreadRef(environmentId, threadId));
@@ -1007,10 +1161,10 @@ function applyRecoveredEventBatch(
     markPromotedDraftThreadByRef(scopeThreadRef(environmentId, threadId));
   }
   for (const threadId of batchEffects.clearDeletedThreadIds) {
-    draftStore.clearDraftThread(scopeThreadRef(environmentId, threadId));
-    useUiStateStore
-      .getState()
-      .clearThreadUi(scopedThreadKey(scopeThreadRef(environmentId, threadId)));
+    const threadRef = scopeThreadRef(environmentId, threadId);
+    disposeThreadDetailSubscriptionByKey(scopedThreadKey(threadRef));
+    draftStore.clearDraftThread(threadRef);
+    useUiStateStore.getState().clearThreadUi(scopedThreadKey(threadRef));
   }
   for (const event of events) {
     if (event.type === "project.deleted") {
@@ -1032,12 +1186,21 @@ export function applyEnvironmentThreadDetailEvent(
 }
 
 function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) {
-  if (
-    !shouldApplyProjectionEvent({
-      current: readLastAppliedProjectionVersion(environmentId),
-      sequence: event.sequence,
-    })
-  ) {
+  const currentProjectionVersion = readLastAppliedProjectionVersion(environmentId);
+  if (projectionRecoveryByEnvironment.has(environmentId)) {
+    noteProjectionRecoveryObservedSequence(environmentId, event.sequence);
+    return;
+  }
+
+  const projectionDecision = classifyProjectionEvent({
+    current: currentProjectionVersion,
+    sequence: event.sequence,
+  });
+  if (projectionDecision === "stale") {
+    return;
+  }
+  if (projectionDecision === "gap") {
+    queueProjectionRecovery(environmentId, event.sequence);
     return;
   }
 
@@ -1261,6 +1424,7 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
   }
 
   lastAppliedProjectionVersionByEnvironment.delete(environmentId);
+  projectionRecoveryByEnvironment.delete(environmentId);
   environmentConnections.delete(environmentId);
   emitEnvironmentConnectionRegistryChange();
   detachThreadDetailSubscriptionsForEnvironment(environmentId);
@@ -1811,6 +1975,7 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
   lastBrowserHiddenAt = null;
   lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
   lastAppliedProjectionVersionByEnvironment.clear();
+  projectionRecoveryByEnvironment.clear();
   pendingSavedEnvironmentConnections.clear();
   for (const key of Array.from(threadDetailSubscriptions.keys())) {
     disposeThreadDetailSubscriptionByKey(key);

@@ -189,6 +189,23 @@ function normalizeCodexTokenUsage(
   };
 }
 
+function resolveCodexApprovalsReviewer(
+  modelSelection: ProviderSendTurnInput["modelSelection"] | undefined,
+  boundInstanceId: ProviderInstanceId,
+): EffectCodexSchema.V2TurnStartParams__ApprovalsReviewer | undefined {
+  if (modelSelection?.instanceId !== boundInstanceId) {
+    return undefined;
+  }
+  const autoReview = getModelSelectionBooleanOptionValue(modelSelection, "autoReview");
+  if (autoReview === true) {
+    return "auto_review";
+  }
+  if (autoReview === false) {
+    return "user";
+  }
+  return undefined;
+}
+
 function toTurnStatus(
   value: EffectCodexSchema.V2TurnCompletedNotification["turn"]["status"] | "cancelled",
 ): "completed" | "failed" | "cancelled" | "interrupted" {
@@ -1378,6 +1395,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           yield* Effect.suspend(() => stopSessionInternal(existing));
         }
 
+        const approvalsReviewer = resolveCodexApprovalsReviewer(
+          input.modelSelection,
+          boundInstanceId,
+        );
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
@@ -1395,6 +1416,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(input.modelSelection?.instanceId === boundInstanceId &&
           getModelSelectionBooleanOptionValue(input.modelSelection, "fastMode") === true
             ? { serviceTier: "fast" }
+            : {}),
+          ...(approvalsReviewer
+            ? {
+                approvalsReviewer:
+                  approvalsReviewer as EffectCodexSchema.V2ThreadStartParams__ApprovalsReviewer,
+              }
             : {}),
         };
         const sessionScope = yield* Scope.make("sequential");
@@ -1514,6 +1541,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       input.modelSelection?.instanceId === boundInstanceId
         ? getModelSelectionBooleanOptionValue(input.modelSelection, "fastMode")
         : undefined;
+    const approvalsReviewer = resolveCodexApprovalsReviewer(input.modelSelection, boundInstanceId);
     return yield* session.runtime
       .sendTurn({
         ...(input.input !== undefined ? { input: input.input } : {}),
@@ -1526,6 +1554,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             }
           : {}),
         ...(fastMode === true ? { serviceTier: "fast" } : {}),
+        ...(approvalsReviewer ? { approvalsReviewer } : {}),
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
         ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
       })

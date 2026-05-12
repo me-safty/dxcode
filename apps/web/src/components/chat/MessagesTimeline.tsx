@@ -129,6 +129,7 @@ interface MessagesTimelineProps {
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  onUserScrollIntent?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +159,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
+  onUserScrollIntent,
 }: MessagesTimelineProps) {
   const rawRows = useMemo(
     () =>
@@ -186,6 +188,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onIsAtEndChange(state.isAtEnd);
     }
   }, [listRef, onIsAtEndChange]);
+
+  const handleUserScrollIntent = useCallback(() => {
+    onUserScrollIntent?.();
+  }, [onUserScrollIntent]);
 
   const previousRowCountRef = useRef(rows.length);
   useEffect(() => {
@@ -266,21 +272,25 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx.Provider value={sharedState}>
       <TimelineRowActivityCtx.Provider value={activityState}>
-        <LegendList<MessagesTimelineRow>
-          ref={listRef}
-          data={rows}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          estimatedItemSize={90}
-          initialScrollAtEnd
-          maintainScrollAtEnd
-          maintainScrollAtEndThreshold={0.1}
-          maintainVisibleContentPosition
-          onScroll={handleScroll}
-          className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-          ListHeaderComponent={TIMELINE_LIST_HEADER}
-          ListFooterComponent={TIMELINE_LIST_FOOTER}
-        />
+        <div
+          className="h-full min-h-0"
+          onTouchMoveCapture={handleUserScrollIntent}
+          onWheelCapture={handleUserScrollIntent}
+        >
+          <LegendList<MessagesTimelineRow>
+            ref={listRef}
+            data={rows}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            estimatedItemSize={90}
+            initialScrollAtEnd
+            maintainVisibleContentPosition={{ data: false, size: true }}
+            onScroll={handleScroll}
+            className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+            ListHeaderComponent={TIMELINE_LIST_HEADER}
+            ListFooterComponent={TIMELINE_LIST_FOOTER}
+          />
+        </div>
       </TimelineRowActivityCtx.Provider>
     </TimelineRowCtx.Provider>
   );

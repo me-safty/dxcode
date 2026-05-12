@@ -11,6 +11,28 @@ describe("resolveMobileEdgeSwipeDecision", () => {
     expect(resolveMobileEdgeSwipeDecision({ deltaX: -64, deltaY: 12, side: "right" })).toBe("open");
   });
 
+  it("closes the left panel after a horizontal leftward swipe", () => {
+    expect(
+      resolveMobileEdgeSwipeDecision({
+        action: "close",
+        deltaX: -64,
+        deltaY: 12,
+        side: "left",
+      }),
+    ).toBe("close");
+  });
+
+  it("closes the right panel after a horizontal rightward swipe", () => {
+    expect(
+      resolveMobileEdgeSwipeDecision({
+        action: "close",
+        deltaX: 64,
+        deltaY: 12,
+        side: "right",
+      }),
+    ).toBe("close");
+  });
+
   it("keeps short horizontal movement pending", () => {
     expect(resolveMobileEdgeSwipeDecision({ deltaX: 32, deltaY: 4, side: "left" })).toBe("pending");
   });

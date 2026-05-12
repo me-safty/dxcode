@@ -5,6 +5,7 @@ import { XIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { ScrollArea } from "~/components/ui/scroll-area";
+import { MOBILE_EDGE_SWIPE_PANEL_ATTRIBUTE } from "~/hooks/useMobileEdgeSwipe";
 
 const Sheet = SheetPrimitive.Root;
 
@@ -91,6 +92,7 @@ function SheetPopup({
             className,
           )}
           data-slot="sheet-popup"
+          {...{ [MOBILE_EDGE_SWIPE_PANEL_ATTRIBUTE]: side }}
           {...props}
         >
           {children}

@@ -10,6 +10,7 @@ import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
+import { shouldRenderTraitsControls } from "./TraitsPicker";
 
 // Everything in composerProviderState is now data-driven by the model's
 // optionDescriptors, so these tests use a single synthetic provider/model and
@@ -176,6 +177,30 @@ describe("getComposerProviderState", () => {
       promptEffort: null,
       modelOptionsForDispatch: undefined,
     });
+  });
+
+  it("keeps Codex Auto Review in dispatch options without making it a traits control", () => {
+    const models = modelWith([
+      { id: "autoReview", label: "Auto Review", type: "boolean", currentValue: false },
+    ]);
+    const state = getComposerProviderState({
+      provider: PROVIDER,
+      model: MODEL,
+      models,
+      prompt: "",
+      modelOptions: undefined,
+    });
+
+    expect(state.modelOptionsForDispatch).toEqual(selections(["autoReview", false]));
+    expect(
+      shouldRenderTraitsControls({
+        provider: PROVIDER,
+        model: MODEL,
+        models,
+        prompt: "",
+        modelOptions: state.modelOptionsForDispatch,
+      }),
+    ).toBe(false);
   });
 
   it("adds ultrathink class names when the prompt triggers a promptInjectedValues descriptor", () => {

@@ -1,6 +1,9 @@
 import { QueryClient } from "@tanstack/react-query";
 import {
+  CommandId,
   EnvironmentId,
+  EventId,
+  type OrchestrationEvent,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -11,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockSubscribeThread = vi.fn();
 const mockThreadUnsubscribe = vi.fn();
+const mockReplayEvents = vi.fn();
 const mockCreateEnvironmentConnection = vi.fn();
 const mockCreateWsRpcClient = vi.fn();
 const mockWaitForSavedEnvironmentRegistryHydration = vi.fn();
@@ -146,6 +150,63 @@ function makeThreadShellSnapshot(params: {
   };
 }
 
+function makeThreadSessionSetEvent(params: {
+  readonly sequence: number;
+  readonly threadId: ThreadId;
+  readonly status: "idle" | "ready";
+}): Extract<OrchestrationEvent, { type: "thread.session-set" }> {
+  const occurredAt = `2026-04-13T00:00:0${params.sequence}.000Z`;
+
+  return {
+    sequence: params.sequence,
+    eventId: EventId.make(`event-session-set-${params.sequence}`),
+    aggregateKind: "thread",
+    aggregateId: params.threadId,
+    occurredAt,
+    commandId: CommandId.make(`command-session-set-${params.sequence}`),
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    type: "thread.session-set",
+    payload: {
+      threadId: params.threadId,
+      session: {
+        threadId: params.threadId,
+        status: params.status,
+        providerName: "codex",
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: occurredAt,
+      },
+    },
+  };
+}
+
+function makeThreadDeletedEvent(params: {
+  readonly sequence: number;
+  readonly threadId: ThreadId;
+}): Extract<OrchestrationEvent, { type: "thread.deleted" }> {
+  const occurredAt = `2026-04-13T00:00:0${params.sequence}.000Z`;
+
+  return {
+    sequence: params.sequence,
+    eventId: EventId.make(`event-thread-deleted-${params.sequence}`),
+    aggregateKind: "thread",
+    aggregateId: params.threadId,
+    occurredAt,
+    commandId: CommandId.make(`command-thread-deleted-${params.sequence}`),
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    type: "thread.deleted",
+    payload: {
+      threadId: params.threadId,
+      deletedAt: occurredAt,
+    },
+  };
+}
+
 describe("retainThreadDetailSubscription", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -178,6 +239,7 @@ describe("retainThreadDetailSubscription", () => {
       },
       orchestration: {
         subscribeThread: mockSubscribeThread,
+        replayEvents: mockReplayEvents,
       },
     });
     mockCreateEnvironmentConnection.mockImplementation((input) => {
@@ -211,6 +273,7 @@ describe("retainThreadDetailSubscription", () => {
       role: "client",
     });
     mockConnectionReconnects.length = 0;
+    mockReplayEvents.mockResolvedValue([]);
   });
 
   afterEach(async () => {
@@ -321,6 +384,55 @@ describe("retainThreadDetailSubscription", () => {
     await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
     expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
 
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("recovers shell sequence gaps through orchestration replay", async () => {
+    const {
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-gap-recovery");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "ready",
+      }),
+      environmentId,
+    );
+
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    mockReplayEvents.mockResolvedValueOnce([
+      makeThreadSessionSetEvent({ sequence: 2, threadId, status: "idle" }),
+      makeThreadDeletedEvent({ sequence: 3, threadId }),
+    ]);
+
+    connectionInput.applyShellEvent(
+      {
+        kind: "thread-removed",
+        sequence: 3,
+        threadId,
+      },
+      environmentId,
+    );
+
+    await vi.waitFor(() => {
+      expect(mockReplayEvents).toHaveBeenCalledWith({ fromSequenceExclusive: 1 });
+      expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
+    });
+
+    release();
     stop();
     await resetEnvironmentServiceForTests();
   });

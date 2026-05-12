@@ -5,6 +5,7 @@ import type {
   ProjectEntry,
   ProviderApprovalDecision,
   ProviderInteractionMode,
+  ProviderOptionSelection,
   ResolvedKeybindingsConfig,
   RuntimeMode,
   ScopedThreadRef,
@@ -18,7 +19,11 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
-import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  createModelSelection,
+  getProviderOptionBooleanSelectionValue,
+  normalizeModelSlug,
+} from "@t3tools/shared/model";
 import {
   forwardRef,
   memo,
@@ -65,6 +70,12 @@ import { ProviderModelPicker } from "./ProviderModelPicker";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
+import {
+  AUTO_REVIEW_MODEL_OPTION_ID,
+  autoReviewAccessConfig,
+  ComposerAccessMenuContent,
+  runtimeModeConfig,
+} from "./ComposerAccessMenuContent";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
@@ -82,19 +93,10 @@ import { basenameOfPath } from "../../vscode-icons";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
 import { Button } from "../ui/button";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
-import {
-  BotIcon,
-  CircleAlertIcon,
-  ListTodoIcon,
-  type LucideIcon,
-  LockIcon,
-  LockOpenIcon,
-  PenLineIcon,
-  XIcon,
-} from "lucide-react";
+import { BotIcon, ChevronDownIcon, CircleAlertIcon, ListTodoIcon, XIcon } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
 import { getProviderInteractionModeToggle } from "../../providerModels";
 import {
@@ -115,28 +117,6 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
-const runtimeModeConfig: Record<
-  RuntimeMode,
-  { label: string; description: string; icon: LucideIcon }
-> = {
-  "approval-required": {
-    label: "Supervised",
-    description: "Ask before commands and file changes.",
-    icon: LockIcon,
-  },
-  "auto-accept-edits": {
-    label: "Auto-accept edits",
-    description: "Auto-approve edits, ask before other actions.",
-    icon: PenLineIcon,
-  },
-  "full-access": {
-    label: "Full access",
-    description: "Allow commands and edits without prompts.",
-    icon: LockOpenIcon,
-  },
-};
-
-const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
@@ -146,6 +126,38 @@ const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-slot="combobox-popup"]',
   '[data-slot="autocomplete-popup"]',
 ].join(",");
+
+function withBooleanModelOption(
+  options: ReadonlyArray<ProviderOptionSelection> | undefined,
+  id: string,
+  value: boolean,
+): ReadonlyArray<ProviderOptionSelection> {
+  let found = false;
+  const nextOptions: Array<ProviderOptionSelection> = [];
+  for (const option of options ?? []) {
+    if (option.id === id) {
+      found = true;
+      nextOptions.push({ id: option.id, value });
+    } else {
+      nextOptions.push(option);
+    }
+  }
+  return found ? nextOptions : [...nextOptions, { id, value }];
+}
+
+function getAutoReviewDescriptorCurrentValue(
+  models: ReadonlyArray<ServerProvider["models"][number]>,
+): boolean | null {
+  for (const model of models) {
+    const descriptor = model.capabilities?.optionDescriptors?.find(
+      (candidate) => candidate.id === AUTO_REVIEW_MODEL_OPTION_ID,
+    );
+    if (descriptor?.type === "boolean" && typeof descriptor.currentValue === "boolean") {
+      return descriptor.currentValue;
+    }
+  }
+  return null;
+}
 
 const extendReplacementRangeForTrailingSpace = (
   text: string,
@@ -186,12 +198,18 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   showPlanToggle: boolean;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
+  autoReviewAvailable?: boolean;
+  autoReviewEnabled?: boolean;
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   onTogglePlanSidebar: () => void;
+  onAutoReviewChange?: (enabled: boolean) => void;
 }) {
-  const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
-  const RuntimeModeIcon = runtimeModeOption.icon;
+  const accessOption =
+    props.autoReviewAvailable && props.autoReviewEnabled === true
+      ? autoReviewAccessConfig
+      : runtimeModeConfig[props.runtimeMode];
+  const RuntimeModeIcon = accessOption.icon;
 
   return (
     <>
@@ -221,40 +239,34 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
         </>
       ) : null}
 
-      <Select
-        value={props.runtimeMode}
-        onValueChange={(value) => props.onRuntimeModeChange(value!)}
-      >
-        <SelectTrigger
-          variant="ghost"
-          size="sm"
-          className="font-medium"
-          aria-label="Runtime mode"
-          title={runtimeModeOption.description}
+      <Menu>
+        <MenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0 font-medium text-muted-foreground/70 hover:text-foreground/80"
+              type="button"
+              aria-label="Runtime mode"
+              title={accessOption.description}
+            />
+          }
         >
           <RuntimeModeIcon className="size-4" />
-          <SelectValue>{runtimeModeOption.label}</SelectValue>
-        </SelectTrigger>
-        <SelectPopup alignItemWithTrigger={false}>
-          {runtimeModeOptions.map((mode) => {
-            const option = runtimeModeConfig[mode];
-            const OptionIcon = option.icon;
-            return (
-              <SelectItem key={mode} value={mode} className="min-w-64 py-2">
-                <div className="grid min-w-0 gap-0.5">
-                  <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                    <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                    {option.label}
-                  </span>
-                  <span className="text-muted-foreground text-xs leading-4">
-                    {option.description}
-                  </span>
-                </div>
-              </SelectItem>
-            );
-          })}
-        </SelectPopup>
-      </Select>
+          <span>{accessOption.label}</span>
+          <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
+        </MenuTrigger>
+        <MenuPopup align="start">
+          <ComposerAccessMenuContent
+            runtimeMode={props.runtimeMode}
+            autoReviewAvailable={props.autoReviewAvailable}
+            autoReviewEnabled={props.autoReviewEnabled}
+            showDescriptions
+            onRuntimeModeChange={props.onRuntimeModeChange}
+            onAutoReviewChange={props.onAutoReviewChange}
+          />
+        </MenuPopup>
+      </Menu>
 
       {props.showPlanToggle ? (
         <>
@@ -568,6 +580,12 @@ export const ChatComposer = memo(
     const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
 
     const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+    const setComposerDraftModelSelection = useComposerDraftStore(
+      (store) => store.setModelSelection,
+    );
+    const setStickyComposerModelSelection = useComposerDraftStore(
+      (store) => store.setStickyModelSelection,
+    );
     const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
     const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
     const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
@@ -720,6 +738,8 @@ export const ChatComposer = memo(
       () => selectedProviderEntry?.models ?? [],
       [selectedProviderEntry],
     );
+    const selectedInstanceModelOptions =
+      composerModelOptions?.[selectedInstanceId] ?? composerModelOptions?.[selectedProvider];
 
     const composerProviderState = useMemo(
       () =>
@@ -728,9 +748,15 @@ export const ChatComposer = memo(
           model: selectedModel,
           models: selectedProviderModels,
           prompt,
-          modelOptions: composerModelOptions?.[selectedProvider],
+          modelOptions: selectedInstanceModelOptions,
         }),
-      [composerModelOptions, prompt, selectedModel, selectedProvider, selectedProviderModels],
+      [
+        prompt,
+        selectedInstanceModelOptions,
+        selectedModel,
+        selectedProvider,
+        selectedProviderModels,
+      ],
     );
 
     const selectedPromptEffort = composerProviderState.promptEffort;
@@ -748,6 +774,52 @@ export const ChatComposer = memo(
       () =>
         createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
       [selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
+    );
+    const autoReviewDispatchValue = getProviderOptionBooleanSelectionValue(
+      selectedModelOptionsForDispatch,
+      AUTO_REVIEW_MODEL_OPTION_ID,
+    );
+    const autoReviewDescriptorValue =
+      autoReviewDispatchValue ?? getAutoReviewDescriptorCurrentValue(selectedProviderModels);
+    const autoReviewSelectionValue = getProviderOptionBooleanSelectionValue(
+      selectedInstanceModelOptions,
+      AUTO_REVIEW_MODEL_OPTION_ID,
+    );
+    const autoReviewAvailable =
+      selectedProvider === ProviderDriverKind.make("codex") &&
+      typeof autoReviewDescriptorValue === "boolean";
+    const autoReviewEnabled = autoReviewAvailable
+      ? (autoReviewSelectionValue ?? autoReviewDescriptorValue)
+      : false;
+    const handleAutoReviewChange = useCallback(
+      (enabled: boolean) => {
+        if (!autoReviewAvailable) {
+          return;
+        }
+        const nextSelection = createModelSelection(
+          selectedInstanceId,
+          selectedModel,
+          withBooleanModelOption(
+            selectedModelOptionsForDispatch ?? selectedInstanceModelOptions ?? undefined,
+            AUTO_REVIEW_MODEL_OPTION_ID,
+            enabled,
+          ),
+        );
+        setComposerDraftModelSelection(composerDraftTarget, nextSelection);
+        setStickyComposerModelSelection(nextSelection);
+        scheduleComposerFocus();
+      },
+      [
+        autoReviewAvailable,
+        composerDraftTarget,
+        scheduleComposerFocus,
+        selectedInstanceId,
+        selectedInstanceModelOptions,
+        selectedModel,
+        selectedModelOptionsForDispatch,
+        setComposerDraftModelSelection,
+        setStickyComposerModelSelection,
+      ],
     );
     const selectedModelForPicker = selectedModel;
     // Instance-keyed option list so the picker can show each configured
@@ -1025,7 +1097,7 @@ export const ChatComposer = memo(
       ...(routeKind === "draft" && draftId ? { draftId } : {}),
       model: selectedModel,
       models: selectedProviderModels,
-      modelOptions: composerModelOptions?.[selectedProvider],
+      modelOptions: selectedInstanceModelOptions,
       prompt,
       onPromptChange: setPromptFromTraits,
     });
@@ -1035,7 +1107,7 @@ export const ChatComposer = memo(
       ...(routeKind === "draft" && draftId ? { draftId } : {}),
       model: selectedModel,
       models: selectedProviderModels,
-      modelOptions: composerModelOptions?.[selectedProvider],
+      modelOptions: selectedInstanceModelOptions,
       prompt,
       onPromptChange: setPromptFromTraits,
     });
@@ -2353,9 +2425,12 @@ export const ChatComposer = memo(
                       runtimeMode={runtimeMode}
                       showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                       traitsMenuContent={providerTraitsMenuContent}
+                      autoReviewAvailable={autoReviewAvailable}
+                      autoReviewEnabled={autoReviewEnabled}
                       onToggleInteractionMode={toggleInteractionMode}
                       onTogglePlanSidebar={togglePlanSidebar}
                       onRuntimeModeChange={handleRuntimeModeChange}
+                      onAutoReviewChange={handleAutoReviewChange}
                     />
                   ) : (
                     <>
@@ -2377,9 +2452,12 @@ export const ChatComposer = memo(
                         showPlanToggle={showPlanSidebarToggle}
                         planSidebarLabel={planSidebarLabel}
                         planSidebarOpen={planSidebarOpen}
+                        autoReviewAvailable={autoReviewAvailable}
+                        autoReviewEnabled={autoReviewEnabled}
                         onToggleInteractionMode={toggleInteractionMode}
                         onRuntimeModeChange={handleRuntimeModeChange}
                         onTogglePlanSidebar={togglePlanSidebar}
+                        onAutoReviewChange={handleAutoReviewChange}
                       />
                     </>
                   )}

@@ -44,6 +44,10 @@ export interface CodexAppServerProviderSnapshot {
   readonly skills: ReadonlyArray<ServerProviderSkill>;
 }
 
+interface CodexAutoReviewSupport {
+  readonly currentValue: boolean;
+}
+
 const REASONING_EFFORT_LABELS: Record<CodexSchema.V2ModelListResponse__ReasoningEffort, string> = {
   none: "None",
   minimal: "Minimal",
@@ -136,6 +140,54 @@ function mapCodexModelCapabilities(
   });
 }
 
+function isEnabledCodexFeature(
+  feature: CodexSchema.V2ExperimentalFeatureListResponse__ExperimentalFeature | undefined,
+): boolean {
+  return (
+    feature !== undefined &&
+    feature.enabled &&
+    feature.stage !== "removed" &&
+    feature.stage !== "deprecated"
+  );
+}
+
+function isAutoReviewApprovalsReviewer(
+  value: CodexSchema.V2ConfigReadResponse__ApprovalsReviewer | null | undefined,
+): boolean {
+  return value === "auto_review" || value === "guardian_subagent";
+}
+
+function applyCodexAutoReviewSupport(
+  models: ReadonlyArray<ServerProviderModel>,
+  support: CodexAutoReviewSupport | null,
+): ReadonlyArray<ServerProviderModel> {
+  if (!support) {
+    return models;
+  }
+
+  return models.map((model) => {
+    const descriptors = model.capabilities?.optionDescriptors ?? [];
+    const withoutExistingAutoReview = descriptors.filter(
+      (descriptor) => descriptor.id !== "autoReview",
+    );
+    return {
+      ...model,
+      capabilities: createModelCapabilities({
+        optionDescriptors: [
+          ...withoutExistingAutoReview,
+          {
+            id: "autoReview",
+            label: "Auto Review",
+            description: "Route approval requests to Codex's automatic approval reviewer.",
+            type: "boolean" as const,
+            currentValue: support.currentValue,
+          },
+        ],
+      }),
+    };
+  });
+}
+
 const toDisplayName = (model: CodexSchema.V2ModelListResponse__Model): string => {
   // Capitalize 'gpt' to 'GPT-' and capitalize any letter following a dash
   return model.displayName
@@ -180,6 +232,36 @@ function appendCustomCodexModels(
   }
   return customEntries.length === 0 ? models : [...models, ...customEntries];
 }
+
+const requestCodexAutoReviewSupport = Effect.fn("requestCodexAutoReviewSupport")(function* (
+  client: CodexClient.CodexAppServerClientShape,
+  cwd: string,
+) {
+  const features: CodexSchema.V2ExperimentalFeatureListResponse__ExperimentalFeature[] = [];
+  let cursor: string | null | undefined = undefined;
+
+  do {
+    const response: CodexSchema.V2ExperimentalFeatureListResponse = yield* client.request(
+      "experimentalFeature/list",
+      cursor ? { cursor } : {},
+    );
+    features.push(...response.data);
+    cursor = response.nextCursor;
+  } while (cursor);
+
+  if (!isEnabledCodexFeature(features.find((feature) => feature.name === "guardian_approval"))) {
+    return null;
+  }
+
+  const config: CodexSchema.V2ConfigReadResponse = yield* client.request("config/read", {
+    cwd,
+    includeLayers: false,
+  });
+
+  return {
+    currentValue: isAutoReviewApprovalsReviewer(config.config.approvals_reviewer),
+  } satisfies CodexAutoReviewSupport;
+});
 
 function parseCodexSkillsListResponse(
   response: CodexSchema.V2SkillsListResponse,
@@ -310,11 +392,21 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     ],
     { concurrency: "unbounded" },
   );
+  const autoReviewSupport = yield* requestCodexAutoReviewSupport(client, input.cwd).pipe(
+    Effect.catch((error: CodexErrors.CodexAppServerError) =>
+      Effect.logDebug("Codex auto review support probe failed", {
+        cause: error.message,
+      }).pipe(Effect.as(null)),
+    ),
+  );
 
   return {
     account: accountResponse,
     version,
-    models: appendCustomCodexModels(models, input.customModels ?? []),
+    models: applyCodexAutoReviewSupport(
+      appendCustomCodexModels(models, input.customModels ?? []),
+      autoReviewSupport,
+    ),
     skills: parseCodexSkillsListResponse(skillsResponse, input.cwd),
   } satisfies CodexAppServerProviderSnapshot;
 });

@@ -99,6 +99,7 @@ import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useMobileEdgeSwipe } from "../hooks/useMobileEdgeSwipe";
 import { markRightPanelUsed, useRegisterRightPanel } from "../rightPanelGesture";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
@@ -206,6 +207,7 @@ const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const USER_SCROLL_DETACH_GRACE_MS = 1_200;
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -738,6 +740,7 @@ export default function ChatView(props: ChatViewProps) {
   const isAtEndRef = useRef(true);
   const scheduledStickToBottomRef = useRef<ScheduledStickToBottom | null>(null);
   const stickToBottomLockUntilRef = useRef(0);
+  const userScrollDetachUntilRef = useRef(0);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
@@ -2173,6 +2176,15 @@ export default function ChatView(props: ChatViewProps) {
     open: openPlanSidebar,
   });
 
+  useMobileEdgeSwipe({
+    action: "close",
+    enabled: shouldUsePlanSidebarSheet && planSidebarOpen,
+    onSwipe: closePlanSidebar,
+    side: "right",
+    startArea: "screen",
+    startSurface: "panel",
+  });
+
   useEffect(() => {
     if (planSidebarOpen) {
       markRightPanelUsed("plan");
@@ -2252,9 +2264,19 @@ export default function ChatView(props: ChatViewProps) {
 
   const markTimelineAtEnd = useCallback(() => {
     isAtEndRef.current = true;
+    userScrollDetachUntilRef.current = 0;
     showScrollDebouncer.current.cancel();
     setScrollToBottomVisible(false);
   }, [setScrollToBottomVisible]);
+
+  const markTimelineAwayFromEnd = useCallback(() => {
+    const wasAtEnd = isAtEndRef.current;
+    isAtEndRef.current = false;
+    cancelScheduledStickToBottom();
+    if (wasAtEnd) {
+      showScrollDebouncer.current.maybeExecute();
+    }
+  }, [cancelScheduledStickToBottom]);
 
   // Scroll helpers — LegendList handles steady-state auto-scroll via
   // maintainScrollAtEnd. Mobile Safari/PWA resume and keyboard collapse can
@@ -2288,18 +2310,30 @@ export default function ChatView(props: ChatViewProps) {
       if (!isAtEnd && performance.now() < stickToBottomLockUntilRef.current) {
         return;
       }
-      if (isAtEndRef.current === isAtEnd) return;
-      isAtEndRef.current = isAtEnd;
+      if (isAtEnd && performance.now() < userScrollDetachUntilRef.current) {
+        return;
+      }
       if (isAtEnd) {
-        showScrollDebouncer.current.cancel();
-        setScrollToBottomVisible(false);
+        markTimelineAtEnd();
       } else {
-        cancelScheduledStickToBottom();
-        showScrollDebouncer.current.maybeExecute();
+        markTimelineAwayFromEnd();
       }
     },
-    [cancelScheduledStickToBottom, setScrollToBottomVisible],
+    [markTimelineAtEnd, markTimelineAwayFromEnd],
   );
+
+  const onTimelineUserScrollIntent = useCallback(() => {
+    stickToBottomLockUntilRef.current = 0;
+    userScrollDetachUntilRef.current = performance.now() + USER_SCROLL_DETACH_GRACE_MS;
+    markTimelineAwayFromEnd();
+  }, [markTimelineAwayFromEnd]);
+
+  useEffect(() => {
+    if (!isAtEndRef.current) {
+      return;
+    }
+    scrollToEnd(false);
+  }, [scrollToEnd, timelineEntries]);
 
   useEffect(() => cancelScheduledStickToBottom, [cancelScheduledStickToBottom]);
 
@@ -3698,6 +3732,7 @@ export default function ChatView(props: ChatViewProps) {
               workspaceRoot={activeWorkspaceRoot}
               skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
               onIsAtEndChange={onIsAtEndChange}
+              onUserScrollIntent={onTimelineUserScrollIntent}
             />
 
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}

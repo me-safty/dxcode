@@ -124,6 +124,34 @@ describe("buildTurnStartParams", () => {
     });
   });
 
+  it("includes automatic approval review when requested", () => {
+    const params = Effect.runSync(
+      buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "auto-accept-edits",
+        prompt: "Implement it",
+        model: "gpt-5.3-codex",
+        approvalsReviewer: "auto_review",
+      }),
+    );
+
+    assert.deepStrictEqual(params, {
+      threadId: "provider-thread-1",
+      approvalPolicy: "on-request",
+      approvalsReviewer: "auto_review",
+      sandboxPolicy: {
+        type: "workspaceWrite",
+      },
+      input: [
+        {
+          type: "text",
+          text: "Implement it",
+        },
+      ],
+      model: "gpt-5.3-codex",
+    });
+  });
+
   it("omits collaboration mode when interaction mode is absent", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
@@ -226,6 +254,7 @@ describe("openCodexThread", () => {
         cwd: "/tmp/project",
         requestedModel: "gpt-5.3-codex",
         serviceTier: undefined,
+        approvalsReviewer: "auto_review",
         resumeThreadId: "stale-thread",
       }),
     );
@@ -235,6 +264,14 @@ describe("openCodexThread", () => {
       calls.map((call) => call.method),
       ["thread/resume", "thread/start"],
     );
+    assert.deepStrictEqual(calls[0]?.payload, {
+      threadId: "stale-thread",
+      cwd: "/tmp/project",
+      approvalPolicy: "never",
+      sandbox: "danger-full-access",
+      model: "gpt-5.3-codex",
+      approvalsReviewer: "auto_review",
+    });
   });
 
   it("propagates non-recoverable resume failures", async () => {
@@ -266,6 +303,7 @@ describe("openCodexThread", () => {
           cwd: "/tmp/project",
           requestedModel: "gpt-5.3-codex",
           serviceTier: undefined,
+          approvalsReviewer: undefined,
           resumeThreadId: "stale-thread",
         }),
       ),

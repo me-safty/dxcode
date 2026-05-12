@@ -29,6 +29,7 @@ import {
 import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
+import { AUTO_REVIEW_MODEL_OPTION_ID } from "./ComposerAccessMenuContent";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
 
@@ -44,6 +45,7 @@ type TraitsPersistence =
     };
 
 const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
+const COMPOSER_ACCESS_BOOLEAN_DESCRIPTOR_IDS = new Set([AUTO_REVIEW_MODEL_OPTION_ID]);
 
 function replaceDescriptorCurrentValue(
   descriptors: ReadonlyArray<ProviderOptionDescriptor>,
@@ -96,14 +98,21 @@ function getSelectedTraits(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "boolean" }> =>
       descriptor.type === "boolean",
   );
+  const traitsBooleanDescriptors = booleanDescriptors.filter(
+    (descriptor) => !COMPOSER_ACCESS_BOOLEAN_DESCRIPTOR_IDS.has(descriptor.id),
+  );
+  const traitsDescriptors = descriptors.filter(
+    (descriptor) =>
+      descriptor.type !== "boolean" || !COMPOSER_ACCESS_BOOLEAN_DESCRIPTOR_IDS.has(descriptor.id),
+  );
   const primarySelectDescriptor = selectDescriptors[0] ?? null;
   const contextWindowDescriptor =
     selectDescriptors.find((descriptor) => descriptor.id === "contextWindow") ?? null;
   const agentDescriptor = selectDescriptors.find((descriptor) => descriptor.id === "agent") ?? null;
   const fastModeDescriptor =
-    booleanDescriptors.find((descriptor) => descriptor.id === "fastMode") ?? null;
+    traitsBooleanDescriptors.find((descriptor) => descriptor.id === "fastMode") ?? null;
   const thinkingDescriptor =
-    booleanDescriptors.find((descriptor) => descriptor.id === "thinking") ?? null;
+    traitsBooleanDescriptors.find((descriptor) => descriptor.id === "thinking") ?? null;
 
   // Prompt-controlled effort (e.g. ultrathink in prompt text)
   const ultrathinkPromptControlled =
@@ -131,8 +140,9 @@ function getSelectedTraits(
   return {
     caps,
     descriptors,
+    traitsDescriptors,
     selectDescriptors,
-    booleanDescriptors,
+    booleanDescriptors: traitsBooleanDescriptors,
     primarySelectDescriptor,
     contextWindowDescriptor,
     agentDescriptor,
@@ -354,7 +364,7 @@ export const TraitsPicker = memo(function TraitsPicker({
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
+  const { traitsDescriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
     getTraitsSectionVisibility({
       provider,
       models,
@@ -377,7 +387,7 @@ export const TraitsPicker = memo(function TraitsPicker({
   }
 
   const triggerLabel =
-    descriptors
+    traitsDescriptors
       .map((descriptor) => {
         if (ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id) {
           return "Ultrathink";

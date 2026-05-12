@@ -2,15 +2,19 @@ import { useEffect, useRef } from "react";
 
 export type MobileEdgeSwipeSide = "left" | "right";
 export type MobileEdgeSwipeStartArea = "edge" | "screen";
+export type MobileEdgeSwipeStartSurface = "any" | "outside-panels" | "panel";
+export type MobileEdgeSwipeAction = "close" | "open";
 
 export const MOBILE_EDGE_SWIPE_EDGE_WIDTH_PX = 64;
 export const MOBILE_EDGE_SWIPE_TRIGGER_DISTANCE_PX = 56;
 export const MOBILE_EDGE_SWIPE_VERTICAL_CANCEL_DISTANCE_PX = 18;
 export const MOBILE_EDGE_SWIPE_HORIZONTAL_DOMINANCE_RATIO = 1.25;
+export const MOBILE_EDGE_SWIPE_PANEL_ATTRIBUTE = "data-mobile-edge-swipe-panel";
 
-export type MobileEdgeSwipeDecision = "cancel" | "open" | "pending";
+export type MobileEdgeSwipeDecision = "cancel" | MobileEdgeSwipeAction | "pending";
 
 export interface MobileEdgeSwipeDelta {
+  readonly action?: MobileEdgeSwipeAction;
   readonly deltaX: number;
   readonly deltaY: number;
   readonly side: MobileEdgeSwipeSide;
@@ -37,6 +41,7 @@ export function isMobileEdgeSwipeStart({
 }
 
 export function resolveMobileEdgeSwipeDecision({
+  action = "open",
   deltaX,
   deltaY,
   side,
@@ -44,6 +49,7 @@ export function resolveMobileEdgeSwipeDecision({
   const horizontalDistance = Math.abs(deltaX);
   const verticalDistance = Math.abs(deltaY);
   const openingDistance = side === "left" ? deltaX : -deltaX;
+  const actionDistance = action === "open" ? openingDistance : -openingDistance;
 
   if (
     verticalDistance >= MOBILE_EDGE_SWIPE_VERTICAL_CANCEL_DISTANCE_PX &&
@@ -53,13 +59,13 @@ export function resolveMobileEdgeSwipeDecision({
   }
 
   if (
-    openingDistance >= MOBILE_EDGE_SWIPE_TRIGGER_DISTANCE_PX &&
+    actionDistance >= MOBILE_EDGE_SWIPE_TRIGGER_DISTANCE_PX &&
     horizontalDistance >= verticalDistance * MOBILE_EDGE_SWIPE_HORIZONTAL_DOMINANCE_RATIO
   ) {
-    return "open";
+    return action;
   }
 
-  if (openingDistance <= -MOBILE_EDGE_SWIPE_VERTICAL_CANCEL_DISTANCE_PX) {
+  if (actionDistance <= -MOBILE_EDGE_SWIPE_VERTICAL_CANCEL_DISTANCE_PX) {
     return "cancel";
   }
 
@@ -85,21 +91,50 @@ function isBlockedTarget(target: EventTarget | null): boolean {
   );
 }
 
+function isAcceptedStartSurface({
+  side,
+  startSurface,
+  target,
+}: {
+  readonly side: MobileEdgeSwipeSide;
+  readonly startSurface: MobileEdgeSwipeStartSurface;
+  readonly target: EventTarget | null;
+}): boolean {
+  if (startSurface === "any") {
+    return true;
+  }
+
+  if (!(target instanceof Element)) {
+    return startSurface === "outside-panels";
+  }
+
+  const panel = target.closest<HTMLElement>(`[${MOBILE_EDGE_SWIPE_PANEL_ATTRIBUTE}]`);
+  if (startSurface === "outside-panels") {
+    return panel === null;
+  }
+
+  return panel?.getAttribute(MOBILE_EDGE_SWIPE_PANEL_ATTRIBUTE) === side;
+}
+
 export function useMobileEdgeSwipe({
+  action = "open",
   edgeWidth = MOBILE_EDGE_SWIPE_EDGE_WIDTH_PX,
   enabled,
-  onOpen,
+  onSwipe,
   side,
   startArea = "edge",
+  startSurface = "any",
 }: {
+  readonly action?: MobileEdgeSwipeAction;
   readonly edgeWidth?: number;
   readonly enabled: boolean;
-  readonly onOpen: () => void;
+  readonly onSwipe: () => void;
   readonly side: MobileEdgeSwipeSide;
   readonly startArea?: MobileEdgeSwipeStartArea;
+  readonly startSurface?: MobileEdgeSwipeStartSurface;
 }) {
-  const onOpenRef = useRef(onOpen);
-  onOpenRef.current = onOpen;
+  const onSwipeRef = useRef(onSwipe);
+  onSwipeRef.current = onSwipe;
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") {
@@ -127,13 +162,16 @@ export function useMobileEdgeSwipe({
       source,
       startX,
       startY,
+      target,
     }: {
       readonly id: number;
       readonly source: "pointer" | "touch";
       readonly startX: number;
       readonly startY: number;
+      readonly target: EventTarget | null;
     }) => {
       if (
+        !isAcceptedStartSurface({ side, startSurface, target }) ||
         !isMobileEdgeSwipeStart({
           edgeWidth,
           side,
@@ -167,6 +205,7 @@ export function useMobileEdgeSwipe({
       const decision = resolveMobileEdgeSwipeDecision({
         deltaX: clientX - activeSwipe.startX,
         deltaY: clientY - activeSwipe.startY,
+        action,
         side,
       });
 
@@ -175,9 +214,9 @@ export function useMobileEdgeSwipe({
       }
 
       activeSwipe = null;
-      if (decision === "open") {
+      if (decision === action) {
         preventDefault();
-        onOpenRef.current();
+        onSwipeRef.current();
       }
     };
 
@@ -201,6 +240,7 @@ export function useMobileEdgeSwipe({
         source: "touch",
         startX: touch.clientX,
         startY: touch.clientY,
+        target: event.target,
       });
     };
 
@@ -239,6 +279,7 @@ export function useMobileEdgeSwipe({
         source: "pointer",
         startX: event.clientX,
         startY: event.clientY,
+        target: event.target,
       });
     };
 
@@ -277,5 +318,5 @@ export function useMobileEdgeSwipe({
       window.removeEventListener("pointerup", resetSwipe, true);
       window.removeEventListener("pointercancel", resetSwipe, true);
     };
-  }, [edgeWidth, enabled, side, startArea]);
+  }, [action, edgeWidth, enabled, side, startArea, startSurface]);
 }

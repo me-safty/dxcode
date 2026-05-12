@@ -272,11 +272,13 @@ validationLayer("CodexAdapterLive validation", (it) => {
         threadId: asThreadId("thread-1"),
         modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
           { id: "fastMode", value: true },
+          { id: "autoReview", value: true },
         ]),
         runtimeMode: "full-access",
       });
 
       assert.deepStrictEqual(validationRuntimeFactory.factory.mock.calls[0]?.[0], {
+        approvalsReviewer: "auto_review",
         binaryPath: "codex",
         cwd: process.cwd(),
         model: "gpt-5.3-codex",
@@ -345,6 +347,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
           modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
             { id: "reasoningEffort", value: "high" },
             { id: "fastMode", value: true },
+            { id: "autoReview", value: false },
           ]),
           attachments: [],
         }),
@@ -355,6 +358,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         model: "gpt-5.3-codex",
         effort: "high",
         serviceTier: "fast",
+        approvalsReviewer: "user",
       });
     }),
   );
@@ -399,6 +403,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
             [
               { id: "reasoningEffort", value: "high" },
               { id: "fastMode", value: true },
+              { id: "autoReview", value: true },
             ],
           ),
           attachments: [],
@@ -410,6 +415,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         model: "gpt-5.3-codex",
         effort: "high",
         serviceTier: "fast",
+        approvalsReviewer: "auto_review",
       });
     }).pipe(Effect.provide(customLayer));
   });

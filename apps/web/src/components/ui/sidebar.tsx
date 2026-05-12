@@ -133,9 +133,19 @@ function SidebarProvider({
 
   useMobileEdgeSwipe({
     enabled: isMobile && !openMobile,
-    onOpen: () => setOpenMobile(true),
+    onSwipe: () => setOpenMobile(true),
     side: "left",
     startArea: "screen",
+    startSurface: "outside-panels",
+  });
+
+  useMobileEdgeSwipe({
+    action: "close",
+    enabled: isMobile && openMobile,
+    onSwipe: () => setOpenMobile(false),
+    side: "left",
+    startArea: "screen",
+    startSurface: "panel",
   });
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
