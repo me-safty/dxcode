@@ -827,6 +827,71 @@ describe("incremental orchestration updates", () => {
     });
   });
 
+  it("settles a running latest turn across optimistic stop and server confirmation", () => {
+    const thread = makeThread({
+      session: {
+        provider: ProviderDriverKind.make("codex"),
+        status: "running",
+        orchestrationStatus: "running",
+        activeTurnId: TurnId.make("turn-1"),
+        createdAt: "2026-02-27T00:00:00.000Z",
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      },
+      latestTurn: {
+        turnId: TurnId.make("turn-1"),
+        state: "running",
+        requestedAt: "2026-02-27T00:00:00.000Z",
+        startedAt: "2026-02-27T00:00:01.000Z",
+        completedAt: null,
+        assistantMessageId: null,
+      },
+    });
+    const stopRequestedAt = "2026-02-27T00:00:04.000Z";
+
+    const afterOptimisticStop = applyOrchestrationEvent(
+      makeState(thread),
+      makeEvent("thread.session-stop-requested", {
+        threadId: thread.id,
+        createdAt: stopRequestedAt,
+      }),
+      localEnvironmentId,
+    );
+
+    expect(threadsOf(afterOptimisticStop)[0]?.session).toMatchObject({
+      status: "closed",
+      activeTurnId: undefined,
+    });
+    expect(threadsOf(afterOptimisticStop)[0]?.latestTurn).toMatchObject({
+      turnId: TurnId.make("turn-1"),
+      state: "interrupted",
+      completedAt: stopRequestedAt,
+    });
+
+    const afterServerConfirmation = applyOrchestrationEvent(
+      afterOptimisticStop,
+      makeEvent("thread.session-set", {
+        threadId: thread.id,
+        session: {
+          threadId: thread.id,
+          status: "stopped",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-02-27T00:00:05.000Z",
+        },
+      }),
+      localEnvironmentId,
+    );
+
+    expect(threadsOf(afterServerConfirmation)[0]?.session?.status).toBe("closed");
+    expect(threadsOf(afterServerConfirmation)[0]?.latestTurn).toMatchObject({
+      turnId: TurnId.make("turn-1"),
+      state: "interrupted",
+      completedAt: stopRequestedAt,
+    });
+  });
+
   it("preserves a failed latest turn when the session enters error", () => {
     const thread = makeThread({
       session: {

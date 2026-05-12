@@ -894,22 +894,14 @@ function latestTurnStateFromInactiveSessionStatus(
   }
 }
 
-function settleLatestTurnForInactiveSession(input: {
+function settleRunningLatestTurnForInactiveSession(input: {
   latestTurn: Thread["latestTurn"];
-  previousSession: Thread["session"];
   nextSessionStatus: OrchestrationSessionStatus;
   completedAt: string;
 }): Thread["latestTurn"] {
   const latestTurn = input.latestTurn;
-  const previousActiveTurnId = input.previousSession?.activeTurnId;
   const nextState = latestTurnStateFromInactiveSessionStatus(input.nextSessionStatus);
-  if (
-    nextState === null ||
-    latestTurn === null ||
-    latestTurn.state !== "running" ||
-    previousActiveTurnId === undefined ||
-    latestTurn.turnId !== previousActiveTurnId
-  ) {
+  if (nextState === null || latestTurn === null || latestTurn.state !== "running") {
     return latestTurn;
   }
   return buildLatestTurn({
@@ -1517,9 +1509,8 @@ function applyEnvironmentOrchestrationEvent(
                     : null,
                 sourceProposedPlan: thread.pendingSourceProposedPlan,
               })
-            : settleLatestTurnForInactiveSession({
+            : settleRunningLatestTurnForInactiveSession({
                 latestTurn: thread.latestTurn,
-                previousSession: thread.session,
                 nextSessionStatus: event.payload.session.status,
                 completedAt: event.payload.session.updatedAt,
               }),
@@ -1539,6 +1530,11 @@ function applyEnvironmentOrchestrationEvent(
                 activeTurnId: undefined,
                 updatedAt: event.payload.createdAt,
               },
+              latestTurn: settleRunningLatestTurnForInactiveSession({
+                latestTurn: thread.latestTurn,
+                nextSessionStatus: "stopped",
+                completedAt: event.payload.createdAt,
+              }),
               updatedAt: event.occurredAt,
             },
       );
