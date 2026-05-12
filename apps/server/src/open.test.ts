@@ -3,8 +3,12 @@ import { assert, it } from "@effect/vitest";
 import { assertSuccess } from "@effect/vitest/utils";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Random from "effect/Random";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   isCommandAvailable,
@@ -12,6 +16,25 @@ import {
   resolveAvailableEditors,
   resolveEditorLaunch,
 } from "./open.ts";
+
+function makeMockDetachedHandle(onUnref: () => void = () => undefined) {
+  return ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(1),
+    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+    isRunning: Effect.succeed(true),
+    kill: () => Effect.void,
+    unref: Effect.sync(() => {
+      onUnref();
+      return Effect.void;
+    }),
+    stdin: Sink.drain,
+    stdout: Stream.empty,
+    stderr: Stream.empty,
+    all: Stream.empty,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+  });
+}
 
 it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
   it.effect("returns commands for command-based editors", () =>
@@ -478,22 +501,53 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
 });
 
 it.layer(NodeServices.layer)("launchDetached", (it) => {
-  it.effect("resolves when command can be spawned", () =>
+  it.effect("spawns through the ChildProcessSpawner service and unrefs the handle", () =>
     Effect.gen(function* () {
+      let spawnedCommand: ChildProcess.StandardCommand | undefined;
+      let didUnref = false;
+      const expectedArgs = ["-e", "process.exit(0)"];
+
+      const spawnerLayer = Layer.mock(ChildProcessSpawner.ChildProcessSpawner, {
+        spawn: (command) =>
+          Effect.sync(() => {
+            assert.equal(command._tag, "StandardCommand");
+            spawnedCommand = command;
+            return makeMockDetachedHandle(() => {
+              didUnref = true;
+            });
+          }),
+      });
+
       const result = yield* launchDetached({
         command: process.execPath,
-        args: ["-e", "process.exit(0)"],
-      }).pipe(Effect.result);
+        args: expectedArgs,
+      }).pipe(Effect.provide(spawnerLayer), Effect.result);
+
       assertSuccess(result, undefined);
+      assert.ok(spawnedCommand);
+      assert.equal(spawnedCommand.command, process.execPath);
+      assert.deepEqual(
+        spawnedCommand.args,
+        process.platform === "win32" ? expectedArgs.map((arg) => `"${arg}"`) : expectedArgs,
+      );
+      assert.deepEqual(spawnedCommand.options, {
+        detached: true,
+        shell: process.platform === "win32",
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+      assert.equal(didUnref, true);
     }),
   );
 
   it.effect("rejects when command does not exist", () =>
     Effect.gen(function* () {
+      const spawnerLayer = Layer.mock(ChildProcessSpawner.ChildProcessSpawner, {});
       const result = yield* launchDetached({
         command: `t3code-no-such-command-${yield* Random.nextUUIDv4}`,
         args: [],
-      }).pipe(Effect.result);
+      }).pipe(Effect.provide(spawnerLayer), Effect.result);
       assert.equal(result._tag, "Failure");
     }),
   );

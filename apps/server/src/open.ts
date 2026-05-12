@@ -1,4 +1,3 @@
-// @effect-diagnostics nodeBuiltinImport:off
 /**
  * Open - Browser/editor launch service interface.
  *
@@ -7,13 +6,13 @@
  *
  * @module Open
  */
-import { spawn } from "node:child_process";
-
 import { EDITORS, OpenError, type EditorId } from "@t3tools/contracts";
 import { isCommandAvailable, type CommandAvailabilityOptions } from "@t3tools/shared/shell";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 // ==============================
 // Definitions
@@ -32,23 +31,25 @@ interface EditorLaunch {
   readonly args: ReadonlyArray<string>;
 }
 
+interface TargetPathAndPosition {
+  readonly path: string;
+  readonly line: string;
+  readonly column: Option.Option<string>;
+}
+
 const TARGET_WITH_POSITION_PATTERN = /^(.*?):(\d+)(?::(\d+))?$/;
 
-function parseTargetPathAndPosition(target: string): {
-  path: string;
-  line: string | undefined;
-  column: string | undefined;
-} | null {
+function parseTargetPathAndPosition(target: string): Option.Option<TargetPathAndPosition> {
   const match = TARGET_WITH_POSITION_PATTERN.exec(target);
   if (!match?.[1] || !match[2]) {
-    return null;
+    return Option.none();
   }
 
-  return {
+  return Option.some({
     path: match[1],
     line: match[2],
-    column: match[3],
-  };
+    column: Option.fromNullish(match[3]),
+  });
 }
 
 function resolveCommandEditorArgs(
@@ -61,15 +62,20 @@ function resolveCommandEditorArgs(
     case "direct-path":
       return [target];
     case "goto":
-      return parsedTarget ? ["--goto", target] : [target];
-    case "line-column": {
-      if (!parsedTarget) {
-        return [target];
-      }
-
-      const { path, line, column } = parsedTarget;
-      return [...(line ? ["--line", line] : []), ...(column ? ["--column", column] : []), path];
-    }
+      return Option.isSome(parsedTarget) ? ["--goto", target] : [target];
+    case "line-column":
+      return Option.match(parsedTarget, {
+        onNone: () => [target],
+        onSome: ({ path, line, column }) => [
+          "--line",
+          line,
+          ...Option.match(column, {
+            onNone: () => [],
+            onSome: (value) => ["--column", value],
+          }),
+          path,
+        ],
+      });
   }
 }
 
@@ -84,13 +90,13 @@ function resolveEditorArgs(
 function resolveAvailableCommand(
   commands: ReadonlyArray<string>,
   options: CommandAvailabilityOptions = {},
-): string | null {
+): Option.Option<string> {
   for (const command of commands) {
     if (isCommandAvailable(command, options)) {
-      return command;
+      return Option.some(command);
     }
   }
-  return null;
+  return Option.none();
 }
 
 function fileManagerCommandForPlatform(platform: NodeJS.Platform): string {
@@ -120,7 +126,7 @@ export function resolveAvailableEditors(
     }
 
     const command = resolveAvailableCommand(editor.commands, { platform, env });
-    if (command !== null) {
+    if (Option.isSome(command)) {
       available.push(editor.id);
     }
   }
@@ -170,8 +176,10 @@ export const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
   }
 
   if (editorDef.commands) {
-    const command =
-      resolveAvailableCommand(editorDef.commands, { platform, env }) ?? editorDef.commands[0];
+    const command = Option.getOrElse(
+      resolveAvailableCommand(editorDef.commands, { platform, env }),
+      () => editorDef.commands[0],
+    );
     return {
       command,
       args: resolveEditorArgs(editorDef, input.cwd),
@@ -185,44 +193,39 @@ export const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
   return { command: fileManagerCommandForPlatform(platform), args: [input.cwd] };
 });
 
-export const launchDetached = (launch: EditorLaunch) =>
-  Effect.gen(function* () {
-    if (!isCommandAvailable(launch.command)) {
-      return yield* new OpenError({ message: `Editor command not found: ${launch.command}` });
-    }
+export const launchDetached = Effect.fn("open.launchDetached")(function* (
+  launch: EditorLaunch,
+): Effect.fn.Return<void, OpenError, ChildProcessSpawner.ChildProcessSpawner> {
+  if (!isCommandAvailable(launch.command)) {
+    return yield* new OpenError({ message: `Editor command not found: ${launch.command}` });
+  }
 
-    yield* Effect.callback<void, OpenError>((resume) => {
-      let child;
-      try {
-        const isWin32 = process.platform === "win32";
-        child = spawn(
-          launch.command,
-          isWin32 ? launch.args.map((a) => `"${a}"`) : [...launch.args],
-          {
-            detached: true,
-            stdio: "ignore",
-            shell: isWin32,
-          },
-        );
-      } catch (error) {
-        return resume(
-          Effect.fail(new OpenError({ message: "failed to spawn detached process", cause: error })),
-        );
-      }
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const isWin32 = process.platform === "win32";
+  const command = ChildProcess.make(
+    launch.command,
+    isWin32 ? launch.args.map((arg) => `"${arg}"`) : [...launch.args],
+    {
+      detached: true,
+      shell: isWin32,
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+    },
+  );
 
-      const handleSpawn = () => {
-        child.unref();
-        resume(Effect.void);
-      };
-
-      child.once("spawn", handleSpawn);
-      child.once("error", (cause) =>
-        resume(Effect.fail(new OpenError({ message: "failed to spawn detached process", cause }))),
-      );
-    });
-  });
+  yield* spawner.spawn(command).pipe(
+    Effect.flatMap((handle) => handle.unref),
+    Effect.asVoid,
+    Effect.scoped,
+    Effect.mapError(
+      (cause) => new OpenError({ message: "failed to spawn detached process", cause }),
+    ),
+  );
+});
 
 const make = Effect.gen(function* () {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const open = yield* Effect.tryPromise({
     try: () => import("open"),
     catch: (cause) => new OpenError({ message: "failed to load browser opener", cause }),
@@ -234,7 +237,12 @@ const make = Effect.gen(function* () {
         try: () => open.default(target),
         catch: (cause) => new OpenError({ message: "Browser auto-open failed", cause }),
       }),
-    openInEditor: (input) => Effect.flatMap(resolveEditorLaunch(input), launchDetached),
+    openInEditor: (input) =>
+      Effect.flatMap(resolveEditorLaunch(input), (launch) =>
+        launchDetached(launch).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        ),
+      ),
   } satisfies OpenShape;
 });
 
