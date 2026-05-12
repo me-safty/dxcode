@@ -238,12 +238,22 @@ export function normalizeClaudeCliEffort(effort: string | null | undefined): str
   return effort;
 }
 
+const BEDROCK_MODEL_ID_MAP: Readonly<Record<string, string>> = {
+  "claude-opus-4-7": "us.anthropic.claude-opus-4-7",
+  "claude-opus-4-6": "us.anthropic.claude-opus-4-6-v1",
+  "claude-opus-4-5": "us.anthropic.claude-opus-4-5-20251101-v1:0",
+  "claude-sonnet-4-6": "us.anthropic.claude-sonnet-4-6",
+  "claude-sonnet-4-5": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+  "claude-haiku-4-5": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+};
+
 export function resolveClaudeApiModelId(modelSelection: ModelSelection): string {
+  const resolvedModel = BEDROCK_MODEL_ID_MAP[modelSelection.model] ?? modelSelection.model;
   switch (getModelSelectionStringOptionValue(modelSelection, "contextWindow")) {
     case "1m":
-      return `${modelSelection.model}[1m]`;
+      return `${resolvedModel}[1m]`;
     default:
-      return modelSelection.model;
+      return resolvedModel;
   }
 }
 
