@@ -239,6 +239,7 @@ function ChatThreadRouteView() {
     enabled: shouldUseDiffSheet,
     onOpen: openLastUsedRightPanel,
     side: "right",
+    startArea: "screen",
   });
 
   useEffect(() => {

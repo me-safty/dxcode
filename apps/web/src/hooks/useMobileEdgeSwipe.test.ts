@@ -28,4 +28,26 @@ describe("resolveMobileEdgeSwipeDecision", () => {
     expect(isMobileEdgeSwipeStart({ viewportWidth: 390, x: 327, side: "right" })).toBe(true);
     expect(isMobileEdgeSwipeStart({ viewportWidth: 390, x: 325, side: "right" })).toBe(false);
   });
+
+  it("accepts starts anywhere in the viewport for full-screen left swipes", () => {
+    expect(
+      isMobileEdgeSwipeStart({
+        side: "left",
+        startArea: "screen",
+        viewportWidth: 390,
+        x: 195,
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts starts anywhere in the viewport for full-screen right swipes", () => {
+    expect(
+      isMobileEdgeSwipeStart({
+        side: "right",
+        startArea: "screen",
+        viewportWidth: 390,
+        x: 195,
+      }),
+    ).toBe(true);
+  });
 });

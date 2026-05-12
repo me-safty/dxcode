@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 export type MobileEdgeSwipeSide = "left" | "right";
+export type MobileEdgeSwipeStartArea = "edge" | "screen";
 
 export const MOBILE_EDGE_SWIPE_EDGE_WIDTH_PX = 64;
 export const MOBILE_EDGE_SWIPE_TRIGGER_DISTANCE_PX = 56;
@@ -17,15 +18,21 @@ export interface MobileEdgeSwipeDelta {
 
 export function isMobileEdgeSwipeStart({
   edgeWidth = MOBILE_EDGE_SWIPE_EDGE_WIDTH_PX,
+  startArea = "edge",
   viewportWidth,
   x,
   side,
 }: {
   readonly edgeWidth?: number;
+  readonly startArea?: MobileEdgeSwipeStartArea;
   readonly viewportWidth: number;
   readonly x: number;
   readonly side: MobileEdgeSwipeSide;
 }): boolean {
+  if (startArea === "screen") {
+    return x >= 0 && x <= viewportWidth;
+  }
+
   return side === "left" ? x <= edgeWidth : viewportWidth - x <= edgeWidth;
 }
 
@@ -83,11 +90,13 @@ export function useMobileEdgeSwipe({
   enabled,
   onOpen,
   side,
+  startArea = "edge",
 }: {
   readonly edgeWidth?: number;
   readonly enabled: boolean;
   readonly onOpen: () => void;
   readonly side: MobileEdgeSwipeSide;
+  readonly startArea?: MobileEdgeSwipeStartArea;
 }) {
   const onOpenRef = useRef(onOpen);
   onOpenRef.current = onOpen;
@@ -128,6 +137,7 @@ export function useMobileEdgeSwipe({
         !isMobileEdgeSwipeStart({
           edgeWidth,
           side,
+          startArea,
           viewportWidth: window.innerWidth,
           x: startX,
         })
@@ -267,5 +277,5 @@ export function useMobileEdgeSwipe({
       window.removeEventListener("pointerup", resetSwipe, true);
       window.removeEventListener("pointercancel", resetSwipe, true);
     };
-  }, [edgeWidth, enabled, side]);
+  }, [edgeWidth, enabled, side, startArea]);
 }

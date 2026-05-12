@@ -135,6 +135,7 @@ function SidebarProvider({
     enabled: isMobile && !openMobile,
     onOpen: () => setOpenMobile(true),
     side: "left",
+    startArea: "screen",
   });
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
