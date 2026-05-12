@@ -1,0 +1,271 @@
+import { useEffect, useRef } from "react";
+
+export type MobileEdgeSwipeSide = "left" | "right";
+
+export const MOBILE_EDGE_SWIPE_EDGE_WIDTH_PX = 64;
+export const MOBILE_EDGE_SWIPE_TRIGGER_DISTANCE_PX = 56;
+export const MOBILE_EDGE_SWIPE_VERTICAL_CANCEL_DISTANCE_PX = 18;
+export const MOBILE_EDGE_SWIPE_HORIZONTAL_DOMINANCE_RATIO = 1.25;
+
+export type MobileEdgeSwipeDecision = "cancel" | "open" | "pending";
+
+export interface MobileEdgeSwipeDelta {
+  readonly deltaX: number;
+  readonly deltaY: number;
+  readonly side: MobileEdgeSwipeSide;
+}
+
+export function isMobileEdgeSwipeStart({
+  edgeWidth = MOBILE_EDGE_SWIPE_EDGE_WIDTH_PX,
+  viewportWidth,
+  x,
+  side,
+}: {
+  readonly edgeWidth?: number;
+  readonly viewportWidth: number;
+  readonly x: number;
+  readonly side: MobileEdgeSwipeSide;
+}): boolean {
+  return side === "left" ? x <= edgeWidth : viewportWidth - x <= edgeWidth;
+}
+
+export function resolveMobileEdgeSwipeDecision({
+  deltaX,
+  deltaY,
+  side,
+}: MobileEdgeSwipeDelta): MobileEdgeSwipeDecision {
+  const horizontalDistance = Math.abs(deltaX);
+  const verticalDistance = Math.abs(deltaY);
+  const openingDistance = side === "left" ? deltaX : -deltaX;
+
+  if (
+    verticalDistance >= MOBILE_EDGE_SWIPE_VERTICAL_CANCEL_DISTANCE_PX &&
+    verticalDistance > horizontalDistance
+  ) {
+    return "cancel";
+  }
+
+  if (
+    openingDistance >= MOBILE_EDGE_SWIPE_TRIGGER_DISTANCE_PX &&
+    horizontalDistance >= verticalDistance * MOBILE_EDGE_SWIPE_HORIZONTAL_DOMINANCE_RATIO
+  ) {
+    return "open";
+  }
+
+  if (openingDistance <= -MOBILE_EDGE_SWIPE_VERTICAL_CANCEL_DISTANCE_PX) {
+    return "cancel";
+  }
+
+  return "pending";
+}
+
+function isBlockedTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+
+  return Boolean(
+    target.closest(
+      [
+        "input",
+        "textarea",
+        "select",
+        "[contenteditable='true']",
+        "[data-mobile-edge-swipe-block='true']",
+        ".xterm",
+      ].join(","),
+    ),
+  );
+}
+
+export function useMobileEdgeSwipe({
+  edgeWidth = MOBILE_EDGE_SWIPE_EDGE_WIDTH_PX,
+  enabled,
+  onOpen,
+  side,
+}: {
+  readonly edgeWidth?: number;
+  readonly enabled: boolean;
+  readonly onOpen: () => void;
+  readonly side: MobileEdgeSwipeSide;
+}) {
+  const onOpenRef = useRef(onOpen);
+  onOpenRef.current = onOpen;
+
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") {
+      return;
+    }
+
+    let activeSwipe:
+      | {
+          pointerId: number;
+          source: "pointer";
+          startX: number;
+          startY: number;
+        }
+      | {
+          source: "touch";
+          startX: number;
+          startY: number;
+          touchId: number;
+        }
+      | null = null;
+    let ignorePointerUntil = 0;
+
+    const startSwipe = ({
+      id,
+      source,
+      startX,
+      startY,
+    }: {
+      readonly id: number;
+      readonly source: "pointer" | "touch";
+      readonly startX: number;
+      readonly startY: number;
+    }) => {
+      if (
+        !isMobileEdgeSwipeStart({
+          edgeWidth,
+          side,
+          viewportWidth: window.innerWidth,
+          x: startX,
+        })
+      ) {
+        return;
+      }
+
+      activeSwipe =
+        source === "pointer"
+          ? { pointerId: id, source, startX, startY }
+          : { source, startX, startY, touchId: id };
+    };
+
+    const updateSwipe = ({
+      clientX,
+      clientY,
+      preventDefault,
+    }: {
+      readonly clientX: number;
+      readonly clientY: number;
+      readonly preventDefault: () => void;
+    }) => {
+      if (!activeSwipe) {
+        return;
+      }
+
+      const decision = resolveMobileEdgeSwipeDecision({
+        deltaX: clientX - activeSwipe.startX,
+        deltaY: clientY - activeSwipe.startY,
+        side,
+      });
+
+      if (decision === "pending") {
+        return;
+      }
+
+      activeSwipe = null;
+      if (decision === "open") {
+        preventDefault();
+        onOpenRef.current();
+      }
+    };
+
+    const resetSwipe = () => {
+      activeSwipe = null;
+    };
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1 || isBlockedTarget(event.target)) {
+        return;
+      }
+
+      const touch = event.touches[0];
+      if (!touch) {
+        return;
+      }
+
+      ignorePointerUntil = performance.now() + 700;
+      startSwipe({
+        id: touch.identifier,
+        source: "touch",
+        startX: touch.clientX,
+        startY: touch.clientY,
+      });
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      if (!activeSwipe || activeSwipe.source !== "touch") {
+        return;
+      }
+
+      const touchId = activeSwipe.touchId;
+      const touch = Array.from(event.changedTouches).find(
+        (changedTouch) => changedTouch.identifier === touchId,
+      );
+      if (!touch) {
+        return;
+      }
+
+      updateSwipe({
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+        preventDefault: () => event.preventDefault(),
+      });
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        performance.now() < ignorePointerUntil ||
+        event.pointerType !== "touch" ||
+        event.isPrimary === false ||
+        isBlockedTarget(event.target)
+      ) {
+        return;
+      }
+
+      startSwipe({
+        id: event.pointerId,
+        source: "pointer",
+        startX: event.clientX,
+        startY: event.clientY,
+      });
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (
+        !activeSwipe ||
+        activeSwipe.source !== "pointer" ||
+        activeSwipe.pointerId !== event.pointerId
+      ) {
+        return;
+      }
+
+      updateSwipe({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        preventDefault: () => event.preventDefault(),
+      });
+    };
+
+    window.addEventListener("touchstart", handleTouchStart, { capture: true, passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { capture: true, passive: false });
+    window.addEventListener("touchend", resetSwipe, true);
+    window.addEventListener("touchcancel", resetSwipe, true);
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("pointermove", handlePointerMove, { capture: true, passive: false });
+    window.addEventListener("pointerup", resetSwipe, true);
+    window.addEventListener("pointercancel", resetSwipe, true);
+
+    return () => {
+      window.removeEventListener("touchstart", handleTouchStart, true);
+      window.removeEventListener("touchmove", handleTouchMove, true);
+      window.removeEventListener("touchend", resetSwipe, true);
+      window.removeEventListener("touchcancel", resetSwipe, true);
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("pointermove", handlePointerMove, true);
+      window.removeEventListener("pointerup", resetSwipe, true);
+      window.removeEventListener("pointercancel", resetSwipe, true);
+    };
+  }, [edgeWidth, enabled, side]);
+}

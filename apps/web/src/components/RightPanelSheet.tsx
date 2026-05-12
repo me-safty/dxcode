@@ -23,7 +23,9 @@ export function RightPanelSheet(props: {
         keepMounted
         className={RIGHT_PANEL_SHEET_CLASS_NAME}
       >
-        {props.children}
+        <div className="flex h-full min-h-0 w-full flex-col max-[760px]:pb-safe max-[760px]:pr-safe max-[760px]:pt-safe">
+          {props.children}
+        </div>
       </SheetPopup>
     </Sheet>
   );

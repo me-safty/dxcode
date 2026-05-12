@@ -17,7 +17,13 @@ import {
   stripDiffSearchParams,
 } from "../diffRouteSearch";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useMobileEdgeSwipe } from "../hooks/useMobileEdgeSwipe";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
+import {
+  markRightPanelUsed,
+  openLastUsedRightPanel,
+  useRegisterRightPanel,
+} from "../rightPanelGesture";
 import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
@@ -179,6 +185,7 @@ function ChatThreadRouteView() {
       ? diffPanelMountState.hasOpenedDiff
       : diffOpen;
   const markDiffOpened = useCallback(() => {
+    markRightPanelUsed("diff");
     setDiffPanelMountState((previous) => {
       if (previous.threadKey === currentThreadKey && previous.hasOpenedDiff) {
         return previous;
@@ -190,7 +197,7 @@ function ChatThreadRouteView() {
     });
   }, [currentThreadKey]);
   const closeDiff = useCallback(() => {
-    if (!threadRef) {
+    if (!threadRef || !diffOpen) {
       return;
     }
     void navigate({
@@ -198,11 +205,12 @@ function ChatThreadRouteView() {
       params: buildThreadRouteParams(threadRef),
       search: { diff: undefined },
     });
-  }, [navigate, threadRef]);
+  }, [diffOpen, navigate, threadRef]);
   const openDiff = useCallback(() => {
     if (!threadRef) {
       return;
     }
+    markRightPanelUsed("diff");
     markDiffOpened();
     void navigate({
       to: "/$environmentId/$threadId",
@@ -213,6 +221,25 @@ function ChatThreadRouteView() {
       },
     });
   }, [markDiffOpened, navigate, threadRef]);
+
+  useEffect(() => {
+    if (diffOpen) {
+      markRightPanelUsed("diff");
+    }
+  }, [diffOpen]);
+
+  useRegisterRightPanel({
+    close: closeDiff,
+    enabled: threadRef !== null,
+    kind: "diff",
+    open: openDiff,
+  });
+
+  useMobileEdgeSwipe({
+    enabled: shouldUseDiffSheet,
+    onOpen: openLastUsedRightPanel,
+    side: "right",
+  });
 
   useEffect(() => {
     if (!threadRef || !bootstrapComplete) {

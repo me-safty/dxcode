@@ -18,6 +18,7 @@ import {
 import { Skeleton } from "~/components/ui/skeleton";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useIsMobile } from "~/hooks/useMediaQuery";
+import { useMobileEdgeSwipe } from "~/hooks/useMobileEdgeSwipe";
 import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
 import * as Schema from "effect/Schema";
 
@@ -129,6 +130,12 @@ function SidebarProvider({
   const toggleSidebar = React.useCallback(() => {
     return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open);
   }, [isMobile, setOpen]);
+
+  useMobileEdgeSwipe({
+    enabled: isMobile && !openMobile,
+    onOpen: () => setOpenMobile(true),
+    side: "left",
+  });
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.

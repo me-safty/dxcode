@@ -9,7 +9,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
-import { DiffIcon, TerminalSquareIcon } from "lucide-react";
+import { DiffIcon, EllipsisIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
@@ -17,6 +17,9 @@ import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Button } from "../ui/button";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -82,15 +85,37 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleDiff,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const isCompactHeader = useMediaQuery("(max-width: 760px)");
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
     activeThreadEnvironmentId,
     primaryEnvironmentId,
   });
+  const activeThreadRef = scopeThreadRef(activeThreadEnvironmentId, activeThreadId);
+  const projectScriptsControl = activeProjectScripts ? (
+    <ProjectScriptsControl
+      scripts={activeProjectScripts}
+      keybindings={keybindings}
+      preferredScriptId={preferredScriptId}
+      onRunScript={onRunProjectScript}
+      onAddScript={onAddProjectScript}
+      onUpdateScript={onUpdateProjectScript}
+      onDeleteScript={onDeleteProjectScript}
+    />
+  ) : null;
+  const gitActionsControl =
+    activeProjectName && gitCwd ? (
+      <GitActionsControl
+        gitCwd={gitCwd}
+        activeThreadRef={activeThreadRef}
+        {...(draftId ? { draftId } : {})}
+      />
+    ) : null;
+  const showMobileOverflowActions = Boolean(projectScriptsControl || gitActionsControl);
 
   return (
-    <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
-      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
+    <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden sm:gap-3">
         <SidebarTrigger className="size-7 shrink-0 md:hidden" />
         <h2
           className="min-w-0 shrink truncate text-sm font-medium text-foreground"
@@ -109,32 +134,43 @@ export const ChatHeader = memo(function ChatHeader({
           </Badge>
         )}
       </div>
-      <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
-        {activeProjectScripts && (
-          <ProjectScriptsControl
-            scripts={activeProjectScripts}
-            keybindings={keybindings}
-            preferredScriptId={preferredScriptId}
-            onRunScript={onRunProjectScript}
-            onAddScript={onAddProjectScript}
-            onUpdateScript={onUpdateProjectScript}
-            onDeleteScript={onDeleteProjectScript}
-          />
+      <div className="flex shrink-0 items-center justify-end gap-1.5 @3xl/header-actions:gap-3">
+        {!isCompactHeader && projectScriptsControl}
+        {!isCompactHeader && showOpenInPicker && (
+          <>
+            <OpenInPicker
+              keybindings={keybindings}
+              availableEditors={availableEditors}
+              openInCwd={openInCwd}
+            />
+          </>
         )}
-        {showOpenInPicker && (
-          <OpenInPicker
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            openInCwd={openInCwd}
-          />
-        )}
-        {activeProjectName && (
-          <GitActionsControl
-            gitCwd={gitCwd}
-            activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
-            {...(draftId ? { draftId } : {})}
-          />
-        )}
+        {!isCompactHeader && gitActionsControl}
+        {isCompactHeader && showMobileOverflowActions ? (
+          <Popover>
+            <PopoverTrigger
+              render={<Button size="icon-xs" variant="outline" aria-label="More thread actions" />}
+            >
+              <EllipsisIcon className="size-4" />
+            </PopoverTrigger>
+            <PopoverPopup align="end" side="bottom" className="w-64 max-w-[calc(100vw-1rem)]">
+              <div className="space-y-4">
+                {projectScriptsControl ? (
+                  <section className="space-y-2">
+                    <h3 className="px-0.5 text-muted-foreground text-xs font-medium">Run</h3>
+                    <div className="flex justify-start">{projectScriptsControl}</div>
+                  </section>
+                ) : null}
+                {gitActionsControl ? (
+                  <section className="space-y-2">
+                    <h3 className="px-0.5 text-muted-foreground text-xs font-medium">Git</h3>
+                    <div className="flex justify-start">{gitActionsControl}</div>
+                  </section>
+                ) : null}
+              </div>
+            </PopoverPopup>
+          </Popover>
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={

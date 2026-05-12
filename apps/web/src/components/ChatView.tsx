@@ -99,6 +99,7 @@ import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { markRightPanelUsed, useRegisterRightPanel } from "../rightPanelGesture";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -146,6 +147,11 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
+import {
+  scheduleStickToBottom,
+  STICK_TO_BOTTOM_RESUME_LOCK_MS,
+  type ScheduledStickToBottom,
+} from "./chat/stickToBottom";
 import { ChatHeader } from "./chat/ChatHeader";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
@@ -685,6 +691,7 @@ export default function ChatView(props: ChatViewProps) {
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const showScrollToBottomRef = useRef(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
@@ -729,6 +736,8 @@ export default function ChatView(props: ChatViewProps) {
   );
   const legendListRef = useRef<LegendListRef | null>(null);
   const isAtEndRef = useRef(true);
+  const scheduledStickToBottomRef = useRef<ScheduledStickToBottom | null>(null);
+  const stickToBottomLockUntilRef = useRef(0);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
@@ -2131,6 +2140,14 @@ export default function ChatView(props: ChatViewProps) {
   const toggleInteractionMode = useCallback(() => {
     handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
   }, [handleInteractionModeChange, interactionMode]);
+  const hidePlanSidebar = useCallback(() => {
+    setPlanSidebarOpen(false);
+  }, []);
+  const openPlanSidebar = useCallback(() => {
+    planSidebarDismissedForTurnRef.current = null;
+    markRightPanelUsed("plan");
+    setPlanSidebarOpen(true);
+  }, []);
   const togglePlanSidebar = useCallback(() => {
     setPlanSidebarOpen((open) => {
       if (open) {
@@ -2138,6 +2155,7 @@ export default function ChatView(props: ChatViewProps) {
           activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
       } else {
         planSidebarDismissedForTurnRef.current = null;
+        markRightPanelUsed("plan");
       }
       return !open;
     });
@@ -2147,6 +2165,19 @@ export default function ChatView(props: ChatViewProps) {
     planSidebarDismissedForTurnRef.current =
       activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
   }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+
+  useRegisterRightPanel({
+    close: hidePlanSidebar,
+    enabled: shouldUsePlanSidebarSheet,
+    kind: "plan",
+    open: openPlanSidebar,
+  });
+
+  useEffect(() => {
+    if (planSidebarOpen) {
+      markRightPanelUsed("plan");
+    }
+  }, [planSidebarOpen]);
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -2202,33 +2233,79 @@ export default function ChatView(props: ChatViewProps) {
     [environmentId, serverThread],
   );
 
-  // Scroll helpers — LegendList handles auto-scroll via maintainScrollAtEnd.
-  const scrollToEnd = useCallback((animated = false) => {
-    legendListRef.current?.scrollToEnd?.({ animated });
+  const setScrollToBottomVisible = useCallback((visible: boolean) => {
+    showScrollToBottomRef.current = visible;
+    setShowScrollToBottom(visible);
   }, []);
 
   // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
   // thread switches.  LegendList fires scroll events with isAtEnd=false while
   // initialScrollAtEnd is settling; hiding is always immediate.
   const showScrollDebouncer = useRef(
-    new Debouncer(() => setShowScrollToBottom(true), { wait: 150 }),
+    new Debouncer(() => setScrollToBottomVisible(true), { wait: 150 }),
   );
-  const onIsAtEndChange = useCallback((isAtEnd: boolean) => {
-    if (isAtEndRef.current === isAtEnd) return;
-    isAtEndRef.current = isAtEnd;
-    if (isAtEnd) {
-      showScrollDebouncer.current.cancel();
-      setShowScrollToBottom(false);
-    } else {
-      showScrollDebouncer.current.maybeExecute();
-    }
+
+  const cancelScheduledStickToBottom = useCallback(() => {
+    scheduledStickToBottomRef.current?.cancel();
+    scheduledStickToBottomRef.current = null;
   }, []);
+
+  const markTimelineAtEnd = useCallback(() => {
+    isAtEndRef.current = true;
+    showScrollDebouncer.current.cancel();
+    setScrollToBottomVisible(false);
+  }, [setScrollToBottomVisible]);
+
+  // Scroll helpers — LegendList handles steady-state auto-scroll via
+  // maintainScrollAtEnd. Mobile Safari/PWA resume and keyboard collapse can
+  // still resize the viewport after a send, so we settle the bottom position
+  // across a few frames and short delayed windows.
+  const scrollToEnd = useCallback(
+    (animated = false) => {
+      markTimelineAtEnd();
+      cancelScheduledStickToBottom();
+      void legendListRef.current?.scrollToEnd?.({ animated });
+      if (animated) {
+        return;
+      }
+
+      scheduledStickToBottomRef.current = scheduleStickToBottom({
+        scrollToEnd: () => {
+          void legendListRef.current?.scrollToEnd?.({ animated: false });
+        },
+      });
+    },
+    [cancelScheduledStickToBottom, markTimelineAtEnd],
+  );
+
+  const forceStickToBottom = useCallback(() => {
+    stickToBottomLockUntilRef.current = performance.now() + STICK_TO_BOTTOM_RESUME_LOCK_MS;
+    scrollToEnd(false);
+  }, [scrollToEnd]);
+
+  const onIsAtEndChange = useCallback(
+    (isAtEnd: boolean) => {
+      if (!isAtEnd && performance.now() < stickToBottomLockUntilRef.current) {
+        return;
+      }
+      if (isAtEndRef.current === isAtEnd) return;
+      isAtEndRef.current = isAtEnd;
+      if (isAtEnd) {
+        showScrollDebouncer.current.cancel();
+        setScrollToBottomVisible(false);
+      } else {
+        cancelScheduledStickToBottom();
+        showScrollDebouncer.current.maybeExecute();
+      }
+    },
+    [cancelScheduledStickToBottom, setScrollToBottomVisible],
+  );
+
+  useEffect(() => cancelScheduledStickToBottom, [cancelScheduledStickToBottom]);
 
   useEffect(() => {
     setPullRequestDialogState(null);
-    isAtEndRef.current = true;
-    showScrollDebouncer.current.cancel();
-    setShowScrollToBottom(false);
+    forceStickToBottom();
     if (planSidebarOpenOnNextThreadRef.current) {
       planSidebarOpenOnNextThreadRef.current = false;
       setPlanSidebarOpen(true);
@@ -2237,7 +2314,51 @@ export default function ChatView(props: ChatViewProps) {
       setPlanSidebarOpen(false);
     }
     planSidebarDismissedForTurnRef.current = null;
-  }, [activeThread?.id]);
+  }, [activeThread?.id, forceStickToBottom]);
+
+  useEffect(() => {
+    const shouldRestoreBottom = () => {
+      const listState = legendListRef.current?.getState?.();
+      return Boolean(listState?.isAtEnd || isAtEndRef.current || !showScrollToBottomRef.current);
+    };
+
+    const restoreBottom = () => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+      if (!shouldRestoreBottom()) {
+        return;
+      }
+      forceStickToBottom();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        restoreBottom();
+      }
+    };
+    const handlePageShow = () => restoreBottom();
+    const handleFocus = () => restoreBottom();
+    const handleResize = () => {
+      if (shouldRestoreBottom()) {
+        forceStickToBottom();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("resize", handleResize);
+    window.visualViewport?.addEventListener("resize", handleResize);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("resize", handleResize);
+      window.visualViewport?.removeEventListener("resize", handleResize);
+    };
+  }, [forceStickToBottom]);
 
   // Auto-open the plan sidebar when plan/todo steps arrive for the current turn.
   // Don't auto-open for plans carried over from a previous turn (the user can open manually).
@@ -2742,9 +2863,7 @@ export default function ChatView(props: ChatViewProps) {
     // Scroll to the current end *before* adding the optimistic message.
     // This sets LegendList's internal isAtEnd=true so maintainScrollAtEnd
     // automatically pins to the new item when the data changes.
-    isAtEndRef.current = true;
-    showScrollDebouncer.current.cancel();
-    setShowScrollToBottom(false);
+    markTimelineAtEnd();
     await legendListRef.current?.scrollToEnd?.({ animated: false });
 
     setOptimisticUserMessages((existing) => [
@@ -2758,6 +2877,7 @@ export default function ChatView(props: ChatViewProps) {
         streaming: false,
       },
     ]);
+    forceStickToBottom();
 
     setThreadError(threadIdForSend, null);
     if (expiredTerminalContextCount > 0) {
@@ -3137,9 +3257,7 @@ export default function ChatView(props: ChatViewProps) {
       setThreadError(threadIdForSend, null);
 
       // Scroll to the current end *before* adding the optimistic message.
-      isAtEndRef.current = true;
-      showScrollDebouncer.current.cancel();
-      setShowScrollToBottom(false);
+      markTimelineAtEnd();
       await legendListRef.current?.scrollToEnd?.({ animated: false });
 
       setOptimisticUserMessages((existing) => [
@@ -3152,6 +3270,7 @@ export default function ChatView(props: ChatViewProps) {
           streaming: false,
         },
       ]);
+      forceStickToBottom();
 
       try {
         await persistThreadSettingsForNextTurn({
@@ -3220,6 +3339,8 @@ export default function ChatView(props: ChatViewProps) {
       isConnecting,
       isSendBusy,
       isServerThread,
+      forceStickToBottom,
+      markTimelineAtEnd,
       persistThreadSettingsForNextTurn,
       resetLocalDispatch,
       runtimeMode,
@@ -3597,10 +3718,10 @@ export default function ChatView(props: ChatViewProps) {
           {/* Input bar */}
           <div
             className={cn(
-              "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
+              "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-0.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
               isGitRepo
-                ? "pb-[calc(env(safe-area-inset-bottom)+0.25rem)]"
-                : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
+                ? "pb-[max(calc(env(safe-area-inset-bottom)-0.75rem),0px)]"
+                : "pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
             )}
           >
             <div className="relative isolate">
