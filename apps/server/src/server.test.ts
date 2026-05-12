@@ -117,6 +117,7 @@ import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as Data from "effect/Data";
+import { ExecutionBridgeRunRegistryLive } from "./executionBridge/runStart.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -699,6 +700,7 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.serverEnvironment,
         }),
       ),
+      Layer.provideMerge(ExecutionBridgeRunRegistryLive),
       Layer.provide(
         Layer.mock(RepositoryIdentityResolver)({
           resolve: () => Effect.succeed(null),
@@ -769,6 +771,31 @@ const getHttpServerUrl = (pathname = "") =>
     const address = server.address as HttpServer.TcpAddress;
     return `http://127.0.0.1:${address.port}${pathname}`;
   });
+
+const withExecutionBridgeSecret = <A, E, R>(
+  secret: string | null,
+  effect: Effect.Effect<A, E, R>,
+) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = process.env.T3_EXECUTION_BRIDGE_SHARED_SECRET;
+      if (secret === null) {
+        delete process.env.T3_EXECUTION_BRIDGE_SHARED_SECRET;
+      } else {
+        process.env.T3_EXECUTION_BRIDGE_SHARED_SECRET = secret;
+      }
+      return previous;
+    }),
+    () => effect,
+    (previous) =>
+      Effect.sync(() => {
+        if (previous === undefined) {
+          delete process.env.T3_EXECUTION_BRIDGE_SHARED_SECRET;
+        } else {
+          process.env.T3_EXECUTION_BRIDGE_SHARED_SECRET = previous;
+        }
+      }),
+  );
 
 const bootstrapBrowserSession = (
   credential = defaultDesktopBootstrapToken,
@@ -1048,6 +1075,85 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertBrowserApiCorsHeaders(response.headers);
       assert.deepEqual(body, testEnvironmentDescriptor);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects bridge requests when the shared secret is not configured", () =>
+    withExecutionBridgeSecret(
+      null,
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+        const url = yield* getHttpServerUrl("/api/execution/runs/status");
+
+        const response = yield* Effect.promise(() =>
+          fetch(url, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              executionRunId: "run-test",
+              t3ThreadId: String(defaultThreadId),
+            }),
+          }),
+        );
+
+        assert.equal(response.status, 503);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    ),
+  );
+
+  it.effect("rejects bridge requests with the wrong bearer token", () =>
+    withExecutionBridgeSecret(
+      "correct-secret",
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+        const url = yield* getHttpServerUrl("/api/execution/runs/status");
+
+        const response = yield* Effect.promise(() =>
+          fetch(url, {
+            method: "POST",
+            headers: {
+              authorization: "Bearer wrong-secret",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              executionRunId: "run-test",
+              t3ThreadId: String(defaultThreadId),
+            }),
+          }),
+        );
+
+        assert.equal(response.status, 401);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    ),
+  );
+
+  it.effect("accepts bridge requests with the configured bearer token", () =>
+    withExecutionBridgeSecret(
+      "correct-secret",
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+        const url = yield* getHttpServerUrl("/api/execution/runs/status");
+
+        const response = yield* Effect.promise(() =>
+          fetch(url, {
+            method: "POST",
+            headers: {
+              authorization: "Bearer correct-secret",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              executionRunId: "run-test",
+              t3ThreadId: String(defaultThreadId),
+            }),
+          }),
+        );
+        const body = (yield* Effect.promise(() => response.json())) as { readonly found: boolean };
+
+        assert.equal(response.status, 200);
+        assert.equal(body.found, false);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    ),
   );
 
   it.effect("reports unauthenticated session state without requiring auth", () =>

@@ -10,4 +10,17 @@ cd /d "%REPO_ROOT%"
 
 if not exist "logs" mkdir "logs"
 
+if exist ".env.local" call :load_env ".env.local"
+if exist ".env" call :load_env ".env"
+
+set "PATH=%USERPROFILE%\.local\bin;%LOCALAPPDATA%\OpenAI\Codex\bin;%USERPROFILE%\AppData\Roaming\npm;%USERPROFILE%\.bun\bin;%LOCALAPPDATA%\Microsoft\WindowsApps;%PATH%"
+
 node apps\server\dist\bin.mjs --port 3773 --host 127.0.0.1 --no-browser >> "logs\t3code-server.log" 2>&1
+
+exit /b %ERRORLEVEL%
+
+:load_env
+for /f "usebackq eol=# tokens=1,* delims==" %%A in (%1) do (
+  if not "%%A"=="" set "%%A=%%B"
+)
+exit /b 0

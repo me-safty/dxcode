@@ -13,7 +13,7 @@ describe("createT3ExecutionBridgeClient", () => {
   });
 
   it("uses the default bridge base URL when no override is provided", async () => {
-    vi.stubEnv("T3_EXECUTION_BRIDGE_BASE_URL", "https://bridge.example.com/");
+    vi.stubEnv("T3_EXECUTION_BRIDGE_BASE_URL", "https://t3.olumbe.com/");
     vi.stubEnv("T3_EXECUTION_BRIDGE_SHARED_SECRET", "shared-secret");
     const fetchMock = vi.fn(async () =>
       Response.json({
@@ -35,7 +35,7 @@ describe("createT3ExecutionBridgeClient", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://bridge.example.com/api/execution/runs/continue",
+      "https://t3.olumbe.com/api/execution/runs/continue",
       expect.objectContaining({
         headers: expect.objectContaining({ authorization: "Bearer shared-secret" }),
       }),

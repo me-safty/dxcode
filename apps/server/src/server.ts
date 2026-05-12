@@ -84,6 +84,16 @@ import {
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
 import {
+  executionBridgeContinueRouteLayer,
+  executionBridgeInterruptRouteLayer,
+  executionBridgeLifecycleCallbacksLive,
+  executionBridgeRunCreateRouteLayer,
+  executionBridgeStatusQueryRouteLayer,
+  taskPullRequestEnsureRouteLayer,
+  taskRuntimeMaterializeRouteLayer,
+} from "./executionBridge/http.ts";
+import { ExecutionBridgeRunRegistryLive } from "./executionBridge/runStart.ts";
+import {
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
 } from "./orchestration/http.ts";
@@ -303,11 +313,17 @@ export const makeRoutesLayer = Layer.mergeAll(
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
   attachmentsRouteLayer,
+  executionBridgeContinueRouteLayer,
+  executionBridgeInterruptRouteLayer,
+  executionBridgeRunCreateRouteLayer,
+  executionBridgeStatusQueryRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
+  taskPullRequestEnsureRouteLayer,
+  taskRuntimeMaterializeRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));
@@ -402,6 +418,7 @@ export const makeServerLayer = Layer.unwrap(
       HttpRouter.serve(makeRoutesLayer, {
         disableLogger: !config.logWebSocketEvents,
       }),
+      executionBridgeLifecycleCallbacksLive,
       httpListeningLayer,
       runtimeStateLayer,
       tailscaleServeLayer,
@@ -412,6 +429,7 @@ export const makeServerLayer = Layer.unwrap(
       Layer.provideMerge(HttpServerLive),
       Layer.provide(ObservabilityLive),
       Layer.provideMerge(FetchHttpClient.layer),
+      Layer.provideMerge(ExecutionBridgeRunRegistryLive),
       Layer.provideMerge(VcsProcess.layer),
       Layer.provideMerge(PlatformServicesLive),
     );

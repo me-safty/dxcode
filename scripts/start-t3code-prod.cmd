@@ -40,6 +40,9 @@ goto wait_loop
 echo Checking public endpoint https://t3.olumbe.com...
 curl -sS -o NUL -w "  https://t3.olumbe.com -> %%{http_code}\n" https://t3.olumbe.com/
 
+echo Checking unauthenticated bridge route...
+curl -sS -o NUL -X POST -w "  /api/execution/runs/status -> %%{http_code} (expected 401 when secret is configured)\n" https://t3.olumbe.com/api/execution/runs/status
+
 echo.
 echo Pairing URL (most recent token from the log):
 powershell -NoProfile -Command "$line = Get-Content -LiteralPath '%LOG_FILE%' -Tail 200 -ErrorAction SilentlyContinue | Where-Object { $_ -match 'pairingUrl:' } | Select-Object -Last 1; if ($line) { '  ' + (($line -replace '.*pairingUrl:\s*', '').Trim() -replace 'http://127\.0\.0\.1:3773', 'https://t3.olumbe.com') } else { '  (no pairingUrl found yet - check ' + '%LOG_FILE%' + ')' }"
