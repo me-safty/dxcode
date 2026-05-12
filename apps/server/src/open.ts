@@ -163,6 +163,7 @@ function resolveWindowsBrowserLaunch(target: string, command: string): ProcessLa
     command,
     args: [...POWERSHELL_ARGUMENTS_PREFIX, encodedCommand],
     options: {
+      detached: true,
       shell: false,
       stdin: "ignore",
       stdout: "ignore",

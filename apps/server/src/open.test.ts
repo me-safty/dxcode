@@ -543,6 +543,7 @@ it("resolveBrowserLaunch maps default browser launchers by platform", () => {
     ),
   ]);
   assert.deepEqual(windows.options, {
+    detached: true,
     shell: false,
     stdin: "ignore",
     stdout: "ignore",
@@ -555,6 +556,7 @@ it("resolveBrowserLaunch opens through Windows from WSL when not remote", () => 
     WSL_DISTRO_NAME: "Ubuntu",
   });
   assert.equal(launch.command, "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe");
+  assert.equal(launch.options.detached, true);
 });
 
 it("resolveBrowserLaunch keeps xdg-open for WSL over SSH", () => {
