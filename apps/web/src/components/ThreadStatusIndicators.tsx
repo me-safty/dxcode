@@ -235,14 +235,20 @@ export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSumma
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5">
       {terminalStatus ? (
-        <span
-          role="img"
-          aria-label={terminalStatus.label}
-          title={terminalStatus.label}
-          className={`inline-flex items-center justify-center ${terminalStatus.colorClass}`}
-        >
-          <TerminalIcon className={`size-3 ${terminalStatus.pulse ? "animate-pulse" : ""}`} />
-        </span>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                role="img"
+                aria-label={terminalStatus.label}
+                className={`inline-flex items-center justify-center ${terminalStatus.colorClass}`}
+              />
+            }
+          >
+            <TerminalIcon className={`size-3 ${terminalStatus.pulse ? "animate-pulse" : ""}`} />
+          </TooltipTrigger>
+          <TooltipPopup side="top">{terminalStatus.label}</TooltipPopup>
+        </Tooltip>
       ) : null}
       {isRemoteThread ? (
         <Tooltip>

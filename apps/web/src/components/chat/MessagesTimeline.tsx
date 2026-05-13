@@ -393,16 +393,23 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
   const activity = use(TimelineRowActivityCtx);
 
   return (
-    <Button
-      type="button"
-      size="xs"
-      variant="outline"
-      disabled={activity.isRevertingCheckpoint || activity.isWorking}
-      onClick={() => ctx.onRevertUserMessage(messageId)}
-      title="Revert to this message"
-    >
-      <Undo2Icon className="size-3" />
-    </Button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            disabled={activity.isRevertingCheckpoint || activity.isWorking}
+            onClick={() => ctx.onRevertUserMessage(messageId)}
+            aria-label="Revert to this message"
+          />
+        }
+      >
+        <Undo2Icon className="size-3" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">Revert to this message</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -1184,13 +1191,20 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           {workEntry.changedFiles?.slice(0, 4).map((filePath) => {
             const displayPath = formatWorkspaceRelativePath(filePath, workspaceRoot);
             return (
-              <span
-                key={`${workEntry.id}:${filePath}`}
-                className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
-                title={displayPath}
-              >
-                {displayPath}
-              </span>
+              <Tooltip key={`${workEntry.id}:${filePath}`}>
+                <TooltipTrigger
+                  render={
+                    <span className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75" />
+                  }
+                >
+                  {displayPath}
+                </TooltipTrigger>
+                <TooltipPopup side="top" className="max-w-[min(40rem,calc(100vw-2rem))]">
+                  <div className="tooltip-scrollbar-thin overflow-x-auto whitespace-nowrap">
+                    {displayPath}
+                  </div>
+                </TooltipPopup>
+              </Tooltip>
             );
           })}
           {(workEntry.changedFiles?.length ?? 0) > 4 && (
