@@ -73,6 +73,11 @@ import {
   derivePhysicalProjectKey,
 } from "../../logicalProject";
 import { getClientSettings } from "~/hooks/useSettings";
+import {
+  readCachedEnvironmentState,
+  removeCachedEnvironmentState,
+  scheduleCachedEnvironmentStateWrite,
+} from "~/orchestrationStartupCache";
 
 type EnvironmentServiceState = {
   readonly queryClient: QueryClient;
@@ -376,6 +381,7 @@ function attachThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry): b
     (item) => {
       if (item.kind === "snapshot") {
         useStore.getState().syncServerThreadDetail(item.snapshot.thread, entry.environmentId);
+        scheduleEnvironmentStartupCacheWrite(entry.environmentId, [entry.threadId]);
         return;
       }
       applyEnvironmentThreadDetailEvent(item.event, entry.environmentId);
@@ -943,6 +949,45 @@ function reconcileSnapshotDerivedState() {
   useTerminalStateStore.getState().removeOrphanedTerminalStates(activeThreadKeys);
 }
 
+function hydrateEnvironmentFromStartupCache(environmentId: EnvironmentId): void {
+  const cachedState = readCachedEnvironmentState(environmentId);
+  if (!cachedState) {
+    return;
+  }
+
+  const previousEnvironmentState = useStore.getState().environmentStateById[environmentId];
+  useStore.getState().hydrateCachedEnvironmentState(environmentId, cachedState);
+  if (useStore.getState().environmentStateById[environmentId] === previousEnvironmentState) {
+    return;
+  }
+
+  reconcileSnapshotDerivedState();
+}
+
+function scheduleEnvironmentStartupCacheWrite(
+  environmentId: EnvironmentId,
+  preferredThreadIds: readonly ThreadId[] = [],
+): void {
+  const environmentState = useStore.getState().environmentStateById[environmentId];
+  if (!environmentState) {
+    return;
+  }
+
+  scheduleCachedEnvironmentStateWrite(environmentId, environmentState, {
+    preferredThreadIds,
+  });
+}
+
+function collectThreadIdsFromEvents(events: ReadonlyArray<OrchestrationEvent>): ThreadId[] {
+  const threadIds = new Set<ThreadId>();
+  for (const event of events) {
+    if ("threadId" in event.payload) {
+      threadIds.add(event.payload.threadId);
+    }
+  }
+  return [...threadIds];
+}
+
 export function shouldApplyTerminalEvent(input: {
   serverThreadArchivedAt: string | null | undefined;
   hasDraftThread: boolean;
@@ -1022,6 +1067,7 @@ function applyRecoveredEventBatch(
   }
 
   reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
+  scheduleEnvironmentStartupCacheWrite(environmentId, collectThreadIdsFromEvents(events));
 }
 
 export function applyEnvironmentThreadDetailEvent(
@@ -1052,6 +1098,7 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
 
   useStore.getState().applyShellEvent(event, environmentId);
   markAppliedProjectionEvent(environmentId, event.sequence);
+  scheduleEnvironmentStartupCacheWrite(environmentId, threadId ? [threadId] : []);
 
   switch (event.kind) {
     case "project-upserted":
@@ -1102,6 +1149,7 @@ function createEnvironmentConnectionHandlers() {
       );
       reconcileThreadDetailSubscriptionEvictionForEnvironment(environmentId);
       reconcileSnapshotDerivedState();
+      scheduleEnvironmentStartupCacheWrite(environmentId);
     },
     applyTerminalEvent: (event: TerminalEvent, environmentId: EnvironmentId) => {
       const threadRef = scopeThreadRef(environmentId, ThreadId.make(event.threadId));
@@ -1279,6 +1327,8 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
     return existing;
   }
 
+  hydrateEnvironmentFromStartupCache(knownEnvironment.environmentId);
+
   return registerConnection(
     createEnvironmentConnection({
       kind: "primary",
@@ -1302,6 +1352,8 @@ async function ensureSavedEnvironmentConnection(
     readonly serverConfig?: ServerConfig | null;
   },
 ): Promise<EnvironmentConnection> {
+  hydrateEnvironmentFromStartupCache(record.environmentId);
+
   const existing = environmentConnections.get(record.environmentId);
   if (existing) {
     return existing;
@@ -1458,6 +1510,10 @@ async function ensureSavedEnvironmentConnection(
 async function syncSavedEnvironmentConnections(
   records: ReadonlyArray<SavedEnvironmentRecord>,
 ): Promise<void> {
+  for (const record of records) {
+    hydrateEnvironmentFromStartupCache(record.environmentId);
+  }
+
   const expectedEnvironmentIds = new Set(records.map((record) => record.environmentId));
   const staleEnvironmentIds = [...environmentConnections.values()]
     .filter((connection) => connection.kind === "saved")
@@ -1630,6 +1686,7 @@ export async function reconnectSavedEnvironment(environmentId: EnvironmentId): P
 export async function removeSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
   await disconnectSavedEnvironment(environmentId);
   disposeThreadDetailSubscriptionsForEnvironment(environmentId);
+  removeCachedEnvironmentState(environmentId);
   useSavedEnvironmentRegistryStore.getState().remove(environmentId);
   useSavedEnvironmentRuntimeStore.getState().clear(environmentId);
   useStore.getState().removeEnvironmentState(environmentId);

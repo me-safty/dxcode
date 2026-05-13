@@ -1920,6 +1920,26 @@ export function removeEnvironmentState(state: AppState, environmentId: Environme
   };
 }
 
+export function hydrateCachedEnvironmentState(
+  state: AppState,
+  environmentId: EnvironmentId,
+  cachedState: EnvironmentState,
+): AppState {
+  const currentEnvironmentState = getStoredEnvironmentState(state, environmentId);
+  if (
+    currentEnvironmentState.bootstrapComplete ||
+    currentEnvironmentState.projectIds.length > 0 ||
+    currentEnvironmentState.threadIds.length > 0
+  ) {
+    return state;
+  }
+
+  return commitEnvironmentState(state, environmentId, {
+    ...cachedState,
+    bootstrapComplete: false,
+  });
+}
+
 export function setThreadBranch(
   state: AppState,
   threadRef: ScopedThreadRef,
@@ -1946,6 +1966,10 @@ export function setThreadBranch(
 interface AppStore extends AppState {
   setActiveEnvironmentId: (environmentId: EnvironmentId) => void;
   removeEnvironmentState: (environmentId: EnvironmentId) => void;
+  hydrateCachedEnvironmentState: (
+    environmentId: EnvironmentId,
+    cachedState: EnvironmentState,
+  ) => void;
   syncServerShellSnapshot: (
     snapshot: OrchestrationShellSnapshot,
     environmentId: EnvironmentId,
@@ -1971,6 +1995,8 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => setActiveEnvironmentId(state, environmentId)),
   removeEnvironmentState: (environmentId) =>
     set((state) => removeEnvironmentState(state, environmentId)),
+  hydrateCachedEnvironmentState: (environmentId, cachedState) =>
+    set((state) => hydrateCachedEnvironmentState(state, environmentId, cachedState)),
   syncServerShellSnapshot: (snapshot, environmentId) =>
     set((state) => syncServerShellSnapshot(state, snapshot, environmentId)),
   syncServerThreadDetail: (thread, environmentId) =>
