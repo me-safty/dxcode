@@ -5,7 +5,7 @@ This runbook covers the local production topology:
 - the T3 server runs on this Windows PC at `127.0.0.1:3773`
 - Cloudflare Tunnel `t3code-local` exposes it publicly at `https://t3.olumbe.com`
 - Convex calls the local server bridge through that public URL
-- Slack and Linear continue to call Convex public HTTP endpoints
+- Slack calls the Convex public HTTP endpoint
 
 ## Local Services
 
@@ -25,6 +25,42 @@ Use the operator command from the repo root to start the server, tunnel, and des
 scripts\start-t3code-prod.cmd
 ```
 
+For active development, use the hot-reloading local server command instead:
+
+```cmd
+bun run dev:local-cloudflare
+```
+
+This runs the server from source on `127.0.0.1:3773` and runs
+`cloudflared tunnel run t3code-local` in the same terminal. Stop or pause the
+`t3code-server` scheduled task first so the dev server can bind port `3773`.
+Set `T3CODE_SKIP_CLOUDFLARE=1` if the scheduled tunnel is already running and
+you only want the hot-reloading server process.
+
+## Stable Pairing Token
+
+Set `T3CODE_OWNER_PAIRING_TOKEN` in `.env.local` to reuse the same owner pairing
+URL across local server restarts:
+
+```text
+T3CODE_OWNER_PAIRING_TOKEN=<long random local-only token>
+```
+
+Then use:
+
+```text
+https://t3.olumbe.com/pair#token=<long random local-only token>
+```
+
+`bun run dev:local-cloudflare` keeps the matching local auth row armed while it
+runs, so hot-reload server restarts do not force you to chase the transient
+startup token in the logs. The scheduled production server also seeds the same
+token before startup. To seed manually, run:
+
+```cmd
+bun run auth:seed-owner-pairing
+```
+
 ## Convex Env
 
 Run Convex commands from `apps/orchestrator` with the intended `CONVEX_DEPLOYMENT` selected.
@@ -33,14 +69,20 @@ Run Convex commands from `apps/orchestrator` with the intended `CONVEX_DEPLOYMEN
 bunx convex env set --prod T3_EXECUTION_BRIDGE_BASE_URL 'https://t3.olumbe.com'
 bunx convex env set --prod T3_EXECUTION_BRIDGE_SHARED_SECRET '<same secret used by local T3 server>'
 bunx convex env set --prod LINEAR_DEFAULT_WORKSPACE_ROOT 'C:\Users\Vivek\Affil\t3code'
+bunx convex env set --prod GITHUB_WEBHOOK_SECRET '<shared GitHub webhook secret>'
 ```
 
-Slack and Linear webhook URLs stay on Convex:
+Slack and GitHub webhook URLs stay on Convex:
 
 ```text
 https://<your-convex-site>/slack/webhook
-https://<your-convex-site>/linear/webhook
+https://<your-convex-site>/github/webhook
 ```
+
+Configure the GitHub webhook for `deployment_status` and `pull_request` events.
+The orchestrator verifies `X-Hub-Signature-256` with `GITHUB_WEBHOOK_SECRET`,
+posts public preview URLs when deployments become ready, and reacts to the
+original Slack task with a checkmark when the linked PR is merged.
 
 Lifecycle callbacks from T3 use:
 
@@ -97,8 +139,66 @@ If Convex reports schema incompatibilities during local bring-up, clear the affe
    curl.exe -i -X POST https://t3.olumbe.com/api/execution/runs/status
    ```
 
-3. Post a tiny dated Slack smoke task in `#testing` that mentions `Engineering Agent`.
+3. Post a tiny dated Slack smoke task in `#testing` that mentions `Vevin`.
 
-4. Post a tiny dated Linear smoke task on a test issue/comment using the configured Linear app.
+4. Confirm Convex accepts the webhook, local T3 receives a bridge request, and the originating thread receives a reply.
 
-5. Confirm Convex accepts the webhook, local T3 receives a bridge request, and the originating thread receives a reply.
+## Slack E2E Matrix
+
+Use Convex dev until the orchestrator is production-ready:
+
+```bash
+cd apps/orchestrator
+bun run dev
+```
+
+Watch the dev logs while testing:
+
+```powershell
+Get-Content $env:TEMP\t3-orchestrator-convex-dev.err.log -Wait
+```
+
+Test these Slack behaviors in `#testing`:
+
+- Initial task mention: Vevin reacts to the original message with `eyes`.
+- Initial task card: Vevin posts `Talk to Vevin in this thread` with an `Open T3` button.
+- Message relay: the message sent to T3 is only the user message and attachment links. Slack client attribution such as `Sent using ChatGPT` must be stripped.
+- Aside: a message starting with `aside - ` is ignored and not relayed to T3.
+- Mute: `@Vevin mute` stops non-mention follow-ups in that Slack thread; `@Vevin unmute` resumes them.
+- PR created: Vevin posts a PR status card with `View PR` and Vercel preview buttons. The PR card must not include an `Open T3` button.
+- Deployment ready: Vevin posts a deployment-ready card with the public Vercel preview URL.
+- PR merged: Vevin reacts to the original Slack task message with `white_check_mark` and posts the same style PR status card.
+
+### Current E2E Tracker
+
+Update this checklist during each manual/live validation pass:
+
+- [x] Initial mention received by `/slack/webhook` in Convex dev logs.
+- [x] Original Slack message gets one `eyes` reaction.
+- [x] Initial card posts `Talk to Vevin in this thread` with an `Open T3` button.
+- [x] T3 prompt does not include Slack client attribution such as `Sent using ChatGPT`.
+- [x] Assistant replies relay back into the Slack thread.
+- [x] `aside - ...` follow-up is ignored and does not call T3.
+- [x] `@Vevin mute` mutes non-mention follow-ups in that Slack thread.
+- [x] `@Vevin unmute` resumes non-mention follow-ups.
+- [x] PR-created card posts once with `View PR` and deployment buttons, and no `Open T3` button.
+- [x] Deployment-ready event posts the public preview URL.
+- [x] PR-merged event adds `white_check_mark` to the original message and posts a PR status card.
+
+Latest live run:
+
+- Slack thread: `C0AJ5HR70PR` / `1778700070.090889`
+- Task: `kn76eye74y6t36wczn835ysrs186mgma`
+- Work session: `ks7dfw28hb6wb479waxygcfr0x86nzsh`
+- PR: `https://github.com/affil-ai/nextcard/pull/1388`
+- Verified preview buttons: `nextcard-web`, `nextcard-mcp`, `nextcard-pdp`
+- Merge validation: PR #1388 was merged on 2026-05-13 at 13:03 PDT. Convex dev handled the GitHub `pull_request.closed` webhook, Slack parent message `1778700070.090889` received `white_check_mark`, and Vevin posted a merge PR card in the thread at `1778702583.999829`.
+
+PR merge validation steps:
+
+1. Use a disposable Slack-created PR, or a PR that is safe to merge.
+2. Merge it on GitHub.
+3. Watch Convex dev logs for a `pull_request` webhook handled by `convex/github.ts`.
+4. Confirm Vevin reacts to the original Slack task message with `white_check_mark`.
+5. Confirm Vevin posts a PR status card in the same Slack thread.
+6. Confirm duplicate GitHub deliveries do not post another merge card.

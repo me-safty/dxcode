@@ -1876,9 +1876,31 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const sanitizedBranch = targetBranch.replace(/\//g, "-");
     const repoName = path.basename(input.cwd);
     const worktreePath = input.path ?? path.join(worktreesDir, repoName, sanitizedBranch);
+    const baseRef = input.refreshBaseFromOrigin
+      ? yield* resolvePrimaryRemoteName(input.cwd).pipe(
+          Effect.tap((remoteName) =>
+            runGit("GitVcsDriver.createWorktree.refreshBaseFromOrigin", input.cwd, [
+              "fetch",
+              "--quiet",
+              "--no-tags",
+              remoteName,
+              `+refs/heads/${input.refName}:refs/remotes/${remoteName}/${input.refName}`,
+            ]),
+          ),
+          Effect.map((remoteName) => `${remoteName}/${input.refName}`),
+        )
+      : input.refName;
     const args = input.newRefName
-      ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
-      : ["worktree", "add", worktreePath, input.refName];
+      ? [
+          "worktree",
+          "add",
+          ...(input.refreshBaseFromOrigin ? ["--no-track"] : []),
+          "-b",
+          input.newRefName,
+          worktreePath,
+          baseRef,
+        ]
+      : ["worktree", "add", worktreePath, baseRef];
 
     yield* executeGit("GitVcsDriver.createWorktree", input.cwd, args, {
       fallbackErrorMessage: "git worktree add failed",

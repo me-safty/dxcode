@@ -376,8 +376,13 @@ describe("thread navigation helpers", () => {
     assert.isNull(threadTraversalDirectionFromCommand(null));
   });
 
-  it("shows jump hints only when configured modifiers match", () => {
-    assert.isTrue(
+  it("does not resolve or hint thread number jumps", () => {
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "1", code: "Digit1", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+      }),
+    );
+    assert.isFalse(
       shouldShowThreadJumpHints(event({ metaKey: true }), DEFAULT_BINDINGS, {
         platform: "MacIntel",
       }),
@@ -387,7 +392,7 @@ describe("thread navigation helpers", () => {
         platform: "MacIntel",
       }),
     );
-    assert.isTrue(
+    assert.isFalse(
       shouldShowThreadJumpHints(event({ ctrlKey: true }), DEFAULT_BINDINGS, {
         platform: "Linux",
       }),

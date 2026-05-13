@@ -194,7 +194,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
-  it.effect("ships configurable thread navigation defaults", () =>
+  it.effect("ships configurable thread traversal defaults without number jumps", () =>
     Effect.sync(() => {
       const defaultsByCommand = new Map(
         DEFAULT_KEYBINDINGS.map((binding) => [binding.command, binding.key] as const),
@@ -202,8 +202,8 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       assert.equal(defaultsByCommand.get("thread.previous"), "mod+shift+[");
       assert.equal(defaultsByCommand.get("thread.next"), "mod+shift+]");
-      assert.equal(defaultsByCommand.get("thread.jump.1"), "mod+1");
-      assert.equal(defaultsByCommand.get("thread.jump.9"), "mod+9");
+      assert.isFalse(defaultsByCommand.has("thread.jump.1"));
+      assert.isFalse(defaultsByCommand.has("thread.jump.9"));
       assert.equal(defaultsByCommand.get("modelPicker.toggle"), "mod+shift+m");
       assert.equal(defaultsByCommand.get("modelPicker.jump.1"), "mod+1");
       assert.equal(defaultsByCommand.get("modelPicker.jump.9"), "mod+9");

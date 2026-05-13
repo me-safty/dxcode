@@ -3,19 +3,22 @@ import { describe, expect, it } from "vitest";
 import {
   applyTeamAppMuteCommand,
   isAsideTeamAppMessage,
+  mentionsNonTeamAppSlackUser,
+  mentionsTeamAppUser,
   shouldIgnoreTeamAppMessage,
+  teamAppMuteCommandReaction,
 } from "./teamAppMessages.ts";
 
 describe("team app message domain helpers", () => {
   describe("isAsideTeamAppMessage", () => {
-    it.each(["- aside this is for humans", " - aside: ignore this", "- ASIDE\nnot for ai"])(
+    it.each(["aside - this is for humans", " aside - ignore this", "ASIDE - not for ai"])(
       "detects aside prefix in %s",
       (body) => {
         expect(isAsideTeamAppMessage(body)).toBe(true);
       },
     );
 
-    it.each(["aside but no dash", "-aside missing separator", "we should set aside time"])(
+    it.each(["aside but no dash", "- aside old prefix", "we should set aside time"])(
       "does not treat %s as an aside",
       (body) => {
         expect(isAsideTeamAppMessage(body)).toBe(false);
@@ -27,7 +30,7 @@ describe("team app message domain helpers", () => {
     it("hard-ignores aside messages even when the AI Engineer is mentioned", () => {
       expect(
         shouldIgnoreTeamAppMessage({
-          body: "- aside @Engineering we should discuss privately",
+          body: "aside - @Vevin we should discuss privately",
           isThreadMuted: false,
           mentionsAiEngineer: true,
         }),
@@ -76,8 +79,9 @@ describe("team app message domain helpers", () => {
     it("mutes a Team App thread when requested", () => {
       expect(
         applyTeamAppMuteCommand({
-          body: "@Engineering mute this thread",
+          body: "@Vevin mute this thread",
           isThreadMuted: false,
+          mentionsAiEngineer: true,
         }),
       ).toEqual({ muted: true, changed: true, command: "mute" });
     });
@@ -85,8 +89,9 @@ describe("team app message domain helpers", () => {
     it("unmutes a Team App thread when requested", () => {
       expect(
         applyTeamAppMuteCommand({
-          body: "unmute, you can respond again",
+          body: "@Vevin unmute, you can respond again",
           isThreadMuted: true,
+          mentionsAiEngineer: true,
         }),
       ).toEqual({ muted: false, changed: true, command: "unmute" });
     });
@@ -94,15 +99,17 @@ describe("team app message domain helpers", () => {
     it("is idempotent for repeated mute and unmute requests", () => {
       expect(
         applyTeamAppMuteCommand({
-          body: "mute please",
+          body: "@Vevin mute please",
           isThreadMuted: true,
+          mentionsAiEngineer: true,
         }),
       ).toEqual({ muted: true, changed: false, command: "mute" });
 
       expect(
         applyTeamAppMuteCommand({
-          body: "unmute please",
+          body: "@Vevin unmute please",
           isThreadMuted: false,
+          mentionsAiEngineer: true,
         }),
       ).toEqual({ muted: false, changed: false, command: "unmute" });
     });
@@ -112,8 +119,75 @@ describe("team app message domain helpers", () => {
         applyTeamAppMuteCommand({
           body: "Can you check the failing typecheck?",
           isThreadMuted: false,
+          mentionsAiEngineer: false,
         }),
       ).toEqual({ muted: false, changed: false });
+    });
+
+    it("ignores mute command words unless the bot is mentioned", () => {
+      expect(
+        applyTeamAppMuteCommand({
+          body: "mute this topic for now",
+          isThreadMuted: false,
+          mentionsAiEngineer: false,
+        }),
+      ).toEqual({ muted: false, changed: false });
+    });
+  });
+
+  describe("teamAppMuteCommandReaction", () => {
+    it("maps mute commands to acknowledgement reactions", () => {
+      expect(teamAppMuteCommandReaction("mute")).toBe("zipper_mouth_face");
+      expect(teamAppMuteCommandReaction("unmute")).toBe("speaker");
+    });
+  });
+
+  describe("mentionsTeamAppUser", () => {
+    it("detects Slack user-id mentions and Vevin name mentions", () => {
+      expect(mentionsTeamAppUser({ body: "<@U123> mute", botUserId: "U123" })).toBe(true);
+      expect(mentionsTeamAppUser({ body: "@U123 mute", botUserId: "U123" })).toBe(true);
+      expect(mentionsTeamAppUser({ body: "@Vevin unmute" })).toBe(true);
+    });
+
+    it("detects configured bot names", () => {
+      expect(mentionsTeamAppUser({ body: "@Engineering mute", botUserName: "Engineering" })).toBe(
+        true,
+      );
+    });
+
+    it("does not match ordinary text", () => {
+      expect(mentionsTeamAppUser({ body: "please keep going", botUserName: "Engineering" })).toBe(
+        false,
+      );
+    });
+  });
+
+  describe("mentionsNonTeamAppSlackUser", () => {
+    it("detects Slack mentions for other users", () => {
+      expect(
+        mentionsNonTeamAppSlackUser({
+          body: "<@U0791S1K34N|John Ta> devin is cooked",
+          botUserId: "U0B0T56AY7R",
+        }),
+      ).toBe(true);
+    });
+
+    it("detects Chat SDK normalized display-name mentions for other users", () => {
+      expect(
+        mentionsNonTeamAppSlackUser({
+          body: "@John Ta devin is cooked",
+          botUserId: "U0B0T56AY7R",
+        }),
+      ).toBe(true);
+    });
+
+    it("ignores the bot's own Slack mention", () => {
+      expect(
+        mentionsNonTeamAppSlackUser({
+          body: "<@U0B0T56AY7R|Vevin> mute",
+          botUserId: "U0B0T56AY7R",
+        }),
+      ).toBe(false);
     });
   });
 });

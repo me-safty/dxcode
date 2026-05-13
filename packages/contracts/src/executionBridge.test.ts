@@ -55,10 +55,22 @@ describe("execution bridge PR contracts", () => {
           baseBranch: "main",
           title: "Fix checkout regression",
           draft: true,
+          headSha: "abc1234",
+          previewUrl: "https://app-git-task-fix-checkout-acme.vercel.app",
+          deploymentPreviews: [
+            {
+              provider: "vercel",
+              environment: "Preview - app",
+              url: "https://app-git-task-fix-checkout-acme.vercel.app",
+            },
+          ],
         },
       });
 
       expect(response.pullRequest?.number).toBe(42);
+      expect(response.pullRequest?.previewUrl).toBe(
+        "https://app-git-task-fix-checkout-acme.vercel.app",
+      );
     }
 
     expect(

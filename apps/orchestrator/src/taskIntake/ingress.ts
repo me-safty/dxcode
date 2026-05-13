@@ -7,7 +7,7 @@ import {
   buildTaskIntakeInitialPrompt,
   buildTaskIntakeTitle,
 } from "./prompts.ts";
-import { buildTaskIntakeNeedsInputReply, buildTaskIntakeStartFailedReply } from "./replies.ts";
+import { buildTaskIntakeFollowUpFailedReply, buildTaskIntakeStartFailedReply } from "./replies.ts";
 
 export type TaskIntakeIngressResult =
   | {
@@ -32,21 +32,8 @@ export interface TaskIntakeIngressDependencies {
   readonly replies: TaskIntakeReplyTransport;
 }
 
-function clarifyReason(message: TaskIntakeMessage): string | null {
-  const text = message.text.trim();
-  if (text.length === 0) {
-    return "The message did not include a coding request.";
-  }
-
-  const withoutMentions = text
-    .replace(/<@[A-Z0-9]+>/g, "")
-    .replace(/@\S+/g, "")
-    .trim();
-  if (withoutMentions.length < 8) {
-    return "The message only included a mention or very short note.";
-  }
-
-  return null;
+export interface TaskIntakeIngressOptions {
+  readonly initialPromptContext?: string;
 }
 
 function errorSummary(error: unknown) {
@@ -77,27 +64,28 @@ async function acknowledgeAcceptedBestEffort(
   }
 }
 
+async function postTaskStartedCardBestEffort(
+  dependencies: TaskIntakeIngressDependencies,
+  input: Parameters<
+    NonNullable<TaskIntakeIngressDependencies["replies"]["postTaskStartedCard"]>
+  >[0],
+) {
+  if (dependencies.replies.postTaskStartedCard === undefined) return;
+
+  try {
+    await dependencies.replies.postTaskStartedCard(input);
+  } catch {
+    // Source status cards are useful but should not change Task/runtime state.
+  }
+}
+
 export async function handleTaskIntakeMessage(
   rawMessage: unknown,
   dependencies: TaskIntakeIngressDependencies,
+  options: TaskIntakeIngressOptions = {},
 ): Promise<TaskIntakeIngressResult> {
   const message = decodeTaskIntakeMessage(rawMessage);
   const externalLink = toTaskIntakeExternalLinkIdentity(message.conversation);
-  const ambiguousReason = clarifyReason(message);
-
-  if (ambiguousReason !== null) {
-    const reply = buildTaskIntakeNeedsInputReply({ message, reason: ambiguousReason });
-    await postReplyBestEffort(dependencies, reply);
-    return {
-      accepted: true,
-      ignored: false,
-      resolution: {
-        type: "needs_input",
-        reason: ambiguousReason,
-        reply,
-      },
-    };
-  }
 
   const stored = await dependencies.store.resolveMessage({
     message,
@@ -119,16 +107,38 @@ export async function handleTaskIntakeMessage(
 
   if (stored.status === "routed_existing") {
     if (stored.t3ThreadId !== undefined && stored.workSessionId !== undefined) {
-      await dependencies.runtime.continueTaskRuntime({
-        eventId: message.eventId,
-        taskId: stored.taskId,
-        workSessionId: stored.workSessionId,
-        t3ThreadId: stored.t3ThreadId,
-        prompt: buildTaskIntakeFollowUpPrompt(message),
-      });
+      try {
+        await dependencies.runtime.continueTaskRuntime({
+          eventId: message.eventId,
+          taskId: stored.taskId,
+          workSessionId: stored.workSessionId,
+          t3ThreadId: stored.t3ThreadId,
+          prompt: buildTaskIntakeFollowUpPrompt(message),
+        });
+      } catch (error) {
+        const summary = errorSummary(error);
+        await postReplyBestEffort(
+          dependencies,
+          buildTaskIntakeFollowUpFailedReply({
+            message,
+            taskId: stored.taskId,
+            t3ThreadId: stored.t3ThreadId,
+            summary,
+          }),
+        );
+        return {
+          accepted: true,
+          ignored: false,
+          taskId: stored.taskId,
+          t3ThreadId: stored.t3ThreadId,
+          resolution: {
+            type: "route_existing_task",
+            taskId: stored.taskId,
+          },
+        };
+      }
     }
 
-    await acknowledgeAcceptedBestEffort(dependencies, message);
     return {
       accepted: true,
       ignored: false,
@@ -142,13 +152,21 @@ export async function handleTaskIntakeMessage(
   }
 
   try {
-    const initialPrompt = buildTaskIntakeInitialPrompt(message);
+    await acknowledgeAcceptedBestEffort(dependencies, message);
+    const initialPrompt =
+      options.initialPromptContext === undefined
+        ? buildTaskIntakeInitialPrompt(message)
+        : buildTaskIntakeInitialPrompt(message, { context: options.initialPromptContext });
     const materialized = await dependencies.runtime.materializeTaskRuntime({
       taskId: stored.taskId,
       initialPrompt,
       startCodingAgent: true,
     });
-    await acknowledgeAcceptedBestEffort(dependencies, message);
+    await postTaskStartedCardBestEffort(dependencies, {
+      message,
+      taskId: stored.taskId,
+      materialization: materialized,
+    });
     return {
       accepted: true,
       ignored: false,

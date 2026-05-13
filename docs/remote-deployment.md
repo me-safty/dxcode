@@ -8,11 +8,10 @@ The active production-like setup runs T3 on this Windows PC and exposes it throu
 Convex -> https://t3.olumbe.com -> Cloudflare Tunnel t3code-local -> 127.0.0.1:3773
 ```
 
-Slack and Linear do not call the local T3 server directly. They call Convex:
+Slack does not call the local T3 server directly. It calls Convex:
 
 ```text
 https://<your-convex-site>/slack/webhook
-https://<your-convex-site>/linear/webhook
 ```
 
 Convex then calls the local T3 execution bridge at `https://t3.olumbe.com`.

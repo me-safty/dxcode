@@ -7,8 +7,14 @@ export function resolveExecutionBridgeModelSelection(
   request: Pick<ExecutionRunCreateRequest, "modelSelection">,
   existingProjectDefault: ModelSelection | null,
 ) {
+  const hasProcessDefault =
+    process.env.T3_DEFAULT_PROVIDER_INSTANCE_ID?.trim() || process.env.T3_DEFAULT_MODEL?.trim();
+  const processDefault = hasProcessDefault ? getAutoBootstrapDefaultModelSelection() : null;
   return (
-    request.modelSelection ?? getAutoBootstrapDefaultModelSelection() ?? existingProjectDefault
+    request.modelSelection ??
+    processDefault ??
+    existingProjectDefault ??
+    getAutoBootstrapDefaultModelSelection()
   );
 }
 

@@ -517,6 +517,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 refName: bootstrap.prepareWorktree.baseBranch,
                 newRefName: bootstrap.prepareWorktree.branch,
                 path: null,
+                refreshBaseFromOrigin: true,
               });
               targetWorktreePath = worktree.worktree.path;
               yield* orchestrationEngine.dispatch({

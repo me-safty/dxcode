@@ -213,6 +213,13 @@ export const TaskPullRequestEnsureRequest = Schema.Struct({
 });
 export type TaskPullRequestEnsureRequest = typeof TaskPullRequestEnsureRequest.Type;
 
+export const TaskPullRequestDeploymentPreview = Schema.Struct({
+  provider: TrimmedNonEmptyString,
+  environment: Schema.optional(TrimmedNonEmptyString),
+  url: Schema.String,
+});
+export type TaskPullRequestDeploymentPreview = typeof TaskPullRequestDeploymentPreview.Type;
+
 export const TaskPullRequestMetadata = Schema.Struct({
   owner: TrimmedNonEmptyString,
   repo: TrimmedNonEmptyString,
@@ -222,6 +229,9 @@ export const TaskPullRequestMetadata = Schema.Struct({
   baseBranch: TrimmedNonEmptyString,
   title: TrimmedNonEmptyString,
   draft: Schema.Boolean,
+  headSha: Schema.optional(TrimmedNonEmptyString),
+  previewUrl: Schema.optional(Schema.String),
+  deploymentPreviews: Schema.optional(Schema.Array(TaskPullRequestDeploymentPreview)),
 });
 export type TaskPullRequestMetadata = typeof TaskPullRequestMetadata.Type;
 

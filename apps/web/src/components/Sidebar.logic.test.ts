@@ -9,6 +9,7 @@ import {
   getFallbackThreadIdAfterDelete,
   getVisibleThreadsForProject,
   getProjectSortTimestamp,
+  groupSidebarThreadsByWorktree,
   hasUnseenCompletion,
   isContextMenuPointerDown,
   orderItemsByPreferredIds,
@@ -437,6 +438,92 @@ describe("getVisibleSidebarThreadIds", () => {
         },
       ]),
     ).toEqual([ThreadId.make("thread-12"), ThreadId.make("thread-11")]);
+  });
+});
+
+describe("groupSidebarThreadsByWorktree", () => {
+  const thread = (id: string, worktreePath: string | null, branch: string | null = null) => ({
+    id: ThreadId.make(id),
+    worktreePath,
+    branch,
+  });
+
+  it("groups local threads together", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-local-1", null, "main"),
+      thread("thread-local-2", null, "feature/local"),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      key: "local",
+      label: "Local",
+      detail: null,
+      worktreePath: null,
+      branch: "main",
+    });
+    expect(groups[0]?.threads.map((item) => item.id)).toEqual([
+      ThreadId.make("thread-local-1"),
+      ThreadId.make("thread-local-2"),
+    ]);
+  });
+
+  it("groups worktree threads by exact worktree path", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-a-1", "C:\\Users\\Vivek\\Affil\\nextcard\\.worktrees\\alpha", "alpha"),
+      thread("thread-b-1", "C:\\Users\\Vivek\\Affil\\nextcard\\.worktrees\\beta", "beta"),
+      thread("thread-a-2", "C:\\Users\\Vivek\\Affil\\nextcard\\.worktrees\\alpha", "alpha"),
+    ]);
+
+    expect(groups.map((group) => group.label)).toEqual(["alpha", "beta"]);
+    expect(groups.map((group) => group.threads.map((item) => item.id))).toEqual([
+      [ThreadId.make("thread-a-1"), ThreadId.make("thread-a-2")],
+      [ThreadId.make("thread-b-1")],
+    ]);
+  });
+
+  it("preserves the already-sorted thread order inside each group", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-newest", "/repo/.worktrees/feature", "feature"),
+      thread("thread-local", null, "main"),
+      thread("thread-older", "/repo/.worktrees/feature", "feature"),
+    ]);
+
+    expect(groups[0]?.threads.map((item) => item.id)).toEqual([
+      ThreadId.make("thread-newest"),
+      ThreadId.make("thread-older"),
+    ]);
+  });
+
+  it("uses the first sorted thread in a group as the new-thread seed", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-newest", "/repo/.worktrees/review", "review/newest"),
+      thread("thread-older", "/repo/.worktrees/review", "review/older"),
+    ]);
+
+    expect(groups[0]?.seedThread.id).toBe(ThreadId.make("thread-newest"));
+    expect(groups[0]?.branch).toBe("review/newest");
+    expect(groups[0]?.worktreePath).toBe("/repo/.worktrees/review");
+  });
+
+  it("labels worktree groups with the branch name before falling back to the path basename", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-branch", "/repo/.worktrees/generated-folder", "feature/readable-branch"),
+      thread("thread-path", "/repo/.worktrees/path-label", null),
+    ]);
+
+    expect(groups.map((group) => group.label)).toEqual(["feature/readable-branch", "path-label"]);
+  });
+
+  it("prefers an AI-generated branch label over a temporary worktree branch", () => {
+    const groups = groupSidebarThreadsByWorktree([
+      thread("thread-temp", "/repo/.worktrees/t3code-12345678", "t3code/12345678"),
+      thread("thread-renamed", "/repo/.worktrees/t3code-12345678", "t3code/readable-branch"),
+    ]);
+
+    expect(groups[0]?.label).toBe("t3code/readable-branch");
+    expect(groups[0]?.branch).toBe("t3code/readable-branch");
+    expect(groups[0]?.seedThread.id).toBe(ThreadId.make("thread-temp"));
   });
 });
 

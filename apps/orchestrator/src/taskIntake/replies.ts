@@ -60,6 +60,24 @@ export function buildTaskIntakeFollowUpReply(input: {
   });
 }
 
+export function buildTaskIntakeFollowUpFailedReply(input: {
+  readonly message: TaskIntakeMessage;
+  readonly taskId: string;
+  readonly t3ThreadId?: string;
+  readonly summary: string;
+}): TaskIntakeReply {
+  return replyBase({
+    message: input.message,
+    suffix: "follow-up-failed",
+    body: [
+      `I could not send this follow-up to Task ${input.taskId}.`,
+      ...(input.t3ThreadId !== undefined ? [`Primary T3 thread: \`${input.t3ThreadId}\``] : []),
+      "",
+      `Failure summary: ${input.summary}`,
+    ].join("\n"),
+  });
+}
+
 export function buildTaskIntakeStartFailedReply(input: {
   readonly message: TaskIntakeMessage;
   readonly taskId?: string;

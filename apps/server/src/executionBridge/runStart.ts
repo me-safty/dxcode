@@ -15,11 +15,14 @@ import {
   type TaskRuntimeLifecycleEvent,
   type TaskRuntimeMaterializeRequest,
   type TaskRuntimeMaterializeResponse,
+  type VcsCreateWorktreeInput,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -32,6 +35,7 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import { GitVcsDriver, type GitVcsDriverShape } from "../vcs/GitVcsDriver.ts";
 import { resolveExecutionBridgeModelSelection } from "./requestDefaults.ts";
+import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 
 export type ExecutionLifecycleCheckpoint = "started" | "completed" | "failed" | "interrupted";
 
@@ -96,19 +100,6 @@ function deriveProjectTitle(workspaceRoot: string) {
 function deriveThreadTitle(input: ExecutionRunCreateRequest) {
   const trimmedTitle = input.title?.trim();
   return trimmedTitle || `Run ${input.controlThreadId}`;
-}
-
-function slug(value: string) {
-  const normalized = value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
-  return normalized.length > 0 ? normalized : "task";
-}
-
-function taskBranchName(request: TaskRuntimeMaterializeRequest) {
-  return `codex/${slug(request.title)}-${slug(request.workSessionId).slice(-16)}`;
 }
 
 const makeExecutionBridgeRunRegistry = Effect.gen(function* () {
@@ -222,6 +213,19 @@ export const ExecutionBridgeRunRegistryLive = Layer.effect(
   makeExecutionBridgeRunRegistry,
 );
 
+export function taskRuntimeWorktreeCreateInput(
+  request: Pick<TaskRuntimeMaterializeRequest, "project">,
+  branch: string,
+): VcsCreateWorktreeInput {
+  return {
+    cwd: request.project.workspaceRoot,
+    refName: request.project.defaultBranch,
+    newRefName: branch,
+    path: null,
+    refreshBaseFromOrigin: true,
+  };
+}
+
 export class ExecutionBridgeRunStartError extends Schema.TaggedErrorClass<ExecutionBridgeRunStartError>()(
   "ExecutionBridgeRunStartError",
   {
@@ -229,6 +233,10 @@ export class ExecutionBridgeRunStartError extends Schema.TaggedErrorClass<Execut
     status: Schema.Number,
   },
 ) {}
+
+class GhCliError extends Data.TaggedError("GhCliError")<{
+  readonly cause: unknown;
+}> {}
 
 const currentIsoTimestamp = Effect.map(DateTime.now, (now) =>
   DateTime.formatIso(DateTime.toUtc(now)),
@@ -267,12 +275,13 @@ export const startExecutionRun = (request: ExecutionRunCreateRequest) =>
     }
 
     const threadId = ThreadId.make(crypto.randomUUID());
+    const title = deriveThreadTitle(request);
     yield* orchestrationEngine.dispatch({
       type: "thread.create",
       commandId: CommandId.make(`execution-bridge:thread:create:${request.executionRunId}`),
       threadId,
       projectId,
-      title: deriveThreadTitle(request),
+      title,
       modelSelection,
       runtimeMode: request.runtimeMode,
       interactionMode: request.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -306,6 +315,7 @@ export const startExecutionRun = (request: ExecutionRunCreateRequest) =>
         attachments: [],
       },
       modelSelection,
+      titleSeed: title,
       runtimeMode: request.runtimeMode,
       interactionMode: request.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
       createdAt: now,
@@ -456,6 +466,7 @@ export const materializeTaskRuntime = (request: TaskRuntimeMaterializeRequest) =
             attachments: [],
           },
           modelSelection: request.modelSelection,
+          titleSeed: request.title,
           runtimeMode: request.runtimeMode,
           interactionMode: request.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
           createdAt: now,
@@ -488,13 +499,8 @@ export const materializeTaskRuntime = (request: TaskRuntimeMaterializeRequest) =
       });
     }
 
-    const branch = taskBranchName(request);
-    const worktree = yield* git.createWorktree({
-      cwd: request.project.workspaceRoot,
-      refName: request.project.defaultBranch,
-      newRefName: branch,
-      path: null,
-    });
+    const branch = buildTemporaryWorktreeBranchName();
+    const worktree = yield* git.createWorktree(taskRuntimeWorktreeCreateInput(request, branch));
     const threadId = ThreadId.make(crypto.randomUUID());
 
     yield* orchestrationEngine.dispatch({
@@ -529,6 +535,7 @@ export const materializeTaskRuntime = (request: TaskRuntimeMaterializeRequest) =
           attachments: [],
         },
         modelSelection,
+        titleSeed: request.title,
         runtimeMode: request.runtimeMode,
         interactionMode: request.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
         createdAt: now,
@@ -575,6 +582,276 @@ function parseGitHubPullRequestUrl(
   return { owner, repo, number, url: matchedUrl };
 }
 
+interface GitHubDeploymentRow {
+  readonly id?: unknown;
+  readonly environment?: unknown;
+  readonly creator?: { readonly login?: unknown } | null | undefined;
+  readonly statuses_url?: unknown;
+}
+
+interface GitHubDeploymentStatusRow {
+  readonly state?: unknown;
+  readonly environment_url?: unknown;
+  readonly target_url?: unknown;
+}
+
+const GitHubDeploymentRow = Schema.Struct({
+  id: Schema.optional(Schema.Unknown),
+  environment: Schema.optional(Schema.Unknown),
+  creator: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        login: Schema.optional(Schema.Unknown),
+      }),
+    ),
+  ),
+  statuses_url: Schema.optional(Schema.Unknown),
+});
+
+const GitHubDeploymentStatusRow = Schema.Struct({
+  state: Schema.optional(Schema.Unknown),
+  environment_url: Schema.optional(Schema.Unknown),
+  target_url: Schema.optional(Schema.Unknown),
+});
+
+const GitHubDeploymentRowsFromJson = Schema.fromJsonString(Schema.Array(GitHubDeploymentRow));
+const GitHubDeploymentStatusRowsFromJson = Schema.fromJsonString(
+  Schema.Array(GitHubDeploymentStatusRow),
+);
+const decodeGitHubDeploymentRows = Schema.decodeUnknownSync(GitHubDeploymentRowsFromJson);
+const decodeGitHubDeploymentStatusRows = Schema.decodeUnknownSync(
+  GitHubDeploymentStatusRowsFromJson,
+);
+
+export interface TaskPullRequestPreviewLink {
+  readonly provider: "vercel";
+  readonly environment?: string;
+  readonly url: string;
+}
+
+function vercelBranchSlug(branch: string) {
+  return branch
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function vercelProjectSlugFromEnvironment(environment: string | undefined) {
+  return environment
+    ?.trim()
+    .replace(/^Preview\s*(?:[-:]|\u2013|\u2014)\s*/i, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export function toVercelBranchPreviewUrl(input: {
+  readonly url: string;
+  readonly environment?: string;
+  readonly branch?: string;
+}) {
+  if (input.branch === undefined) return input.url;
+  const projectSlug = vercelProjectSlugFromEnvironment(input.environment);
+  const branchSlug = vercelBranchSlug(input.branch);
+  if (!projectSlug || !branchSlug) return input.url;
+
+  try {
+    const url = new URL(input.url);
+    const hostname = url.hostname.toLowerCase();
+    const suffix = hostname.includes(".") ? hostname.slice(hostname.indexOf(".") + 1) : "";
+    if (!suffix || !hostname.endsWith(".nextcard.com")) return input.url;
+    return `https://${projectSlug}-git-${branchSlug}.${suffix}`;
+  } catch {
+    return input.url;
+  }
+}
+
+function isPublicDeploymentPreviewUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return false;
+    return url.hostname.toLowerCase() !== "vercel.com" && !url.hostname.endsWith(".vercel.com");
+  } catch {
+    return false;
+  }
+}
+
+function deploymentEnvironmentRank(environment: string | undefined) {
+  const normalized = environment?.toLowerCase() ?? "";
+  if (normalized.includes("preview") && normalized.includes("nextcard-web")) return 0;
+  if (normalized.includes("nextcard-web")) return 1;
+  if (normalized.includes("preview")) return 2;
+  return 3;
+}
+
+export function sortTaskPullRequestPreviewLinks(previews: readonly TaskPullRequestPreviewLink[]) {
+  return previews.toSorted((left, right) => {
+    const rankDelta =
+      deploymentEnvironmentRank(left.environment) - deploymentEnvironmentRank(right.environment);
+    if (rankDelta !== 0) return rankDelta;
+    return (left.environment ?? left.url).localeCompare(right.environment ?? right.url);
+  });
+}
+
+export function collectTaskPullRequestPreviewLinks(input: {
+  readonly deployments: readonly GitHubDeploymentRow[];
+  readonly statusesByDeploymentId: ReadonlyMap<string, readonly GitHubDeploymentStatusRow[]>;
+  readonly headBranch?: string;
+}) {
+  const previews: TaskPullRequestPreviewLink[] = [];
+  const seen = new Set<string>();
+
+  for (const deployment of input.deployments) {
+    const id = String(deployment.id ?? "").trim();
+    if (!id) continue;
+
+    const environment =
+      typeof deployment.environment === "string" ? deployment.environment.trim() : "";
+    const creatorLogin =
+      typeof deployment.creator?.login === "string" ? deployment.creator.login : "";
+    const isVercelDeployment =
+      creatorLogin.toLowerCase() === "vercel[bot]" ||
+      environment.toLowerCase().includes("vercel") ||
+      environment.toLowerCase().includes("nextcard");
+    if (!isVercelDeployment) continue;
+
+    const statuses = input.statusesByDeploymentId.get(id) ?? [];
+    for (const status of statuses) {
+      if (status.state !== "success") continue;
+      const url = isPublicDeploymentPreviewUrl(status.environment_url)
+        ? status.environment_url
+        : isPublicDeploymentPreviewUrl(status.target_url)
+          ? status.target_url
+          : null;
+      if (url === null || seen.has(url)) continue;
+      const previewUrl = toVercelBranchPreviewUrl({
+        url,
+        ...(environment ? { environment } : {}),
+        ...(input.headBranch !== undefined ? { branch: input.headBranch } : {}),
+      });
+      if (seen.has(previewUrl)) continue;
+      seen.add(previewUrl);
+      previews.push({
+        provider: "vercel",
+        ...(environment ? { environment } : {}),
+        url: previewUrl,
+      });
+    }
+  }
+
+  return sortTaskPullRequestPreviewLinks(previews);
+}
+
+const runGhJson = Effect.fn("executionBridge.runGhJson")(function* (
+  cwd: string,
+  args: readonly string[],
+) {
+  const result = yield* Effect.tryPromise({
+    try: async () => {
+      const { execFile } = await import("node:child_process");
+      return new Promise<{ stdout: string }>((resolve, reject) => {
+        execFile(
+          "gh",
+          [...args],
+          {
+            cwd,
+            timeout: 20_000,
+            maxBuffer: 4 * 1024 * 1024,
+          },
+          (error, stdout) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+            resolve({ stdout });
+          },
+        );
+      });
+    },
+    catch: (cause) => new GhCliError({ cause }),
+  });
+  return result.stdout;
+});
+
+const readCurrentHeadSha = Effect.fn("executionBridge.readCurrentHeadSha")(function* (
+  git: GitVcsDriverShape,
+  cwd: string,
+) {
+  const result = yield* git.execute({
+    operation: "ExecutionBridge.ensureTaskPullRequest.readHeadSha",
+    cwd,
+    args: ["rev-parse", "HEAD"],
+  });
+  const sha = result.stdout.trim();
+  return sha.length > 0 ? sha : null;
+});
+
+const resolveTaskPullRequestPreviewLinks = Effect.fn(
+  "executionBridge.resolveTaskPullRequestPreviewLinks",
+)(function* (input: {
+  readonly cwd: string;
+  readonly owner: string;
+  readonly repo: string;
+  readonly headSha: string;
+  readonly headBranch?: string;
+}) {
+  let bestPreviews: readonly TaskPullRequestPreviewLink[] = [];
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const deployments = yield* runGhJson(input.cwd, [
+      "api",
+      `repos/${input.owner}/${input.repo}/deployments?sha=${input.headSha}`,
+    ]).pipe(
+      Effect.map((stdout) => decodeGitHubDeploymentRows(stdout)),
+      Effect.catch(() => Effect.succeed([])),
+    );
+
+    const statusesByDeploymentId = new Map<string, readonly GitHubDeploymentStatusRow[]>();
+    for (const deployment of deployments) {
+      const id = String(deployment.id ?? "").trim();
+      if (!id) continue;
+      const statusesUrl =
+        typeof deployment.statuses_url === "string"
+          ? deployment.statuses_url
+          : `repos/${input.owner}/${input.repo}/deployments/${id}/statuses`;
+      const statuses = yield* runGhJson(input.cwd, ["api", statusesUrl]).pipe(
+        Effect.map((stdout) => decodeGitHubDeploymentStatusRows(stdout)),
+        Effect.catch(() => Effect.succeed([])),
+      );
+      statusesByDeploymentId.set(id, statuses);
+    }
+
+    const previews = collectTaskPullRequestPreviewLinks({
+      deployments,
+      statusesByDeploymentId,
+      ...(input.headBranch !== undefined ? { headBranch: input.headBranch } : {}),
+    });
+    if (previews.length > bestPreviews.length) {
+      bestPreviews = previews;
+    }
+    const hasWebPreview = previews.some((preview) =>
+      preview.environment?.toLowerCase().includes("nextcard-web"),
+    );
+    const successfulDeploymentCount = deployments.filter((deployment) => {
+      const id = String(deployment.id ?? "").trim();
+      if (!id) return false;
+      return (statusesByDeploymentId.get(id) ?? []).some((status) => status.state === "success");
+    }).length;
+    if (
+      (previews.length > 0 && hasWebPreview) ||
+      (previews.length > 0 && successfulDeploymentCount >= 2) ||
+      attempt === 11
+    ) {
+      return previews.length > 0 ? previews : bestPreviews;
+    }
+    yield* Effect.sleep(Duration.seconds(5));
+  }
+
+  return bestPreviews;
+});
+
 const readAheadCount = Effect.fn("executionBridge.readAheadCount")(function* (
   git: GitVcsDriverShape,
   cwd: string,
@@ -615,38 +892,54 @@ const configureTaskPullRequestBaseBranch = Effect.fn(
     .pipe(Effect.catch(() => Effect.void));
 });
 
-const recoverTaskPullRequestBranch = Effect.fn("executionBridge.recoverTaskPullRequestBranch")(
-  function* (git: GitVcsDriverShape, cwd: string, expectedBranch: string) {
-    yield* git.execute({
-      operation: "ExecutionBridge.ensureTaskPullRequest.recoverBranch",
+const detachTaskPullRequestBaseUpstream = Effect.fn(
+  "executionBridge.detachTaskPullRequestBaseUpstream",
+)(function* (git: GitVcsDriverShape, cwd: string, branch: string, baseBranch: string) {
+  const mergeRef = yield* git
+    .execute({
+      operation: "ExecutionBridge.ensureTaskPullRequest.readBranchMerge",
       cwd,
-      args: ["checkout", "-B", expectedBranch],
-    });
-    return yield* git.statusDetails(cwd);
-  },
-);
+      args: ["config", "--get", `branch.${branch}.merge`],
+    })
+    .pipe(
+      Effect.map((result) => result.stdout.trim()),
+      Effect.catch(() => Effect.succeed("")),
+    );
+
+  if (branch === baseBranch || mergeRef !== `refs/heads/${baseBranch}`) {
+    return;
+  }
+
+  yield* Effect.logInfo(
+    "execution bridge detaching task branch from base upstream before PR ensure",
+    {
+      branch,
+      baseBranch,
+      worktreePath: cwd,
+    },
+  );
+  yield* git
+    .execute({
+      operation: "ExecutionBridge.ensureTaskPullRequest.unsetUpstream",
+      cwd,
+      args: ["branch", "--unset-upstream", branch],
+    })
+    .pipe(Effect.catch(() => Effect.void));
+});
 
 export const ensureTaskPullRequest = (request: TaskPullRequestEnsureRequest) =>
   Effect.gen(function* () {
     const git = yield* GitVcsDriver;
     const gitManager = yield* GitManager;
     const checkedAt = yield* currentIsoTimestamp;
-    let details = yield* git.statusDetails(request.worktreePath);
+    const details = yield* git.statusDetails(request.worktreePath);
     let branch = details.branch ?? request.branch;
-
     if (branch !== request.branch) {
-      details = yield* recoverTaskPullRequestBranch(git, request.worktreePath, request.branch);
-      branch = details.branch ?? request.branch;
-
-      if (branch !== request.branch) {
-        return {
-          taskId: request.taskId,
-          workSessionId: request.workSessionId,
-          status: "failed",
-          checkedAt,
-          summary: `Worktree is on branch ${branch}, expected ${request.branch}.`,
-        } satisfies TaskPullRequestEnsureResponse;
-      }
+      yield* Effect.logInfo("execution bridge using current worktree branch for PR ensure", {
+        requestedBranch: request.branch,
+        currentBranch: branch,
+        worktreePath: request.worktreePath,
+      });
     }
 
     if (!details.hasWorkingTreeChanges && !details.hasUpstream && details.aheadCount === 0) {
@@ -660,6 +953,7 @@ export const ensureTaskPullRequest = (request: TaskPullRequestEnsureRequest) =>
     }
 
     const baseBranch = request.project.defaultBranch;
+    yield* detachTaskPullRequestBaseUpstream(git, request.worktreePath, branch, baseBranch);
     yield* configureTaskPullRequestBaseBranch(git, request.worktreePath, branch, baseBranch);
 
     if (!details.hasWorkingTreeChanges) {
@@ -712,6 +1006,20 @@ export const ensureTaskPullRequest = (request: TaskPullRequestEnsureRequest) =>
         summary: "GitHub pull request was created, but T3 could not parse its URL.",
       } satisfies TaskPullRequestEnsureResponse;
     }
+    const headSha = yield* readCurrentHeadSha(git, request.worktreePath).pipe(
+      Effect.catch(() => Effect.succeed(null)),
+    );
+    const deploymentPreviews =
+      headSha !== null
+        ? yield* resolveTaskPullRequestPreviewLinks({
+            cwd: request.worktreePath,
+            owner: parsed.owner,
+            repo: parsed.repo,
+            headSha,
+            headBranch: result.pr.headBranch ?? branch,
+          })
+        : [];
+    const previewUrl = deploymentPreviews[0]?.url;
 
     return {
       taskId: request.taskId,
@@ -723,10 +1031,13 @@ export const ensureTaskPullRequest = (request: TaskPullRequestEnsureRequest) =>
         repo: parsed.repo,
         number: pullRequestNumber,
         url: parsed.url,
-        headBranch: result.pr.headBranch ?? request.branch,
+        headBranch: result.pr.headBranch ?? branch,
         baseBranch: result.pr.baseBranch ?? request.project.defaultBranch,
         title: result.pr.title ?? request.title,
         draft: result.pr.status === "created",
+        ...(headSha !== null ? { headSha } : {}),
+        ...(previewUrl !== undefined ? { previewUrl } : {}),
+        ...(deploymentPreviews.length > 0 ? { deploymentPreviews } : {}),
       },
     } satisfies TaskPullRequestEnsureResponse;
   }).pipe(

@@ -14,6 +14,12 @@ const projectFields = {
   t3ProjectId: v.optional(v.string()),
 } as const;
 
+function projectWorkspaceRoot(row: any) {
+  return (
+    row.workspaceRoot ?? row.sandboxWorkspaceRoot ?? `C:\\Users\\Vivek\\Affil\\${row.repoName}`
+  );
+}
+
 function projectReturn() {
   return v.object({
     id: v.id("projects"),
@@ -34,7 +40,7 @@ function toProject(row: any) {
   return {
     id: row._id,
     repoName: row.repoName,
-    workspaceRoot: row.workspaceRoot,
+    workspaceRoot: projectWorkspaceRoot(row),
     defaultBranch: row.defaultBranch,
     githubOwner: row.githubOwner,
     githubRepo: row.githubRepo,

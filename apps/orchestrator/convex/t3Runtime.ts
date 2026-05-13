@@ -20,6 +20,7 @@ export const materializeTaskRuntime = action({
     workSessionId: v.string(),
     t3ProjectId: v.string(),
     t3ThreadId: v.string(),
+    environmentId: v.optional(v.string()),
     branch: v.union(v.null(), v.string()),
     worktreePath: v.union(v.null(), v.string()),
     acceptedAt: v.string(),
@@ -80,12 +81,12 @@ export const materializeTaskRuntime = action({
       acceptedAt: Date.parse(response.acceptedAt),
       ...(response.branch !== null ? { branch: response.branch } : {}),
       ...(response.worktreePath !== null ? { worktreePath: response.worktreePath } : {}),
-    });
-
-    await ctx.scheduler.runAfter(0, api.t3Runtime.ensureTaskPullRequest, {
-      taskId: args.taskId,
-      workSessionId: workSessionSeed.workSessionId,
-      reason: "runtime-materialized",
+      ...(response.environment !== undefined
+        ? { environmentId: String(response.environment.environmentId) }
+        : {}),
+      ...(process.env.T3_EXECUTION_BRIDGE_BASE_URL !== undefined
+        ? { runtimeEndpointUrl: process.env.T3_EXECUTION_BRIDGE_BASE_URL }
+        : {}),
     });
 
     return {
@@ -93,6 +94,9 @@ export const materializeTaskRuntime = action({
       workSessionId: response.workSessionId,
       t3ProjectId: String(response.t3ProjectId),
       t3ThreadId: String(response.t3ThreadId),
+      ...(response.environment !== undefined
+        ? { environmentId: String(response.environment.environmentId) }
+        : {}),
       branch: response.branch ?? null,
       worktreePath: response.worktreePath ?? null,
       acceptedAt: response.acceptedAt,
@@ -287,12 +291,6 @@ export const continueTaskRuntime = action({
       acceptedAt: Date.parse(response.acceptedAt),
     });
 
-    await ctx.scheduler.runAfter(0, api.t3Runtime.ensureTaskPullRequest, {
-      taskId: args.taskId,
-      workSessionId: args.workSessionId,
-      reason: "runtime-continuation",
-    });
-
     return {
       taskId: String(args.taskId),
       workSessionId: String(response.executionRunId),
@@ -317,6 +315,11 @@ export const ensureTaskPullRequest = action({
       v.literal("skipped"),
     ),
     url: v.optional(v.string()),
+    title: v.optional(v.string()),
+    repo: v.optional(v.string()),
+    headBranch: v.optional(v.string()),
+    previewUrl: v.optional(v.string()),
+    deploymentPreviewsJson: v.optional(v.string()),
     summary: v.optional(v.string()),
   }),
   handler: async (ctx, args) => {
@@ -369,6 +372,15 @@ export const ensureTaskPullRequest = action({
             baseBranch: response.pullRequest.baseBranch,
             title: response.pullRequest.title,
             draft: response.pullRequest.draft,
+            ...(response.pullRequest.headSha !== undefined
+              ? { headSha: response.pullRequest.headSha }
+              : {}),
+            ...(response.pullRequest.previewUrl !== undefined
+              ? { previewUrl: response.pullRequest.previewUrl }
+              : {}),
+            ...(response.pullRequest.deploymentPreviews !== undefined
+              ? { deploymentPreviewsJson: JSON.stringify(response.pullRequest.deploymentPreviews) }
+              : {}),
           }
         : {}),
     });
@@ -376,6 +388,19 @@ export const ensureTaskPullRequest = action({
     return {
       status: response.status,
       ...(response.pullRequest !== undefined ? { url: response.pullRequest.url } : {}),
+      ...(response.pullRequest !== undefined ? { title: response.pullRequest.title } : {}),
+      ...(response.pullRequest !== undefined
+        ? { repo: `${response.pullRequest.owner}/${response.pullRequest.repo}` }
+        : {}),
+      ...(response.pullRequest !== undefined
+        ? { headBranch: response.pullRequest.headBranch }
+        : {}),
+      ...(response.pullRequest?.previewUrl !== undefined
+        ? { previewUrl: response.pullRequest.previewUrl }
+        : {}),
+      ...(response.pullRequest?.deploymentPreviews !== undefined
+        ? { deploymentPreviewsJson: JSON.stringify(response.pullRequest.deploymentPreviews) }
+        : {}),
       ...(response.summary !== undefined ? { summary: response.summary } : {}),
     };
   },
@@ -498,6 +523,9 @@ export const recordTaskPullRequestEnsureResult = internalMutation({
     baseBranch: v.optional(v.string()),
     title: v.optional(v.string()),
     draft: v.optional(v.boolean()),
+    headSha: v.optional(v.string()),
+    previewUrl: v.optional(v.string()),
+    deploymentPreviewsJson: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -540,6 +568,32 @@ export const recordTaskPullRequestEnsureResult = internalMutation({
           updatedAt: args.checkedAt,
         });
       }
+
+      const existingPullRequest = await ctx.db
+        .query("githubPullRequests")
+        .withIndex("by_external_id", (q: any) => q.eq("externalId", externalId))
+        .unique();
+      const pullRequestPatch = {
+        taskId: args.taskId,
+        owner: args.owner,
+        repo: args.repo,
+        number: args.number,
+        url: args.url,
+        state: args.status,
+        updatedAt: args.checkedAt,
+        ...(args.headSha !== undefined ? { headSha: args.headSha } : {}),
+        ...(args.headBranch !== undefined ? { headBranch: args.headBranch } : {}),
+        ...(args.title !== undefined ? { title: args.title } : {}),
+      };
+      if (existingPullRequest !== null) {
+        await ctx.db.patch(existingPullRequest._id, pullRequestPatch);
+      } else {
+        await ctx.db.insert("githubPullRequests", {
+          externalId,
+          createdAt: args.checkedAt,
+          ...pullRequestPatch,
+        });
+      }
     }
 
     const eventKind =
@@ -568,6 +622,11 @@ export const recordTaskPullRequestEnsureResult = internalMutation({
         ...(args.baseBranch !== undefined ? { baseBranch: args.baseBranch } : {}),
         ...(args.title !== undefined ? { title: args.title } : {}),
         ...(args.draft !== undefined ? { draft: args.draft } : {}),
+        ...(args.headSha !== undefined ? { headSha: args.headSha } : {}),
+        ...(args.previewUrl !== undefined ? { previewUrl: args.previewUrl } : {}),
+        ...(args.deploymentPreviewsJson !== undefined
+          ? { deploymentPreviews: JSON.parse(args.deploymentPreviewsJson) }
+          : {}),
       }),
       createdAt: args.checkedAt,
     });

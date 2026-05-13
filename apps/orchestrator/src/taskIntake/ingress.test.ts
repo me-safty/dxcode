@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TaskIntakeMessage, TaskIntakeReply } from "./contracts.ts";
 import { handleTaskIntakeMessage } from "./ingress.ts";
-import type { TaskIntakeRuntime, TaskIntakeStore } from "./ports.ts";
+import type { TaskIntakeReplyTransport, TaskIntakeRuntime, TaskIntakeStore } from "./ports.ts";
 
 function baseMessage(overrides?: Partial<TaskIntakeMessage>): TaskIntakeMessage {
   return {
@@ -112,8 +112,30 @@ describe("handleTaskIntakeMessage", () => {
     expect(acknowledgements[0]?.messageId).toBe("comment-1");
   });
 
+  it("posts an optional task started card after materialization", async () => {
+    const startedCards: Array<{ readonly taskId: string; readonly t3ThreadId: string }> = [];
+    const deps = dependencies();
+    (
+      deps.replies as typeof deps.replies & {
+        postTaskStartedCard: NonNullable<TaskIntakeReplyTransport["postTaskStartedCard"]>;
+      }
+    ).postTaskStartedCard = async ({ taskId, materialization }) => {
+      startedCards.push({ taskId, t3ThreadId: materialization.t3ThreadId });
+      return {
+        status: "posted" as const,
+        externalMessageId: "started-card-1",
+      };
+    };
+
+    const result = await handleTaskIntakeMessage(baseMessage(), deps);
+
+    expect(result.resolution.type).toBe("create_task");
+    expect(startedCards).toEqual([{ taskId: "task-123", t3ThreadId: "thread-456" }]);
+  });
+
   it("continues the existing T3 thread for materialized follow-up messages", async () => {
     let materializeCalls = 0;
+    const acknowledgements: TaskIntakeMessage[] = [];
     let continued:
       | {
           readonly eventId: string;
@@ -126,6 +148,7 @@ describe("handleTaskIntakeMessage", () => {
     const postedReplies: TaskIntakeReply[] = [];
     const deps = dependencies({
       replies: postedReplies,
+      acknowledgements,
       store: {
         async resolveMessage() {
           return {
@@ -174,13 +197,16 @@ describe("handleTaskIntakeMessage", () => {
     expect(result.resolution.type).toBe("route_existing_task");
     expect(result.taskId).toBe("task-existing");
     expect(postedReplies).toHaveLength(0);
+    expect(acknowledgements).toHaveLength(0);
   });
 
   it("routes follow-ups without continuing when runtime references are not available", async () => {
     let continueCalls = 0;
     const postedReplies: TaskIntakeReply[] = [];
+    const acknowledgements: TaskIntakeMessage[] = [];
     const deps = dependencies({
       replies: postedReplies,
+      acknowledgements,
       store: {
         async resolveMessage() {
           return {
@@ -207,6 +233,49 @@ describe("handleTaskIntakeMessage", () => {
     expect(result.resolution.type).toBe("route_existing_task");
     expect(result.taskId).toBe("task-existing");
     expect(postedReplies).toHaveLength(0);
+    expect(acknowledgements).toHaveLength(0);
+  });
+
+  it("posts a failure reply when an existing task follow-up cannot be queued", async () => {
+    const postedReplies: TaskIntakeReply[] = [];
+    const deps = dependencies({
+      replies: postedReplies,
+      store: {
+        async resolveMessage() {
+          return {
+            status: "routed_existing",
+            taskId: "task-existing",
+            projectId: "project-123",
+            t3ThreadId: "thread-existing",
+            workSessionId: "work-session-existing",
+          };
+        },
+      },
+      runtime: {
+        async continueTaskRuntime() {
+          throw new Error("Cannot recover thread because no provider resume state is persisted.");
+        },
+      },
+    });
+
+    const result = await handleTaskIntakeMessage(
+      baseMessage({
+        eventId: "linear:event-4",
+        messageId: "comment-4",
+        text: "Please continue this task.",
+      }),
+      deps,
+    );
+
+    expect(result.resolution.type).toBe("route_existing_task");
+    expect(postedReplies).toHaveLength(1);
+    expect(postedReplies[0]?.idempotencyKey).toBe("linear:event-4:follow-up-failed");
+    expect(postedReplies[0]?.body).toContain(
+      "I could not send this follow-up to Task task-existing.",
+    );
+    expect(postedReplies[0]?.body).toContain(
+      "Cannot recover thread because no provider resume state is persisted.",
+    );
   });
 
   it("skips duplicate events without posting another reply", async () => {
@@ -230,24 +299,38 @@ describe("handleTaskIntakeMessage", () => {
     expect(postedReplies).toHaveLength(0);
   });
 
-  it("asks for clarification when the message is ambiguous", async () => {
+  it("trusts short messages and relays them into a T3 task", async () => {
     const postedReplies: TaskIntakeReply[] = [];
-    let resolveCalls = 0;
+    const acknowledgements: TaskIntakeMessage[] = [];
+    let materializedPrompt: string | undefined;
     const deps = dependencies({
       replies: postedReplies,
-      store: {
-        async resolveMessage() {
-          resolveCalls += 1;
-          throw new Error("should not create");
+      acknowledgements,
+      runtime: {
+        async materializeTaskRuntime(input) {
+          materializedPrompt = input.initialPrompt;
+          return {
+            taskId: "task-123",
+            workSessionId: "session-123",
+            t3ProjectId: "project-456",
+            t3ThreadId: "thread-456",
+            branch: "ai/task-123",
+            worktreePath: "/tmp/worktree",
+            acceptedAt: "2026-04-12T12:00:01.000Z",
+          };
         },
       },
     });
 
-    const result = await handleTaskIntakeMessage(baseMessage({ text: "@Engineering" }), deps);
+    const result = await handleTaskIntakeMessage(
+      baseMessage({ text: "@Engineering hello?" }),
+      deps,
+    );
 
-    expect(resolveCalls).toBe(0);
-    expect(result.resolution.type).toBe("needs_input");
-    expect(postedReplies[0]?.body).toContain("need a clearer coding task");
+    expect(result.resolution.type).toBe("create_task");
+    expect(materializedPrompt).toBe("@Engineering hello?");
+    expect(postedReplies).toHaveLength(0);
+    expect(acknowledgements).toHaveLength(1);
   });
 
   it("records failed runtime starts and posts a start failure reply", async () => {

@@ -8,8 +8,10 @@
  * @module
  */
 
+import type * as chatSdkState from "../chatSdkState.js";
+import type * as github from "../github.js";
+import type * as githubData from "../githubData.js";
 import type * as http from "../http.js";
-import type * as linear from "../linear.js";
 import type * as projects from "../projects.js";
 import type * as t3Runtime from "../t3Runtime.js";
 import type * as taskEvents from "../taskEvents.js";
@@ -26,8 +28,10 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  chatSdkState: typeof chatSdkState;
+  github: typeof github;
+  githubData: typeof githubData;
   http: typeof http;
-  linear: typeof linear;
   projects: typeof projects;
   t3Runtime: typeof t3Runtime;
   taskEvents: typeof taskEvents;

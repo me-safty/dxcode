@@ -27,6 +27,19 @@ describe("VcsCreateWorktreeInput", () => {
 
     expect(parsed.newRefName).toBeUndefined();
     expect(parsed.refName).toBe("feature/existing");
+    expect(parsed.refreshBaseFromOrigin).toBeUndefined();
+  });
+
+  it("accepts an explicit origin base refresh request", () => {
+    const parsed = decodeCreateWorktreeInput({
+      cwd: "/repo",
+      refName: "main",
+      newRefName: "feature/fresh",
+      path: "/tmp/worktree",
+      refreshBaseFromOrigin: true,
+    });
+
+    expect(parsed.refreshBaseFromOrigin).toBe(true);
   });
 });
 

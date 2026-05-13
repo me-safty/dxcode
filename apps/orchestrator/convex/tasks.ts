@@ -3,6 +3,7 @@ import * as DateTime from "effect/DateTime";
 
 import { isValidTaskStatusTransition } from "../src/domain/taskStatus.ts";
 import type { TaskStatus } from "../src/domain/taskStatus.ts";
+import { resolveMentionedProjectAlias } from "../src/taskIntake/projectRouting.ts";
 import type { Id } from "./_generated/dataModel.js";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server.js";
 
@@ -84,6 +85,12 @@ function taskTreeReturn() {
         }),
       ),
     }),
+  );
+}
+
+function projectWorkspaceRoot(row: any) {
+  return (
+    row.workspaceRoot ?? row.sandboxWorkspaceRoot ?? `C:\\Users\\Vivek\\Affil\\${row.repoName}`
   );
 }
 
@@ -315,7 +322,11 @@ export const resolveTaskIntakeMessage = internalMutation({
       return routedExistingTask(task._id);
     }
 
-    const project = await resolveProjectForTaskIntake(ctx, args.source, args.teamId);
+    const project = await resolveProjectForTaskIntake(ctx, {
+      source: args.source,
+      teamId: args.teamId,
+      text: args.text,
+    });
     if (project === null) {
       throw new Error(
         args.teamId
@@ -395,7 +406,11 @@ export const ensureTaskFromLinearIngress = internalMutation({
       };
     }
 
-    const project = await resolveProjectForLinear(ctx, args.teamId);
+    const project = await resolveProjectForLinear(
+      ctx,
+      args.teamId,
+      `${args.title ?? ""}\n${args.body}`,
+    );
     if (project === null) {
       throw new Error(
         args.teamId
@@ -609,17 +624,26 @@ export const recordTaskIntakeLifecycleReplyPosted = internalMutation({
   },
 });
 
-async function resolveProjectForLinear(ctx: any, teamId: string | undefined) {
-  return resolveProjectForTaskIntake(ctx, "linear", teamId);
+async function resolveProjectForLinear(ctx: any, teamId: string | undefined, text: string) {
+  return resolveProjectForTaskIntake(ctx, { source: "linear", teamId, text });
 }
 
-async function resolveProjectForTaskIntake(ctx: any, source: string, teamId: string | undefined) {
-  if (teamId !== undefined) {
+async function resolveProjectForTaskIntake(
+  ctx: any,
+  input: { readonly source: string; readonly teamId: string | undefined; readonly text: string },
+) {
+  const requestedRepo = resolveMentionedProjectAlias(input.text) ?? "nextcard";
+  const requestedProject = await findProjectByRepoName(ctx, requestedRepo);
+  if (requestedProject !== null) {
+    return requestedProject;
+  }
+
+  if (input.teamId !== undefined) {
     const exactRows = await ctx.db
       .query("projects")
       .withIndex("by_linear_team_project", (q: any) =>
-        source === "linear"
-          ? q.eq("linearTeamId", teamId).eq("linearProjectId", undefined)
+        input.source === "linear"
+          ? q.eq("linearTeamId", input.teamId).eq("linearProjectId", undefined)
           : q.eq("linearTeamId", undefined).eq("linearProjectId", undefined),
       )
       .take(2);
@@ -630,6 +654,24 @@ async function resolveProjectForTaskIntake(ctx: any, source: string, teamId: str
 
   const projects = await ctx.db.query("projects").take(2);
   return projects.length === 1 ? projects[0] : null;
+}
+
+async function findProjectByRepoName(ctx: any, repoName: "nextcard" | "t3code") {
+  const row = await ctx.db
+    .query("projects")
+    .withIndex("by_repo", (q: any) => q.eq("githubOwner", "affil-ai").eq("githubRepo", repoName))
+    .unique();
+  if (row !== null) {
+    return row;
+  }
+
+  const rows = await ctx.db
+    .query("projects")
+    .withIndex("by_workspace_root", (q: any) =>
+      q.eq("workspaceRoot", `C:\\Users\\Vivek\\Affil\\${repoName}`),
+    )
+    .take(1);
+  return rows[0] ?? null;
 }
 
 function taskIntakeEventPayload(args: {
@@ -708,7 +750,7 @@ export const getTaskRuntimeSeed = query({
       project: {
         id: project._id,
         repoName: project.repoName,
-        workspaceRoot: project.workspaceRoot,
+        workspaceRoot: projectWorkspaceRoot(project),
         defaultBranch: project.defaultBranch,
       },
     };
@@ -770,7 +812,7 @@ export const listTaskTree = query({
         project: {
           id: project._id,
           repoName: project.repoName,
-          workspaceRoot: project.workspaceRoot,
+          workspaceRoot: projectWorkspaceRoot(project),
           defaultBranch: project.defaultBranch,
           githubOwner: project.githubOwner,
           githubRepo: project.githubRepo,

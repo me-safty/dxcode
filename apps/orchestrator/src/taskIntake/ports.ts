@@ -52,6 +52,7 @@ export interface TaskIntakeRuntimeMaterialization {
   readonly workSessionId: string;
   readonly t3ProjectId: string;
   readonly t3ThreadId: string;
+  readonly environmentId?: string;
   readonly branch: string | null;
   readonly worktreePath: string | null;
   readonly acceptedAt: string;
@@ -81,6 +82,12 @@ export interface TaskIntakeRuntime {
 export interface TaskIntakeReplyTransport {
   readonly acknowledgeAccepted?: (input: {
     readonly message: TaskIntakeMessage;
+  }) => Promise<TaskIntakeDeliveryResult>;
+
+  readonly postTaskStartedCard?: (input: {
+    readonly message: TaskIntakeMessage;
+    readonly taskId: string;
+    readonly materialization: TaskIntakeRuntimeMaterialization;
   }) => Promise<TaskIntakeDeliveryResult>;
 
   readonly postReply: (reply: TaskIntakeReply) => Promise<TaskIntakeDeliveryResult>;

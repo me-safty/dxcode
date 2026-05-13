@@ -15,6 +15,11 @@ if exist ".env" call :load_env ".env"
 
 set "PATH=%USERPROFILE%\.local\bin;%LOCALAPPDATA%\OpenAI\Codex\bin;%USERPROFILE%\AppData\Roaming\npm;%USERPROFILE%\.bun\bin;%LOCALAPPDATA%\Microsoft\WindowsApps;%PATH%"
 
+if not "%T3CODE_OWNER_PAIRING_TOKEN%"=="" (
+  set "T3CODE_OWNER_PAIRING_STATE=userdata"
+  node scripts\seed-owner-pairing-token.ts >> "logs\t3code-server.log" 2>&1
+)
+
 node apps\server\dist\bin.mjs --port 3773 --host 127.0.0.1 --no-browser >> "logs\t3code-server.log" 2>&1
 
 exit /b %ERRORLEVEL%

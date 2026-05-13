@@ -57,7 +57,7 @@ const runtimeLifecycleStatus = v.union(
 export default defineSchema({
   projects: defineTable({
     repoName: v.string(),
-    workspaceRoot: v.string(),
+    workspaceRoot: v.optional(v.string()),
     defaultBranch: v.string(),
     githubOwner: v.string(),
     githubRepo: v.string(),
@@ -108,6 +108,23 @@ export default defineSchema({
   })
     .index("by_task", ["taskId"])
     .index("by_kind_external_id", ["kind", "externalId"]),
+  githubPullRequests: defineTable({
+    taskId: v.id("tasks"),
+    externalId: v.string(),
+    owner: v.string(),
+    repo: v.string(),
+    number: v.number(),
+    url: v.string(),
+    headSha: v.optional(v.string()),
+    headBranch: v.optional(v.string()),
+    title: v.optional(v.string()),
+    state: v.optional(v.string()),
+    mergedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_external_id", ["externalId"])
+    .index("by_repo_head_sha", ["owner", "repo", "headSha"]),
   workSessions: defineTable({
     taskId: v.id("tasks"),
     taskThreadId: v.id("taskThreads"),
@@ -145,4 +162,36 @@ export default defineSchema({
   })
     .index("by_task_created", ["taskId", "createdAt"])
     .index("by_event_key", ["eventKey"]),
+  chatSdkSubscriptions: defineTable({
+    threadId: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_thread", ["threadId"]),
+  chatSdkLocks: defineTable({
+    threadId: v.string(),
+    token: v.string(),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_thread", ["threadId"]),
+  chatSdkCache: defineTable({
+    key: v.string(),
+    valueJson: v.string(),
+    expiresAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
+  chatSdkLists: defineTable({
+    key: v.string(),
+    valuesJson: v.array(v.string()),
+    expiresAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
+  chatSdkQueues: defineTable({
+    threadId: v.string(),
+    entriesJson: v.array(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_thread", ["threadId"]),
 });

@@ -4035,6 +4035,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           refName: "main",
           newRefName: "t3code/bootstrap-refName",
           path: null,
+          refreshBaseFromOrigin: true,
         });
         assert.deepEqual(runForThread.mock.calls[0]?.[0], {
           threadId: ThreadId.make("thread-bootstrap"),

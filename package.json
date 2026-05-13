@@ -31,6 +31,8 @@
     "prepare": "effect-language-service patch",
     "dev": "node scripts/dev-runner.ts dev",
     "dev:server": "node scripts/dev-runner.ts dev:server",
+    "dev:local-cloudflare": "node scripts/local-cloudflare-dev.ts",
+    "auth:seed-owner-pairing": "node scripts/seed-owner-pairing-token.ts",
     "dev:web": "node scripts/dev-runner.ts dev:web",
     "dev:marketing": "turbo run dev --filter=@t3tools/marketing",
     "dev:desktop": "node scripts/dev-runner.ts dev:desktop",

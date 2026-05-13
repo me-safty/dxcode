@@ -2,12 +2,6 @@ import { httpRouter } from "convex/server";
 import * as Schema from "effect/Schema";
 import { TaskRuntimeAssistantMessageEvent, TaskRuntimeLifecycleEvent } from "@t3tools/contracts";
 
-import {
-  buildLinearInstallUrl,
-  buildLinearOAuthCallbackUrl,
-  exchangeLinearOAuthCode,
-  renderLinearOAuthPage,
-} from "../src/linear/oauth.ts";
 import { api, internal } from "./_generated/api.js";
 import type { Id } from "./_generated/dataModel.js";
 import { httpAction } from "./_generated/server.js";
@@ -40,6 +34,59 @@ function requireBridgeAuthorization(request: Request) {
   return { ok: true as const };
 }
 
+function timingSafeEqualString(actual: string, expected: string) {
+  if (actual.length !== expected.length) {
+    return false;
+  }
+
+  let diff = 0;
+  for (let index = 0; index < actual.length; index += 1) {
+    diff |= actual.charCodeAt(index) ^ expected.charCodeAt(index);
+  }
+  return diff === 0;
+}
+
+async function verifyGitHubWebhookSignature(body: string, signature: string | null) {
+  const secret = process.env.GITHUB_WEBHOOK_SECRET?.trim();
+  if (!secret) {
+    return {
+      ok: false as const,
+      status: 503,
+      message: "Missing GitHub webhook secret",
+    };
+  }
+  if (signature === null || !signature.startsWith("sha256=")) {
+    return {
+      ok: false as const,
+      status: 401,
+      message: "Missing GitHub webhook signature",
+    };
+  }
+
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const digest = await crypto.subtle.sign("HMAC", key, encoder.encode(body));
+  const expected = `sha256=${Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")}`;
+
+  if (!timingSafeEqualString(signature, expected)) {
+    return {
+      ok: false as const,
+      status: 401,
+      message: "Invalid GitHub webhook signature",
+    };
+  }
+
+  return { ok: true as const };
+}
+
 http.route({
   path: "/health",
   method: "GET",
@@ -47,78 +94,36 @@ http.route({
 });
 
 http.route({
-  path: "/linear/oauth/install",
-  method: "GET",
-  handler: httpAction(async (ctx, request) => {
-    try {
-      return Response.redirect(buildLinearInstallUrl(new URL(request.url).origin), 302);
-    } catch (error) {
-      return renderLinearOAuthPage({
-        status: "error",
-        title: "Linear Install Could Not Start",
-        detail: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }),
-});
-
-http.route({
-  path: "/linear/oauth/callback",
-  method: "GET",
-  handler: httpAction(async (ctx, request) => {
-    const url = new URL(request.url);
-    const error = url.searchParams.get("error");
-    if (error) {
-      return renderLinearOAuthPage({
-        status: "error",
-        title: "Linear Install Was Cancelled",
-        detail: error,
-      });
-    }
-
-    const code = url.searchParams.get("code");
-    if (!code) {
-      return renderLinearOAuthPage({
-        status: "error",
-        title: "Linear Install Did Not Return A Code",
-        detail: "Linear redirected back without an authorization code.",
-      });
-    }
-
-    try {
-      const result = await exchangeLinearOAuthCode({
-        code,
-        redirectUri: buildLinearOAuthCallbackUrl(url.origin),
-      });
-
-      return renderLinearOAuthPage({
-        status: "success",
-        title: "Linear App Install Completed",
-        detail: `OAuth callback completed successfully.${result.scope ? ` Granted scopes: ${result.scope}.` : ""} You can close this tab and continue with webhook testing.`,
-      });
-    } catch (callbackError) {
-      return renderLinearOAuthPage({
-        status: "error",
-        title: "Linear Install Callback Failed",
-        detail: callbackError instanceof Error ? callbackError.message : String(callbackError),
-      });
-    }
-  }),
-});
-
-http.route({
-  path: "/linear/webhook",
-  method: "POST",
-  handler: httpAction(async (ctx, request) => {
-    return forwardChatSdkWebhook(ctx, request, "linear");
-  }),
-});
-
-http.route({
   path: "/slack/webhook",
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     return forwardChatSdkWebhook(ctx, request, "slack");
+  }),
+});
+
+http.route({
+  path: "/github/webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const body = await request.text();
+    const auth = await verifyGitHubWebhookSignature(
+      body,
+      request.headers.get("x-hub-signature-256"),
+    );
+    if (!auth.ok) {
+      return Response.json({ error: auth.message }, { status: auth.status });
+    }
+
+    const result = await ctx.runAction(internal.github.handleWebhook, {
+      event: request.headers.get("x-github-event") ?? "",
+      deliveryId: request.headers.get("x-github-delivery") ?? "",
+      body,
+    });
+
+    return Response.json({
+      accepted: true,
+      ...result,
+    });
   }),
 });
 
@@ -185,6 +190,11 @@ http.route({
       | {
           readonly status: "waiting_for_changes" | "created" | "existing" | "failed" | "skipped";
           readonly url?: string;
+          readonly title?: string;
+          readonly repo?: string;
+          readonly headBranch?: string;
+          readonly previewUrl?: string;
+          readonly deploymentPreviewsJson?: string;
           readonly summary?: string;
         }
       | undefined;
@@ -203,20 +213,53 @@ http.route({
       }
 
       try {
-        intakeReply = await ctx.runAction(internal.taskIntake.postTaskRuntimeLifecycleReply, {
-          taskId: payload.taskId as Id<"tasks">,
-          workSessionId: payload.workSessionId as Id<"workSessions">,
-          status: payload.type,
-          occurredAt: payload.occurredAt,
-          ...(payload.t3ThreadId !== undefined ? { t3ThreadId: String(payload.t3ThreadId) } : {}),
-          ...(payload.t3TurnId !== undefined ? { t3TurnId: String(payload.t3TurnId) } : {}),
-          ...(payload.failureSummary !== undefined
-            ? { failureSummary: payload.failureSummary }
-            : {}),
-          ...(payload.assistantResponse !== undefined
-            ? { assistantResponse: payload.assistantResponse }
-            : {}),
-        });
+        if (
+          payload.type === "completed" &&
+          pullRequest?.status !== "failed" &&
+          pullRequest?.status !== "waiting_for_changes" &&
+          pullRequest?.status !== "skipped" &&
+          pullRequest.url !== undefined
+        ) {
+          const parsedPullRequest = /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/i.exec(
+            pullRequest.url,
+          );
+          intakeReply =
+            parsedPullRequest !== null
+              ? await ctx.runAction(internal.taskIntake.postTaskPullRequestStatusReply, {
+                  taskId: payload.taskId as Id<"tasks">,
+                  workSessionId: payload.workSessionId as Id<"workSessions">,
+                  pullRequestExternalId: `${parsedPullRequest[1]}/${parsedPullRequest[2]}#${parsedPullRequest[3]}`,
+                  pullRequestUrl: pullRequest.url,
+                  pullRequestStatus: pullRequest.status,
+                  ...(pullRequest.title !== undefined ? { title: pullRequest.title } : {}),
+                  ...(pullRequest.repo !== undefined ? { repo: pullRequest.repo } : {}),
+                  ...(pullRequest.headBranch !== undefined
+                    ? { headBranch: pullRequest.headBranch }
+                    : {}),
+                  ...(pullRequest.previewUrl !== undefined
+                    ? { previewUrl: pullRequest.previewUrl }
+                    : {}),
+                  ...(pullRequest.deploymentPreviewsJson !== undefined
+                    ? { deploymentPreviewsJson: pullRequest.deploymentPreviewsJson }
+                    : {}),
+                })
+              : { posted: false, reason: "unparseable_pull_request_url" };
+        } else if (payload.type === "failed") {
+          intakeReply = await ctx.runAction(internal.taskIntake.postTaskRuntimeLifecycleReply, {
+            taskId: payload.taskId as Id<"tasks">,
+            workSessionId: payload.workSessionId as Id<"workSessions">,
+            status: payload.type,
+            occurredAt: payload.occurredAt,
+            ...(payload.t3ThreadId !== undefined ? { t3ThreadId: String(payload.t3ThreadId) } : {}),
+            ...(payload.t3TurnId !== undefined ? { t3TurnId: String(payload.t3TurnId) } : {}),
+            ...(payload.failureSummary !== undefined
+              ? { failureSummary: payload.failureSummary }
+              : {}),
+            ...(payload.assistantResponse !== undefined
+              ? { assistantResponse: payload.assistantResponse }
+              : {}),
+          });
+        }
       } catch (error) {
         intakeReply = {
           posted: false,
@@ -239,7 +282,7 @@ export default http;
 async function forwardChatSdkWebhook(
   ctx: Parameters<Parameters<typeof httpAction>[0]>[0],
   request: Request,
-  source: "linear" | "slack",
+  source: "slack",
 ) {
   const result = await ctx.runAction(internal.taskIntake.handleChatSdkWebhook, {
     source,

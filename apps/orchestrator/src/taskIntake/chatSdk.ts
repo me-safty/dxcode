@@ -1,7 +1,12 @@
-import { Chat, type Attachment, type Message, type Thread } from "chat";
-import type { LinearRawMessage } from "@chat-adapter/linear";
+import {
+  Chat,
+  type Attachment,
+  type Message,
+  type MessageContext,
+  type StateAdapter,
+  type Thread,
+} from "chat";
 import type { SlackEvent } from "@chat-adapter/slack";
-import { createMemoryState } from "@chat-adapter/state-memory";
 
 import {
   chatUserName,
@@ -9,15 +14,16 @@ import {
   type TaskIntakeChatSdkSource,
 } from "./chatSdkAdapters.ts";
 import type { TaskIntakeMessage } from "./contracts.ts";
-
-const taskIntakeChatSdkState = createMemoryState();
+import { stripSlackClientAttribution } from "./slackMessageText.ts";
 
 export interface TaskIntakeChatSdkOptions {
   readonly sources?: ReadonlySet<TaskIntakeChatSdkSource>;
+  readonly state: StateAdapter;
   readonly onMessage: (input: {
-    readonly source: "linear" | "slack";
+    readonly source: "slack";
     readonly thread: Thread;
     readonly message: Message;
+    readonly context?: MessageContext;
     readonly intakeMessage: TaskIntakeMessage;
   }) => Promise<void>;
 }
@@ -40,37 +46,6 @@ function taskIntakeAttachments(attachments: readonly Attachment[]) {
     .filter((attachment): attachment is { readonly name?: string; readonly url: string } => {
       return attachment !== null;
     });
-}
-
-export function linearChatMessageToTaskIntakeMessage(input: {
-  readonly thread: Thread;
-  readonly message: Message<LinearRawMessage>;
-}): TaskIntakeMessage {
-  const comment = input.message.raw.comment;
-  const commentId = comment.parentId ?? comment.id;
-  const attachments = taskIntakeAttachments(input.message.attachments);
-
-  return {
-    eventId: `linear:${input.message.id}`,
-    source: "linear",
-    conversation: {
-      source: "linear",
-      externalLinkKind: "linear_issue",
-      externalId: comment.issueId,
-      issueId: comment.issueId,
-      commentId,
-      ...(comment.url !== undefined ? { url: comment.url } : {}),
-    },
-    messageId: input.message.id,
-    text: input.message.text,
-    ...(attachments.length > 0 ? { attachments } : {}),
-    receivedAt: messageReceivedAt(input.message),
-    ...(comment.url !== undefined ? { url: comment.url } : {}),
-    actor: {
-      externalId: input.message.author.userId,
-      displayName: input.message.author.userName || input.message.author.fullName,
-    },
-  };
 }
 
 export function slackChatMessageToTaskIntakeMessage(input: {
@@ -97,7 +72,7 @@ export function slackChatMessageToTaskIntakeMessage(input: {
       ...(teamId !== undefined ? { teamId } : {}),
     },
     messageId: input.message.id,
-    text: input.message.text,
+    text: stripSlackClientAttribution(input.message.text),
     ...(attachments.length > 0 ? { attachments } : {}),
     receivedAt: messageReceivedAt(input.message),
     actor: {
@@ -108,30 +83,24 @@ export function slackChatMessageToTaskIntakeMessage(input: {
 }
 
 async function handleChatSdkMessage(
-  source: "linear" | "slack",
   thread: Thread,
   message: Message,
+  context: MessageContext | undefined,
   options: TaskIntakeChatSdkOptions,
 ) {
   await options.onMessage({
-    source,
+    source: "slack",
     thread,
     message,
-    intakeMessage:
-      source === "linear"
-        ? linearChatMessageToTaskIntakeMessage({
-            thread,
-            message: message as Message<LinearRawMessage>,
-          })
-        : slackChatMessageToTaskIntakeMessage({
-            thread,
-            message: message as Message<SlackEvent>,
-          }),
+    ...(context !== undefined ? { context } : {}),
+    intakeMessage: slackChatMessageToTaskIntakeMessage({
+      thread,
+      message: message as Message<SlackEvent>,
+    }),
   });
 }
 
-export function chatSdkSourceFromThreadId(threadId: string): "linear" | "slack" | null {
-  if (threadId.startsWith("linear:")) return "linear";
+export function chatSdkSourceFromThreadId(threadId: string): "slack" | null {
   if (threadId.startsWith("slack:")) return "slack";
   return null;
 }
@@ -142,23 +111,24 @@ export function createTaskIntakeChatSdkBot(options: TaskIntakeChatSdkOptions) {
     adapters: createTaskIntakeChatSdkAdapters(
       options.sources === undefined ? undefined : { sources: options.sources },
     ),
-    state: taskIntakeChatSdkState,
+    state: options.state,
     dedupeTtlMs: 10 * 60 * 1000,
+    concurrency: "queue",
     logger: "info",
   });
 
-  bot.onNewMention(async (thread, message) => {
+  bot.onNewMention(async (thread, message, context) => {
     await thread.subscribe();
     const source = chatSdkSourceFromThreadId(message.threadId);
     if (source !== null) {
-      await handleChatSdkMessage(source, thread, message, options);
+      await handleChatSdkMessage(thread, message, context, options);
     }
   });
 
-  bot.onSubscribedMessage(async (thread, message) => {
+  bot.onSubscribedMessage(async (thread, message, context) => {
     const source = chatSdkSourceFromThreadId(message.threadId);
     if (source !== null) {
-      await handleChatSdkMessage(source, thread, message, options);
+      await handleChatSdkMessage(thread, message, context, options);
     }
   });
 

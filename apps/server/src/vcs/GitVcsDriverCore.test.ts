@@ -285,6 +285,59 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(yield* fileSystem.exists(worktreePath), false);
       }),
     );
+
+    it.effect(
+      "creates a new worktree from the refreshed origin base without moving local base",
+      () =>
+        Effect.gen(function* () {
+          const remote = yield* makeTmpDir("git-worktree-origin-remote-");
+          const source = yield* makeTmpDir("git-worktree-origin-source-");
+          const clone = yield* makeTmpDir("git-worktree-origin-clone-");
+          const worktreePath = (yield* Path.Path).join(
+            yield* makeTmpDir("git-worktrees-"),
+            "fresh-origin-worktree",
+          );
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+
+          yield* git(remote, ["init", "--bare"]);
+          const { initialBranch } = yield* initRepoWithCommit(source);
+          const localBaseBeforeRemoteAdvance = yield* git(source, ["rev-parse", initialBranch]);
+          yield* git(source, ["remote", "add", "origin", remote]);
+          yield* git(source, ["push", "-u", "origin", initialBranch]);
+          yield* git(source, ["clone", remote, clone]);
+          yield* git(clone, ["config", "user.email", "test@test.com"]);
+          yield* git(clone, ["config", "user.name", "Test"]);
+
+          yield* writeTextFile(source, "remote.txt", "remote\n");
+          yield* git(source, ["add", "remote.txt"]);
+          yield* git(source, ["commit", "-m", "remote base update"]);
+          const remoteBaseSha = yield* git(source, ["rev-parse", initialBranch]);
+          yield* git(source, ["push", "origin", initialBranch]);
+          assert.notEqual(localBaseBeforeRemoteAdvance, remoteBaseSha);
+
+          const created = yield* driver.createWorktree({
+            cwd: clone,
+            path: worktreePath,
+            refName: initialBranch,
+            newRefName: "feature/fresh-origin",
+            refreshBaseFromOrigin: true,
+          });
+
+          assert.equal(created.worktree.path, worktreePath);
+          assert.equal(created.worktree.refName, "feature/fresh-origin");
+          assert.equal(yield* git(worktreePath, ["rev-parse", "HEAD"]), remoteBaseSha);
+          assert.equal(
+            yield* git(worktreePath, ["config", "--get", "branch.feature/fresh-origin.merge"]).pipe(
+              Effect.catch(() => Effect.succeed("")),
+            ),
+            "",
+          );
+          assert.equal(
+            yield* git(clone, ["rev-parse", initialBranch]),
+            localBaseBeforeRemoteAdvance,
+          );
+        }),
+    );
   });
 
   describe("commit context", () => {

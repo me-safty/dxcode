@@ -39,8 +39,14 @@ function buildTaskIntakeRelayPrompt(message: TaskIntakeMessage): string {
   return [text.length > 0 ? text : "(empty message body)", "", ...attachmentLines].join("\n");
 }
 
-export function buildTaskIntakeInitialPrompt(message: TaskIntakeMessage): string {
-  return buildTaskIntakeRelayPrompt(message);
+export function buildTaskIntakeInitialPrompt(
+  message: TaskIntakeMessage,
+  options: { readonly context?: string } = {},
+): string {
+  const relayPrompt = buildTaskIntakeRelayPrompt(message);
+  const context = options.context?.trim();
+  if (!context) return relayPrompt;
+  return [context, "", "User request:", relayPrompt].join("\n");
 }
 
 export function buildTaskIntakeFollowUpPrompt(message: TaskIntakeMessage): string {
