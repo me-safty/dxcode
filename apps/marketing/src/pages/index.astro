@@ -66,7 +66,7 @@ const mobileEndorsementRows = [
       <div class="hero-preview">
         <figure class="hero-screenshot-frame">
           <img
-            src="/updated-screenshot.jpeg"
+            src="/updated-screenshot.webp"
             alt="T3 Code app showing multiple coding agent threads in one workspace"
             width="2508"
             height="1682"
@@ -82,7 +82,7 @@ const mobileEndorsementRows = [
               <span style="background:#28c840"></span>
             </div>
             <div class="app-title">
-              <img src="/icon.png" alt="" />
+              <img src="/icon.webp" alt="" />
               <span>T3 Code</span>
               <span class="app-title-badge">ALPHA</span>
             </div>
@@ -190,7 +190,7 @@ const mobileEndorsementRows = [
                       >
                         <div class="endorsement-author">
                           <img
-                            src={`/pfps/${tweet.handle}.jpeg`}
+                            src={`/pfps/${tweet.handle}.webp`}
                             alt=""
                             width="40"
                             height="40"
@@ -228,7 +228,7 @@ const mobileEndorsementRows = [
                       >
                         <div class="endorsement-author">
                           <img
-                            src={`/pfps/${tweet.handle}.jpeg`}
+                            src={`/pfps/${tweet.handle}.webp`}
                             alt=""
                             width="40"
                             height="40"
@@ -758,6 +758,12 @@ const mobileEndorsementRows = [
     border-radius: 14px;
     background: #0a0a0c;
     box-shadow: 0 28px 64px -28px rgba(0, 0, 0, 0.75);
+  }
+
+  .hero-screenshot-frame picture {
+    display: block;
+    width: 100%;
+    height: 100%;
   }
 
   .hero-screenshot-frame img {
