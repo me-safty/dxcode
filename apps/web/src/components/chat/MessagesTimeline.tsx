@@ -1149,7 +1149,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                 className="max-w-[min(56rem,calc(100vw-2rem))] px-0 py-0"
                 side="top"
               >
-                <div className="max-w-[min(56rem,calc(100vw-2rem))] overflow-x-auto px-1.5 py-1 font-mono text-[11px] leading-4 whitespace-nowrap">
+                <div className="tooltip-scrollbar-thin max-w-[min(56rem,calc(100vw-2rem))] overflow-x-auto px-1.5 py-1 font-mono text-[11px] leading-4 whitespace-nowrap">
                   {rawCommand}
                 </div>
               </TooltipPopup>
