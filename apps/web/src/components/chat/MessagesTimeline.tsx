@@ -1129,50 +1129,39 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
         </span>
         <div className="min-w-0 flex-1 overflow-hidden">
           {rawCommand ? (
-            <div className="max-w-full">
-              <p
-                className={cn(
-                  "truncate text-xs leading-5",
-                  workToneClass(workEntry.tone),
-                  preview ? "text-muted-foreground/70" : "",
-                )}
-                title={displayText}
+            <Tooltip>
+              <TooltipTrigger className="block max-w-full text-left" aria-label={displayText}>
+                <p
+                  className={cn(
+                    "truncate text-xs leading-5",
+                    workToneClass(workEntry.tone),
+                    preview ? "text-muted-foreground/70" : "",
+                  )}
+                >
+                  <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
+                    {heading}
+                  </span>
+                  {preview && <span className="text-muted-foreground/55"> - {preview}</span>}
+                </p>
+              </TooltipTrigger>
+              <TooltipPopup
+                align="start"
+                className="max-w-[min(56rem,calc(100vw-2rem))] px-0 py-0"
+                side="top"
               >
-                <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
-                  {heading}
-                </span>
-                {preview && (
-                  <Tooltip>
-                    <TooltipTrigger
-                      closeDelay={0}
-                      delay={75}
-                      render={
-                        <span className="max-w-full cursor-default text-muted-foreground/55 transition-colors hover:text-muted-foreground/75 focus-visible:text-muted-foreground/75">
-                          {" "}
-                          - {preview}
-                        </span>
-                      }
-                    />
-                    <TooltipPopup
-                      align="start"
-                      className="max-w-[min(56rem,calc(100vw-2rem))] px-0 py-0"
-                      side="top"
-                    >
-                      <div className="max-w-[min(56rem,calc(100vw-2rem))] overflow-x-auto px-1.5 py-1 font-mono text-[11px] leading-4 whitespace-nowrap">
-                        {rawCommand}
-                      </div>
-                    </TooltipPopup>
-                  </Tooltip>
-                )}
-              </p>
-            </div>
+                <div className="max-w-[min(56rem,calc(100vw-2rem))]">
+                  <p className="border-b border-border/60 px-1.5 py-1 text-xs leading-5 whitespace-pre-wrap wrap-break-word">
+                    {displayText}
+                  </p>
+                  <div className="overflow-x-auto px-1.5 py-1 font-mono text-[11px] leading-4 whitespace-nowrap">
+                    {rawCommand}
+                  </div>
+                </div>
+              </TooltipPopup>
+            </Tooltip>
           ) : (
             <Tooltip>
-              <TooltipTrigger
-                className="block min-w-0 w-full text-left"
-                title={displayText}
-                aria-label={displayText}
-              >
+              <TooltipTrigger className="block min-w-0 w-full text-left" aria-label={displayText}>
                 <p
                   className={cn(
                     "truncate text-[11px] leading-5",
