@@ -52,7 +52,17 @@ import Layout from "../layouts/Layout.astro";
       </div>
 
       <div class="hero-preview">
-        <div class="app-preview">
+        <figure class="hero-screenshot-frame">
+          <img
+            src="/updated-screenshot.jpeg"
+            alt="T3 Code app showing multiple coding agent threads in one workspace"
+            width="2508"
+            height="1682"
+            loading="eager"
+            decoding="async"
+          />
+        </figure>
+        <div class="app-preview" aria-hidden="true">
           <div class="app-titlebar">
             <div class="app-traffic">
               <span style="background:#ff5f57"></span>
@@ -723,7 +733,25 @@ import Layout from "../layouts/Layout.astro";
     transform: perspective(2000px) rotateX(0deg);
   }
 
+  .hero-screenshot-frame {
+    position: relative;
+    overflow: hidden;
+    aspect-ratio: 2508 / 1682;
+    border-radius: 14px;
+    background: #0a0a0c;
+    box-shadow: 0 28px 64px -28px rgba(0, 0, 0, 0.75);
+  }
+
+  .hero-screenshot-frame img {
+    width: calc(100% + 4px);
+    height: calc(100% + 4px);
+    margin: -2px;
+    object-fit: cover;
+    object-position: center top;
+  }
+
   .app-preview {
+    display: none;
     background: #0a0a0c;
     border: 1px solid var(--border);
     border-radius: 14px;
@@ -1224,7 +1252,14 @@ import Layout from "../layouts/Layout.astro";
 
   /* ── Responsive ────────────────────────────────────────── */
   @media (max-width: 960px) {
-    .hero-preview { display: none; }
+    .hero-preview {
+      width: min(860px, calc(100vw - 24px));
+      margin-left: 50%;
+      transform: translateX(-50%) perspective(1600px) rotateX(1.5deg);
+    }
+    .hero-preview:hover {
+      transform: translateX(-50%) perspective(1600px) rotateX(0deg);
+    }
     .harness-grid { grid-template-columns: 1fr 1fr; }
     .harness { border-right: 0; border-bottom: 1px solid var(--border); }
     .harness:nth-child(odd) { border-right: 1px solid var(--border); }
