@@ -330,7 +330,10 @@ function ChatThreadRouteView() {
     finalizePromotedDraftThreadByRef(threadRef);
   }, [draftThread?.promotedTo, serverThreadStarted, threadRef]);
 
-  if (!threadRef || !bootstrapComplete || !routeThreadExists) {
+  const shouldRenderThreadRoute =
+    threadRef !== null && (routeThreadExists || draftThreadExists || !bootstrapComplete);
+
+  if (!shouldRenderThreadRoute) {
     return null;
   }
 
