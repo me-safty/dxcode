@@ -168,8 +168,11 @@ const mobileEndorsementRows = [
 
   <!-- ── Endorsements ─────────────────────────────────────────── -->
   <section id="endorsements" class="sec-endorsements" aria-labelledby="endorsements-title">
-    <div class="endorsements-head container">
-      <h2 id="endorsements-title">Developers love T3 Code</h2>
+    <div class="container">
+      <div class="endorsements-head">
+        <h2 id="endorsements-title">Developers love T3 Code</h2>
+        <p>Real reactions from people building with T3 Code today.</p>
+      </div>
     </div>
 
     <div class="endorsement-carousel endorsement-carousel--desktop" aria-label="Developer endorsements">
@@ -192,8 +195,8 @@ const mobileEndorsementRows = [
                           <img
                             src={`/pfps/${tweet.handle}.webp`}
                             alt=""
-                            width="40"
-                            height="40"
+                            width="28"
+                            height="28"
                             loading="lazy"
                             decoding="async"
                           />
@@ -230,8 +233,8 @@ const mobileEndorsementRows = [
                           <img
                             src={`/pfps/${tweet.handle}.webp`}
                             alt=""
-                            width="40"
-                            height="40"
+                            width="28"
+                            height="28"
                             loading="lazy"
                             decoding="async"
                           />
@@ -999,23 +1002,27 @@ const mobileEndorsementRows = [
   /* ── Endorsements ─────────────────────────────────────── */
   .sec-endorsements {
     overflow: hidden;
-    padding: 44px 0 56px;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 42%),
-      #09090b;
+    padding: 72px 0;
   }
 
   .endorsements-head {
-    display: block;
-    margin-bottom: 30px;
+    max-width: 640px;
+    margin-bottom: 32px;
   }
 
   .endorsements-head h2 {
-    max-width: 760px;
-    font-size: clamp(30px, 3.8vw, 46px);
+    font-size: clamp(26px, 2.4vw, 32px);
     font-weight: 500;
-    letter-spacing: -0.035em;
-    line-height: 1.05;
+    letter-spacing: -0.025em;
+    line-height: 1.15;
+    margin-bottom: 8px;
+  }
+
+  .endorsements-head p {
+    color: var(--fg-muted);
+    font-size: 15px;
+    letter-spacing: -0.003em;
+    line-height: 1.5;
   }
 
   .endorsement-carousel {
@@ -1036,18 +1043,18 @@ const mobileEndorsementRows = [
     top: 0;
     bottom: 0;
     z-index: 2;
-    width: max(28px, calc((100vw - 1240px) / 2 + 48px));
+    width: max(48px, calc((100vw - 1240px) / 2 + 56px));
     pointer-events: none;
   }
 
   .endorsement-carousel::before {
     left: 0;
-    background: linear-gradient(90deg, var(--bg) 8%, transparent);
+    background: linear-gradient(90deg, var(--bg), transparent);
   }
 
   .endorsement-carousel::after {
     right: 0;
-    background: linear-gradient(270deg, var(--bg) 8%, transparent);
+    background: linear-gradient(270deg, var(--bg), transparent);
   }
 
   .endorsement-row {
@@ -1079,50 +1086,44 @@ const mobileEndorsementRows = [
 
   .endorsement-card {
     position: relative;
-    width: clamp(278px, 28vw, 356px);
-    height: 156px;
-    padding: 16px;
+    width: clamp(264px, 22vw, 308px);
+    height: 132px;
+    padding: 14px 16px;
     display: flex;
     flex-direction: column;
+    gap: 10px;
     border: 1px solid var(--border);
-    border-radius: 8px;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
-      #0d0d10;
-    box-shadow: 0 22px 44px -28px rgba(0, 0, 0, 0.75);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.012);
     transition:
-      transform 0.18s ease,
       border-color 0.18s ease,
       background 0.18s ease;
   }
 
   .endorsement-card:hover {
-    transform: translateY(-2px);
     border-color: var(--border-strong);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
-      #101014;
+    background: rgba(255, 255, 255, 0.03);
   }
 
   .endorsement-author {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
+    gap: 8px;
+    min-width: 0;
   }
 
   .endorsement-author img {
-    width: 40px;
-    height: 40px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     object-fit: cover;
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    flex-shrink: 0;
   }
 
   .endorsement-handle {
-    color: var(--fg);
-    font-size: 14px;
-    font-weight: 600;
+    color: var(--fg-muted);
+    font-size: 13px;
+    font-weight: 500;
     letter-spacing: -0.005em;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1130,14 +1131,14 @@ const mobileEndorsementRows = [
   }
 
   .endorsement-card p {
-    color: color-mix(in oklab, var(--fg) 88%, var(--fg-muted));
-    font-size: 14px;
+    color: var(--fg);
+    font-size: 13.5px;
     line-height: 1.4;
-    letter-spacing: -0.004em;
+    letter-spacing: -0.003em;
     display: -webkit-box;
     overflow: hidden;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 4;
+    -webkit-line-clamp: 3;
   }
 
   /* ── Git ──────────────────────────────────────────────── */
@@ -1354,10 +1355,10 @@ const mobileEndorsementRows = [
     .container { padding-left: 20px; padding-right: 20px; }
     .hero-preview { display: none; }
     .sec-endorsements {
-      padding: 36px 0 46px;
+      padding: 56px 0;
     }
     .endorsements-head {
-      margin-bottom: 26px;
+      margin-bottom: 28px;
     }
     .endorsement-carousel--desktop {
       display: none;
@@ -1367,7 +1368,7 @@ const mobileEndorsementRows = [
     }
     .endorsement-carousel::before,
     .endorsement-carousel::after {
-      width: 20px;
+      width: 28px;
     }
     .endorsement-track {
       animation-duration: 68s;
@@ -1376,13 +1377,12 @@ const mobileEndorsementRows = [
       animation-duration: 76s;
     }
     .endorsement-card {
-      width: 286px;
-      height: 152px;
+      width: 268px;
+      height: 132px;
       padding: 14px;
     }
     .endorsement-card p {
-      font-size: 13.5px;
-      -webkit-line-clamp: 4;
+      font-size: 13px;
     }
   }
 </style>
