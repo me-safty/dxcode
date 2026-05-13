@@ -1485,6 +1485,9 @@ function reconnectEnvironmentConnectionsAfterBrowserResume(reason: string): void
   lastBrowserResumeReconnectAt = now;
 
   for (const connection of environmentConnections.values()) {
+    if (connection.client.isHeartbeatFresh()) {
+      continue;
+    }
     void connection.reconnect().catch((error) => {
       console.warn("Environment reconnect after browser resume failed", {
         environmentId: connection.environmentId,
