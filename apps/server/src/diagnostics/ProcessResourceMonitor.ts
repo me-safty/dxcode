@@ -22,7 +22,6 @@ import {
 const SAMPLE_INTERVAL_MS = 5_000;
 const RETENTION_MS = 60 * 60_000;
 const MAX_RETAINED_SAMPLES = 20_000;
-const DEFAULT_TOP_PROCESS_LIMIT = 30;
 
 export interface ProcessResourceSample {
   readonly sampledAt: DateTime.Utc;
@@ -57,37 +56,8 @@ function dateTimeFromMillis(ms: number): DateTime.Utc {
   return DateTime.makeUnsafe(ms);
 }
 
-function parseElapsedMs(elapsed: string): number | null {
-  const [daysPrefix, timeText] = elapsed.includes("-")
-    ? (elapsed.split("-", 2) as [string, string])
-    : (["0", elapsed] as const);
-  const days = Number.parseInt(daysPrefix, 10);
-  if (!Number.isFinite(days) || days < 0) return null;
-
-  const parts = timeText.split(":");
-  const secondsText = parts.pop();
-  if (!secondsText) return null;
-  const seconds = Number.parseFloat(secondsText);
-  if (!Number.isFinite(seconds) || seconds < 0) return null;
-
-  const minutesText = parts.pop();
-  const minutes = minutesText === undefined ? 0 : Number.parseInt(minutesText, 10);
-  if (!Number.isFinite(minutes) || minutes < 0) return null;
-
-  const hoursText = parts.pop();
-  const hours = hoursText === undefined ? 0 : Number.parseInt(hoursText, 10);
-  if (!Number.isFinite(hours) || hours < 0 || parts.length > 0) return null;
-
-  return (((days * 24 + hours) * 60 + minutes) * 60 + seconds) * 1_000;
-}
-
-function sampleKey(
-  row: Pick<ProcessRow, "pid" | "command" | "elapsed">,
-  sampledAtMs: number,
-): string {
-  const elapsedMs = parseElapsedMs(row.elapsed);
-  const startedAtMs = elapsedMs === null ? null : Math.round((sampledAtMs - elapsedMs) / 1_000);
-  return `${row.pid}:${startedAtMs ?? "unknown"}:${row.command}`;
+function sampleKey(row: Pick<ProcessRow, "pid" | "command">): string {
+  return `${row.pid}:${row.command}`;
 }
 
 function findServerRootRow(rows: ReadonlyArray<ProcessRow>, serverPid: number): ProcessRow | null {
@@ -109,7 +79,7 @@ export function collectMonitoredSamples(input: {
     samples.push({
       sampledAt: input.sampledAt,
       sampledAtMs: input.sampledAtMs,
-      processKey: sampleKey(root, input.sampledAtMs),
+      processKey: sampleKey(root),
       pid: root.pid,
       ppid: root.ppid,
       command: root.command,
@@ -124,7 +94,7 @@ export function collectMonitoredSamples(input: {
     samples.push({
       sampledAt: input.sampledAt,
       sampledAtMs: input.sampledAtMs,
-      processKey: sampleKey(process, input.sampledAtMs),
+      processKey: sampleKey(process),
       pid: process.pid,
       ppid: process.ppid,
       command: process.command,
@@ -190,8 +160,7 @@ function summarizeProcesses(
         sampleCount: sorted.length,
       } satisfies ServerProcessResourceHistorySummary;
     })
-    .toSorted((left, right) => right.cpuSecondsApprox - left.cpuSecondsApprox)
-    .slice(0, DEFAULT_TOP_PROCESS_LIMIT);
+    .toSorted((left, right) => right.cpuSecondsApprox - left.cpuSecondsApprox);
 }
 
 function buildBuckets(input: {

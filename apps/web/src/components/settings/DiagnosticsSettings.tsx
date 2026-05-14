@@ -316,7 +316,7 @@ function ProcessNameCell({
   return (
     <div
       className="grid min-w-0 grid-cols-[1.25rem_0.375rem_minmax(0,1fr)] items-center gap-2"
-      style={{ paddingLeft: `${Math.min(process.depth, 8) * 16}px` }}
+      style={{ paddingLeft: `${Math.min(process.depth, 6) * 10}px` }}
     >
       {hasChildren ? (
         <button
@@ -331,7 +331,17 @@ function ProcessNameCell({
         <span className="size-5 shrink-0" aria-hidden="true" />
       )}
       <span className="size-1.5 shrink-0 rounded-full bg-emerald-500/80" />
-      <span className="min-w-0 truncate font-medium text-foreground">{name}</span>
+      <Tooltip>
+        <TooltipTrigger
+          render={<span className="min-w-0 truncate font-medium text-foreground">{name}</span>}
+        />
+        <TooltipPopup
+          side="top"
+          className="max-w-[min(440px,calc(100vw-2rem))] whitespace-normal break-words text-left font-mono text-[11px] leading-relaxed text-wrap"
+        >
+          {process.command}
+        </TooltipPopup>
+      </Tooltip>
     </div>
   );
 }
@@ -429,7 +439,7 @@ function ProcessDiagnosticsTable({
       chainVerticalScroll
       scrollFade
       hideScrollbars
-      className="w-full max-w-full rounded-none border-t border-border/60"
+      className="max-h-[min(64vh,44rem)] w-full max-w-full rounded-none border-t border-border/60"
     >
       <table className="w-full min-w-[1040px] table-fixed text-left text-xs">
         <colgroup>
@@ -441,7 +451,7 @@ function ProcessDiagnosticsTable({
           <col className="w-[11%]" />
           <col className="w-[6%]" />
         </colgroup>
-        <thead className="border-b border-border/60 bg-muted/15 text-[11px] uppercase tracking-[0.08em] text-muted-foreground/70">
+        <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-[11px] uppercase tracking-[0.08em] text-muted-foreground/70">
           <tr>
             <th className="px-4 py-2 font-semibold sm:pl-5">Name</th>
             <th className="px-3 py-2 text-right font-semibold">CPU</th>
@@ -449,7 +459,7 @@ function ProcessDiagnosticsTable({
             <th className="px-3 py-2 font-semibold">Command</th>
             <th className="px-3 py-2 text-right font-semibold">PID</th>
             <th className="px-3 py-2 font-semibold">Type</th>
-            <th className="px-2 py-2 text-right font-semibold sm:pr-4">Kill</th>
+            <th className="p-2 text-right font-semibold sm:pr-4">Kill</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border/50">
@@ -494,7 +504,7 @@ function ProcessDiagnosticsTable({
               <td className="truncate px-3 py-2 align-middle text-muted-foreground">
                 {formatProcessType(process)}
               </td>
-              <td className="px-2 py-2 align-middle sm:pr-4">
+              <td className="p-2 align-middle sm:pr-4">
                 <ProcessSignalActions
                   process={process}
                   isSignaling={signalingPid === process.pid}
@@ -528,6 +538,43 @@ function formatShortProcessName(command: string): string {
   return name.length > 42 ? `${name.slice(0, 39)}...` : name;
 }
 
+function ResourceHistoryProcessNameCell({
+  process,
+  visualDepth,
+}: {
+  process: ServerProcessResourceHistorySummary;
+  visualDepth: number;
+}) {
+  const name = formatShortProcessName(process.command);
+
+  return (
+    <div
+      className="grid min-w-0 grid-cols-[1.25rem_0.375rem_minmax(0,1fr)] items-center gap-2"
+      style={{ paddingLeft: `${Math.min(visualDepth, 6) * 10}px` }}
+      aria-label={`${process.isServerRoot ? "Root" : "Child"} process ${name}`}
+    >
+      <span className="size-5 shrink-0" aria-hidden="true" />
+      <span
+        className={cn(
+          "size-1.5 shrink-0 rounded-full",
+          process.isServerRoot ? "bg-amber-500/90" : "bg-emerald-500/80",
+        )}
+      />
+      <Tooltip>
+        <TooltipTrigger
+          render={<span className="min-w-0 truncate font-medium text-foreground">{name}</span>}
+        />
+        <TooltipPopup
+          side="top"
+          className="max-w-[min(440px,calc(100vw-2rem))] whitespace-normal break-words text-left font-mono text-[11px] leading-relaxed text-wrap"
+        >
+          {process.command}
+        </TooltipPopup>
+      </Tooltip>
+    </div>
+  );
+}
+
 function ProcessResourceHistoryChart({
   buckets,
 }: {
@@ -541,18 +588,28 @@ function ProcessResourceHistoryChart({
 
   return (
     <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-      <div className="flex h-28 items-end gap-1 overflow-hidden rounded-sm bg-muted/10 px-2 py-2">
+      <div className="flex h-28 items-end gap-1 overflow-hidden rounded-sm bg-muted/10 p-2">
         {buckets.map((bucket) => {
-          const height = Math.max(2, (bucket.avgCpuPercent / maxCpuPercent) * 100);
+          const peakHeight = Math.max(2, (bucket.maxCpuPercent / maxCpuPercent) * 100);
+          const averageHeight = Math.max(2, (bucket.avgCpuPercent / maxCpuPercent) * 100);
           return (
             <Tooltip key={DateTime.formatIso(bucket.startedAt)}>
               <TooltipTrigger
                 render={
                   <div className="flex h-full min-w-1 flex-1 items-end">
                     <div
-                      className="w-full rounded-t-sm bg-foreground/55 transition-colors hover:bg-foreground"
-                      style={{ height: `${height}%` }}
-                    />
+                      className="relative h-full w-full"
+                      aria-label={`Average CPU ${bucket.avgCpuPercent.toFixed(1)}%, peak CPU ${bucket.maxCpuPercent.toFixed(1)}%`}
+                    >
+                      <div
+                        className="absolute inset-x-0 bottom-0 rounded-t-sm bg-foreground/15 transition-colors"
+                        style={{ height: `${peakHeight}%` }}
+                      />
+                      <div
+                        className="absolute inset-x-0 bottom-0 rounded-t-sm bg-foreground/60 transition-colors"
+                        style={{ height: `${averageHeight}%` }}
+                      />
+                    </div>
                   </div>
                 }
               />
@@ -600,12 +657,17 @@ function ProcessResourceHistoryTable({
   processes: ReadonlyArray<ServerProcessResourceHistorySummary>;
   emptyLabel: string;
 }) {
+  const shallowestChildDepth = processes.reduce<number | null>((minDepth, process) => {
+    if (process.isServerRoot) return minDepth;
+    return minDepth === null ? process.depth : Math.min(minDepth, process.depth);
+  }, null);
+
   return (
     <ScrollArea
       chainVerticalScroll
       scrollFade
       hideScrollbars
-      className="w-full max-w-full border-t border-border/60"
+      className="max-h-[min(64vh,44rem)] w-full max-w-full border-t border-border/60"
     >
       <table className="w-full min-w-[980px] table-fixed text-left text-xs">
         <colgroup>
@@ -618,7 +680,7 @@ function ProcessResourceHistoryTable({
           <col className="w-[16%]" />
           <col className="w-[10%]" />
         </colgroup>
-        <thead className="border-b border-border/60 bg-muted/15 text-[11px] uppercase tracking-[0.08em] text-muted-foreground/70">
+        <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-[11px] uppercase tracking-[0.08em] text-muted-foreground/70">
           <tr>
             <th className="px-4 py-2 font-semibold sm:pl-5">Process</th>
             <th className="px-3 py-2 text-right font-semibold">CPU Time</th>
@@ -641,23 +703,14 @@ function ProcessResourceHistoryTable({
           {processes.map((process) => (
             <tr key={process.processKey} className="hover:bg-muted/20">
               <td className="px-4 py-2 align-middle sm:pl-5">
-                <div
-                  className="flex min-w-0 items-center gap-2"
-                  style={{ paddingLeft: `${Math.min(process.depth, 8) * 14}px` }}
-                >
-                  <span
-                    className={cn(
-                      "inline-flex h-5 shrink-0 items-center rounded-sm border border-border/70 px-1.5 text-[10px] font-medium uppercase text-muted-foreground",
-                      process.isServerRoot &&
-                        "border-amber-500/50 text-amber-700 dark:text-amber-300",
-                    )}
-                  >
-                    {process.isServerRoot ? "Root" : "Child"}
-                  </span>
-                  <span className="min-w-0 truncate font-medium">
-                    {formatShortProcessName(process.command)}
-                  </span>
-                </div>
+                <ResourceHistoryProcessNameCell
+                  process={process}
+                  visualDepth={
+                    process.isServerRoot || shallowestChildDepth === null
+                      ? 0
+                      : Math.max(1, process.depth - shallowestChildDepth + 1)
+                  }
+                />
               </td>
               <td className="px-3 py-2 text-right align-middle font-mono tabular-nums">
                 {formatCpuTime(process.cpuSecondsApprox)}
@@ -942,7 +995,7 @@ export function DiagnosticsSettingsPanel() {
           <StatBlock
             label="CPU Time"
             value={resourceData ? formatCpuTime(resourceData.totalCpuSecondsApprox) : "..."}
-            tooltip="Approximate cumulative CPU time for the T3 server root process and its descendant processes during the selected window."
+            tooltip="Approximate active CPU time for the T3 server root process and its descendants during the selected window. It grows only while sampled processes use CPU and older samples leave as the window moves."
           />
           <StatBlock
             label="Samples"
