@@ -1,4 +1,190 @@
-# VS Code Extension Plan
+# T3 Code for VS Code
+
+Experimental VS Code shell for T3 Code. It starts a local T3 backend, injects a host bridge into the existing T3 web UI, and renders that UI in a sidebar or custom editor webview.
+
+Build a local VSIX from the repository root:
+
+```sh
+bun run --filter t3code-vscode package
+```
+
+Install the generated `.vsix` with VS Code's "Install from VSIX..." command, or from the repository root:
+
+```sh
+code --install-extension apps/vscode-extension/t3code-vscode-0.0.1.vsix
+```
+
+## Implementation Status
+
+Current status: locally installable experimental VSIX exists and uses stable VS Code APIs only.
+
+Implemented so far:
+
+- Created the `apps/vscode-extension` workspace package with `package.json`, `src/extension.ts`, `src/backendManager.ts`, `src/webview.ts`, `tsdown.config.ts`, build scripts, package scripts, and a minimal SVG icon.
+- Added extension commands:
+  - `t3code.open`
+  - `t3code.newThread`
+  - `t3code.restartBackend`
+- Added a stable Activity Bar view container and webview view:
+  - `t3code.sidebarView`
+- Added custom editor contribution and provider:
+  - `t3code.conversationEditor`
+  - virtual resources shaped like `t3-code://route/local/new`
+- Added a backend process manager that:
+  - chooses the active workspace folder or first workspace folder as `cwd`
+  - allocates a loopback port
+  - generates a bootstrap token
+  - writes a desktop-compatible bootstrap envelope through fd 3
+  - starts the bundled `dist/server/bin.mjs` with `ELECTRON_RUN_AS_NODE=1`
+  - falls back to a development checkout command when no bundled server exists
+  - supports user-configurable server command, args, cwd, and T3 home
+  - polls `/.well-known/t3/environment` with a per-request timeout
+  - terminates the backend on extension disposal
+- Added a neutral host bridge contract:
+  - `T3HostBridge`
+  - `window.t3HostBridge`
+- Updated the web app to:
+  - prefer `window.t3HostBridge.getLocalEnvironmentBootstrap()`
+  - fall back to `window.desktopBridge.getLocalEnvironmentBootstrap()`
+  - use hash history in VS Code webviews
+  - read bootstrap credentials from either bridge
+  - support `VITE_BASE_URL` so extension-local web assets can be built with relative paths
+- Added webview rendering that:
+  - reads extension-local `dist/webview/index.html`
+  - injects a `<base>` tag using `webview.asWebviewUri(...)`
+  - injects `window.t3HostBridge`
+  - initializes the hash route
+  - applies a restrictive CSP with local backend HTTP and WebSocket connect sources
+- Added packaging that:
+  - builds `apps/web`
+  - builds `apps/server`
+  - builds the extension host bundle
+  - copies `apps/web/dist` to `apps/vscode-extension/dist/webview`
+  - copies `apps/server/dist` to `apps/vscode-extension/dist/server`
+  - stages extension runtime dependencies under `apps/vscode-extension/dist/node_modules`
+  - creates `apps/vscode-extension/t3code-vscode-0.0.1.vsix`
+- Verified:
+  - `bun fmt`
+  - `bun lint` (passes with existing unrelated warnings)
+  - `bun typecheck`
+  - `bun run --filter t3code-vscode package`
+  - manual bundled-backend readiness smoke test
+
+Not implemented yet:
+
+- Proposed `chatSessionsProvider` integration.
+- `chatSessions/newSession` menu contribution.
+- Listing recent T3 threads as VS Code chat session items.
+- Thread-specific route reconstruction in the custom editor. The custom editor currently opens the T3 chat index route.
+- Webview-to-extension host actions beyond a basic `postMessage` bridge hook.
+- Add current file/selection to T3 Code.
+- Reveal/open file host actions.
+- VS Code theme/font propagation into the web UI.
+- Platform-specific VSIX build matrix.
+- Package size optimization.
+- Marketplace publishing hardening.
+
+Known packaging notes:
+
+- The generated VSIX is intentionally gitignored.
+- Extension build output under `apps/vscode-extension/dist` is intentionally gitignored.
+- The current local VSIX includes staged runtime dependencies and is large. The initial working artifact was around 119 MB on macOS arm64.
+- `bun install --production` reports a blocked `node-pty` postinstall in the staged extension runtime, but the installed package includes `node-pty` prebuilds for macOS and Windows. Linux packaging still needs explicit validation.
+- The current package is not yet platform-targeted with `vsce --target`.
+
+## Decision Log
+
+### 2026-05-14: Use Stable Webview Surfaces First
+
+Decision: implement the stable sidebar/custom-editor extension shell before proposed chat-session APIs.
+
+Reasoning:
+
+- The plan identifies `chatSessionsProvider` as proposed and unstable.
+- A stable webview shell lets us validate backend startup, bootstrap auth, webview CSP, asset loading, and the existing T3 UI in VS Code first.
+- This keeps experimentation installable in normal VS Code without proposed API flags.
+
+Deviation from original plan:
+
+- Strategy 1 remains the product direction, but Phase 6 is deferred.
+- The current artifact is closer to Strategy 2 plus the backend/webview pieces of Strategy 1.
+
+### 2026-05-14: Introduce `window.t3HostBridge`
+
+Decision: add a neutral `T3HostBridge` instead of making the VS Code webview impersonate Electron's `desktopBridge`.
+
+Reasoning:
+
+- VS Code is not Electron desktop from the app's perspective, even if VS Code itself runs on Electron.
+- A neutral bridge matches the preferred design in the plan and leaves `desktopBridge` for desktop-specific APIs.
+- The web app still falls back to `desktopBridge` for compatibility.
+
+Implemented as planned:
+
+- `packages/contracts/src/ipc.ts` defines `T3HostBridge`.
+- `apps/web/src/environments/primary/target.ts` and `auth.ts` read `t3HostBridge` first.
+- `apps/web/src/main.tsx` uses hash routing when `isVscodeWebview` is true.
+
+### 2026-05-14: Reuse Desktop Bootstrap Transport
+
+Decision: start the T3 backend with `--bootstrap-fd 3` and pass a desktop-compatible bootstrap envelope.
+
+Reasoning:
+
+- The server already supports this flow.
+- It avoids a parallel auth/bootstrap design.
+- The web app can exchange the injected bootstrap token through the existing `/api/auth/bootstrap` endpoint.
+
+Implemented as planned:
+
+- The extension generates a bootstrap token.
+- The extension writes `mode`, `noBrowser`, `port`, `t3Home`, `host`, `desktopBootstrapToken`, and Tailscale fields to fd 3.
+- The webview injects the token through `window.t3HostBridge.getLocalEnvironmentBootstrap()`.
+
+Deviation from original plan:
+
+- The extension currently defines the bootstrap payload shape locally instead of importing `DesktopBackendBootstrap` from `@t3tools/contracts`. This avoids pulling schema/runtime dependencies into the extension host bundle for the first prototype.
+
+### 2026-05-14: Start One Backend for the Active Workspace
+
+Decision: use one extension-owned backend process based on the active editor's workspace folder, falling back to the first workspace folder or the user home directory.
+
+Reasoning:
+
+- This satisfies the initial single-workspace experimentation path with minimal server churn.
+- It keeps the process manager small while preserving room for a future multi-root backend registry.
+
+Deviation from original plan:
+
+- The backend manager is not yet a full one-process-per-workspace registry.
+- Multi-root workspace behavior is basic.
+
+### 2026-05-14: Package Staged Runtime Dependencies
+
+Decision: stage runtime dependencies under `apps/vscode-extension/dist/node_modules` and package with `vsce --no-dependencies`.
+
+Reasoning:
+
+- The server bundle still has external imports such as `effect`, `@effect/platform-node`, `@opencode-ai/sdk`, `@anthropic-ai/claude-agent-sdk`, `@pierre/diffs`, and `node-pty`.
+- Letting `vsce` discover dependencies directly from the monorepo pulled unrelated files and failed while parsing unrelated markdown.
+- Controlled staging produces an installable local VSIX.
+
+Deviation from original plan:
+
+- Packaging is not yet optimized.
+- The current VSIX is not platform-specific, although platform-specific VSIXs are still the recommended direction if `node-pty` remains required.
+
+### 2026-05-14: Keep Built Artifacts Out of Git
+
+Decision: ignore extension VSIX files and extension build outputs.
+
+Reasoning:
+
+- The VSIX and `dist` content are generated artifacts.
+- The package can be rebuilt from source with `bun run --filter t3code-vscode package`.
+- Keeping generated assets out of git keeps the extension source package reviewable.
+
+## Plan
 
 ## Goal
 
@@ -518,49 +704,3 @@ Packaging recommendation:
 - Add CI targets for macOS arm64/x64, Linux x64/arm64, and Windows x64/arm64 once the extension works.
 - Use a universal fallback only if the backend can avoid native dependencies or ship optional native binaries cleanly.
 - If `node-pty` remains required at runtime, platform-specific VSIXs are the cleaner distribution model.
-
-Possible VSIX layout:
-
-```text
-apps/vscode-extension/dist/extension.js
-apps/vscode-extension/webview/index.html
-apps/vscode-extension/webview/assets/*
-apps/vscode-extension/server/*
-apps/vscode-extension/resources/*
-```
-
-## Open Questions
-
-Resolved:
-
-- Target UX is Codex-like.
-- Prefer one backend per workspace if low-churn; otherwise use the existing multi-project backend shape.
-- Use the same T3 home as desktop for now.
-- Remote workspaces/SSH/devcontainers are desirable only if low-churn.
-- Marketplace platform-specific VSIXs are supported, so native dependencies such as `node-pty` can be handled with target-specific packages.
-- Auth should reuse existing bootstrap/session flows where possible; choose cookie or bearer based on what works best in VS Code webviews.
-
-Still open:
-
-- Exact multi-root workspace behavior.
-  - Defer for now, consider only single-root workspaces initially.
-- Whether VS Code webview cookie auth works reliably enough for the existing `/api/auth/bootstrap` path.
-  - Assess best option after experimentation.
-- Whether the first packaged build should include all platform targets or start with a single target.
-  - Include only current platform target, same as the referenced codex extension, for local testing for now.
-- How much remote workspace support can be achieved without changing server assumptions.
-  - Assess best option after experimentation.
-
-## Recommendation
-
-Implement the Codex-like extension shell first, with a stable webview view as the first milestone and chat session integration as the second milestone.
-
-The extension should reuse the existing T3 backend and React UI rather than reimplementing chat natively. The main product work should be in host adaptation:
-
-- backend process lifecycle
-- webview asset loading and CSP
-- host bridge/bootstrap
-- chat-session-to-thread routing
-- VS Code command/file integration
-
-This gives the best chance of matching Codex's behavior while preserving T3 Code's existing architecture and avoiding a second UI implementation.

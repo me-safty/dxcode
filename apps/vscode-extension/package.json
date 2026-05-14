@@ -1,0 +1,140 @@
+{
+  "name": "t3code-vscode",
+  "displayName": "T3 Code",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Run T3 Code inside VS Code.",
+  "categories": [
+    "Other"
+  ],
+  "license": "MIT",
+  "publisher": "t3tools",
+  "files": [
+    "dist",
+    "resources",
+    "README.md"
+  ],
+  "type": "module",
+  "main": "./dist/extension.mjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:extension": "tsdown",
+    "package": "node scripts/package.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.111",
+    "@effect/platform-bun": "4.0.0-beta.59",
+    "@effect/platform-node": "4.0.0-beta.59",
+    "@effect/platform-node-shared": "4.0.0-beta.59",
+    "@effect/sql-sqlite-bun": "4.0.0-beta.59",
+    "@opencode-ai/sdk": "^1.3.15",
+    "@pierre/diffs": "1.1.20",
+    "effect": "4.0.0-beta.59",
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/vscode": "^1.96.0",
+    "@vscode/vsce": "^3.6.0",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "t3code.open",
+        "title": "T3 Code: Open"
+      },
+      {
+        "command": "t3code.newThread",
+        "title": "T3 Code: New Thread"
+      },
+      {
+        "command": "t3code.restartBackend",
+        "title": "T3 Code: Restart Backend"
+      }
+    ],
+    "configuration": {
+      "title": "T3 Code",
+      "properties": {
+        "t3code.server.command": {
+          "type": "string",
+          "default": "",
+          "description": "Optional executable used to start the T3 backend. When unset, the extension uses its bundled backend or a development checkout."
+        },
+        "t3code.server.args": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional arguments for t3code.server.command. The extension appends --bootstrap-fd, --auto-bootstrap-project-from-cwd, and the workspace path."
+        },
+        "t3code.server.cwd": {
+          "type": "string",
+          "default": "",
+          "description": "Optional working directory for t3code.server.command."
+        },
+        "t3code.home": {
+          "type": "string",
+          "default": "",
+          "description": "Optional T3 home directory. Defaults to ~/.t3 to match the desktop app."
+        }
+      }
+    },
+    "customEditors": [
+      {
+        "viewType": "t3code.conversationEditor",
+        "displayName": "T3 Code Thread",
+        "priority": "default",
+        "selector": [
+          {
+            "filenamePattern": "t3-code:/**/*"
+          }
+        ]
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "t3code",
+          "title": "T3 Code",
+          "icon": "resources/t3code.svg"
+        }
+      ]
+    },
+    "views": {
+      "t3code": [
+        {
+          "id": "t3code.sidebarView",
+          "type": "webview",
+          "name": "T3 Code"
+        }
+      ]
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "t3code.open"
+        },
+        {
+          "command": "t3code.newThread"
+        },
+        {
+          "command": "t3code.restartBackend"
+        }
+      ]
+    }
+  },
+  "activationEvents": [
+    "onCommand:t3code.newThread",
+    "onCommand:t3code.open",
+    "onCommand:t3code.restartBackend",
+    "onCustomEditor:t3code.conversationEditor",
+    "onView:t3code.sidebarView"
+  ],
+  "engines": {
+    "vscode": "^1.96.0"
+  }
+}

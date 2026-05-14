@@ -8,6 +8,7 @@ import pkg from "./package.json" with { type: "json" };
 const port = Number(process.env.PORT ?? 5733);
 const host = process.env.HOST?.trim() || "localhost";
 const configuredWsUrl = process.env.VITE_WS_URL?.trim();
+const configuredBaseUrl = process.env.VITE_BASE_URL?.trim();
 const configuredHostedAppChannel = process.env.VITE_HOSTED_APP_CHANNEL?.trim() || "";
 const configuredAppVersion = process.env.APP_VERSION?.trim() || pkg.version;
 const configuredHostedAppUrl = (() => {
@@ -56,6 +57,7 @@ function resolveDevProxyTarget(wsUrl: string | undefined): string | undefined {
 const devProxyTarget = resolveDevProxyTarget(configuredWsUrl);
 
 export default defineConfig({
+  ...(configuredBaseUrl ? { base: configuredBaseUrl } : {}),
   plugins: [
     tanstackRouter(),
     react(),

@@ -233,6 +233,11 @@ export const DesktopEnvironmentBootstrapSchema = Schema.Struct({
   bootstrapToken: Schema.optionalKey(Schema.String),
 });
 
+export interface T3HostBridge {
+  getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
+  postMessage?: (message: unknown) => void;
+}
+
 export const DesktopSshEnvironmentTargetSchema = Schema.Struct({
   alias: Schema.String,
   hostname: Schema.String,

@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { DesktopBridge, LocalApi } from "@t3tools/contracts";
+import type { DesktopBridge, LocalApi, T3HostBridge } from "@t3tools/contracts";
 
 interface ImportMetaEnv {
   readonly VITE_HTTP_URL: string;
@@ -18,5 +18,7 @@ declare global {
   interface Window {
     nativeApi?: LocalApi;
     desktopBridge?: DesktopBridge;
+    t3HostBridge?: T3HostBridge;
+    __T3_IS_VSCODE_WEBVIEW?: boolean;
   }
 }
