@@ -1,4 +1,4 @@
-import type { DesktopBridge } from "@t3tools/contracts";
+import type { DesktopBridge, T3HostBridge } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
@@ -17,6 +17,7 @@ type TestWindow = {
     replaceState: (_data: unknown, _unused: string, url: string) => void;
   };
   desktopBridge?: DesktopBridge;
+  t3HostBridge?: T3HostBridge;
 };
 
 function installTestBrowser(url: string) {
@@ -141,6 +142,74 @@ describe("resolveInitialServerAuthGateState", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://remote.example.com/api/auth/session", {
       credentials: "include",
     });
+  });
+
+  it("uses the VS Code host bridge bootstrap credential before the Electron desktop bridge", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        sessionResponse({
+          authenticated: false,
+          auth: {
+            policy: "desktop-managed-local",
+            bootstrapMethods: ["desktop-bootstrap"],
+            sessionMethods: ["browser-session-cookie"],
+            sessionCookieName: "t3_session",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          authenticated: true,
+          sessionMethod: "browser-session-cookie",
+          expiresAt: "2026-04-05T00:00:00.000Z",
+        }),
+      )
+      .mockResolvedValueOnce(
+        sessionResponse({
+          authenticated: true,
+          auth: {
+            policy: "desktop-managed-local",
+            bootstrapMethods: ["desktop-bootstrap"],
+            sessionMethods: ["browser-session-cookie"],
+            sessionCookieName: "t3_session",
+          },
+          sessionMethod: "browser-session-cookie",
+          expiresAt: "2026-04-05T00:00:00.000Z",
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const testWindow = installTestBrowser("https://webview.example/");
+    testWindow.t3HostBridge = {
+      getLocalEnvironmentBootstrap: () => ({
+        label: "VS Code",
+        httpBaseUrl: "http://127.0.0.1:4888",
+        wsBaseUrl: "ws://127.0.0.1:4888",
+        bootstrapToken: "vscode-bootstrap-token",
+      }),
+    };
+    testWindow.desktopBridge = {
+      getLocalEnvironmentBootstrap: () => ({
+        label: "Desktop",
+        httpBaseUrl: "http://127.0.0.1:3773",
+        wsBaseUrl: "ws://127.0.0.1:3773",
+        bootstrapToken: "desktop-bootstrap-token",
+      }),
+    } as DesktopBridge;
+
+    const { resolveInitialServerAuthGateState } = await import("./environments/primary");
+
+    await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
+      status: "authenticated",
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://127.0.0.1:4888/api/auth/session");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://127.0.0.1:4888/api/auth/bootstrap");
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      body: JSON.stringify({ credential: "vscode-bootstrap-token" }),
+      method: "POST",
+    });
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("http://127.0.0.1:4888/api/auth/session");
   });
 
   it("uses the current origin as an auth proxy base for local dev environments", async () => {

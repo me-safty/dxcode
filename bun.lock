@@ -165,6 +165,7 @@
         "@vscode/vsce": "^3.6.0",
         "tsdown": "catalog:",
         "typescript": "catalog:",
+        "vitest": "catalog:",
       },
     },
     "apps/web": {

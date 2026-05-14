@@ -167,4 +167,38 @@ describe("environmentBootstrap", () => {
     await expect(resolveInitialPrimaryEnvironmentDescriptor()).resolves.toEqual(BASE_ENVIRONMENT);
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:5733/.well-known/t3/environment");
   });
+
+  it("uses the VS Code host bridge before the Electron desktop bridge", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(BASE_ENVIRONMENT));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      location: new URL("https://webview.example/"),
+      history: {
+        replaceState: vi.fn(),
+      },
+      t3HostBridge: {
+        getLocalEnvironmentBootstrap: () => ({
+          label: "VS Code",
+          httpBaseUrl: "http://127.0.0.1:4888",
+          wsBaseUrl: "ws://127.0.0.1:4888",
+          bootstrapToken: "vscode-bootstrap-token",
+        }),
+      },
+      desktopBridge: {
+        getLocalEnvironmentBootstrap: () => ({
+          label: "Desktop",
+          httpBaseUrl: "http://127.0.0.1:3773",
+          wsBaseUrl: "ws://127.0.0.1:3773",
+          bootstrapToken: "desktop-bootstrap-token",
+        }),
+      },
+    });
+
+    await expect(resolveInitialPrimaryEnvironmentDescriptor()).resolves.toEqual(BASE_ENVIRONMENT);
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:4888/.well-known/t3/environment");
+    expect(getPrimaryKnownEnvironment()?.target).toEqual({
+      httpBaseUrl: "http://127.0.0.1:4888/",
+      wsBaseUrl: "ws://127.0.0.1:4888/",
+    });
+  });
 });

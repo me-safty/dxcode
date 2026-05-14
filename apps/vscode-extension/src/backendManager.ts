@@ -32,16 +32,55 @@ interface ResolvedServerCommand {
   readonly cwd: string;
 }
 
+export interface BackendSpawnOptions {
+  readonly cwd: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly stdio: readonly ["ignore", "pipe", "pipe", "pipe"];
+}
+
+export type BackendSpawn = (
+  command: string,
+  args: readonly string[],
+  options: BackendSpawnOptions,
+) => ChildProcessWithoutNullStreams;
+
+export interface BackendManagerDependencies {
+  readonly findAvailablePort: () => Promise<number>;
+  readonly fetch: typeof fetch;
+  readonly mkdirSync: typeof fs.mkdirSync;
+  readonly randomBytes: typeof crypto.randomBytes;
+  readonly spawn: BackendSpawn;
+}
+
+const defaultBackendManagerDependencies: BackendManagerDependencies = {
+  findAvailablePort,
+  fetch,
+  mkdirSync: fs.mkdirSync,
+  randomBytes: crypto.randomBytes,
+  spawn: (command, args, options) =>
+    spawn(command, [...args], {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: [...options.stdio],
+    }) as ChildProcessWithoutNullStreams,
+};
+
 export class BackendManager {
   #process: ChildProcessWithoutNullStreams | null = null;
   #connection: BackendConnection | null = null;
   #starting: Promise<BackendConnection> | null = null;
   #outputChannel: vscode.OutputChannel;
   readonly #context: vscode.ExtensionContext;
+  readonly #dependencies: BackendManagerDependencies;
 
-  constructor(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
+  constructor(
+    context: vscode.ExtensionContext,
+    outputChannel: vscode.OutputChannel,
+    dependencies: BackendManagerDependencies = defaultBackendManagerDependencies,
+  ) {
     this.#context = context;
     this.#outputChannel = outputChannel;
+    this.#dependencies = dependencies;
   }
 
   async ensureStarted(): Promise<BackendConnection> {
@@ -92,9 +131,9 @@ export class BackendManager {
   async #start(): Promise<BackendConnection> {
     const workspaceFolder = resolveWorkspaceFolder();
     const cwd = workspaceFolder?.uri.fsPath ?? os.homedir();
-    const port = await findAvailablePort();
+    const port = await this.#dependencies.findAvailablePort();
     const host = "127.0.0.1";
-    const bootstrapToken = crypto.randomBytes(24).toString("hex");
+    const bootstrapToken = this.#dependencies.randomBytes(24).toString("hex");
     const t3Home = resolveT3Home();
     const command = resolveServerCommand(this.#context, cwd);
     const bootstrap: BackendBootstrap = {
@@ -109,10 +148,10 @@ export class BackendManager {
     };
     const args = [...command.args, "--bootstrap-fd", "3", "--auto-bootstrap-project-from-cwd", cwd];
 
-    fs.mkdirSync(t3Home, { recursive: true });
+    this.#dependencies.mkdirSync(t3Home, { recursive: true });
     this.#outputChannel.appendLine(`[backend] Starting: ${command.command} ${args.join(" ")}`);
 
-    const child = spawn(command.command, args, {
+    const child = this.#dependencies.spawn(command.command, args, {
       cwd: command.cwd,
       env: backendEnv(),
       stdio: ["ignore", "pipe", "pipe", "pipe"],
@@ -144,7 +183,7 @@ export class BackendManager {
 
     const httpBaseUrl = `http://${host}:${port}`;
     const wsBaseUrl = `ws://${host}:${port}`;
-    await waitForBackendReady(httpBaseUrl);
+    await waitForBackendReady(httpBaseUrl, this.#dependencies.fetch);
 
     this.#connection = {
       httpBaseUrl,
@@ -267,7 +306,10 @@ function findAvailablePort(): Promise<number> {
   });
 }
 
-async function waitForBackendReady(httpBaseUrl: string): Promise<void> {
+async function waitForBackendReady(
+  httpBaseUrl: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<void> {
   const deadline = Date.now() + 60_000;
   const readinessUrl = new URL(READINESS_PATH, httpBaseUrl);
 
@@ -275,7 +317,7 @@ async function waitForBackendReady(httpBaseUrl: string): Promise<void> {
     const controller = new AbortController();
     const requestTimeout = setTimeout(() => controller.abort(), 1_000);
     try {
-      const response = await fetch(readinessUrl, { signal: controller.signal });
+      const response = await fetchFn(readinessUrl, { signal: controller.signal });
       if (response.ok) {
         return;
       }

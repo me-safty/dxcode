@@ -20,6 +20,7 @@
     "build": "node scripts/build.mjs",
     "build:extension": "tsdown",
     "package": "node scripts/package.mjs",
+    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -38,7 +39,8 @@
     "@types/vscode": "^1.96.0",
     "@vscode/vsce": "^3.6.0",
     "tsdown": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "contributes": {
     "commands": [
