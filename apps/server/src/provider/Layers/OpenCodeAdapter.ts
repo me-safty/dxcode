@@ -21,13 +21,7 @@ import * as Random from "effect/Random";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import type {
-  Event as OpenCodeEvent,
-  OpencodeClient,
-  Part,
-  PermissionRequest,
-  QuestionRequest,
-} from "@opencode-ai/sdk/v2";
+import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -64,7 +58,7 @@ interface OpenCodeTurnSnapshot {
 }
 
 type OpenCodeSubscribedEvent =
-  Awaited<ReturnType<OpencodeClient["global"]["event"]>> extends {
+  Awaited<ReturnType<OpencodeClient["event"]["subscribe"]>> extends {
     readonly stream: AsyncIterable<infer TEvent>;
   }
     ? TEvent
@@ -95,7 +89,7 @@ interface OpenCodeSessionContext {
   /**
    * Sole lifecycle handle for the session. Closing this scope:
    *   - aborts the `AbortController` registered as a finalizer
-   *     (cancels the in-flight `global.event` fetch),
+   *     (cancels the in-flight `event.subscribe` fetch),
    *   - interrupts the event-pump and server-exit fibers forked
    *     via `Effect.forkIn(sessionScope)`,
    *   - tears down the OpenCode server process for scope-owned servers.
@@ -395,24 +389,6 @@ function toolStateCreatedAt(part: Extract<Part, { type: "tool" }>): string | und
   }
 }
 
-function unwrapOpenCodeSubscribedEvent(
-  raw: OpenCodeSubscribedEvent | OpenCodeEvent,
-): OpenCodeEvent | null {
-  if (typeof raw !== "object" || raw === null) {
-    return null;
-  }
-  if ("payload" in raw) {
-    const payload = raw.payload;
-    if (typeof payload === "object" && payload !== null && "type" in payload) {
-      return payload as OpenCodeEvent;
-    }
-  }
-  if ("type" in raw) {
-    return raw as OpenCodeEvent;
-  }
-  return null;
-}
-
 function sessionErrorMessage(error: unknown): string {
   if (!error || typeof error !== "object") {
     return "OpenCode session failed.";
@@ -658,7 +634,7 @@ export function makeOpenCodeAdapter(
 
     const handleSubscribedEvent = Effect.fn("handleSubscribedEvent")(function* (
       context: OpenCodeSessionContext,
-      event: OpenCodeEvent,
+      event: OpenCodeSubscribedEvent,
     ) {
       const payloadSessionId =
         "properties" in event ? (event.properties as { sessionID?: unknown }).sessionID : undefined;
@@ -887,25 +863,6 @@ export function makeOpenCodeAdapter(
           break;
         }
 
-        case "session.idle": {
-          if (turnId) {
-            context.activeTurnId = undefined;
-            yield* updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
-            yield* emit({
-              ...(yield* buildEventBase({
-                threadId: context.session.threadId,
-                turnId,
-                raw: event,
-              })),
-              type: "turn.completed",
-              payload: {
-                state: "completed",
-              },
-            });
-          }
-          break;
-        }
-
         case "session.status": {
           if (event.properties.status.type === "busy") {
             yield* updateProviderSession(context, {
@@ -997,7 +954,7 @@ export function makeOpenCodeAdapter(
     const startEventPump = Effect.fn("startEventPump")(function* (context: OpenCodeSessionContext) {
       // One AbortController per session scope. The finalizer fires when
       // the scope closes (explicit stop, unexpected exit, or layer
-      // shutdown) and cancels the in-flight `global.event` fetch so
+      // shutdown) and cancels the in-flight `event.subscribe` fetch so
       // the async iterable unwinds cleanly.
       const eventsAbortController = new AbortController();
       yield* Scope.addFinalizer(
@@ -1008,8 +965,8 @@ export function makeOpenCodeAdapter(
       // Fibers forked into `context.sessionScope` are interrupted
       // automatically when the scope closes — no bookkeeping required.
       yield* Effect.flatMap(
-        runOpenCodeSdk("global.event", () =>
-          context.client.global.event({
+        runOpenCodeSdk("event.subscribe", () =>
+          context.client.event.subscribe(undefined, {
             signal: eventsAbortController.signal,
           }),
         ),
@@ -1018,15 +975,11 @@ export function makeOpenCodeAdapter(
             subscription.stream,
             (cause) =>
               new OpenCodeRuntimeError({
-                operation: "global.event",
+                operation: "event.subscribe",
                 detail: openCodeRuntimeErrorDetail(cause),
                 cause,
               }),
-          ).pipe(
-            Stream.map(unwrapOpenCodeSubscribedEvent),
-            Stream.filter((event): event is OpenCodeEvent => event !== null),
-            Stream.runForEach((event) => handleSubscribedEvent(context, event)),
-          ),
+          ).pipe(Stream.runForEach((event) => handleSubscribedEvent(context, event))),
       ).pipe(
         Effect.exit,
         Effect.flatMap((exit) =>
