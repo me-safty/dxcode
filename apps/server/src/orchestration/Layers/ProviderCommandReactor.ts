@@ -20,6 +20,7 @@ import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Random from "effect/Random";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
@@ -48,6 +49,7 @@ type ProviderIntentEvent = Extract<
     type:
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
+      | "thread.queued-turn-send-started"
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
@@ -83,6 +85,8 @@ const turnStartKeyForEvent = (event: ProviderIntentEvent): string =>
 
 const serverCommandId = (tag: string): CommandId =>
   CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
+const effectServerCommandId = (tag: string) =>
+  Effect.map(Random.nextUUIDv4, (id) => CommandId.make(`server:${tag}:${id}`));
 
 const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
@@ -789,6 +793,93 @@ const make = Effect.gen(function* () {
       .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
   });
 
+  const processQueuedTurnSendStarted = Effect.fn("processQueuedTurnSendStarted")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.queued-turn-send-started" }>,
+  ) {
+    const thread = yield* resolveThread(event.payload.threadId);
+    if (!thread) {
+      return;
+    }
+    const queuedTurn = thread.queuedTurns.find(
+      (entry) => entry.queueItemId === event.payload.queueItemId,
+    );
+    const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
+    if (!queuedTurn || !message || message.role !== "user") {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.queued-turn.send.fail",
+        commandId: yield* effectServerCommandId("queued-turn-send-missing-message"),
+        threadId: event.payload.threadId,
+        queueItemId: event.payload.queueItemId,
+        reason: "Queued user message was not found.",
+        createdAt: event.payload.createdAt,
+      });
+      return;
+    }
+
+    const sendTurnRequest = yield* buildSendTurnRequestForThread({
+      threadId: event.payload.threadId,
+      messageText: message.text,
+      ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+      ...(queuedTurn.modelSelection !== undefined
+        ? { modelSelection: queuedTurn.modelSelection }
+        : {}),
+      interactionMode: queuedTurn.interactionMode,
+      createdAt: event.payload.createdAt,
+    }).pipe(
+      Effect.map(Option.some),
+      Effect.catchCause((cause) =>
+        effectServerCommandId("queued-turn-send-build-failed").pipe(
+          Effect.flatMap((commandId) =>
+            orchestrationEngine.dispatch({
+              type: "thread.queued-turn.send.fail",
+              commandId,
+              threadId: event.payload.threadId,
+              queueItemId: event.payload.queueItemId,
+              reason: formatFailureDetail(cause),
+              createdAt: event.payload.createdAt,
+            }),
+          ),
+          Effect.as(Option.none()),
+        ),
+      ),
+    );
+
+    if (Option.isNone(sendTurnRequest)) {
+      return;
+    }
+
+    yield* providerService.sendTurn(sendTurnRequest.value).pipe(
+      Effect.flatMap(() =>
+        effectServerCommandId("queued-turn-send-accepted").pipe(
+          Effect.flatMap((commandId) =>
+            orchestrationEngine.dispatch({
+              type: "thread.queued-turn.send.accept",
+              commandId,
+              threadId: event.payload.threadId,
+              queueItemId: event.payload.queueItemId,
+              createdAt: event.payload.createdAt,
+            }),
+          ),
+        ),
+      ),
+      Effect.catchCause((cause) =>
+        effectServerCommandId("queued-turn-send-failed").pipe(
+          Effect.flatMap((commandId) =>
+            orchestrationEngine.dispatch({
+              type: "thread.queued-turn.send.fail",
+              commandId,
+              threadId: event.payload.threadId,
+              queueItemId: event.payload.queueItemId,
+              reason: formatFailureDetail(cause),
+              createdAt: event.payload.createdAt,
+            }),
+          ),
+        ),
+      ),
+      Effect.forkScoped,
+    );
+  });
+
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,
   ) {
@@ -959,6 +1050,9 @@ const make = Effect.gen(function* () {
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);
         return;
+      case "thread.queued-turn-send-started":
+        yield* processQueuedTurnSendStarted(event);
+        return;
       case "thread.turn-interrupt-requested":
         yield* processTurnInterruptRequested(event);
         return;
@@ -994,6 +1088,7 @@ const make = Effect.gen(function* () {
       if (
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||
+        event.type === "thread.queued-turn-send-started" ||
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||
