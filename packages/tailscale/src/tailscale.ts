@@ -135,7 +135,7 @@ export const readTailscaleStatus: Effect.Effect<
   const child = yield* spawner
     .spawn(
       ChildProcess.make("tailscale", args, {
-        shell: process.platform === "win32",
+        shell: false,
       }),
     )
     .pipe(
@@ -214,7 +214,7 @@ const runTailscaleCommand = (
     const child = yield* spawner
       .spawn(
         ChildProcess.make("tailscale", args, {
-          shell: process.platform === "win32",
+          shell: false,
         }),
       )
       .pipe(
