@@ -4,10 +4,18 @@ import * as vscode from "vscode";
 
 import type { BackendConnection } from "./backendManager.ts";
 
+export interface WebviewDisplayPreferences {
+  readonly showOpenInPicker: boolean;
+  readonly showCheckoutModeIndicator: boolean;
+  readonly showBranchSelector: boolean;
+  readonly showTerminalToggle: boolean;
+}
+
 export interface WebviewRenderInput {
   readonly webview: vscode.Webview;
   readonly extensionUri: vscode.Uri;
   readonly connection: BackendConnection;
+  readonly displayPreferences?: WebviewDisplayPreferences;
   readonly initialRoute?: string;
 }
 
@@ -39,6 +47,7 @@ export async function renderT3Webview(input: WebviewRenderInput): Promise<string
       bootstrapToken: input.connection.bootstrapToken,
       bearerToken: input.connection.bearerToken,
     },
+    displayPreferences: input.displayPreferences ?? DEFAULT_DISPLAY_PREFERENCES,
     initialRoute: input.initialRoute ?? "/_chat/",
   });
 
@@ -51,6 +60,13 @@ export async function renderT3Webview(input: WebviewRenderInput): Promise<string
   );
 }
 
+const DEFAULT_DISPLAY_PREFERENCES: WebviewDisplayPreferences = {
+  showOpenInPicker: false,
+  showCheckoutModeIndicator: false,
+  showBranchSelector: false,
+  showTerminalToggle: false,
+};
+
 function makeBridgeScript(input: {
   readonly bootstrap: {
     readonly label: string;
@@ -59,17 +75,27 @@ function makeBridgeScript(input: {
     readonly bootstrapToken: string;
     readonly bearerToken: string;
   };
+  readonly displayPreferences: WebviewDisplayPreferences;
   readonly initialRoute: string;
 }): string {
   return `
     (() => {
       const vscode = acquireVsCodeApi();
       const bootstrap = ${JSON.stringify(input.bootstrap)};
+      let displayPreferences = ${JSON.stringify(input.displayPreferences)};
       const initialRoute = ${JSON.stringify(input.initialRoute)};
+      const displayPreferenceListeners = new Set();
       window.__T3_IS_VSCODE_WEBVIEW = true;
       const pendingRequests = new Map();
       window.addEventListener("message", (event) => {
         const message = event.data;
+        if (message && message.type === "t3.displayPreferencesChanged") {
+          displayPreferences = message.preferences;
+          for (const listener of displayPreferenceListeners) {
+            listener(displayPreferences);
+          }
+          return;
+        }
         if (!message || message.type !== "t3.hostResponse") {
           return;
         }
@@ -99,6 +125,15 @@ function makeBridgeScript(input: {
       window.t3HostBridge = {
         getLocalEnvironmentBootstrap() {
           return bootstrap;
+        },
+        getDisplayPreferences() {
+          return displayPreferences;
+        },
+        onDisplayPreferencesChanged(callback) {
+          displayPreferenceListeners.add(callback);
+          return () => {
+            displayPreferenceListeners.delete(callback);
+          };
         },
         getClientSettings() {
           return requestHost("getClientSettings");

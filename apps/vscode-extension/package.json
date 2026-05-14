@@ -82,6 +82,26 @@
           "type": "string",
           "default": "",
           "description": "Optional T3 home directory. Defaults to ~/.t3 to match the desktop app."
+        },
+        "t3code.ui.showOpenInPicker": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the T3 Code open/reveal picker inside VS Code webviews."
+        },
+        "t3code.ui.showCheckoutModeIndicator": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the T3 Code checkout mode indicator inside VS Code webviews."
+        },
+        "t3code.ui.showBranchSelector": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the T3 Code branch/ref selector inside VS Code webviews."
+        },
+        "t3code.ui.showTerminalToggle": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the T3 Code terminal drawer toggle inside VS Code webviews."
         }
       }
     },

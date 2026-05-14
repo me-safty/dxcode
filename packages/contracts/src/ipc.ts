@@ -235,8 +235,26 @@ export const DesktopEnvironmentBootstrapSchema = Schema.Struct({
   bearerToken: Schema.optionalKey(Schema.String),
 });
 
+export interface T3HostDisplayPreferences {
+  showOpenInPicker: boolean;
+  showCheckoutModeIndicator: boolean;
+  showBranchSelector: boolean;
+  showTerminalToggle: boolean;
+}
+
+export const T3HostDisplayPreferencesSchema = Schema.Struct({
+  showOpenInPicker: Schema.Boolean,
+  showCheckoutModeIndicator: Schema.Boolean,
+  showBranchSelector: Schema.Boolean,
+  showTerminalToggle: Schema.Boolean,
+});
+
 export interface T3HostBridge {
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
+  getDisplayPreferences?: () => T3HostDisplayPreferences | null;
+  onDisplayPreferencesChanged?: (
+    callback: (preferences: T3HostDisplayPreferences) => void,
+  ) => () => void;
   getClientSettings?: () => Promise<ClientSettings | null>;
   setClientSettings?: (settings: ClientSettings) => Promise<void>;
   postMessage?: (message: unknown) => void;

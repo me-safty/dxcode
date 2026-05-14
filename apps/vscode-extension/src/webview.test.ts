@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import packageJson from "../package.json" with { type: "json" };
 import { renderT3Webview } from "./webview.ts";
 
 vi.mock("vscode", () => ({
@@ -58,6 +59,10 @@ describe("renderT3Webview", () => {
     expect(html).toContain(`<base href="vscode-resource:${extensionRoot}/dist/webview/">`);
     expect(html).toContain("window.__T3_IS_VSCODE_WEBVIEW = true");
     expect(html).toContain("window.t3HostBridge");
+    expect(html).toContain("getDisplayPreferences()");
+    expect(html).toContain("onDisplayPreferencesChanged(callback)");
+    expect(html).toContain('message.type === "t3.displayPreferencesChanged"');
+    expect(html).toContain('"showOpenInPicker":false');
     expect(html).toContain("getClientSettings()");
     expect(html).toContain("setClientSettings(settings)");
     expect(html).toContain('"bootstrapToken":"bootstrap-token"');
@@ -82,8 +87,27 @@ describe("renderT3Webview", () => {
         cwd: "/workspace",
         t3Home: "/home/user/.t3",
       },
+      displayPreferences: {
+        showOpenInPicker: true,
+        showCheckoutModeIndicator: true,
+        showBranchSelector: false,
+        showTerminalToggle: true,
+      },
     });
 
     expect(html).toContain('const initialRoute = "/_chat/"');
+    expect(html).toContain('"showOpenInPicker":true');
+    expect(html).toContain('"showBranchSelector":false');
+  });
+});
+
+describe("VS Code display preference settings", () => {
+  it("contributes disabled-by-default settings for each host-hidden control", () => {
+    const properties = packageJson.contributes.configuration.properties;
+
+    expect(properties["t3code.ui.showOpenInPicker"]?.default).toBe(false);
+    expect(properties["t3code.ui.showCheckoutModeIndicator"]?.default).toBe(false);
+    expect(properties["t3code.ui.showBranchSelector"]?.default).toBe(false);
+    expect(properties["t3code.ui.showTerminalToggle"]?.default).toBe(false);
   });
 });

@@ -20,6 +20,24 @@ VS Code webviews use bearer auth for the extension-owned local backend, not brow
 
 The web app then sends authenticated HTTP requests with an `Authorization: Bearer ...` header and requests short-lived WebSocket tokens before opening `/ws`. This avoids relying on cross-origin cookie behavior between the VS Code webview origin and the loopback backend.
 
+## VS Code Webview UI Defaults
+
+The VS Code webview hides T3 Code controls that duplicate VS Code-native surfaces:
+
+- Open/reveal picker: VS Code already owns editor and file-reveal actions.
+- Checkout mode indicator: VS Code already shows the active workspace/checkouts.
+- Branch/ref selector: VS Code already owns branch/ref selection through its source-control UI.
+- Terminal drawer toggle: VS Code already owns terminal surfaces.
+
+Each control can be restored individually with extension settings:
+
+- `t3code.ui.showOpenInPicker`
+- `t3code.ui.showCheckoutModeIndicator`
+- `t3code.ui.showBranchSelector`
+- `t3code.ui.showTerminalToggle`
+
+All four settings default to `false`. Values are passed to the React app through `window.t3HostBridge.getDisplayPreferences()` at startup and through `window.t3HostBridge.onDisplayPreferencesChanged(...)` while the webview is open, so changes apply without reopening the T3 Code view.
+
 ## Implementation Status
 
 Current status: locally installable experimental VSIX exists and uses stable VS Code APIs only.
@@ -50,21 +68,31 @@ Implemented so far:
 - Added a neutral host bridge contract:
   - `T3HostBridge`
   - `window.t3HostBridge`
+  - `getDisplayPreferences()` for host-level UI visibility preferences
 - Updated the web app to:
   - prefer `window.t3HostBridge.getLocalEnvironmentBootstrap()`
   - fall back to `window.desktopBridge.getLocalEnvironmentBootstrap()`
   - use hash history in VS Code webviews
+  - identify VS Code webviews only through the explicit `window.__T3_IS_VSCODE_WEBVIEW` marker
   - read bootstrap credentials from either bridge
   - use host-injected bearer auth for VS Code webview HTTP and WebSocket startup
+  - hide VS Code-duplicated controls by default based on host display preferences
   - read and write `ClientSettings` through `window.t3HostBridge` when no desktop bridge is present
   - support `VITE_BASE_URL` so extension-local web assets can be built with relative paths
 - Added webview rendering that:
   - reads extension-local `dist/webview/index.html`
   - injects a `<base>` tag using `webview.asWebviewUri(...)`
   - injects `window.t3HostBridge`
+  - injects VS Code display preferences from extension configuration
+  - broadcasts display preference changes to open T3 Code webviews
   - handles neutral host bridge requests for shared client settings persistence
   - initializes the hash route
   - applies a restrictive CSP with local backend HTTP and WebSocket connect sources
+- Added extension settings for restoring VS Code-hidden T3 Code controls:
+  - `t3code.ui.showOpenInPicker`
+  - `t3code.ui.showCheckoutModeIndicator`
+  - `t3code.ui.showBranchSelector`
+  - `t3code.ui.showTerminalToggle`
 - Added shared T3 Code app `ClientSettings` persistence for VS Code:
   - persists to `<T3 home>/userdata/client-settings.json`
   - uses the same raw client-settings file format as desktop
@@ -110,6 +138,35 @@ Known packaging notes:
 
 ## Decision Log
 
+### 2026-05-14: Hide VS Code-Duplicated Web UI by Default
+
+Decision: keep the existing React UI, but hide specific controls in VS Code webviews when VS Code already provides the corresponding native surface.
+
+Hidden by default:
+
+- Open/reveal picker.
+- Checkout mode indicator.
+- Branch/ref selector.
+- Terminal drawer toggle button.
+
+Reasoning:
+
+- The extension runs inside VS Code, so controls for opening the current workspace in VS Code, revealing files through the platform file manager, showing checkout type, picking refs, and opening a terminal duplicate capabilities already present in the host.
+- Removing duplicated chrome keeps the embedded T3 Code surface focused on conversation and agent workflow while preserving the underlying app behavior for users who explicitly want the original controls.
+- `window.t3HostBridge` remains neutral. VS Code detection now relies only on the explicit `window.__T3_IS_VSCODE_WEBVIEW` marker, while host-specific visibility choices are passed through `window.t3HostBridge.getDisplayPreferences()`.
+
+Implemented:
+
+- Added disabled-by-default extension settings for each hidden control:
+  - `t3code.ui.showOpenInPicker`
+  - `t3code.ui.showCheckoutModeIndicator`
+  - `t3code.ui.showBranchSelector`
+  - `t3code.ui.showTerminalToggle`
+- Added `T3HostDisplayPreferences` to the shared host bridge contract.
+- Injected the current VS Code setting values into each rendered webview.
+- Broadcast setting changes to open T3 Code webviews and subscribed to them from React.
+- Applied the preferences in `ChatHeader` and `BranchToolbar`.
+
 ### 2026-05-14: Use Stable Webview Surfaces First
 
 Decision: implement the stable sidebar/custom-editor extension shell before proposed chat-session APIs.
@@ -140,6 +197,7 @@ Implemented as planned:
 - `packages/contracts/src/ipc.ts` defines `T3HostBridge`.
 - `apps/web/src/environments/primary/target.ts` and `auth.ts` read `t3HostBridge` first.
 - `apps/web/src/main.tsx` uses hash routing when `isVscodeWebview` is true.
+- `isVscodeWebview` is keyed only from `window.__T3_IS_VSCODE_WEBVIEW`, not from the neutral bridge existing.
 
 ### 2026-05-14: Reuse Desktop Bootstrap Transport
 

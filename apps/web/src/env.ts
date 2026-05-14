@@ -8,5 +8,4 @@ export const isElectron =
   (window.desktopBridge !== undefined || window.nativeApi !== undefined);
 
 export const isVscodeWebview =
-  typeof window !== "undefined" &&
-  (window.__T3_IS_VSCODE_WEBVIEW === true || window.t3HostBridge !== undefined);
+  typeof window !== "undefined" && window.__T3_IS_VSCODE_WEBVIEW === true;

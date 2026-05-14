@@ -6,24 +6,25 @@ import {
   registerClientSettingsHostBridge,
   resolveClientSettingsPath,
 } from "./clientSettingsPersistence.ts";
-import { renderT3Webview } from "./webview.ts";
+import { renderT3Webview, type WebviewDisplayPreferences } from "./webview.ts";
 
 export function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel("T3 Code");
   const backendManager = new BackendManager(context, outputChannel);
+  const displayPreferences = new WebviewDisplayPreferenceBroadcaster(context);
 
   context.subscriptions.push(outputChannel);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       "t3code.sidebarView",
-      new T3SidebarProvider(context, backendManager, outputChannel),
+      new T3SidebarProvider(context, backendManager, outputChannel, displayPreferences),
       { webviewOptions: { retainContextWhenHidden: true } },
     ),
   );
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(
       "t3code.conversationEditor",
-      new T3ConversationEditorProvider(context, backendManager, outputChannel),
+      new T3ConversationEditorProvider(context, backendManager, outputChannel, displayPreferences),
       { supportsMultipleEditorsPerDocument: true },
     ),
   );
@@ -64,15 +65,18 @@ class T3SidebarProvider implements vscode.WebviewViewProvider {
   readonly #context: vscode.ExtensionContext;
   readonly #backendManager: BackendManager;
   readonly #outputChannel: vscode.OutputChannel;
+  readonly #displayPreferences: WebviewDisplayPreferenceBroadcaster;
 
   constructor(
     context: vscode.ExtensionContext,
     backendManager: BackendManager,
     outputChannel: vscode.OutputChannel,
+    displayPreferences: WebviewDisplayPreferenceBroadcaster,
   ) {
     this.#context = context;
     this.#backendManager = backendManager;
     this.#outputChannel = outputChannel;
+    this.#displayPreferences = displayPreferences;
   }
 
   async resolveWebviewView(webviewView: vscode.WebviewView): Promise<void> {
@@ -83,11 +87,16 @@ class T3SidebarProvider implements vscode.WebviewViewProvider {
       persistence: createClientSettingsPersistence(resolveClientSettingsPath(connection.t3Home)),
       outputChannel: this.#outputChannel,
     });
-    webviewView.onDidDispose(() => bridgeDisposable.dispose());
+    const displayPreferencesDisposable = this.#displayPreferences.track(webviewView.webview);
+    webviewView.onDidDispose(() => {
+      bridgeDisposable.dispose();
+      displayPreferencesDisposable.dispose();
+    });
     webviewView.webview.html = await renderT3Webview({
       webview: webviewView.webview,
       extensionUri: this.#context.extensionUri,
       connection,
+      displayPreferences: readWebviewDisplayPreferences(),
       initialRoute: "/_chat/",
     });
   }
@@ -107,15 +116,18 @@ class T3ConversationEditorProvider implements vscode.CustomReadonlyEditorProvide
   readonly #context: vscode.ExtensionContext;
   readonly #backendManager: BackendManager;
   readonly #outputChannel: vscode.OutputChannel;
+  readonly #displayPreferences: WebviewDisplayPreferenceBroadcaster;
 
   constructor(
     context: vscode.ExtensionContext,
     backendManager: BackendManager,
     outputChannel: vscode.OutputChannel,
+    displayPreferences: WebviewDisplayPreferenceBroadcaster,
   ) {
     this.#context = context;
     this.#backendManager = backendManager;
     this.#outputChannel = outputChannel;
+    this.#displayPreferences = displayPreferences;
   }
 
   openCustomDocument(uri: vscode.Uri): T3ConversationDocument {
@@ -133,14 +145,70 @@ class T3ConversationEditorProvider implements vscode.CustomReadonlyEditorProvide
       persistence: createClientSettingsPersistence(resolveClientSettingsPath(connection.t3Home)),
       outputChannel: this.#outputChannel,
     });
-    webviewPanel.onDidDispose(() => bridgeDisposable.dispose());
+    const displayPreferencesDisposable = this.#displayPreferences.track(webviewPanel.webview);
+    webviewPanel.onDidDispose(() => {
+      bridgeDisposable.dispose();
+      displayPreferencesDisposable.dispose();
+    });
     webviewPanel.webview.html = await renderT3Webview({
       webview: webviewPanel.webview,
       extensionUri: this.#context.extensionUri,
       connection,
+      displayPreferences: readWebviewDisplayPreferences(),
       initialRoute: routeFromUri(document.uri),
     });
   }
+}
+
+const DISPLAY_PREFERENCE_SETTINGS = [
+  "t3code.ui.showOpenInPicker",
+  "t3code.ui.showCheckoutModeIndicator",
+  "t3code.ui.showBranchSelector",
+  "t3code.ui.showTerminalToggle",
+] as const;
+
+class WebviewDisplayPreferenceBroadcaster {
+  readonly #webviews = new Set<vscode.Webview>();
+
+  constructor(context: vscode.ExtensionContext) {
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (!DISPLAY_PREFERENCE_SETTINGS.some((key) => event.affectsConfiguration(key))) {
+          return;
+        }
+        this.#broadcast();
+      }),
+    );
+  }
+
+  track(webview: vscode.Webview): vscode.Disposable {
+    this.#webviews.add(webview);
+    return {
+      dispose: () => {
+        this.#webviews.delete(webview);
+      },
+    };
+  }
+
+  #broadcast(): void {
+    const preferences = readWebviewDisplayPreferences();
+    for (const webview of this.#webviews) {
+      void webview["postMessage"]({
+        type: "t3.displayPreferencesChanged",
+        preferences,
+      });
+    }
+  }
+}
+
+function readWebviewDisplayPreferences(): WebviewDisplayPreferences {
+  const configuration = vscode.workspace.getConfiguration("t3code");
+  return {
+    showOpenInPicker: configuration.get<boolean>("ui.showOpenInPicker", false),
+    showCheckoutModeIndicator: configuration.get<boolean>("ui.showCheckoutModeIndicator", false),
+    showBranchSelector: configuration.get<boolean>("ui.showBranchSelector", false),
+    showTerminalToggle: configuration.get<boolean>("ui.showTerminalToggle", false),
+  };
 }
 
 function configureWebview(webview: vscode.Webview, extensionUri: vscode.Uri) {
