@@ -105,6 +105,16 @@ T3_DEFAULT_MODEL=claude-sonnet-4-6
 
 ## Bridge Health Checks
 
+Run the combined local/Cloudflare/Convex check:
+
+```powershell
+cd C:\Users\Vivek\Affil\t3code
+$env:T3CODE_HEALTH_CONVEX_SITE_URL = "https://scrupulous-fly-947.convex.site"
+bun run health:orchestrator
+```
+
+Manual checks:
+
 ```powershell
 schtasks /query /tn t3code-server /fo LIST /v
 schtasks /query /tn t3code-tunnel /fo LIST /v

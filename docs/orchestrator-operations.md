@@ -10,6 +10,24 @@ Use this with `apps/orchestrator/AGENTS.md` and `docs/orchestrator-deployment.md
 
 ## Fast Triage
 
+Run the local production health check first:
+
+```powershell
+cd C:\Users\Vivek\Affil\t3code
+$env:T3CODE_HEALTH_CONVEX_SITE_URL = "https://scrupulous-fly-947.convex.site"
+bun run health:orchestrator
+```
+
+The command checks:
+
+- `t3code-server` scheduled task
+- `t3code-tunnel` scheduled task
+- local T3 at `http://127.0.0.1:3773`
+- public T3/Cloudflare at `https://t3.olumbe.com`
+- unauthenticated bridge status at `/api/execution/runs/status`
+- Convex `/health`
+- recent `severity: "error"` orchestrator events
+
 Start with the durable Convex event log:
 
 ```powershell
@@ -251,3 +269,125 @@ GitHub redelivery is safe for supported events because Slack delivery is guarded
 - PR status cards are keyed by work session, PR identity, and source link
 
 Use GitHub's webhook redelivery UI for a real replay. The orchestrator should record the redelivery in `orchestratorEvents` while suppressing duplicate Slack posts if the claim was already delivered.
+
+## Production Cutover Checklist
+
+Use this checklist before moving Slack or GitHub webhooks away from the current Convex dev deployment.
+
+### Before Cutover
+
+1. Confirm the target Convex deployment URL:
+
+   ```text
+   Current dev: https://scrupulous-fly-947.convex.site
+   Target prod: https://<production-convex-site>
+   ```
+
+2. Set production Convex env vars:
+
+   ```powershell
+   cd C:\Users\Vivek\Affil\t3code\apps\orchestrator
+   bunx convex env set --prod T3_EXECUTION_BRIDGE_BASE_URL "https://t3.olumbe.com"
+   bunx convex env set --prod T3_WEB_APP_BASE_URL "https://t3.olumbe.com"
+   bunx convex env set --prod T3_EXECUTION_BRIDGE_SHARED_SECRET "<rotated bridge secret>"
+   bunx convex env set --prod GITHUB_WEBHOOK_SECRET "<rotated github webhook secret>"
+   ```
+
+3. Confirm Slack Chat SDK credentials and GitHub token are set on the target deployment.
+
+4. Deploy the target Convex deployment.
+
+5. Configure local T3 to call the target Convex URL:
+
+   ```text
+   ORCHESTRATOR_BASE_URL=https://<production-convex-site>
+   T3_EXECUTION_BRIDGE_SHARED_SECRET=<same rotated bridge secret>
+   ```
+
+6. Run health checks against the target deployment:
+
+   ```powershell
+   cd C:\Users\Vivek\Affil\t3code
+   $env:T3CODE_HEALTH_CONVEX_SITE_URL = "https://<production-convex-site>"
+   bun run health:orchestrator
+   ```
+
+7. Save rollback values before editing any external app:
+
+   ```text
+   Slack rollback URL: https://scrupulous-fly-947.convex.site/slack/webhook
+   GitHub rollback URL: https://scrupulous-fly-947.convex.site/github/webhook
+   Local T3 rollback ORCHESTRATOR_BASE_URL: https://scrupulous-fly-947.convex.site
+   ```
+
+### Cutover
+
+1. Update Slack event/webhook URL:
+
+   ```text
+   https://<production-convex-site>/slack/webhook
+   ```
+
+2. Update GitHub webhook URL:
+
+   ```text
+   https://<production-convex-site>/github/webhook
+   ```
+
+3. Confirm GitHub webhook events include:
+
+   ```text
+   pull_request
+   deployment_status
+   ```
+
+4. Restart or reload local T3 if `ORCHESTRATOR_BASE_URL` or bridge secret changed.
+
+5. Run the full smoke:
+   - initial Slack mention gets eyes reaction
+   - `Talk to Vevin in this thread` card appears with `Open T3`
+   - assistant replies relay
+   - mention-free follow-up works
+   - `aside - ...` is ignored
+   - `@Vevin mute` and `@Vevin unmute` get acknowledgement reactions
+   - harmless file change creates commit, push, and PR
+   - PR card has `View PR` and deployment buttons only
+   - deployment-ready message posts a branch preview URL
+   - merging the PR reacts to the original Slack message and posts merged status
+
+6. Inspect the trace:
+
+   ```powershell
+   cd C:\Users\Vivek\Affil\t3code\apps\orchestrator
+   bunx convex run observability:listRecent -- '{ "limit": 100 }'
+   bunx convex run observability:listRecent -- '{ "severity": "error", "limit": 50 }'
+   ```
+
+### Rollback
+
+1. Repoint Slack to:
+
+   ```text
+   https://scrupulous-fly-947.convex.site/slack/webhook
+   ```
+
+2. Repoint GitHub to:
+
+   ```text
+   https://scrupulous-fly-947.convex.site/github/webhook
+   ```
+
+3. Restore local T3:
+
+   ```text
+   ORCHESTRATOR_BASE_URL=https://scrupulous-fly-947.convex.site
+   T3_EXECUTION_BRIDGE_SHARED_SECRET=<dev bridge secret>
+   ```
+
+4. Restart local T3 and run:
+
+   ```powershell
+   cd C:\Users\Vivek\Affil\t3code
+   $env:T3CODE_HEALTH_CONVEX_SITE_URL = "https://scrupulous-fly-947.convex.site"
+   bun run health:orchestrator
+   ```
