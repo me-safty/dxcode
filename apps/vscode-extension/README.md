@@ -90,7 +90,8 @@ Not implemented yet:
 - `chatSessions/newSession` menu contribution.
 - Listing recent T3 threads as VS Code chat session items.
 - Thread-specific route reconstruction in the custom editor. The custom editor currently opens the T3 chat index route.
-- Webview-to-extension host actions beyond a basic `postMessage` bridge hook.
+- Webview-to-extension host actions beyond client settings persistence.
+- Containing keybinding collisions between T3 webview shortcuts and VS Code native keybindings. See the decision log entry below.
 - Add current file/selection to T3 Code.
 - Reveal/open file host actions.
 - VS Code theme/font propagation into the web UI.
@@ -218,6 +219,32 @@ Implementation direction:
 - Preserve the server/client settings boundary: shared client settings should not be folded into `settings.json` or the `ServerSettings` schema.
 - Keep the existing web app fallback behavior for non-hosted/browser contexts: when no host persistence API is available, browser storage remains the fallback.
 - Desktop should continue using its existing `window.desktopBridge` persistence path and file format.
+
+### 2026-05-14: Defer VS Code Native Keybinding Conflict Handling
+
+Decision: do not ship a keyboard-spill fix in this phase. Keep the extension baseline unchanged and defer keybinding conflict handling until we can design a general VS Code-host integration instead of hard-coding individual shortcuts.
+
+Findings:
+
+- The T3 web app already handles shortcuts with browser `keydown` listeners and calls `preventDefault()` for commands such as creating a new thread.
+- In VS Code webviews, shortcuts can still also reach VS Code's keybinding service. For example, `Cmd+N` can both create a T3 thread and run VS Code's default new untitled file command.
+- A webview-local capture-phase `keydown` guard is not enough for host-level accelerators. Manual validation showed `Cmd+N` still opened a VS Code untitled file after the webview had handled the shortcut.
+- Static empty-command/no-op VS Code keybinding attempts were also not a satisfactory general fix. They either failed to stop `Cmd+N` in this setup or required one static rule per shortcut/context.
+- VS Code extension keybindings are contributed statically through `package.json`. There is no stable runtime API for an extension to dynamically register arbitrary keybindings from T3 Code's app settings.
+- Editing the user's VS Code `keybindings.json` to mirror T3 settings would be too invasive and would blur ownership between T3 Code app preferences and VS Code user preferences.
+- The installed Codex extension handles `Cmd+N` through VS Code's own keybinding service, not through a generic webview DOM guard. Its manifest contributes `cmd+n`/`ctrl+n` to `chatgpt.newChat` when `chatgpt.supportsNewChatKeyShortcut` is true. The webview sets that context key while an eligible Codex surface has focus, and the extension command posts a `new-chat` message back into the webview.
+
+Implications:
+
+- The Codex pattern is reliable for a specific command like "new chat" because VS Code sees the keybinding first and resolves it to an extension command instead of the default workbench command.
+- Directly copying that pattern into T3 Code for every app shortcut would still require static manifest entries and extension/web handlers for each conflicted shortcut. That is not acceptable as the general solution for T3's user-configurable keybindings.
+- A future phase should design a host-owned keybinding bridge with a clear policy for which app commands are worth promoting to VS Code-native commands, how focus/context is tracked, and how user-customized T3 keybindings interact with VS Code's static keybinding model.
+
+Deferred work:
+
+- Decide whether T3 Code should expose a small, curated set of VS Code-native commands, such as "new thread", while leaving fully dynamic app keybindings browser-local.
+- Investigate whether a generated manifest or build-time command list can keep curated keybindings maintainable without one-off handlers scattered across the extension and web app.
+- Avoid runtime edits to VS Code user keybindings unless the user explicitly opts in.
 
 ## Plan
 
