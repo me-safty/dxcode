@@ -651,6 +651,25 @@ export const OpenCodeIcon: Icon = (props) => (
   </svg>
 );
 
+export const DroidIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 512 512" fill="none">
+    <path
+      d="M255.8 102.1c23.4-57.8 54.4-62.9 84.4-13.8l21.1 34.6 39.9-7c56.8-10 76.7 14.4 54.1 66.4l-16.2 37.1 31 26.1c43.4 36.5 36.6 67.2-18.6 83.4l-38.9 11.4-2.3 40.5c-3.2 56.6-31.5 70.3-76.8 37.1l-32.7-23.9-32.7 23.9c-45.3 33.2-73.6 19.5-76.8-37.1l-2.3-40.5-38.9-11.4c-55.2-16.2-62-46.9-18.6-83.4l31-26.1-16.2-37.1c-22.6-52 2.7-79.4 54.1-66.4l39.9 7 21.5-20.8Z"
+      stroke="currentColor"
+      strokeWidth="36"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <circle cx="256" cy="256" r="25" fill="currentColor" />
+    <path
+      d="M256 130v252M142 196l228 120M370 196 142 316"
+      stroke="currentColor"
+      strokeWidth="26"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
 export const GithubCopilotIcon: Icon = ({ className, ...props }) => (
   <svg
     {...props}
