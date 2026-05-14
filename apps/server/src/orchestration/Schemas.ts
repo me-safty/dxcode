@@ -16,6 +16,10 @@ import {
   ThreadRevertedPayload as ContractsThreadRevertedPayloadSchema,
   ThreadActivityAppendedPayload as ContractsThreadActivityAppendedPayloadSchema,
   ThreadTurnStartRequestedPayload as ContractsThreadTurnStartRequestedPayloadSchema,
+  ThreadTurnQueuedPayload as ContractsThreadTurnQueuedPayloadSchema,
+  ThreadQueuedTurnSendAcceptedPayload as ContractsThreadQueuedTurnSendAcceptedPayloadSchema,
+  ThreadQueuedTurnSendFailedPayload as ContractsThreadQueuedTurnSendFailedPayloadSchema,
+  ThreadQueuedTurnSendStartedPayload as ContractsThreadQueuedTurnSendStartedPayloadSchema,
   ThreadTurnInterruptRequestedPayload as ContractsThreadTurnInterruptRequestedPayloadSchema,
   ThreadApprovalResponseRequestedPayload as ContractsThreadApprovalResponseRequestedPayloadSchema,
   ThreadCheckpointRevertRequestedPayload as ContractsThreadCheckpointRevertRequestedPayloadSchema,
@@ -43,6 +47,11 @@ export const ThreadRevertedPayload = ContractsThreadRevertedPayloadSchema;
 export const ThreadActivityAppendedPayload = ContractsThreadActivityAppendedPayloadSchema;
 
 export const ThreadTurnStartRequestedPayload = ContractsThreadTurnStartRequestedPayloadSchema;
+export const ThreadTurnQueuedPayload = ContractsThreadTurnQueuedPayloadSchema;
+export const ThreadQueuedTurnSendStartedPayload = ContractsThreadQueuedTurnSendStartedPayloadSchema;
+export const ThreadQueuedTurnSendAcceptedPayload =
+  ContractsThreadQueuedTurnSendAcceptedPayloadSchema;
+export const ThreadQueuedTurnSendFailedPayload = ContractsThreadQueuedTurnSendFailedPayloadSchema;
 export const ThreadTurnInterruptRequestedPayload =
   ContractsThreadTurnInterruptRequestedPayloadSchema;
 export const ThreadApprovalResponseRequestedPayload =

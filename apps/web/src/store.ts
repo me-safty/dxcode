@@ -1265,6 +1265,7 @@ function applyEnvironmentOrchestrationEvent(
           archivedAt: null,
           deletedAt: null,
           messages: [],
+          queuedTurns: [],
           proposedPlans: [],
           activities: [],
           checkpoints: [],

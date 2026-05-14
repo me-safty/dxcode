@@ -1,8 +1,10 @@
 import {
+  OrchestrationQueuedTurnStatus,
   ApprovalRequestId,
   type ChatAttachment,
   type OrchestrationEvent,
   ThreadId,
+  type TurnQueueItemId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -16,6 +18,7 @@ import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../per
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
+import { ProjectionQueuedTurnRepository } from "../../persistence/Services/ProjectionQueuedTurns.ts";
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
 import { type ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -35,6 +38,7 @@ import {
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
+import { ProjectionQueuedTurnRepositoryLive } from "../../persistence/Layers/ProjectionQueuedTurns.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
 import { ProjectionThreadMessageRepositoryLive } from "../../persistence/Layers/ProjectionThreadMessages.ts";
@@ -62,6 +66,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadActivities: "projection.thread-activities",
   threadSessions: "projection.thread-sessions",
   threadTurns: "projection.thread-turns",
+  queuedTurns: "projection.queued-turns",
   checkpoints: "projection.checkpoints",
   pendingApprovals: "projection.pending-approvals",
 } as const;
@@ -456,6 +461,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
+    const projectionQueuedTurnRepository = yield* ProjectionQueuedTurnRepository;
 
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -980,6 +986,86 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       });
     });
 
+    const updateQueuedTurnStatus = Effect.fn("updateQueuedTurnStatus")(function* (input: {
+      readonly queueItemId: TurnQueueItemId;
+      readonly status: OrchestrationQueuedTurnStatus;
+      readonly failureReason: string | null;
+      readonly updatedAt: string;
+    }) {
+      const existing = yield* projectionQueuedTurnRepository.getByQueueItemId({
+        queueItemId: input.queueItemId,
+      });
+      if (Option.isNone(existing)) {
+        return;
+      }
+      yield* projectionQueuedTurnRepository.upsert({
+        ...existing.value,
+        status: input.status,
+        failureReason: input.failureReason,
+        updatedAt: input.updatedAt,
+      });
+    });
+
+    const applyQueuedTurnsProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyQueuedTurnsProjection",
+    )(function* (event, _attachmentSideEffects) {
+      switch (event.type) {
+        case "thread.turn-queued":
+          yield* projectionQueuedTurnRepository.upsert({
+            queueItemId: event.payload.queueItemId,
+            threadId: event.payload.threadId,
+            messageId: event.payload.messageId,
+            modelSelection: event.payload.modelSelection ?? null,
+            titleSeed: event.payload.titleSeed ?? null,
+            runtimeMode: event.payload.runtimeMode,
+            interactionMode: event.payload.interactionMode,
+            sourceProposedPlanThreadId: event.payload.sourceProposedPlan?.threadId ?? null,
+            sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
+            status: "pending",
+            failureReason: null,
+            createdAt: event.payload.createdAt,
+            updatedAt: event.payload.createdAt,
+          });
+          return;
+
+        case "thread.queued-turn-send-started":
+          yield* updateQueuedTurnStatus({
+            queueItemId: event.payload.queueItemId,
+            status: "sending",
+            failureReason: null,
+            updatedAt: event.payload.createdAt,
+          });
+          return;
+
+        case "thread.queued-turn-send-accepted":
+          yield* updateQueuedTurnStatus({
+            queueItemId: event.payload.queueItemId,
+            status: "accepted",
+            failureReason: null,
+            updatedAt: event.payload.createdAt,
+          });
+          return;
+
+        case "thread.queued-turn-send-failed":
+          yield* updateQueuedTurnStatus({
+            queueItemId: event.payload.queueItemId,
+            status: "failed",
+            failureReason: event.payload.reason,
+            updatedAt: event.payload.createdAt,
+          });
+          return;
+
+        case "thread.deleted":
+          yield* projectionQueuedTurnRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          return;
+
+        default:
+          return;
+      }
+    });
+
     const applyThreadTurnsProjection: ProjectorDefinition["apply"] = Effect.fn(
       "applyThreadTurnsProjection",
     )(function* (event, _attachmentSideEffects) {
@@ -1388,6 +1474,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyThreadTurnsProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.queuedTurns,
+        apply: applyQueuedTurnsProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
         apply: applyCheckpointsProjection,
       },
@@ -1500,6 +1590,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),
+  Layer.provideMerge(ProjectionQueuedTurnRepositoryLive),
   Layer.provideMerge(ProjectionPendingApprovalRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),
 );

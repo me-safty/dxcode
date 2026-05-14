@@ -67,6 +67,7 @@ const ModelSelectionWire = Schema.Struct({
   model: TrimmedNonEmptyString,
   options: Schema.optionalKey(ProviderOptionSelections),
 });
+export const CanonicalModelSelection = ModelSelectionWire;
 
 // Source shape for persisted legacy payloads. Fields are typed as
 // `Schema.Unknown` so malformed drafts still make it into the transform and
@@ -334,6 +335,33 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+export const OrchestrationQueuedTurnStatus = Schema.Literals([
+  "pending",
+  "sending",
+  "accepted",
+  "failed",
+]);
+export type OrchestrationQueuedTurnStatus = typeof OrchestrationQueuedTurnStatus.Type;
+
+export const OrchestrationQueuedTurn = Schema.Struct({
+  queueItemId: TurnQueueItemId,
+  messageId: MessageId,
+  modelSelection: Schema.optional(ModelSelection),
+  titleSeed: Schema.optional(TrimmedNonEmptyString),
+  runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
+  ),
+  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  status: OrchestrationQueuedTurnStatus,
+  failureReason: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationQueuedTurn = typeof OrchestrationQueuedTurn.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -351,6 +379,9 @@ export const OrchestrationThread = Schema.Struct({
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
+  queuedTurns: Schema.Array(OrchestrationQueuedTurn).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
@@ -765,6 +796,31 @@ const ThreadRevertCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadQueuedTurnSendStartCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-turn.send.start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  mode: Schema.Literals(["normal", "recover"]),
+  createdAt: IsoDateTime,
+});
+
+const ThreadQueuedTurnSendAcceptCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-turn.send.accept"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  queueItemId: TurnQueueItemId,
+  createdAt: IsoDateTime,
+});
+
+const ThreadQueuedTurnSendFailCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-turn.send.fail"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  queueItemId: TurnQueueItemId,
+  reason: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -773,6 +829,9 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
+  ThreadQueuedTurnSendStartCommand,
+  ThreadQueuedTurnSendAcceptCommand,
+  ThreadQueuedTurnSendFailCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 

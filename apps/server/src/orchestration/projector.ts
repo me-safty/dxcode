@@ -2,6 +2,7 @@ import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3to
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
+  OrchestrationQueuedTurn,
   OrchestrationSession,
   OrchestrationThread,
 } from "@t3tools/contracts";
@@ -20,8 +21,12 @@ import {
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
   ThreadMetaUpdatedPayload,
+  ThreadQueuedTurnSendAcceptedPayload,
+  ThreadQueuedTurnSendFailedPayload,
+  ThreadQueuedTurnSendStartedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
+  ThreadTurnQueuedPayload,
   ThreadUnarchivedPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
@@ -44,6 +49,19 @@ function updateThread(
   patch: ThreadPatch,
 ): OrchestrationThread[] {
   return threads.map((thread) => (thread.id === threadId ? { ...thread, ...patch } : thread));
+}
+
+function updateQueuedTurn(
+  queuedTurns: ReadonlyArray<OrchestrationQueuedTurn>,
+  queueItemId: OrchestrationQueuedTurn["queueItemId"],
+  patch: Pick<OrchestrationQueuedTurn, "status" | "failureReason" | "updatedAt">,
+): OrchestrationQueuedTurn[] {
+  return queuedTurns.map((entry) => {
+    if (entry.queueItemId !== queueItemId) {
+      return entry;
+    }
+    return Object.assign({}, entry, patch);
+  });
 }
 
 function decodeForEvent<A>(
@@ -265,6 +283,7 @@ export function projectEvent(
             archivedAt: null,
             deletedAt: null,
             messages: [],
+            queuedTurns: [],
             activities: [],
             checkpoints: [],
             session: null,
@@ -417,6 +436,137 @@ export function projectEvent(
           }),
         };
       });
+
+    case "thread.turn-queued":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ThreadTurnQueuedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return nextBase;
+        }
+
+        const queuedTurn: OrchestrationQueuedTurn = yield* decodeForEvent(
+          OrchestrationQueuedTurn,
+          {
+            queueItemId: payload.queueItemId,
+            messageId: payload.messageId,
+            ...(payload.modelSelection !== undefined
+              ? { modelSelection: payload.modelSelection }
+              : {}),
+            ...(payload.titleSeed !== undefined ? { titleSeed: payload.titleSeed } : {}),
+            runtimeMode: payload.runtimeMode,
+            interactionMode: payload.interactionMode,
+            ...(payload.sourceProposedPlan !== undefined
+              ? { sourceProposedPlan: payload.sourceProposedPlan }
+              : {}),
+            status: "pending",
+            failureReason: null,
+            createdAt: payload.createdAt,
+            updatedAt: payload.createdAt,
+          },
+          event.type,
+          "queuedTurn",
+        );
+
+        const queuedTurns = thread.queuedTurns.some(
+          (entry) => entry.queueItemId === queuedTurn.queueItemId,
+        )
+          ? thread.queuedTurns.map((entry) =>
+              entry.queueItemId === queuedTurn.queueItemId ? queuedTurn : entry,
+            )
+          : [...thread.queuedTurns, queuedTurn];
+
+        return {
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            queuedTurns,
+            updatedAt: event.occurredAt,
+          }),
+        };
+      });
+
+    case "thread.queued-turn-send-started":
+      return decodeForEvent(
+        ThreadQueuedTurnSendStartedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              queuedTurns: updateQueuedTurn(thread.queuedTurns, payload.queueItemId, {
+                status: "sending",
+                failureReason: null,
+                updatedAt: payload.createdAt,
+              }),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.queued-turn-send-accepted":
+      return decodeForEvent(
+        ThreadQueuedTurnSendAcceptedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              queuedTurns: updateQueuedTurn(thread.queuedTurns, payload.queueItemId, {
+                status: "accepted",
+                failureReason: null,
+                updatedAt: payload.createdAt,
+              }),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.queued-turn-send-failed":
+      return decodeForEvent(
+        ThreadQueuedTurnSendFailedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              queuedTurns: updateQueuedTurn(thread.queuedTurns, payload.queueItemId, {
+                status: "failed",
+                failureReason: payload.reason,
+                updatedAt: payload.createdAt,
+              }),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
 
     case "thread.session-set":
       return Effect.gen(function* () {
