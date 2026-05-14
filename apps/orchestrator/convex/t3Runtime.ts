@@ -5,9 +5,58 @@ import { ThreadId, type TaskRuntimeMaterializeResponse } from "@t3tools/contract
 
 import { createT3ExecutionBridgeClient } from "../src/t3/client.ts";
 import { internal, api } from "./_generated/api.js";
+import type { Id } from "./_generated/dataModel.js";
 import { action, internalMutation, internalQuery } from "./_generated/server.js";
 
 const decodeThreadId = Schema.decodeUnknownSync(ThreadId);
+
+function errorSummary(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function logOrchestratorEvent(
+  ctx: any,
+  input: {
+    readonly kind: string;
+    readonly summary: string;
+    readonly severity?: "debug" | "info" | "warn" | "error" | undefined;
+    readonly eventKey?: string | undefined;
+    readonly taskId?: Id<"tasks"> | undefined;
+    readonly workSessionId?: Id<"workSessions"> | undefined;
+    readonly externalId?: string | undefined;
+    readonly payload?: unknown | undefined;
+  },
+) {
+  console[input.severity === "error" ? "error" : input.severity === "warn" ? "warn" : "log"](
+    input.kind,
+    {
+      summary: input.summary,
+      ...(input.eventKey !== undefined ? { eventKey: input.eventKey } : {}),
+      ...(input.taskId !== undefined ? { taskId: input.taskId } : {}),
+      ...(input.workSessionId !== undefined ? { workSessionId: input.workSessionId } : {}),
+      ...(input.externalId !== undefined ? { externalId: input.externalId } : {}),
+      ...(input.payload !== undefined ? { payload: input.payload } : {}),
+    },
+  );
+  return ctx
+    .runMutation(internal.observability.append, {
+      kind: input.kind,
+      source: "t3",
+      severity: input.severity ?? "info",
+      summary: input.summary,
+      ...(input.eventKey !== undefined ? { eventKey: input.eventKey } : {}),
+      ...(input.taskId !== undefined ? { taskId: input.taskId } : {}),
+      ...(input.workSessionId !== undefined ? { workSessionId: input.workSessionId } : {}),
+      ...(input.externalId !== undefined ? { externalId: input.externalId } : {}),
+      ...(input.payload !== undefined ? { payloadJson: JSON.stringify(input.payload) } : {}),
+    })
+    .catch((error: unknown) => {
+      console.warn("observability.append.failed", {
+        kind: input.kind,
+        error: errorSummary(error),
+      });
+    });
+}
 
 export const materializeTaskRuntime = action({
   args: {
@@ -41,6 +90,20 @@ export const materializeTaskRuntime = action({
 
     const client = createT3ExecutionBridgeClient();
     const idempotencyKey = `task-runtime:${String(args.taskId)}:${String(workSessionSeed.workSessionId)}`;
+    await logOrchestratorEvent(ctx, {
+      kind: "t3.runtime.materialize-requested",
+      summary: "Calling local T3 bridge to materialize task runtime.",
+      eventKey: `${idempotencyKey}:bridge-requested`,
+      taskId: args.taskId,
+      workSessionId: workSessionSeed.workSessionId,
+      payload: {
+        idempotencyKey,
+        repoName: tree.project.repoName,
+        workspaceRoot: tree.project.workspaceRoot,
+        defaultBranch: tree.project.defaultBranch,
+        startCodingAgent: requestedStartCodingAgent,
+      },
+    });
 
     let response: TaskRuntimeMaterializeResponse;
     try {
@@ -61,6 +124,18 @@ export const materializeTaskRuntime = action({
       });
     } catch (error) {
       const failureSummary = error instanceof Error ? error.message : String(error);
+      await logOrchestratorEvent(ctx, {
+        kind: "t3.runtime.materialize-failed",
+        severity: "error",
+        summary: "Local T3 bridge failed to materialize task runtime.",
+        eventKey: `${idempotencyKey}:bridge-failed`,
+        taskId: args.taskId,
+        workSessionId: workSessionSeed.workSessionId,
+        payload: {
+          idempotencyKey,
+          failureSummary,
+        },
+      });
       await ctx.runMutation(internal.t3Runtime.recordTaskRuntimeMaterializationFailed, {
         taskId: args.taskId,
         workSessionId: workSessionSeed.workSessionId,
@@ -70,6 +145,21 @@ export const materializeTaskRuntime = action({
       });
       throw error;
     }
+    await logOrchestratorEvent(ctx, {
+      kind: "t3.runtime.materialize-accepted",
+      summary: "Local T3 bridge accepted task runtime materialization.",
+      eventKey: `${idempotencyKey}:bridge-accepted`,
+      taskId: args.taskId,
+      workSessionId: workSessionSeed.workSessionId,
+      payload: {
+        idempotencyKey,
+        t3ProjectId: String(response.t3ProjectId),
+        t3ThreadId: String(response.t3ThreadId),
+        branch: response.branch,
+        worktreePath: response.worktreePath,
+        environmentId: response.environment?.environmentId,
+      },
+    });
 
     await ctx.runMutation(internal.t3Runtime.recordTaskRuntimeMaterialized, {
       taskId: args.taskId,
@@ -142,6 +232,17 @@ export const startMaterializedTaskRuntimeAgent = action({
     const client = createT3ExecutionBridgeClient();
 
     try {
+      await logOrchestratorEvent(ctx, {
+        kind: "t3.runtime.agent-start-requested",
+        summary: "Calling local T3 bridge to start materialized coding agent.",
+        eventKey: `${eventKey}:bridge-requested`,
+        taskId: args.taskId,
+        workSessionId: args.workSessionId,
+        payload: {
+          workspaceRoot: seed.worktreePath,
+          title: seed.title,
+        },
+      });
       const response = await client.createExecutionRun({
         controlThreadId: String(args.taskId),
         executionRunId: String(args.workSessionId),
@@ -161,6 +262,17 @@ export const startMaterializedTaskRuntimeAgent = action({
         eventKey: `${eventKey}:accepted`,
         acceptedAt: Date.parse(response.acceptedAt),
       });
+      await logOrchestratorEvent(ctx, {
+        kind: "t3.runtime.agent-start-accepted",
+        summary: "Local T3 bridge accepted materialized coding agent start.",
+        eventKey: `${eventKey}:bridge-accepted`,
+        taskId: args.taskId,
+        workSessionId: args.workSessionId,
+        payload: {
+          t3ThreadId: String(response.t3ThreadId),
+          acceptedAt: response.acceptedAt,
+        },
+      });
 
       return {
         started: true,
@@ -169,6 +281,17 @@ export const startMaterializedTaskRuntimeAgent = action({
       };
     } catch (error) {
       const failureSummary = error instanceof Error ? error.message : String(error);
+      await logOrchestratorEvent(ctx, {
+        kind: "t3.runtime.agent-start-failed",
+        severity: "error",
+        summary: "Local T3 bridge failed to start materialized coding agent.",
+        eventKey: `${eventKey}:bridge-failed`,
+        taskId: args.taskId,
+        workSessionId: args.workSessionId,
+        payload: {
+          failureSummary,
+        },
+      });
       await ctx.runMutation(internal.t3Runtime.recordTaskRuntimeAgentStartFailed, {
         taskId: args.taskId,
         workSessionId: args.workSessionId,
@@ -273,6 +396,17 @@ export const continueTaskRuntime = action({
 
     const client = createT3ExecutionBridgeClient();
     const t3ThreadId = decodeThreadId(args.t3ThreadId);
+    await logOrchestratorEvent(ctx, {
+      kind: "t3.runtime.continue-requested",
+      summary: "Calling local T3 bridge to continue task runtime.",
+      eventKey: `${args.eventId}:runtime-continuation:bridge-requested`,
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      payload: {
+        t3ThreadId: args.t3ThreadId,
+        promptPreview: args.prompt.slice(0, 120),
+      },
+    });
     const response = await client.continueExecutionRun({
       controlThreadId: String(args.taskId),
       executionRunId: String(args.workSessionId),
@@ -289,6 +423,17 @@ export const continueTaskRuntime = action({
       t3ThreadId: String(response.t3ThreadId),
       eventKey: `${args.eventId}:runtime-continuation`,
       acceptedAt: Date.parse(response.acceptedAt),
+    });
+    await logOrchestratorEvent(ctx, {
+      kind: "t3.runtime.continue-accepted",
+      summary: "Local T3 bridge accepted task runtime continuation.",
+      eventKey: `${args.eventId}:runtime-continuation:bridge-accepted`,
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      payload: {
+        t3ThreadId: String(response.t3ThreadId),
+        acceptedAt: response.acceptedAt,
+      },
     });
 
     return {
@@ -332,6 +477,20 @@ export const ensureTaskPullRequest = action({
     }
 
     const idempotencyKey = `task-pr:${String(args.taskId)}:${String(args.workSessionId)}:${seed.branch}`;
+    await logOrchestratorEvent(ctx, {
+      kind: "t3.pr.ensure-requested",
+      summary: "Preparing to call local T3 bridge to ensure task pull request.",
+      eventKey: `${idempotencyKey}:bridge-requested`,
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      payload: {
+        reason: args.reason ?? "unspecified",
+        branch: seed.branch,
+        worktreePath: seed.worktreePath,
+        repo: `${seed.project.githubOwner}/${seed.project.githubRepo}`,
+        defaultBranch: seed.project.defaultBranch,
+      },
+    });
     await ctx.runMutation(internal.t3Runtime.recordTaskPullRequestRequested, {
       taskId: args.taskId,
       workSessionId: args.workSessionId,
@@ -383,6 +542,30 @@ export const ensureTaskPullRequest = action({
               : {}),
           }
         : {}),
+    });
+    await logOrchestratorEvent(ctx, {
+      kind: "t3.pr.ensure-completed",
+      summary: "Local T3 bridge completed pull request ensure.",
+      eventKey: `${idempotencyKey}:bridge-completed:${response.status}`,
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      payload: {
+        status: response.status,
+        summary: response.summary,
+        pullRequest:
+          response.pullRequest === undefined
+            ? undefined
+            : {
+                owner: response.pullRequest.owner,
+                repo: response.pullRequest.repo,
+                number: response.pullRequest.number,
+                url: response.pullRequest.url,
+                headBranch: response.pullRequest.headBranch,
+                headSha: response.pullRequest.headSha,
+                previewUrl: response.pullRequest.previewUrl,
+                deploymentPreviewCount: response.pullRequest.deploymentPreviews?.length ?? 0,
+              },
+      },
     });
 
     return {

@@ -34,6 +34,57 @@ function requireBridgeAuthorization(request: Request) {
   return { ok: true as const };
 }
 
+function errorSummary(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function logHttpEvent(
+  ctx: Parameters<Parameters<typeof httpAction>[0]>[0],
+  input: {
+    readonly kind: string;
+    readonly source: string;
+    readonly severity?: "debug" | "info" | "warn" | "error" | undefined;
+    readonly summary: string;
+    readonly eventKey?: string | undefined;
+    readonly taskId?: Id<"tasks"> | undefined;
+    readonly workSessionId?: Id<"workSessions"> | undefined;
+    readonly externalId?: string | undefined;
+    readonly payload?: unknown | undefined;
+  },
+) {
+  const payloadJson = input.payload === undefined ? undefined : JSON.stringify(input.payload);
+  console[input.severity === "error" ? "error" : input.severity === "warn" ? "warn" : "log"](
+    input.kind,
+    {
+      source: input.source,
+      summary: input.summary,
+      ...(input.eventKey !== undefined ? { eventKey: input.eventKey } : {}),
+      ...(input.taskId !== undefined ? { taskId: String(input.taskId) } : {}),
+      ...(input.workSessionId !== undefined ? { workSessionId: String(input.workSessionId) } : {}),
+      ...(input.externalId !== undefined ? { externalId: input.externalId } : {}),
+      ...(input.payload !== undefined ? { payload: input.payload } : {}),
+    },
+  );
+  return ctx
+    .runMutation(internal.observability.append, {
+      kind: input.kind,
+      source: input.source,
+      severity: input.severity ?? "info",
+      summary: input.summary,
+      ...(input.eventKey !== undefined ? { eventKey: input.eventKey } : {}),
+      ...(input.taskId !== undefined ? { taskId: input.taskId } : {}),
+      ...(input.workSessionId !== undefined ? { workSessionId: input.workSessionId } : {}),
+      ...(input.externalId !== undefined ? { externalId: input.externalId } : {}),
+      ...(payloadJson !== undefined ? { payloadJson } : {}),
+    })
+    .catch((error) => {
+      console.warn("observability.append.failed", {
+        kind: input.kind,
+        error: errorSummary(error),
+      });
+    });
+}
+
 function timingSafeEqualString(actual: string, expected: string) {
   if (actual.length !== expected.length) {
     return false;
@@ -97,6 +148,14 @@ http.route({
   path: "/slack/webhook",
   method: "POST",
   handler: httpAction(async (ctx, request) => {
+    await logHttpEvent(ctx, {
+      kind: "http.slack-webhook.received",
+      source: "slack",
+      summary: "Received Slack Chat SDK webhook.",
+      payload: {
+        contentLength: request.headers.get("content-length"),
+      },
+    });
     return forwardChatSdkWebhook(ctx, request, "slack");
   }),
 });
@@ -106,18 +165,57 @@ http.route({
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     const body = await request.text();
+    const event = request.headers.get("x-github-event") ?? "";
+    const deliveryId = request.headers.get("x-github-delivery") ?? "";
+    await logHttpEvent(ctx, {
+      kind: "http.github-webhook.received",
+      source: "github",
+      summary: "Received GitHub webhook.",
+      eventKey: deliveryId ? `github:${deliveryId}:received` : undefined,
+      externalId: deliveryId || undefined,
+      payload: {
+        event,
+        deliveryId,
+        bodyBytes: body.length,
+      },
+    });
     const auth = await verifyGitHubWebhookSignature(
       body,
       request.headers.get("x-hub-signature-256"),
     );
     if (!auth.ok) {
+      await logHttpEvent(ctx, {
+        kind: "http.github-webhook.auth-failed",
+        source: "github",
+        severity: auth.status >= 500 ? "error" : "warn",
+        summary: auth.message,
+        eventKey: deliveryId ? `github:${deliveryId}:auth-failed` : undefined,
+        externalId: deliveryId || undefined,
+        payload: {
+          event,
+          deliveryId,
+          status: auth.status,
+        },
+      });
       return Response.json({ error: auth.message }, { status: auth.status });
     }
 
     const result = await ctx.runAction(internal.github.handleWebhook, {
-      event: request.headers.get("x-github-event") ?? "",
-      deliveryId: request.headers.get("x-github-delivery") ?? "",
+      event,
+      deliveryId,
       body,
+    });
+    await logHttpEvent(ctx, {
+      kind: "http.github-webhook.handled",
+      source: "github",
+      summary: "GitHub webhook action completed.",
+      eventKey: deliveryId ? `github:${deliveryId}:handled` : undefined,
+      externalId: deliveryId || undefined,
+      payload: {
+        event,
+        deliveryId,
+        ...result,
+      },
     });
 
     return Response.json({
@@ -133,10 +231,31 @@ http.route({
   handler: httpAction(async (ctx, request) => {
     const auth = requireBridgeAuthorization(request);
     if (!auth.ok) {
+      await logHttpEvent(ctx, {
+        kind: "http.t3-assistant-message.auth-failed",
+        source: "t3",
+        severity: auth.status >= 500 ? "error" : "warn",
+        summary: auth.message,
+        payload: { status: auth.status },
+      });
       return Response.json({ error: auth.message }, { status: auth.status });
     }
 
     const payload = decodeTaskRuntimeAssistantMessageEvent(await request.json());
+    await logHttpEvent(ctx, {
+      kind: "http.t3-assistant-message.received",
+      source: "t3",
+      summary: "Received T3 assistant message callback.",
+      eventKey: `${String(payload.eventId)}:http-received`,
+      taskId: payload.taskId as Id<"tasks">,
+      workSessionId: payload.workSessionId as Id<"workSessions">,
+      payload: {
+        eventId: payload.eventId,
+        t3ThreadId: String(payload.t3ThreadId),
+        t3MessageId: String(payload.t3MessageId),
+        t3TurnId: payload.t3TurnId === undefined ? undefined : String(payload.t3TurnId),
+      },
+    });
     const result = await ctx.runAction(internal.taskIntake.postTaskRuntimeAssistantMessage, {
       eventId: payload.eventId,
       taskId: payload.taskId as Id<"tasks">,
@@ -161,10 +280,31 @@ http.route({
   handler: httpAction(async (ctx, request) => {
     const auth = requireBridgeAuthorization(request);
     if (!auth.ok) {
+      await logHttpEvent(ctx, {
+        kind: "http.t3-runtime-event.auth-failed",
+        source: "t3",
+        severity: auth.status >= 500 ? "error" : "warn",
+        summary: auth.message,
+        payload: { status: auth.status },
+      });
       return Response.json({ error: auth.message }, { status: auth.status });
     }
 
     const payload = decodeTaskRuntimeLifecycleEvent(await request.json());
+    await logHttpEvent(ctx, {
+      kind: "http.t3-runtime-event.received",
+      source: "t3",
+      summary: "Received T3 runtime lifecycle callback.",
+      eventKey: `${String(payload.eventId)}:http-received`,
+      taskId: payload.taskId as Id<"tasks">,
+      workSessionId: payload.workSessionId as Id<"workSessions">,
+      payload: {
+        eventId: payload.eventId,
+        type: payload.type,
+        t3ThreadId: payload.t3ThreadId === undefined ? undefined : String(payload.t3ThreadId),
+        t3TurnId: payload.t3TurnId === undefined ? undefined : String(payload.t3TurnId),
+      },
+    });
     const result = await ctx.runMutation(internal.t3Runtime.applyTaskRuntimeLifecycleEvent, {
       eventId: payload.eventId,
       taskId: payload.taskId as Id<"tasks">,

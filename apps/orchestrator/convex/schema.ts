@@ -162,6 +162,26 @@ export default defineSchema({
   })
     .index("by_task_created", ["taskId", "createdAt"])
     .index("by_event_key", ["eventKey"]),
+  orchestratorEvents: defineTable({
+    eventKey: v.optional(v.string()),
+    kind: v.string(),
+    source: v.string(),
+    severity: v.union(v.literal("debug"), v.literal("info"), v.literal("warn"), v.literal("error")),
+    summary: v.string(),
+    taskId: v.optional(v.id("tasks")),
+    workSessionId: v.optional(v.id("workSessions")),
+    externalId: v.optional(v.string()),
+    payloadJson: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_created", ["createdAt"])
+    .index("by_kind_created", ["kind", "createdAt"])
+    .index("by_task_created", ["taskId", "createdAt"])
+    .index("by_work_session_created", ["workSessionId", "createdAt"])
+    .index("by_external_created", ["externalId", "createdAt"])
+    .index("by_source_created", ["source", "createdAt"])
+    .index("by_severity_created", ["severity", "createdAt"])
+    .index("by_event_key", ["eventKey"]),
   chatSdkSubscriptions: defineTable({
     threadId: v.string(),
     createdAt: v.number(),

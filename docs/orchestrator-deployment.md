@@ -84,6 +84,10 @@ The orchestrator verifies `X-Hub-Signature-256` with `GITHUB_WEBHOOK_SECRET`,
 posts public preview URLs when deployments become ready, and reacts to the
 original Slack task with a checkmark when the linked PR is merged.
 
+Operational debugging lives in `docs/orchestrator-operations.md`. Start there
+when Slack receives a message but Vevin does not reply, when PR/deployment cards
+are missing, or when a GitHub redelivery needs to be traced.
+
 Lifecycle callbacks from T3 use:
 
 ```text

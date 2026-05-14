@@ -45,6 +45,50 @@ function errorSummary(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function logOrchestratorEvent(
+  ctx: any,
+  input: {
+    readonly kind: string;
+    readonly summary: string;
+    readonly severity?: "debug" | "info" | "warn" | "error" | undefined;
+    readonly eventKey?: string | undefined;
+    readonly taskId?: Id<"tasks"> | undefined;
+    readonly workSessionId?: Id<"workSessions"> | undefined;
+    readonly externalId?: string | undefined;
+    readonly payload?: unknown | undefined;
+  },
+) {
+  console[input.severity === "error" ? "error" : input.severity === "warn" ? "warn" : "log"](
+    input.kind,
+    {
+      summary: input.summary,
+      ...(input.eventKey !== undefined ? { eventKey: input.eventKey } : {}),
+      ...(input.taskId !== undefined ? { taskId: String(input.taskId) } : {}),
+      ...(input.workSessionId !== undefined ? { workSessionId: String(input.workSessionId) } : {}),
+      ...(input.externalId !== undefined ? { externalId: input.externalId } : {}),
+      ...(input.payload !== undefined ? { payload: input.payload } : {}),
+    },
+  );
+  return ctx
+    .runMutation(internal.observability.append, {
+      kind: input.kind,
+      source: "slack",
+      severity: input.severity ?? "info",
+      summary: input.summary,
+      ...(input.eventKey !== undefined ? { eventKey: input.eventKey } : {}),
+      ...(input.taskId !== undefined ? { taskId: input.taskId } : {}),
+      ...(input.workSessionId !== undefined ? { workSessionId: input.workSessionId } : {}),
+      ...(input.externalId !== undefined ? { externalId: input.externalId } : {}),
+      ...(input.payload !== undefined ? { payloadJson: JSON.stringify(input.payload) } : {}),
+    })
+    .catch((error: unknown) => {
+      console.warn("observability.append.failed", {
+        kind: input.kind,
+        error: errorSummary(error),
+      });
+    });
+}
+
 function chatSdkState(ctx: any) {
   return createConvexChatSdkState({
     subscribe(threadId) {
@@ -152,6 +196,18 @@ async function shouldHandleSlackIntakeMessage(
       muted: muteCommand.muted,
       changed: muteCommand.changed,
     });
+    await logOrchestratorEvent(ctx, {
+      kind: "slack.policy.ignored",
+      summary: "Slack message was handled as a mute/unmute command.",
+      eventKey: `${intakeMessage.eventId}:slack-policy:${muteCommand.command}`,
+      externalId,
+      payload: {
+        eventId: intakeMessage.eventId,
+        reason: `slack_thread_${muteCommand.command}`,
+        muted: muteCommand.muted,
+        changed: muteCommand.changed,
+      },
+    });
     return { handle: false as const, reason: `slack_thread_${muteCommand.command}` };
   }
 
@@ -164,6 +220,18 @@ async function shouldHandleSlackIntakeMessage(
     console.log("taskIntake.slack.policy.ignore", {
       eventId: intakeMessage.eventId,
       reason: `slack_thread_${decision.reason}`,
+    });
+    await logOrchestratorEvent(ctx, {
+      kind: "slack.policy.ignored",
+      summary: "Slack message was ignored by Vevin policy.",
+      eventKey: `${intakeMessage.eventId}:slack-policy:${decision.reason}`,
+      externalId,
+      payload: {
+        eventId: intakeMessage.eventId,
+        reason: `slack_thread_${decision.reason}`,
+        hasExistingLink: existingLink !== null,
+        isMuted: existingLink?.muted ?? false,
+      },
     });
     return { handle: false as const, reason: `slack_thread_${decision.reason}` };
   }
@@ -183,6 +251,16 @@ async function shouldHandleSlackIntakeMessage(
       eventId: intakeMessage.eventId,
       reason: "slack_thread_other_user_mention",
     });
+    await logOrchestratorEvent(ctx, {
+      kind: "slack.policy.ignored",
+      summary: "Slack message was ignored because it mentioned another user.",
+      eventKey: `${intakeMessage.eventId}:slack-policy:other-user-mention`,
+      externalId,
+      payload: {
+        eventId: intakeMessage.eventId,
+        reason: "slack_thread_other_user_mention",
+      },
+    });
     return { handle: false as const, reason: "slack_thread_other_user_mention" };
   }
 
@@ -191,6 +269,17 @@ async function shouldHandleSlackIntakeMessage(
       eventId: intakeMessage.eventId,
       reason: "slack_ambient_without_task_thread",
     });
+    await logOrchestratorEvent(ctx, {
+      kind: "slack.policy.ignored",
+      summary:
+        "Slack message was ignored because no task thread exists and Vevin was not mentioned.",
+      eventKey: `${intakeMessage.eventId}:slack-policy:ambient`,
+      externalId,
+      payload: {
+        eventId: intakeMessage.eventId,
+        reason: "slack_ambient_without_task_thread",
+      },
+    });
     return { handle: false as const, reason: "slack_ambient_without_task_thread" };
   }
 
@@ -198,6 +287,17 @@ async function shouldHandleSlackIntakeMessage(
     eventId: intakeMessage.eventId,
     existingTaskThread: existingLink !== null,
     mentionsBot,
+  });
+  await logOrchestratorEvent(ctx, {
+    kind: "slack.policy.accepted",
+    summary: "Slack message was accepted for orchestration.",
+    eventKey: `${intakeMessage.eventId}:slack-policy:accepted`,
+    externalId,
+    payload: {
+      eventId: intakeMessage.eventId,
+      existingTaskThread: existingLink !== null,
+      mentionsBot,
+    },
   });
   return { handle: true as const };
 }
@@ -219,6 +319,15 @@ export const handleChatSdkWebhook = internalAction({
       source: args.source,
       bodyBytes: args.body.length,
     });
+    await logOrchestratorEvent(ctx, {
+      kind: "slack.webhook.action-received",
+      summary: "Slack Chat SDK webhook action started.",
+      eventKey: `slack:webhook:${crypto.randomUUID()}:received`,
+      payload: {
+        source: args.source,
+        bodyBytes: args.body.length,
+      },
+    });
     const bot = createTaskIntakeChatSdkBot({
       sources: new Set([args.source]),
       state: chatSdkState(ctx),
@@ -233,6 +342,23 @@ export const handleChatSdkWebhook = internalAction({
             externalLinkKind: intakeMessage.conversation.externalLinkKind,
             externalId: intakeMessage.conversation.externalId,
             textPreview: intakeMessage.text.slice(0, 120),
+          });
+          await logOrchestratorEvent(ctx, {
+            kind: "slack.message.received",
+            summary: "Slack message received from Chat SDK.",
+            eventKey: `${intakeMessage.eventId}:message-received`,
+            externalId: intakeMessage.conversation.externalId,
+            payload: {
+              source: intakeMessage.source,
+              eventId: intakeMessage.eventId,
+              messageId: intakeMessage.messageId,
+              threadId: thread.id,
+              messageThreadId: message.threadId,
+              externalLinkKind: intakeMessage.conversation.externalLinkKind,
+              externalId: intakeMessage.conversation.externalId,
+              isMention: message.isMention,
+              textPreview: intakeMessage.text.slice(0, 120),
+            },
           });
           const rawSlackMessage = message.raw as {
             readonly text?: string;
@@ -318,6 +444,24 @@ export const handleChatSdkWebhook = internalAction({
                     workSessionId:
                       "workSessionId" in resolved ? String(resolved.workSessionId) : undefined,
                   });
+                  await logOrchestratorEvent(ctx, {
+                    kind: "task-intake.store.resolved",
+                    summary: "Task intake message resolved to task state.",
+                    eventKey: `${input.message.eventId}:store-resolved`,
+                    externalId: input.externalLink.externalId,
+                    ...("taskId" in resolved ? { taskId: resolved.taskId as Id<"tasks"> } : {}),
+                    ...("workSessionId" in resolved
+                      ? { workSessionId: resolved.workSessionId as Id<"workSessions"> }
+                      : {}),
+                    payload: {
+                      eventId: input.message.eventId,
+                      status: resolved.status,
+                      taskId: "taskId" in resolved ? String(resolved.taskId) : undefined,
+                      t3ThreadId: "t3ThreadId" in resolved ? resolved.t3ThreadId : undefined,
+                      workSessionId:
+                        "workSessionId" in resolved ? String(resolved.workSessionId) : undefined,
+                    },
+                  });
                   return resolved;
                 },
                 async recordStartFailed(input) {
@@ -335,6 +479,16 @@ export const handleChatSdkWebhook = internalAction({
                     taskId: input.taskId,
                     promptPreview: input.initialPrompt.slice(0, 120),
                   });
+                  await logOrchestratorEvent(ctx, {
+                    kind: "task-intake.runtime.materialize-started",
+                    summary: "Task intake requested T3 runtime materialization.",
+                    taskId: input.taskId as Id<"tasks">,
+                    payload: {
+                      taskId: input.taskId,
+                      startCodingAgent: input.startCodingAgent,
+                      promptPreview: input.initialPrompt.slice(0, 120),
+                    },
+                  });
                   const materialized = await ctx.runAction(api.t3Runtime.materializeTaskRuntime, {
                     taskId: input.taskId as Id<"tasks">,
                     initialPrompt: input.initialPrompt,
@@ -345,6 +499,20 @@ export const handleChatSdkWebhook = internalAction({
                     t3ThreadId: materialized.t3ThreadId,
                     workSessionId: materialized.workSessionId,
                   });
+                  await logOrchestratorEvent(ctx, {
+                    kind: "task-intake.runtime.materialize-completed",
+                    summary: "T3 runtime materialization completed.",
+                    taskId: input.taskId as Id<"tasks">,
+                    workSessionId: materialized.workSessionId as Id<"workSessions">,
+                    payload: {
+                      taskId: input.taskId,
+                      t3ThreadId: materialized.t3ThreadId,
+                      workSessionId: materialized.workSessionId,
+                      environmentId: materialized.environmentId,
+                      branch: materialized.branch,
+                      worktreePath: materialized.worktreePath,
+                    },
+                  });
                   return materialized;
                 },
                 async continueTaskRuntime(input) {
@@ -354,6 +522,20 @@ export const handleChatSdkWebhook = internalAction({
                     workSessionId: input.workSessionId,
                     t3ThreadId: input.t3ThreadId,
                     promptPreview: input.prompt.slice(0, 120),
+                  });
+                  await logOrchestratorEvent(ctx, {
+                    kind: "task-intake.runtime.continue-started",
+                    summary: "Task intake requested T3 runtime continuation.",
+                    eventKey: `${input.eventId}:runtime-continue-started`,
+                    taskId: input.taskId as Id<"tasks">,
+                    workSessionId: input.workSessionId as Id<"workSessions">,
+                    payload: {
+                      eventId: input.eventId,
+                      taskId: input.taskId,
+                      workSessionId: input.workSessionId,
+                      t3ThreadId: input.t3ThreadId,
+                      promptPreview: input.prompt.slice(0, 120),
+                    },
                   });
                   const continued = await ctx.runAction(api.t3Runtime.continueTaskRuntime, {
                     eventId: input.eventId,
@@ -368,6 +550,19 @@ export const handleChatSdkWebhook = internalAction({
                     workSessionId: input.workSessionId,
                     t3ThreadId: continued.t3ThreadId,
                   });
+                  await logOrchestratorEvent(ctx, {
+                    kind: "task-intake.runtime.continue-completed",
+                    summary: "T3 runtime continuation was accepted.",
+                    eventKey: `${input.eventId}:runtime-continue-completed`,
+                    taskId: input.taskId as Id<"tasks">,
+                    workSessionId: input.workSessionId as Id<"workSessions">,
+                    payload: {
+                      eventId: input.eventId,
+                      taskId: input.taskId,
+                      workSessionId: input.workSessionId,
+                      t3ThreadId: continued.t3ThreadId,
+                    },
+                  });
                   return continued;
                 },
               },
@@ -377,6 +572,17 @@ export const handleChatSdkWebhook = internalAction({
                   console.log("taskIntake.reply.acknowledged", {
                     eventId: intakeMessage.eventId,
                     reaction: "eyes",
+                  });
+                  await logOrchestratorEvent(ctx, {
+                    kind: "slack.reply.acknowledged",
+                    summary: "Acknowledged initial Slack message with eyes reaction.",
+                    eventKey: `${intakeMessage.eventId}:reaction:eyes`,
+                    externalId: intakeMessage.conversation.externalId,
+                    payload: {
+                      eventId: intakeMessage.eventId,
+                      reaction: "eyes",
+                      externalMessageId: `${message.id}:reaction:eyes`,
+                    },
                   });
                   return {
                     status: "posted",
@@ -423,6 +629,20 @@ export const handleChatSdkWebhook = internalAction({
                         externalMessageId: posted.id,
                       },
                     );
+                    await logOrchestratorEvent(ctx, {
+                      kind: "slack.reply.task-started-card-delivered",
+                      summary: "Delivered task started Slack card.",
+                      eventKey: `${claim.claimEventKey}:orchestrator-delivered`,
+                      taskId: claim.taskId,
+                      externalId: claim.externalId,
+                      payload: {
+                        claimEventKey: claim.claimEventKey,
+                        linkId: claim.linkId,
+                        t3ThreadId: claim.t3ThreadId,
+                        environmentId: claim.environmentId,
+                        externalMessageId: posted.id,
+                      },
+                    });
                     return {
                       status: "posted",
                       externalMessageId: posted.id,
@@ -433,6 +653,19 @@ export const handleChatSdkWebhook = internalAction({
                       claimEventKey: claim.claimEventKey,
                       linkId: claim.linkId,
                       error: errorSummary(error),
+                    });
+                    await logOrchestratorEvent(ctx, {
+                      kind: "slack.reply.task-started-card-failed",
+                      severity: "error",
+                      summary: "Failed to deliver task started Slack card.",
+                      eventKey: `${claim.claimEventKey}:orchestrator-failed`,
+                      taskId: claim.taskId,
+                      externalId: claim.externalId,
+                      payload: {
+                        claimEventKey: claim.claimEventKey,
+                        linkId: claim.linkId,
+                        error: errorSummary(error),
+                      },
                     });
                     return {
                       status: "failed",
@@ -445,6 +678,16 @@ export const handleChatSdkWebhook = internalAction({
                   console.log("taskIntake.reply.posted", {
                     eventId: intakeMessage.eventId,
                     externalMessageId: posted.id,
+                  });
+                  await logOrchestratorEvent(ctx, {
+                    kind: "slack.reply.posted",
+                    summary: "Posted Slack reply through Chat SDK.",
+                    eventKey: `${intakeMessage.eventId}:reply:${posted.id}`,
+                    externalId: intakeMessage.conversation.externalId,
+                    payload: {
+                      eventId: intakeMessage.eventId,
+                      externalMessageId: posted.id,
+                    },
                   });
                   return {
                     status: "posted",
@@ -461,6 +704,19 @@ export const handleChatSdkWebhook = internalAction({
             eventId: intakeMessage.eventId,
             messageId: intakeMessage.messageId,
             error: errorSummary(error),
+          });
+          await logOrchestratorEvent(ctx, {
+            kind: "slack.message.failed",
+            severity: "error",
+            summary: "Failed while handling Slack message.",
+            eventKey: `${intakeMessage.eventId}:message-failed`,
+            externalId: intakeMessage.conversation.externalId,
+            payload: {
+              source: intakeMessage.source,
+              eventId: intakeMessage.eventId,
+              messageId: intakeMessage.messageId,
+              error: errorSummary(error),
+            },
           });
           try {
             await thread.post(
@@ -501,6 +757,16 @@ export const handleChatSdkWebhook = internalAction({
     });
     await Promise.all(pendingTasks);
     const contentType = response.headers.get("content-type") ?? undefined;
+    await logOrchestratorEvent(ctx, {
+      kind: "slack.webhook.action-completed",
+      summary: "Slack Chat SDK webhook action completed.",
+      payload: {
+        source: args.source,
+        status: response.status,
+        pendingTasks: pendingTasks.length,
+        contentType,
+      },
+    });
 
     return {
       status: response.status,
@@ -546,6 +812,17 @@ export const postTaskRuntimeLifecycleReply = internalAction({
         ? { assistantResponse: args.assistantResponse }
         : {}),
     });
+    await logOrchestratorEvent(ctx, {
+      kind: "task-intake.lifecycle-reply.claimed",
+      summary: "Claimed lifecycle reply delivery targets.",
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      payload: {
+        status: args.status,
+        claimCount: claims.length,
+        slackClaimCount: claims.filter((claim) => claim.kind === "slack_thread").length,
+      },
+    });
     if (claims.length === 0) {
       return { posted: false, reason: "no_unclaimed_intake_links" };
     }
@@ -564,6 +841,18 @@ export const postTaskRuntimeLifecycleReply = internalAction({
     const postedIds: string[] = [];
     for (const claim of slackClaims) {
       try {
+        await logOrchestratorEvent(ctx, {
+          kind: "task-intake.lifecycle-reply.delivery-started",
+          summary: "Posting lifecycle reply to Slack.",
+          eventKey: `${claim.claimEventKey}:orchestrator-started`,
+          taskId: claim.taskId,
+          externalId: claim.externalId,
+          payload: {
+            claimEventKey: claim.claimEventKey,
+            linkId: claim.linkId,
+            status: args.status,
+          },
+        });
         const posted: { readonly id: string } = await bot
           .thread(
             chatSdkThreadIdForLifecycleReply({
@@ -580,6 +869,19 @@ export const postTaskRuntimeLifecycleReply = internalAction({
           status: args.status,
           externalMessageId: posted.id,
         });
+        await logOrchestratorEvent(ctx, {
+          kind: "task-intake.lifecycle-reply.delivered",
+          summary: "Delivered lifecycle reply to Slack.",
+          eventKey: `${claim.claimEventKey}:orchestrator-delivered`,
+          taskId: claim.taskId,
+          externalId: claim.externalId,
+          payload: {
+            claimEventKey: claim.claimEventKey,
+            linkId: claim.linkId,
+            status: args.status,
+            externalMessageId: posted.id,
+          },
+        });
       } catch (error) {
         await ctx.runMutation(internal.taskEvents.recordTaskLifecycleReplyFailed, {
           taskId: claim.taskId,
@@ -587,6 +889,20 @@ export const postTaskRuntimeLifecycleReply = internalAction({
           linkId: claim.linkId,
           status: args.status,
           error: error instanceof Error ? error.message : String(error),
+        });
+        await logOrchestratorEvent(ctx, {
+          kind: "task-intake.lifecycle-reply.failed",
+          severity: "error",
+          summary: "Failed to deliver lifecycle reply to Slack.",
+          eventKey: `${claim.claimEventKey}:orchestrator-failed`,
+          taskId: claim.taskId,
+          externalId: claim.externalId,
+          payload: {
+            claimEventKey: claim.claimEventKey,
+            linkId: claim.linkId,
+            status: args.status,
+            error: errorSummary(error),
+          },
         });
       }
     }
@@ -643,6 +959,20 @@ export const postTaskPullRequestStatusReply = internalAction({
         ? { deploymentPreviewsJson: args.deploymentPreviewsJson }
         : {}),
     });
+    await logOrchestratorEvent(ctx, {
+      kind: "task-intake.pr-status-reply.claimed",
+      summary: "Claimed pull request status reply delivery targets.",
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      externalId: args.pullRequestExternalId,
+      payload: {
+        pullRequestExternalId: args.pullRequestExternalId,
+        pullRequestUrl: args.pullRequestUrl,
+        pullRequestStatus: args.pullRequestStatus,
+        claimCount: claims.length,
+        slackClaimCount: claims.filter((claim) => claim.kind === "slack_thread").length,
+      },
+    });
     if (claims.length === 0) {
       return { posted: false, reason: "no_unclaimed_pr_status_links" };
     }
@@ -661,6 +991,19 @@ export const postTaskPullRequestStatusReply = internalAction({
     const postedIds: string[] = [];
     for (const claim of slackClaims) {
       try {
+        await logOrchestratorEvent(ctx, {
+          kind: "task-intake.pr-status-reply.delivery-started",
+          summary: "Posting pull request status card to Slack.",
+          eventKey: `${claim.claimEventKey}:orchestrator-started`,
+          taskId: claim.taskId,
+          externalId: claim.externalId,
+          payload: {
+            claimEventKey: claim.claimEventKey,
+            linkId: claim.linkId,
+            pullRequestUrl: claim.pullRequestUrl,
+            deploymentPreviewCount: claim.deploymentPreviews?.length ?? 0,
+          },
+        });
         const posted: { readonly id: string } = await bot
           .thread(
             chatSdkThreadIdForLifecycleReply({
@@ -697,12 +1040,37 @@ export const postTaskPullRequestStatusReply = internalAction({
           linkId: claim.linkId,
           externalMessageId: posted.id,
         });
+        await logOrchestratorEvent(ctx, {
+          kind: "task-intake.pr-status-reply.delivered",
+          summary: "Delivered pull request status card to Slack.",
+          eventKey: `${claim.claimEventKey}:orchestrator-delivered`,
+          taskId: claim.taskId,
+          externalId: claim.externalId,
+          payload: {
+            claimEventKey: claim.claimEventKey,
+            linkId: claim.linkId,
+            externalMessageId: posted.id,
+          },
+        });
       } catch (error) {
         await ctx.runMutation(internal.taskEvents.recordTaskPullRequestStatusReplyFailed, {
           taskId: claim.taskId,
           claimEventKey: claim.claimEventKey,
           linkId: claim.linkId,
           error: error instanceof Error ? error.message : String(error),
+        });
+        await logOrchestratorEvent(ctx, {
+          kind: "task-intake.pr-status-reply.failed",
+          severity: "error",
+          summary: "Failed to deliver pull request status card to Slack.",
+          eventKey: `${claim.claimEventKey}:orchestrator-failed`,
+          taskId: claim.taskId,
+          externalId: claim.externalId,
+          payload: {
+            claimEventKey: claim.claimEventKey,
+            linkId: claim.linkId,
+            error: errorSummary(error),
+          },
         });
       }
     }
@@ -751,6 +1119,21 @@ export const postTaskRuntimeAssistantMessage = internalAction({
       ...(args.t3TurnId !== undefined ? { t3TurnId: args.t3TurnId } : {}),
       assistantMessage: args.assistantMessage,
     });
+    await logOrchestratorEvent(ctx, {
+      kind: "task-intake.assistant-message-reply.claimed",
+      summary: "Claimed assistant message reply delivery targets.",
+      eventKey: `${args.eventId}:assistant-message-claimed`,
+      taskId: args.taskId,
+      workSessionId: args.workSessionId,
+      payload: {
+        eventId: args.eventId,
+        t3ThreadId: args.t3ThreadId,
+        t3MessageId: args.t3MessageId,
+        t3TurnId: args.t3TurnId,
+        claimCount: claims.length,
+        slackClaimCount: claims.filter((claim) => claim.kind === "slack_thread").length,
+      },
+    });
     if (claims.length === 0) {
       return { posted: false, reason: "no_unclaimed_intake_links" };
     }
@@ -769,6 +1152,18 @@ export const postTaskRuntimeAssistantMessage = internalAction({
     const postedIds: string[] = [];
     for (const claim of slackClaims) {
       try {
+        await logOrchestratorEvent(ctx, {
+          kind: "task-intake.assistant-message-reply.delivery-started",
+          summary: "Posting assistant message reply to Slack.",
+          eventKey: `${claim.claimEventKey}:orchestrator-started`,
+          taskId: claim.taskId,
+          workSessionId: claim.workSessionId,
+          externalId: claim.externalId,
+          payload: {
+            claimEventKey: claim.claimEventKey,
+            linkId: claim.linkId,
+          },
+        });
         const posted: { readonly id: string } = await bot
           .thread(
             chatSdkThreadIdForLifecycleReply({
@@ -785,6 +1180,19 @@ export const postTaskRuntimeAssistantMessage = internalAction({
           linkId: claim.linkId,
           externalMessageId: posted.id,
         });
+        await logOrchestratorEvent(ctx, {
+          kind: "task-intake.assistant-message-reply.delivered",
+          summary: "Delivered assistant message reply to Slack.",
+          eventKey: `${claim.claimEventKey}:orchestrator-delivered`,
+          taskId: claim.taskId,
+          workSessionId: claim.workSessionId,
+          externalId: claim.externalId,
+          payload: {
+            claimEventKey: claim.claimEventKey,
+            linkId: claim.linkId,
+            externalMessageId: posted.id,
+          },
+        });
       } catch (error) {
         await ctx.runMutation(internal.taskEvents.recordTaskAssistantMessageReplyFailed, {
           taskId: claim.taskId,
@@ -792,6 +1200,20 @@ export const postTaskRuntimeAssistantMessage = internalAction({
           claimEventKey: claim.claimEventKey,
           linkId: claim.linkId,
           error: error instanceof Error ? error.message : String(error),
+        });
+        await logOrchestratorEvent(ctx, {
+          kind: "task-intake.assistant-message-reply.failed",
+          severity: "error",
+          summary: "Failed to deliver assistant message reply to Slack.",
+          eventKey: `${claim.claimEventKey}:orchestrator-failed`,
+          taskId: claim.taskId,
+          workSessionId: claim.workSessionId,
+          externalId: claim.externalId,
+          payload: {
+            claimEventKey: claim.claimEventKey,
+            linkId: claim.linkId,
+            error: errorSummary(error),
+          },
         });
       }
     }

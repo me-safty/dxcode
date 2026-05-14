@@ -12,6 +12,7 @@ import type * as chatSdkState from "../chatSdkState.js";
 import type * as github from "../github.js";
 import type * as githubData from "../githubData.js";
 import type * as http from "../http.js";
+import type * as observability from "../observability.js";
 import type * as projects from "../projects.js";
 import type * as t3Runtime from "../t3Runtime.js";
 import type * as taskEvents from "../taskEvents.js";
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   github: typeof github;
   githubData: typeof githubData;
   http: typeof http;
+  observability: typeof observability;
   projects: typeof projects;
   t3Runtime: typeof t3Runtime;
   taskEvents: typeof taskEvents;
