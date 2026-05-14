@@ -2,7 +2,7 @@ import "../index.css";
 
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { ThreadId } from "@t3tools/contracts";
-import type { ComponentProps } from "react";
+import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
@@ -23,8 +23,8 @@ const {
   fitAddonLoadSpy: vi.fn(),
   attachedCustomKeyEventHandlerSpy: vi.fn(),
   latestCustomKeyEventHandler: {
-    current: undefined as ((event: KeyboardEvent) => boolean) | undefined,
-  },
+    current: undefined,
+  } as React.MutableRefObject<((event: KeyboardEvent) => boolean) | undefined>,
   environmentApiById: new Map<string, { terminal: { open: ReturnType<typeof vi.fn> } }>(),
   readEnvironmentApiMock: vi.fn((environmentId: string) => environmentApiById.get(environmentId)),
   readLocalApiMock: vi.fn<
@@ -156,7 +156,7 @@ async function mountTerminalViewport(props: {
   threadRef: ReturnType<typeof scopeThreadRef>;
   drawerBackgroundColor?: string;
   drawerTextColor?: string;
-  keybindings?: ComponentProps<typeof TerminalViewport>["keybindings"];
+  keybindings?: React.ComponentProps<typeof TerminalViewport>["keybindings"];
 }) {
   const drawer = document.createElement("div");
   drawer.className = "thread-terminal-drawer";
