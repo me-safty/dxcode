@@ -7,14 +7,15 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 
 import { ensureLocalApi } from "../localApi";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 
 const PROCESS_DIAGNOSTICS_STALE_TIME_MS = 2_000;
 const PROCESS_DIAGNOSTICS_IDLE_TTL_MS = 5 * 60_000;
-const PROCESS_RESOURCE_HISTORY_REFRESH_MS = 5_000;
+const PROCESS_RESOURCE_HISTORY_STALE_TIME_MS = 5_000;
+const PROCESS_RESOURCE_HISTORY_INPUT_SEPARATOR = ":";
 
 const processDiagnosticsAtom = Atom.make(
   Effect.promise(() => ensureLocalApi().server.getProcessDiagnostics()),
@@ -26,6 +27,38 @@ const processDiagnosticsAtom = Atom.make(
   Atom.setIdleTTL(PROCESS_DIAGNOSTICS_IDLE_TTL_MS),
   Atom.withLabel("process-diagnostics"),
 );
+
+function formatProcessResourceHistoryKey(input: {
+  readonly windowMs: number;
+  readonly bucketMs: number;
+}): string {
+  return `${input.windowMs}${PROCESS_RESOURCE_HISTORY_INPUT_SEPARATOR}${input.bucketMs}`;
+}
+
+function parseProcessResourceHistoryKey(key: string): {
+  readonly windowMs: number;
+  readonly bucketMs: number;
+} {
+  const [windowMs = "0", bucketMs = "0"] = key.split(PROCESS_RESOURCE_HISTORY_INPUT_SEPARATOR);
+  return {
+    windowMs: Number(windowMs),
+    bucketMs: Number(bucketMs),
+  };
+}
+
+const processResourceHistoryAtom = Atom.family((key: string) => {
+  const input = parseProcessResourceHistoryKey(key);
+  return Atom.make(
+    Effect.promise(() => ensureLocalApi().server.getProcessResourceHistory(input)),
+  ).pipe(
+    Atom.swr({
+      staleTime: PROCESS_RESOURCE_HISTORY_STALE_TIME_MS,
+      revalidateOnMount: true,
+    }),
+    Atom.setIdleTTL(PROCESS_DIAGNOSTICS_IDLE_TTL_MS),
+    Atom.withLabel(`process-resource-history:${key}`),
+  );
+});
 
 export interface ProcessDiagnosticsState {
   readonly data: ServerProcessDiagnosticsResult | null;
@@ -47,6 +80,17 @@ function formatProcessDiagnosticsError(error: unknown): string {
 
 function readProcessDiagnosticsError(
   result: AsyncResult.AsyncResult<ServerProcessDiagnosticsResult, unknown>,
+): string | null {
+  if (result._tag !== "Failure") {
+    return null;
+  }
+
+  const squashed = Cause.squash(result.cause);
+  return formatProcessDiagnosticsError(squashed);
+}
+
+function readProcessResourceHistoryError(
+  result: AsyncResult.AsyncResult<ServerProcessResourceHistoryResult, unknown>,
 ): string | null {
   if (result._tag !== "Failure") {
     return null;
@@ -79,55 +123,18 @@ export function useProcessResourceHistory(input: {
   readonly windowMs: number;
   readonly bucketMs: number;
 }): ProcessResourceHistoryState {
-  const { bucketMs, windowMs } = input;
-  const [data, setData] = useState<ServerProcessResourceHistoryResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, setIsPending] = useState(true);
+  const atom = processResourceHistoryAtom(formatProcessResourceHistoryKey(input));
+  const result = useAtomValue(atom);
+  const data = Option.getOrNull(AsyncResult.value(result));
 
   const refresh = useCallback(() => {
-    setIsPending(true);
-    void ensureLocalApi()
-      .server.getProcessResourceHistory({ bucketMs, windowMs })
-      .then((result) => {
-        setData(result);
-        setError(null);
-      })
-      .catch((cause: unknown) => {
-        setError(formatProcessDiagnosticsError(cause));
-      })
-      .finally(() => {
-        setIsPending(false);
-      });
-  }, [bucketMs, windowMs]);
+    appAtomRegistry.refresh(atom);
+  }, [atom]);
 
-  useEffect(() => {
-    let isMounted = true;
-    const read = () => {
-      setIsPending(true);
-      void ensureLocalApi()
-        .server.getProcessResourceHistory({ bucketMs, windowMs })
-        .then((result) => {
-          if (!isMounted) return;
-          setData(result);
-          setError(null);
-        })
-        .catch((cause: unknown) => {
-          if (!isMounted) return;
-          setError(formatProcessDiagnosticsError(cause));
-        })
-        .finally(() => {
-          if (!isMounted) return;
-          setIsPending(false);
-        });
-    };
-
-    read();
-    const interval = window.setInterval(read, PROCESS_RESOURCE_HISTORY_REFRESH_MS);
-    return () => {
-      isMounted = false;
-      window.clearInterval(interval);
-    };
-  }, [bucketMs, windowMs]);
-
-  return { data, error, isPending, refresh };
+  return {
+    data,
+    error: readProcessResourceHistoryError(result),
+    isPending: result.waiting,
+    refresh,
+  };
 }
