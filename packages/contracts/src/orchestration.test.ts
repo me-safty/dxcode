@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  DEFAULT_PROVIDER_TURN_DELIVERY_MODE,
   DEFAULT_RUNTIME_MODE,
   ModelSelection,
   OrchestrationCommand,
@@ -220,10 +221,11 @@ it.effect("decodes thread.turn.start defaults for provider and runtime mode", ()
     assert.strictEqual(parsed.modelSelection, undefined);
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
     assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
+    assert.strictEqual(parsed.delivery ?? DEFAULT_PROVIDER_TURN_DELIVERY_MODE, "steer");
   }),
 );
 
-it.effect("preserves explicit provider and runtime mode in thread.turn.start", () =>
+it.effect("preserves explicit provider, runtime mode, and delivery in thread.turn.start", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({
       type: "thread.turn.start",
@@ -239,12 +241,14 @@ it.effect("preserves explicit provider and runtime mode in thread.turn.start", (
         provider: "codex",
         model: "gpt-5.4",
       },
+      delivery: "queue",
       runtimeMode: "full-access",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.modelSelection?.instanceId, "codex");
     assert.strictEqual(parsed.runtimeMode, "full-access");
     assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
+    assert.strictEqual(parsed.delivery, "queue");
   }),
 );
 

@@ -2858,6 +2858,7 @@ export default function ChatView(props: ChatViewProps) {
         type: "thread.turn.start",
         commandId: newCommandId(),
         threadId: threadIdForSend,
+        delivery: "steer",
         message: {
           messageId: messageIdForSend,
           role: "user",
@@ -3173,6 +3174,7 @@ export default function ChatView(props: ChatViewProps) {
           type: "thread.turn.start",
           commandId: newCommandId(),
           threadId: threadIdForSend,
+          delivery: "steer",
           message: {
             messageId: messageIdForSend,
             role: "user",
@@ -3298,6 +3300,7 @@ export default function ChatView(props: ChatViewProps) {
           type: "thread.turn.start",
           commandId: newCommandId(),
           threadId: nextThreadId,
+          delivery: "steer",
           message: {
             messageId: newMessageId(),
             role: "user",
