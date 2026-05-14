@@ -103,7 +103,8 @@ Known packaging notes:
 
 - The generated VSIX is intentionally gitignored.
 - Extension build output under `apps/vscode-extension/dist` is intentionally gitignored.
-- The current local VSIX includes staged runtime dependencies and is large. The initial working artifact was around 119 MB on macOS arm64.
+- The current local VSIX includes staged runtime dependencies and is still larger than a normal webview-only extension. The initial working artifact was around 119 MB on macOS arm64; pruning runtime-dead staged dependency files reduced the local artifact to around 22 MB.
+- VS Code packaging removes the backend's duplicated `dist/server/client` static web app after copying `apps/server/dist`. The extension webview loads `dist/webview` directly, so the packaged backend does not need its standalone static-client copy.
 - `bun install --production` reports a blocked `node-pty` postinstall in the staged extension runtime, but the installed package includes `node-pty` prebuilds for macOS and Windows. Linux packaging still needs explicit validation.
 - The current package is not yet platform-targeted with `vsce --target`.
 
@@ -187,6 +188,7 @@ Reasoning:
 Deviation from original plan:
 
 - Packaging is not yet optimized.
+- The VS Code package currently strips `dist/server/client` as a packaging-only shortcut. A cleaner longer-term fix would split the server build so extension packaging can build/copy the backend without producing the standalone web client at all.
 - The current VSIX is not platform-specific, although platform-specific VSIXs are still the recommended direction if `node-pty` remains required.
 
 ### 2026-05-14: Keep Built Artifacts Out of Git
