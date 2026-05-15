@@ -155,6 +155,42 @@ it.effect("discovers editors through the service API", () =>
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
+it.effect("discovers and launches editors from the user Applications directory on macOS", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-home-" });
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-bin-" });
+    const cursorApp = path.join(home, "Applications", "Cursor.app");
+    yield* fileSystem.makeDirectory(cursorApp, { recursive: true });
+    yield* fileSystem.writeFileString(path.join(binDir, "open"), "");
+
+    let spawned: ChildProcess.StandardCommand | undefined;
+    const layer = testLayer({
+      platform: "darwin",
+      env: { HOME: home, PATH: binDir },
+      onSpawn: (command) => {
+        spawned = command;
+      },
+    });
+
+    const editors = yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher;
+      const available = yield* launcher.resolveAvailableEditors();
+      yield* launcher.launchEditor({
+        editor: "cursor",
+        cwd: "/tmp/workspace/src/index.ts:12:4",
+      });
+      return available;
+    }).pipe(Effect.provide(layer));
+
+    assert.equal(editors.includes("cursor"), true);
+    assert.ok(spawned);
+    assert.equal(spawned.command, "open");
+    assert.deepEqual(spawned.args, ["-a", cursorApp, "/tmp/workspace/src/index.ts"]);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.effect("rejects unknown editors through the service API", () =>
   Effect.gen(function* () {
     const launcher = yield* ExternalLauncher;
